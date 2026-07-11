@@ -88,7 +88,7 @@ type bundleCmdOptions struct {
 
 	// signingKey selects KMS-backed (key-based) signing for --attest instead of
 	// keyless OIDC. A non-empty value is a KMS key URI (awskms:// | gcpkms:// |
-	// azurekms://). Mutually exclusive with the keyless-only flags. See #407.
+	// azurekms:// | hashivault://). Mutually exclusive with the keyless-only flags. See #407.
 	signingKey string
 
 	// oidcDeviceFlow opts in to the OAuth 2.0 Device Authorization Grant flow
@@ -758,7 +758,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     flagSigningKey,
-				Usage:    "Sign --attest bundles with a KMS-backed key (awskms:// | gcpkms:// | azurekms://) instead of keyless OIDC, for CI/CD without OIDC. Mutually exclusive with --identity-token, --oidc-device-flow, --fulcio-url. Like keyless, KMS signs to Rekor v2 by default; opt out with --rekor-url (v1) or --signing-config (custom). Verify the resulting bundle with `aicr verify --key <uri>`.",
+				Usage:    "Sign --attest bundles with a KMS-backed key (awskms:// | gcpkms:// | azurekms:// | hashivault://) instead of keyless OIDC, for CI/CD without OIDC. Mutually exclusive with --identity-token, --oidc-device-flow, --fulcio-url. Like keyless, KMS signs to Rekor v2 by default; opt out with --rekor-url (v1) or --signing-config (custom). Verify the resulting bundle with `aicr verify --key <uri>`.",
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{

@@ -57,6 +57,7 @@ excluded (their license is covered by the Go distribution).
 | `github.com/beorn7/perks/quantile` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/beorn7/perks/LICENSE |
 | `github.com/blang/semver` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/blang/semver/LICENSE |
 | `github.com/blang/semver/v4` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/blang/semver/v4/LICENSE |
+| `github.com/cenkalti/backoff/v4` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/cenkalti/backoff/v4/LICENSE |
 | `github.com/cenkalti/backoff/v5` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/cenkalti/backoff/v5/LICENSE |
 | `github.com/cespare/xxhash/v2` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/cespare/xxhash/v2/LICENSE.txt |
 | `github.com/coreos/go-oidc/v3/oidc` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/coreos/go-oidc/v3/LICENSE |
@@ -111,8 +112,16 @@ excluded (their license is covered by the Go distribution).
 | `github.com/googleapis/gax-go/v2` | BSD-3-Clause | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/googleapis/gax-go/v2/LICENSE |
 | `github.com/gorilla/websocket` | BSD-2-Clause | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/gorilla/websocket/LICENSE |
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | BSD-3-Clause | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/grpc-ecosystem/grpc-gateway/v2/LICENSE |
+| `github.com/hashicorp/errwrap` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/errwrap/LICENSE |
 | `github.com/hashicorp/go-cleanhttp` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-cleanhttp/LICENSE |
+| `github.com/hashicorp/go-multierror` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-multierror/LICENSE |
 | `github.com/hashicorp/go-retryablehttp` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-retryablehttp/LICENSE |
+| `github.com/hashicorp/go-rootcerts` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-rootcerts/LICENSE |
+| `github.com/hashicorp/go-secure-stdlib/parseutil` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-secure-stdlib/parseutil/LICENSE |
+| `github.com/hashicorp/go-secure-stdlib/strutil` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-secure-stdlib/strutil/LICENSE |
+| `github.com/hashicorp/go-sockaddr` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-sockaddr/LICENSE |
+| `github.com/hashicorp/hcl` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/hcl/LICENSE |
+| `github.com/hashicorp/vault/api` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/vault/api/LICENSE |
 | `github.com/huandu/xstrings` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/huandu/xstrings/LICENSE |
 | `github.com/jedisct1/go-minisign` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/jedisct1/go-minisign/LICENSE |
 | `github.com/jellydator/ttlcache/v3` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/jellydator/ttlcache/v3/LICENSE |
@@ -125,6 +134,8 @@ excluded (their license is covered by the Go distribution).
 | `github.com/mattn/go-colorable` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/mattn/go-colorable/LICENSE |
 | `github.com/mattn/go-isatty` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/mattn/go-isatty/LICENSE |
 | `github.com/mitchellh/copystructure` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/mitchellh/copystructure/LICENSE |
+| `github.com/mitchellh/go-homedir` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/mitchellh/go-homedir/LICENSE |
+| `github.com/mitchellh/mapstructure` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/mitchellh/mapstructure/LICENSE |
 | `github.com/mitchellh/reflectwalk` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/mitchellh/reflectwalk/LICENSE |
 | `github.com/moby/spdystream` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/moby/spdystream/LICENSE |
 | `github.com/moby/spdystream/spdy` | BSD-3-Clause | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/moby/spdystream/spdy/LICENSE |
@@ -132,6 +143,7 @@ excluded (their license is covered by the Go distribution).
 | `github.com/modern-go/reflect2` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/modern-go/reflect2/LICENSE |
 | `github.com/monochromegane/go-gitignore` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/monochromegane/go-gitignore/LICENSE |
 | `github.com/munnerz/goautoneg` | BSD-3-Clause | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/munnerz/goautoneg/LICENSE |
+| `github.com/natefinch/atomic` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/natefinch/atomic/LICENSE |
 | `github.com/nvidia/k8s-launch-kit/pkg` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/nvidia/k8s-launch-kit/LICENSE |
 | `github.com/oklog/ulid/v2` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/oklog/ulid/v2/LICENSE |
 | `github.com/opencontainers/go-digest` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/opencontainers/go-digest/LICENSE |
@@ -144,6 +156,7 @@ excluded (their license is covered by the Go distribution).
 | `github.com/prometheus/client_model/go` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/prometheus/client_model/LICENSE |
 | `github.com/prometheus/common` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/prometheus/common/LICENSE |
 | `github.com/prometheus/procfs` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/prometheus/procfs/LICENSE |
+| `github.com/ryanuber/go-glob` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/ryanuber/go-glob/LICENSE |
 | `github.com/sassoftware/relic/lib` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/sassoftware/relic/LICENSE |
 | `github.com/secure-systems-lab/go-securesystemslib` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/secure-systems-lab/go-securesystemslib/LICENSE |
 | `github.com/shibumi/go-pathspec` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/shibumi/go-pathspec/LICENSE |
@@ -156,6 +169,7 @@ excluded (their license is covered by the Go distribution).
 | `github.com/sigstore/sigstore/pkg/signature/kms/aws` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/sigstore/sigstore/pkg/signature/kms/aws/LICENSE |
 | `github.com/sigstore/sigstore/pkg/signature/kms/azure` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/sigstore/sigstore/pkg/signature/kms/azure/LICENSE |
 | `github.com/sigstore/sigstore/pkg/signature/kms/gcp` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/sigstore/sigstore/pkg/signature/kms/gcp/LICENSE |
+| `github.com/sigstore/sigstore/pkg/signature/kms/hashivault` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/sigstore/sigstore/pkg/signature/kms/hashivault/LICENSE |
 | `github.com/sigstore/timestamp-authority/v2/pkg/verification` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/sigstore/timestamp-authority/v2/LICENSE |
 | `github.com/spf13/cast` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/spf13/cast/LICENSE |
 | `github.com/spf13/cobra` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/spf13/cobra/LICENSE.txt |
@@ -6988,6 +7002,38 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
+
+```
+
+
+### github.com/cenkalti/backoff/v4
+
+* License: MIT
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/cenkalti/backoff/v4/LICENSE
+
+#### LICENSE
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2014 Cenk Altı
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ```
 
@@ -15108,6 +15154,651 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 
+### github.com/hashicorp/errwrap
+
+* License: MPL-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/errwrap/LICENSE
+
+#### LICENSE
+
+```text
+Mozilla Public License, version 2.0
+
+1. Definitions
+
+1.1. “Contributor”
+
+     means each individual or legal entity that creates, contributes to the
+     creation of, or owns Covered Software.
+
+1.2. “Contributor Version”
+
+     means the combination of the Contributions of others (if any) used by a
+     Contributor and that particular Contributor’s Contribution.
+
+1.3. “Contribution”
+
+     means Covered Software of a particular Contributor.
+
+1.4. “Covered Software”
+
+     means Source Code Form to which the initial Contributor has attached the
+     notice in Exhibit A, the Executable Form of such Source Code Form, and
+     Modifications of such Source Code Form, in each case including portions
+     thereof.
+
+1.5. “Incompatible With Secondary Licenses”
+     means
+
+     a. that the initial Contributor has attached the notice described in
+        Exhibit B to the Covered Software; or
+
+     b. that the Covered Software was made available under the terms of version
+        1.1 or earlier of the License, but not also under the terms of a
+        Secondary License.
+
+1.6. “Executable Form”
+
+     means any form of the work other than Source Code Form.
+
+1.7. “Larger Work”
+
+     means a work that combines Covered Software with other material, in a separate
+     file or files, that is not Covered Software.
+
+1.8. “License”
+
+     means this document.
+
+1.9. “Licensable”
+
+     means having the right to grant, to the maximum extent possible, whether at the
+     time of the initial grant or subsequently, any and all of the rights conveyed by
+     this License.
+
+1.10. “Modifications”
+
+     means any of the following:
+
+     a. any file in Source Code Form that results from an addition to, deletion
+        from, or modification of the contents of Covered Software; or
+
+     b. any new file in Source Code Form that contains any Covered Software.
+
+1.11. “Patent Claims” of a Contributor
+
+      means any patent claim(s), including without limitation, method, process,
+      and apparatus claims, in any patent Licensable by such Contributor that
+      would be infringed, but for the grant of the License, by the making,
+      using, selling, offering for sale, having made, import, or transfer of
+      either its Contributions or its Contributor Version.
+
+1.12. “Secondary License”
+
+      means either the GNU General Public License, Version 2.0, the GNU Lesser
+      General Public License, Version 2.1, the GNU Affero General Public
+      License, Version 3.0, or any later versions of those licenses.
+
+1.13. “Source Code Form”
+
+      means the form of the work preferred for making modifications.
+
+1.14. “You” (or “Your”)
+
+      means an individual or a legal entity exercising rights under this
+      License. For legal entities, “You” includes any entity that controls, is
+      controlled by, or is under common control with You. For purposes of this
+      definition, “control” means (a) the power, direct or indirect, to cause
+      the direction or management of such entity, whether by contract or
+      otherwise, or (b) ownership of more than fifty percent (50%) of the
+      outstanding shares or beneficial ownership of such entity.
+
+
+2. License Grants and Conditions
+
+2.1. Grants
+
+     Each Contributor hereby grants You a world-wide, royalty-free,
+     non-exclusive license:
+
+     a. under intellectual property rights (other than patent or trademark)
+        Licensable by such Contributor to use, reproduce, make available,
+        modify, display, perform, distribute, and otherwise exploit its
+        Contributions, either on an unmodified basis, with Modifications, or as
+        part of a Larger Work; and
+
+     b. under Patent Claims of such Contributor to make, use, sell, offer for
+        sale, have made, import, and otherwise transfer either its Contributions
+        or its Contributor Version.
+
+2.2. Effective Date
+
+     The licenses granted in Section 2.1 with respect to any Contribution become
+     effective for each Contribution on the date the Contributor first distributes
+     such Contribution.
+
+2.3. Limitations on Grant Scope
+
+     The licenses granted in this Section 2 are the only rights granted under this
+     License. No additional rights or licenses will be implied from the distribution
+     or licensing of Covered Software under this License. Notwithstanding Section
+     2.1(b) above, no patent license is granted by a Contributor:
+
+     a. for any code that a Contributor has removed from Covered Software; or
+
+     b. for infringements caused by: (i) Your and any other third party’s
+        modifications of Covered Software, or (ii) the combination of its
+        Contributions with other software (except as part of its Contributor
+        Version); or
+
+     c. under Patent Claims infringed by Covered Software in the absence of its
+        Contributions.
+
+     This License does not grant any rights in the trademarks, service marks, or
+     logos of any Contributor (except as may be necessary to comply with the
+     notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+     No Contributor makes additional grants as a result of Your choice to
+     distribute the Covered Software under a subsequent version of this License
+     (see Section 10.2) or under the terms of a Secondary License (if permitted
+     under the terms of Section 3.3).
+
+2.5. Representation
+
+     Each Contributor represents that the Contributor believes its Contributions
+     are its original creation(s) or it has sufficient rights to grant the
+     rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+     This License is not intended to limit any rights You have under applicable
+     copyright doctrines of fair use, fair dealing, or other equivalents.
+
+2.7. Conditions
+
+     Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted in
+     Section 2.1.
+
+
+3. Responsibilities
+
+3.1. Distribution of Source Form
+
+     All distribution of Covered Software in Source Code Form, including any
+     Modifications that You create or to which You contribute, must be under the
+     terms of this License. You must inform recipients that the Source Code Form
+     of the Covered Software is governed by the terms of this License, and how
+     they can obtain a copy of this License. You may not attempt to alter or
+     restrict the recipients’ rights in the Source Code Form.
+
+3.2. Distribution of Executable Form
+
+     If You distribute Covered Software in Executable Form then:
+
+     a. such Covered Software must also be made available in Source Code Form,
+        as described in Section 3.1, and You must inform recipients of the
+        Executable Form how they can obtain a copy of such Source Code Form by
+        reasonable means in a timely manner, at a charge no more than the cost
+        of distribution to the recipient; and
+
+     b. You may distribute such Executable Form under the terms of this License,
+        or sublicense it under different terms, provided that the license for
+        the Executable Form does not attempt to limit or alter the recipients’
+        rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+     You may create and distribute a Larger Work under terms of Your choice,
+     provided that You also comply with the requirements of this License for the
+     Covered Software. If the Larger Work is a combination of Covered Software
+     with a work governed by one or more Secondary Licenses, and the Covered
+     Software is not Incompatible With Secondary Licenses, this License permits
+     You to additionally distribute such Covered Software under the terms of
+     such Secondary License(s), so that the recipient of the Larger Work may, at
+     their option, further distribute the Covered Software under the terms of
+     either this License or such Secondary License(s).
+
+3.4. Notices
+
+     You may not remove or alter the substance of any license notices (including
+     copyright notices, patent notices, disclaimers of warranty, or limitations
+     of liability) contained within the Source Code Form of the Covered
+     Software, except that You may alter any license notices to the extent
+     required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+     You may choose to offer, and to charge a fee for, warranty, support,
+     indemnity or liability obligations to one or more recipients of Covered
+     Software. However, You may do so only on Your own behalf, and not on behalf
+     of any Contributor. You must make it absolutely clear that any such
+     warranty, support, indemnity, or liability obligation is offered by You
+     alone, and You hereby agree to indemnify every Contributor for any
+     liability incurred by such Contributor as a result of warranty, support,
+     indemnity or liability terms You offer. You may include additional
+     disclaimers of warranty and limitations of liability specific to any
+     jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+
+   If it is impossible for You to comply with any of the terms of this License
+   with respect to some or all of the Covered Software due to statute, judicial
+   order, or regulation then You must: (a) comply with the terms of this License
+   to the maximum extent possible; and (b) describe the limitations and the code
+   they affect. Such description must be placed in a text file included with all
+   distributions of the Covered Software under this License. Except to the
+   extent prohibited by statute or regulation, such description must be
+   sufficiently detailed for a recipient of ordinary skill to be able to
+   understand it.
+
+5. Termination
+
+5.1. The rights granted under this License will terminate automatically if You
+     fail to comply with any of its terms. However, if You become compliant,
+     then the rights granted under this License from a particular Contributor
+     are reinstated (a) provisionally, unless and until such Contributor
+     explicitly and finally terminates Your grants, and (b) on an ongoing basis,
+     if such Contributor fails to notify You of the non-compliance by some
+     reasonable means prior to 60 days after You have come back into compliance.
+     Moreover, Your grants from a particular Contributor are reinstated on an
+     ongoing basis if such Contributor notifies You of the non-compliance by
+     some reasonable means, this is the first time You have received notice of
+     non-compliance with this License from such Contributor, and You become
+     compliant prior to 30 days after Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+     infringement claim (excluding declaratory judgment actions, counter-claims,
+     and cross-claims) alleging that a Contributor Version directly or
+     indirectly infringes any patent, then the rights granted to You by any and
+     all Contributors for the Covered Software under Section 2.1 of this License
+     shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all end user
+     license agreements (excluding distributors and resellers) which have been
+     validly granted by You or Your distributors under this License prior to
+     termination shall survive termination.
+
+6. Disclaimer of Warranty
+
+   Covered Software is provided under this License on an “as is” basis, without
+   warranty of any kind, either expressed, implied, or statutory, including,
+   without limitation, warranties that the Covered Software is free of defects,
+   merchantable, fit for a particular purpose or non-infringing. The entire
+   risk as to the quality and performance of the Covered Software is with You.
+   Should any Covered Software prove defective in any respect, You (not any
+   Contributor) assume the cost of any necessary servicing, repair, or
+   correction. This disclaimer of warranty constitutes an essential part of this
+   License. No use of  any Covered Software is authorized under this License
+   except under this disclaimer.
+
+7. Limitation of Liability
+
+   Under no circumstances and under no legal theory, whether tort (including
+   negligence), contract, or otherwise, shall any Contributor, or anyone who
+   distributes Covered Software as permitted above, be liable to You for any
+   direct, indirect, special, incidental, or consequential damages of any
+   character including, without limitation, damages for lost profits, loss of
+   goodwill, work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses, even if such party shall have been
+   informed of the possibility of such damages. This limitation of liability
+   shall not apply to liability for death or personal injury resulting from such
+   party’s negligence to the extent applicable law prohibits such limitation.
+   Some jurisdictions do not allow the exclusion or limitation of incidental or
+   consequential damages, so this exclusion and limitation may not apply to You.
+
+8. Litigation
+
+   Any litigation relating to this License may be brought only in the courts of
+   a jurisdiction where the defendant maintains its principal place of business
+   and such litigation shall be governed by laws of that jurisdiction, without
+   reference to its conflict-of-law provisions. Nothing in this Section shall
+   prevent a party’s ability to bring cross-claims or counter-claims.
+
+9. Miscellaneous
+
+   This License represents the complete agreement concerning the subject matter
+   hereof. If any provision of this License is held to be unenforceable, such
+   provision shall be reformed only to the extent necessary to make it
+   enforceable. Any law or regulation which provides that the language of a
+   contract shall be construed against the drafter shall not be used to construe
+   this License against a Contributor.
+
+
+10. Versions of the License
+
+10.1. New Versions
+
+      Mozilla Foundation is the license steward. Except as provided in Section
+      10.3, no one other than the license steward has the right to modify or
+      publish new versions of this License. Each version will be given a
+      distinguishing version number.
+
+10.2. Effect of New Versions
+
+      You may distribute the Covered Software under the terms of the version of
+      the License under which You originally received the Covered Software, or
+      under the terms of any subsequent version published by the license
+      steward.
+
+10.3. Modified Versions
+
+      If you create software not governed by this License, and you want to
+      create a new license for such software, you may create and use a modified
+      version of this License if you rename the license and remove any
+      references to the name of the license steward (except to note that such
+      modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary Licenses
+      If You choose to distribute Source Code Form that is Incompatible With
+      Secondary Licenses under the terms of this version of the License, the
+      notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+
+      This Source Code Form is subject to the
+      terms of the Mozilla Public License, v.
+      2.0. If a copy of the MPL was not
+      distributed with this file, You can
+      obtain one at
+      http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular file, then
+You may include the notice in a location (such as a LICENSE file in a relevant
+directory) where a recipient would be likely to look for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - “Incompatible With Secondary Licenses” Notice
+
+      This Source Code Form is “Incompatible
+      With Secondary Licenses”, as defined by
+      the Mozilla Public License, v. 2.0.
+
+
+```
+
+#### README.md
+
+```text
+# errwrap
+
+`errwrap` is a package for Go that formalizes the pattern of wrapping errors
+and checking if an error contains another error.
+
+There is a common pattern in Go of taking a returned `error` value and
+then wrapping it (such as with `fmt.Errorf`) before returning it. The problem
+with this pattern is that you completely lose the original `error` structure.
+
+Arguably the _correct_ approach is that you should make a custom structure
+implementing the `error` interface, and have the original error as a field
+on that structure, such [as this example](http://golang.org/pkg/os/#PathError).
+This is a good approach, but you have to know the entire chain of possible
+rewrapping that happens, when you might just care about one.
+
+`errwrap` formalizes this pattern (it doesn't matter what approach you use
+above) by giving a single interface for wrapping errors, checking if a specific
+error is wrapped, and extracting that error.
+
+## Installation and Docs
+
+Install using `go get github.com/hashicorp/errwrap`.
+
+Full documentation is available at
+http://godoc.org/github.com/hashicorp/errwrap
+
+## Usage
+
+#### Basic Usage
+
+Below is a very basic example of its usage:
+
+```go
+// A function that always returns an error, but wraps it, like a real
+// function might.
+func tryOpen() error {
+	_, err := os.Open("/i/dont/exist")
+	if err != nil {
+		return errwrap.Wrapf("Doesn't exist: {{err}}", err)
+	}
+
+	return nil
+}
+
+func main() {
+	err := tryOpen()
+
+	// We can use the Contains helpers to check if an error contains
+	// another error. It is safe to do this with a nil error, or with
+	// an error that doesn't even use the errwrap package.
+	if errwrap.Contains(err, "does not exist") {
+		// Do something
+	}
+	if errwrap.ContainsType(err, new(os.PathError)) {
+		// Do something
+	}
+
+	// Or we can use the associated `Get` functions to just extract
+	// a specific error. This would return nil if that specific error doesn't
+	// exist.
+	perr := errwrap.GetType(err, new(os.PathError))
+}
+```
+
+#### Custom Types
+
+If you're already making custom types that properly wrap errors, then
+you can get all the functionality of `errwraps.Contains` and such by
+implementing the `Wrapper` interface with just one function. Example:
+
+```go
+type AppError {
+  Code ErrorCode
+  Err  error
+}
+
+func (e *AppError) WrappedErrors() []error {
+  return []error{e.Err}
+}
+```
+
+Now this works:
+
+```go
+err := &AppError{Err: fmt.Errorf("an error")}
+if errwrap.ContainsType(err, fmt.Errorf("")) {
+	// This will work!
+}
+```
+
+```
+
+#### errwrap.go
+
+```text
+// Package errwrap implements methods to formalize error wrapping in Go.
+//
+// All of the top-level functions that take an `error` are built to be able
+// to take any error, not just wrapped errors. This allows you to use errwrap
+// without having to type-check and type-cast everywhere.
+package errwrap
+
+import (
+	"errors"
+	"reflect"
+	"strings"
+)
+
+// WalkFunc is the callback called for Walk.
+type WalkFunc func(error)
+
+// Wrapper is an interface that can be implemented by custom types to
+// have all the Contains, Get, etc. functions in errwrap work.
+//
+// When Walk reaches a Wrapper, it will call the callback for every
+// wrapped error in addition to the wrapper itself. Since all the top-level
+// functions in errwrap use Walk, this means that all those functions work
+// with your custom type.
+type Wrapper interface {
+	WrappedErrors() []error
+}
+
+// Wrap defines that outer wraps inner, returning an error type that
+// can be cleanly used with the other methods in this package, such as
+// Contains, GetAll, etc.
+//
+// This function won't modify the error message at all (the outer message
+// will be used).
+func Wrap(outer, inner error) error {
+	return &wrappedError{
+		Outer: outer,
+		Inner: inner,
+	}
+}
+
+// Wrapf wraps an error with a formatting message. This is similar to using
+// `fmt.Errorf` to wrap an error. If you're using `fmt.Errorf` to wrap
+// errors, you should replace it with this.
+//
+// format is the format of the error message. The string '{{err}}' will
+// be replaced with the original error message.
+//
+// Deprecated: Use fmt.Errorf()
+func Wrapf(format string, err error) error {
+	outerMsg := "<nil>"
+	if err != nil {
+		outerMsg = err.Error()
+	}
+
+	outer := errors.New(strings.Replace(
+		format, "{{err}}", outerMsg, -1))
+
+	return Wrap(outer, err)
+}
+
+// Contains checks if the given error contains an error with the
+// message msg. If err is not a wrapped error, this will always return
+// false unless the error itself happens to match this msg.
+func Contains(err error, msg string) bool {
+	return len(GetAll(err, msg)) > 0
+}
+
+// ContainsType checks if the given error contains an error with
+// the same concrete type as v. If err is not a wrapped error, this will
+// check the err itself.
+func ContainsType(err error, v interface{}) bool {
+	return len(GetAllType(err, v)) > 0
+}
+
+// Get is the same as GetAll but returns the deepest matching error.
+func Get(err error, msg string) error {
+	es := GetAll(err, msg)
+	if len(es) > 0 {
+		return es[len(es)-1]
+	}
+
+	return nil
+}
+
+// GetType is the same as GetAllType but returns the deepest matching error.
+func GetType(err error, v interface{}) error {
+	es := GetAllType(err, v)
+	if len(es) > 0 {
+		return es[len(es)-1]
+	}
+
+	return nil
+}
+
+// GetAll gets all the errors that might be wrapped in err with the
+// given message. The order of the errors is such that the outermost
+// matching error (the most recent wrap) is index zero, and so on.
+func GetAll(err error, msg string) []error {
+	var result []error
+
+	Walk(err, func(err error) {
+		if err.Error() == msg {
+			result = append(result, err)
+		}
+	})
+
+	return result
+}
+
+// GetAllType gets all the errors that are the same type as v.
+//
+// The order of the return value is the same as described in GetAll.
+func GetAllType(err error, v interface{}) []error {
+	var result []error
+
+	var search string
+	if v != nil {
+		search = reflect.TypeOf(v).String()
+	}
+	Walk(err, func(err error) {
+		var needle string
+		if err != nil {
+			needle = reflect.TypeOf(err).String()
+		}
+
+		if needle == search {
+			result = append(result, err)
+		}
+	})
+
+	return result
+}
+
+// Walk walks all the wrapped errors in err and calls the callback. If
+// err isn't a wrapped error, this will be called once for err. If err
+// is a wrapped error, the callback will be called for both the wrapper
+// that implements error as well as the wrapped error itself.
+func Walk(err error, cb WalkFunc) {
+	if err == nil {
+		return
+	}
+
+	switch e := err.(type) {
+	case *wrappedError:
+		cb(e.Outer)
+		Walk(e.Inner, cb)
+	case Wrapper:
+		cb(err)
+
+		for _, err := range e.WrappedErrors() {
+			Walk(err, cb)
+		}
+	case interface{ Unwrap() error }:
+		cb(err)
+		Walk(e.Unwrap(), cb)
+	default:
+		cb(err)
+	}
+}
+
+// wrappedError is an implementation of error that has both the
+// outer and inner errors.
+type wrappedError struct {
+	Outer error
+	Inner error
+}
+
+func (w *wrappedError) Error() string {
+	return w.Outer.Error()
+}
+
+func (w *wrappedError) WrappedErrors() []error {
+	return []error{w.Outer, w.Inner}
+}
+
+func (w *wrappedError) Unwrap() error {
+	return w.Inner
+}
+
+```
+
+
 ### github.com/hashicorp/go-cleanhttp
 
 * License: MPL-2.0
@@ -15658,6 +16349,914 @@ func PrintablePathCheckHandler(next http.Handler, input *HandlerInput) http.Hand
 
 		return
 	})
+}
+
+```
+
+
+### github.com/hashicorp/go-multierror
+
+* License: MPL-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-multierror/LICENSE
+
+#### LICENSE
+
+```text
+Mozilla Public License, version 2.0
+
+1. Definitions
+
+1.1. “Contributor”
+
+     means each individual or legal entity that creates, contributes to the
+     creation of, or owns Covered Software.
+
+1.2. “Contributor Version”
+
+     means the combination of the Contributions of others (if any) used by a
+     Contributor and that particular Contributor’s Contribution.
+
+1.3. “Contribution”
+
+     means Covered Software of a particular Contributor.
+
+1.4. “Covered Software”
+
+     means Source Code Form to which the initial Contributor has attached the
+     notice in Exhibit A, the Executable Form of such Source Code Form, and
+     Modifications of such Source Code Form, in each case including portions
+     thereof.
+
+1.5. “Incompatible With Secondary Licenses”
+     means
+
+     a. that the initial Contributor has attached the notice described in
+        Exhibit B to the Covered Software; or
+
+     b. that the Covered Software was made available under the terms of version
+        1.1 or earlier of the License, but not also under the terms of a
+        Secondary License.
+
+1.6. “Executable Form”
+
+     means any form of the work other than Source Code Form.
+
+1.7. “Larger Work”
+
+     means a work that combines Covered Software with other material, in a separate
+     file or files, that is not Covered Software.
+
+1.8. “License”
+
+     means this document.
+
+1.9. “Licensable”
+
+     means having the right to grant, to the maximum extent possible, whether at the
+     time of the initial grant or subsequently, any and all of the rights conveyed by
+     this License.
+
+1.10. “Modifications”
+
+     means any of the following:
+
+     a. any file in Source Code Form that results from an addition to, deletion
+        from, or modification of the contents of Covered Software; or
+
+     b. any new file in Source Code Form that contains any Covered Software.
+
+1.11. “Patent Claims” of a Contributor
+
+      means any patent claim(s), including without limitation, method, process,
+      and apparatus claims, in any patent Licensable by such Contributor that
+      would be infringed, but for the grant of the License, by the making,
+      using, selling, offering for sale, having made, import, or transfer of
+      either its Contributions or its Contributor Version.
+
+1.12. “Secondary License”
+
+      means either the GNU General Public License, Version 2.0, the GNU Lesser
+      General Public License, Version 2.1, the GNU Affero General Public
+      License, Version 3.0, or any later versions of those licenses.
+
+1.13. “Source Code Form”
+
+      means the form of the work preferred for making modifications.
+
+1.14. “You” (or “Your”)
+
+      means an individual or a legal entity exercising rights under this
+      License. For legal entities, “You” includes any entity that controls, is
+      controlled by, or is under common control with You. For purposes of this
+      definition, “control” means (a) the power, direct or indirect, to cause
+      the direction or management of such entity, whether by contract or
+      otherwise, or (b) ownership of more than fifty percent (50%) of the
+      outstanding shares or beneficial ownership of such entity.
+
+
+2. License Grants and Conditions
+
+2.1. Grants
+
+     Each Contributor hereby grants You a world-wide, royalty-free,
+     non-exclusive license:
+
+     a. under intellectual property rights (other than patent or trademark)
+        Licensable by such Contributor to use, reproduce, make available,
+        modify, display, perform, distribute, and otherwise exploit its
+        Contributions, either on an unmodified basis, with Modifications, or as
+        part of a Larger Work; and
+
+     b. under Patent Claims of such Contributor to make, use, sell, offer for
+        sale, have made, import, and otherwise transfer either its Contributions
+        or its Contributor Version.
+
+2.2. Effective Date
+
+     The licenses granted in Section 2.1 with respect to any Contribution become
+     effective for each Contribution on the date the Contributor first distributes
+     such Contribution.
+
+2.3. Limitations on Grant Scope
+
+     The licenses granted in this Section 2 are the only rights granted under this
+     License. No additional rights or licenses will be implied from the distribution
+     or licensing of Covered Software under this License. Notwithstanding Section
+     2.1(b) above, no patent license is granted by a Contributor:
+
+     a. for any code that a Contributor has removed from Covered Software; or
+
+     b. for infringements caused by: (i) Your and any other third party’s
+        modifications of Covered Software, or (ii) the combination of its
+        Contributions with other software (except as part of its Contributor
+        Version); or
+
+     c. under Patent Claims infringed by Covered Software in the absence of its
+        Contributions.
+
+     This License does not grant any rights in the trademarks, service marks, or
+     logos of any Contributor (except as may be necessary to comply with the
+     notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+     No Contributor makes additional grants as a result of Your choice to
+     distribute the Covered Software under a subsequent version of this License
+     (see Section 10.2) or under the terms of a Secondary License (if permitted
+     under the terms of Section 3.3).
+
+2.5. Representation
+
+     Each Contributor represents that the Contributor believes its Contributions
+     are its original creation(s) or it has sufficient rights to grant the
+     rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+     This License is not intended to limit any rights You have under applicable
+     copyright doctrines of fair use, fair dealing, or other equivalents.
+
+2.7. Conditions
+
+     Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted in
+     Section 2.1.
+
+
+3. Responsibilities
+
+3.1. Distribution of Source Form
+
+     All distribution of Covered Software in Source Code Form, including any
+     Modifications that You create or to which You contribute, must be under the
+     terms of this License. You must inform recipients that the Source Code Form
+     of the Covered Software is governed by the terms of this License, and how
+     they can obtain a copy of this License. You may not attempt to alter or
+     restrict the recipients’ rights in the Source Code Form.
+
+3.2. Distribution of Executable Form
+
+     If You distribute Covered Software in Executable Form then:
+
+     a. such Covered Software must also be made available in Source Code Form,
+        as described in Section 3.1, and You must inform recipients of the
+        Executable Form how they can obtain a copy of such Source Code Form by
+        reasonable means in a timely manner, at a charge no more than the cost
+        of distribution to the recipient; and
+
+     b. You may distribute such Executable Form under the terms of this License,
+        or sublicense it under different terms, provided that the license for
+        the Executable Form does not attempt to limit or alter the recipients’
+        rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+     You may create and distribute a Larger Work under terms of Your choice,
+     provided that You also comply with the requirements of this License for the
+     Covered Software. If the Larger Work is a combination of Covered Software
+     with a work governed by one or more Secondary Licenses, and the Covered
+     Software is not Incompatible With Secondary Licenses, this License permits
+     You to additionally distribute such Covered Software under the terms of
+     such Secondary License(s), so that the recipient of the Larger Work may, at
+     their option, further distribute the Covered Software under the terms of
+     either this License or such Secondary License(s).
+
+3.4. Notices
+
+     You may not remove or alter the substance of any license notices (including
+     copyright notices, patent notices, disclaimers of warranty, or limitations
+     of liability) contained within the Source Code Form of the Covered
+     Software, except that You may alter any license notices to the extent
+     required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+     You may choose to offer, and to charge a fee for, warranty, support,
+     indemnity or liability obligations to one or more recipients of Covered
+     Software. However, You may do so only on Your own behalf, and not on behalf
+     of any Contributor. You must make it absolutely clear that any such
+     warranty, support, indemnity, or liability obligation is offered by You
+     alone, and You hereby agree to indemnify every Contributor for any
+     liability incurred by such Contributor as a result of warranty, support,
+     indemnity or liability terms You offer. You may include additional
+     disclaimers of warranty and limitations of liability specific to any
+     jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+
+   If it is impossible for You to comply with any of the terms of this License
+   with respect to some or all of the Covered Software due to statute, judicial
+   order, or regulation then You must: (a) comply with the terms of this License
+   to the maximum extent possible; and (b) describe the limitations and the code
+   they affect. Such description must be placed in a text file included with all
+   distributions of the Covered Software under this License. Except to the
+   extent prohibited by statute or regulation, such description must be
+   sufficiently detailed for a recipient of ordinary skill to be able to
+   understand it.
+
+5. Termination
+
+5.1. The rights granted under this License will terminate automatically if You
+     fail to comply with any of its terms. However, if You become compliant,
+     then the rights granted under this License from a particular Contributor
+     are reinstated (a) provisionally, unless and until such Contributor
+     explicitly and finally terminates Your grants, and (b) on an ongoing basis,
+     if such Contributor fails to notify You of the non-compliance by some
+     reasonable means prior to 60 days after You have come back into compliance.
+     Moreover, Your grants from a particular Contributor are reinstated on an
+     ongoing basis if such Contributor notifies You of the non-compliance by
+     some reasonable means, this is the first time You have received notice of
+     non-compliance with this License from such Contributor, and You become
+     compliant prior to 30 days after Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+     infringement claim (excluding declaratory judgment actions, counter-claims,
+     and cross-claims) alleging that a Contributor Version directly or
+     indirectly infringes any patent, then the rights granted to You by any and
+     all Contributors for the Covered Software under Section 2.1 of this License
+     shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all end user
+     license agreements (excluding distributors and resellers) which have been
+     validly granted by You or Your distributors under this License prior to
+     termination shall survive termination.
+
+6. Disclaimer of Warranty
+
+   Covered Software is provided under this License on an “as is” basis, without
+   warranty of any kind, either expressed, implied, or statutory, including,
+   without limitation, warranties that the Covered Software is free of defects,
+   merchantable, fit for a particular purpose or non-infringing. The entire
+   risk as to the quality and performance of the Covered Software is with You.
+   Should any Covered Software prove defective in any respect, You (not any
+   Contributor) assume the cost of any necessary servicing, repair, or
+   correction. This disclaimer of warranty constitutes an essential part of this
+   License. No use of  any Covered Software is authorized under this License
+   except under this disclaimer.
+
+7. Limitation of Liability
+
+   Under no circumstances and under no legal theory, whether tort (including
+   negligence), contract, or otherwise, shall any Contributor, or anyone who
+   distributes Covered Software as permitted above, be liable to You for any
+   direct, indirect, special, incidental, or consequential damages of any
+   character including, without limitation, damages for lost profits, loss of
+   goodwill, work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses, even if such party shall have been
+   informed of the possibility of such damages. This limitation of liability
+   shall not apply to liability for death or personal injury resulting from such
+   party’s negligence to the extent applicable law prohibits such limitation.
+   Some jurisdictions do not allow the exclusion or limitation of incidental or
+   consequential damages, so this exclusion and limitation may not apply to You.
+
+8. Litigation
+
+   Any litigation relating to this License may be brought only in the courts of
+   a jurisdiction where the defendant maintains its principal place of business
+   and such litigation shall be governed by laws of that jurisdiction, without
+   reference to its conflict-of-law provisions. Nothing in this Section shall
+   prevent a party’s ability to bring cross-claims or counter-claims.
+
+9. Miscellaneous
+
+   This License represents the complete agreement concerning the subject matter
+   hereof. If any provision of this License is held to be unenforceable, such
+   provision shall be reformed only to the extent necessary to make it
+   enforceable. Any law or regulation which provides that the language of a
+   contract shall be construed against the drafter shall not be used to construe
+   this License against a Contributor.
+
+
+10. Versions of the License
+
+10.1. New Versions
+
+      Mozilla Foundation is the license steward. Except as provided in Section
+      10.3, no one other than the license steward has the right to modify or
+      publish new versions of this License. Each version will be given a
+      distinguishing version number.
+
+10.2. Effect of New Versions
+
+      You may distribute the Covered Software under the terms of the version of
+      the License under which You originally received the Covered Software, or
+      under the terms of any subsequent version published by the license
+      steward.
+
+10.3. Modified Versions
+
+      If you create software not governed by this License, and you want to
+      create a new license for such software, you may create and use a modified
+      version of this License if you rename the license and remove any
+      references to the name of the license steward (except to note that such
+      modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary Licenses
+      If You choose to distribute Source Code Form that is Incompatible With
+      Secondary Licenses under the terms of this version of the License, the
+      notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+
+      This Source Code Form is subject to the
+      terms of the Mozilla Public License, v.
+      2.0. If a copy of the MPL was not
+      distributed with this file, You can
+      obtain one at
+      http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular file, then
+You may include the notice in a location (such as a LICENSE file in a relevant
+directory) where a recipient would be likely to look for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - “Incompatible With Secondary Licenses” Notice
+
+      This Source Code Form is “Incompatible
+      With Secondary Licenses”, as defined by
+      the Mozilla Public License, v. 2.0.
+
+```
+
+#### Makefile
+
+```text
+TEST?=./...
+
+default: test
+
+# test runs the test suite and vets the code.
+test: generate
+	@echo "==> Running tests..."
+	@go list $(TEST) \
+		| grep -v "/vendor/" \
+		| xargs -n1 go test -timeout=60s -parallel=10 ${TESTARGS}
+
+# testrace runs the race checker
+testrace: generate
+	@echo "==> Running tests (race)..."
+	@go list $(TEST) \
+		| grep -v "/vendor/" \
+		| xargs -n1 go test -timeout=60s -race ${TESTARGS}
+
+# updatedeps installs all the dependencies needed to run and build.
+updatedeps:
+	@sh -c "'${CURDIR}/scripts/deps.sh' '${NAME}'"
+
+# generate runs `go generate` to build the dynamically generated source files.
+generate:
+	@echo "==> Generating..."
+	@find . -type f -name '.DS_Store' -delete
+	@go list ./... \
+		| grep -v "/vendor/" \
+		| xargs -n1 go generate
+
+.PHONY: default test testrace updatedeps generate
+
+```
+
+#### README.md
+
+```text
+# go-multierror
+
+[![CircleCI](https://img.shields.io/circleci/build/github/hashicorp/go-multierror/master)](https://circleci.com/gh/hashicorp/go-multierror)
+[![Go Reference](https://pkg.go.dev/badge/github.com/hashicorp/go-multierror.svg)](https://pkg.go.dev/github.com/hashicorp/go-multierror)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/hashicorp/go-multierror)
+
+[circleci]: https://app.circleci.com/pipelines/github/hashicorp/go-multierror
+[godocs]: https://pkg.go.dev/github.com/hashicorp/go-multierror
+
+`go-multierror` is a package for Go that provides a mechanism for
+representing a list of `error` values as a single `error`.
+
+This allows a function in Go to return an `error` that might actually
+be a list of errors. If the caller knows this, they can unwrap the
+list and access the errors. If the caller doesn't know, the error
+formats to a nice human-readable format.
+
+`go-multierror` is fully compatible with the Go standard library
+[errors](https://golang.org/pkg/errors/) package, including the
+functions `As`, `Is`, and `Unwrap`. This provides a standardized approach
+for introspecting on error values.
+
+## Installation and Docs
+
+Install using `go get github.com/hashicorp/go-multierror`.
+
+Full documentation is available at
+https://pkg.go.dev/github.com/hashicorp/go-multierror
+
+### Requires go version 1.13 or newer
+
+`go-multierror` requires go version 1.13 or newer. Go 1.13 introduced
+[error wrapping](https://golang.org/doc/go1.13#error_wrapping), which
+this library takes advantage of.
+
+If you need to use an earlier version of go, you can use the
+[v1.0.0](https://github.com/hashicorp/go-multierror/tree/v1.0.0)
+tag, which doesn't rely on features in go 1.13.
+
+If you see compile errors that look like the below, it's likely that
+you're on an older version of go:
+
+```
+/go/src/github.com/hashicorp/go-multierror/multierror.go:112:9: undefined: errors.As
+/go/src/github.com/hashicorp/go-multierror/multierror.go:117:9: undefined: errors.Is
+```
+
+## Usage
+
+go-multierror is easy to use and purposely built to be unobtrusive in
+existing Go applications/libraries that may not be aware of it.
+
+**Building a list of errors**
+
+The `Append` function is used to create a list of errors. This function
+behaves a lot like the Go built-in `append` function: it doesn't matter
+if the first argument is nil, a `multierror.Error`, or any other `error`,
+the function behaves as you would expect.
+
+```go
+var result error
+
+if err := step1(); err != nil {
+	result = multierror.Append(result, err)
+}
+if err := step2(); err != nil {
+	result = multierror.Append(result, err)
+}
+
+return result
+```
+
+**Customizing the formatting of the errors**
+
+By specifying a custom `ErrorFormat`, you can customize the format
+of the `Error() string` function:
+
+```go
+var result *multierror.Error
+
+// ... accumulate errors here, maybe using Append
+
+if result != nil {
+	result.ErrorFormat = func([]error) string {
+		return "errors!"
+	}
+}
+```
+
+**Accessing the list of errors**
+
+`multierror.Error` implements `error` so if the caller doesn't know about
+multierror, it will work just fine. But if you're aware a multierror might
+be returned, you can use type switches to access the list of errors:
+
+```go
+if err := something(); err != nil {
+	if merr, ok := err.(*multierror.Error); ok {
+		// Use merr.Errors
+	}
+}
+```
+
+You can also use the standard [`errors.Unwrap`](https://golang.org/pkg/errors/#Unwrap)
+function. This will continue to unwrap into subsequent errors until none exist.
+
+**Extracting an error**
+
+The standard library [`errors.As`](https://golang.org/pkg/errors/#As)
+function can be used directly with a multierror to extract a specific error:
+
+```go
+// Assume err is a multierror value
+err := somefunc()
+
+// We want to know if "err" has a "RichErrorType" in it and extract it.
+var errRich RichErrorType
+if errors.As(err, &errRich) {
+	// It has it, and now errRich is populated.
+}
+```
+
+**Checking for an exact error value**
+
+Some errors are returned as exact errors such as the [`ErrNotExist`](https://golang.org/pkg/os/#pkg-variables)
+error in the `os` package. You can check if this error is present by using
+the standard [`errors.Is`](https://golang.org/pkg/errors/#Is) function.
+
+```go
+// Assume err is a multierror value
+err := somefunc()
+if errors.Is(err, os.ErrNotExist) {
+	// err contains os.ErrNotExist
+}
+```
+
+**Returning a multierror only if there are errors**
+
+If you build a `multierror.Error`, you can use the `ErrorOrNil` function
+to return an `error` implementation only if there are errors to return:
+
+```go
+var result *multierror.Error
+
+// ... accumulate errors here
+
+// Return the `error` only if errors were added to the multierror, otherwise
+// return nil since there are no errors.
+return result.ErrorOrNil()
+```
+
+```
+
+#### append.go
+
+```text
+package multierror
+
+// Append is a helper function that will append more errors
+// onto an Error in order to create a larger multi-error.
+//
+// If err is not a multierror.Error, then it will be turned into
+// one. If any of the errs are multierr.Error, they will be flattened
+// one level into err.
+// Any nil errors within errs will be ignored. If err is nil, a new
+// *Error will be returned.
+func Append(err error, errs ...error) *Error {
+	switch err := err.(type) {
+	case *Error:
+		// Typed nils can reach here, so initialize if we are nil
+		if err == nil {
+			err = new(Error)
+		}
+
+		// Go through each error and flatten
+		for _, e := range errs {
+			switch e := e.(type) {
+			case *Error:
+				if e != nil {
+					err.Errors = append(err.Errors, e.Errors...)
+				}
+			default:
+				if e != nil {
+					err.Errors = append(err.Errors, e)
+				}
+			}
+		}
+
+		return err
+	default:
+		newErrs := make([]error, 0, len(errs)+1)
+		if err != nil {
+			newErrs = append(newErrs, err)
+		}
+		newErrs = append(newErrs, errs...)
+
+		return Append(&Error{}, newErrs...)
+	}
+}
+
+```
+
+#### flatten.go
+
+```text
+package multierror
+
+// Flatten flattens the given error, merging any *Errors together into
+// a single *Error.
+func Flatten(err error) error {
+	// If it isn't an *Error, just return the error as-is
+	if _, ok := err.(*Error); !ok {
+		return err
+	}
+
+	// Otherwise, make the result and flatten away!
+	flatErr := new(Error)
+	flatten(err, flatErr)
+	return flatErr
+}
+
+func flatten(err error, flatErr *Error) {
+	switch err := err.(type) {
+	case *Error:
+		for _, e := range err.Errors {
+			flatten(e, flatErr)
+		}
+	default:
+		flatErr.Errors = append(flatErr.Errors, err)
+	}
+}
+
+```
+
+#### format.go
+
+```text
+package multierror
+
+import (
+	"fmt"
+	"strings"
+)
+
+// ErrorFormatFunc is a function callback that is called by Error to
+// turn the list of errors into a string.
+type ErrorFormatFunc func([]error) string
+
+// ListFormatFunc is a basic formatter that outputs the number of errors
+// that occurred along with a bullet point list of the errors.
+func ListFormatFunc(es []error) string {
+	if len(es) == 1 {
+		return fmt.Sprintf("1 error occurred:\n\t* %s\n\n", es[0])
+	}
+
+	points := make([]string, len(es))
+	for i, err := range es {
+		points[i] = fmt.Sprintf("* %s", err)
+	}
+
+	return fmt.Sprintf(
+		"%d errors occurred:\n\t%s\n\n",
+		len(es), strings.Join(points, "\n\t"))
+}
+
+```
+
+#### group.go
+
+```text
+package multierror
+
+import "sync"
+
+// Group is a collection of goroutines which return errors that need to be
+// coalesced.
+type Group struct {
+	mutex sync.Mutex
+	err   *Error
+	wg    sync.WaitGroup
+}
+
+// Go calls the given function in a new goroutine.
+//
+// If the function returns an error it is added to the group multierror which
+// is returned by Wait.
+func (g *Group) Go(f func() error) {
+	g.wg.Add(1)
+
+	go func() {
+		defer g.wg.Done()
+
+		if err := f(); err != nil {
+			g.mutex.Lock()
+			g.err = Append(g.err, err)
+			g.mutex.Unlock()
+		}
+	}()
+}
+
+// Wait blocks until all function calls from the Go method have returned, then
+// returns the multierror.
+func (g *Group) Wait() *Error {
+	g.wg.Wait()
+	g.mutex.Lock()
+	defer g.mutex.Unlock()
+	return g.err
+}
+
+```
+
+#### multierror.go
+
+```text
+package multierror
+
+import (
+	"errors"
+	"fmt"
+)
+
+// Error is an error type to track multiple errors. This is used to
+// accumulate errors in cases and return them as a single "error".
+type Error struct {
+	Errors      []error
+	ErrorFormat ErrorFormatFunc
+}
+
+func (e *Error) Error() string {
+	fn := e.ErrorFormat
+	if fn == nil {
+		fn = ListFormatFunc
+	}
+
+	return fn(e.Errors)
+}
+
+// ErrorOrNil returns an error interface if this Error represents
+// a list of errors, or returns nil if the list of errors is empty. This
+// function is useful at the end of accumulation to make sure that the value
+// returned represents the existence of errors.
+func (e *Error) ErrorOrNil() error {
+	if e == nil {
+		return nil
+	}
+	if len(e.Errors) == 0 {
+		return nil
+	}
+
+	return e
+}
+
+func (e *Error) GoString() string {
+	return fmt.Sprintf("*%#v", *e)
+}
+
+// WrappedErrors returns the list of errors that this Error is wrapping. It is
+// an implementation of the errwrap.Wrapper interface so that multierror.Error
+// can be used with that library.
+//
+// This method is not safe to be called concurrently. Unlike accessing the
+// Errors field directly, this function also checks if the multierror is nil to
+// prevent a null-pointer panic. It satisfies the errwrap.Wrapper interface.
+func (e *Error) WrappedErrors() []error {
+	if e == nil {
+		return nil
+	}
+	return e.Errors
+}
+
+// Unwrap returns an error from Error (or nil if there are no errors).
+// This error returned will further support Unwrap to get the next error,
+// etc. The order will match the order of Errors in the multierror.Error
+// at the time of calling.
+//
+// The resulting error supports errors.As/Is/Unwrap so you can continue
+// to use the stdlib errors package to introspect further.
+//
+// This will perform a shallow copy of the errors slice. Any errors appended
+// to this error after calling Unwrap will not be available until a new
+// Unwrap is called on the multierror.Error.
+func (e *Error) Unwrap() error {
+	// If we have no errors then we do nothing
+	if e == nil || len(e.Errors) == 0 {
+		return nil
+	}
+
+	// If we have exactly one error, we can just return that directly.
+	if len(e.Errors) == 1 {
+		return e.Errors[0]
+	}
+
+	// Shallow copy the slice
+	errs := make([]error, len(e.Errors))
+	copy(errs, e.Errors)
+	return chain(errs)
+}
+
+// chain implements the interfaces necessary for errors.Is/As/Unwrap to
+// work in a deterministic way with multierror. A chain tracks a list of
+// errors while accounting for the current represented error. This lets
+// Is/As be meaningful.
+//
+// Unwrap returns the next error. In the cleanest form, Unwrap would return
+// the wrapped error here but we can't do that if we want to properly
+// get access to all the errors. Instead, users are recommended to use
+// Is/As to get the correct error type out.
+//
+// Precondition: []error is non-empty (len > 0)
+type chain []error
+
+// Error implements the error interface
+func (e chain) Error() string {
+	return e[0].Error()
+}
+
+// Unwrap implements errors.Unwrap by returning the next error in the
+// chain or nil if there are no more errors.
+func (e chain) Unwrap() error {
+	if len(e) == 1 {
+		return nil
+	}
+
+	return e[1:]
+}
+
+// As implements errors.As by attempting to map to the current value.
+func (e chain) As(target interface{}) bool {
+	return errors.As(e[0], target)
+}
+
+// Is implements errors.Is by comparing the current value directly.
+func (e chain) Is(target error) bool {
+	return errors.Is(e[0], target)
+}
+
+```
+
+#### prefix.go
+
+```text
+package multierror
+
+import (
+	"fmt"
+
+	"github.com/hashicorp/errwrap"
+)
+
+// Prefix is a helper function that will prefix some text
+// to the given error. If the error is a multierror.Error, then
+// it will be prefixed to each wrapped error.
+//
+// This is useful to use when appending multiple multierrors
+// together in order to give better scoping.
+func Prefix(err error, prefix string) error {
+	if err == nil {
+		return nil
+	}
+
+	format := fmt.Sprintf("%s {{err}}", prefix)
+	switch err := err.(type) {
+	case *Error:
+		// Typed nils can reach here, so initialize if we are nil
+		if err == nil {
+			err = new(Error)
+		}
+
+		// Wrap each of the errors
+		for i, e := range err.Errors {
+			err.Errors[i] = errwrap.Wrapf(format, e)
+		}
+
+		return err
+	default:
+		return errwrap.Wrapf(format, err)
+	}
+}
+
+```
+
+#### sort.go
+
+```text
+package multierror
+
+// Len implements sort.Interface function for length
+func (err Error) Len() int {
+	return len(err.Errors)
+}
+
+// Swap implements sort.Interface function for swapping elements
+func (err Error) Swap(i, j int) {
+	err.Errors[i], err.Errors[j] = err.Errors[j], err.Errors[i]
+}
+
+// Less implements sort.Interface function for determining order
+func (err Error) Less(i, j int) bool {
+	return err.Errors[i].Error() < err.Errors[j].Error()
 }
 
 ```
@@ -17261,6 +18860,21137 @@ func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 ```
 
 
+### github.com/hashicorp/go-rootcerts
+
+* License: MPL-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-rootcerts/LICENSE
+
+#### .travis.yml
+
+```text
+sudo: false
+
+language: go
+
+go:
+  - 1.6
+
+branches:
+  only:
+    - master
+
+script: make test
+
+```
+
+#### LICENSE
+
+```text
+Mozilla Public License, version 2.0
+
+1. Definitions
+
+1.1. "Contributor"
+
+     means each individual or legal entity that creates, contributes to the
+     creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+
+     means the combination of the Contributions of others (if any) used by a
+     Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+
+     means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+
+     means Source Code Form to which the initial Contributor has attached the
+     notice in Exhibit A, the Executable Form of such Source Code Form, and
+     Modifications of such Source Code Form, in each case including portions
+     thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+     means
+
+     a. that the initial Contributor has attached the notice described in
+        Exhibit B to the Covered Software; or
+
+     b. that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the terms of
+        a Secondary License.
+
+1.6. "Executable Form"
+
+     means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+
+     means a work that combines Covered Software with other material, in a
+     separate file or files, that is not Covered Software.
+
+1.8. "License"
+
+     means this document.
+
+1.9. "Licensable"
+
+     means having the right to grant, to the maximum extent possible, whether
+     at the time of the initial grant or subsequently, any and all of the
+     rights conveyed by this License.
+
+1.10. "Modifications"
+
+     means any of the following:
+
+     a. any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered Software; or
+
+     b. any new file in Source Code Form that contains any Covered Software.
+
+1.11. "Patent Claims" of a Contributor
+
+      means any patent claim(s), including without limitation, method,
+      process, and apparatus claims, in any patent Licensable by such
+      Contributor that would be infringed, but for the grant of the License,
+      by the making, using, selling, offering for sale, having made, import,
+      or transfer of either its Contributions or its Contributor Version.
+
+1.12. "Secondary License"
+
+      means either the GNU General Public License, Version 2.0, the GNU Lesser
+      General Public License, Version 2.1, the GNU Affero General Public
+      License, Version 3.0, or any later versions of those licenses.
+
+1.13. "Source Code Form"
+
+      means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+
+      means an individual or a legal entity exercising rights under this
+      License. For legal entities, "You" includes any entity that controls, is
+      controlled by, or is under common control with You. For purposes of this
+      definition, "control" means (a) the power, direct or indirect, to cause
+      the direction or management of such entity, whether by contract or
+      otherwise, or (b) ownership of more than fifty percent (50%) of the
+      outstanding shares or beneficial ownership of such entity.
+
+
+2. License Grants and Conditions
+
+2.1. Grants
+
+     Each Contributor hereby grants You a world-wide, royalty-free,
+     non-exclusive license:
+
+     a. under intellectual property rights (other than patent or trademark)
+        Licensable by such Contributor to use, reproduce, make available,
+        modify, display, perform, distribute, and otherwise exploit its
+        Contributions, either on an unmodified basis, with Modifications, or
+        as part of a Larger Work; and
+
+     b. under Patent Claims of such Contributor to make, use, sell, offer for
+        sale, have made, import, and otherwise transfer either its
+        Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+     The licenses granted in Section 2.1 with respect to any Contribution
+     become effective for each Contribution on the date the Contributor first
+     distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+     The licenses granted in this Section 2 are the only rights granted under
+     this License. No additional rights or licenses will be implied from the
+     distribution or licensing of Covered Software under this License.
+     Notwithstanding Section 2.1(b) above, no patent license is granted by a
+     Contributor:
+
+     a. for any code that a Contributor has removed from Covered Software; or
+
+     b. for infringements caused by: (i) Your and any other third party's
+        modifications of Covered Software, or (ii) the combination of its
+        Contributions with other software (except as part of its Contributor
+        Version); or
+
+     c. under Patent Claims infringed by Covered Software in the absence of
+        its Contributions.
+
+     This License does not grant any rights in the trademarks, service marks,
+     or logos of any Contributor (except as may be necessary to comply with
+     the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+     No Contributor makes additional grants as a result of Your choice to
+     distribute the Covered Software under a subsequent version of this
+     License (see Section 10.2) or under the terms of a Secondary License (if
+     permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+     Each Contributor represents that the Contributor believes its
+     Contributions are its original creation(s) or it has sufficient rights to
+     grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+     This License is not intended to limit any rights You have under
+     applicable copyright doctrines of fair use, fair dealing, or other
+     equivalents.
+
+2.7. Conditions
+
+     Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted in
+     Section 2.1.
+
+
+3. Responsibilities
+
+3.1. Distribution of Source Form
+
+     All distribution of Covered Software in Source Code Form, including any
+     Modifications that You create or to which You contribute, must be under
+     the terms of this License. You must inform recipients that the Source
+     Code Form of the Covered Software is governed by the terms of this
+     License, and how they can obtain a copy of this License. You may not
+     attempt to alter or restrict the recipients' rights in the Source Code
+     Form.
+
+3.2. Distribution of Executable Form
+
+     If You distribute Covered Software in Executable Form then:
+
+     a. such Covered Software must also be made available in Source Code Form,
+        as described in Section 3.1, and You must inform recipients of the
+        Executable Form how they can obtain a copy of such Source Code Form by
+        reasonable means in a timely manner, at a charge no more than the cost
+        of distribution to the recipient; and
+
+     b. You may distribute such Executable Form under the terms of this
+        License, or sublicense it under different terms, provided that the
+        license for the Executable Form does not attempt to limit or alter the
+        recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+     You may create and distribute a Larger Work under terms of Your choice,
+     provided that You also comply with the requirements of this License for
+     the Covered Software. If the Larger Work is a combination of Covered
+     Software with a work governed by one or more Secondary Licenses, and the
+     Covered Software is not Incompatible With Secondary Licenses, this
+     License permits You to additionally distribute such Covered Software
+     under the terms of such Secondary License(s), so that the recipient of
+     the Larger Work may, at their option, further distribute the Covered
+     Software under the terms of either this License or such Secondary
+     License(s).
+
+3.4. Notices
+
+     You may not remove or alter the substance of any license notices
+     (including copyright notices, patent notices, disclaimers of warranty, or
+     limitations of liability) contained within the Source Code Form of the
+     Covered Software, except that You may alter any license notices to the
+     extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+     You may choose to offer, and to charge a fee for, warranty, support,
+     indemnity or liability obligations to one or more recipients of Covered
+     Software. However, You may do so only on Your own behalf, and not on
+     behalf of any Contributor. You must make it absolutely clear that any
+     such warranty, support, indemnity, or liability obligation is offered by
+     You alone, and You hereby agree to indemnify every Contributor for any
+     liability incurred by such Contributor as a result of warranty, support,
+     indemnity or liability terms You offer. You may include additional
+     disclaimers of warranty and limitations of liability specific to any
+     jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+
+   If it is impossible for You to comply with any of the terms of this License
+   with respect to some or all of the Covered Software due to statute,
+   judicial order, or regulation then You must: (a) comply with the terms of
+   this License to the maximum extent possible; and (b) describe the
+   limitations and the code they affect. Such description must be placed in a
+   text file included with all distributions of the Covered Software under
+   this License. Except to the extent prohibited by statute or regulation,
+   such description must be sufficiently detailed for a recipient of ordinary
+   skill to be able to understand it.
+
+5. Termination
+
+5.1. The rights granted under this License will terminate automatically if You
+     fail to comply with any of its terms. However, if You become compliant,
+     then the rights granted under this License from a particular Contributor
+     are reinstated (a) provisionally, unless and until such Contributor
+     explicitly and finally terminates Your grants, and (b) on an ongoing
+     basis, if such Contributor fails to notify You of the non-compliance by
+     some reasonable means prior to 60 days after You have come back into
+     compliance. Moreover, Your grants from a particular Contributor are
+     reinstated on an ongoing basis if such Contributor notifies You of the
+     non-compliance by some reasonable means, this is the first time You have
+     received notice of non-compliance with this License from such
+     Contributor, and You become compliant prior to 30 days after Your receipt
+     of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+     infringement claim (excluding declaratory judgment actions,
+     counter-claims, and cross-claims) alleging that a Contributor Version
+     directly or indirectly infringes any patent, then the rights granted to
+     You by any and all Contributors for the Covered Software under Section
+     2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all end user
+     license agreements (excluding distributors and resellers) which have been
+     validly granted by You or Your distributors under this License prior to
+     termination shall survive termination.
+
+6. Disclaimer of Warranty
+
+   Covered Software is provided under this License on an "as is" basis,
+   without warranty of any kind, either expressed, implied, or statutory,
+   including, without limitation, warranties that the Covered Software is free
+   of defects, merchantable, fit for a particular purpose or non-infringing.
+   The entire risk as to the quality and performance of the Covered Software
+   is with You. Should any Covered Software prove defective in any respect,
+   You (not any Contributor) assume the cost of any necessary servicing,
+   repair, or correction. This disclaimer of warranty constitutes an essential
+   part of this License. No use of  any Covered Software is authorized under
+   this License except under this disclaimer.
+
+7. Limitation of Liability
+
+   Under no circumstances and under no legal theory, whether tort (including
+   negligence), contract, or otherwise, shall any Contributor, or anyone who
+   distributes Covered Software as permitted above, be liable to You for any
+   direct, indirect, special, incidental, or consequential damages of any
+   character including, without limitation, damages for lost profits, loss of
+   goodwill, work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses, even if such party shall have been
+   informed of the possibility of such damages. This limitation of liability
+   shall not apply to liability for death or personal injury resulting from
+   such party's negligence to the extent applicable law prohibits such
+   limitation. Some jurisdictions do not allow the exclusion or limitation of
+   incidental or consequential damages, so this exclusion and limitation may
+   not apply to You.
+
+8. Litigation
+
+   Any litigation relating to this License may be brought only in the courts
+   of a jurisdiction where the defendant maintains its principal place of
+   business and such litigation shall be governed by laws of that
+   jurisdiction, without reference to its conflict-of-law provisions. Nothing
+   in this Section shall prevent a party's ability to bring cross-claims or
+   counter-claims.
+
+9. Miscellaneous
+
+   This License represents the complete agreement concerning the subject
+   matter hereof. If any provision of this License is held to be
+   unenforceable, such provision shall be reformed only to the extent
+   necessary to make it enforceable. Any law or regulation which provides that
+   the language of a contract shall be construed against the drafter shall not
+   be used to construe this License against a Contributor.
+
+
+10. Versions of the License
+
+10.1. New Versions
+
+      Mozilla Foundation is the license steward. Except as provided in Section
+      10.3, no one other than the license steward has the right to modify or
+      publish new versions of this License. Each version will be given a
+      distinguishing version number.
+
+10.2. Effect of New Versions
+
+      You may distribute the Covered Software under the terms of the version
+      of the License under which You originally received the Covered Software,
+      or under the terms of any subsequent version published by the license
+      steward.
+
+10.3. Modified Versions
+
+      If you create software not governed by this License, and you want to
+      create a new license for such software, you may create and use a
+      modified version of this License if you rename the license and remove
+      any references to the name of the license steward (except to note that
+      such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+      Licenses If You choose to distribute Source Code Form that is
+      Incompatible With Secondary Licenses under the terms of this version of
+      the License, the notice described in Exhibit B of this License must be
+      attached.
+
+Exhibit A - Source Code Form License Notice
+
+      This Source Code Form is subject to the
+      terms of the Mozilla Public License, v.
+      2.0. If a copy of the MPL was not
+      distributed with this file, You can
+      obtain one at
+      http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular file,
+then You may include the notice in a location (such as a LICENSE file in a
+relevant directory) where a recipient would be likely to look for such a
+notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+
+      This Source Code Form is "Incompatible
+      With Secondary Licenses", as defined by
+      the Mozilla Public License, v. 2.0.
+
+
+```
+
+#### Makefile
+
+```text
+TEST?=./...
+
+test:
+	go test $(TEST) $(TESTARGS) -timeout=3s -parallel=4
+	go vet $(TEST)
+	go test $(TEST) -race
+
+.PHONY: test
+
+```
+
+#### README.md
+
+```text
+# rootcerts
+
+Functions for loading root certificates for TLS connections.
+
+-----
+
+Go's standard library `crypto/tls` provides a common mechanism for configuring
+TLS connections in `tls.Config`. The `RootCAs` field on this struct is a pool
+of certificates for the client to use as a trust store when verifying server
+certificates.
+
+This library contains utility functions for loading certificates destined for
+that field, as well as one other important thing:
+
+When the `RootCAs` field is `nil`, the standard library attempts to load the
+host's root CA set.  This behavior is OS-specific, and the Darwin
+implementation contains [a bug that prevents trusted certificates from the
+System and Login keychains from being loaded][1]. This library contains
+Darwin-specific behavior that works around that bug.
+
+[1]: https://github.com/golang/go/issues/14514
+
+## Example Usage
+
+Here's a snippet demonstrating how this library is meant to be used:
+
+```go
+func httpClient() (*http.Client, error)
+	tlsConfig := &tls.Config{}
+	err := rootcerts.ConfigureTLS(tlsConfig, &rootcerts.Config{
+		CAFile:      os.Getenv("MYAPP_CAFILE"),
+		CAPath:      os.Getenv("MYAPP_CAPATH"),
+		Certificate: os.Getenv("MYAPP_CERTIFICATE"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	c := cleanhttp.DefaultClient()
+	t := cleanhttp.DefaultTransport()
+	t.TLSClientConfig = tlsConfig
+	c.Transport = t
+	return c, nil
+}
+```
+
+```
+
+#### doc.go
+
+```text
+// Package rootcerts contains functions to aid in loading CA certificates for
+// TLS connections.
+//
+// In addition, its default behavior on Darwin works around an open issue [1]
+// in Go's crypto/x509 that prevents certicates from being loaded from the
+// System or Login keychains.
+//
+// [1] https://github.com/golang/go/issues/14514
+package rootcerts
+
+```
+
+#### rootcerts.go
+
+```text
+package rootcerts
+
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+)
+
+// Config determines where LoadCACerts will load certificates from. When CAFile,
+// CACertificate and CAPath are blank, this library's functions will either load
+// system roots explicitly and return them, or set the CertPool to nil to allow
+// Go's standard library to load system certs.
+type Config struct {
+	// CAFile is a path to a PEM-encoded certificate file or bundle. Takes
+	// precedence over CACertificate and CAPath.
+	CAFile string
+
+	// CACertificate is a PEM-encoded certificate or bundle. Takes precedence
+	// over CAPath.
+	CACertificate []byte
+
+	// CAPath is a path to a directory populated with PEM-encoded certificates.
+	CAPath string
+}
+
+// ConfigureTLS sets up the RootCAs on the provided tls.Config based on the
+// Config specified.
+func ConfigureTLS(t *tls.Config, c *Config) error {
+	if t == nil {
+		return nil
+	}
+	pool, err := LoadCACerts(c)
+	if err != nil {
+		return err
+	}
+	t.RootCAs = pool
+	return nil
+}
+
+// LoadCACerts loads a CertPool based on the Config specified.
+func LoadCACerts(c *Config) (*x509.CertPool, error) {
+	if c == nil {
+		c = &Config{}
+	}
+	if c.CAFile != "" {
+		return LoadCAFile(c.CAFile)
+	}
+	if len(c.CACertificate) != 0 {
+		return AppendCertificate(c.CACertificate)
+	}
+	if c.CAPath != "" {
+		return LoadCAPath(c.CAPath)
+	}
+
+	return LoadSystemCAs()
+}
+
+// LoadCAFile loads a single PEM-encoded file from the path specified.
+func LoadCAFile(caFile string) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+
+	pem, err := ioutil.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("Error loading CA File: %s", err)
+	}
+
+	ok := pool.AppendCertsFromPEM(pem)
+	if !ok {
+		return nil, fmt.Errorf("Error loading CA File: Couldn't parse PEM in: %s", caFile)
+	}
+
+	return pool, nil
+}
+
+// AppendCertificate appends an in-memory PEM-encoded certificate or bundle and returns a pool.
+func AppendCertificate(ca []byte) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+
+	ok := pool.AppendCertsFromPEM(ca)
+	if !ok {
+		return nil, errors.New("Error appending CA: Couldn't parse PEM")
+	}
+
+	return pool, nil
+}
+
+// LoadCAPath walks the provided path and loads all certificates encounted into
+// a pool.
+func LoadCAPath(caPath string) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	walkFn := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		pem, err := ioutil.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("Error loading file from CAPath: %s", err)
+		}
+
+		ok := pool.AppendCertsFromPEM(pem)
+		if !ok {
+			return fmt.Errorf("Error loading CA Path: Couldn't parse PEM in: %s", path)
+		}
+
+		return nil
+	}
+
+	err := filepath.Walk(caPath, walkFn)
+	if err != nil {
+		return nil, err
+	}
+
+	return pool, nil
+}
+
+```
+
+#### rootcerts_base.go
+
+```text
+// +build !darwin
+
+package rootcerts
+
+import "crypto/x509"
+
+// LoadSystemCAs does nothing on non-Darwin systems. We return nil so that
+// default behavior of standard TLS config libraries is triggered, which is to
+// load system certs.
+func LoadSystemCAs() (*x509.CertPool, error) {
+	return nil, nil
+}
+
+```
+
+#### rootcerts_darwin.go
+
+```text
+package rootcerts
+
+import (
+	"crypto/x509"
+	"os/exec"
+	"path"
+
+	"github.com/mitchellh/go-homedir"
+)
+
+// LoadSystemCAs has special behavior on Darwin systems to work around
+func LoadSystemCAs() (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+
+	for _, keychain := range certKeychains() {
+		err := addCertsFromKeychain(pool, keychain)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return pool, nil
+}
+
+func addCertsFromKeychain(pool *x509.CertPool, keychain string) error {
+	cmd := exec.Command("/usr/bin/security", "find-certificate", "-a", "-p", keychain)
+	data, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	pool.AppendCertsFromPEM(data)
+
+	return nil
+}
+
+func certKeychains() []string {
+	keychains := []string{
+		"/System/Library/Keychains/SystemRootCertificates.keychain",
+		"/Library/Keychains/System.keychain",
+	}
+	home, err := homedir.Dir()
+	if err == nil {
+		loginKeychain := path.Join(home, "Library", "Keychains", "login.keychain")
+		keychains = append(keychains, loginKeychain)
+	}
+	return keychains
+}
+
+```
+
+
+### github.com/hashicorp/go-secure-stdlib/parseutil
+
+* License: MPL-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-secure-stdlib/parseutil/LICENSE
+
+#### LICENSE
+
+```text
+Copyright (c) 2020 HashiCorp, Inc.
+
+Mozilla Public License, version 2.0
+
+1. Definitions
+
+1.1. "Contributor"
+
+     means each individual or legal entity that creates, contributes to the
+     creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+
+     means the combination of the Contributions of others (if any) used by a
+     Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+
+     means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+
+     means Source Code Form to which the initial Contributor has attached the
+     notice in Exhibit A, the Executable Form of such Source Code Form, and
+     Modifications of such Source Code Form, in each case including portions
+     thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+     means
+
+     a. that the initial Contributor has attached the notice described in
+        Exhibit B to the Covered Software; or
+
+     b. that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the terms of
+        a Secondary License.
+
+1.6. "Executable Form"
+
+     means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+
+     means a work that combines Covered Software with other material, in a
+     separate file or files, that is not Covered Software.
+
+1.8. "License"
+
+     means this document.
+
+1.9. "Licensable"
+
+     means having the right to grant, to the maximum extent possible, whether
+     at the time of the initial grant or subsequently, any and all of the
+     rights conveyed by this License.
+
+1.10. "Modifications"
+
+     means any of the following:
+
+     a. any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered Software; or
+
+     b. any new file in Source Code Form that contains any Covered Software.
+
+1.11. "Patent Claims" of a Contributor
+
+      means any patent claim(s), including without limitation, method,
+      process, and apparatus claims, in any patent Licensable by such
+      Contributor that would be infringed, but for the grant of the License,
+      by the making, using, selling, offering for sale, having made, import,
+      or transfer of either its Contributions or its Contributor Version.
+
+1.12. "Secondary License"
+
+      means either the GNU General Public License, Version 2.0, the GNU Lesser
+      General Public License, Version 2.1, the GNU Affero General Public
+      License, Version 3.0, or any later versions of those licenses.
+
+1.13. "Source Code Form"
+
+      means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+
+      means an individual or a legal entity exercising rights under this
+      License. For legal entities, "You" includes any entity that controls, is
+      controlled by, or is under common control with You. For purposes of this
+      definition, "control" means (a) the power, direct or indirect, to cause
+      the direction or management of such entity, whether by contract or
+      otherwise, or (b) ownership of more than fifty percent (50%) of the
+      outstanding shares or beneficial ownership of such entity.
+
+
+2. License Grants and Conditions
+
+2.1. Grants
+
+     Each Contributor hereby grants You a world-wide, royalty-free,
+     non-exclusive license:
+
+     a. under intellectual property rights (other than patent or trademark)
+        Licensable by such Contributor to use, reproduce, make available,
+        modify, display, perform, distribute, and otherwise exploit its
+        Contributions, either on an unmodified basis, with Modifications, or
+        as part of a Larger Work; and
+
+     b. under Patent Claims of such Contributor to make, use, sell, offer for
+        sale, have made, import, and otherwise transfer either its
+        Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+     The licenses granted in Section 2.1 with respect to any Contribution
+     become effective for each Contribution on the date the Contributor first
+     distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+     The licenses granted in this Section 2 are the only rights granted under
+     this License. No additional rights or licenses will be implied from the
+     distribution or licensing of Covered Software under this License.
+     Notwithstanding Section 2.1(b) above, no patent license is granted by a
+     Contributor:
+
+     a. for any code that a Contributor has removed from Covered Software; or
+
+     b. for infringements caused by: (i) Your and any other third party's
+        modifications of Covered Software, or (ii) the combination of its
+        Contributions with other software (except as part of its Contributor
+        Version); or
+
+     c. under Patent Claims infringed by Covered Software in the absence of
+        its Contributions.
+
+     This License does not grant any rights in the trademarks, service marks,
+     or logos of any Contributor (except as may be necessary to comply with
+     the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+     No Contributor makes additional grants as a result of Your choice to
+     distribute the Covered Software under a subsequent version of this
+     License (see Section 10.2) or under the terms of a Secondary License (if
+     permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+     Each Contributor represents that the Contributor believes its
+     Contributions are its original creation(s) or it has sufficient rights to
+     grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+     This License is not intended to limit any rights You have under
+     applicable copyright doctrines of fair use, fair dealing, or other
+     equivalents.
+
+2.7. Conditions
+
+     Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted in
+     Section 2.1.
+
+
+3. Responsibilities
+
+3.1. Distribution of Source Form
+
+     All distribution of Covered Software in Source Code Form, including any
+     Modifications that You create or to which You contribute, must be under
+     the terms of this License. You must inform recipients that the Source
+     Code Form of the Covered Software is governed by the terms of this
+     License, and how they can obtain a copy of this License. You may not
+     attempt to alter or restrict the recipients' rights in the Source Code
+     Form.
+
+3.2. Distribution of Executable Form
+
+     If You distribute Covered Software in Executable Form then:
+
+     a. such Covered Software must also be made available in Source Code Form,
+        as described in Section 3.1, and You must inform recipients of the
+        Executable Form how they can obtain a copy of such Source Code Form by
+        reasonable means in a timely manner, at a charge no more than the cost
+        of distribution to the recipient; and
+
+     b. You may distribute such Executable Form under the terms of this
+        License, or sublicense it under different terms, provided that the
+        license for the Executable Form does not attempt to limit or alter the
+        recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+     You may create and distribute a Larger Work under terms of Your choice,
+     provided that You also comply with the requirements of this License for
+     the Covered Software. If the Larger Work is a combination of Covered
+     Software with a work governed by one or more Secondary Licenses, and the
+     Covered Software is not Incompatible With Secondary Licenses, this
+     License permits You to additionally distribute such Covered Software
+     under the terms of such Secondary License(s), so that the recipient of
+     the Larger Work may, at their option, further distribute the Covered
+     Software under the terms of either this License or such Secondary
+     License(s).
+
+3.4. Notices
+
+     You may not remove or alter the substance of any license notices
+     (including copyright notices, patent notices, disclaimers of warranty, or
+     limitations of liability) contained within the Source Code Form of the
+     Covered Software, except that You may alter any license notices to the
+     extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+     You may choose to offer, and to charge a fee for, warranty, support,
+     indemnity or liability obligations to one or more recipients of Covered
+     Software. However, You may do so only on Your own behalf, and not on
+     behalf of any Contributor. You must make it absolutely clear that any
+     such warranty, support, indemnity, or liability obligation is offered by
+     You alone, and You hereby agree to indemnify every Contributor for any
+     liability incurred by such Contributor as a result of warranty, support,
+     indemnity or liability terms You offer. You may include additional
+     disclaimers of warranty and limitations of liability specific to any
+     jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+
+   If it is impossible for You to comply with any of the terms of this License
+   with respect to some or all of the Covered Software due to statute,
+   judicial order, or regulation then You must: (a) comply with the terms of
+   this License to the maximum extent possible; and (b) describe the
+   limitations and the code they affect. Such description must be placed in a
+   text file included with all distributions of the Covered Software under
+   this License. Except to the extent prohibited by statute or regulation,
+   such description must be sufficiently detailed for a recipient of ordinary
+   skill to be able to understand it.
+
+5. Termination
+
+5.1. The rights granted under this License will terminate automatically if You
+     fail to comply with any of its terms. However, if You become compliant,
+     then the rights granted under this License from a particular Contributor
+     are reinstated (a) provisionally, unless and until such Contributor
+     explicitly and finally terminates Your grants, and (b) on an ongoing
+     basis, if such Contributor fails to notify You of the non-compliance by
+     some reasonable means prior to 60 days after You have come back into
+     compliance. Moreover, Your grants from a particular Contributor are
+     reinstated on an ongoing basis if such Contributor notifies You of the
+     non-compliance by some reasonable means, this is the first time You have
+     received notice of non-compliance with this License from such
+     Contributor, and You become compliant prior to 30 days after Your receipt
+     of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+     infringement claim (excluding declaratory judgment actions,
+     counter-claims, and cross-claims) alleging that a Contributor Version
+     directly or indirectly infringes any patent, then the rights granted to
+     You by any and all Contributors for the Covered Software under Section
+     2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all end user
+     license agreements (excluding distributors and resellers) which have been
+     validly granted by You or Your distributors under this License prior to
+     termination shall survive termination.
+
+6. Disclaimer of Warranty
+
+   Covered Software is provided under this License on an "as is" basis,
+   without warranty of any kind, either expressed, implied, or statutory,
+   including, without limitation, warranties that the Covered Software is free
+   of defects, merchantable, fit for a particular purpose or non-infringing.
+   The entire risk as to the quality and performance of the Covered Software
+   is with You. Should any Covered Software prove defective in any respect,
+   You (not any Contributor) assume the cost of any necessary servicing,
+   repair, or correction. This disclaimer of warranty constitutes an essential
+   part of this License. No use of  any Covered Software is authorized under
+   this License except under this disclaimer.
+
+7. Limitation of Liability
+
+   Under no circumstances and under no legal theory, whether tort (including
+   negligence), contract, or otherwise, shall any Contributor, or anyone who
+   distributes Covered Software as permitted above, be liable to You for any
+   direct, indirect, special, incidental, or consequential damages of any
+   character including, without limitation, damages for lost profits, loss of
+   goodwill, work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses, even if such party shall have been
+   informed of the possibility of such damages. This limitation of liability
+   shall not apply to liability for death or personal injury resulting from
+   such party's negligence to the extent applicable law prohibits such
+   limitation. Some jurisdictions do not allow the exclusion or limitation of
+   incidental or consequential damages, so this exclusion and limitation may
+   not apply to You.
+
+8. Litigation
+
+   Any litigation relating to this License may be brought only in the courts
+   of a jurisdiction where the defendant maintains its principal place of
+   business and such litigation shall be governed by laws of that
+   jurisdiction, without reference to its conflict-of-law provisions. Nothing
+   in this Section shall prevent a party's ability to bring cross-claims or
+   counter-claims.
+
+9. Miscellaneous
+
+   This License represents the complete agreement concerning the subject
+   matter hereof. If any provision of this License is held to be
+   unenforceable, such provision shall be reformed only to the extent
+   necessary to make it enforceable. Any law or regulation which provides that
+   the language of a contract shall be construed against the drafter shall not
+   be used to construe this License against a Contributor.
+
+
+10. Versions of the License
+
+10.1. New Versions
+
+      Mozilla Foundation is the license steward. Except as provided in Section
+      10.3, no one other than the license steward has the right to modify or
+      publish new versions of this License. Each version will be given a
+      distinguishing version number.
+
+10.2. Effect of New Versions
+
+      You may distribute the Covered Software under the terms of the version
+      of the License under which You originally received the Covered Software,
+      or under the terms of any subsequent version published by the license
+      steward.
+
+10.3. Modified Versions
+
+      If you create software not governed by this License, and you want to
+      create a new license for such software, you may create and use a
+      modified version of this License if you rename the license and remove
+      any references to the name of the license steward (except to note that
+      such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+      Licenses If You choose to distribute Source Code Form that is
+      Incompatible With Secondary Licenses under the terms of this version of
+      the License, the notice described in Exhibit B of this License must be
+      attached.
+
+Exhibit A - Source Code Form License Notice
+
+      This Source Code Form is subject to the
+      terms of the Mozilla Public License, v.
+      2.0. If a copy of the MPL was not
+      distributed with this file, You can
+      obtain one at
+      http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular file,
+then You may include the notice in a location (such as a LICENSE file in a
+relevant directory) where a recipient would be likely to look for such a
+notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+
+      This Source Code Form is "Incompatible
+      With Secondary Licenses", as defined by
+      the Mozilla Public License, v. 2.0.
+
+
+```
+
+#### normalize.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package parseutil
+
+import (
+	"fmt"
+	"net"
+	"net/url"
+	"strings"
+)
+
+// general delimiters as defined in RFC-3986 §2.2
+// See: https://www.rfc-editor.org/rfc/rfc3986#section-2.2
+const genDelims = ":/?#[]@"
+
+func normalizeHostPort(host string, port string) (string, error) {
+	if host == "" {
+		return "", fmt.Errorf("empty hostname")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() == nil && ip.To16() != nil && port == "" {
+			// this is a unique case, host is ipv6 and requires brackets due to
+			// being part of a url, but they won't be added by net.JoinHostPort
+			// as there is no port
+			// See: https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2
+			return "[" + ip.String() + "]", nil
+		}
+		host = ip.String()
+	} else if strings.Contains(host, ":") {
+		// host is an invalid ipv6 literal.
+		// hosts cannot contain certain reserved characters, including ":"
+		// See: https://www.rfc-editor.org/rfc/rfc3986#section-2.2,
+		//      https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2
+		return "", fmt.Errorf("host contains an invalid IPv6 literal")
+	}
+	if port == "" {
+		return host, nil
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
+func parseUrl(addr string) (string, error) {
+	if u, err := url.Parse(addr); err == nil {
+		if strings.HasSuffix(u.Host, ":") {
+			return "", fmt.Errorf("url has malformed host: missing port value after colon")
+		}
+		if u.Host, err = normalizeHostPort(u.Hostname(), u.Port()); err != nil {
+			return "", err
+		}
+		return u.String(), nil
+	}
+	return "", fmt.Errorf("failed to parse address")
+}
+
+// NormalizeAddr takes an address as a string and returns a normalized copy.
+// If the address is a URL, IP Address, or host:port address that includes an
+// IPv6 address, the normalized copy will be conformant with RFC-5952 §4. If
+// the address cannot be parsed, an error will be returned.
+//
+// There are two valid formats:
+//
+// - hosts: "host"
+//   - may be any of: IPv6 literal, IPv4 literal, dns name, or [sub]domain name
+//   - IPv6 literals cannot be encapsulated within square brackets in this format
+//
+// - URIs: "[scheme://] [user@] host [:port] [/path] [?query] [#frag]"
+//   - format should conform with RFC-3986 §3 or else the returned address may
+//     be parsed and formatted incorrectly
+//   - hosts containing IPv6 literals MUST be encapsulated within square brackets,
+//     as defined in RFC-3986 §3.2.2 and RFC-5952 §6
+//   - all non-host components are optional
+//
+// See:
+//   - https://www.rfc-editor.org/rfc/rfc5952
+//   - https://www.rfc-editor.org/rfc/rfc3986
+func NormalizeAddr(address string) (string, error) {
+	if address == "" {
+		return "", fmt.Errorf("empty address")
+	}
+
+	if strings.HasPrefix(address, "[") && strings.HasSuffix(address, "]") {
+		return "", fmt.Errorf("address cannot be encapsulated by brackets")
+	}
+
+	if ip := net.ParseIP(address); ip != nil {
+		return ip.String(), nil
+	}
+
+	// if the provided address does not have a scheme provided, attempt to
+	// provide one and re-parse the result. this is done by looking for the
+	// first general delimiter and checking if it exists or if it's not a colon
+	// or by subsequently checking if the first character of the address is a
+	// letter or a colon or if the colon is part of "://"
+	// See: https://www.rfc-editor.org/rfc/rfc3986#section-3
+	//
+	// though the first character being a colon is not mentioned in the scheme
+	// spec, we check for it as url.Parse will read certain invalid ipv6
+	// addresses as valid urls, and we want to avoid that
+	idx := strings.IndexAny(address, genDelims)
+	switch {
+	case idx < 0:
+		fallthrough
+	case address[idx] != ':':
+		fallthrough
+		// by this point we already know that idx > 0 and that address[idx] == ':'
+	case idx > 1 && !strings.HasPrefix(address[idx:], "://"):
+		const scheme = "default://"
+		// attempt to parse it as a url. we only want to try this func when we
+		// know for sure it has a scheme, since it will parse ANYTHING, but
+		// just put it into u.Path when called without the scheme
+		u, err := parseUrl(scheme + address)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimPrefix(u, scheme), nil
+
+	default:
+		return parseUrl(address)
+	}
+}
+
+```
+
+#### parsepath.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package parseutil
+
+import (
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/url"
+	"os"
+	"strings"
+)
+
+var (
+	ErrNotAUrl   = errors.New("not a url")
+	ErrNotParsed = errors.New("not a parsed value")
+)
+
+type options struct {
+	errorOnMissingEnv bool
+	noTrimSpaces      bool
+}
+
+type option func() optionFunc
+
+type optionFunc func(*options)
+
+// ParsePath parses a URL with schemes file://, env://, or any other. Depending
+// on the scheme it will return specific types of data:
+//
+// * file:// will return a string with the file's contents
+//
+// * env:// will return a string with the env var's contents
+//
+// * Anything else will return the string as it was. Functionally this means
+// anything for which Go's `url.Parse` function does not throw an error. If you
+// want to ensure that this function errors if a known scheme is not found, use
+// MustParsePath.
+//
+// On error, we return the original string along with the error. The caller can
+// switch on errors.Is(err, ErrNotAUrl) to understand whether it was the parsing
+// step that errored or something else (such as a file not found). This is
+// useful to attempt to read a non-URL string from some resource, but where the
+// original input may simply be a valid string of that type.
+func ParsePath(path string, options ...option) (string, error) {
+	return parsePath(path, false, options)
+}
+
+// MustParsePath behaves like ParsePath but will return ErrNotAUrl if the value
+// is not a URL with a scheme that can be parsed by this function.
+func MustParsePath(path string, options ...option) (string, error) {
+	return parsePath(path, true, options)
+}
+
+func parsePath(path string, mustParse bool, passedOptions []option) (string, error) {
+	var opts options
+	for _, o := range passedOptions {
+		of := o()
+		of(&opts)
+	}
+
+	trimmedPath := strings.TrimSpace(path)
+	parsed, err := url.Parse(trimmedPath)
+	if err != nil {
+		err = fmt.Errorf("error parsing url (%q): %w", err.Error(), ErrNotAUrl)
+		if opts.noTrimSpaces {
+			return path, err
+		}
+		return trimmedPath, err
+	}
+	switch parsed.Scheme {
+	case "file":
+		contents, err := ioutil.ReadFile(strings.TrimPrefix(trimmedPath, "file://"))
+		if err != nil {
+			return trimmedPath, fmt.Errorf("error reading file at %s: %w", trimmedPath, err)
+		}
+		if opts.noTrimSpaces {
+			return string(contents), nil
+		}
+		return strings.TrimSpace(string(contents)), nil
+	case "env":
+		envKey := strings.TrimPrefix(trimmedPath, "env://")
+		envVal, ok := os.LookupEnv(envKey)
+		if opts.errorOnMissingEnv && !ok {
+			return "", fmt.Errorf("environment variable %s unset", envKey)
+		}
+		if opts.noTrimSpaces {
+			return envVal, nil
+		}
+		return strings.TrimSpace(envVal), nil
+	case "string":
+		// Meant if there is a need to provide a string literal that is prefixed by one of these URL schemes but want to "escape" it,
+		// e.g. "string://env://foo", in order to get the value "env://foo"
+		val := strings.TrimPrefix(trimmedPath, "string://")
+		if opts.noTrimSpaces {
+			return val, nil
+		}
+		return strings.TrimSpace(val), nil
+	default:
+		if mustParse {
+			return "", ErrNotParsed
+		}
+		return path, nil
+	}
+}
+
+// When true, values returned from ParsePath won't have leading/trailing spaces trimmed.
+func WithNoTrimSpaces(noTrim bool) option {
+	return func() optionFunc {
+		return optionFunc(func(o *options) {
+			o.noTrimSpaces = noTrim
+		})
+	}
+}
+
+// When true, if an environment variable is unset, an error will be returned rather than the empty string.
+func WithErrorOnMissingEnv(errorOnMissingEnv bool) option {
+	return func() optionFunc {
+		return optionFunc(func(o *options) {
+			o.errorOnMissingEnv = errorOnMissingEnv
+		})
+	}
+}
+
+```
+
+#### parseutil.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package parseutil
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/hashicorp/go-secure-stdlib/strutil"
+	sockaddr "github.com/hashicorp/go-sockaddr"
+	"github.com/mitchellh/mapstructure"
+)
+
+var (
+	validCapacityString               = regexp.MustCompile("^[\t ]*([0-9]+)[\t ]?([kmgtKMGT][iI]?[bB])?[\t ]*$")
+	ErrDurationMultiplicationOverflow = errors.New("multiplication of durations resulted in overflow, one operand may be too large")
+)
+
+// ParseCapacityString parses a capacity string and returns the number of bytes it represents.
+// Capacity strings are things like 5gib or 10MB. Supported prefixes are kb, kib, mb, mib, gb,
+// gib, tb, tib, which are not case sensitive. If no prefix is present, the number is assumed
+// to be in bytes already.
+func ParseCapacityString(in interface{}) (uint64, error) {
+	var cap uint64
+
+	jsonIn, ok := in.(json.Number)
+	if ok {
+		in = jsonIn.String()
+	}
+
+	switch inp := in.(type) {
+	case nil:
+		// return default of zero
+	case string:
+		if inp == "" {
+			return cap, nil
+		}
+
+		matches := validCapacityString.FindStringSubmatch(inp)
+
+		// no sub-groups means we couldn't parse it
+		if len(matches) <= 1 {
+			return cap, errors.New("could not parse capacity from input")
+		}
+
+		var multiplier uint64 = 1
+		switch strings.ToLower(matches[2]) {
+		case "kb":
+			multiplier = 1000
+		case "kib":
+			multiplier = 1024
+		case "mb":
+			multiplier = 1000 * 1000
+		case "mib":
+			multiplier = 1024 * 1024
+		case "gb":
+			multiplier = 1000 * 1000 * 1000
+		case "gib":
+			multiplier = 1024 * 1024 * 1024
+		case "tb":
+			multiplier = 1000 * 1000 * 1000 * 1000
+		case "tib":
+			multiplier = 1024 * 1024 * 1024 * 1024
+		}
+
+		size, err := strconv.ParseUint(matches[1], 10, 64)
+		if err != nil {
+			return cap, err
+		}
+
+		cap = size * multiplier
+	case int:
+		cap = uint64(inp)
+	case int32:
+		cap = uint64(inp)
+	case int64:
+		cap = uint64(inp)
+	case uint:
+		cap = uint64(inp)
+	case uint32:
+		cap = uint64(inp)
+	case uint64:
+		cap = uint64(inp)
+	case float32:
+		cap = uint64(inp)
+	case float64:
+		cap = uint64(inp)
+	default:
+		return cap, errors.New("could not parse capacity from input")
+	}
+
+	return cap, nil
+}
+
+// Parse a duration from an arbitrary value (a string or numeric value) into
+// a time.Duration; when units are missing (such as when a numeric type is
+// provided), the duration is assumed to be in seconds.
+func ParseDurationSecond(in interface{}) (time.Duration, error) {
+	var dur time.Duration
+	jsonIn, ok := in.(json.Number)
+	if ok {
+		in = jsonIn.String()
+	}
+	var err error
+	switch inp := in.(type) {
+	case nil:
+		// return default of zero
+	case string:
+		if inp == "" {
+			return dur, nil
+		}
+
+		if v, err := strconv.ParseInt(inp, 10, 64); err == nil {
+			return overflowMul(time.Duration(v), time.Second)
+		}
+
+		if strings.HasSuffix(inp, "d") {
+			v, err := strconv.ParseInt(inp[:len(inp)-1], 10, 64)
+			if err != nil {
+				return dur, err
+			}
+			return overflowMul(time.Duration(v), 24*time.Hour)
+		}
+
+		var err error
+		if dur, err = time.ParseDuration(inp); err != nil {
+			return dur, err
+		}
+	case int:
+		dur, err = overflowMul(time.Duration(inp), time.Second)
+	case int32:
+		dur, err = overflowMul(time.Duration(inp), time.Second)
+	case int64:
+		dur, err = overflowMul(time.Duration(inp), time.Second)
+	case uint:
+		dur, err = overflowMul(time.Duration(inp), time.Second)
+	case uint32:
+		dur, err = overflowMul(time.Duration(inp), time.Second)
+	case uint64:
+		dur, err = overflowMul(time.Duration(inp), time.Second)
+	case float32:
+		dur, err = overflowMul(time.Duration(inp), time.Second)
+	case float64:
+		dur, err = overflowMul(time.Duration(inp), time.Second)
+	case time.Duration:
+		dur = inp
+	default:
+		return 0, errors.New("could not parse duration from input")
+	}
+	if err != nil {
+		dur = time.Duration(0)
+	}
+	return dur, err
+}
+
+// Multiplication of durations could overflow, this performs multiplication while erroring out if an overflow occurs
+func overflowMul(a time.Duration, b time.Duration) (time.Duration, error) {
+	x := a * b
+	if a != 0 && x/a != b {
+		return time.Duration(0), ErrDurationMultiplicationOverflow
+	}
+	return x, nil
+}
+
+// Parse an absolute timestamp from the provided arbitrary value (string or
+// numeric value). When an untyped numeric value is provided, it is assumed
+// to be seconds from the Unix Epoch.
+func ParseAbsoluteTime(in interface{}) (time.Time, error) {
+	var t time.Time
+	switch inp := in.(type) {
+	case nil:
+		// return default of zero
+		return t, nil
+	case string:
+		// Allow RFC3339 with nanoseconds, or without,
+		// or an epoch time as an integer.
+		var err error
+		t, err = time.Parse(time.RFC3339Nano, inp)
+		if err == nil {
+			break
+		}
+		t, err = time.Parse(time.RFC3339, inp)
+		if err == nil {
+			break
+		}
+		epochTime, err := strconv.ParseInt(inp, 10, 64)
+		if err == nil {
+			t = time.Unix(epochTime, 0)
+			break
+		}
+		return t, errors.New("could not parse string as date and time")
+	case json.Number:
+		epochTime, err := inp.Int64()
+		if err != nil {
+			return t, err
+		}
+		t = time.Unix(epochTime, 0)
+	case int:
+		t = time.Unix(int64(inp), 0)
+	case int32:
+		t = time.Unix(int64(inp), 0)
+	case int64:
+		t = time.Unix(inp, 0)
+	case uint:
+		t = time.Unix(int64(inp), 0)
+	case uint32:
+		t = time.Unix(int64(inp), 0)
+	case uint64:
+		t = time.Unix(int64(inp), 0)
+	default:
+		return t, errors.New("could not parse time from input type")
+	}
+	return t, nil
+}
+
+// ParseInt takes an arbitrary value (either a string or numeric type) and
+// parses it as an int64 value. This value is assumed to be larger than the
+// provided type, but cannot safely be cast.
+//
+// When the end value is bounded (such as an int value), it is recommended
+// to instead call SafeParseInt or SafeParseIntRange to safely cast to a
+// more restrictive type.
+func ParseInt(in interface{}) (int64, error) {
+	var ret int64
+	jsonIn, ok := in.(json.Number)
+	if ok {
+		in = jsonIn.String()
+	}
+	switch in.(type) {
+	case string:
+		inp := in.(string)
+		if inp == "" {
+			return 0, nil
+		}
+		var err error
+		left, err := strconv.ParseInt(inp, 10, 64)
+		if err != nil {
+			return ret, err
+		}
+		ret = left
+	case int:
+		ret = int64(in.(int))
+	case int32:
+		ret = int64(in.(int32))
+	case int64:
+		ret = in.(int64)
+	case uint:
+		ret = int64(in.(uint))
+	case uint32:
+		ret = int64(in.(uint32))
+	case uint64:
+		ret = int64(in.(uint64))
+	default:
+		return 0, errors.New("could not parse value from input")
+	}
+
+	return ret, nil
+}
+
+// ParseDirectIntSlice behaves similarly to ParseInt, but accepts typed
+// slices, returning a slice of int64s.
+//
+// If the starting value may not be in slice form (e.g.. a bare numeric value
+// could be provided), it is suggested to call ParseIntSlice instead.
+func ParseDirectIntSlice(in interface{}) ([]int64, error) {
+	var ret []int64
+
+	switch in.(type) {
+	case []int:
+		for _, v := range in.([]int) {
+			ret = append(ret, int64(v))
+		}
+	case []int32:
+		for _, v := range in.([]int32) {
+			ret = append(ret, int64(v))
+		}
+	case []int64:
+		// For consistency to ensure callers can always modify ret without
+		// impacting in.
+		for _, v := range in.([]int64) {
+			ret = append(ret, v)
+		}
+	case []uint:
+		for _, v := range in.([]uint) {
+			ret = append(ret, int64(v))
+		}
+	case []uint32:
+		for _, v := range in.([]uint32) {
+			ret = append(ret, int64(v))
+		}
+	case []uint64:
+		for _, v := range in.([]uint64) {
+			ret = append(ret, int64(v))
+		}
+	case []json.Number:
+		for _, v := range in.([]json.Number) {
+			element, err := ParseInt(v)
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, element)
+		}
+	case []string:
+		for _, v := range in.([]string) {
+			element, err := ParseInt(v)
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, element)
+		}
+	default:
+		return nil, errors.New("could not parse value from input")
+	}
+
+	return ret, nil
+}
+
+// ParseIntSlice is a helper function for handling upgrades of optional
+// slices; that is, if the API accepts a type similar to <int|[]int>,
+// nicely handle the common cases of providing only an int-ish, providing
+// an actual slice of int-ishes, or providing a comma-separated list of
+// numbers.
+//
+// When []int64 is not the desired final type (or the values should be
+// range-bound), it is suggested to call SafeParseIntSlice or
+// SafeParseIntSliceRange instead.
+func ParseIntSlice(in interface{}) ([]int64, error) {
+	if ret, err := ParseInt(in); err == nil {
+		return []int64{ret}, nil
+	}
+
+	if ret, err := ParseDirectIntSlice(in); err == nil {
+		return ret, nil
+	}
+
+	if strings, err := ParseCommaStringSlice(in); err == nil {
+		var ret []int64
+		for _, v := range strings {
+			if v == "" {
+				// Ignore empty fields
+				continue
+			}
+
+			element, err := ParseInt(v)
+			if err != nil {
+				return nil, err
+			}
+			ret = append(ret, element)
+		}
+
+		return ret, nil
+	}
+
+	return nil, errors.New("could not parse value from input")
+}
+
+// Parses the provided arbitrary value as a boolean-like value.
+func ParseBool(in interface{}) (bool, error) {
+	var result bool
+	if err := mapstructure.WeakDecode(in, &result); err != nil {
+		return false, err
+	}
+	return result, nil
+}
+
+// Parses the provided arbitrary value as a string.
+func ParseString(in interface{}) (string, error) {
+	var result string
+	if err := mapstructure.WeakDecode(in, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+// Parses the provided string-like value as a comma-separated list of values.
+func ParseCommaStringSlice(in interface{}) ([]string, error) {
+	jsonIn, ok := in.(json.Number)
+	if ok {
+		in = jsonIn.String()
+	}
+
+	rawString, ok := in.(string)
+	if ok && rawString == "" {
+		return []string{}, nil
+	}
+	var result []string
+	config := &mapstructure.DecoderConfig{
+		Result:           &result,
+		WeaklyTypedInput: true,
+		DecodeHook:       mapstructure.StringToSliceHookFunc(","),
+	}
+	decoder, err := mapstructure.NewDecoder(config)
+	if err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(in); err != nil {
+		return nil, err
+	}
+	return strutil.TrimStrings(result), nil
+}
+
+// Parses the specified value as one or more addresses, separated by commas.
+func ParseAddrs(addrs interface{}) ([]*sockaddr.SockAddrMarshaler, error) {
+	out := make([]*sockaddr.SockAddrMarshaler, 0)
+	stringAddrs := make([]string, 0)
+
+	switch addrs.(type) {
+	case string:
+		stringAddrs = strutil.ParseArbitraryStringSlice(addrs.(string), ",")
+		if len(stringAddrs) == 0 {
+			return nil, fmt.Errorf("unable to parse addresses from %v", addrs)
+		}
+
+	case []string:
+		stringAddrs = addrs.([]string)
+
+	case []interface{}:
+		for _, v := range addrs.([]interface{}) {
+			stringAddr, ok := v.(string)
+			if !ok {
+				return nil, fmt.Errorf("error parsing %v as string", v)
+			}
+			stringAddrs = append(stringAddrs, stringAddr)
+		}
+
+	default:
+		return nil, fmt.Errorf("unknown address input type %T", addrs)
+	}
+
+	for _, addr := range stringAddrs {
+		sa, err := sockaddr.NewSockAddr(addr)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing address %q: %w", addr, err)
+		}
+		out = append(out, &sockaddr.SockAddrMarshaler{
+			SockAddr: sa,
+		})
+	}
+
+	return out, nil
+}
+
+// Parses the provided arbitrary value (see ParseInt), ensuring it is within
+// the specified range (inclusive of bounds). If this range corresponds to a
+// smaller type, the returned value can then be safely cast without risking
+// overflow.
+func SafeParseIntRange(in interface{}, min int64, max int64) (int64, error) {
+	raw, err := ParseInt(in)
+	if err != nil {
+		return 0, err
+	}
+
+	if raw < min || raw > max {
+		return 0, fmt.Errorf("error parsing int value; out of range [%v to %v]: %v", min, max, raw)
+	}
+
+	return raw, nil
+}
+
+// Parses the specified arbitrary value (see ParseInt), ensuring that the
+// resulting value is within the range for an int value. If no error occurred,
+// the caller knows no overflow occurred.
+func SafeParseInt(in interface{}) (int, error) {
+	raw, err := SafeParseIntRange(in, math.MinInt, math.MaxInt)
+	return int(raw), err
+}
+
+// Parses the provided arbitrary value (see ParseIntSlice) into a slice of
+// int64 values, ensuring each is within the specified range (inclusive of
+// bounds). If this range corresponds to a smaller type, the returned value
+// can then be safely cast without risking overflow.
+//
+// If elements is positive, it is used to ensure the resulting slice is
+// bounded above by that many number of elements (inclusive).
+func SafeParseIntSliceRange(in interface{}, minValue int64, maxValue int64, elements int) ([]int64, error) {
+	raw, err := ParseIntSlice(in)
+	if err != nil {
+		return nil, err
+	}
+
+	if elements > 0 && len(raw) > elements {
+		return nil, fmt.Errorf("error parsing value from input: got %v but expected at most %v elements", len(raw), elements)
+	}
+
+	for index, value := range raw {
+		if value < minValue || value > maxValue {
+			return nil, fmt.Errorf("error parsing value from input: element %v was outside of range [%v to %v]: %v", index, minValue, maxValue, value)
+		}
+	}
+
+	return raw, nil
+}
+
+// Parses the provided arbitrary value (see ParseIntSlice) into a slice of
+// int values, ensuring the each resulting value in the slice is within the
+// range for an int value. If no error occurred, the caller knows no overflow
+// occurred.
+//
+// If elements is positive, it is used to ensure the resulting slice is
+// bounded above by that many number of elements (inclusive).
+func SafeParseIntSlice(in interface{}, elements int) ([]int, error) {
+	raw, err := SafeParseIntSliceRange(in, math.MinInt, math.MaxInt, elements)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+
+	var result = make([]int, 0, len(raw))
+	for _, element := range raw {
+		result = append(result, int(element))
+	}
+
+	return result, nil
+}
+
+```
+
+
+### github.com/hashicorp/go-secure-stdlib/strutil
+
+* License: MPL-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-secure-stdlib/strutil/LICENSE
+
+#### LICENSE
+
+```text
+Mozilla Public License, version 2.0
+
+1. Definitions
+
+1.1. "Contributor"
+
+     means each individual or legal entity that creates, contributes to the
+     creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+
+     means the combination of the Contributions of others (if any) used by a
+     Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+
+     means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+
+     means Source Code Form to which the initial Contributor has attached the
+     notice in Exhibit A, the Executable Form of such Source Code Form, and
+     Modifications of such Source Code Form, in each case including portions
+     thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+     means
+
+     a. that the initial Contributor has attached the notice described in
+        Exhibit B to the Covered Software; or
+
+     b. that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the terms of
+        a Secondary License.
+
+1.6. "Executable Form"
+
+     means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+
+     means a work that combines Covered Software with other material, in a
+     separate file or files, that is not Covered Software.
+
+1.8. "License"
+
+     means this document.
+
+1.9. "Licensable"
+
+     means having the right to grant, to the maximum extent possible, whether
+     at the time of the initial grant or subsequently, any and all of the
+     rights conveyed by this License.
+
+1.10. "Modifications"
+
+     means any of the following:
+
+     a. any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered Software; or
+
+     b. any new file in Source Code Form that contains any Covered Software.
+
+1.11. "Patent Claims" of a Contributor
+
+      means any patent claim(s), including without limitation, method,
+      process, and apparatus claims, in any patent Licensable by such
+      Contributor that would be infringed, but for the grant of the License,
+      by the making, using, selling, offering for sale, having made, import,
+      or transfer of either its Contributions or its Contributor Version.
+
+1.12. "Secondary License"
+
+      means either the GNU General Public License, Version 2.0, the GNU Lesser
+      General Public License, Version 2.1, the GNU Affero General Public
+      License, Version 3.0, or any later versions of those licenses.
+
+1.13. "Source Code Form"
+
+      means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+
+      means an individual or a legal entity exercising rights under this
+      License. For legal entities, "You" includes any entity that controls, is
+      controlled by, or is under common control with You. For purposes of this
+      definition, "control" means (a) the power, direct or indirect, to cause
+      the direction or management of such entity, whether by contract or
+      otherwise, or (b) ownership of more than fifty percent (50%) of the
+      outstanding shares or beneficial ownership of such entity.
+
+
+2. License Grants and Conditions
+
+2.1. Grants
+
+     Each Contributor hereby grants You a world-wide, royalty-free,
+     non-exclusive license:
+
+     a. under intellectual property rights (other than patent or trademark)
+        Licensable by such Contributor to use, reproduce, make available,
+        modify, display, perform, distribute, and otherwise exploit its
+        Contributions, either on an unmodified basis, with Modifications, or
+        as part of a Larger Work; and
+
+     b. under Patent Claims of such Contributor to make, use, sell, offer for
+        sale, have made, import, and otherwise transfer either its
+        Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+     The licenses granted in Section 2.1 with respect to any Contribution
+     become effective for each Contribution on the date the Contributor first
+     distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+     The licenses granted in this Section 2 are the only rights granted under
+     this License. No additional rights or licenses will be implied from the
+     distribution or licensing of Covered Software under this License.
+     Notwithstanding Section 2.1(b) above, no patent license is granted by a
+     Contributor:
+
+     a. for any code that a Contributor has removed from Covered Software; or
+
+     b. for infringements caused by: (i) Your and any other third party's
+        modifications of Covered Software, or (ii) the combination of its
+        Contributions with other software (except as part of its Contributor
+        Version); or
+
+     c. under Patent Claims infringed by Covered Software in the absence of
+        its Contributions.
+
+     This License does not grant any rights in the trademarks, service marks,
+     or logos of any Contributor (except as may be necessary to comply with
+     the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+     No Contributor makes additional grants as a result of Your choice to
+     distribute the Covered Software under a subsequent version of this
+     License (see Section 10.2) or under the terms of a Secondary License (if
+     permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+     Each Contributor represents that the Contributor believes its
+     Contributions are its original creation(s) or it has sufficient rights to
+     grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+     This License is not intended to limit any rights You have under
+     applicable copyright doctrines of fair use, fair dealing, or other
+     equivalents.
+
+2.7. Conditions
+
+     Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted in
+     Section 2.1.
+
+
+3. Responsibilities
+
+3.1. Distribution of Source Form
+
+     All distribution of Covered Software in Source Code Form, including any
+     Modifications that You create or to which You contribute, must be under
+     the terms of this License. You must inform recipients that the Source
+     Code Form of the Covered Software is governed by the terms of this
+     License, and how they can obtain a copy of this License. You may not
+     attempt to alter or restrict the recipients' rights in the Source Code
+     Form.
+
+3.2. Distribution of Executable Form
+
+     If You distribute Covered Software in Executable Form then:
+
+     a. such Covered Software must also be made available in Source Code Form,
+        as described in Section 3.1, and You must inform recipients of the
+        Executable Form how they can obtain a copy of such Source Code Form by
+        reasonable means in a timely manner, at a charge no more than the cost
+        of distribution to the recipient; and
+
+     b. You may distribute such Executable Form under the terms of this
+        License, or sublicense it under different terms, provided that the
+        license for the Executable Form does not attempt to limit or alter the
+        recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+     You may create and distribute a Larger Work under terms of Your choice,
+     provided that You also comply with the requirements of this License for
+     the Covered Software. If the Larger Work is a combination of Covered
+     Software with a work governed by one or more Secondary Licenses, and the
+     Covered Software is not Incompatible With Secondary Licenses, this
+     License permits You to additionally distribute such Covered Software
+     under the terms of such Secondary License(s), so that the recipient of
+     the Larger Work may, at their option, further distribute the Covered
+     Software under the terms of either this License or such Secondary
+     License(s).
+
+3.4. Notices
+
+     You may not remove or alter the substance of any license notices
+     (including copyright notices, patent notices, disclaimers of warranty, or
+     limitations of liability) contained within the Source Code Form of the
+     Covered Software, except that You may alter any license notices to the
+     extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+     You may choose to offer, and to charge a fee for, warranty, support,
+     indemnity or liability obligations to one or more recipients of Covered
+     Software. However, You may do so only on Your own behalf, and not on
+     behalf of any Contributor. You must make it absolutely clear that any
+     such warranty, support, indemnity, or liability obligation is offered by
+     You alone, and You hereby agree to indemnify every Contributor for any
+     liability incurred by such Contributor as a result of warranty, support,
+     indemnity or liability terms You offer. You may include additional
+     disclaimers of warranty and limitations of liability specific to any
+     jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+
+   If it is impossible for You to comply with any of the terms of this License
+   with respect to some or all of the Covered Software due to statute,
+   judicial order, or regulation then You must: (a) comply with the terms of
+   this License to the maximum extent possible; and (b) describe the
+   limitations and the code they affect. Such description must be placed in a
+   text file included with all distributions of the Covered Software under
+   this License. Except to the extent prohibited by statute or regulation,
+   such description must be sufficiently detailed for a recipient of ordinary
+   skill to be able to understand it.
+
+5. Termination
+
+5.1. The rights granted under this License will terminate automatically if You
+     fail to comply with any of its terms. However, if You become compliant,
+     then the rights granted under this License from a particular Contributor
+     are reinstated (a) provisionally, unless and until such Contributor
+     explicitly and finally terminates Your grants, and (b) on an ongoing
+     basis, if such Contributor fails to notify You of the non-compliance by
+     some reasonable means prior to 60 days after You have come back into
+     compliance. Moreover, Your grants from a particular Contributor are
+     reinstated on an ongoing basis if such Contributor notifies You of the
+     non-compliance by some reasonable means, this is the first time You have
+     received notice of non-compliance with this License from such
+     Contributor, and You become compliant prior to 30 days after Your receipt
+     of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+     infringement claim (excluding declaratory judgment actions,
+     counter-claims, and cross-claims) alleging that a Contributor Version
+     directly or indirectly infringes any patent, then the rights granted to
+     You by any and all Contributors for the Covered Software under Section
+     2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all end user
+     license agreements (excluding distributors and resellers) which have been
+     validly granted by You or Your distributors under this License prior to
+     termination shall survive termination.
+
+6. Disclaimer of Warranty
+
+   Covered Software is provided under this License on an "as is" basis,
+   without warranty of any kind, either expressed, implied, or statutory,
+   including, without limitation, warranties that the Covered Software is free
+   of defects, merchantable, fit for a particular purpose or non-infringing.
+   The entire risk as to the quality and performance of the Covered Software
+   is with You. Should any Covered Software prove defective in any respect,
+   You (not any Contributor) assume the cost of any necessary servicing,
+   repair, or correction. This disclaimer of warranty constitutes an essential
+   part of this License. No use of  any Covered Software is authorized under
+   this License except under this disclaimer.
+
+7. Limitation of Liability
+
+   Under no circumstances and under no legal theory, whether tort (including
+   negligence), contract, or otherwise, shall any Contributor, or anyone who
+   distributes Covered Software as permitted above, be liable to You for any
+   direct, indirect, special, incidental, or consequential damages of any
+   character including, without limitation, damages for lost profits, loss of
+   goodwill, work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses, even if such party shall have been
+   informed of the possibility of such damages. This limitation of liability
+   shall not apply to liability for death or personal injury resulting from
+   such party's negligence to the extent applicable law prohibits such
+   limitation. Some jurisdictions do not allow the exclusion or limitation of
+   incidental or consequential damages, so this exclusion and limitation may
+   not apply to You.
+
+8. Litigation
+
+   Any litigation relating to this License may be brought only in the courts
+   of a jurisdiction where the defendant maintains its principal place of
+   business and such litigation shall be governed by laws of that
+   jurisdiction, without reference to its conflict-of-law provisions. Nothing
+   in this Section shall prevent a party's ability to bring cross-claims or
+   counter-claims.
+
+9. Miscellaneous
+
+   This License represents the complete agreement concerning the subject
+   matter hereof. If any provision of this License is held to be
+   unenforceable, such provision shall be reformed only to the extent
+   necessary to make it enforceable. Any law or regulation which provides that
+   the language of a contract shall be construed against the drafter shall not
+   be used to construe this License against a Contributor.
+
+
+10. Versions of the License
+
+10.1. New Versions
+
+      Mozilla Foundation is the license steward. Except as provided in Section
+      10.3, no one other than the license steward has the right to modify or
+      publish new versions of this License. Each version will be given a
+      distinguishing version number.
+
+10.2. Effect of New Versions
+
+      You may distribute the Covered Software under the terms of the version
+      of the License under which You originally received the Covered Software,
+      or under the terms of any subsequent version published by the license
+      steward.
+
+10.3. Modified Versions
+
+      If you create software not governed by this License, and you want to
+      create a new license for such software, you may create and use a
+      modified version of this License if you rename the license and remove
+      any references to the name of the license steward (except to note that
+      such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+      Licenses If You choose to distribute Source Code Form that is
+      Incompatible With Secondary Licenses under the terms of this version of
+      the License, the notice described in Exhibit B of this License must be
+      attached.
+
+Exhibit A - Source Code Form License Notice
+
+      This Source Code Form is subject to the
+      terms of the Mozilla Public License, v.
+      2.0. If a copy of the MPL was not
+      distributed with this file, You can
+      obtain one at
+      http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular file,
+then You may include the notice in a location (such as a LICENSE file in a
+relevant directory) where a recipient would be likely to look for such a
+notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+
+      This Source Code Form is "Incompatible
+      With Secondary Licenses", as defined by
+      the Mozilla Public License, v. 2.0.
+
+
+```
+
+#### strutil.go
+
+```text
+package strutil
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"unicode"
+
+	glob "github.com/ryanuber/go-glob"
+)
+
+// StrListContainsGlob looks for a string in a list of strings and allows
+// globs.
+func StrListContainsGlob(haystack []string, needle string) bool {
+	for _, item := range haystack {
+		if glob.Glob(item, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// StrListContains looks for a string in a list of strings.
+func StrListContains(haystack []string, needle string) bool {
+	for _, item := range haystack {
+		if item == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// StrListContainsCaseInsensitive looks for a string in a list of strings.
+func StrListContainsCaseInsensitive(haystack []string, needle string) bool {
+	for _, item := range haystack {
+		if strings.EqualFold(item, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// StrListSubset checks if a given list is a subset
+// of another set
+func StrListSubset(super, sub []string) bool {
+	for _, item := range sub {
+		if !StrListContains(super, item) {
+			return false
+		}
+	}
+	return true
+}
+
+// ParseDedupAndSortStrings parses a comma separated list of strings
+// into a slice of strings. The return slice will be sorted and will
+// not contain duplicate or empty items.
+func ParseDedupAndSortStrings(input string, sep string) []string {
+	input = strings.TrimSpace(input)
+	parsed := []string{}
+	if input == "" {
+		// Don't return nil
+		return parsed
+	}
+	return RemoveDuplicates(strings.Split(input, sep), false)
+}
+
+// ParseDedupLowercaseAndSortStrings parses a comma separated list of
+// strings into a slice of strings. The return slice will be sorted and
+// will not contain duplicate or empty items. The values will be converted
+// to lower case.
+func ParseDedupLowercaseAndSortStrings(input string, sep string) []string {
+	input = strings.TrimSpace(input)
+	parsed := []string{}
+	if input == "" {
+		// Don't return nil
+		return parsed
+	}
+	return RemoveDuplicates(strings.Split(input, sep), true)
+}
+
+// ParseKeyValues parses a comma separated list of `<key>=<value>` tuples
+// into a map[string]string.
+func ParseKeyValues(input string, out map[string]string, sep string) error {
+	if out == nil {
+		return fmt.Errorf("'out is nil")
+	}
+
+	keyValues := ParseDedupLowercaseAndSortStrings(input, sep)
+	if len(keyValues) == 0 {
+		return nil
+	}
+
+	for _, keyValue := range keyValues {
+		shards := strings.Split(keyValue, "=")
+		if len(shards) != 2 {
+			return fmt.Errorf("invalid <key,value> format")
+		}
+
+		key := strings.TrimSpace(shards[0])
+		value := strings.TrimSpace(shards[1])
+		if key == "" || value == "" {
+			return fmt.Errorf("invalid <key,value> pair: key: %q value: %q", key, value)
+		}
+		out[key] = value
+	}
+	return nil
+}
+
+// ParseArbitraryKeyValues parses arbitrary <key,value> tuples. The input
+// can be one of the following:
+// * JSON string
+// * Base64 encoded JSON string
+// * Comma separated list of `<key>=<value>` pairs
+// * Base64 encoded string containing comma separated list of
+//   `<key>=<value>` pairs
+//
+// Input will be parsed into the output parameter, which should
+// be a non-nil map[string]string.
+func ParseArbitraryKeyValues(input string, out map[string]string, sep string) error {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+	if out == nil {
+		return fmt.Errorf("'out' is nil")
+	}
+
+	// Try to base64 decode the input. If successful, consider the decoded
+	// value as input.
+	inputBytes, err := base64.StdEncoding.DecodeString(input)
+	if err == nil {
+		input = string(inputBytes)
+	}
+
+	// Try to JSON unmarshal the input. If successful, consider that the
+	// metadata was supplied as JSON input.
+	err = json.Unmarshal([]byte(input), &out)
+	if err != nil {
+		// If JSON unmarshaling fails, consider that the input was
+		// supplied as a comma separated string of 'key=value' pairs.
+		if err = ParseKeyValues(input, out, sep); err != nil {
+			return fmt.Errorf("failed to parse the input: %w", err)
+		}
+	}
+
+	// Validate the parsed input
+	for key, value := range out {
+		if key != "" && value == "" {
+			return fmt.Errorf("invalid value for key %q", key)
+		}
+	}
+
+	return nil
+}
+
+// ParseStringSlice parses a `sep`-separated list of strings into a
+// []string with surrounding whitespace removed.
+//
+// The output will always be a valid slice but may be of length zero.
+func ParseStringSlice(input string, sep string) []string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return []string{}
+	}
+
+	splitStr := strings.Split(input, sep)
+	ret := make([]string, len(splitStr))
+	for i, val := range splitStr {
+		ret[i] = strings.TrimSpace(val)
+	}
+
+	return ret
+}
+
+// ParseArbitraryStringSlice parses arbitrary string slice. The input
+// can be one of the following:
+// * JSON string
+// * Base64 encoded JSON string
+// * `sep` separated list of values
+// * Base64-encoded string containing a `sep` separated list of values
+//
+// Note that the separator is ignored if the input is found to already be in a
+// structured format (e.g., JSON)
+//
+// The output will always be a valid slice but may be of length zero.
+func ParseArbitraryStringSlice(input string, sep string) []string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return []string{}
+	}
+
+	// Try to base64 decode the input. If successful, consider the decoded
+	// value as input.
+	inputBytes, err := base64.StdEncoding.DecodeString(input)
+	if err == nil {
+		input = string(inputBytes)
+	}
+
+	ret := []string{}
+
+	// Try to JSON unmarshal the input. If successful, consider that the
+	// metadata was supplied as JSON input.
+	err = json.Unmarshal([]byte(input), &ret)
+	if err != nil {
+		// If JSON unmarshaling fails, consider that the input was
+		// supplied as a separated string of values.
+		return ParseStringSlice(input, sep)
+	}
+
+	if ret == nil {
+		return []string{}
+	}
+
+	return ret
+}
+
+// TrimStrings takes a slice of strings and returns a slice of strings
+// with trimmed spaces
+func TrimStrings(items []string) []string {
+	ret := make([]string, len(items))
+	for i, item := range items {
+		ret[i] = strings.TrimSpace(item)
+	}
+	return ret
+}
+
+// RemoveDuplicates removes duplicate and empty elements from a slice of
+// strings. This also may convert the items in the slice to lower case and
+// returns a sorted slice.
+func RemoveDuplicates(items []string, lowercase bool) []string {
+	itemsMap := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if lowercase {
+			item = strings.ToLower(item)
+		}
+		itemsMap[item] = struct{}{}
+	}
+	items = make([]string, 0, len(itemsMap))
+	for item := range itemsMap {
+		items = append(items, item)
+	}
+	sort.Strings(items)
+	return items
+}
+
+// RemoveDuplicatesStable removes duplicate and empty elements from a slice of
+// strings, preserving order (and case) of the original slice.
+// In all cases, strings are compared after trimming whitespace
+// If caseInsensitive, strings will be compared after ToLower()
+func RemoveDuplicatesStable(items []string, caseInsensitive bool) []string {
+	itemsMap := make(map[string]struct{}, len(items))
+	deduplicated := make([]string, 0, len(items))
+
+	for _, item := range items {
+		key := strings.TrimSpace(item)
+		if _, ok := itemsMap[key]; ok || key == "" {
+			continue
+		}
+		if caseInsensitive {
+			key = strings.ToLower(key)
+		}
+		if _, ok := itemsMap[key]; ok {
+			continue
+		}
+		itemsMap[key] = struct{}{}
+		deduplicated = append(deduplicated, item)
+	}
+	return deduplicated
+}
+
+// RemoveEmpty removes empty elements from a slice of
+// strings
+func RemoveEmpty(items []string) []string {
+	if len(items) == 0 {
+		return items
+	}
+	itemsSlice := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == "" {
+			continue
+		}
+		itemsSlice = append(itemsSlice, item)
+	}
+	return itemsSlice
+}
+
+// EquivalentSlices checks whether the given string sets are equivalent, as in,
+// they contain the same values.
+func EquivalentSlices(a, b []string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+
+	if a == nil || b == nil {
+		return false
+	}
+
+	// First we'll build maps to ensure unique values
+	mapA := make(map[string]struct{}, len(a))
+	mapB := make(map[string]struct{}, len(b))
+	for _, keyA := range a {
+		mapA[keyA] = struct{}{}
+	}
+	for _, keyB := range b {
+		mapB[keyB] = struct{}{}
+	}
+
+	// Now we'll build our checking slices
+	sortedA := make([]string, 0, len(mapA))
+	sortedB := make([]string, 0, len(mapB))
+	for keyA := range mapA {
+		sortedA = append(sortedA, keyA)
+	}
+	for keyB := range mapB {
+		sortedB = append(sortedB, keyB)
+	}
+	sort.Strings(sortedA)
+	sort.Strings(sortedB)
+
+	// Finally, compare
+	if len(sortedA) != len(sortedB) {
+		return false
+	}
+
+	for i := range sortedA {
+		if sortedA[i] != sortedB[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// EqualStringMaps tests whether two map[string]string objects are equal.
+// Equal means both maps have the same sets of keys and values. This function
+// is 6-10x faster than a call to reflect.DeepEqual().
+func EqualStringMaps(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k := range a {
+		v, ok := b[k]
+		if !ok || a[k] != v {
+			return false
+		}
+	}
+
+	return true
+}
+
+// StrListDelete removes the first occurrence of the given item from the slice
+// of strings if the item exists.
+func StrListDelete(s []string, d string) []string {
+	if s == nil {
+		return s
+	}
+
+	for index, element := range s {
+		if element == d {
+			return append(s[:index], s[index+1:]...)
+		}
+	}
+
+	return s
+}
+
+// GlobbedStringsMatch compares item to val with support for a leading and/or
+// trailing wildcard '*' in item.
+func GlobbedStringsMatch(item, val string) bool {
+	if len(item) < 2 {
+		return val == item
+	}
+
+	hasPrefix := strings.HasPrefix(item, "*")
+	hasSuffix := strings.HasSuffix(item, "*")
+
+	if hasPrefix && hasSuffix {
+		return strings.Contains(val, item[1:len(item)-1])
+	} else if hasPrefix {
+		return strings.HasSuffix(val, item[1:])
+	} else if hasSuffix {
+		return strings.HasPrefix(val, item[:len(item)-1])
+	}
+
+	return val == item
+}
+
+// AppendIfMissing adds a string to a slice if the given string is not present
+func AppendIfMissing(slice []string, i string) []string {
+	if StrListContains(slice, i) {
+		return slice
+	}
+	return append(slice, i)
+}
+
+// MergeSlices adds an arbitrary number of slices together, uniquely
+func MergeSlices(args ...[]string) []string {
+	all := map[string]struct{}{}
+	for _, slice := range args {
+		for _, v := range slice {
+			all[v] = struct{}{}
+		}
+	}
+
+	result := make([]string, 0, len(all))
+	for k := range all {
+		result = append(result, k)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// Difference returns the set difference (A - B) of the two given slices. The
+// result will also remove any duplicated values in set A regardless of whether
+// that matches any values in set B.
+func Difference(a, b []string, lowercase bool) []string {
+	if len(a) == 0 {
+		return a
+	}
+	if len(b) == 0 {
+		if !lowercase {
+			return a
+		}
+		newA := make([]string, len(a))
+		for i, v := range a {
+			newA[i] = strings.ToLower(v)
+		}
+		return newA
+	}
+
+	a = RemoveDuplicates(a, lowercase)
+	b = RemoveDuplicates(b, lowercase)
+
+	itemsMap := map[string]struct{}{}
+	for _, aVal := range a {
+		itemsMap[aVal] = struct{}{}
+	}
+
+	// Perform difference calculation
+	for _, bVal := range b {
+		if _, ok := itemsMap[bVal]; ok {
+			delete(itemsMap, bVal)
+		}
+	}
+
+	items := []string{}
+	for item := range itemsMap {
+		items = append(items, item)
+	}
+	sort.Strings(items)
+	return items
+}
+
+// GetString attempts to retrieve a value from the provided map and assert that it is a string. If the key does not
+// exist in the map, this will return an empty string. If the key exists, but the value is not a string type, this will
+// return an error. If no map or key is provied, this will return an error
+func GetString(m map[string]interface{}, key string) (string, error) {
+	if m == nil {
+		return "", fmt.Errorf("missing map")
+	}
+	if key == "" {
+		return "", fmt.Errorf("missing key")
+	}
+
+	rawVal, ok := m[key]
+	if !ok {
+		return "", nil
+	}
+
+	str, ok := rawVal.(string)
+	if !ok {
+		return "", fmt.Errorf("invalid value at %s: is a %T", key, rawVal)
+	}
+	return str, nil
+}
+
+// Printable returns true if all characters in the string are printable
+// according to Unicode
+func Printable(s string) bool {
+	return strings.IndexFunc(s, func(c rune) bool {
+		return !unicode.IsPrint(c)
+	}) == -1
+}
+
+// StringListToInterfaceList simply takes a []string and turns it into a
+// []interface{} to satisfy the input requirements for other library functions
+func StringListToInterfaceList(in []string) []interface{} {
+	ret := make([]interface{}, len(in))
+	for i, v := range in {
+		ret[i] = v
+	}
+	return ret
+}
+
+// Reverse reverses the input string
+func Reverse(in string) string {
+	l := len(in)
+	out := make([]byte, l)
+	for i := 0; i <= l/2; i++ {
+		out[i], out[l-1-i] = in[l-1-i], in[i]
+	}
+	return string(out)
+}
+
+```
+
+
+### github.com/hashicorp/go-sockaddr
+
+* License: MPL-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/go-sockaddr/LICENSE
+
+#### .gitignore
+
+```text
+# Compiled Object files, Static and Dynamic libs (Shared Objects)
+*.o
+*.a
+*.so
+
+# Folders
+_obj
+_test
+
+# Architecture specific extensions/prefixes
+*.[568vq]
+[568vq].out
+
+*.cgo1.go
+*.cgo2.c
+_cgo_defun.c
+_cgo_gotypes.go
+_cgo_export.*
+
+_testmain.go
+
+*.exe
+*.test
+*.prof
+.cover.out*
+coverage.html
+
+```
+
+#### GNUmakefile
+
+```text
+TOOLS= golang.org/x/tools/cover
+GOCOVER_TMPFILE?=	$(GOCOVER_FILE).tmp
+GOCOVER_FILE?=	.cover.out
+GOCOVERHTML?=	coverage.html
+FIND=`/usr/bin/which 2> /dev/null gfind find | /usr/bin/grep -v ^no | /usr/bin/head -n 1`
+XARGS=`/usr/bin/which 2> /dev/null gxargs xargs | /usr/bin/grep -v ^no | /usr/bin/head -n 1`
+
+test:: $(GOCOVER_FILE)
+	@$(MAKE) -C cmd/sockaddr test
+
+cover:: coverage_report
+
+$(GOCOVER_FILE)::
+	@${FIND} . -type d ! -path '*cmd*' ! -path '*.git*' -print0 | ${XARGS} -0 -I % sh -ec "cd % && rm -f $(GOCOVER_TMPFILE) && go test -coverprofile=$(GOCOVER_TMPFILE)"
+
+	@echo 'mode: set' > $(GOCOVER_FILE)
+	@${FIND} . -type f ! -path '*cmd*' ! -path '*.git*' -name "$(GOCOVER_TMPFILE)" -print0 | ${XARGS} -0 -n1 cat $(GOCOVER_TMPFILE) | grep -v '^mode: ' >> ${PWD}/$(GOCOVER_FILE)
+
+$(GOCOVERHTML): $(GOCOVER_FILE)
+	go tool cover -html=$(GOCOVER_FILE) -o $(GOCOVERHTML)
+
+coverage_report:: $(GOCOVER_FILE)
+	go tool cover -html=$(GOCOVER_FILE)
+
+audit_tools::
+	@go get -u github.com/golang/lint/golint && echo "Installed golint:"
+	@go get -u github.com/fzipp/gocyclo && echo "Installed gocyclo:"
+	@go get -u github.com/remyoudompheng/go-misc/deadcode && echo "Installed deadcode:"
+	@go get -u github.com/client9/misspell/cmd/misspell && echo "Installed misspell:"
+	@go get -u github.com/gordonklaus/ineffassign && echo "Installed ineffassign:"
+
+audit::
+	deadcode
+	go tool vet -all *.go
+	go tool vet -shadow=true *.go
+	golint *.go
+	ineffassign .
+	gocyclo -over 65 *.go
+	misspell *.go
+
+clean::
+	rm -f $(GOCOVER_FILE) $(GOCOVERHTML)
+
+dev::
+	@go build
+	@$(MAKE) -B -C cmd/sockaddr sockaddr
+
+install::
+	@go install
+	@$(MAKE) -C cmd/sockaddr install
+
+doc::
+	@echo Visit: http://127.0.0.1:6161/pkg/github.com/hashicorp/go-sockaddr/
+	godoc -http=:6161 -goroot $GOROOT
+
+world::
+	@set -e; \
+	for os in solaris darwin freebsd linux windows android; do \
+		for arch in amd64; do \
+			printf "Building on %s-%s\n" "$${os}" "$${arch}" ; \
+			env GOOS="$${os}" GOARCH="$${arch}" go build -o /dev/null; \
+		done; \
+	done
+
+	$(MAKE) -C cmd/sockaddr world
+
+```
+
+#### LICENSE
+
+```text
+Copyright (c) 2016 HashiCorp, Inc.
+
+Mozilla Public License Version 2.0
+==================================
+
+1. Definitions
+--------------
+
+1.1. "Contributor"
+    means each individual or legal entity that creates, contributes to
+    the creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+    means the combination of the Contributions of others (if any) used
+    by a Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+    means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+    means Source Code Form to which the initial Contributor has attached
+    the notice in Exhibit A, the Executable Form of such Source Code
+    Form, and Modifications of such Source Code Form, in each case
+    including portions thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+    means
+
+    (a) that the initial Contributor has attached the notice described
+        in Exhibit B to the Covered Software; or
+
+    (b) that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the
+        terms of a Secondary License.
+
+1.6. "Executable Form"
+    means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+    means a work that combines Covered Software with other material, in
+    a separate file or files, that is not Covered Software.
+
+1.8. "License"
+    means this document.
+
+1.9. "Licensable"
+    means having the right to grant, to the maximum extent possible,
+    whether at the time of the initial grant or subsequently, any and
+    all of the rights conveyed by this License.
+
+1.10. "Modifications"
+    means any of the following:
+
+    (a) any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered
+        Software; or
+
+    (b) any new file in Source Code Form that contains any Covered
+        Software.
+
+1.11. "Patent Claims" of a Contributor
+    means any patent claim(s), including without limitation, method,
+    process, and apparatus claims, in any patent Licensable by such
+    Contributor that would be infringed, but for the grant of the
+    License, by the making, using, selling, offering for sale, having
+    made, import, or transfer of either its Contributions or its
+    Contributor Version.
+
+1.12. "Secondary License"
+    means either the GNU General Public License, Version 2.0, the GNU
+    Lesser General Public License, Version 2.1, the GNU Affero General
+    Public License, Version 3.0, or any later versions of those
+    licenses.
+
+1.13. "Source Code Form"
+    means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+    means an individual or a legal entity exercising rights under this
+    License. For legal entities, "You" includes any entity that
+    controls, is controlled by, or is under common control with You. For
+    purposes of this definition, "control" means (a) the power, direct
+    or indirect, to cause the direction or management of such entity,
+    whether by contract or otherwise, or (b) ownership of more than
+    fifty percent (50%) of the outstanding shares or beneficial
+    ownership of such entity.
+
+2. License Grants and Conditions
+--------------------------------
+
+2.1. Grants
+
+Each Contributor hereby grants You a world-wide, royalty-free,
+non-exclusive license:
+
+(a) under intellectual property rights (other than patent or trademark)
+    Licensable by such Contributor to use, reproduce, make available,
+    modify, display, perform, distribute, and otherwise exploit its
+    Contributions, either on an unmodified basis, with Modifications, or
+    as part of a Larger Work; and
+
+(b) under Patent Claims of such Contributor to make, use, sell, offer
+    for sale, have made, import, and otherwise transfer either its
+    Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+The licenses granted in Section 2.1 with respect to any Contribution
+become effective for each Contribution on the date the Contributor first
+distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+The licenses granted in this Section 2 are the only rights granted under
+this License. No additional rights or licenses will be implied from the
+distribution or licensing of Covered Software under this License.
+Notwithstanding Section 2.1(b) above, no patent license is granted by a
+Contributor:
+
+(a) for any code that a Contributor has removed from Covered Software;
+    or
+
+(b) for infringements caused by: (i) Your and any other third party's
+    modifications of Covered Software, or (ii) the combination of its
+    Contributions with other software (except as part of its Contributor
+    Version); or
+
+(c) under Patent Claims infringed by Covered Software in the absence of
+    its Contributions.
+
+This License does not grant any rights in the trademarks, service marks,
+or logos of any Contributor (except as may be necessary to comply with
+the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+No Contributor makes additional grants as a result of Your choice to
+distribute the Covered Software under a subsequent version of this
+License (see Section 10.2) or under the terms of a Secondary License (if
+permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+Each Contributor represents that the Contributor believes its
+Contributions are its original creation(s) or it has sufficient rights
+to grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+This License is not intended to limit any rights You have under
+applicable copyright doctrines of fair use, fair dealing, or other
+equivalents.
+
+2.7. Conditions
+
+Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted
+in Section 2.1.
+
+3. Responsibilities
+-------------------
+
+3.1. Distribution of Source Form
+
+All distribution of Covered Software in Source Code Form, including any
+Modifications that You create or to which You contribute, must be under
+the terms of this License. You must inform recipients that the Source
+Code Form of the Covered Software is governed by the terms of this
+License, and how they can obtain a copy of this License. You may not
+attempt to alter or restrict the recipients' rights in the Source Code
+Form.
+
+3.2. Distribution of Executable Form
+
+If You distribute Covered Software in Executable Form then:
+
+(a) such Covered Software must also be made available in Source Code
+    Form, as described in Section 3.1, and You must inform recipients of
+    the Executable Form how they can obtain a copy of such Source Code
+    Form by reasonable means in a timely manner, at a charge no more
+    than the cost of distribution to the recipient; and
+
+(b) You may distribute such Executable Form under the terms of this
+    License, or sublicense it under different terms, provided that the
+    license for the Executable Form does not attempt to limit or alter
+    the recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+You may create and distribute a Larger Work under terms of Your choice,
+provided that You also comply with the requirements of this License for
+the Covered Software. If the Larger Work is a combination of Covered
+Software with a work governed by one or more Secondary Licenses, and the
+Covered Software is not Incompatible With Secondary Licenses, this
+License permits You to additionally distribute such Covered Software
+under the terms of such Secondary License(s), so that the recipient of
+the Larger Work may, at their option, further distribute the Covered
+Software under the terms of either this License or such Secondary
+License(s).
+
+3.4. Notices
+
+You may not remove or alter the substance of any license notices
+(including copyright notices, patent notices, disclaimers of warranty,
+or limitations of liability) contained within the Source Code Form of
+the Covered Software, except that You may alter any license notices to
+the extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+You may choose to offer, and to charge a fee for, warranty, support,
+indemnity or liability obligations to one or more recipients of Covered
+Software. However, You may do so only on Your own behalf, and not on
+behalf of any Contributor. You must make it absolutely clear that any
+such warranty, support, indemnity, or liability obligation is offered by
+You alone, and You hereby agree to indemnify every Contributor for any
+liability incurred by such Contributor as a result of warranty, support,
+indemnity or liability terms You offer. You may include additional
+disclaimers of warranty and limitations of liability specific to any
+jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+---------------------------------------------------
+
+If it is impossible for You to comply with any of the terms of this
+License with respect to some or all of the Covered Software due to
+statute, judicial order, or regulation then You must: (a) comply with
+the terms of this License to the maximum extent possible; and (b)
+describe the limitations and the code they affect. Such description must
+be placed in a text file included with all distributions of the Covered
+Software under this License. Except to the extent prohibited by statute
+or regulation, such description must be sufficiently detailed for a
+recipient of ordinary skill to be able to understand it.
+
+5. Termination
+--------------
+
+5.1. The rights granted under this License will terminate automatically
+if You fail to comply with any of its terms. However, if You become
+compliant, then the rights granted under this License from a particular
+Contributor are reinstated (a) provisionally, unless and until such
+Contributor explicitly and finally terminates Your grants, and (b) on an
+ongoing basis, if such Contributor fails to notify You of the
+non-compliance by some reasonable means prior to 60 days after You have
+come back into compliance. Moreover, Your grants from a particular
+Contributor are reinstated on an ongoing basis if such Contributor
+notifies You of the non-compliance by some reasonable means, this is the
+first time You have received notice of non-compliance with this License
+from such Contributor, and You become compliant prior to 30 days after
+Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+infringement claim (excluding declaratory judgment actions,
+counter-claims, and cross-claims) alleging that a Contributor Version
+directly or indirectly infringes any patent, then the rights granted to
+You by any and all Contributors for the Covered Software under Section
+2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all
+end user license agreements (excluding distributors and resellers) which
+have been validly granted by You or Your distributors under this License
+prior to termination shall survive termination.
+
+************************************************************************
+*                                                                      *
+*  6. Disclaimer of Warranty                                           *
+*  -------------------------                                           *
+*                                                                      *
+*  Covered Software is provided under this License on an "as is"       *
+*  basis, without warranty of any kind, either expressed, implied, or  *
+*  statutory, including, without limitation, warranties that the       *
+*  Covered Software is free of defects, merchantable, fit for a        *
+*  particular purpose or non-infringing. The entire risk as to the     *
+*  quality and performance of the Covered Software is with You.        *
+*  Should any Covered Software prove defective in any respect, You     *
+*  (not any Contributor) assume the cost of any necessary servicing,   *
+*  repair, or correction. This disclaimer of warranty constitutes an   *
+*  essential part of this License. No use of any Covered Software is   *
+*  authorized under this License except under this disclaimer.         *
+*                                                                      *
+************************************************************************
+
+************************************************************************
+*                                                                      *
+*  7. Limitation of Liability                                          *
+*  --------------------------                                          *
+*                                                                      *
+*  Under no circumstances and under no legal theory, whether tort      *
+*  (including negligence), contract, or otherwise, shall any           *
+*  Contributor, or anyone who distributes Covered Software as          *
+*  permitted above, be liable to You for any direct, indirect,         *
+*  special, incidental, or consequential damages of any character      *
+*  including, without limitation, damages for lost profits, loss of    *
+*  goodwill, work stoppage, computer failure or malfunction, or any    *
+*  and all other commercial damages or losses, even if such party      *
+*  shall have been informed of the possibility of such damages. This   *
+*  limitation of liability shall not apply to liability for death or   *
+*  personal injury resulting from such party's negligence to the       *
+*  extent applicable law prohibits such limitation. Some               *
+*  jurisdictions do not allow the exclusion or limitation of           *
+*  incidental or consequential damages, so this exclusion and          *
+*  limitation may not apply to You.                                    *
+*                                                                      *
+************************************************************************
+
+8. Litigation
+-------------
+
+Any litigation relating to this License may be brought only in the
+courts of a jurisdiction where the defendant maintains its principal
+place of business and such litigation shall be governed by laws of that
+jurisdiction, without reference to its conflict-of-law provisions.
+Nothing in this Section shall prevent a party's ability to bring
+cross-claims or counter-claims.
+
+9. Miscellaneous
+----------------
+
+This License represents the complete agreement concerning the subject
+matter hereof. If any provision of this License is held to be
+unenforceable, such provision shall be reformed only to the extent
+necessary to make it enforceable. Any law or regulation which provides
+that the language of a contract shall be construed against the drafter
+shall not be used to construe this License against a Contributor.
+
+10. Versions of the License
+---------------------------
+
+10.1. New Versions
+
+Mozilla Foundation is the license steward. Except as provided in Section
+10.3, no one other than the license steward has the right to modify or
+publish new versions of this License. Each version will be given a
+distinguishing version number.
+
+10.2. Effect of New Versions
+
+You may distribute the Covered Software under the terms of the version
+of the License under which You originally received the Covered Software,
+or under the terms of any subsequent version published by the license
+steward.
+
+10.3. Modified Versions
+
+If you create software not governed by this License, and you want to
+create a new license for such software, you may create and use a
+modified version of this License if you rename the license and remove
+any references to the name of the license steward (except to note that
+such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+Licenses
+
+If You choose to distribute Source Code Form that is Incompatible With
+Secondary Licenses under the terms of this version of the License, the
+notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+-------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular
+file, then You may include the notice in a location (such as a LICENSE
+file in a relevant directory) where a recipient would be likely to look
+for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+---------------------------------------------------------
+
+  This Source Code Form is "Incompatible With Secondary Licenses", as
+  defined by the Mozilla Public License, v. 2.0.
+
+```
+
+#### README.md
+
+```text
+# go-sockaddr
+
+## `sockaddr` Library
+
+Socket address convenience functions for Go.  `go-sockaddr` is a convenience
+library that makes doing the right thing with IP addresses easy.  `go-sockaddr`
+is loosely modeled after the UNIX `sockaddr_t` and creates a union of the family
+of `sockaddr_t` types (see below for an ascii diagram).  Library documentation
+is available
+at
+[https://godoc.org/github.com/hashicorp/go-sockaddr](https://godoc.org/github.com/hashicorp/go-sockaddr).
+The primary intent of the library was to make it possible to define heuristics
+for selecting the correct IP addresses when a configuration is evaluated at
+runtime.  See
+the
+[docs](https://godoc.org/github.com/hashicorp/go-sockaddr),
+[`template` package](https://godoc.org/github.com/hashicorp/go-sockaddr/template),
+tests,
+and
+[CLI utility](https://github.com/hashicorp/go-sockaddr/tree/master/cmd/sockaddr)
+for details and hints as to how to use this library.
+
+For example, with this library it is possible to find an IP address that:
+
+* is attached to a default route
+  ([`GetDefaultInterfaces()`](https://godoc.org/github.com/hashicorp/go-sockaddr#GetDefaultInterfaces))
+* is contained within a CIDR block ([`IfByNetwork()`](https://godoc.org/github.com/hashicorp/go-sockaddr#IfByNetwork))
+* is an RFC1918 address
+  ([`IfByRFC("1918")`](https://godoc.org/github.com/hashicorp/go-sockaddr#IfByRFC))
+* is ordered
+  ([`OrderedIfAddrBy(args)`](https://godoc.org/github.com/hashicorp/go-sockaddr#OrderedIfAddrBy) where
+  `args` includes, but is not limited
+  to,
+  [`AscIfType`](https://godoc.org/github.com/hashicorp/go-sockaddr#AscIfType),
+  [`AscNetworkSize`](https://godoc.org/github.com/hashicorp/go-sockaddr#AscNetworkSize))
+* excludes all IPv6 addresses
+  ([`IfByType("^(IPv4)$")`](https://godoc.org/github.com/hashicorp/go-sockaddr#IfByType))
+* is larger than a `/32`
+  ([`IfByMaskSize(32)`](https://godoc.org/github.com/hashicorp/go-sockaddr#IfByMaskSize))
+* is not on a `down` interface
+  ([`ExcludeIfs("flags", "down")`](https://godoc.org/github.com/hashicorp/go-sockaddr#ExcludeIfs))
+* preferences an IPv6 address over an IPv4 address
+  ([`SortIfByType()`](https://godoc.org/github.com/hashicorp/go-sockaddr#SortIfByType) +
+  [`ReverseIfAddrs()`](https://godoc.org/github.com/hashicorp/go-sockaddr#ReverseIfAddrs)); and
+* excludes any IP in RFC6890 address
+  ([`IfByRFC("6890")`](https://godoc.org/github.com/hashicorp/go-sockaddr#IfByRFC))
+
+Or any combination or variation therein.
+
+There are also a few simple helper functions such as `GetPublicIP` and
+`GetPrivateIP` which both return strings and select the first public or private
+IP address on the default interface, respectively.  Similarly, there is also a
+helper function called `GetInterfaceIP` which returns the first usable IP
+address on the named interface.
+
+## `sockaddr` CLI
+
+Given the possible complexity of the `sockaddr` library, there is a CLI utility
+that accompanies the library, also
+called
+[`sockaddr`](https://github.com/hashicorp/go-sockaddr/tree/master/cmd/sockaddr).
+The
+[`sockaddr`](https://github.com/hashicorp/go-sockaddr/tree/master/cmd/sockaddr)
+utility exposes nearly all of the functionality of the library and can be used
+either as an administrative tool or testing tool.  To install
+the
+[`sockaddr`](https://github.com/hashicorp/go-sockaddr/tree/master/cmd/sockaddr),
+run:
+
+```text
+$ go install github.com/hashicorp/go-sockaddr/cmd/sockaddr@latest
+```
+
+If you're familiar with UNIX's `sockaddr` struct's, the following diagram
+mapping the C `sockaddr` (top) to `go-sockaddr` structs (bottom) and
+interfaces will be helpful:
+
+```
++-------------------------------------------------------+
+|                                                       |
+|                        sockaddr                       |
+|                        SockAddr                       |
+|                                                       |
+| +--------------+ +----------------------------------+ |
+| | sockaddr_un  | |                                  | |
+| | SockAddrUnix | |           sockaddr_in{,6}        | |
+| +--------------+ |                IPAddr            | |
+|                  |                                  | |
+|                  | +-------------+ +--------------+ | |
+|                  | | sockaddr_in | | sockaddr_in6 | | |
+|                  | |   IPv4Addr  | |   IPv6Addr   | | |
+|                  | +-------------+ +--------------+ | |
+|                  |                                  | |
+|                  +----------------------------------+ |
+|                                                       |
++-------------------------------------------------------+
+```
+
+## Inspiration and Design
+
+There were many subtle inspirations that led to this design, but the most direct
+inspiration for the filtering syntax was
+OpenBSD's
+[`pf.conf(5)`](https://www.freebsd.org/cgi/man.cgi?query=pf.conf&apropos=0&sektion=0&arch=default&format=html#PARAMETERS) firewall
+syntax that lets you select the first IP address on a given named interface.
+The original problem stemmed from:
+
+* needing to create immutable images using [Packer](https://www.packer.io) that
+  ran the [Consul](https://www.consul.io) process (Consul can only use one IP
+  address at a time);
+* images that may or may not have multiple interfaces or IP addresses at
+  runtime; and
+* we didn't want to rely on configuration management to render out the correct
+  IP address if the VM image was being used in an auto-scaling group.
+
+Instead we needed some way to codify a heuristic that would correctly select the
+right IP address but the input parameters were not known when the image was
+created.
+
+```
+
+#### doc.go
+
+```text
+/*
+Package sockaddr is a Go implementation of the UNIX socket family data types and
+related helper functions.
+*/
+package sockaddr
+
+```
+
+#### ifaddr.go
+
+```text
+package sockaddr
+
+import "strings"
+
+// ifAddrAttrMap is a map of the IfAddr type-specific attributes.
+var ifAddrAttrMap map[AttrName]func(IfAddr) string
+var ifAddrAttrs []AttrName
+
+func init() {
+	ifAddrAttrInit()
+}
+
+// GetPrivateIP returns a string with a single IP address that is part of RFC
+// 6890 and has a default route.  If the system can't determine its IP address
+// or find an RFC 6890 IP address, an empty string will be returned instead.
+// This function is the `eval` equivalent of:
+//
+// ```
+// $ sockaddr eval -r '{{GetPrivateInterfaces | attr "address"}}'
+/// ```
+func GetPrivateIP() (string, error) {
+	privateIfs, err := GetPrivateInterfaces()
+	if err != nil {
+		return "", err
+	}
+	if len(privateIfs) < 1 {
+		return "", nil
+	}
+
+	ifAddr := privateIfs[0]
+	ip := *ToIPAddr(ifAddr.SockAddr)
+	return ip.NetIP().String(), nil
+}
+
+// GetPrivateIPs returns a string with all IP addresses that are part of RFC
+// 6890 (regardless of whether or not there is a default route, unlike
+// GetPublicIP).  If the system can't find any RFC 6890 IP addresses, an empty
+// string will be returned instead.  This function is the `eval` equivalent of:
+//
+// ```
+// $ sockaddr eval -r '{{GetAllInterfaces | include "RFC" "6890" | join "address" " "}}'
+/// ```
+func GetPrivateIPs() (string, error) {
+	ifAddrs, err := GetAllInterfaces()
+	if err != nil {
+		return "", err
+	} else if len(ifAddrs) < 1 {
+		return "", nil
+	}
+
+	ifAddrs, _ = FilterIfByType(ifAddrs, TypeIP)
+	if len(ifAddrs) == 0 {
+		return "", nil
+	}
+
+	OrderedIfAddrBy(AscIfType, AscIfNetworkSize).Sort(ifAddrs)
+
+	ifAddrs, _, err = IfByRFC("6890", ifAddrs)
+	if err != nil {
+		return "", err
+	} else if len(ifAddrs) == 0 {
+		return "", nil
+	}
+
+	_, ifAddrs, err = IfByRFC(ForwardingBlacklistRFC, ifAddrs)
+	if err != nil {
+		return "", err
+	} else if len(ifAddrs) == 0 {
+		return "", nil
+	}
+
+	ips := make([]string, 0, len(ifAddrs))
+	for _, ifAddr := range ifAddrs {
+		ip := *ToIPAddr(ifAddr.SockAddr)
+		s := ip.NetIP().String()
+		ips = append(ips, s)
+	}
+
+	return strings.Join(ips, " "), nil
+}
+
+// GetPublicIP returns a string with a single IP address that is NOT part of RFC
+// 6890 and has a default route.  If the system can't determine its IP address
+// or find a non RFC 6890 IP address, an empty string will be returned instead.
+// This function is the `eval` equivalent of:
+//
+// ```
+// $ sockaddr eval -r '{{GetPublicInterfaces | attr "address"}}'
+/// ```
+func GetPublicIP() (string, error) {
+	publicIfs, err := GetPublicInterfaces()
+	if err != nil {
+		return "", err
+	} else if len(publicIfs) < 1 {
+		return "", nil
+	}
+
+	ifAddr := publicIfs[0]
+	ip := *ToIPAddr(ifAddr.SockAddr)
+	return ip.NetIP().String(), nil
+}
+
+// GetPublicIPs returns a string with all IP addresses that are NOT part of RFC
+// 6890 (regardless of whether or not there is a default route, unlike
+// GetPublicIP).  If the system can't find any non RFC 6890 IP addresses, an
+// empty string will be returned instead.  This function is the `eval`
+// equivalent of:
+//
+// ```
+// $ sockaddr eval -r '{{GetAllInterfaces | exclude "RFC" "6890" | join "address" " "}}'
+/// ```
+func GetPublicIPs() (string, error) {
+	ifAddrs, err := GetAllInterfaces()
+	if err != nil {
+		return "", err
+	} else if len(ifAddrs) < 1 {
+		return "", nil
+	}
+
+	ifAddrs, _ = FilterIfByType(ifAddrs, TypeIP)
+	if len(ifAddrs) == 0 {
+		return "", nil
+	}
+
+	OrderedIfAddrBy(AscIfType, AscIfNetworkSize).Sort(ifAddrs)
+
+	_, ifAddrs, err = IfByRFC("6890", ifAddrs)
+	if err != nil {
+		return "", err
+	} else if len(ifAddrs) == 0 {
+		return "", nil
+	}
+
+	ips := make([]string, 0, len(ifAddrs))
+	for _, ifAddr := range ifAddrs {
+		ip := *ToIPAddr(ifAddr.SockAddr)
+		s := ip.NetIP().String()
+		ips = append(ips, s)
+	}
+
+	return strings.Join(ips, " "), nil
+}
+
+// GetInterfaceIP returns a string with a single IP address sorted by the size
+// of the network (i.e. IP addresses with a smaller netmask, larger network
+// size, are sorted first).  This function is the `eval` equivalent of:
+//
+// ```
+// $ sockaddr eval -r '{{GetAllInterfaces | include "name" <<ARG>> | sort "type,size" | include "flag" "forwardable" | attr "address" }}'
+/// ```
+func GetInterfaceIP(namedIfRE string) (string, error) {
+	ifAddrs, err := GetAllInterfaces()
+	if err != nil {
+		return "", err
+	}
+
+	ifAddrs, _, err = IfByName(namedIfRE, ifAddrs)
+	if err != nil {
+		return "", err
+	}
+
+	ifAddrs, _, err = IfByFlag("forwardable", ifAddrs)
+	if err != nil {
+		return "", err
+	}
+
+	ifAddrs, err = SortIfBy("+type,+size", ifAddrs)
+	if err != nil {
+		return "", err
+	}
+
+	if len(ifAddrs) == 0 {
+		return "", err
+	}
+
+	ip := ToIPAddr(ifAddrs[0].SockAddr)
+	if ip == nil {
+		return "", err
+	}
+
+	return IPAddrAttr(*ip, "address"), nil
+}
+
+// GetInterfaceIPs returns a string with all IPs, sorted by the size of the
+// network (i.e. IP addresses with a smaller netmask, larger network size, are
+// sorted first), on a named interface.  This function is the `eval` equivalent
+// of:
+//
+// ```
+// $ sockaddr eval -r '{{GetAllInterfaces | include "name" <<ARG>> | sort "type,size" | join "address" " "}}'
+/// ```
+func GetInterfaceIPs(namedIfRE string) (string, error) {
+	ifAddrs, err := GetAllInterfaces()
+	if err != nil {
+		return "", err
+	}
+
+	ifAddrs, _, err = IfByName(namedIfRE, ifAddrs)
+	if err != nil {
+		return "", err
+	}
+
+	ifAddrs, err = SortIfBy("+type,+size", ifAddrs)
+	if err != nil {
+		return "", err
+	}
+
+	if len(ifAddrs) == 0 {
+		return "", err
+	}
+
+	ips := make([]string, 0, len(ifAddrs))
+	for _, ifAddr := range ifAddrs {
+		ip := *ToIPAddr(ifAddr.SockAddr)
+		s := ip.NetIP().String()
+		ips = append(ips, s)
+	}
+
+	return strings.Join(ips, " "), nil
+}
+
+// IfAddrAttrs returns a list of attributes supported by the IfAddr type
+func IfAddrAttrs() []AttrName {
+	return ifAddrAttrs
+}
+
+// IfAddrAttr returns a string representation of an attribute for the given
+// IfAddr.
+func IfAddrAttr(ifAddr IfAddr, attrName AttrName) string {
+	fn, found := ifAddrAttrMap[attrName]
+	if !found {
+		return ""
+	}
+
+	return fn(ifAddr)
+}
+
+// ifAddrAttrInit is called once at init()
+func ifAddrAttrInit() {
+	// Sorted for human readability
+	ifAddrAttrs = []AttrName{
+		"flags",
+		"name",
+	}
+
+	ifAddrAttrMap = map[AttrName]func(ifAddr IfAddr) string{
+		"flags": func(ifAddr IfAddr) string {
+			return ifAddr.Interface.Flags.String()
+		},
+		"name": func(ifAddr IfAddr) string {
+			return ifAddr.Interface.Name
+		},
+	}
+}
+
+```
+
+#### ifaddrs.go
+
+```text
+package sockaddr
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"math/big"
+	"net"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+var (
+	// Centralize all regexps and regexp.Copy() where necessary.
+	signRE       *regexp.Regexp = regexp.MustCompile(`^[\s]*[+-]`)
+	whitespaceRE *regexp.Regexp = regexp.MustCompile(`[\s]+`)
+	// These regular expressions enable the deprecated parseDefaultIfNameWindows
+	// and should be removed when those functions are.
+	ifNameRE *regexp.Regexp = regexp.MustCompile(`^(?:Ethernet|Wireless LAN) adapter ([^:]+):`)
+	ipAddrRE *regexp.Regexp = regexp.MustCompile(`^   IPv[46] Address\. \. \. \. \. \. \. \. \. \. \. : ([^\s]+)`)
+)
+
+// IfAddrs is a slice of IfAddr
+type IfAddrs []IfAddr
+
+func (ifs IfAddrs) Len() int { return len(ifs) }
+
+// CmpIfFunc is the function signature that must be met to be used in the
+// OrderedIfAddrBy multiIfAddrSorter
+type CmpIfAddrFunc func(p1, p2 *IfAddr) int
+
+// multiIfAddrSorter implements the Sort interface, sorting the IfAddrs within.
+type multiIfAddrSorter struct {
+	ifAddrs IfAddrs
+	cmp     []CmpIfAddrFunc
+}
+
+// Sort sorts the argument slice according to the Cmp functions passed to
+// OrderedIfAddrBy.
+func (ms *multiIfAddrSorter) Sort(ifAddrs IfAddrs) {
+	ms.ifAddrs = ifAddrs
+	sort.Sort(ms)
+}
+
+// OrderedIfAddrBy sorts SockAddr by the list of sort function pointers.
+func OrderedIfAddrBy(cmpFuncs ...CmpIfAddrFunc) *multiIfAddrSorter {
+	return &multiIfAddrSorter{
+		cmp: cmpFuncs,
+	}
+}
+
+// Len is part of sort.Interface.
+func (ms *multiIfAddrSorter) Len() int {
+	return len(ms.ifAddrs)
+}
+
+// Less is part of sort.Interface. It is implemented by looping along the Cmp()
+// functions until it finds a comparison that is either less than or greater
+// than.  A return value of 0 defers sorting to the next function in the
+// multisorter (which means the results of sorting may leave the resutls in a
+// non-deterministic order).
+func (ms *multiIfAddrSorter) Less(i, j int) bool {
+	p, q := &ms.ifAddrs[i], &ms.ifAddrs[j]
+	// Try all but the last comparison.
+	var k int
+	for k = 0; k < len(ms.cmp)-1; k++ {
+		cmp := ms.cmp[k]
+		x := cmp(p, q)
+		switch x {
+		case -1:
+			// p < q, so we have a decision.
+			return true
+		case 1:
+			// p > q, so we have a decision.
+			return false
+		}
+		// p == q; try the next comparison.
+	}
+	// All comparisons to here said "equal", so just return whatever the
+	// final comparison reports.
+	switch ms.cmp[k](p, q) {
+	case -1:
+		return true
+	case 1:
+		return false
+	default:
+		// Still a tie! Now what?
+		return false
+		panic("undefined sort order for remaining items in the list")
+	}
+}
+
+// Swap is part of sort.Interface.
+func (ms *multiIfAddrSorter) Swap(i, j int) {
+	ms.ifAddrs[i], ms.ifAddrs[j] = ms.ifAddrs[j], ms.ifAddrs[i]
+}
+
+// AscIfAddress is a sorting function to sort IfAddrs by their respective
+// address type.  Non-equal types are deferred in the sort.
+func AscIfAddress(p1Ptr, p2Ptr *IfAddr) int {
+	return AscAddress(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// AscIfDefault is a sorting function to sort IfAddrs by whether or not they
+// have a default route or not.  Non-equal types are deferred in the sort.
+//
+// FIXME: This is a particularly expensive sorting operation because of the
+// non-memoized calls to NewRouteInfo().  In an ideal world the routeInfo data
+// once at the start of the sort and pass it along as a context or by wrapping
+// the IfAddr type with this information (this would also solve the inability to
+// return errors and the possibility of failing silently).  Fortunately,
+// N*log(N) where N = 3 is only ~6.2 invocations.  Not ideal, but not worth
+// optimizing today.  The common case is this gets called once or twice.
+// Patches welcome.
+func AscIfDefault(p1Ptr, p2Ptr *IfAddr) int {
+	ri, err := NewRouteInfo()
+	if err != nil {
+		return sortDeferDecision
+	}
+
+	defaultIfName, err := ri.GetDefaultInterfaceName()
+	if err != nil {
+		return sortDeferDecision
+	}
+
+	switch {
+	case p1Ptr.Interface.Name == defaultIfName && p2Ptr.Interface.Name == defaultIfName:
+		return sortDeferDecision
+	case p1Ptr.Interface.Name == defaultIfName:
+		return sortReceiverBeforeArg
+	case p2Ptr.Interface.Name == defaultIfName:
+		return sortArgBeforeReceiver
+	default:
+		return sortDeferDecision
+	}
+}
+
+// AscIfName is a sorting function to sort IfAddrs by their interface names.
+func AscIfName(p1Ptr, p2Ptr *IfAddr) int {
+	return strings.Compare(p1Ptr.Name, p2Ptr.Name)
+}
+
+// AscIfNetworkSize is a sorting function to sort IfAddrs by their respective
+// network mask size.
+func AscIfNetworkSize(p1Ptr, p2Ptr *IfAddr) int {
+	return AscNetworkSize(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// AscIfPort is a sorting function to sort IfAddrs by their respective
+// port type.  Non-equal types are deferred in the sort.
+func AscIfPort(p1Ptr, p2Ptr *IfAddr) int {
+	return AscPort(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// AscIfPrivate is a sorting function to sort IfAddrs by "private" values before
+// "public" values.  Both IPv4 and IPv6 are compared against RFC6890 (RFC6890
+// includes, and is not limited to, RFC1918 and RFC6598 for IPv4, and IPv6
+// includes RFC4193).
+func AscIfPrivate(p1Ptr, p2Ptr *IfAddr) int {
+	return AscPrivate(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// AscIfType is a sorting function to sort IfAddrs by their respective address
+// type.  Non-equal types are deferred in the sort.
+func AscIfType(p1Ptr, p2Ptr *IfAddr) int {
+	return AscType(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// DescIfAddress is identical to AscIfAddress but reverse ordered.
+func DescIfAddress(p1Ptr, p2Ptr *IfAddr) int {
+	return -1 * AscAddress(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// DescIfDefault is identical to AscIfDefault but reverse ordered.
+func DescIfDefault(p1Ptr, p2Ptr *IfAddr) int {
+	return -1 * AscIfDefault(p1Ptr, p2Ptr)
+}
+
+// DescIfName is identical to AscIfName but reverse ordered.
+func DescIfName(p1Ptr, p2Ptr *IfAddr) int {
+	return -1 * strings.Compare(p1Ptr.Name, p2Ptr.Name)
+}
+
+// DescIfNetworkSize is identical to AscIfNetworkSize but reverse ordered.
+func DescIfNetworkSize(p1Ptr, p2Ptr *IfAddr) int {
+	return -1 * AscNetworkSize(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// DescIfPort is identical to AscIfPort but reverse ordered.
+func DescIfPort(p1Ptr, p2Ptr *IfAddr) int {
+	return -1 * AscPort(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// DescIfPrivate is identical to AscIfPrivate but reverse ordered.
+func DescIfPrivate(p1Ptr, p2Ptr *IfAddr) int {
+	return -1 * AscPrivate(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// DescIfType is identical to AscIfType but reverse ordered.
+func DescIfType(p1Ptr, p2Ptr *IfAddr) int {
+	return -1 * AscType(&p1Ptr.SockAddr, &p2Ptr.SockAddr)
+}
+
+// FilterIfByType filters IfAddrs and returns a list of the matching type
+func FilterIfByType(ifAddrs IfAddrs, type_ SockAddrType) (matchedIfs, excludedIfs IfAddrs) {
+	excludedIfs = make(IfAddrs, 0, len(ifAddrs))
+	matchedIfs = make(IfAddrs, 0, len(ifAddrs))
+
+	for _, ifAddr := range ifAddrs {
+		if ifAddr.SockAddr.Type()&type_ != 0 {
+			matchedIfs = append(matchedIfs, ifAddr)
+		} else {
+			excludedIfs = append(excludedIfs, ifAddr)
+		}
+	}
+	return matchedIfs, excludedIfs
+}
+
+// IfAttr forwards the selector to IfAttr.Attr() for resolution.  If there is
+// more than one IfAddr, only the first IfAddr is used.
+func IfAttr(selectorName string, ifAddr IfAddr) (string, error) {
+	attrName := AttrName(strings.ToLower(selectorName))
+	attrVal, err := ifAddr.Attr(attrName)
+	return attrVal, err
+}
+
+// IfAttrs forwards the selector to IfAttrs.Attr() for resolution.  If there is
+// more than one IfAddr, only the first IfAddr is used.
+func IfAttrs(selectorName string, ifAddrs IfAddrs) (string, error) {
+	if len(ifAddrs) == 0 {
+		return "", nil
+	}
+
+	attrName := AttrName(strings.ToLower(selectorName))
+	attrVal, err := ifAddrs[0].Attr(attrName)
+	return attrVal, err
+}
+
+// GetAllInterfaces iterates over all available network interfaces and finds all
+// available IP addresses on each interface and converts them to
+// sockaddr.IPAddrs, and returning the result as an array of IfAddr.
+func GetAllInterfaces() (IfAddrs, error) {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	ifAddrs := make(IfAddrs, 0, len(ifs))
+	for _, intf := range ifs {
+		addrs, err := intf.Addrs()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, addr := range addrs {
+			var ipAddr IPAddr
+			ipAddr, err = NewIPAddr(addr.String())
+			if err != nil {
+				return IfAddrs{}, fmt.Errorf("unable to create an IP address from %q", addr.String())
+			}
+
+			ifAddr := IfAddr{
+				SockAddr:  ipAddr,
+				Interface: intf,
+			}
+			ifAddrs = append(ifAddrs, ifAddr)
+		}
+	}
+
+	return ifAddrs, nil
+}
+
+// GetDefaultInterfaces returns IfAddrs of the addresses attached to the default
+// route.
+func GetDefaultInterfaces() (IfAddrs, error) {
+	ri, err := NewRouteInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	defaultIfName, err := ri.GetDefaultInterfaceName()
+	if err != nil {
+		return nil, err
+	}
+
+	var defaultIfs, ifAddrs IfAddrs
+	ifAddrs, err = GetAllInterfaces()
+	for _, ifAddr := range ifAddrs {
+		if ifAddr.Name == defaultIfName {
+			defaultIfs = append(defaultIfs, ifAddr)
+		}
+	}
+
+	return defaultIfs, nil
+}
+
+// GetPrivateInterfaces returns an IfAddrs that are part of RFC 6890 and have a
+// default route.  If the system can't determine its IP address or find an RFC
+// 6890 IP address, an empty IfAddrs will be returned instead.  This function is
+// the `eval` equivalent of:
+//
+// ```
+// $ sockaddr eval -r '{{GetAllInterfaces | include "type" "ip" | include "flags" "forwardable" | include "flags" "up" | sort "default,type,size" | include "RFC" "6890" }}'
+/// ```
+func GetPrivateInterfaces() (IfAddrs, error) {
+	privateIfs, err := GetAllInterfaces()
+	if err != nil {
+		return IfAddrs{}, err
+	}
+	if len(privateIfs) == 0 {
+		return IfAddrs{}, nil
+	}
+
+	privateIfs, _ = FilterIfByType(privateIfs, TypeIP)
+	if len(privateIfs) == 0 {
+		return IfAddrs{}, nil
+	}
+
+	privateIfs, _, err = IfByFlag("forwardable", privateIfs)
+	if err != nil {
+		return IfAddrs{}, err
+	}
+
+	privateIfs, _, err = IfByFlag("up", privateIfs)
+	if err != nil {
+		return IfAddrs{}, err
+	}
+
+	if len(privateIfs) == 0 {
+		return IfAddrs{}, nil
+	}
+
+	OrderedIfAddrBy(AscIfDefault, AscIfType, AscIfNetworkSize).Sort(privateIfs)
+
+	privateIfs, _, err = IfByRFC("6890", privateIfs)
+	if err != nil {
+		return IfAddrs{}, err
+	} else if len(privateIfs) == 0 {
+		return IfAddrs{}, nil
+	}
+
+	return privateIfs, nil
+}
+
+// GetPublicInterfaces returns an IfAddrs that are NOT part of RFC 6890 and has a
+// default route.  If the system can't determine its IP address or find a non
+// RFC 6890 IP address, an empty IfAddrs will be returned instead.  This
+// function is the `eval` equivalent of:
+//
+// ```
+// $ sockaddr eval -r '{{GetAllInterfaces | include "type" "ip" | include "flags" "forwardable" | include "flags" "up" | sort "default,type,size" | exclude "RFC" "6890" }}'
+/// ```
+func GetPublicInterfaces() (IfAddrs, error) {
+	publicIfs, err := GetAllInterfaces()
+	if err != nil {
+		return IfAddrs{}, err
+	}
+	if len(publicIfs) == 0 {
+		return IfAddrs{}, nil
+	}
+
+	publicIfs, _ = FilterIfByType(publicIfs, TypeIP)
+	if len(publicIfs) == 0 {
+		return IfAddrs{}, nil
+	}
+
+	publicIfs, _, err = IfByFlag("forwardable", publicIfs)
+	if err != nil {
+		return IfAddrs{}, err
+	}
+
+	publicIfs, _, err = IfByFlag("up", publicIfs)
+	if err != nil {
+		return IfAddrs{}, err
+	}
+
+	if len(publicIfs) == 0 {
+		return IfAddrs{}, nil
+	}
+
+	OrderedIfAddrBy(AscIfDefault, AscIfType, AscIfNetworkSize).Sort(publicIfs)
+
+	_, publicIfs, err = IfByRFC("6890", publicIfs)
+	if err != nil {
+		return IfAddrs{}, err
+	} else if len(publicIfs) == 0 {
+		return IfAddrs{}, nil
+	}
+
+	return publicIfs, nil
+}
+
+// IfByAddress returns a list of matched and non-matched IfAddrs, or an error if
+// the regexp fails to compile.
+func IfByAddress(inputRe string, ifAddrs IfAddrs) (matched, remainder IfAddrs, err error) {
+	re, err := regexp.Compile(inputRe)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Unable to compile address regexp %+q: %v", inputRe, err)
+	}
+
+	matchedAddrs := make(IfAddrs, 0, len(ifAddrs))
+	excludedAddrs := make(IfAddrs, 0, len(ifAddrs))
+	for _, addr := range ifAddrs {
+		if re.MatchString(addr.SockAddr.String()) {
+			matchedAddrs = append(matchedAddrs, addr)
+		} else {
+			excludedAddrs = append(excludedAddrs, addr)
+		}
+	}
+
+	return matchedAddrs, excludedAddrs, nil
+}
+
+// IfByName returns a list of matched and non-matched IfAddrs, or an error if
+// the regexp fails to compile.
+func IfByName(inputRe string, ifAddrs IfAddrs) (matched, remainder IfAddrs, err error) {
+	re, err := regexp.Compile(inputRe)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Unable to compile name regexp %+q: %v", inputRe, err)
+	}
+
+	matchedAddrs := make(IfAddrs, 0, len(ifAddrs))
+	excludedAddrs := make(IfAddrs, 0, len(ifAddrs))
+	for _, addr := range ifAddrs {
+		if re.MatchString(addr.Name) {
+			matchedAddrs = append(matchedAddrs, addr)
+		} else {
+			excludedAddrs = append(excludedAddrs, addr)
+		}
+	}
+
+	return matchedAddrs, excludedAddrs, nil
+}
+
+// IfByPort returns a list of matched and non-matched IfAddrs, or an error if
+// the regexp fails to compile.
+func IfByPort(inputRe string, ifAddrs IfAddrs) (matchedIfs, excludedIfs IfAddrs, err error) {
+	re, err := regexp.Compile(inputRe)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Unable to compile port regexp %+q: %v", inputRe, err)
+	}
+
+	ipIfs, nonIfs := FilterIfByType(ifAddrs, TypeIP)
+	matchedIfs = make(IfAddrs, 0, len(ipIfs))
+	excludedIfs = append(IfAddrs(nil), nonIfs...)
+	for _, addr := range ipIfs {
+		ipAddr := ToIPAddr(addr.SockAddr)
+		if ipAddr == nil {
+			continue
+		}
+
+		port := strconv.FormatInt(int64((*ipAddr).IPPort()), 10)
+		if re.MatchString(port) {
+			matchedIfs = append(matchedIfs, addr)
+		} else {
+			excludedIfs = append(excludedIfs, addr)
+		}
+	}
+
+	return matchedIfs, excludedIfs, nil
+}
+
+// IfByRFC returns a list of matched and non-matched IfAddrs that contain the
+// relevant RFC-specified traits.
+func IfByRFC(selectorParam string, ifAddrs IfAddrs) (matched, remainder IfAddrs, err error) {
+	inputRFC, err := strconv.ParseUint(selectorParam, 10, 64)
+	if err != nil {
+		return IfAddrs{}, IfAddrs{}, fmt.Errorf("unable to parse RFC number %q: %v", selectorParam, err)
+	}
+
+	matchedIfAddrs := make(IfAddrs, 0, len(ifAddrs))
+	remainingIfAddrs := make(IfAddrs, 0, len(ifAddrs))
+
+	rfcNetMap := KnownRFCs()
+	rfcNets, ok := rfcNetMap[uint(inputRFC)]
+	if !ok {
+		return nil, nil, fmt.Errorf("unsupported RFC %d", inputRFC)
+	}
+
+	for _, ifAddr := range ifAddrs {
+		var contained bool
+		for _, rfcNet := range rfcNets {
+			if rfcNet.Contains(ifAddr.SockAddr) {
+				matchedIfAddrs = append(matchedIfAddrs, ifAddr)
+				contained = true
+				break
+			}
+		}
+		if !contained {
+			remainingIfAddrs = append(remainingIfAddrs, ifAddr)
+		}
+	}
+
+	return matchedIfAddrs, remainingIfAddrs, nil
+}
+
+// IfByRFCs returns a list of matched and non-matched IfAddrs that contain the
+// relevant RFC-specified traits.  Multiple RFCs can be specified and separated
+// by the `|` symbol.  No protection is taken to ensure an IfAddr does not end
+// up in both the included and excluded list.
+func IfByRFCs(selectorParam string, ifAddrs IfAddrs) (matched, remainder IfAddrs, err error) {
+	var includedIfs, excludedIfs IfAddrs
+	for _, rfcStr := range strings.Split(selectorParam, "|") {
+		includedRFCIfs, excludedRFCIfs, err := IfByRFC(rfcStr, ifAddrs)
+		if err != nil {
+			return IfAddrs{}, IfAddrs{}, fmt.Errorf("unable to lookup RFC number %q: %v", rfcStr, err)
+		}
+		includedIfs = append(includedIfs, includedRFCIfs...)
+		excludedIfs = append(excludedIfs, excludedRFCIfs...)
+	}
+
+	return includedIfs, excludedIfs, nil
+}
+
+// IfByMaskSize returns a list of matched and non-matched IfAddrs that have the
+// matching mask size.
+func IfByMaskSize(selectorParam string, ifAddrs IfAddrs) (matchedIfs, excludedIfs IfAddrs, err error) {
+	maskSize, err := strconv.ParseUint(selectorParam, 10, 64)
+	if err != nil {
+		return IfAddrs{}, IfAddrs{}, fmt.Errorf("invalid exclude size argument (%q): %v", selectorParam, err)
+	}
+
+	ipIfs, nonIfs := FilterIfByType(ifAddrs, TypeIP)
+	matchedIfs = make(IfAddrs, 0, len(ipIfs))
+	excludedIfs = append(IfAddrs(nil), nonIfs...)
+	for _, addr := range ipIfs {
+		ipAddr := ToIPAddr(addr.SockAddr)
+		if ipAddr == nil {
+			return IfAddrs{}, IfAddrs{}, fmt.Errorf("unable to filter mask sizes on non-IP type %s: %v", addr.SockAddr.Type().String(), addr.SockAddr.String())
+		}
+
+		switch {
+		case (*ipAddr).Type()&TypeIPv4 != 0 && maskSize > 32:
+			return IfAddrs{}, IfAddrs{}, fmt.Errorf("mask size out of bounds for IPv4 address: %d", maskSize)
+		case (*ipAddr).Type()&TypeIPv6 != 0 && maskSize > 128:
+			return IfAddrs{}, IfAddrs{}, fmt.Errorf("mask size out of bounds for IPv6 address: %d", maskSize)
+		}
+
+		if (*ipAddr).Maskbits() == int(maskSize) {
+			matchedIfs = append(matchedIfs, addr)
+		} else {
+			excludedIfs = append(excludedIfs, addr)
+		}
+	}
+
+	return matchedIfs, excludedIfs, nil
+}
+
+// IfByType returns a list of matching and non-matching IfAddr that match the
+// specified type.  For instance:
+//
+// include "type" "IPv4,IPv6"
+//
+// will include any IfAddrs that is either an IPv4 or IPv6 address.  Any
+// addresses on those interfaces that don't match will be included in the
+// remainder results.
+func IfByType(inputTypes string, ifAddrs IfAddrs) (matched, remainder IfAddrs, err error) {
+	matchingIfAddrs := make(IfAddrs, 0, len(ifAddrs))
+	remainingIfAddrs := make(IfAddrs, 0, len(ifAddrs))
+
+	ifTypes := strings.Split(strings.ToLower(inputTypes), "|")
+	for _, ifType := range ifTypes {
+		switch ifType {
+		case "ip", "ipv4", "ipv6", "unix":
+			// Valid types
+		default:
+			return nil, nil, fmt.Errorf("unsupported type %q %q", ifType, inputTypes)
+		}
+	}
+
+	for _, ifAddr := range ifAddrs {
+		for _, ifType := range ifTypes {
+			var matched bool
+			switch {
+			case ifType == "ip" && ifAddr.SockAddr.Type()&TypeIP != 0:
+				matched = true
+			case ifType == "ipv4" && ifAddr.SockAddr.Type()&TypeIPv4 != 0:
+				matched = true
+			case ifType == "ipv6" && ifAddr.SockAddr.Type()&TypeIPv6 != 0:
+				matched = true
+			case ifType == "unix" && ifAddr.SockAddr.Type()&TypeUnix != 0:
+				matched = true
+			}
+
+			if matched {
+				matchingIfAddrs = append(matchingIfAddrs, ifAddr)
+			} else {
+				remainingIfAddrs = append(remainingIfAddrs, ifAddr)
+			}
+		}
+	}
+
+	return matchingIfAddrs, remainingIfAddrs, nil
+}
+
+// IfByFlag returns a list of matching and non-matching IfAddrs that match the
+// specified type.  For instance:
+//
+// include "flag" "up,broadcast"
+//
+// will include any IfAddrs that have both the "up" and "broadcast" flags set.
+// Any addresses on those interfaces that don't match will be omitted from the
+// results.
+func IfByFlag(inputFlags string, ifAddrs IfAddrs) (matched, remainder IfAddrs, err error) {
+	matchedAddrs := make(IfAddrs, 0, len(ifAddrs))
+	excludedAddrs := make(IfAddrs, 0, len(ifAddrs))
+
+	var wantForwardable,
+		wantGlobalUnicast,
+		wantInterfaceLocalMulticast,
+		wantLinkLocalMulticast,
+		wantLinkLocalUnicast,
+		wantLoopback,
+		wantMulticast,
+		wantUnspecified bool
+	var ifFlags net.Flags
+	var checkFlags, checkAttrs bool
+	for _, flagName := range strings.Split(strings.ToLower(inputFlags), "|") {
+		switch flagName {
+		case "broadcast":
+			checkFlags = true
+			ifFlags = ifFlags | net.FlagBroadcast
+		case "down":
+			checkFlags = true
+			ifFlags = (ifFlags &^ net.FlagUp)
+		case "forwardable":
+			checkAttrs = true
+			wantForwardable = true
+		case "global unicast":
+			checkAttrs = true
+			wantGlobalUnicast = true
+		case "interface-local multicast":
+			checkAttrs = true
+			wantInterfaceLocalMulticast = true
+		case "link-local multicast":
+			checkAttrs = true
+			wantLinkLocalMulticast = true
+		case "link-local unicast":
+			checkAttrs = true
+			wantLinkLocalUnicast = true
+		case "loopback":
+			checkAttrs = true
+			checkFlags = true
+			ifFlags = ifFlags | net.FlagLoopback
+			wantLoopback = true
+		case "multicast":
+			checkAttrs = true
+			checkFlags = true
+			ifFlags = ifFlags | net.FlagMulticast
+			wantMulticast = true
+		case "point-to-point":
+			checkFlags = true
+			ifFlags = ifFlags | net.FlagPointToPoint
+		case "unspecified":
+			checkAttrs = true
+			wantUnspecified = true
+		case "up":
+			checkFlags = true
+			ifFlags = ifFlags | net.FlagUp
+		default:
+			return nil, nil, fmt.Errorf("Unknown interface flag: %+q", flagName)
+		}
+	}
+
+	for _, ifAddr := range ifAddrs {
+		var matched bool
+		if checkFlags && ifAddr.Interface.Flags&ifFlags == ifFlags {
+			matched = true
+		}
+		if checkAttrs {
+			if ip := ToIPAddr(ifAddr.SockAddr); ip != nil {
+				netIP := (*ip).NetIP()
+				switch {
+				case wantGlobalUnicast && netIP.IsGlobalUnicast():
+					matched = true
+				case wantInterfaceLocalMulticast && netIP.IsInterfaceLocalMulticast():
+					matched = true
+				case wantLinkLocalMulticast && netIP.IsLinkLocalMulticast():
+					matched = true
+				case wantLinkLocalUnicast && netIP.IsLinkLocalUnicast():
+					matched = true
+				case wantLoopback && netIP.IsLoopback():
+					matched = true
+				case wantMulticast && netIP.IsMulticast():
+					matched = true
+				case wantUnspecified && netIP.IsUnspecified():
+					matched = true
+				case wantForwardable && !IsRFC(ForwardingBlacklist, ifAddr.SockAddr):
+					matched = true
+				}
+			}
+		}
+		if matched {
+			matchedAddrs = append(matchedAddrs, ifAddr)
+		} else {
+			excludedAddrs = append(excludedAddrs, ifAddr)
+		}
+	}
+	return matchedAddrs, excludedAddrs, nil
+}
+
+// IfByNetwork returns an IfAddrs that are equal to or included within the
+// network passed in by selector.
+func IfByNetwork(selectorParam string, inputIfAddrs IfAddrs) (IfAddrs, IfAddrs, error) {
+	var includedIfs, excludedIfs IfAddrs
+	for _, netStr := range strings.Split(selectorParam, "|") {
+		netAddr, err := NewIPAddr(netStr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to create an IP address from %+q: %v", netStr, err)
+		}
+
+		for _, ifAddr := range inputIfAddrs {
+			if netAddr.Contains(ifAddr.SockAddr) {
+				includedIfs = append(includedIfs, ifAddr)
+			} else {
+				excludedIfs = append(excludedIfs, ifAddr)
+			}
+		}
+	}
+
+	return includedIfs, excludedIfs, nil
+}
+
+// IfAddrMath will return a new IfAddr struct with a mutated value.
+func IfAddrMath(operation, value string, inputIfAddr IfAddr) (IfAddr, error) {
+	// Regexp used to enforce the sign being a required part of the grammar for
+	// some values.
+	signRe := signRE.Copy()
+
+	switch strings.ToLower(operation) {
+	case "address":
+		// "address" operates on the IP address and is allowed to overflow or
+		// underflow networks, however it will wrap along the underlying address's
+		// underlying type.
+
+		if !signRe.MatchString(value) {
+			return IfAddr{}, fmt.Errorf("sign (+/-) is required for operation %q", operation)
+		}
+
+		switch sockType := inputIfAddr.SockAddr.Type(); sockType {
+		case TypeIPv4:
+			// 33 == Accept any uint32 value
+			// TODO(seanc@): Add the ability to parse hex
+			i, err := strconv.ParseInt(value, 10, 33)
+			if err != nil {
+				return IfAddr{}, fmt.Errorf("unable to convert %q to int for operation %q: %v", value, operation, err)
+			}
+
+			ipv4 := *ToIPv4Addr(inputIfAddr.SockAddr)
+			ipv4Uint32 := uint32(ipv4.Address)
+			ipv4Uint32 += uint32(i)
+			return IfAddr{
+				SockAddr: IPv4Addr{
+					Address: IPv4Address(ipv4Uint32),
+					Mask:    ipv4.Mask,
+				},
+				Interface: inputIfAddr.Interface,
+			}, nil
+		case TypeIPv6:
+			// 64 == Accept any int32 value
+			// TODO(seanc@): Add the ability to parse hex.  Also parse a bignum int.
+			i, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return IfAddr{}, fmt.Errorf("unable to convert %q to int for operation %q: %v", value, operation, err)
+			}
+
+			ipv6 := *ToIPv6Addr(inputIfAddr.SockAddr)
+			ipv6BigIntA := new(big.Int)
+			ipv6BigIntA.Set(ipv6.Address)
+			ipv6BigIntB := big.NewInt(i)
+
+			ipv6Addr := ipv6BigIntA.Add(ipv6BigIntA, ipv6BigIntB)
+			ipv6Addr.And(ipv6Addr, ipv6HostMask)
+
+			return IfAddr{
+				SockAddr: IPv6Addr{
+					Address: IPv6Address(ipv6Addr),
+					Mask:    ipv6.Mask,
+				},
+				Interface: inputIfAddr.Interface,
+			}, nil
+		default:
+			return IfAddr{}, fmt.Errorf("unsupported type for operation %q: %T", operation, sockType)
+		}
+	case "network":
+		// "network" operates on the network address.  Positive values start at the
+		// network address and negative values wrap at the network address, which
+		// means a "-1" value on a network will be the broadcast address after
+		// wrapping is applied.
+
+		if !signRe.MatchString(value) {
+			return IfAddr{}, fmt.Errorf("sign (+/-) is required for operation %q", operation)
+		}
+
+		switch sockType := inputIfAddr.SockAddr.Type(); sockType {
+		case TypeIPv4:
+			// 33 == Accept any uint32 value
+			// TODO(seanc@): Add the ability to parse hex
+			i, err := strconv.ParseInt(value, 10, 33)
+			if err != nil {
+				return IfAddr{}, fmt.Errorf("unable to convert %q to int for operation %q: %v", value, operation, err)
+			}
+
+			ipv4 := *ToIPv4Addr(inputIfAddr.SockAddr)
+			ipv4Uint32 := uint32(ipv4.NetworkAddress())
+
+			// Wrap along network mask boundaries.  EZ-mode wrapping made possible by
+			// use of int64 vs a uint.
+			var wrappedMask int64
+			if i >= 0 {
+				wrappedMask = i
+			} else {
+				wrappedMask = 1 + i + int64(^uint32(ipv4.Mask))
+			}
+
+			ipv4Uint32 = ipv4Uint32 + (uint32(wrappedMask) &^ uint32(ipv4.Mask))
+
+			return IfAddr{
+				SockAddr: IPv4Addr{
+					Address: IPv4Address(ipv4Uint32),
+					Mask:    ipv4.Mask,
+				},
+				Interface: inputIfAddr.Interface,
+			}, nil
+		case TypeIPv6:
+			// 64 == Accept any int32 value
+			// TODO(seanc@): Add the ability to parse hex.  Also parse a bignum int.
+			i, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return IfAddr{}, fmt.Errorf("unable to convert %q to int for operation %q: %v", value, operation, err)
+			}
+
+			ipv6 := *ToIPv6Addr(inputIfAddr.SockAddr)
+			ipv6BigInt := new(big.Int)
+			ipv6BigInt.Set(ipv6.NetworkAddress())
+
+			mask := new(big.Int)
+			mask.Set(ipv6.Mask)
+			if i > 0 {
+				wrappedMask := new(big.Int)
+				wrappedMask.SetInt64(i)
+
+				wrappedMask.AndNot(wrappedMask, mask)
+				ipv6BigInt.Add(ipv6BigInt, wrappedMask)
+			} else {
+				// Mask off any bits that exceed the network size.  Subtract the
+				// wrappedMask from the last usable - 1
+				wrappedMask := new(big.Int)
+				wrappedMask.SetInt64(-1 * i)
+				wrappedMask.Sub(wrappedMask, big.NewInt(1))
+
+				wrappedMask.AndNot(wrappedMask, mask)
+
+				lastUsable := new(big.Int)
+				lastUsable.Set(ipv6.LastUsable().(IPv6Addr).Address)
+
+				ipv6BigInt = lastUsable.Sub(lastUsable, wrappedMask)
+			}
+
+			return IfAddr{
+				SockAddr: IPv6Addr{
+					Address: IPv6Address(ipv6BigInt),
+					Mask:    ipv6.Mask,
+				},
+				Interface: inputIfAddr.Interface,
+			}, nil
+		default:
+			return IfAddr{}, fmt.Errorf("unsupported type for operation %q: %T", operation, sockType)
+		}
+	case "mask":
+		// "mask" operates on the IP address and returns the IP address on
+		// which the given integer mask has been applied. If the applied mask
+		// corresponds to a larger network than the mask of the IP address,
+		// the latter will be replaced by the former.
+		switch sockType := inputIfAddr.SockAddr.Type(); sockType {
+		case TypeIPv4:
+			i, err := strconv.ParseUint(value, 10, 32)
+			if err != nil {
+				return IfAddr{}, fmt.Errorf("unable to convert %q to int for operation %q: %v", value, operation, err)
+			}
+
+			if i > 32 {
+				return IfAddr{}, fmt.Errorf("parameter for operation %q on ipv4 addresses must be between 0 and 32", operation)
+			}
+
+			ipv4 := *ToIPv4Addr(inputIfAddr.SockAddr)
+
+			ipv4Mask := net.CIDRMask(int(i), 32)
+			ipv4MaskUint32 := binary.BigEndian.Uint32(ipv4Mask)
+
+			maskedIpv4 := ipv4.NetIP().Mask(ipv4Mask)
+			maskedIpv4Uint32 := binary.BigEndian.Uint32(maskedIpv4)
+
+			maskedIpv4MaskUint32 := uint32(ipv4.Mask)
+
+			if ipv4MaskUint32 < maskedIpv4MaskUint32 {
+				maskedIpv4MaskUint32 = ipv4MaskUint32
+			}
+
+			return IfAddr{
+				SockAddr: IPv4Addr{
+					Address: IPv4Address(maskedIpv4Uint32),
+					Mask:    IPv4Mask(maskedIpv4MaskUint32),
+				},
+				Interface: inputIfAddr.Interface,
+			}, nil
+		case TypeIPv6:
+			i, err := strconv.ParseUint(value, 10, 32)
+			if err != nil {
+				return IfAddr{}, fmt.Errorf("unable to convert %q to int for operation %q: %v", value, operation, err)
+			}
+
+			if i > 128 {
+				return IfAddr{}, fmt.Errorf("parameter for operation %q on ipv6 addresses must be between 0 and 64", operation)
+			}
+
+			ipv6 := *ToIPv6Addr(inputIfAddr.SockAddr)
+
+			ipv6Mask := net.CIDRMask(int(i), 128)
+			ipv6MaskBigInt := new(big.Int)
+			ipv6MaskBigInt.SetBytes(ipv6Mask)
+
+			maskedIpv6 := ipv6.NetIP().Mask(ipv6Mask)
+			maskedIpv6BigInt := new(big.Int)
+			maskedIpv6BigInt.SetBytes(maskedIpv6)
+
+			maskedIpv6MaskBigInt := new(big.Int)
+			maskedIpv6MaskBigInt.Set(ipv6.Mask)
+
+			if ipv6MaskBigInt.Cmp(maskedIpv6MaskBigInt) == -1 {
+				maskedIpv6MaskBigInt = ipv6MaskBigInt
+			}
+
+			return IfAddr{
+				SockAddr: IPv6Addr{
+					Address: IPv6Address(maskedIpv6BigInt),
+					Mask:    IPv6Mask(maskedIpv6MaskBigInt),
+				},
+				Interface: inputIfAddr.Interface,
+			}, nil
+		default:
+			return IfAddr{}, fmt.Errorf("unsupported type for operation %q: %T", operation, sockType)
+		}
+	default:
+		return IfAddr{}, fmt.Errorf("unsupported math operation: %q", operation)
+	}
+}
+
+// IfAddrsMath will apply an IfAddrMath operation each IfAddr struct.  Any
+// failure will result in zero results.
+func IfAddrsMath(operation, value string, inputIfAddrs IfAddrs) (IfAddrs, error) {
+	outputAddrs := make(IfAddrs, 0, len(inputIfAddrs))
+	for _, ifAddr := range inputIfAddrs {
+		result, err := IfAddrMath(operation, value, ifAddr)
+		if err != nil {
+			return IfAddrs{}, fmt.Errorf("unable to perform an IPMath operation on %s: %v", ifAddr, err)
+		}
+		outputAddrs = append(outputAddrs, result)
+	}
+	return outputAddrs, nil
+}
+
+// IncludeIfs returns an IfAddrs based on the passed in selector.
+func IncludeIfs(selectorName, selectorParam string, inputIfAddrs IfAddrs) (IfAddrs, error) {
+	var includedIfs IfAddrs
+	var err error
+
+	switch strings.ToLower(selectorName) {
+	case "address":
+		includedIfs, _, err = IfByAddress(selectorParam, inputIfAddrs)
+	case "flag", "flags":
+		includedIfs, _, err = IfByFlag(selectorParam, inputIfAddrs)
+	case "name":
+		includedIfs, _, err = IfByName(selectorParam, inputIfAddrs)
+	case "network":
+		includedIfs, _, err = IfByNetwork(selectorParam, inputIfAddrs)
+	case "port":
+		includedIfs, _, err = IfByPort(selectorParam, inputIfAddrs)
+	case "rfc", "rfcs":
+		includedIfs, _, err = IfByRFCs(selectorParam, inputIfAddrs)
+	case "size":
+		includedIfs, _, err = IfByMaskSize(selectorParam, inputIfAddrs)
+	case "type":
+		includedIfs, _, err = IfByType(selectorParam, inputIfAddrs)
+	default:
+		return IfAddrs{}, fmt.Errorf("invalid include selector %q", selectorName)
+	}
+
+	if err != nil {
+		return IfAddrs{}, err
+	}
+
+	return includedIfs, nil
+}
+
+// ExcludeIfs returns an IfAddrs based on the passed in selector.
+func ExcludeIfs(selectorName, selectorParam string, inputIfAddrs IfAddrs) (IfAddrs, error) {
+	var excludedIfs IfAddrs
+	var err error
+
+	switch strings.ToLower(selectorName) {
+	case "address":
+		_, excludedIfs, err = IfByAddress(selectorParam, inputIfAddrs)
+	case "flag", "flags":
+		_, excludedIfs, err = IfByFlag(selectorParam, inputIfAddrs)
+	case "name":
+		_, excludedIfs, err = IfByName(selectorParam, inputIfAddrs)
+	case "network":
+		_, excludedIfs, err = IfByNetwork(selectorParam, inputIfAddrs)
+	case "port":
+		_, excludedIfs, err = IfByPort(selectorParam, inputIfAddrs)
+	case "rfc", "rfcs":
+		_, excludedIfs, err = IfByRFCs(selectorParam, inputIfAddrs)
+	case "size":
+		_, excludedIfs, err = IfByMaskSize(selectorParam, inputIfAddrs)
+	case "type":
+		_, excludedIfs, err = IfByType(selectorParam, inputIfAddrs)
+	default:
+		return IfAddrs{}, fmt.Errorf("invalid exclude selector %q", selectorName)
+	}
+
+	if err != nil {
+		return IfAddrs{}, err
+	}
+
+	return excludedIfs, nil
+}
+
+// SortIfBy returns an IfAddrs sorted based on the passed in selector.  Multiple
+// sort clauses can be passed in as a comma delimited list without whitespace.
+func SortIfBy(selectorParam string, inputIfAddrs IfAddrs) (IfAddrs, error) {
+	sortedIfs := append(IfAddrs(nil), inputIfAddrs...)
+
+	clauses := strings.Split(selectorParam, ",")
+	sortFuncs := make([]CmpIfAddrFunc, len(clauses))
+
+	for i, clause := range clauses {
+		switch strings.TrimSpace(strings.ToLower(clause)) {
+		case "+address", "address":
+			// The "address" selector returns an array of IfAddrs
+			// ordered by the network address.  IfAddrs that are not
+			// comparable will be at the end of the list and in a
+			// non-deterministic order.
+			sortFuncs[i] = AscIfAddress
+		case "-address":
+			sortFuncs[i] = DescIfAddress
+		case "+default", "default":
+			sortFuncs[i] = AscIfDefault
+		case "-default":
+			sortFuncs[i] = DescIfDefault
+		case "+name", "name":
+			// The "name" selector returns an array of IfAddrs
+			// ordered by the interface name.
+			sortFuncs[i] = AscIfName
+		case "-name":
+			sortFuncs[i] = DescIfName
+		case "+port", "port":
+			// The "port" selector returns an array of IfAddrs
+			// ordered by the port, if included in the IfAddr.
+			// IfAddrs that are not comparable will be at the end of
+			// the list and in a non-deterministic order.
+			sortFuncs[i] = AscIfPort
+		case "-port":
+			sortFuncs[i] = DescIfPort
+		case "+private", "private":
+			// The "private" selector returns an array of IfAddrs
+			// ordered by private addresses first.  IfAddrs that are
+			// not comparable will be at the end of the list and in
+			// a non-deterministic order.
+			sortFuncs[i] = AscIfPrivate
+		case "-private":
+			sortFuncs[i] = DescIfPrivate
+		case "+size", "size":
+			// The "size" selector returns an array of IfAddrs
+			// ordered by the size of the network mask, smaller mask
+			// (larger number of hosts per network) to largest
+			// (e.g. a /24 sorts before a /32).
+			sortFuncs[i] = AscIfNetworkSize
+		case "-size":
+			sortFuncs[i] = DescIfNetworkSize
+		case "+type", "type":
+			// The "type" selector returns an array of IfAddrs
+			// ordered by the type of the IfAddr.  The sort order is
+			// Unix, IPv4, then IPv6.
+			sortFuncs[i] = AscIfType
+		case "-type":
+			sortFuncs[i] = DescIfType
+		default:
+			// Return an empty list for invalid sort types.
+			return IfAddrs{}, fmt.Errorf("unknown sort type: %q", clause)
+		}
+	}
+
+	OrderedIfAddrBy(sortFuncs...).Sort(sortedIfs)
+
+	return sortedIfs, nil
+}
+
+// UniqueIfAddrsBy creates a unique set of IfAddrs based on the matching
+// selector.  UniqueIfAddrsBy assumes the input has already been sorted.
+func UniqueIfAddrsBy(selectorName string, inputIfAddrs IfAddrs) (IfAddrs, error) {
+	attrName := strings.ToLower(selectorName)
+
+	ifs := make(IfAddrs, 0, len(inputIfAddrs))
+	var lastMatch string
+	for _, ifAddr := range inputIfAddrs {
+		var out string
+		switch attrName {
+		case "address":
+			out = ifAddr.SockAddr.String()
+		case "name":
+			out = ifAddr.Name
+		default:
+			return nil, fmt.Errorf("unsupported unique constraint %+q", selectorName)
+		}
+
+		switch {
+		case lastMatch == "", lastMatch != out:
+			lastMatch = out
+			ifs = append(ifs, ifAddr)
+		case lastMatch == out:
+			continue
+		}
+	}
+
+	return ifs, nil
+}
+
+// JoinIfAddrs joins an IfAddrs and returns a string
+func JoinIfAddrs(selectorName string, joinStr string, inputIfAddrs IfAddrs) (string, error) {
+	outputs := make([]string, 0, len(inputIfAddrs))
+	attrName := AttrName(strings.ToLower(selectorName))
+
+	for _, ifAddr := range inputIfAddrs {
+		var attrVal string
+		var err error
+		attrVal, err = ifAddr.Attr(attrName)
+		if err != nil {
+			return "", err
+		}
+		outputs = append(outputs, attrVal)
+	}
+	return strings.Join(outputs, joinStr), nil
+}
+
+// LimitIfAddrs returns a slice of IfAddrs based on the specified limit.
+func LimitIfAddrs(lim uint, in IfAddrs) (IfAddrs, error) {
+	// Clamp the limit to the length of the array
+	if int(lim) > len(in) {
+		lim = uint(len(in))
+	}
+
+	return in[0:lim], nil
+}
+
+// OffsetIfAddrs returns a slice of IfAddrs based on the specified offset.
+func OffsetIfAddrs(off int, in IfAddrs) (IfAddrs, error) {
+	var end bool
+	if off < 0 {
+		end = true
+		off = off * -1
+	}
+
+	if off > len(in) {
+		return IfAddrs{}, fmt.Errorf("unable to seek past the end of the interface array: offset (%d) exceeds the number of interfaces (%d)", off, len(in))
+	}
+
+	if end {
+		return in[len(in)-off:], nil
+	}
+	return in[off:], nil
+}
+
+func (ifAddr IfAddr) String() string {
+	return fmt.Sprintf("%s %v", ifAddr.SockAddr, ifAddr.Interface)
+}
+
+// parseDefaultIfNameFromRoute parses standard route(8)'s output for the *BSDs
+// and Solaris.
+func parseDefaultIfNameFromRoute(routeOut string) (string, error) {
+	lines := strings.Split(routeOut, "\n")
+	for _, line := range lines {
+		kvs := strings.SplitN(line, ":", 2)
+		if len(kvs) != 2 {
+			continue
+		}
+
+		if strings.TrimSpace(kvs[0]) == "interface" {
+			ifName := strings.TrimSpace(kvs[1])
+			return ifName, nil
+		}
+	}
+
+	return "", errors.New("No default interface found")
+}
+
+// parseDefaultIfNameFromIPCmd parses the default interface from ip(8) for
+// Linux.
+func parseDefaultIfNameFromIPCmd(routeOut string) (string, error) {
+	parsedLines := parseIfNameFromIPCmd(routeOut)
+	for _, parsedLine := range parsedLines {
+		if parsedLine[0] == "default" &&
+			parsedLine[1] == "via" &&
+			parsedLine[3] == "dev" {
+			ifName := strings.TrimSpace(parsedLine[4])
+			return ifName, nil
+		}
+	}
+
+	return "", errors.New("No default interface found")
+}
+
+// parseDefaultIfNameFromIPCmdAndroid parses the default interface from ip(8) for
+// Android.
+func parseDefaultIfNameFromIPCmdAndroid(routeOut string) (string, error) {
+	parsedLines := parseIfNameFromIPCmd(routeOut)
+	if len(parsedLines) > 0 {
+		ifName := strings.TrimSpace(parsedLines[0][4])
+		return ifName, nil
+	}
+
+	return "", errors.New("No default interface found")
+}
+
+// parseIfNameFromIPCmd parses interfaces from ip(8) for
+// Linux.
+func parseIfNameFromIPCmd(routeOut string) [][]string {
+	lines := strings.Split(routeOut, "\n")
+	re := whitespaceRE.Copy()
+	parsedLines := make([][]string, 0, len(lines))
+	for _, line := range lines {
+		kvs := re.Split(line, -1)
+		if len(kvs) < 5 {
+			continue
+		}
+		parsedLines = append(parsedLines, kvs)
+	}
+	return parsedLines
+}
+
+// parseDefaultIfNameWindows parses the default interface from `netstat -rn` and
+// `ipconfig` on Windows.
+//
+// This has been deprecated in favor of a Powershell-based solution because of
+// issues with localized Windows versions, but is currently retained for backward
+// compatibility
+func parseDefaultIfNameWindows(routeOut, ipconfigOut string) (string, error) {
+	defaultIPAddr, err := parseDefaultIPAddrWindowsRoute(routeOut)
+	if err != nil {
+		return "", err
+	}
+
+	ifName, err := parseDefaultIfNameWindowsIPConfig(defaultIPAddr, ipconfigOut)
+	if err != nil {
+		return "", err
+	}
+
+	return ifName, nil
+}
+
+// parseDefaultIPAddrWindowsRoute parses the IP address on the default interface
+// `netstat -rn`.
+//
+// NOTES(sean): Only IPv4 addresses are parsed at this time.  If you have an
+// IPv6 connected host, submit an issue on github.com/hashicorp/go-sockaddr with
+// the output from `netstat -rn`, `ipconfig`, and version of Windows to see IPv6
+// support added.
+//
+// This has been deprecated in favor of a Powershell-based solution because of
+// issues with localized Windows versions, but is currently retained for backward
+// compatibility.
+func parseDefaultIPAddrWindowsRoute(routeOut string) (string, error) {
+	lines := strings.Split(routeOut, "\n")
+	re := whitespaceRE.Copy()
+	for _, line := range lines {
+		kvs := re.Split(strings.TrimSpace(line), -1)
+		if len(kvs) < 3 {
+			continue
+		}
+
+		if kvs[0] == "0.0.0.0" && kvs[1] == "0.0.0.0" {
+			defaultIPAddr := strings.TrimSpace(kvs[3])
+			return defaultIPAddr, nil
+		}
+	}
+
+	return "", errors.New("No IP on default interface found")
+}
+
+// parseDefaultIfNameWindowsIPConfig parses the output of `ipconfig` to find the
+// interface name forwarding traffic to the default gateway.
+//
+// This has been deprecated in favor of a Powershell-based solution because of
+// issues with localized Windows versions, but is currently retained for backward
+// compatibility
+func parseDefaultIfNameWindowsIPConfig(defaultIPAddr, routeOut string) (string, error) {
+	lines := strings.Split(routeOut, "\n")
+	ifNameRe := ifNameRE.Copy()
+	ipAddrRe := ipAddrRE.Copy()
+	var ifName string
+	for _, line := range lines {
+		switch ifNameMatches := ifNameRe.FindStringSubmatch(line); {
+		case len(ifNameMatches) > 1:
+			ifName = ifNameMatches[1]
+			continue
+		}
+
+		switch ipAddrMatches := ipAddrRe.FindStringSubmatch(line); {
+		case len(ipAddrMatches) > 1 && ipAddrMatches[1] == defaultIPAddr:
+			return ifName, nil
+		}
+	}
+
+	return "", errors.New("No default interface found with matching IP")
+}
+
+```
+
+#### ifattr.go
+
+```text
+package sockaddr
+
+import (
+	"fmt"
+	"net"
+)
+
+// IfAddr is a union of a SockAddr and a net.Interface.
+type IfAddr struct {
+	SockAddr
+	net.Interface
+}
+
+// Attr returns the named attribute as a string
+func (ifAddr IfAddr) Attr(attrName AttrName) (string, error) {
+	val := IfAddrAttr(ifAddr, attrName)
+	if val != "" {
+		return val, nil
+	}
+
+	return Attr(ifAddr.SockAddr, attrName)
+}
+
+// Attr returns the named attribute as a string
+func Attr(sa SockAddr, attrName AttrName) (string, error) {
+	switch sockType := sa.Type(); {
+	case sockType&TypeIP != 0:
+		ip := *ToIPAddr(sa)
+		attrVal := IPAddrAttr(ip, attrName)
+		if attrVal != "" {
+			return attrVal, nil
+		}
+
+		if sockType == TypeIPv4 {
+			ipv4 := *ToIPv4Addr(sa)
+			attrVal := IPv4AddrAttr(ipv4, attrName)
+			if attrVal != "" {
+				return attrVal, nil
+			}
+		} else if sockType == TypeIPv6 {
+			ipv6 := *ToIPv6Addr(sa)
+			attrVal := IPv6AddrAttr(ipv6, attrName)
+			if attrVal != "" {
+				return attrVal, nil
+			}
+		}
+
+	case sockType == TypeUnix:
+		us := *ToUnixSock(sa)
+		attrVal := UnixSockAttr(us, attrName)
+		if attrVal != "" {
+			return attrVal, nil
+		}
+	}
+
+	// Non type-specific attributes
+	switch attrName {
+	case "string":
+		return sa.String(), nil
+	case "type":
+		return sa.Type().String(), nil
+	}
+
+	return "", fmt.Errorf("unsupported attribute name %q", attrName)
+}
+
+```
+
+#### ipaddr.go
+
+```text
+package sockaddr
+
+import (
+	"fmt"
+	"math/big"
+	"net"
+	"strings"
+)
+
+// Constants for the sizes of IPv3, IPv4, and IPv6 address types.
+const (
+	IPv3len = 6
+	IPv4len = 4
+	IPv6len = 16
+)
+
+// IPAddr is a generic IP address interface for IPv4 and IPv6 addresses,
+// networks, and socket endpoints.
+type IPAddr interface {
+	SockAddr
+	AddressBinString() string
+	AddressHexString() string
+	Cmp(SockAddr) int
+	CmpAddress(SockAddr) int
+	CmpPort(SockAddr) int
+	FirstUsable() IPAddr
+	Host() IPAddr
+	IPPort() IPPort
+	LastUsable() IPAddr
+	Maskbits() int
+	NetIP() *net.IP
+	NetIPMask() *net.IPMask
+	NetIPNet() *net.IPNet
+	Network() IPAddr
+	Octets() []int
+}
+
+// IPPort is the type for an IP port number for the TCP and UDP IP transports.
+type IPPort uint16
+
+// IPPrefixLen is a typed integer representing the prefix length for a given
+// IPAddr.
+type IPPrefixLen byte
+
+// ipAddrAttrMap is a map of the IPAddr type-specific attributes.
+var ipAddrAttrMap map[AttrName]func(IPAddr) string
+var ipAddrAttrs []AttrName
+
+func init() {
+	ipAddrInit()
+}
+
+// NewIPAddr creates a new IPAddr from a string.  Returns nil if the string is
+// not an IPv4 or an IPv6 address.
+func NewIPAddr(addr string) (IPAddr, error) {
+	ipv4Addr, err := NewIPv4Addr(addr)
+	if err == nil {
+		return ipv4Addr, nil
+	}
+
+	ipv6Addr, err := NewIPv6Addr(addr)
+	if err == nil {
+		return ipv6Addr, nil
+	}
+
+	return nil, fmt.Errorf("invalid IPAddr %v", addr)
+}
+
+// IPAddrAttr returns a string representation of an attribute for the given
+// IPAddr.
+func IPAddrAttr(ip IPAddr, selector AttrName) string {
+	fn, found := ipAddrAttrMap[selector]
+	if !found {
+		return ""
+	}
+
+	return fn(ip)
+}
+
+// IPAttrs returns a list of attributes supported by the IPAddr type
+func IPAttrs() []AttrName {
+	return ipAddrAttrs
+}
+
+// MustIPAddr is a helper method that must return an IPAddr or panic on invalid
+// input.
+func MustIPAddr(addr string) IPAddr {
+	ip, err := NewIPAddr(addr)
+	if err != nil {
+		panic(fmt.Sprintf("Unable to create an IPAddr from %+q: %v", addr, err))
+	}
+	return ip
+}
+
+// ipAddrInit is called once at init()
+func ipAddrInit() {
+	// Sorted for human readability
+	ipAddrAttrs = []AttrName{
+		"host",
+		"address",
+		"port",
+		"netmask",
+		"network",
+		"mask_bits",
+		"binary",
+		"hex",
+		"first_usable",
+		"last_usable",
+		"octets",
+	}
+
+	ipAddrAttrMap = map[AttrName]func(ip IPAddr) string{
+		"address": func(ip IPAddr) string {
+			return ip.NetIP().String()
+		},
+		"binary": func(ip IPAddr) string {
+			return ip.AddressBinString()
+		},
+		"first_usable": func(ip IPAddr) string {
+			return ip.FirstUsable().String()
+		},
+		"hex": func(ip IPAddr) string {
+			return ip.AddressHexString()
+		},
+		"host": func(ip IPAddr) string {
+			return ip.Host().String()
+		},
+		"last_usable": func(ip IPAddr) string {
+			return ip.LastUsable().String()
+		},
+		"mask_bits": func(ip IPAddr) string {
+			return fmt.Sprintf("%d", ip.Maskbits())
+		},
+		"netmask": func(ip IPAddr) string {
+			switch v := ip.(type) {
+			case IPv4Addr:
+				ipv4Mask := IPv4Addr{
+					Address: IPv4Address(v.Mask),
+					Mask:    IPv4HostMask,
+				}
+				return ipv4Mask.String()
+			case IPv6Addr:
+				ipv6Mask := new(big.Int)
+				ipv6Mask.Set(v.Mask)
+				ipv6MaskAddr := IPv6Addr{
+					Address: IPv6Address(ipv6Mask),
+					Mask:    ipv6HostMask,
+				}
+				return ipv6MaskAddr.String()
+			default:
+				return fmt.Sprintf("<unsupported type: %T>", ip)
+			}
+		},
+		"network": func(ip IPAddr) string {
+			return ip.Network().NetIP().String()
+		},
+		"octets": func(ip IPAddr) string {
+			octets := ip.Octets()
+			octetStrs := make([]string, 0, len(octets))
+			for _, octet := range octets {
+				octetStrs = append(octetStrs, fmt.Sprintf("%d", octet))
+			}
+			return strings.Join(octetStrs, " ")
+		},
+		"port": func(ip IPAddr) string {
+			return fmt.Sprintf("%d", ip.IPPort())
+		},
+	}
+}
+
+```
+
+#### ipaddrs.go
+
+```text
+package sockaddr
+
+import "bytes"
+
+type IPAddrs []IPAddr
+
+func (s IPAddrs) Len() int      { return len(s) }
+func (s IPAddrs) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+
+// // SortIPAddrsByCmp is a type that satisfies sort.Interface and can be used
+// // by the routines in this package.  The SortIPAddrsByCmp type is used to
+// // sort IPAddrs by Cmp()
+// type SortIPAddrsByCmp struct{ IPAddrs }
+
+// // Less reports whether the element with index i should sort before the
+// // element with index j.
+// func (s SortIPAddrsByCmp) Less(i, j int) bool {
+// 	// Sort by Type, then address, then port number.
+// 	return Less(s.IPAddrs[i], s.IPAddrs[j])
+// }
+
+// SortIPAddrsBySpecificMaskLen is a type that satisfies sort.Interface and
+// can be used by the routines in this package.  The
+// SortIPAddrsBySpecificMaskLen type is used to sort IPAddrs by smallest
+// network (most specific to largest network).
+type SortIPAddrsByNetworkSize struct{ IPAddrs }
+
+// Less reports whether the element with index i should sort before the
+// element with index j.
+func (s SortIPAddrsByNetworkSize) Less(i, j int) bool {
+	// Sort masks with a larger binary value (i.e. fewer hosts per network
+	// prefix) after masks with a smaller value (larger number of hosts per
+	// prefix).
+	switch bytes.Compare([]byte(*s.IPAddrs[i].NetIPMask()), []byte(*s.IPAddrs[j].NetIPMask())) {
+	case 0:
+		// Fall through to the second test if the net.IPMasks are the
+		// same.
+		break
+	case 1:
+		return true
+	case -1:
+		return false
+	default:
+		panic("bad, m'kay?")
+	}
+
+	// Sort IPs based on the length (i.e. prefer IPv4 over IPv6).
+	iLen := len(*s.IPAddrs[i].NetIP())
+	jLen := len(*s.IPAddrs[j].NetIP())
+	if iLen != jLen {
+		return iLen > jLen
+	}
+
+	// Sort IPs based on their network address from lowest to highest.
+	switch bytes.Compare(s.IPAddrs[i].NetIPNet().IP, s.IPAddrs[j].NetIPNet().IP) {
+	case 0:
+		break
+	case 1:
+		return false
+	case -1:
+		return true
+	default:
+		panic("lol wut?")
+	}
+
+	// If a host does not have a port set, it always sorts after hosts
+	// that have a port (e.g. a host with a /32 and port number is more
+	// specific and should sort first over a host with a /32 but no port
+	// set).
+	if s.IPAddrs[i].IPPort() == 0 || s.IPAddrs[j].IPPort() == 0 {
+		return false
+	}
+	return s.IPAddrs[i].IPPort() < s.IPAddrs[j].IPPort()
+}
+
+// SortIPAddrsBySpecificMaskLen is a type that satisfies sort.Interface and
+// can be used by the routines in this package.  The
+// SortIPAddrsBySpecificMaskLen type is used to sort IPAddrs by smallest
+// network (most specific to largest network).
+type SortIPAddrsBySpecificMaskLen struct{ IPAddrs }
+
+// Less reports whether the element with index i should sort before the
+// element with index j.
+func (s SortIPAddrsBySpecificMaskLen) Less(i, j int) bool {
+	return s.IPAddrs[i].Maskbits() > s.IPAddrs[j].Maskbits()
+}
+
+// SortIPAddrsByBroadMaskLen is a type that satisfies sort.Interface and can
+// be used by the routines in this package.  The SortIPAddrsByBroadMaskLen
+// type is used to sort IPAddrs by largest network (i.e. largest subnets
+// first).
+type SortIPAddrsByBroadMaskLen struct{ IPAddrs }
+
+// Less reports whether the element with index i should sort before the
+// element with index j.
+func (s SortIPAddrsByBroadMaskLen) Less(i, j int) bool {
+	return s.IPAddrs[i].Maskbits() < s.IPAddrs[j].Maskbits()
+}
+
+```
+
+#### ipv4addr.go
+
+```text
+package sockaddr
+
+import (
+	"encoding/binary"
+	"fmt"
+	"net"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+type (
+	// IPv4Address is a named type representing an IPv4 address.
+	IPv4Address uint32
+
+	// IPv4Network is a named type representing an IPv4 network.
+	IPv4Network uint32
+
+	// IPv4Mask is a named type representing an IPv4 network mask.
+	IPv4Mask uint32
+)
+
+// IPv4HostMask is a constant represents a /32 IPv4 Address
+// (i.e. 255.255.255.255).
+const IPv4HostMask = IPv4Mask(0xffffffff)
+
+// ipv4AddrAttrMap is a map of the IPv4Addr type-specific attributes.
+var ipv4AddrAttrMap map[AttrName]func(IPv4Addr) string
+var ipv4AddrAttrs []AttrName
+var trailingHexNetmaskRE *regexp.Regexp
+
+// IPv4Addr implements a convenience wrapper around the union of Go's
+// built-in net.IP and net.IPNet types.  In UNIX-speak, IPv4Addr implements
+// `sockaddr` when the the address family is set to AF_INET
+// (i.e. `sockaddr_in`).
+type IPv4Addr struct {
+	IPAddr
+	Address IPv4Address
+	Mask    IPv4Mask
+	Port    IPPort
+}
+
+func init() {
+	ipv4AddrInit()
+	trailingHexNetmaskRE = regexp.MustCompile(`/([0f]{8})$`)
+}
+
+// NewIPv4Addr creates an IPv4Addr from a string.  String can be in the form
+// of either an IPv4:port (e.g. `1.2.3.4:80`, in which case the mask is
+// assumed to be a `/32`), an IPv4 address (e.g. `1.2.3.4`, also with a `/32`
+// mask), or an IPv4 CIDR (e.g. `1.2.3.4/24`, which has its IP port
+// initialized to zero).  ipv4Str can not be a hostname.
+//
+// NOTE: Many net.*() routines will initialize and return an IPv6 address.
+// To create uint32 values from net.IP, always test to make sure the address
+// returned can be converted to a 4 byte array using To4().
+func NewIPv4Addr(ipv4Str string) (IPv4Addr, error) {
+	// Strip off any bogus hex-encoded netmasks that will be mis-parsed by Go.  In
+	// particular, clients with the Barracuda VPN client will see something like:
+	// `192.168.3.51/00ffffff` as their IP address.
+	trailingHexNetmaskRe := trailingHexNetmaskRE.Copy()
+	if match := trailingHexNetmaskRe.FindStringIndex(ipv4Str); match != nil {
+		ipv4Str = ipv4Str[:match[0]]
+	}
+
+	// Parse as an IPv4 CIDR
+	ipAddr, network, err := net.ParseCIDR(ipv4Str)
+	if err == nil {
+		ipv4 := ipAddr.To4()
+		if ipv4 == nil {
+			return IPv4Addr{}, fmt.Errorf("Unable to convert %s to an IPv4 address", ipv4Str)
+		}
+
+		// If we see an IPv6 netmask, convert it to an IPv4 mask.
+		netmaskSepPos := strings.LastIndexByte(ipv4Str, '/')
+		if netmaskSepPos != -1 && netmaskSepPos+1 < len(ipv4Str) {
+			netMask, err := strconv.ParseUint(ipv4Str[netmaskSepPos+1:], 10, 8)
+			if err != nil {
+				return IPv4Addr{}, fmt.Errorf("Unable to convert %s to an IPv4 address: unable to parse CIDR netmask: %v", ipv4Str, err)
+			} else if netMask > 128 {
+				return IPv4Addr{}, fmt.Errorf("Unable to convert %s to an IPv4 address: invalid CIDR netmask", ipv4Str)
+			}
+
+			if netMask >= 96 {
+				// Convert the IPv6 netmask to an IPv4 netmask
+				network.Mask = net.CIDRMask(int(netMask-96), IPv4len*8)
+			}
+		}
+		ipv4Addr := IPv4Addr{
+			Address: IPv4Address(binary.BigEndian.Uint32(ipv4)),
+			Mask:    IPv4Mask(binary.BigEndian.Uint32(network.Mask)),
+		}
+		return ipv4Addr, nil
+	}
+
+	// Attempt to parse ipv4Str as a /32 host with a port number.
+	tcpAddr, err := net.ResolveTCPAddr("tcp4", ipv4Str)
+	if err == nil {
+		ipv4 := tcpAddr.IP.To4()
+		if ipv4 == nil {
+			return IPv4Addr{}, fmt.Errorf("Unable to resolve %+q as an IPv4 address", ipv4Str)
+		}
+
+		ipv4Uint32 := binary.BigEndian.Uint32(ipv4)
+		ipv4Addr := IPv4Addr{
+			Address: IPv4Address(ipv4Uint32),
+			Mask:    IPv4HostMask,
+			Port:    IPPort(tcpAddr.Port),
+		}
+
+		return ipv4Addr, nil
+	}
+
+	// Parse as a naked IPv4 address
+	ip := net.ParseIP(ipv4Str)
+	if ip != nil {
+		ipv4 := ip.To4()
+		if ipv4 == nil {
+			return IPv4Addr{}, fmt.Errorf("Unable to string convert %+q to an IPv4 address", ipv4Str)
+		}
+
+		ipv4Uint32 := binary.BigEndian.Uint32(ipv4)
+		ipv4Addr := IPv4Addr{
+			Address: IPv4Address(ipv4Uint32),
+			Mask:    IPv4HostMask,
+		}
+		return ipv4Addr, nil
+	}
+
+	return IPv4Addr{}, fmt.Errorf("Unable to parse %+q to an IPv4 address: %v", ipv4Str, err)
+}
+
+// AddressBinString returns a string with the IPv4Addr's Address represented
+// as a sequence of '0' and '1' characters.  This method is useful for
+// debugging or by operators who want to inspect an address.
+func (ipv4 IPv4Addr) AddressBinString() string {
+	return fmt.Sprintf("%032s", strconv.FormatUint(uint64(ipv4.Address), 2))
+}
+
+// AddressHexString returns a string with the IPv4Addr address represented as
+// a sequence of hex characters.  This method is useful for debugging or by
+// operators who want to inspect an address.
+func (ipv4 IPv4Addr) AddressHexString() string {
+	return fmt.Sprintf("%08s", strconv.FormatUint(uint64(ipv4.Address), 16))
+}
+
+// Broadcast is an IPv4Addr-only method that returns the broadcast address of
+// the network.
+//
+// NOTE: IPv6 only supports multicast, so this method only exists for
+// IPv4Addr.
+func (ipv4 IPv4Addr) Broadcast() IPAddr {
+	// Nothing should listen on a broadcast address.
+	return IPv4Addr{
+		Address: IPv4Address(ipv4.BroadcastAddress()),
+		Mask:    IPv4HostMask,
+	}
+}
+
+// BroadcastAddress returns a IPv4Network of the IPv4Addr's broadcast
+// address.
+func (ipv4 IPv4Addr) BroadcastAddress() IPv4Network {
+	return IPv4Network(uint32(ipv4.Address)&uint32(ipv4.Mask) | ^uint32(ipv4.Mask))
+}
+
+// CmpAddress follows the Cmp() standard protocol and returns:
+//
+// - -1 If the receiver should sort first because its address is lower than arg
+// - 0 if the SockAddr arg is equal to the receiving IPv4Addr or the argument is
+//   of a different type.
+// - 1 If the argument should sort first.
+func (ipv4 IPv4Addr) CmpAddress(sa SockAddr) int {
+	ipv4b, ok := sa.(IPv4Addr)
+	if !ok {
+		return sortDeferDecision
+	}
+
+	switch {
+	case ipv4.Address == ipv4b.Address:
+		return sortDeferDecision
+	case ipv4.Address < ipv4b.Address:
+		return sortReceiverBeforeArg
+	default:
+		return sortArgBeforeReceiver
+	}
+}
+
+// CmpPort follows the Cmp() standard protocol and returns:
+//
+// - -1 If the receiver should sort first because its port is lower than arg
+// - 0 if the SockAddr arg's port number is equal to the receiving IPv4Addr,
+//   regardless of type.
+// - 1 If the argument should sort first.
+func (ipv4 IPv4Addr) CmpPort(sa SockAddr) int {
+	var saPort IPPort
+	switch v := sa.(type) {
+	case IPv4Addr:
+		saPort = v.Port
+	case IPv6Addr:
+		saPort = v.Port
+	default:
+		return sortDeferDecision
+	}
+
+	switch {
+	case ipv4.Port == saPort:
+		return sortDeferDecision
+	case ipv4.Port < saPort:
+		return sortReceiverBeforeArg
+	default:
+		return sortArgBeforeReceiver
+	}
+}
+
+// CmpRFC follows the Cmp() standard protocol and returns:
+//
+// - -1 If the receiver should sort first because it belongs to the RFC and its
+//   arg does not
+// - 0 if the receiver and arg both belong to the same RFC or neither do.
+// - 1 If the arg belongs to the RFC but receiver does not.
+func (ipv4 IPv4Addr) CmpRFC(rfcNum uint, sa SockAddr) int {
+	recvInRFC := IsRFC(rfcNum, ipv4)
+	ipv4b, ok := sa.(IPv4Addr)
+	if !ok {
+		// If the receiver is part of the desired RFC and the SockAddr
+		// argument is not, return -1 so that the receiver sorts before
+		// the non-IPv4 SockAddr.  Conversely, if the receiver is not
+		// part of the RFC, punt on sorting and leave it for the next
+		// sorter.
+		if recvInRFC {
+			return sortReceiverBeforeArg
+		} else {
+			return sortDeferDecision
+		}
+	}
+
+	argInRFC := IsRFC(rfcNum, ipv4b)
+	switch {
+	case (recvInRFC && argInRFC), (!recvInRFC && !argInRFC):
+		// If a and b both belong to the RFC, or neither belong to
+		// rfcNum, defer sorting to the next sorter.
+		return sortDeferDecision
+	case recvInRFC && !argInRFC:
+		return sortReceiverBeforeArg
+	default:
+		return sortArgBeforeReceiver
+	}
+}
+
+// Contains returns true if the SockAddr is contained within the receiver.
+func (ipv4 IPv4Addr) Contains(sa SockAddr) bool {
+	ipv4b, ok := sa.(IPv4Addr)
+	if !ok {
+		return false
+	}
+
+	return ipv4.ContainsNetwork(ipv4b)
+}
+
+// ContainsAddress returns true if the IPv4Address is contained within the
+// receiver.
+func (ipv4 IPv4Addr) ContainsAddress(x IPv4Address) bool {
+	return IPv4Address(ipv4.NetworkAddress()) <= x &&
+		IPv4Address(ipv4.BroadcastAddress()) >= x
+}
+
+// ContainsNetwork returns true if the network from IPv4Addr is contained
+// within the receiver.
+func (ipv4 IPv4Addr) ContainsNetwork(x IPv4Addr) bool {
+	return ipv4.NetworkAddress() <= x.NetworkAddress() &&
+		ipv4.BroadcastAddress() >= x.BroadcastAddress()
+}
+
+// DialPacketArgs returns the arguments required to be passed to
+// net.DialUDP().  If the Mask of ipv4 is not a /32 or the Port is 0,
+// DialPacketArgs() will fail.  See Host() to create an IPv4Addr with its
+// mask set to /32.
+func (ipv4 IPv4Addr) DialPacketArgs() (network, dialArgs string) {
+	if ipv4.Mask != IPv4HostMask || ipv4.Port == 0 {
+		return "udp4", ""
+	}
+	return "udp4", fmt.Sprintf("%s:%d", ipv4.NetIP().String(), ipv4.Port)
+}
+
+// DialStreamArgs returns the arguments required to be passed to
+// net.DialTCP().  If the Mask of ipv4 is not a /32 or the Port is 0,
+// DialStreamArgs() will fail.  See Host() to create an IPv4Addr with its
+// mask set to /32.
+func (ipv4 IPv4Addr) DialStreamArgs() (network, dialArgs string) {
+	if ipv4.Mask != IPv4HostMask || ipv4.Port == 0 {
+		return "tcp4", ""
+	}
+	return "tcp4", fmt.Sprintf("%s:%d", ipv4.NetIP().String(), ipv4.Port)
+}
+
+// Equal returns true if a SockAddr is equal to the receiving IPv4Addr.
+func (ipv4 IPv4Addr) Equal(sa SockAddr) bool {
+	ipv4b, ok := sa.(IPv4Addr)
+	if !ok {
+		return false
+	}
+
+	if ipv4.Port != ipv4b.Port {
+		return false
+	}
+
+	if ipv4.Address != ipv4b.Address {
+		return false
+	}
+
+	if ipv4.NetIPNet().String() != ipv4b.NetIPNet().String() {
+		return false
+	}
+
+	return true
+}
+
+// FirstUsable returns an IPv4Addr set to the first address following the
+// network prefix.  The first usable address in a network is normally the
+// gateway and should not be used except by devices forwarding packets
+// between two administratively distinct networks (i.e. a router).  This
+// function does not discriminate against first usable vs "first address that
+// should be used."  For example, FirstUsable() on "192.168.1.10/24" would
+// return the address "192.168.1.1/24".
+func (ipv4 IPv4Addr) FirstUsable() IPAddr {
+	addr := ipv4.NetworkAddress()
+
+	// If /32, return the address itself. If /31 assume a point-to-point
+	// link and return the lower address.
+	if ipv4.Maskbits() < 31 {
+		addr++
+	}
+
+	return IPv4Addr{
+		Address: IPv4Address(addr),
+		Mask:    IPv4HostMask,
+	}
+}
+
+// Host returns a copy of ipv4 with its mask set to /32 so that it can be
+// used by DialPacketArgs(), DialStreamArgs(), ListenPacketArgs(), or
+// ListenStreamArgs().
+func (ipv4 IPv4Addr) Host() IPAddr {
+	// Nothing should listen on a broadcast address.
+	return IPv4Addr{
+		Address: ipv4.Address,
+		Mask:    IPv4HostMask,
+		Port:    ipv4.Port,
+	}
+}
+
+// IPPort returns the Port number attached to the IPv4Addr
+func (ipv4 IPv4Addr) IPPort() IPPort {
+	return ipv4.Port
+}
+
+// LastUsable returns the last address before the broadcast address in a
+// given network.
+func (ipv4 IPv4Addr) LastUsable() IPAddr {
+	addr := ipv4.BroadcastAddress()
+
+	// If /32, return the address itself. If /31 assume a point-to-point
+	// link and return the upper address.
+	if ipv4.Maskbits() < 31 {
+		addr--
+	}
+
+	return IPv4Addr{
+		Address: IPv4Address(addr),
+		Mask:    IPv4HostMask,
+	}
+}
+
+// ListenPacketArgs returns the arguments required to be passed to
+// net.ListenUDP().  If the Mask of ipv4 is not a /32, ListenPacketArgs()
+// will fail.  See Host() to create an IPv4Addr with its mask set to /32.
+func (ipv4 IPv4Addr) ListenPacketArgs() (network, listenArgs string) {
+	if ipv4.Mask != IPv4HostMask {
+		return "udp4", ""
+	}
+	return "udp4", fmt.Sprintf("%s:%d", ipv4.NetIP().String(), ipv4.Port)
+}
+
+// ListenStreamArgs returns the arguments required to be passed to
+// net.ListenTCP().  If the Mask of ipv4 is not a /32, ListenStreamArgs()
+// will fail.  See Host() to create an IPv4Addr with its mask set to /32.
+func (ipv4 IPv4Addr) ListenStreamArgs() (network, listenArgs string) {
+	if ipv4.Mask != IPv4HostMask {
+		return "tcp4", ""
+	}
+	return "tcp4", fmt.Sprintf("%s:%d", ipv4.NetIP().String(), ipv4.Port)
+}
+
+// Maskbits returns the number of network mask bits in a given IPv4Addr.  For
+// example, the Maskbits() of "192.168.1.1/24" would return 24.
+func (ipv4 IPv4Addr) Maskbits() int {
+	mask := make(net.IPMask, IPv4len)
+	binary.BigEndian.PutUint32(mask, uint32(ipv4.Mask))
+	maskOnes, _ := mask.Size()
+	return maskOnes
+}
+
+// MustIPv4Addr is a helper method that must return an IPv4Addr or panic on
+// invalid input.
+func MustIPv4Addr(addr string) IPv4Addr {
+	ipv4, err := NewIPv4Addr(addr)
+	if err != nil {
+		panic(fmt.Sprintf("Unable to create an IPv4Addr from %+q: %v", addr, err))
+	}
+	return ipv4
+}
+
+// NetIP returns the address as a net.IP (address is always presized to
+// IPv4).
+func (ipv4 IPv4Addr) NetIP() *net.IP {
+	x := make(net.IP, IPv4len)
+	binary.BigEndian.PutUint32(x, uint32(ipv4.Address))
+	return &x
+}
+
+// NetIPMask create a new net.IPMask from the IPv4Addr.
+func (ipv4 IPv4Addr) NetIPMask() *net.IPMask {
+	ipv4Mask := net.IPMask{}
+	ipv4Mask = make(net.IPMask, IPv4len)
+	binary.BigEndian.PutUint32(ipv4Mask, uint32(ipv4.Mask))
+	return &ipv4Mask
+}
+
+// NetIPNet create a new net.IPNet from the IPv4Addr.
+func (ipv4 IPv4Addr) NetIPNet() *net.IPNet {
+	ipv4net := &net.IPNet{}
+	ipv4net.IP = make(net.IP, IPv4len)
+	binary.BigEndian.PutUint32(ipv4net.IP, uint32(ipv4.NetworkAddress()))
+	ipv4net.Mask = *ipv4.NetIPMask()
+	return ipv4net
+}
+
+// Network returns the network prefix or network address for a given network.
+func (ipv4 IPv4Addr) Network() IPAddr {
+	return IPv4Addr{
+		Address: IPv4Address(ipv4.NetworkAddress()),
+		Mask:    ipv4.Mask,
+	}
+}
+
+// NetworkAddress returns an IPv4Network of the IPv4Addr's network address.
+func (ipv4 IPv4Addr) NetworkAddress() IPv4Network {
+	return IPv4Network(uint32(ipv4.Address) & uint32(ipv4.Mask))
+}
+
+// Octets returns a slice of the four octets in an IPv4Addr's Address.  The
+// order of the bytes is big endian.
+func (ipv4 IPv4Addr) Octets() []int {
+	return []int{
+		int(ipv4.Address >> 24),
+		int((ipv4.Address >> 16) & 0xff),
+		int((ipv4.Address >> 8) & 0xff),
+		int(ipv4.Address & 0xff),
+	}
+}
+
+// String returns a string representation of the IPv4Addr
+func (ipv4 IPv4Addr) String() string {
+	if ipv4.Port != 0 {
+		return fmt.Sprintf("%s:%d", ipv4.NetIP().String(), ipv4.Port)
+	}
+
+	if ipv4.Maskbits() == 32 {
+		return ipv4.NetIP().String()
+	}
+
+	return fmt.Sprintf("%s/%d", ipv4.NetIP().String(), ipv4.Maskbits())
+}
+
+// Type is used as a type switch and returns TypeIPv4
+func (IPv4Addr) Type() SockAddrType {
+	return TypeIPv4
+}
+
+// IPv4AddrAttr returns a string representation of an attribute for the given
+// IPv4Addr.
+func IPv4AddrAttr(ipv4 IPv4Addr, selector AttrName) string {
+	fn, found := ipv4AddrAttrMap[selector]
+	if !found {
+		return ""
+	}
+
+	return fn(ipv4)
+}
+
+// IPv4Attrs returns a list of attributes supported by the IPv4Addr type
+func IPv4Attrs() []AttrName {
+	return ipv4AddrAttrs
+}
+
+// ipv4AddrInit is called once at init()
+func ipv4AddrInit() {
+	// Sorted for human readability
+	ipv4AddrAttrs = []AttrName{
+		"size", // Same position as in IPv6 for output consistency
+		"broadcast",
+		"uint32",
+	}
+
+	ipv4AddrAttrMap = map[AttrName]func(ipv4 IPv4Addr) string{
+		"broadcast": func(ipv4 IPv4Addr) string {
+			return ipv4.Broadcast().String()
+		},
+		"size": func(ipv4 IPv4Addr) string {
+			return fmt.Sprintf("%d", 1<<uint(IPv4len*8-ipv4.Maskbits()))
+		},
+		"uint32": func(ipv4 IPv4Addr) string {
+			return fmt.Sprintf("%d", uint32(ipv4.Address))
+		},
+	}
+}
+
+```
+
+#### ipv6addr.go
+
+```text
+package sockaddr
+
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"math/big"
+	"net"
+)
+
+type (
+	// IPv6Address is a named type representing an IPv6 address.
+	IPv6Address *big.Int
+
+	// IPv6Network is a named type representing an IPv6 network.
+	IPv6Network *big.Int
+
+	// IPv6Mask is a named type representing an IPv6 network mask.
+	IPv6Mask *big.Int
+)
+
+// IPv6HostPrefix is a constant represents a /128 IPv6 Prefix.
+const IPv6HostPrefix = IPPrefixLen(128)
+
+// ipv6HostMask is an unexported big.Int representing a /128 IPv6 address.
+// This value must be a constant and always set to all ones.
+var ipv6HostMask IPv6Mask
+
+// ipv6AddrAttrMap is a map of the IPv6Addr type-specific attributes.
+var ipv6AddrAttrMap map[AttrName]func(IPv6Addr) string
+var ipv6AddrAttrs []AttrName
+
+func init() {
+	biMask := new(big.Int)
+	biMask.SetBytes([]byte{
+		0xff, 0xff,
+		0xff, 0xff,
+		0xff, 0xff,
+		0xff, 0xff,
+		0xff, 0xff,
+		0xff, 0xff,
+		0xff, 0xff,
+		0xff, 0xff,
+	},
+	)
+	ipv6HostMask = IPv6Mask(biMask)
+
+	ipv6AddrInit()
+}
+
+// IPv6Addr implements a convenience wrapper around the union of Go's
+// built-in net.IP and net.IPNet types.  In UNIX-speak, IPv6Addr implements
+// `sockaddr` when the the address family is set to AF_INET6
+// (i.e. `sockaddr_in6`).
+type IPv6Addr struct {
+	IPAddr
+	Address IPv6Address
+	Mask    IPv6Mask
+	Port    IPPort
+}
+
+// NewIPv6Addr creates an IPv6Addr from a string.  String can be in the form of
+// an an IPv6:port (e.g. `[2001:4860:0:2001::68]:80`, in which case the mask is
+// assumed to be a /128), an IPv6 address (e.g. `2001:4860:0:2001::68`, also
+// with a `/128` mask), an IPv6 CIDR (e.g. `2001:4860:0:2001::68/64`, which has
+// its IP port initialized to zero).  ipv6Str can not be a hostname.
+//
+// NOTE: Many net.*() routines will initialize and return an IPv4 address.
+// Always test to make sure the address returned cannot be converted to a 4 byte
+// array using To4().
+func NewIPv6Addr(ipv6Str string) (IPv6Addr, error) {
+	v6Addr := false
+LOOP:
+	for i := 0; i < len(ipv6Str); i++ {
+		switch ipv6Str[i] {
+		case '.':
+			break LOOP
+		case ':':
+			v6Addr = true
+			break LOOP
+		}
+	}
+
+	if !v6Addr {
+		return IPv6Addr{}, fmt.Errorf("Unable to resolve %+q as an IPv6 address, appears to be an IPv4 address", ipv6Str)
+	}
+
+	// Attempt to parse ipv6Str as a /128 host with a port number.
+	tcpAddr, err := net.ResolveTCPAddr("tcp6", ipv6Str)
+	if err == nil {
+		ipv6 := tcpAddr.IP.To16()
+		if ipv6 == nil {
+			return IPv6Addr{}, fmt.Errorf("Unable to resolve %+q as a 16byte IPv6 address", ipv6Str)
+		}
+
+		ipv6BigIntAddr := new(big.Int)
+		ipv6BigIntAddr.SetBytes(ipv6)
+
+		ipv6BigIntMask := new(big.Int)
+		ipv6BigIntMask.Set(ipv6HostMask)
+
+		ipv6Addr := IPv6Addr{
+			Address: IPv6Address(ipv6BigIntAddr),
+			Mask:    IPv6Mask(ipv6BigIntMask),
+			Port:    IPPort(tcpAddr.Port),
+		}
+
+		return ipv6Addr, nil
+	}
+
+	// Parse as a naked IPv6 address.  Trim square brackets if present.
+	if len(ipv6Str) > 2 && ipv6Str[0] == '[' && ipv6Str[len(ipv6Str)-1] == ']' {
+		ipv6Str = ipv6Str[1 : len(ipv6Str)-1]
+	}
+	ip := net.ParseIP(ipv6Str)
+	if ip != nil {
+		ipv6 := ip.To16()
+		if ipv6 == nil {
+			return IPv6Addr{}, fmt.Errorf("Unable to string convert %+q to a 16byte IPv6 address", ipv6Str)
+		}
+
+		ipv6BigIntAddr := new(big.Int)
+		ipv6BigIntAddr.SetBytes(ipv6)
+
+		ipv6BigIntMask := new(big.Int)
+		ipv6BigIntMask.Set(ipv6HostMask)
+
+		return IPv6Addr{
+			Address: IPv6Address(ipv6BigIntAddr),
+			Mask:    IPv6Mask(ipv6BigIntMask),
+		}, nil
+	}
+
+	// Parse as an IPv6 CIDR
+	ipAddr, network, err := net.ParseCIDR(ipv6Str)
+	if err == nil {
+		ipv6 := ipAddr.To16()
+		if ipv6 == nil {
+			return IPv6Addr{}, fmt.Errorf("Unable to convert %+q to a 16byte IPv6 address", ipv6Str)
+		}
+
+		ipv6BigIntAddr := new(big.Int)
+		ipv6BigIntAddr.SetBytes(ipv6)
+
+		ipv6BigIntMask := new(big.Int)
+		ipv6BigIntMask.SetBytes(network.Mask)
+
+		ipv6Addr := IPv6Addr{
+			Address: IPv6Address(ipv6BigIntAddr),
+			Mask:    IPv6Mask(ipv6BigIntMask),
+		}
+		return ipv6Addr, nil
+	}
+
+	return IPv6Addr{}, fmt.Errorf("Unable to parse %+q to an IPv6 address: %v", ipv6Str, err)
+}
+
+// AddressBinString returns a string with the IPv6Addr's Address represented
+// as a sequence of '0' and '1' characters.  This method is useful for
+// debugging or by operators who want to inspect an address.
+func (ipv6 IPv6Addr) AddressBinString() string {
+	bi := big.Int(*ipv6.Address)
+	return fmt.Sprintf("%0128s", bi.Text(2))
+}
+
+// AddressHexString returns a string with the IPv6Addr address represented as
+// a sequence of hex characters.  This method is useful for debugging or by
+// operators who want to inspect an address.
+func (ipv6 IPv6Addr) AddressHexString() string {
+	bi := big.Int(*ipv6.Address)
+	return fmt.Sprintf("%032s", bi.Text(16))
+}
+
+// CmpAddress follows the Cmp() standard protocol and returns:
+//
+// - -1 If the receiver should sort first because its address is lower than arg
+// - 0 if the SockAddr arg equal to the receiving IPv6Addr or the argument is of a
+//   different type.
+// - 1 If the argument should sort first.
+func (ipv6 IPv6Addr) CmpAddress(sa SockAddr) int {
+	ipv6b, ok := sa.(IPv6Addr)
+	if !ok {
+		return sortDeferDecision
+	}
+
+	ipv6aBigInt := new(big.Int)
+	ipv6aBigInt.Set(ipv6.Address)
+	ipv6bBigInt := new(big.Int)
+	ipv6bBigInt.Set(ipv6b.Address)
+
+	return ipv6aBigInt.Cmp(ipv6bBigInt)
+}
+
+// CmpPort follows the Cmp() standard protocol and returns:
+//
+// - -1 If the receiver should sort first because its port is lower than arg
+// - 0 if the SockAddr arg's port number is equal to the receiving IPv6Addr,
+//   regardless of type.
+// - 1 If the argument should sort first.
+func (ipv6 IPv6Addr) CmpPort(sa SockAddr) int {
+	var saPort IPPort
+	switch v := sa.(type) {
+	case IPv4Addr:
+		saPort = v.Port
+	case IPv6Addr:
+		saPort = v.Port
+	default:
+		return sortDeferDecision
+	}
+
+	switch {
+	case ipv6.Port == saPort:
+		return sortDeferDecision
+	case ipv6.Port < saPort:
+		return sortReceiverBeforeArg
+	default:
+		return sortArgBeforeReceiver
+	}
+}
+
+// CmpRFC follows the Cmp() standard protocol and returns:
+//
+// - -1 If the receiver should sort first because it belongs to the RFC and its
+//   arg does not
+// - 0 if the receiver and arg both belong to the same RFC or neither do.
+// - 1 If the arg belongs to the RFC but receiver does not.
+func (ipv6 IPv6Addr) CmpRFC(rfcNum uint, sa SockAddr) int {
+	recvInRFC := IsRFC(rfcNum, ipv6)
+	ipv6b, ok := sa.(IPv6Addr)
+	if !ok {
+		// If the receiver is part of the desired RFC and the SockAddr
+		// argument is not, sort receiver before the non-IPv6 SockAddr.
+		// Conversely, if the receiver is not part of the RFC, punt on
+		// sorting and leave it for the next sorter.
+		if recvInRFC {
+			return sortReceiverBeforeArg
+		} else {
+			return sortDeferDecision
+		}
+	}
+
+	argInRFC := IsRFC(rfcNum, ipv6b)
+	switch {
+	case (recvInRFC && argInRFC), (!recvInRFC && !argInRFC):
+		// If a and b both belong to the RFC, or neither belong to
+		// rfcNum, defer sorting to the next sorter.
+		return sortDeferDecision
+	case recvInRFC && !argInRFC:
+		return sortReceiverBeforeArg
+	default:
+		return sortArgBeforeReceiver
+	}
+}
+
+// Contains returns true if the SockAddr is contained within the receiver.
+func (ipv6 IPv6Addr) Contains(sa SockAddr) bool {
+	ipv6b, ok := sa.(IPv6Addr)
+	if !ok {
+		return false
+	}
+
+	return ipv6.ContainsNetwork(ipv6b)
+}
+
+// ContainsAddress returns true if the IPv6Address is contained within the
+// receiver.
+func (ipv6 IPv6Addr) ContainsAddress(x IPv6Address) bool {
+	xAddr := IPv6Addr{
+		Address: x,
+		Mask:    ipv6HostMask,
+	}
+
+	{
+		xIPv6 := xAddr.FirstUsable().(IPv6Addr)
+		yIPv6 := ipv6.FirstUsable().(IPv6Addr)
+		if xIPv6.CmpAddress(yIPv6) >= 1 {
+			return false
+		}
+	}
+
+	{
+		xIPv6 := xAddr.LastUsable().(IPv6Addr)
+		yIPv6 := ipv6.LastUsable().(IPv6Addr)
+		if xIPv6.CmpAddress(yIPv6) <= -1 {
+			return false
+		}
+	}
+	return true
+}
+
+// ContainsNetwork returns true if the network from IPv6Addr is contained within
+// the receiver.
+func (x IPv6Addr) ContainsNetwork(y IPv6Addr) bool {
+	{
+		xIPv6 := x.FirstUsable().(IPv6Addr)
+		yIPv6 := y.FirstUsable().(IPv6Addr)
+		if ret := xIPv6.CmpAddress(yIPv6); ret >= 1 {
+			return false
+		}
+	}
+
+	{
+		xIPv6 := x.LastUsable().(IPv6Addr)
+		yIPv6 := y.LastUsable().(IPv6Addr)
+		if ret := xIPv6.CmpAddress(yIPv6); ret <= -1 {
+			return false
+		}
+	}
+	return true
+}
+
+// DialPacketArgs returns the arguments required to be passed to
+// net.DialUDP().  If the Mask of ipv6 is not a /128 or the Port is 0,
+// DialPacketArgs() will fail.  See Host() to create an IPv6Addr with its
+// mask set to /128.
+func (ipv6 IPv6Addr) DialPacketArgs() (network, dialArgs string) {
+	ipv6Mask := big.Int(*ipv6.Mask)
+	if ipv6Mask.Cmp(ipv6HostMask) != 0 || ipv6.Port == 0 {
+		return "udp6", ""
+	}
+	return "udp6", fmt.Sprintf("[%s]:%d", ipv6.NetIP().String(), ipv6.Port)
+}
+
+// DialStreamArgs returns the arguments required to be passed to
+// net.DialTCP().  If the Mask of ipv6 is not a /128 or the Port is 0,
+// DialStreamArgs() will fail.  See Host() to create an IPv6Addr with its
+// mask set to /128.
+func (ipv6 IPv6Addr) DialStreamArgs() (network, dialArgs string) {
+	ipv6Mask := big.Int(*ipv6.Mask)
+	if ipv6Mask.Cmp(ipv6HostMask) != 0 || ipv6.Port == 0 {
+		return "tcp6", ""
+	}
+	return "tcp6", fmt.Sprintf("[%s]:%d", ipv6.NetIP().String(), ipv6.Port)
+}
+
+// Equal returns true if a SockAddr is equal to the receiving IPv4Addr.
+func (ipv6a IPv6Addr) Equal(sa SockAddr) bool {
+	ipv6b, ok := sa.(IPv6Addr)
+	if !ok {
+		return false
+	}
+
+	if ipv6a.NetIP().String() != ipv6b.NetIP().String() {
+		return false
+	}
+
+	if ipv6a.NetIPNet().String() != ipv6b.NetIPNet().String() {
+		return false
+	}
+
+	if ipv6a.Port != ipv6b.Port {
+		return false
+	}
+
+	return true
+}
+
+// FirstUsable returns an IPv6Addr set to the first address following the
+// network prefix.  The first usable address in a network is normally the
+// gateway and should not be used except by devices forwarding packets
+// between two administratively distinct networks (i.e. a router).  This
+// function does not discriminate against first usable vs "first address that
+// should be used."  For example, FirstUsable() on "2001:0db8::0003/64" would
+// return "2001:0db8::00011".
+func (ipv6 IPv6Addr) FirstUsable() IPAddr {
+	return IPv6Addr{
+		Address: IPv6Address(ipv6.NetworkAddress()),
+		Mask:    ipv6HostMask,
+	}
+}
+
+// Host returns a copy of ipv6 with its mask set to /128 so that it can be
+// used by DialPacketArgs(), DialStreamArgs(), ListenPacketArgs(), or
+// ListenStreamArgs().
+func (ipv6 IPv6Addr) Host() IPAddr {
+	// Nothing should listen on a broadcast address.
+	return IPv6Addr{
+		Address: ipv6.Address,
+		Mask:    ipv6HostMask,
+		Port:    ipv6.Port,
+	}
+}
+
+// IPPort returns the Port number attached to the IPv6Addr
+func (ipv6 IPv6Addr) IPPort() IPPort {
+	return ipv6.Port
+}
+
+// LastUsable returns the last address in a given network.
+func (ipv6 IPv6Addr) LastUsable() IPAddr {
+	addr := new(big.Int)
+	addr.Set(ipv6.Address)
+
+	mask := new(big.Int)
+	mask.Set(ipv6.Mask)
+
+	negMask := new(big.Int)
+	negMask.Xor(ipv6HostMask, mask)
+
+	lastAddr := new(big.Int)
+	lastAddr.And(addr, mask)
+	lastAddr.Or(lastAddr, negMask)
+
+	return IPv6Addr{
+		Address: IPv6Address(lastAddr),
+		Mask:    ipv6HostMask,
+	}
+}
+
+// ListenPacketArgs returns the arguments required to be passed to
+// net.ListenUDP().  If the Mask of ipv6 is not a /128, ListenPacketArgs()
+// will fail.  See Host() to create an IPv6Addr with its mask set to /128.
+func (ipv6 IPv6Addr) ListenPacketArgs() (network, listenArgs string) {
+	ipv6Mask := big.Int(*ipv6.Mask)
+	if ipv6Mask.Cmp(ipv6HostMask) != 0 {
+		return "udp6", ""
+	}
+	return "udp6", fmt.Sprintf("[%s]:%d", ipv6.NetIP().String(), ipv6.Port)
+}
+
+// ListenStreamArgs returns the arguments required to be passed to
+// net.ListenTCP().  If the Mask of ipv6 is not a /128, ListenStreamArgs()
+// will fail.  See Host() to create an IPv6Addr with its mask set to /128.
+func (ipv6 IPv6Addr) ListenStreamArgs() (network, listenArgs string) {
+	ipv6Mask := big.Int(*ipv6.Mask)
+	if ipv6Mask.Cmp(ipv6HostMask) != 0 {
+		return "tcp6", ""
+	}
+	return "tcp6", fmt.Sprintf("[%s]:%d", ipv6.NetIP().String(), ipv6.Port)
+}
+
+// Maskbits returns the number of network mask bits in a given IPv6Addr.  For
+// example, the Maskbits() of "2001:0db8::0003/64" would return 64.
+func (ipv6 IPv6Addr) Maskbits() int {
+	maskOnes, _ := ipv6.NetIPNet().Mask.Size()
+
+	return maskOnes
+}
+
+// MustIPv6Addr is a helper method that must return an IPv6Addr or panic on
+// invalid input.
+func MustIPv6Addr(addr string) IPv6Addr {
+	ipv6, err := NewIPv6Addr(addr)
+	if err != nil {
+		panic(fmt.Sprintf("Unable to create an IPv6Addr from %+q: %v", addr, err))
+	}
+	return ipv6
+}
+
+// NetIP returns the address as a net.IP.
+func (ipv6 IPv6Addr) NetIP() *net.IP {
+	return bigIntToNetIPv6(ipv6.Address)
+}
+
+// NetIPMask create a new net.IPMask from the IPv6Addr.
+func (ipv6 IPv6Addr) NetIPMask() *net.IPMask {
+	ipv6Mask := make(net.IPMask, IPv6len)
+	m := big.Int(*ipv6.Mask)
+	copy(ipv6Mask, m.Bytes())
+	return &ipv6Mask
+}
+
+// Network returns a pointer to the net.IPNet within IPv4Addr receiver.
+func (ipv6 IPv6Addr) NetIPNet() *net.IPNet {
+	ipv6net := &net.IPNet{}
+	ipv6net.IP = make(net.IP, IPv6len)
+	copy(ipv6net.IP, *ipv6.NetIP())
+	ipv6net.Mask = *ipv6.NetIPMask()
+	return ipv6net
+}
+
+// Network returns the network prefix or network address for a given network.
+func (ipv6 IPv6Addr) Network() IPAddr {
+	return IPv6Addr{
+		Address: IPv6Address(ipv6.NetworkAddress()),
+		Mask:    ipv6.Mask,
+	}
+}
+
+// NetworkAddress returns an IPv6Network of the IPv6Addr's network address.
+func (ipv6 IPv6Addr) NetworkAddress() IPv6Network {
+	addr := new(big.Int)
+	addr.SetBytes((*ipv6.Address).Bytes())
+
+	mask := new(big.Int)
+	mask.SetBytes(*ipv6.NetIPMask())
+
+	netAddr := new(big.Int)
+	netAddr.And(addr, mask)
+
+	return IPv6Network(netAddr)
+}
+
+// Octets returns a slice of the 16 octets in an IPv6Addr's Address.  The
+// order of the bytes is big endian.
+func (ipv6 IPv6Addr) Octets() []int {
+	x := make([]int, IPv6len)
+	for i, b := range *bigIntToNetIPv6(ipv6.Address) {
+		x[i] = int(b)
+	}
+
+	return x
+}
+
+// String returns a string representation of the IPv6Addr
+func (ipv6 IPv6Addr) String() string {
+	if ipv6.Port != 0 {
+		return fmt.Sprintf("[%s]:%d", ipv6.NetIP().String(), ipv6.Port)
+	}
+
+	if ipv6.Maskbits() == 128 {
+		return ipv6.NetIP().String()
+	}
+
+	return fmt.Sprintf("%s/%d", ipv6.NetIP().String(), ipv6.Maskbits())
+}
+
+// Type is used as a type switch and returns TypeIPv6
+func (IPv6Addr) Type() SockAddrType {
+	return TypeIPv6
+}
+
+// IPv6Attrs returns a list of attributes supported by the IPv6Addr type
+func IPv6Attrs() []AttrName {
+	return ipv6AddrAttrs
+}
+
+// IPv6AddrAttr returns a string representation of an attribute for the given
+// IPv6Addr.
+func IPv6AddrAttr(ipv6 IPv6Addr, selector AttrName) string {
+	fn, found := ipv6AddrAttrMap[selector]
+	if !found {
+		return ""
+	}
+
+	return fn(ipv6)
+}
+
+// ipv6AddrInit is called once at init()
+func ipv6AddrInit() {
+	// Sorted for human readability
+	ipv6AddrAttrs = []AttrName{
+		"size", // Same position as in IPv6 for output consistency
+		"uint128",
+	}
+
+	ipv6AddrAttrMap = map[AttrName]func(ipv6 IPv6Addr) string{
+		"size": func(ipv6 IPv6Addr) string {
+			netSize := big.NewInt(1)
+			netSize = netSize.Lsh(netSize, uint(IPv6len*8-ipv6.Maskbits()))
+			return netSize.Text(10)
+		},
+		"uint128": func(ipv6 IPv6Addr) string {
+			b := big.Int(*ipv6.Address)
+			return b.Text(10)
+		},
+	}
+}
+
+// bigIntToNetIPv6 is a helper function that correctly returns a net.IP with the
+// correctly padded values.
+func bigIntToNetIPv6(bi *big.Int) *net.IP {
+	x := make(net.IP, IPv6len)
+	ipv6Bytes := bi.Bytes()
+
+	// It's possibe for ipv6Bytes to be less than IPv6len bytes in size.  If
+	// they are different sizes we to pad the size of response.
+	if len(ipv6Bytes) < IPv6len {
+		buf := new(bytes.Buffer)
+		buf.Grow(IPv6len)
+
+		for i := len(ipv6Bytes); i < IPv6len; i++ {
+			if err := binary.Write(buf, binary.BigEndian, byte(0)); err != nil {
+				panic(fmt.Sprintf("Unable to pad byte %d of input %v: %v", i, bi, err))
+			}
+		}
+
+		for _, b := range ipv6Bytes {
+			if err := binary.Write(buf, binary.BigEndian, b); err != nil {
+				panic(fmt.Sprintf("Unable to preserve endianness of input %v: %v", bi, err))
+			}
+		}
+
+		ipv6Bytes = buf.Bytes()
+	}
+	i := copy(x, ipv6Bytes)
+	if i != IPv6len {
+		panic("IPv6 wrong size")
+	}
+	return &x
+}
+
+```
+
+#### rfc.go
+
+```text
+package sockaddr
+
+// ForwardingBlacklist is a faux RFC that includes a list of non-forwardable IP
+// blocks.
+const ForwardingBlacklist = 4294967295
+const ForwardingBlacklistRFC = "4294967295"
+
+// IsRFC tests to see if an SockAddr matches the specified RFC
+func IsRFC(rfcNum uint, sa SockAddr) bool {
+	rfcNetMap := KnownRFCs()
+	rfcNets, ok := rfcNetMap[rfcNum]
+	if !ok {
+		return false
+	}
+
+	var contained bool
+	for _, rfcNet := range rfcNets {
+		if rfcNet.Contains(sa) {
+			contained = true
+			break
+		}
+	}
+	return contained
+}
+
+// KnownRFCs returns an initial set of known RFCs.
+//
+// NOTE (sean@): As this list evolves over time, please submit patches to keep
+// this list current.  If something isn't right, inquire, as it may just be a
+// bug on my part.  Some of the inclusions were based on my judgement as to what
+// would be a useful value (e.g. RFC3330).
+//
+// Useful resources:
+//
+// * https://www.iana.org/assignments/ipv6-address-space/ipv6-address-space.xhtml
+// * https://www.iana.org/assignments/ipv6-unicast-address-assignments/ipv6-unicast-address-assignments.xhtml
+// * https://www.iana.org/assignments/ipv6-address-space/ipv6-address-space.xhtml
+func KnownRFCs() map[uint]SockAddrs {
+	// NOTE(sean@): Multiple SockAddrs per RFC lend themselves well to a
+	// RADIX tree, but `ENOTIME`.  Patches welcome.
+	return map[uint]SockAddrs{
+		919: {
+			// [RFC919] Broadcasting Internet Datagrams
+			MustIPv4Addr("255.255.255.255/32"), // [RFC1122], §7 Broadcast IP Addressing - Proposed Standards
+		},
+		1122: {
+			// [RFC1122] Requirements for Internet Hosts -- Communication Layers
+			MustIPv4Addr("0.0.0.0/8"),   // [RFC1122], §3.2.1.3
+			MustIPv4Addr("127.0.0.0/8"), // [RFC1122], §3.2.1.3
+		},
+		1112: {
+			// [RFC1112] Host Extensions for IP Multicasting
+			MustIPv4Addr("224.0.0.0/4"), // [RFC1112], §4 Host Group Addresses
+		},
+		1918: {
+			// [RFC1918] Address Allocation for Private Internets
+			MustIPv4Addr("10.0.0.0/8"),
+			MustIPv4Addr("172.16.0.0/12"),
+			MustIPv4Addr("192.168.0.0/16"),
+		},
+		2544: {
+			// [RFC2544] Benchmarking Methodology for Network
+			// Interconnect Devices
+			MustIPv4Addr("198.18.0.0/15"),
+		},
+		2765: {
+			// [RFC2765] Stateless IP/ICMP Translation Algorithm
+			// (SIIT) (obsoleted by RFCs 6145, which itself was
+			// later obsoleted by 7915).
+
+			// [RFC2765], §2.1 Addresses
+			MustIPv6Addr("0:0:0:0:0:ffff:0:0/96"),
+		},
+		2928: {
+			// [RFC2928] Initial IPv6 Sub-TLA ID Assignments
+			MustIPv6Addr("2001::/16"), // Superblock
+			//MustIPv6Addr("2001:0000::/23"), // IANA
+			//MustIPv6Addr("2001:0200::/23"), // APNIC
+			//MustIPv6Addr("2001:0400::/23"), // ARIN
+			//MustIPv6Addr("2001:0600::/23"), // RIPE NCC
+			//MustIPv6Addr("2001:0800::/23"), // (future assignment)
+			// ...
+			//MustIPv6Addr("2001:FE00::/23"), // (future assignment)
+		},
+		3056: { // 6to4 address
+			// [RFC3056] Connection of IPv6 Domains via IPv4 Clouds
+
+			// [RFC3056], §2 IPv6 Prefix Allocation
+			MustIPv6Addr("2002::/16"),
+		},
+		3068: {
+			// [RFC3068] An Anycast Prefix for 6to4 Relay Routers
+			// (obsolete by RFC7526)
+
+			// [RFC3068], § 6to4 Relay anycast address
+			MustIPv4Addr("192.88.99.0/24"),
+
+			// [RFC3068], §2.5 6to4 IPv6 relay anycast address
+			//
+			// NOTE: /120 == 128-(32-24)
+			MustIPv6Addr("2002:c058:6301::/120"),
+		},
+		3171: {
+			// [RFC3171] IANA Guidelines for IPv4 Multicast Address Assignments
+			MustIPv4Addr("224.0.0.0/4"),
+		},
+		3330: {
+			// [RFC3330] Special-Use IPv4 Addresses
+
+			// Addresses in this block refer to source hosts on
+			// "this" network.  Address 0.0.0.0/32 may be used as a
+			// source address for this host on this network; other
+			// addresses within 0.0.0.0/8 may be used to refer to
+			// specified hosts on this network [RFC1700, page 4].
+			MustIPv4Addr("0.0.0.0/8"),
+
+			// 10.0.0.0/8 - This block is set aside for use in
+			// private networks.  Its intended use is documented in
+			// [RFC1918].  Addresses within this block should not
+			// appear on the public Internet.
+			MustIPv4Addr("10.0.0.0/8"),
+
+			// 14.0.0.0/8 - This block is set aside for assignments
+			// to the international system of Public Data Networks
+			// [RFC1700, page 181]. The registry of assignments
+			// within this block can be accessed from the "Public
+			// Data Network Numbers" link on the web page at
+			// http://www.iana.org/numbers.html.  Addresses within
+			// this block are assigned to users and should be
+			// treated as such.
+
+			// 24.0.0.0/8 - This block was allocated in early 1996
+			// for use in provisioning IP service over cable
+			// television systems.  Although the IANA initially was
+			// involved in making assignments to cable operators,
+			// this responsibility was transferred to American
+			// Registry for Internet Numbers (ARIN) in May 2001.
+			// Addresses within this block are assigned in the
+			// normal manner and should be treated as such.
+
+			// 39.0.0.0/8 - This block was used in the "Class A
+			// Subnet Experiment" that commenced in May 1995, as
+			// documented in [RFC1797].  The experiment has been
+			// completed and this block has been returned to the
+			// pool of addresses reserved for future allocation or
+			// assignment.  This block therefore no longer has a
+			// special use and is subject to allocation to a
+			// Regional Internet Registry for assignment in the
+			// normal manner.
+
+			// 127.0.0.0/8 - This block is assigned for use as the Internet host
+			// loopback address.  A datagram sent by a higher level protocol to an
+			// address anywhere within this block should loop back inside the host.
+			// This is ordinarily implemented using only 127.0.0.1/32 for loopback,
+			// but no addresses within this block should ever appear on any network
+			// anywhere [RFC1700, page 5].
+			MustIPv4Addr("127.0.0.0/8"),
+
+			// 128.0.0.0/16 - This block, corresponding to the
+			// numerically lowest of the former Class B addresses,
+			// was initially and is still reserved by the IANA.
+			// Given the present classless nature of the IP address
+			// space, the basis for the reservation no longer
+			// applies and addresses in this block are subject to
+			// future allocation to a Regional Internet Registry for
+			// assignment in the normal manner.
+
+			// 169.254.0.0/16 - This is the "link local" block.  It
+			// is allocated for communication between hosts on a
+			// single link.  Hosts obtain these addresses by
+			// auto-configuration, such as when a DHCP server may
+			// not be found.
+			MustIPv4Addr("169.254.0.0/16"),
+
+			// 172.16.0.0/12 - This block is set aside for use in
+			// private networks.  Its intended use is documented in
+			// [RFC1918].  Addresses within this block should not
+			// appear on the public Internet.
+			MustIPv4Addr("172.16.0.0/12"),
+
+			// 191.255.0.0/16 - This block, corresponding to the numerically highest
+			// to the former Class B addresses, was initially and is still reserved
+			// by the IANA.  Given the present classless nature of the IP address
+			// space, the basis for the reservation no longer applies and addresses
+			// in this block are subject to future allocation to a Regional Internet
+			// Registry for assignment in the normal manner.
+
+			// 192.0.0.0/24 - This block, corresponding to the
+			// numerically lowest of the former Class C addresses,
+			// was initially and is still reserved by the IANA.
+			// Given the present classless nature of the IP address
+			// space, the basis for the reservation no longer
+			// applies and addresses in this block are subject to
+			// future allocation to a Regional Internet Registry for
+			// assignment in the normal manner.
+
+			// 192.0.2.0/24 - This block is assigned as "TEST-NET" for use in
+			// documentation and example code.  It is often used in conjunction with
+			// domain names example.com or example.net in vendor and protocol
+			// documentation.  Addresses within this block should not appear on the
+			// public Internet.
+			MustIPv4Addr("192.0.2.0/24"),
+
+			// 192.88.99.0/24 - This block is allocated for use as 6to4 relay
+			// anycast addresses, according to [RFC3068].
+			MustIPv4Addr("192.88.99.0/24"),
+
+			// 192.168.0.0/16 - This block is set aside for use in private networks.
+			// Its intended use is documented in [RFC1918].  Addresses within this
+			// block should not appear on the public Internet.
+			MustIPv4Addr("192.168.0.0/16"),
+
+			// 198.18.0.0/15 - This block has been allocated for use
+			// in benchmark tests of network interconnect devices.
+			// Its use is documented in [RFC2544].
+			MustIPv4Addr("198.18.0.0/15"),
+
+			// 223.255.255.0/24 - This block, corresponding to the
+			// numerically highest of the former Class C addresses,
+			// was initially and is still reserved by the IANA.
+			// Given the present classless nature of the IP address
+			// space, the basis for the reservation no longer
+			// applies and addresses in this block are subject to
+			// future allocation to a Regional Internet Registry for
+			// assignment in the normal manner.
+
+			// 224.0.0.0/4 - This block, formerly known as the Class
+			// D address space, is allocated for use in IPv4
+			// multicast address assignments.  The IANA guidelines
+			// for assignments from this space are described in
+			// [RFC3171].
+			MustIPv4Addr("224.0.0.0/4"),
+
+			// 240.0.0.0/4 - This block, formerly known as the Class E address
+			// space, is reserved.  The "limited broadcast" destination address
+			// 255.255.255.255 should never be forwarded outside the (sub-)net of
+			// the source.  The remainder of this space is reserved
+			// for future use.  [RFC1700, page 4]
+			MustIPv4Addr("240.0.0.0/4"),
+		},
+		3849: {
+			// [RFC3849] IPv6 Address Prefix Reserved for Documentation
+			MustIPv6Addr("2001:db8::/32"), // [RFC3849], §4 IANA Considerations
+		},
+		3927: {
+			// [RFC3927] Dynamic Configuration of IPv4 Link-Local Addresses
+			MustIPv4Addr("169.254.0.0/16"), // [RFC3927], §2.1 Link-Local Address Selection
+		},
+		4038: {
+			// [RFC4038] Application Aspects of IPv6 Transition
+
+			// [RFC4038], §4.2. IPv6 Applications in a Dual-Stack Node
+			MustIPv6Addr("0:0:0:0:0:ffff::/96"),
+		},
+		4193: {
+			// [RFC4193] Unique Local IPv6 Unicast Addresses
+			MustIPv6Addr("fc00::/7"),
+		},
+		4291: {
+			// [RFC4291] IP Version 6 Addressing Architecture
+
+			// [RFC4291], §2.5.2 The Unspecified Address
+			MustIPv6Addr("::/128"),
+
+			// [RFC4291], §2.5.3 The Loopback Address
+			MustIPv6Addr("::1/128"),
+
+			// [RFC4291], §2.5.5.1.  IPv4-Compatible IPv6 Address
+			MustIPv6Addr("::/96"),
+
+			// [RFC4291], §2.5.5.2.  IPv4-Mapped IPv6 Address
+			MustIPv6Addr("::ffff:0:0/96"),
+
+			// [RFC4291], §2.5.6 Link-Local IPv6 Unicast Addresses
+			MustIPv6Addr("fe80::/10"),
+
+			// [RFC4291], §2.5.7 Site-Local IPv6 Unicast Addresses
+			// (depreciated)
+			MustIPv6Addr("fec0::/10"),
+
+			// [RFC4291], §2.7 Multicast Addresses
+			MustIPv6Addr("ff00::/8"),
+
+			// IPv6 Multicast Information.
+			//
+			// In the following "table" below, `ff0x` is replaced
+			// with the following values depending on the scope of
+			// the query:
+			//
+			// IPv6 Multicast Scopes:
+			// * ff00/9 // reserved
+			// * ff01/9 // interface-local
+			// * ff02/9 // link-local
+			// * ff03/9 // realm-local
+			// * ff04/9 // admin-local
+			// * ff05/9 // site-local
+			// * ff08/9 // organization-local
+			// * ff0e/9 // global
+			// * ff0f/9 // reserved
+			//
+			// IPv6 Multicast Addresses:
+			// * ff0x::2 // All routers
+			// * ff02::5 // OSPFIGP
+			// * ff02::6 // OSPFIGP Designated Routers
+			// * ff02::9 // RIP Routers
+			// * ff02::a // EIGRP Routers
+			// * ff02::d // All PIM Routers
+			// * ff02::1a // All RPL Routers
+			// * ff0x::fb // mDNSv6
+			// * ff0x::101 // All Network Time Protocol (NTP) servers
+			// * ff02::1:1 // Link Name
+			// * ff02::1:2 // All-dhcp-agents
+			// * ff02::1:3 // Link-local Multicast Name Resolution
+			// * ff05::1:3 // All-dhcp-servers
+			// * ff02::1:ff00:0/104 // Solicited-node multicast address.
+			// * ff02::2:ff00:0/104 // Node Information Queries
+		},
+		4380: {
+			// [RFC4380] Teredo: Tunneling IPv6 over UDP through
+			// Network Address Translations (NATs)
+
+			// [RFC4380], §2.6 Global Teredo IPv6 Service Prefix
+			MustIPv6Addr("2001:0000::/32"),
+		},
+		4773: {
+			// [RFC4773] Administration of the IANA Special Purpose IPv6 Address Block
+			MustIPv6Addr("2001:0000::/23"), // IANA
+		},
+		4843: {
+			// [RFC4843] An IPv6 Prefix for Overlay Routable Cryptographic Hash Identifiers (ORCHID)
+			MustIPv6Addr("2001:10::/28"), // [RFC4843], §7 IANA Considerations
+		},
+		5180: {
+			// [RFC5180] IPv6 Benchmarking Methodology for Network Interconnect Devices
+			MustIPv6Addr("2001:0200::/48"), // [RFC5180], §8 IANA Considerations
+		},
+		5735: {
+			// [RFC5735] Special Use IPv4 Addresses
+			MustIPv4Addr("192.0.2.0/24"),    // TEST-NET-1
+			MustIPv4Addr("198.51.100.0/24"), // TEST-NET-2
+			MustIPv4Addr("203.0.113.0/24"),  // TEST-NET-3
+			MustIPv4Addr("198.18.0.0/15"),   // Benchmarks
+		},
+		5737: {
+			// [RFC5737] IPv4 Address Blocks Reserved for Documentation
+			MustIPv4Addr("192.0.2.0/24"),    // TEST-NET-1
+			MustIPv4Addr("198.51.100.0/24"), // TEST-NET-2
+			MustIPv4Addr("203.0.113.0/24"),  // TEST-NET-3
+		},
+		6052: {
+			// [RFC6052] IPv6 Addressing of IPv4/IPv6 Translators
+			MustIPv6Addr("64:ff9b::/96"), // [RFC6052], §2.1. Well-Known Prefix
+		},
+		6333: {
+			// [RFC6333] Dual-Stack Lite Broadband Deployments Following IPv4 Exhaustion
+			MustIPv4Addr("192.0.0.0/29"), // [RFC6333], §5.7 Well-Known IPv4 Address
+		},
+		6598: {
+			// [RFC6598] IANA-Reserved IPv4 Prefix for Shared Address Space
+			MustIPv4Addr("100.64.0.0/10"),
+		},
+		6666: {
+			// [RFC6666] A Discard Prefix for IPv6
+			MustIPv6Addr("0100::/64"),
+		},
+		6890: {
+			// [RFC6890] Special-Purpose IP Address Registries
+
+			// From "RFC6890 §2.2.1 Information Requirements":
+			/*
+			   The IPv4 and IPv6 Special-Purpose Address Registries maintain the
+			   following information regarding each entry:
+
+			   o  Address Block - A block of IPv4 or IPv6 addresses that has been
+			      registered for a special purpose.
+
+			   o  Name - A descriptive name for the special-purpose address block.
+
+			   o  RFC - The RFC through which the special-purpose address block was
+			      requested.
+
+			   o  Allocation Date - The date upon which the special-purpose address
+			      block was allocated.
+
+			   o  Termination Date - The date upon which the allocation is to be
+			      terminated.  This field is applicable for limited-use allocations
+			      only.
+
+			   o  Source - A boolean value indicating whether an address from the
+			      allocated special-purpose address block is valid when used as the
+			      source address of an IP datagram that transits two devices.
+
+			   o  Destination - A boolean value indicating whether an address from
+			      the allocated special-purpose address block is valid when used as
+			      the destination address of an IP datagram that transits two
+			      devices.
+
+			   o  Forwardable - A boolean value indicating whether a router may
+			      forward an IP datagram whose destination address is drawn from the
+			      allocated special-purpose address block between external
+			      interfaces.
+
+			   o  Global - A boolean value indicating whether an IP datagram whose
+			      destination address is drawn from the allocated special-purpose
+			      address block is forwardable beyond a specified administrative
+			      domain.
+
+			   o  Reserved-by-Protocol - A boolean value indicating whether the
+			      special-purpose address block is reserved by IP, itself.  This
+			      value is "TRUE" if the RFC that created the special-purpose
+			      address block requires all compliant IP implementations to behave
+			      in a special way when processing packets either to or from
+			      addresses contained by the address block.
+
+			   If the value of "Destination" is FALSE, the values of "Forwardable"
+			   and "Global" must also be false.
+			*/
+
+			/*+----------------------+----------------------------+
+			* | Attribute            | Value                      |
+			* +----------------------+----------------------------+
+			* | Address Block        | 0.0.0.0/8                  |
+			* | Name                 | "This host on this network"|
+			* | RFC                  | [RFC1122], Section 3.2.1.3 |
+			* | Allocation Date      | September 1981             |
+			* | Termination Date     | N/A                        |
+			* | Source               | True                       |
+			* | Destination          | False                      |
+			* | Forwardable          | False                      |
+			* | Global               | False                      |
+			* | Reserved-by-Protocol | True                       |
+			* +----------------------+----------------------------+*/
+			MustIPv4Addr("0.0.0.0/8"),
+
+			/*+----------------------+---------------+
+			* | Attribute            | Value         |
+			* +----------------------+---------------+
+			* | Address Block        | 10.0.0.0/8    |
+			* | Name                 | Private-Use   |
+			* | RFC                  | [RFC1918]     |
+			* | Allocation Date      | February 1996 |
+			* | Termination Date     | N/A           |
+			* | Source               | True          |
+			* | Destination          | True          |
+			* | Forwardable          | True          |
+			* | Global               | False         |
+			* | Reserved-by-Protocol | False         |
+			* +----------------------+---------------+ */
+			MustIPv4Addr("10.0.0.0/8"),
+
+			/*+----------------------+----------------------+
+			  | Attribute            | Value                |
+			  +----------------------+----------------------+
+			  | Address Block        | 100.64.0.0/10        |
+			  | Name                 | Shared Address Space |
+			  | RFC                  | [RFC6598]            |
+			  | Allocation Date      | April 2012           |
+			  | Termination Date     | N/A                  |
+			  | Source               | True                 |
+			  | Destination          | True                 |
+			  | Forwardable          | True                 |
+			  | Global               | False                |
+			  | Reserved-by-Protocol | False                |
+			  +----------------------+----------------------+*/
+			MustIPv4Addr("100.64.0.0/10"),
+
+			/*+----------------------+----------------------------+
+			  | Attribute            | Value                      |
+			  +----------------------+----------------------------+
+			  | Address Block        | 127.0.0.0/8                |
+			  | Name                 | Loopback                   |
+			  | RFC                  | [RFC1122], Section 3.2.1.3 |
+			  | Allocation Date      | September 1981             |
+			  | Termination Date     | N/A                        |
+			  | Source               | False [1]                  |
+			  | Destination          | False [1]                  |
+			  | Forwardable          | False [1]                  |
+			  | Global               | False [1]                  |
+			  | Reserved-by-Protocol | True                       |
+			  +----------------------+----------------------------+*/
+			// [1] Several protocols have been granted exceptions to
+			// this rule.  For examples, see [RFC4379] and
+			// [RFC5884].
+			MustIPv4Addr("127.0.0.0/8"),
+
+			/*+----------------------+----------------+
+			  | Attribute            | Value          |
+			  +----------------------+----------------+
+			  | Address Block        | 169.254.0.0/16 |
+			  | Name                 | Link Local     |
+			  | RFC                  | [RFC3927]      |
+			  | Allocation Date      | May 2005       |
+			  | Termination Date     | N/A            |
+			  | Source               | True           |
+			  | Destination          | True           |
+			  | Forwardable          | False          |
+			  | Global               | False          |
+			  | Reserved-by-Protocol | True           |
+			  +----------------------+----------------+*/
+			MustIPv4Addr("169.254.0.0/16"),
+
+			/*+----------------------+---------------+
+			  | Attribute            | Value         |
+			  +----------------------+---------------+
+			  | Address Block        | 172.16.0.0/12 |
+			  | Name                 | Private-Use   |
+			  | RFC                  | [RFC1918]     |
+			  | Allocation Date      | February 1996 |
+			  | Termination Date     | N/A           |
+			  | Source               | True          |
+			  | Destination          | True          |
+			  | Forwardable          | True          |
+			  | Global               | False         |
+			  | Reserved-by-Protocol | False         |
+			  +----------------------+---------------+*/
+			MustIPv4Addr("172.16.0.0/12"),
+
+			/*+----------------------+---------------------------------+
+			  | Attribute            | Value                           |
+			  +----------------------+---------------------------------+
+			  | Address Block        | 192.0.0.0/24 [2]                |
+			  | Name                 | IETF Protocol Assignments       |
+			  | RFC                  | Section 2.1 of this document    |
+			  | Allocation Date      | January 2010                    |
+			  | Termination Date     | N/A                             |
+			  | Source               | False                           |
+			  | Destination          | False                           |
+			  | Forwardable          | False                           |
+			  | Global               | False                           |
+			  | Reserved-by-Protocol | False                           |
+			  +----------------------+---------------------------------+*/
+			// [2] Not usable unless by virtue of a more specific
+			// reservation.
+			MustIPv4Addr("192.0.0.0/24"),
+
+			/*+----------------------+--------------------------------+
+			  | Attribute            | Value                          |
+			  +----------------------+--------------------------------+
+			  | Address Block        | 192.0.0.0/29                   |
+			  | Name                 | IPv4 Service Continuity Prefix |
+			  | RFC                  | [RFC6333], [RFC7335]           |
+			  | Allocation Date      | June 2011                      |
+			  | Termination Date     | N/A                            |
+			  | Source               | True                           |
+			  | Destination          | True                           |
+			  | Forwardable          | True                           |
+			  | Global               | False                          |
+			  | Reserved-by-Protocol | False                          |
+			  +----------------------+--------------------------------+*/
+			MustIPv4Addr("192.0.0.0/29"),
+
+			/*+----------------------+----------------------------+
+			  | Attribute            | Value                      |
+			  +----------------------+----------------------------+
+			  | Address Block        | 192.0.2.0/24               |
+			  | Name                 | Documentation (TEST-NET-1) |
+			  | RFC                  | [RFC5737]                  |
+			  | Allocation Date      | January 2010               |
+			  | Termination Date     | N/A                        |
+			  | Source               | False                      |
+			  | Destination          | False                      |
+			  | Forwardable          | False                      |
+			  | Global               | False                      |
+			  | Reserved-by-Protocol | False                      |
+			  +----------------------+----------------------------+*/
+			MustIPv4Addr("192.0.2.0/24"),
+
+			/*+----------------------+--------------------+
+			  | Attribute            | Value              |
+			  +----------------------+--------------------+
+			  | Address Block        | 192.88.99.0/24     |
+			  | Name                 | 6to4 Relay Anycast |
+			  | RFC                  | [RFC3068]          |
+			  | Allocation Date      | June 2001          |
+			  | Termination Date     | N/A                |
+			  | Source               | True               |
+			  | Destination          | True               |
+			  | Forwardable          | True               |
+			  | Global               | True               |
+			  | Reserved-by-Protocol | False              |
+			  +----------------------+--------------------+*/
+			MustIPv4Addr("192.88.99.0/24"),
+
+			/*+----------------------+----------------+
+			  | Attribute            | Value          |
+			  +----------------------+----------------+
+			  | Address Block        | 192.168.0.0/16 |
+			  | Name                 | Private-Use    |
+			  | RFC                  | [RFC1918]      |
+			  | Allocation Date      | February 1996  |
+			  | Termination Date     | N/A            |
+			  | Source               | True           |
+			  | Destination          | True           |
+			  | Forwardable          | True           |
+			  | Global               | False          |
+			  | Reserved-by-Protocol | False          |
+			  +----------------------+----------------+*/
+			MustIPv4Addr("192.168.0.0/16"),
+
+			/*+----------------------+---------------+
+			  | Attribute            | Value         |
+			  +----------------------+---------------+
+			  | Address Block        | 198.18.0.0/15 |
+			  | Name                 | Benchmarking  |
+			  | RFC                  | [RFC2544]     |
+			  | Allocation Date      | March 1999    |
+			  | Termination Date     | N/A           |
+			  | Source               | True          |
+			  | Destination          | True          |
+			  | Forwardable          | True          |
+			  | Global               | False         |
+			  | Reserved-by-Protocol | False         |
+			  +----------------------+---------------+*/
+			MustIPv4Addr("198.18.0.0/15"),
+
+			/*+----------------------+----------------------------+
+			  | Attribute            | Value                      |
+			  +----------------------+----------------------------+
+			  | Address Block        | 198.51.100.0/24            |
+			  | Name                 | Documentation (TEST-NET-2) |
+			  | RFC                  | [RFC5737]                  |
+			  | Allocation Date      | January 2010               |
+			  | Termination Date     | N/A                        |
+			  | Source               | False                      |
+			  | Destination          | False                      |
+			  | Forwardable          | False                      |
+			  | Global               | False                      |
+			  | Reserved-by-Protocol | False                      |
+			  +----------------------+----------------------------+*/
+			MustIPv4Addr("198.51.100.0/24"),
+
+			/*+----------------------+----------------------------+
+			  | Attribute            | Value                      |
+			  +----------------------+----------------------------+
+			  | Address Block        | 203.0.113.0/24             |
+			  | Name                 | Documentation (TEST-NET-3) |
+			  | RFC                  | [RFC5737]                  |
+			  | Allocation Date      | January 2010               |
+			  | Termination Date     | N/A                        |
+			  | Source               | False                      |
+			  | Destination          | False                      |
+			  | Forwardable          | False                      |
+			  | Global               | False                      |
+			  | Reserved-by-Protocol | False                      |
+			  +----------------------+----------------------------+*/
+			MustIPv4Addr("203.0.113.0/24"),
+
+			/*+----------------------+----------------------+
+			  | Attribute            | Value                |
+			  +----------------------+----------------------+
+			  | Address Block        | 240.0.0.0/4          |
+			  | Name                 | Reserved             |
+			  | RFC                  | [RFC1112], Section 4 |
+			  | Allocation Date      | August 1989          |
+			  | Termination Date     | N/A                  |
+			  | Source               | False                |
+			  | Destination          | False                |
+			  | Forwardable          | False                |
+			  | Global               | False                |
+			  | Reserved-by-Protocol | True                 |
+			  +----------------------+----------------------+*/
+			MustIPv4Addr("240.0.0.0/4"),
+
+			/*+----------------------+----------------------+
+			  | Attribute            | Value                |
+			  +----------------------+----------------------+
+			  | Address Block        | 255.255.255.255/32   |
+			  | Name                 | Limited Broadcast    |
+			  | RFC                  | [RFC0919], Section 7 |
+			  | Allocation Date      | October 1984         |
+			  | Termination Date     | N/A                  |
+			  | Source               | False                |
+			  | Destination          | True                 |
+			  | Forwardable          | False                |
+			  | Global               | False                |
+			  | Reserved-by-Protocol | False                |
+			  +----------------------+----------------------+*/
+			MustIPv4Addr("255.255.255.255/32"),
+
+			/*+----------------------+------------------+
+			  | Attribute            | Value            |
+			  +----------------------+------------------+
+			  | Address Block        | ::1/128          |
+			  | Name                 | Loopback Address |
+			  | RFC                  | [RFC4291]        |
+			  | Allocation Date      | February 2006    |
+			  | Termination Date     | N/A              |
+			  | Source               | False            |
+			  | Destination          | False            |
+			  | Forwardable          | False            |
+			  | Global               | False            |
+			  | Reserved-by-Protocol | True             |
+			  +----------------------+------------------+*/
+			MustIPv6Addr("::1/128"),
+
+			/*+----------------------+---------------------+
+			  | Attribute            | Value               |
+			  +----------------------+---------------------+
+			  | Address Block        | ::/128              |
+			  | Name                 | Unspecified Address |
+			  | RFC                  | [RFC4291]           |
+			  | Allocation Date      | February 2006       |
+			  | Termination Date     | N/A                 |
+			  | Source               | True                |
+			  | Destination          | False               |
+			  | Forwardable          | False               |
+			  | Global               | False               |
+			  | Reserved-by-Protocol | True                |
+			  +----------------------+---------------------+*/
+			MustIPv6Addr("::/128"),
+
+			/*+----------------------+---------------------+
+			  | Attribute            | Value               |
+			  +----------------------+---------------------+
+			  | Address Block        | 64:ff9b::/96        |
+			  | Name                 | IPv4-IPv6 Translat. |
+			  | RFC                  | [RFC6052]           |
+			  | Allocation Date      | October 2010        |
+			  | Termination Date     | N/A                 |
+			  | Source               | True                |
+			  | Destination          | True                |
+			  | Forwardable          | True                |
+			  | Global               | True                |
+			  | Reserved-by-Protocol | False               |
+			  +----------------------+---------------------+*/
+			MustIPv6Addr("64:ff9b::/96"),
+
+			/*+----------------------+---------------------+
+			  | Attribute            | Value               |
+			  +----------------------+---------------------+
+			  | Address Block        | ::ffff:0:0/96       |
+			  | Name                 | IPv4-mapped Address |
+			  | RFC                  | [RFC4291]           |
+			  | Allocation Date      | February 2006       |
+			  | Termination Date     | N/A                 |
+			  | Source               | False               |
+			  | Destination          | False               |
+			  | Forwardable          | False               |
+			  | Global               | False               |
+			  | Reserved-by-Protocol | True                |
+			  +----------------------+---------------------+*/
+			MustIPv6Addr("::ffff:0:0/96"),
+
+			/*+----------------------+----------------------------+
+			  | Attribute            | Value                      |
+			  +----------------------+----------------------------+
+			  | Address Block        | 100::/64                   |
+			  | Name                 | Discard-Only Address Block |
+			  | RFC                  | [RFC6666]                  |
+			  | Allocation Date      | June 2012                  |
+			  | Termination Date     | N/A                        |
+			  | Source               | True                       |
+			  | Destination          | True                       |
+			  | Forwardable          | True                       |
+			  | Global               | False                      |
+			  | Reserved-by-Protocol | False                      |
+			  +----------------------+----------------------------+*/
+			MustIPv6Addr("100::/64"),
+
+			/*+----------------------+---------------------------+
+			  | Attribute            | Value                     |
+			  +----------------------+---------------------------+
+			  | Address Block        | 2001::/23                 |
+			  | Name                 | IETF Protocol Assignments |
+			  | RFC                  | [RFC2928]                 |
+			  | Allocation Date      | September 2000            |
+			  | Termination Date     | N/A                       |
+			  | Source               | False[1]                  |
+			  | Destination          | False[1]                  |
+			  | Forwardable          | False[1]                  |
+			  | Global               | False[1]                  |
+			  | Reserved-by-Protocol | False                     |
+			  +----------------------+---------------------------+*/
+			// [1] Unless allowed by a more specific allocation.
+			MustIPv6Addr("2001::/16"),
+
+			/*+----------------------+----------------+
+			  | Attribute            | Value          |
+			  +----------------------+----------------+
+			  | Address Block        | 2001::/32      |
+			  | Name                 | TEREDO         |
+			  | RFC                  | [RFC4380]      |
+			  | Allocation Date      | January 2006   |
+			  | Termination Date     | N/A            |
+			  | Source               | True           |
+			  | Destination          | True           |
+			  | Forwardable          | True           |
+			  | Global               | False          |
+			  | Reserved-by-Protocol | False          |
+			  +----------------------+----------------+*/
+			// Covered by previous entry, included for completeness.
+			//
+			// MustIPv6Addr("2001::/16"),
+
+			/*+----------------------+----------------+
+			  | Attribute            | Value          |
+			  +----------------------+----------------+
+			  | Address Block        | 2001:2::/48    |
+			  | Name                 | Benchmarking   |
+			  | RFC                  | [RFC5180]      |
+			  | Allocation Date      | April 2008     |
+			  | Termination Date     | N/A            |
+			  | Source               | True           |
+			  | Destination          | True           |
+			  | Forwardable          | True           |
+			  | Global               | False          |
+			  | Reserved-by-Protocol | False          |
+			  +----------------------+----------------+*/
+			// Covered by previous entry, included for completeness.
+			//
+			// MustIPv6Addr("2001:2::/48"),
+
+			/*+----------------------+---------------+
+			  | Attribute            | Value         |
+			  +----------------------+---------------+
+			  | Address Block        | 2001:db8::/32 |
+			  | Name                 | Documentation |
+			  | RFC                  | [RFC3849]     |
+			  | Allocation Date      | July 2004     |
+			  | Termination Date     | N/A           |
+			  | Source               | False         |
+			  | Destination          | False         |
+			  | Forwardable          | False         |
+			  | Global               | False         |
+			  | Reserved-by-Protocol | False         |
+			  +----------------------+---------------+*/
+			// Covered by previous entry, included for completeness.
+			//
+			// MustIPv6Addr("2001:db8::/32"),
+
+			/*+----------------------+--------------+
+			  | Attribute            | Value        |
+			  +----------------------+--------------+
+			  | Address Block        | 2001:10::/28 |
+			  | Name                 | ORCHID       |
+			  | RFC                  | [RFC4843]    |
+			  | Allocation Date      | March 2007   |
+			  | Termination Date     | March 2014   |
+			  | Source               | False        |
+			  | Destination          | False        |
+			  | Forwardable          | False        |
+			  | Global               | False        |
+			  | Reserved-by-Protocol | False        |
+			  +----------------------+--------------+*/
+			// Covered by previous entry, included for completeness.
+			//
+			// MustIPv6Addr("2001:10::/28"),
+
+			/*+----------------------+---------------+
+			  | Attribute            | Value         |
+			  +----------------------+---------------+
+			  | Address Block        | 2002::/16 [2] |
+			  | Name                 | 6to4          |
+			  | RFC                  | [RFC3056]     |
+			  | Allocation Date      | February 2001 |
+			  | Termination Date     | N/A           |
+			  | Source               | True          |
+			  | Destination          | True          |
+			  | Forwardable          | True          |
+			  | Global               | N/A [2]       |
+			  | Reserved-by-Protocol | False         |
+			  +----------------------+---------------+*/
+			// [2] See [RFC3056] for details.
+			MustIPv6Addr("2002::/16"),
+
+			/*+----------------------+--------------+
+			  | Attribute            | Value        |
+			  +----------------------+--------------+
+			  | Address Block        | fc00::/7     |
+			  | Name                 | Unique-Local |
+			  | RFC                  | [RFC4193]    |
+			  | Allocation Date      | October 2005 |
+			  | Termination Date     | N/A          |
+			  | Source               | True         |
+			  | Destination          | True         |
+			  | Forwardable          | True         |
+			  | Global               | False        |
+			  | Reserved-by-Protocol | False        |
+			  +----------------------+--------------+*/
+			MustIPv6Addr("fc00::/7"),
+
+			/*+----------------------+-----------------------+
+			  | Attribute            | Value                 |
+			  +----------------------+-----------------------+
+			  | Address Block        | fe80::/10             |
+			  | Name                 | Linked-Scoped Unicast |
+			  | RFC                  | [RFC4291]             |
+			  | Allocation Date      | February 2006         |
+			  | Termination Date     | N/A                   |
+			  | Source               | True                  |
+			  | Destination          | True                  |
+			  | Forwardable          | False                 |
+			  | Global               | False                 |
+			  | Reserved-by-Protocol | True                  |
+			  +----------------------+-----------------------+*/
+			MustIPv6Addr("fe80::/10"),
+		},
+		7335: {
+			// [RFC7335] IPv4 Service Continuity Prefix
+			MustIPv4Addr("192.0.0.0/29"), // [RFC7335], §6 IANA Considerations
+		},
+		ForwardingBlacklist: { // Pseudo-RFC
+			// Blacklist of non-forwardable IP blocks taken from RFC6890
+			//
+			// TODO: the attributes for forwardable should be
+			// searcahble and embedded in the main list of RFCs
+			// above.
+			MustIPv4Addr("0.0.0.0/8"),
+			MustIPv4Addr("127.0.0.0/8"),
+			MustIPv4Addr("169.254.0.0/16"),
+			MustIPv4Addr("192.0.0.0/24"),
+			MustIPv4Addr("192.0.2.0/24"),
+			MustIPv4Addr("198.51.100.0/24"),
+			MustIPv4Addr("203.0.113.0/24"),
+			MustIPv4Addr("240.0.0.0/4"),
+			MustIPv4Addr("255.255.255.255/32"),
+			MustIPv6Addr("::1/128"),
+			MustIPv6Addr("::/128"),
+			MustIPv6Addr("::ffff:0:0/96"),
+
+			// There is no way of expressing a whitelist per RFC2928
+			// atm without creating a negative mask, which I don't
+			// want to do atm.
+			//MustIPv6Addr("2001::/23"),
+
+			MustIPv6Addr("2001:db8::/32"),
+			MustIPv6Addr("2001:10::/28"),
+			MustIPv6Addr("fe80::/10"),
+		},
+	}
+}
+
+// VisitAllRFCs iterates over all known RFCs and calls the visitor
+func VisitAllRFCs(fn func(rfcNum uint, sockaddrs SockAddrs)) {
+	rfcNetMap := KnownRFCs()
+
+	// Blacklist of faux-RFCs.  Don't show the world that we're abusing the
+	// RFC system in this library.
+	rfcBlacklist := map[uint]struct{}{
+		ForwardingBlacklist: {},
+	}
+
+	for rfcNum, sas := range rfcNetMap {
+		if _, found := rfcBlacklist[rfcNum]; !found {
+			fn(rfcNum, sas)
+		}
+	}
+}
+
+```
+
+#### route_info.go
+
+```text
+package sockaddr
+
+import "errors"
+
+var (
+	ErrNoInterface = errors.New("No default interface found (unsupported platform)")
+	ErrNoRoute     = errors.New("no route info found (unsupported platform)")
+)
+
+// RouteInterface specifies an interface for obtaining memoized route table and
+// network information from a given OS.
+type RouteInterface interface {
+	// GetDefaultInterfaceName returns the name of the interface that has a
+	// default route or an error and an empty string if a problem was
+	// encountered.
+	GetDefaultInterfaceName() (string, error)
+}
+
+type routeInfo struct {
+	cmds map[string][]string
+}
+
+// VisitCommands visits each command used by the platform-specific RouteInfo
+// implementation.
+func (ri routeInfo) VisitCommands(fn func(name string, cmd []string)) {
+	for k, v := range ri.cmds {
+		cmds := append([]string(nil), v...)
+		fn(k, cmds)
+	}
+}
+
+```
+
+#### route_info_aix.go
+
+```text
+//go:build aix
+
+package sockaddr
+
+import (
+	"errors"
+	"os/exec"
+)
+
+var cmds map[string][]string = map[string][]string{
+	"route": {"/usr/sbin/route", "-n", "get", "default"},
+}
+
+// NewRouteInfo returns a BSD-specific implementation of the RouteInfo
+// interface.
+func NewRouteInfo() (routeInfo, error) {
+	return routeInfo{
+		cmds: cmds,
+	}, nil
+}
+
+// GetDefaultInterfaceName returns the interface name attached to the default
+// route on the default interface.
+func (ri routeInfo) GetDefaultInterfaceName() (string, error) {
+	out, err := exec.Command(cmds["route"][0], cmds["route"][1:]...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	var ifName string
+	if ifName, err = parseDefaultIfNameFromRoute(string(out)); err != nil {
+		return "", errors.New("No default interface found")
+	}
+	return ifName, nil
+}
+
+```
+
+#### route_info_android.go
+
+```text
+//go:build android
+
+package sockaddr
+
+import (
+	"errors"
+	"os/exec"
+)
+
+// NewRouteInfo returns a Android-specific implementation of the RouteInfo
+// interface.
+func NewRouteInfo() (routeInfo, error) {
+	return routeInfo{
+		cmds: map[string][]string{"ip": {"/system/bin/ip", "route", "get", "8.8.8.8"}},
+	}, nil
+}
+
+// GetDefaultInterfaceName returns the interface name attached to the default
+// route on the default interface.
+func (ri routeInfo) GetDefaultInterfaceName() (string, error) {
+	out, err := exec.Command(ri.cmds["ip"][0], ri.cmds["ip"][1:]...).Output()
+	if err != nil {
+		return "", err
+	}
+
+
+	var ifName string
+	if ifName, err = parseDefaultIfNameFromIPCmdAndroid(string(out)); err != nil {
+		return "", errors.New("No default interface found")
+	}
+	return ifName, nil
+}
+
+```
+
+#### route_info_bsd.go
+
+```text
+//go:build darwin || dragonfly || freebsd || netbsd || openbsd
+// +build darwin dragonfly freebsd netbsd openbsd
+
+package sockaddr
+
+import "os/exec"
+
+var cmds = map[string][]string{
+	"route": {"/sbin/route", "-n", "get", "default"},
+}
+
+// NewRouteInfo returns a BSD-specific implementation of the RouteInfo
+// interface.
+func NewRouteInfo() (routeInfo, error) {
+	return routeInfo{
+		cmds: cmds,
+	}, nil
+}
+
+// GetDefaultInterfaceName returns the interface name attached to the default
+// route on the default interface.
+func (ri routeInfo) GetDefaultInterfaceName() (string, error) {
+	out, err := exec.Command(cmds["route"][0], cmds["route"][1:]...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	var ifName string
+	if ifName, err = parseDefaultIfNameFromRoute(string(out)); err != nil {
+		return "", err
+	}
+	return ifName, nil
+}
+
+```
+
+#### route_info_default.go
+
+```text
+//go:build nacl || plan9 || js
+// +build nacl plan9 js
+
+package sockaddr
+
+// getDefaultIfName is the default interface function for unsupported platforms.
+func getDefaultIfName() (string, error) {
+	return "", ErrNoInterface
+}
+
+func NewRouteInfo() (routeInfo, error) {
+	return routeInfo{}, ErrNoRoute
+}
+
+// GetDefaultInterfaceName returns the interface name attached to the default
+// route on the default interface.
+func (ri routeInfo) GetDefaultInterfaceName() (string, error) {
+	return "", ErrNoInterface
+}
+
+```
+
+#### route_info_linux.go
+
+```text
+//go:build !android
+// +build !android
+
+package sockaddr
+
+import (
+	"errors"
+	"os/exec"
+)
+
+// NewRouteInfo returns a Linux-specific implementation of the RouteInfo
+// interface.
+func NewRouteInfo() (routeInfo, error) {
+	// CoreOS Container Linux moved ip to /usr/bin/ip, so look it up on
+	// $PATH and fallback to /sbin/ip on error.
+	path, _ := exec.LookPath("ip")
+	if path == "" {
+		path = "/sbin/ip"
+	}
+
+	return routeInfo{
+		cmds: map[string][]string{"ip": {path, "route"}},
+	}, nil
+}
+
+// GetDefaultInterfaceName returns the interface name attached to the default
+// route on the default interface.
+func (ri routeInfo) GetDefaultInterfaceName() (string, error) {
+	out, err := exec.Command(ri.cmds["ip"][0], ri.cmds["ip"][1:]...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	var ifName string
+	if ifName, err = parseDefaultIfNameFromIPCmd(string(out)); err != nil {
+		return "", errors.New("No default interface found")
+	}
+	return ifName, nil
+}
+
+```
+
+#### route_info_solaris.go
+
+```text
+//go:build solaris
+
+package sockaddr
+
+import (
+	"errors"
+	"os/exec"
+)
+
+var cmds map[string][]string = map[string][]string{
+	"route": {"/usr/sbin/route", "-n", "get", "default"},
+}
+
+// NewRouteInfo returns a BSD-specific implementation of the RouteInfo
+// interface.
+func NewRouteInfo() (routeInfo, error) {
+	return routeInfo{
+		cmds: cmds,
+	}, nil
+}
+
+// GetDefaultInterfaceName returns the interface name attached to the default
+// route on the default interface.
+func (ri routeInfo) GetDefaultInterfaceName() (string, error) {
+	out, err := exec.Command(cmds["route"][0], cmds["route"][1:]...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	var ifName string
+	if ifName, err = parseDefaultIfNameFromRoute(string(out)); err != nil {
+		return "", errors.New("No default interface found")
+	}
+	return ifName, nil
+}
+
+```
+
+#### route_info_test_windows.go
+
+```text
+package sockaddr
+
+import "testing"
+
+func Test_parseWindowsDefaultIfName_new_vs_old(t *testing.T) {
+	if !hasPowershell() {
+		t.Skip("this test requires powershell.")
+		return
+	}
+	ri, err := NewRouteInfo()
+	if err != nil {
+		t.Fatalf("bad: %v", err)
+	}
+	psVer, err1 := ri.GetDefaultInterfaceName()
+	legacyVer, err2 := ri.GetDefaultInterfaceNameLegacy()
+	if err1 != nil {
+		t.Errorf("err != nil for GetDefaultInterfaceName - %v", err1)
+	}
+	if err2 != nil {
+		t.Errorf("err != nil for GetDefaultInterfaceNameLegacy - %v", err2)
+	}
+	if psVer != legacyVer {
+		t.Errorf("got %s; want %s", psVer, legacyVer)
+	}
+}
+
+```
+
+#### route_info_windows.go
+
+```text
+package sockaddr
+
+import (
+	"os/exec"
+	"strings"
+)
+
+var cmds map[string][]string = map[string][]string{
+	"defaultInterface": {"powershell", "Get-NetRoute -DestinationPrefix '0.0.0.0/0' | select -ExpandProperty InterfaceAlias"},
+	// These commands enable GetDefaultInterfaceNameLegacy and should be removed
+	// when it is.
+	"netstat":  {"netstat", "-rn"},
+	"ipconfig": {"ipconfig"},
+}
+
+// NewRouteInfo returns a BSD-specific implementation of the RouteInfo
+// interface.
+func NewRouteInfo() (routeInfo, error) {
+	return routeInfo{
+		cmds: cmds,
+	}, nil
+}
+
+// GetDefaultInterfaceName returns the interface name attached to the default
+// route on the default interface.
+func (ri routeInfo) GetDefaultInterfaceName() (string, error) {
+	if !hasPowershell() {
+		// No powershell, fallback to legacy method
+		return ri.GetDefaultInterfaceNameLegacy()
+	}
+
+	ifNameOut, err := exec.Command(cmds["defaultInterface"][0], cmds["defaultInterface"][1:]...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	ifName := strings.TrimSpace(string(ifNameOut[:]))
+	return ifName, nil
+}
+
+// GetDefaultInterfaceNameLegacy provides legacy behavior for GetDefaultInterfaceName
+// on Windows machines without powershell.
+func (ri routeInfo) GetDefaultInterfaceNameLegacy() (string, error) {
+	ifNameOut, err := exec.Command(cmds["netstat"][0], cmds["netstat"][1:]...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	ipconfigOut, err := exec.Command(cmds["ipconfig"][0], cmds["ipconfig"][1:]...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	ifName, err := parseDefaultIfNameWindows(string(ifNameOut), string(ipconfigOut))
+	if err != nil {
+		return "", err
+	}
+
+	return ifName, nil
+}
+
+func hasPowershell() bool {
+	_, err := exec.LookPath("powershell")
+	return (err != nil)
+}
+
+```
+
+#### sockaddr.go
+
+```text
+package sockaddr
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+type SockAddrType int
+type AttrName string
+
+const (
+	TypeUnknown SockAddrType = 0x0
+	TypeUnix                 = 0x1
+	TypeIPv4                 = 0x2
+	TypeIPv6                 = 0x4
+
+	// TypeIP is the union of TypeIPv4 and TypeIPv6
+	TypeIP = 0x6
+)
+
+type SockAddr interface {
+	// CmpRFC returns 0 if SockAddr exactly matches one of the matched RFC
+	// networks, -1 if the receiver is contained within the RFC network, or
+	// 1 if the address is not contained within the RFC.
+	CmpRFC(rfcNum uint, sa SockAddr) int
+
+	// Contains returns true if the SockAddr arg is contained within the
+	// receiver
+	Contains(SockAddr) bool
+
+	// Equal allows for the comparison of two SockAddrs
+	Equal(SockAddr) bool
+
+	DialPacketArgs() (string, string)
+	DialStreamArgs() (string, string)
+	ListenPacketArgs() (string, string)
+	ListenStreamArgs() (string, string)
+
+	// String returns the string representation of SockAddr
+	String() string
+
+	// Type returns the SockAddrType
+	Type() SockAddrType
+}
+
+// sockAddrAttrMap is a map of the SockAddr type-specific attributes.
+var sockAddrAttrMap map[AttrName]func(SockAddr) string
+var sockAddrAttrs []AttrName
+
+func init() {
+	sockAddrInit()
+}
+
+// New creates a new SockAddr from the string.  The order in which New()
+// attempts to construct a SockAddr is: IPv4Addr, IPv6Addr, SockAddrUnix.
+//
+// NOTE: New() relies on the heuristic wherein if the path begins with either a
+// '.'  or '/' character before creating a new UnixSock.  For UNIX sockets that
+// are absolute paths or are nested within a sub-directory, this works as
+// expected, however if the UNIX socket is contained in the current working
+// directory, this will fail unless the path begins with "./"
+// (e.g. "./my-local-socket").  Calls directly to NewUnixSock() do not suffer
+// this limitation.  Invalid IP addresses such as "256.0.0.0/-1" will run afoul
+// of this heuristic and be assumed to be a valid UNIX socket path (which they
+// are, but it is probably not what you want and you won't realize it until you
+// stat(2) the file system to discover it doesn't exist).
+func NewSockAddr(s string) (SockAddr, error) {
+	ipv4Addr, err := NewIPv4Addr(s)
+	if err == nil {
+		return ipv4Addr, nil
+	}
+
+	ipv6Addr, err := NewIPv6Addr(s)
+	if err == nil {
+		return ipv6Addr, nil
+	}
+
+	// Check to make sure the string begins with either a '.' or '/', or
+	// contains a '/'.
+	if len(s) > 1 && (strings.IndexAny(s[0:1], "./") != -1 || strings.IndexByte(s, '/') != -1) {
+		unixSock, err := NewUnixSock(s)
+		if err == nil {
+			return unixSock, nil
+		}
+	}
+
+	return nil, fmt.Errorf("Unable to convert %q to an IPv4 or IPv6 address, or a UNIX Socket", s)
+}
+
+// ToIPAddr returns an IPAddr type or nil if the type conversion fails.
+func ToIPAddr(sa SockAddr) *IPAddr {
+	ipa, ok := sa.(IPAddr)
+	if !ok {
+		return nil
+	}
+	return &ipa
+}
+
+// ToIPv4Addr returns an IPv4Addr type or nil if the type conversion fails.
+func ToIPv4Addr(sa SockAddr) *IPv4Addr {
+	switch v := sa.(type) {
+	case IPv4Addr:
+		return &v
+	default:
+		return nil
+	}
+}
+
+// ToIPv6Addr returns an IPv6Addr type or nil if the type conversion fails.
+func ToIPv6Addr(sa SockAddr) *IPv6Addr {
+	switch v := sa.(type) {
+	case IPv6Addr:
+		return &v
+	default:
+		return nil
+	}
+}
+
+// ToUnixSock returns a UnixSock type or nil if the type conversion fails.
+func ToUnixSock(sa SockAddr) *UnixSock {
+	switch v := sa.(type) {
+	case UnixSock:
+		return &v
+	default:
+		return nil
+	}
+}
+
+// SockAddrAttr returns a string representation of an attribute for the given
+// SockAddr.
+func SockAddrAttr(sa SockAddr, selector AttrName) string {
+	fn, found := sockAddrAttrMap[selector]
+	if !found {
+		return ""
+	}
+
+	return fn(sa)
+}
+
+// String() for SockAddrType returns a string representation of the
+// SockAddrType (e.g. "IPv4", "IPv6", "UNIX", "IP", or "unknown").
+func (sat SockAddrType) String() string {
+	switch sat {
+	case TypeIPv4:
+		return "IPv4"
+	case TypeIPv6:
+		return "IPv6"
+	// There is no concrete "IP" type.  Leaving here as a reminder.
+	// case TypeIP:
+	// 	return "IP"
+	case TypeUnix:
+		return "UNIX"
+	default:
+		panic("unsupported type")
+	}
+}
+
+// sockAddrInit is called once at init()
+func sockAddrInit() {
+	sockAddrAttrs = []AttrName{
+		"type", // type should be first
+		"string",
+	}
+
+	sockAddrAttrMap = map[AttrName]func(sa SockAddr) string{
+		"string": func(sa SockAddr) string {
+			return sa.String()
+		},
+		"type": func(sa SockAddr) string {
+			return sa.Type().String()
+		},
+	}
+}
+
+// UnixSockAttrs returns a list of attributes supported by the UnixSock type
+func SockAddrAttrs() []AttrName {
+	return sockAddrAttrs
+}
+
+// Although this is pretty trivial to do in a program, having the logic here is
+// useful all around. Note that this marshals into a *string* -- the underlying
+// string representation of the sockaddr. If you then unmarshal into this type
+// in Go, all will work as expected, but externally you can take what comes out
+// and use the string value directly.
+type SockAddrMarshaler struct {
+	SockAddr
+}
+
+func (s *SockAddrMarshaler) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.SockAddr.String())
+}
+
+func (s *SockAddrMarshaler) UnmarshalJSON(in []byte) error {
+	var str string
+	err := json.Unmarshal(in, &str)
+	if err != nil {
+		return err
+	}
+	sa, err := NewSockAddr(str)
+	if err != nil {
+		return err
+	}
+	s.SockAddr = sa
+	return nil
+}
+
+```
+
+#### sockaddrs.go
+
+```text
+package sockaddr
+
+import (
+	"bytes"
+	"sort"
+)
+
+// SockAddrs is a slice of SockAddrs
+type SockAddrs []SockAddr
+
+func (s SockAddrs) Len() int      { return len(s) }
+func (s SockAddrs) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+
+// CmpAddrFunc is the function signature that must be met to be used in the
+// OrderedAddrBy multiAddrSorter
+type CmpAddrFunc func(p1, p2 *SockAddr) int
+
+// multiAddrSorter implements the Sort interface, sorting the SockAddrs within.
+type multiAddrSorter struct {
+	addrs SockAddrs
+	cmp   []CmpAddrFunc
+}
+
+// Sort sorts the argument slice according to the Cmp functions passed to
+// OrderedAddrBy.
+func (ms *multiAddrSorter) Sort(sockAddrs SockAddrs) {
+	ms.addrs = sockAddrs
+	sort.Sort(ms)
+}
+
+// OrderedAddrBy sorts SockAddr by the list of sort function pointers.
+func OrderedAddrBy(cmpFuncs ...CmpAddrFunc) *multiAddrSorter {
+	return &multiAddrSorter{
+		cmp: cmpFuncs,
+	}
+}
+
+// Len is part of sort.Interface.
+func (ms *multiAddrSorter) Len() int {
+	return len(ms.addrs)
+}
+
+// Less is part of sort.Interface. It is implemented by looping along the
+// Cmp() functions until it finds a comparison that is either less than,
+// equal to, or greater than.
+func (ms *multiAddrSorter) Less(i, j int) bool {
+	p, q := &ms.addrs[i], &ms.addrs[j]
+	// Try all but the last comparison.
+	var k int
+	for k = 0; k < len(ms.cmp)-1; k++ {
+		cmp := ms.cmp[k]
+		x := cmp(p, q)
+		switch x {
+		case -1:
+			// p < q, so we have a decision.
+			return true
+		case 1:
+			// p > q, so we have a decision.
+			return false
+		}
+		// p == q; try the next comparison.
+	}
+	// All comparisons to here said "equal", so just return whatever the
+	// final comparison reports.
+	switch ms.cmp[k](p, q) {
+	case -1:
+		return true
+	case 1:
+		return false
+	default:
+		// Still a tie! Now what?
+		return false
+	}
+}
+
+// Swap is part of sort.Interface.
+func (ms *multiAddrSorter) Swap(i, j int) {
+	ms.addrs[i], ms.addrs[j] = ms.addrs[j], ms.addrs[i]
+}
+
+const (
+	// NOTE (sean@): These constants are here for code readability only and
+	// are sprucing up the code for readability purposes.  Some of the
+	// Cmp*() variants have confusing logic (especially when dealing with
+	// mixed-type comparisons) and this, I think, has made it easier to grok
+	// the code faster.
+	sortReceiverBeforeArg = -1
+	sortDeferDecision     = 0
+	sortArgBeforeReceiver = 1
+)
+
+// AscAddress is a sorting function to sort SockAddrs by their respective
+// address type.  Non-equal types are deferred in the sort.
+func AscAddress(p1Ptr, p2Ptr *SockAddr) int {
+	p1 := *p1Ptr
+	p2 := *p2Ptr
+
+	switch v := p1.(type) {
+	case IPv4Addr:
+		return v.CmpAddress(p2)
+	case IPv6Addr:
+		return v.CmpAddress(p2)
+	case UnixSock:
+		return v.CmpAddress(p2)
+	default:
+		return sortDeferDecision
+	}
+}
+
+// AscPort is a sorting function to sort SockAddrs by their respective address
+// type.  Non-equal types are deferred in the sort.
+func AscPort(p1Ptr, p2Ptr *SockAddr) int {
+	p1 := *p1Ptr
+	p2 := *p2Ptr
+
+	switch v := p1.(type) {
+	case IPv4Addr:
+		return v.CmpPort(p2)
+	case IPv6Addr:
+		return v.CmpPort(p2)
+	default:
+		return sortDeferDecision
+	}
+}
+
+// AscPrivate is a sorting function to sort "more secure" private values before
+// "more public" values.  Both IPv4 and IPv6 are compared against RFC6890
+// (RFC6890 includes, and is not limited to, RFC1918 and RFC6598 for IPv4, and
+// IPv6 includes RFC4193).
+func AscPrivate(p1Ptr, p2Ptr *SockAddr) int {
+	p1 := *p1Ptr
+	p2 := *p2Ptr
+
+	switch v := p1.(type) {
+	case IPv4Addr, IPv6Addr:
+		return v.CmpRFC(6890, p2)
+	default:
+		return sortDeferDecision
+	}
+}
+
+// AscNetworkSize is a sorting function to sort SockAddrs based on their network
+// size.  Non-equal types are deferred in the sort.
+func AscNetworkSize(p1Ptr, p2Ptr *SockAddr) int {
+	p1 := *p1Ptr
+	p2 := *p2Ptr
+	p1Type := p1.Type()
+	p2Type := p2.Type()
+
+	// Network size operations on non-IP types make no sense
+	if p1Type != p2Type && p1Type != TypeIP {
+		return sortDeferDecision
+	}
+
+	ipA := p1.(IPAddr)
+	ipB := p2.(IPAddr)
+
+	return bytes.Compare([]byte(*ipA.NetIPMask()), []byte(*ipB.NetIPMask()))
+}
+
+// AscType is a sorting function to sort "more secure" types before
+// "less-secure" types.
+func AscType(p1Ptr, p2Ptr *SockAddr) int {
+	p1 := *p1Ptr
+	p2 := *p2Ptr
+	p1Type := p1.Type()
+	p2Type := p2.Type()
+	switch {
+	case p1Type < p2Type:
+		return sortReceiverBeforeArg
+	case p1Type == p2Type:
+		return sortDeferDecision
+	case p1Type > p2Type:
+		return sortArgBeforeReceiver
+	default:
+		return sortDeferDecision
+	}
+}
+
+// FilterByType returns two lists: a list of matched and unmatched SockAddrs
+func (sas SockAddrs) FilterByType(type_ SockAddrType) (matched, excluded SockAddrs) {
+	matched = make(SockAddrs, 0, len(sas))
+	excluded = make(SockAddrs, 0, len(sas))
+
+	for _, sa := range sas {
+		if sa.Type()&type_ != 0 {
+			matched = append(matched, sa)
+		} else {
+			excluded = append(excluded, sa)
+		}
+	}
+	return matched, excluded
+}
+
+```
+
+#### unixsock.go
+
+```text
+package sockaddr
+
+import (
+	"fmt"
+	"strings"
+)
+
+type UnixSock struct {
+	SockAddr
+	path string
+}
+type UnixSocks []*UnixSock
+
+// unixAttrMap is a map of the UnixSockAddr type-specific attributes.
+var unixAttrMap map[AttrName]func(UnixSock) string
+var unixAttrs []AttrName
+
+func init() {
+	unixAttrInit()
+}
+
+// NewUnixSock creates an UnixSock from a string path.  String can be in the
+// form of either URI-based string (e.g. `file:///etc/passwd`), an absolute
+// path (e.g. `/etc/passwd`), or a relative path (e.g. `./foo`).
+func NewUnixSock(s string) (ret UnixSock, err error) {
+	ret.path = s
+	return ret, nil
+}
+
+// Contains returns true if sa and us have the same path
+func (us UnixSock) Contains(sa SockAddr) bool {
+	usb, ok := sa.(UnixSock)
+	if !ok {
+		return false
+	}
+
+	return usb.path == us.path
+}
+
+// CmpAddress follows the Cmp() standard protocol and returns:
+//
+// - -1 If the receiver should sort first because its name lexically sorts before arg
+// - 0 if the SockAddr arg is not a UnixSock, or is a UnixSock with the same path.
+// - 1 If the argument should sort first.
+func (us UnixSock) CmpAddress(sa SockAddr) int {
+	usb, ok := sa.(UnixSock)
+	if !ok {
+		return sortDeferDecision
+	}
+
+	return strings.Compare(us.Path(), usb.Path())
+}
+
+// CmpRFC doesn't make sense for a Unix socket, so just return defer decision
+func (us UnixSock) CmpRFC(rfcNum uint, sa SockAddr) int { return sortDeferDecision }
+
+// DialPacketArgs returns the arguments required to be passed to net.DialUnix()
+// with the `unixgram` network type.
+func (us UnixSock) DialPacketArgs() (network, dialArgs string) {
+	return "unixgram", us.path
+}
+
+// DialStreamArgs returns the arguments required to be passed to net.DialUnix()
+// with the `unix` network type.
+func (us UnixSock) DialStreamArgs() (network, dialArgs string) {
+	return "unix", us.path
+}
+
+// Equal returns true if a SockAddr is equal to the receiving UnixSock.
+func (us UnixSock) Equal(sa SockAddr) bool {
+	usb, ok := sa.(UnixSock)
+	if !ok {
+		return false
+	}
+
+	if us.Path() != usb.Path() {
+		return false
+	}
+
+	return true
+}
+
+// ListenPacketArgs returns the arguments required to be passed to
+// net.ListenUnixgram() with the `unixgram` network type.
+func (us UnixSock) ListenPacketArgs() (network, dialArgs string) {
+	return "unixgram", us.path
+}
+
+// ListenStreamArgs returns the arguments required to be passed to
+// net.ListenUnix() with the `unix` network type.
+func (us UnixSock) ListenStreamArgs() (network, dialArgs string) {
+	return "unix", us.path
+}
+
+// MustUnixSock is a helper method that must return an UnixSock or panic on
+// invalid input.
+func MustUnixSock(addr string) UnixSock {
+	us, err := NewUnixSock(addr)
+	if err != nil {
+		panic(fmt.Sprintf("Unable to create a UnixSock from %+q: %v", addr, err))
+	}
+	return us
+}
+
+// Path returns the given path of the UnixSock
+func (us UnixSock) Path() string {
+	return us.path
+}
+
+// String returns the path of the UnixSock
+func (us UnixSock) String() string {
+	return fmt.Sprintf("%+q", us.path)
+}
+
+// Type is used as a type switch and returns TypeUnix
+func (UnixSock) Type() SockAddrType {
+	return TypeUnix
+}
+
+// UnixSockAttrs returns a list of attributes supported by the UnixSockAddr type
+func UnixSockAttrs() []AttrName {
+	return unixAttrs
+}
+
+// UnixSockAttr returns a string representation of an attribute for the given
+// UnixSock.
+func UnixSockAttr(us UnixSock, attrName AttrName) string {
+	fn, found := unixAttrMap[attrName]
+	if !found {
+		return ""
+	}
+
+	return fn(us)
+}
+
+// unixAttrInit is called once at init()
+func unixAttrInit() {
+	// Sorted for human readability
+	unixAttrs = []AttrName{
+		"path",
+	}
+
+	unixAttrMap = map[AttrName]func(us UnixSock) string{
+		"path": func(us UnixSock) string {
+			return us.Path()
+		},
+	}
+}
+
+```
+
+
+### github.com/hashicorp/hcl
+
+* License: MPL-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/hcl/LICENSE
+
+#### .gitignore
+
+```text
+y.output
+
+# ignore intellij files
+.idea
+*.iml
+*.ipr
+*.iws
+
+*.test
+
+```
+
+#### .travis.yml
+
+```text
+sudo: false
+
+language: go
+
+go:
+  - 1.x
+  - tip
+
+branches:
+  only:
+    - master
+
+script: make test
+
+```
+
+#### LICENSE
+
+```text
+Mozilla Public License, version 2.0
+
+1. Definitions
+
+1.1. “Contributor”
+
+     means each individual or legal entity that creates, contributes to the
+     creation of, or owns Covered Software.
+
+1.2. “Contributor Version”
+
+     means the combination of the Contributions of others (if any) used by a
+     Contributor and that particular Contributor’s Contribution.
+
+1.3. “Contribution”
+
+     means Covered Software of a particular Contributor.
+
+1.4. “Covered Software”
+
+     means Source Code Form to which the initial Contributor has attached the
+     notice in Exhibit A, the Executable Form of such Source Code Form, and
+     Modifications of such Source Code Form, in each case including portions
+     thereof.
+
+1.5. “Incompatible With Secondary Licenses”
+     means
+
+     a. that the initial Contributor has attached the notice described in
+        Exhibit B to the Covered Software; or
+
+     b. that the Covered Software was made available under the terms of version
+        1.1 or earlier of the License, but not also under the terms of a
+        Secondary License.
+
+1.6. “Executable Form”
+
+     means any form of the work other than Source Code Form.
+
+1.7. “Larger Work”
+
+     means a work that combines Covered Software with other material, in a separate
+     file or files, that is not Covered Software.
+
+1.8. “License”
+
+     means this document.
+
+1.9. “Licensable”
+
+     means having the right to grant, to the maximum extent possible, whether at the
+     time of the initial grant or subsequently, any and all of the rights conveyed by
+     this License.
+
+1.10. “Modifications”
+
+     means any of the following:
+
+     a. any file in Source Code Form that results from an addition to, deletion
+        from, or modification of the contents of Covered Software; or
+
+     b. any new file in Source Code Form that contains any Covered Software.
+
+1.11. “Patent Claims” of a Contributor
+
+      means any patent claim(s), including without limitation, method, process,
+      and apparatus claims, in any patent Licensable by such Contributor that
+      would be infringed, but for the grant of the License, by the making,
+      using, selling, offering for sale, having made, import, or transfer of
+      either its Contributions or its Contributor Version.
+
+1.12. “Secondary License”
+
+      means either the GNU General Public License, Version 2.0, the GNU Lesser
+      General Public License, Version 2.1, the GNU Affero General Public
+      License, Version 3.0, or any later versions of those licenses.
+
+1.13. “Source Code Form”
+
+      means the form of the work preferred for making modifications.
+
+1.14. “You” (or “Your”)
+
+      means an individual or a legal entity exercising rights under this
+      License. For legal entities, “You” includes any entity that controls, is
+      controlled by, or is under common control with You. For purposes of this
+      definition, “control” means (a) the power, direct or indirect, to cause
+      the direction or management of such entity, whether by contract or
+      otherwise, or (b) ownership of more than fifty percent (50%) of the
+      outstanding shares or beneficial ownership of such entity.
+
+
+2. License Grants and Conditions
+
+2.1. Grants
+
+     Each Contributor hereby grants You a world-wide, royalty-free,
+     non-exclusive license:
+
+     a. under intellectual property rights (other than patent or trademark)
+        Licensable by such Contributor to use, reproduce, make available,
+        modify, display, perform, distribute, and otherwise exploit its
+        Contributions, either on an unmodified basis, with Modifications, or as
+        part of a Larger Work; and
+
+     b. under Patent Claims of such Contributor to make, use, sell, offer for
+        sale, have made, import, and otherwise transfer either its Contributions
+        or its Contributor Version.
+
+2.2. Effective Date
+
+     The licenses granted in Section 2.1 with respect to any Contribution become
+     effective for each Contribution on the date the Contributor first distributes
+     such Contribution.
+
+2.3. Limitations on Grant Scope
+
+     The licenses granted in this Section 2 are the only rights granted under this
+     License. No additional rights or licenses will be implied from the distribution
+     or licensing of Covered Software under this License. Notwithstanding Section
+     2.1(b) above, no patent license is granted by a Contributor:
+
+     a. for any code that a Contributor has removed from Covered Software; or
+
+     b. for infringements caused by: (i) Your and any other third party’s
+        modifications of Covered Software, or (ii) the combination of its
+        Contributions with other software (except as part of its Contributor
+        Version); or
+
+     c. under Patent Claims infringed by Covered Software in the absence of its
+        Contributions.
+
+     This License does not grant any rights in the trademarks, service marks, or
+     logos of any Contributor (except as may be necessary to comply with the
+     notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+     No Contributor makes additional grants as a result of Your choice to
+     distribute the Covered Software under a subsequent version of this License
+     (see Section 10.2) or under the terms of a Secondary License (if permitted
+     under the terms of Section 3.3).
+
+2.5. Representation
+
+     Each Contributor represents that the Contributor believes its Contributions
+     are its original creation(s) or it has sufficient rights to grant the
+     rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+     This License is not intended to limit any rights You have under applicable
+     copyright doctrines of fair use, fair dealing, or other equivalents.
+
+2.7. Conditions
+
+     Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted in
+     Section 2.1.
+
+
+3. Responsibilities
+
+3.1. Distribution of Source Form
+
+     All distribution of Covered Software in Source Code Form, including any
+     Modifications that You create or to which You contribute, must be under the
+     terms of this License. You must inform recipients that the Source Code Form
+     of the Covered Software is governed by the terms of this License, and how
+     they can obtain a copy of this License. You may not attempt to alter or
+     restrict the recipients’ rights in the Source Code Form.
+
+3.2. Distribution of Executable Form
+
+     If You distribute Covered Software in Executable Form then:
+
+     a. such Covered Software must also be made available in Source Code Form,
+        as described in Section 3.1, and You must inform recipients of the
+        Executable Form how they can obtain a copy of such Source Code Form by
+        reasonable means in a timely manner, at a charge no more than the cost
+        of distribution to the recipient; and
+
+     b. You may distribute such Executable Form under the terms of this License,
+        or sublicense it under different terms, provided that the license for
+        the Executable Form does not attempt to limit or alter the recipients’
+        rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+     You may create and distribute a Larger Work under terms of Your choice,
+     provided that You also comply with the requirements of this License for the
+     Covered Software. If the Larger Work is a combination of Covered Software
+     with a work governed by one or more Secondary Licenses, and the Covered
+     Software is not Incompatible With Secondary Licenses, this License permits
+     You to additionally distribute such Covered Software under the terms of
+     such Secondary License(s), so that the recipient of the Larger Work may, at
+     their option, further distribute the Covered Software under the terms of
+     either this License or such Secondary License(s).
+
+3.4. Notices
+
+     You may not remove or alter the substance of any license notices (including
+     copyright notices, patent notices, disclaimers of warranty, or limitations
+     of liability) contained within the Source Code Form of the Covered
+     Software, except that You may alter any license notices to the extent
+     required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+     You may choose to offer, and to charge a fee for, warranty, support,
+     indemnity or liability obligations to one or more recipients of Covered
+     Software. However, You may do so only on Your own behalf, and not on behalf
+     of any Contributor. You must make it absolutely clear that any such
+     warranty, support, indemnity, or liability obligation is offered by You
+     alone, and You hereby agree to indemnify every Contributor for any
+     liability incurred by such Contributor as a result of warranty, support,
+     indemnity or liability terms You offer. You may include additional
+     disclaimers of warranty and limitations of liability specific to any
+     jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+
+   If it is impossible for You to comply with any of the terms of this License
+   with respect to some or all of the Covered Software due to statute, judicial
+   order, or regulation then You must: (a) comply with the terms of this License
+   to the maximum extent possible; and (b) describe the limitations and the code
+   they affect. Such description must be placed in a text file included with all
+   distributions of the Covered Software under this License. Except to the
+   extent prohibited by statute or regulation, such description must be
+   sufficiently detailed for a recipient of ordinary skill to be able to
+   understand it.
+
+5. Termination
+
+5.1. The rights granted under this License will terminate automatically if You
+     fail to comply with any of its terms. However, if You become compliant,
+     then the rights granted under this License from a particular Contributor
+     are reinstated (a) provisionally, unless and until such Contributor
+     explicitly and finally terminates Your grants, and (b) on an ongoing basis,
+     if such Contributor fails to notify You of the non-compliance by some
+     reasonable means prior to 60 days after You have come back into compliance.
+     Moreover, Your grants from a particular Contributor are reinstated on an
+     ongoing basis if such Contributor notifies You of the non-compliance by
+     some reasonable means, this is the first time You have received notice of
+     non-compliance with this License from such Contributor, and You become
+     compliant prior to 30 days after Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+     infringement claim (excluding declaratory judgment actions, counter-claims,
+     and cross-claims) alleging that a Contributor Version directly or
+     indirectly infringes any patent, then the rights granted to You by any and
+     all Contributors for the Covered Software under Section 2.1 of this License
+     shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all end user
+     license agreements (excluding distributors and resellers) which have been
+     validly granted by You or Your distributors under this License prior to
+     termination shall survive termination.
+
+6. Disclaimer of Warranty
+
+   Covered Software is provided under this License on an “as is” basis, without
+   warranty of any kind, either expressed, implied, or statutory, including,
+   without limitation, warranties that the Covered Software is free of defects,
+   merchantable, fit for a particular purpose or non-infringing. The entire
+   risk as to the quality and performance of the Covered Software is with You.
+   Should any Covered Software prove defective in any respect, You (not any
+   Contributor) assume the cost of any necessary servicing, repair, or
+   correction. This disclaimer of warranty constitutes an essential part of this
+   License. No use of  any Covered Software is authorized under this License
+   except under this disclaimer.
+
+7. Limitation of Liability
+
+   Under no circumstances and under no legal theory, whether tort (including
+   negligence), contract, or otherwise, shall any Contributor, or anyone who
+   distributes Covered Software as permitted above, be liable to You for any
+   direct, indirect, special, incidental, or consequential damages of any
+   character including, without limitation, damages for lost profits, loss of
+   goodwill, work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses, even if such party shall have been
+   informed of the possibility of such damages. This limitation of liability
+   shall not apply to liability for death or personal injury resulting from such
+   party’s negligence to the extent applicable law prohibits such limitation.
+   Some jurisdictions do not allow the exclusion or limitation of incidental or
+   consequential damages, so this exclusion and limitation may not apply to You.
+
+8. Litigation
+
+   Any litigation relating to this License may be brought only in the courts of
+   a jurisdiction where the defendant maintains its principal place of business
+   and such litigation shall be governed by laws of that jurisdiction, without
+   reference to its conflict-of-law provisions. Nothing in this Section shall
+   prevent a party’s ability to bring cross-claims or counter-claims.
+
+9. Miscellaneous
+
+   This License represents the complete agreement concerning the subject matter
+   hereof. If any provision of this License is held to be unenforceable, such
+   provision shall be reformed only to the extent necessary to make it
+   enforceable. Any law or regulation which provides that the language of a
+   contract shall be construed against the drafter shall not be used to construe
+   this License against a Contributor.
+
+
+10. Versions of the License
+
+10.1. New Versions
+
+      Mozilla Foundation is the license steward. Except as provided in Section
+      10.3, no one other than the license steward has the right to modify or
+      publish new versions of this License. Each version will be given a
+      distinguishing version number.
+
+10.2. Effect of New Versions
+
+      You may distribute the Covered Software under the terms of the version of
+      the License under which You originally received the Covered Software, or
+      under the terms of any subsequent version published by the license
+      steward.
+
+10.3. Modified Versions
+
+      If you create software not governed by this License, and you want to
+      create a new license for such software, you may create and use a modified
+      version of this License if you rename the license and remove any
+      references to the name of the license steward (except to note that such
+      modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary Licenses
+      If You choose to distribute Source Code Form that is Incompatible With
+      Secondary Licenses under the terms of this version of the License, the
+      notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+
+      This Source Code Form is subject to the
+      terms of the Mozilla Public License, v.
+      2.0. If a copy of the MPL was not
+      distributed with this file, You can
+      obtain one at
+      http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular file, then
+You may include the notice in a location (such as a LICENSE file in a relevant
+directory) where a recipient would be likely to look for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - “Incompatible With Secondary Licenses” Notice
+
+      This Source Code Form is “Incompatible
+      With Secondary Licenses”, as defined by
+      the Mozilla Public License, v. 2.0.
+
+
+```
+
+#### Makefile
+
+```text
+TEST?=./...
+
+default: test
+
+fmt: generate
+	go fmt ./...
+
+test: generate
+	go get -t ./...
+	go test $(TEST) $(TESTARGS)
+
+generate:
+	go generate ./...
+
+updatedeps:
+	go get -u golang.org/x/tools/cmd/stringer
+
+.PHONY: default generate test updatedeps
+
+```
+
+#### README.md
+
+```text
+# HCL
+
+[![GoDoc](https://godoc.org/github.com/hashicorp/hcl?status.png)](https://godoc.org/github.com/hashicorp/hcl) [![Build Status](https://travis-ci.org/hashicorp/hcl.svg?branch=master)](https://travis-ci.org/hashicorp/hcl)
+
+HCL (HashiCorp Configuration Language) is a configuration language built
+by HashiCorp. The goal of HCL is to build a structured configuration language
+that is both human and machine friendly for use with command-line tools, but
+specifically targeted towards DevOps tools, servers, etc.
+
+HCL is also fully JSON compatible. That is, JSON can be used as completely
+valid input to a system expecting HCL. This helps makes systems
+interoperable with other systems.
+
+HCL is heavily inspired by
+[libucl](https://github.com/vstakhov/libucl),
+nginx configuration, and others similar.
+
+## Why?
+
+A common question when viewing HCL is to ask the question: why not
+JSON, YAML, etc.?
+
+Prior to HCL, the tools we built at [HashiCorp](http://www.hashicorp.com)
+used a variety of configuration languages from full programming languages
+such as Ruby to complete data structure languages such as JSON. What we
+learned is that some people wanted human-friendly configuration languages
+and some people wanted machine-friendly languages.
+
+JSON fits a nice balance in this, but is fairly verbose and most
+importantly doesn't support comments. With YAML, we found that beginners
+had a really hard time determining what the actual structure was, and
+ended up guessing more often than not whether to use a hyphen, colon, etc.
+in order to represent some configuration key.
+
+Full programming languages such as Ruby enable complex behavior
+a configuration language shouldn't usually allow, and also forces
+people to learn some set of Ruby.
+
+Because of this, we decided to create our own configuration language
+that is JSON-compatible. Our configuration language (HCL) is designed
+to be written and modified by humans. The API for HCL allows JSON
+as an input so that it is also machine-friendly (machines can generate
+JSON instead of trying to generate HCL).
+
+Our goal with HCL is not to alienate other configuration languages.
+It is instead to provide HCL as a specialized language for our tools,
+and JSON as the interoperability layer.
+
+## Syntax
+
+For a complete grammar, please see the parser itself. A high-level overview
+of the syntax and grammar is listed here.
+
+  * Single line comments start with `#` or `//`
+
+  * Multi-line comments are wrapped in `/*` and `*/`. Nested block comments
+    are not allowed. A multi-line comment (also known as a block comment)
+    terminates at the first `*/` found.
+
+  * Values are assigned with the syntax `key = value` (whitespace doesn't
+    matter). The value can be any primitive: a string, number, boolean,
+    object, or list.
+
+  * Strings are double-quoted and can contain any UTF-8 characters.
+    Example: `"Hello, World"`
+
+  * Multi-line strings start with `<<EOF` at the end of a line, and end
+    with `EOF` on its own line ([here documents](https://en.wikipedia.org/wiki/Here_document)).
+    Any text may be used in place of `EOF`. Example:
+```
+<<FOO
+hello
+world
+FOO
+```
+
+  * Numbers are assumed to be base 10. If you prefix a number with 0x,
+    it is treated as a hexadecimal. If it is prefixed with 0, it is
+    treated as an octal. Numbers can be in scientific notation: "1e10".
+
+  * Boolean values: `true`, `false`
+
+  * Arrays can be made by wrapping it in `[]`. Example:
+    `["foo", "bar", 42]`. Arrays can contain primitives,
+    other arrays, and objects. As an alternative, lists
+    of objects can be created with repeated blocks, using
+    this structure:
+
+    ```hcl
+    service {
+        key = "value"
+    }
+
+    service {
+        key = "value"
+    }
+    ```
+
+Objects and nested objects are created using the structure shown below:
+
+```
+variable "ami" {
+    description = "the AMI to use"
+}
+```
+This would be equivalent to the following json:
+``` json
+{
+  "variable": {
+      "ami": {
+          "description": "the AMI to use"
+        }
+    }
+}
+```
+
+## Thanks
+
+Thanks to:
+
+  * [@vstakhov](https://github.com/vstakhov) - The original libucl parser
+    and syntax that HCL was based off of.
+
+  * [@fatih](https://github.com/fatih) - The rewritten HCL parser
+    in pure Go (no goyacc) and support for a printer.
+
+```
+
+#### appveyor.yml
+
+```text
+version: "build-{branch}-{build}"
+image: Visual Studio 2015
+clone_folder: c:\gopath\src\github.com\hashicorp\hcl
+environment:
+  GOPATH: c:\gopath
+init:
+  - git config --global core.autocrlf false
+install:
+- cmd: >-
+    echo %Path%
+
+    go version
+
+    go env
+
+    go get -t ./...
+
+build_script:
+- cmd: go test -v ./...
+
+```
+
+#### decoder.go
+
+```text
+package hcl
+
+import (
+	"errors"
+	"fmt"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/hashicorp/hcl/hcl/ast"
+	"github.com/hashicorp/hcl/hcl/parser"
+	"github.com/hashicorp/hcl/hcl/token"
+)
+
+// This is the tag to use with structures to have settings for HCL
+const tagName = "hcl"
+
+var (
+	// nodeType holds a reference to the type of ast.Node
+	nodeType reflect.Type = findNodeType()
+)
+
+// Unmarshal accepts a byte slice as input and writes the
+// data to the value pointed to by v.
+func Unmarshal(bs []byte, v interface{}) error {
+	root, err := parse(bs, false)
+	if err != nil {
+		return err
+	}
+
+	return DecodeObject(v, root)
+}
+
+// UnmarshalErrorOnDuplicates accepts a byte slice as input and writes the
+// data to the value pointed to by v but errors on duplicate attribute key.
+func UnmarshalErrorOnDuplicates(bs []byte, v interface{}) error {
+	root, err := parse(bs, true)
+	if err != nil {
+		return err
+	}
+
+	return DecodeObject(v, root)
+}
+
+// Decode reads the given input and decodes it into the structure
+// given by `out`.
+func Decode(out interface{}, in string) error {
+	return decode(out, in, false)
+}
+
+// DecodeErrorOnDuplicates reads the given input and decodes it into the structure but errrors on duplicate attribute key
+// given by `out`.
+func DecodeErrorOnDuplicates(out interface{}, in string) error {
+	return decode(out, in, true)
+}
+
+// decode reads the given input and decodes it into the structure given by `out`.
+// takes in a boolean to determine if it should error on duplicate attribute
+func decode(out interface{}, in string, errorOnDuplicateAtributes bool) error {
+	obj, err := parse([]byte(in), errorOnDuplicateAtributes)
+	if err != nil {
+		return err
+	}
+
+	return DecodeObject(out, obj)
+}
+
+// DecodeObject is a lower-level version of Decode. It decodes a
+// raw Object into the given output.
+func DecodeObject(out interface{}, n ast.Node) error {
+	val := reflect.ValueOf(out)
+	if val.Kind() != reflect.Ptr {
+		return errors.New("result must be a pointer")
+	}
+
+	// If we have the file, we really decode the root node
+	if f, ok := n.(*ast.File); ok {
+		n = f.Node
+	}
+
+	var d decoder
+	return d.decode("root", n, val.Elem())
+}
+
+type decoder struct {
+	stack []reflect.Kind
+}
+
+func (d *decoder) decode(name string, node ast.Node, result reflect.Value) error {
+	k := result
+
+	// If we have an interface with a valid value, we use that
+	// for the check.
+	if result.Kind() == reflect.Interface {
+		elem := result.Elem()
+		if elem.IsValid() {
+			k = elem
+		}
+	}
+
+	// Push current onto stack unless it is an interface.
+	if k.Kind() != reflect.Interface {
+		d.stack = append(d.stack, k.Kind())
+
+		// Schedule a pop
+		defer func() {
+			d.stack = d.stack[:len(d.stack)-1]
+		}()
+	}
+
+	switch k.Kind() {
+	case reflect.Bool:
+		return d.decodeBool(name, node, result)
+	case reflect.Float32, reflect.Float64:
+		return d.decodeFloat(name, node, result)
+	case reflect.Int, reflect.Int32, reflect.Int64:
+		return d.decodeInt(name, node, result)
+	case reflect.Interface:
+		// When we see an interface, we make our own thing
+		return d.decodeInterface(name, node, result)
+	case reflect.Map:
+		return d.decodeMap(name, node, result)
+	case reflect.Ptr:
+		return d.decodePtr(name, node, result)
+	case reflect.Slice:
+		return d.decodeSlice(name, node, result)
+	case reflect.String:
+		return d.decodeString(name, node, result)
+	case reflect.Struct:
+		return d.decodeStruct(name, node, result)
+	default:
+		return &parser.PosError{
+			Pos: node.Pos(),
+			Err: fmt.Errorf("%s: unknown kind to decode into: %s", name, k.Kind()),
+		}
+	}
+}
+
+func (d *decoder) decodeBool(name string, node ast.Node, result reflect.Value) error {
+	switch n := node.(type) {
+	case *ast.LiteralType:
+		if n.Token.Type == token.BOOL {
+			v, err := strconv.ParseBool(n.Token.Text)
+			if err != nil {
+				return err
+			}
+
+			result.Set(reflect.ValueOf(v))
+			return nil
+		}
+	}
+
+	return &parser.PosError{
+		Pos: node.Pos(),
+		Err: fmt.Errorf("%s: unknown type %T", name, node),
+	}
+}
+
+func (d *decoder) decodeFloat(name string, node ast.Node, result reflect.Value) error {
+	switch n := node.(type) {
+	case *ast.LiteralType:
+		if n.Token.Type == token.FLOAT || n.Token.Type == token.NUMBER {
+			v, err := strconv.ParseFloat(n.Token.Text, 64)
+			if err != nil {
+				return err
+			}
+
+			result.Set(reflect.ValueOf(v).Convert(result.Type()))
+			return nil
+		}
+	}
+
+	return &parser.PosError{
+		Pos: node.Pos(),
+		Err: fmt.Errorf("%s: unknown type %T", name, node),
+	}
+}
+
+func (d *decoder) decodeInt(name string, node ast.Node, result reflect.Value) error {
+	switch n := node.(type) {
+	case *ast.LiteralType:
+		switch n.Token.Type {
+		case token.NUMBER:
+			v, err := strconv.ParseInt(n.Token.Text, 0, 0)
+			if err != nil {
+				return err
+			}
+
+			if result.Kind() == reflect.Interface {
+				result.Set(reflect.ValueOf(int(v)))
+			} else {
+				result.SetInt(v)
+			}
+			return nil
+		case token.STRING:
+			v, err := strconv.ParseInt(n.Token.Value().(string), 0, 0)
+			if err != nil {
+				return err
+			}
+
+			if result.Kind() == reflect.Interface {
+				result.Set(reflect.ValueOf(int(v)))
+			} else {
+				result.SetInt(v)
+			}
+			return nil
+		}
+	}
+
+	return &parser.PosError{
+		Pos: node.Pos(),
+		Err: fmt.Errorf("%s: unknown type %T", name, node),
+	}
+}
+
+func (d *decoder) decodeInterface(name string, node ast.Node, result reflect.Value) error {
+	// When we see an ast.Node, we retain the value to enable deferred decoding.
+	// Very useful in situations where we want to preserve ast.Node information
+	// like Pos
+	if result.Type() == nodeType && result.CanSet() {
+		result.Set(reflect.ValueOf(node))
+		return nil
+	}
+
+	var set reflect.Value
+	redecode := true
+
+	// For testing types, ObjectType should just be treated as a list. We
+	// set this to a temporary var because we want to pass in the real node.
+	testNode := node
+	if ot, ok := node.(*ast.ObjectType); ok {
+		testNode = ot.List
+	}
+
+	switch n := testNode.(type) {
+	case *ast.ObjectList:
+		// If we're at the root or we're directly within a slice, then we
+		// decode objects into map[string]interface{}, otherwise we decode
+		// them into lists.
+		if len(d.stack) == 0 || d.stack[len(d.stack)-1] == reflect.Slice {
+			var temp map[string]interface{}
+			tempVal := reflect.ValueOf(temp)
+			result := reflect.MakeMap(
+				reflect.MapOf(
+					reflect.TypeOf(""),
+					tempVal.Type().Elem()))
+
+			set = result
+		} else {
+			var temp []map[string]interface{}
+			tempVal := reflect.ValueOf(temp)
+			result := reflect.MakeSlice(
+				reflect.SliceOf(tempVal.Type().Elem()), 0, len(n.Items))
+			set = result
+		}
+	case *ast.ObjectType:
+		// If we're at the root or we're directly within a slice, then we
+		// decode objects into map[string]interface{}, otherwise we decode
+		// them into lists.
+		if len(d.stack) == 0 || d.stack[len(d.stack)-1] == reflect.Slice {
+			var temp map[string]interface{}
+			tempVal := reflect.ValueOf(temp)
+			result := reflect.MakeMap(
+				reflect.MapOf(
+					reflect.TypeOf(""),
+					tempVal.Type().Elem()))
+
+			set = result
+		} else {
+			var temp []map[string]interface{}
+			tempVal := reflect.ValueOf(temp)
+			result := reflect.MakeSlice(
+				reflect.SliceOf(tempVal.Type().Elem()), 0, 1)
+			set = result
+		}
+	case *ast.ListType:
+		var temp []interface{}
+		tempVal := reflect.ValueOf(temp)
+		result := reflect.MakeSlice(
+			reflect.SliceOf(tempVal.Type().Elem()), 0, 0)
+		set = result
+	case *ast.LiteralType:
+		switch n.Token.Type {
+		case token.BOOL:
+			var result bool
+			set = reflect.Indirect(reflect.New(reflect.TypeOf(result)))
+		case token.FLOAT:
+			var result float64
+			set = reflect.Indirect(reflect.New(reflect.TypeOf(result)))
+		case token.NUMBER:
+			var result int
+			set = reflect.Indirect(reflect.New(reflect.TypeOf(result)))
+		case token.STRING, token.HEREDOC:
+			set = reflect.Indirect(reflect.New(reflect.TypeOf("")))
+		default:
+			return &parser.PosError{
+				Pos: node.Pos(),
+				Err: fmt.Errorf("%s: cannot decode into interface: %T", name, node),
+			}
+		}
+	default:
+		return fmt.Errorf(
+			"%s: cannot decode into interface: %T",
+			name, node)
+	}
+
+	// Set the result to what its supposed to be, then reset
+	// result so we don't reflect into this method anymore.
+	result.Set(set)
+
+	if redecode {
+		// Revisit the node so that we can use the newly instantiated
+		// thing and populate it.
+		if err := d.decode(name, node, result); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (d *decoder) decodeMap(name string, node ast.Node, result reflect.Value) error {
+	if item, ok := node.(*ast.ObjectItem); ok {
+		node = &ast.ObjectList{Items: []*ast.ObjectItem{item}}
+	}
+
+	if ot, ok := node.(*ast.ObjectType); ok {
+		node = ot.List
+	}
+
+	n, ok := node.(*ast.ObjectList)
+	if !ok {
+		return &parser.PosError{
+			Pos: node.Pos(),
+			Err: fmt.Errorf("%s: not an object type for map (%T)", name, node),
+		}
+	}
+
+	// If we have an interface, then we can address the interface,
+	// but not the slice itself, so get the element but set the interface
+	set := result
+	if result.Kind() == reflect.Interface {
+		result = result.Elem()
+	}
+
+	resultType := result.Type()
+	resultElemType := resultType.Elem()
+	resultKeyType := resultType.Key()
+	if resultKeyType.Kind() != reflect.String {
+		return &parser.PosError{
+			Pos: node.Pos(),
+			Err: fmt.Errorf("%s: map must have string keys", name),
+		}
+	}
+
+	// Make a map if it is nil
+	resultMap := result
+	if result.IsNil() {
+		resultMap = reflect.MakeMap(
+			reflect.MapOf(resultKeyType, resultElemType))
+	}
+
+	// Go through each element and decode it.
+	done := make(map[string]struct{})
+	for _, item := range n.Items {
+		if item.Val == nil {
+			continue
+		}
+
+		// github.com/hashicorp/terraform/issue/5740
+		if len(item.Keys) == 0 {
+			return &parser.PosError{
+				Pos: node.Pos(),
+				Err: fmt.Errorf("%s: map must have string keys", name),
+			}
+		}
+
+		// Get the key we're dealing with, which is the first item
+		keyStr := item.Keys[0].Token.Value().(string)
+
+		// If we've already processed this key, then ignore it
+		if _, ok := done[keyStr]; ok {
+			continue
+		}
+
+		// Determine the value. If we have more than one key, then we
+		// get the objectlist of only these keys.
+		itemVal := item.Val
+		if len(item.Keys) > 1 {
+			itemVal = n.Filter(keyStr)
+			done[keyStr] = struct{}{}
+		}
+
+		// Make the field name
+		fieldName := fmt.Sprintf("%s.%s", name, keyStr)
+
+		// Get the key/value as reflection values
+		key := reflect.ValueOf(keyStr)
+		val := reflect.Indirect(reflect.New(resultElemType))
+
+		// If we have a pre-existing value in the map, use that
+		oldVal := resultMap.MapIndex(key)
+		if oldVal.IsValid() {
+			val.Set(oldVal)
+		}
+
+		// Decode!
+		if err := d.decode(fieldName, itemVal, val); err != nil {
+			return err
+		}
+
+		// Set the value on the map
+		resultMap.SetMapIndex(key, val)
+	}
+
+	// Set the final map if we can
+	set.Set(resultMap)
+
+	return nil
+}
+
+func (d *decoder) decodePtr(name string, node ast.Node, result reflect.Value) error {
+	// if pointer is not nil, decode into existing value
+	if !result.IsNil() {
+		return d.decode(name, node, result.Elem())
+	}
+
+	// Create an element of the concrete (non pointer) type and decode
+	// into that. Then set the value of the pointer to this type.
+	resultType := result.Type()
+	resultElemType := resultType.Elem()
+	val := reflect.New(resultElemType)
+	if err := d.decode(name, node, reflect.Indirect(val)); err != nil {
+		return err
+	}
+
+	result.Set(val)
+	return nil
+}
+
+func (d *decoder) decodeSlice(name string, node ast.Node, result reflect.Value) error {
+	// If we have an interface, then we can address the interface,
+	// but not the slice itself, so get the element but set the interface
+	set := result
+	if result.Kind() == reflect.Interface {
+		result = result.Elem()
+	}
+	// Create the slice if it isn't nil
+	resultType := result.Type()
+	resultElemType := resultType.Elem()
+	if result.IsNil() {
+		resultSliceType := reflect.SliceOf(resultElemType)
+		result = reflect.MakeSlice(
+			resultSliceType, 0, 0)
+	}
+
+	// Figure out the items we'll be copying into the slice
+	var items []ast.Node
+	switch n := node.(type) {
+	case *ast.ObjectList:
+		items = make([]ast.Node, len(n.Items))
+		for i, item := range n.Items {
+			items[i] = item
+		}
+	case *ast.ObjectType:
+		items = []ast.Node{n}
+	case *ast.ListType:
+		items = n.List
+	default:
+		return &parser.PosError{
+			Pos: node.Pos(),
+			Err: fmt.Errorf("unknown slice type: %T", node),
+		}
+	}
+
+	for i, item := range items {
+		fieldName := fmt.Sprintf("%s[%d]", name, i)
+
+		// Decode
+		val := reflect.Indirect(reflect.New(resultElemType))
+
+		// if item is an object that was decoded from ambiguous JSON and
+		// flattened, make sure it's expanded if it needs to decode into a
+		// defined structure.
+		item := expandObject(item, val)
+
+		if err := d.decode(fieldName, item, val); err != nil {
+			return err
+		}
+
+		// Append it onto the slice
+		result = reflect.Append(result, val)
+	}
+
+	set.Set(result)
+	return nil
+}
+
+// expandObject detects if an ambiguous JSON object was flattened to a List which
+// should be decoded into a struct, and expands the ast to properly deocode.
+func expandObject(node ast.Node, result reflect.Value) ast.Node {
+	item, ok := node.(*ast.ObjectItem)
+	if !ok {
+		return node
+	}
+
+	elemType := result.Type()
+
+	// our target type must be a struct
+	switch elemType.Kind() {
+	case reflect.Ptr:
+		switch elemType.Elem().Kind() {
+		case reflect.Struct:
+			//OK
+		default:
+			return node
+		}
+	case reflect.Struct:
+		//OK
+	default:
+		return node
+	}
+
+	// A list value will have a key and field name. If it had more fields,
+	// it wouldn't have been flattened.
+	if len(item.Keys) != 2 {
+		return node
+	}
+
+	keyToken := item.Keys[0].Token
+	item.Keys = item.Keys[1:]
+
+	// we need to un-flatten the ast enough to decode
+	newNode := &ast.ObjectItem{
+		Keys: []*ast.ObjectKey{
+			{
+				Token: keyToken,
+			},
+		},
+		Val: &ast.ObjectType{
+			List: &ast.ObjectList{
+				Items: []*ast.ObjectItem{item},
+			},
+		},
+	}
+
+	return newNode
+}
+
+func (d *decoder) decodeString(name string, node ast.Node, result reflect.Value) error {
+	switch n := node.(type) {
+	case *ast.LiteralType:
+		switch n.Token.Type {
+		case token.NUMBER:
+			result.Set(reflect.ValueOf(n.Token.Text).Convert(result.Type()))
+			return nil
+		case token.STRING, token.HEREDOC:
+			result.Set(reflect.ValueOf(n.Token.Value()).Convert(result.Type()))
+			return nil
+		}
+	}
+
+	return &parser.PosError{
+		Pos: node.Pos(),
+		Err: fmt.Errorf("%s: unknown type for string %T", name, node),
+	}
+}
+
+func (d *decoder) decodeStruct(name string, node ast.Node, result reflect.Value) error {
+	var item *ast.ObjectItem
+	if it, ok := node.(*ast.ObjectItem); ok {
+		item = it
+		node = it.Val
+	}
+
+	if ot, ok := node.(*ast.ObjectType); ok {
+		node = ot.List
+	}
+
+	// Handle the special case where the object itself is a literal. Previously
+	// the yacc parser would always ensure top-level elements were arrays. The new
+	// parser does not make the same guarantees, thus we need to convert any
+	// top-level literal elements into a list.
+	if _, ok := node.(*ast.LiteralType); ok && item != nil {
+		node = &ast.ObjectList{Items: []*ast.ObjectItem{item}}
+	}
+
+	list, ok := node.(*ast.ObjectList)
+	if !ok {
+		return &parser.PosError{
+			Pos: node.Pos(),
+			Err: fmt.Errorf("%s: not an object type for struct (%T)", name, node),
+		}
+	}
+
+	// This slice will keep track of all the structs we'll be decoding.
+	// There can be more than one struct if there are embedded structs
+	// that are squashed.
+	structs := make([]reflect.Value, 1, 5)
+	structs[0] = result
+
+	// Compile the list of all the fields that we're going to be decoding
+	// from all the structs.
+	type field struct {
+		field reflect.StructField
+		val   reflect.Value
+	}
+	fields := []field{}
+	for len(structs) > 0 {
+		structVal := structs[0]
+		structs = structs[1:]
+
+		structType := structVal.Type()
+		for i := 0; i < structType.NumField(); i++ {
+			fieldType := structType.Field(i)
+			tagParts := strings.Split(fieldType.Tag.Get(tagName), ",")
+
+			// Ignore fields with tag name "-"
+			if tagParts[0] == "-" {
+				continue
+			}
+
+			if fieldType.Anonymous {
+				fieldKind := fieldType.Type.Kind()
+				if fieldKind != reflect.Struct {
+					return &parser.PosError{
+						Pos: node.Pos(),
+						Err: fmt.Errorf("%s: unsupported type to struct: %s",
+							fieldType.Name, fieldKind),
+					}
+				}
+
+				// We have an embedded field. We "squash" the fields down
+				// if specified in the tag.
+				squash := false
+				for _, tag := range tagParts[1:] {
+					if tag == "squash" {
+						squash = true
+						break
+					}
+				}
+
+				if squash {
+					structs = append(
+						structs, result.FieldByName(fieldType.Name))
+					continue
+				}
+			}
+
+			// Normal struct field, store it away
+			fields = append(fields, field{fieldType, structVal.Field(i)})
+		}
+	}
+
+	usedKeys := make(map[string]struct{})
+	decodedFields := make([]string, 0, len(fields))
+	decodedFieldsVal := make([]reflect.Value, 0)
+	unusedKeysVal := make([]reflect.Value, 0)
+
+	// fill unusedNodeKeys with keys from the AST
+	// a slice because we have to do equals case fold to match Filter
+	unusedNodeKeys := make(map[string][]token.Pos, 0)
+	for i, item := range list.Items {
+		for _, k := range item.Keys {
+			// isNestedJSON returns true for e.g. bar in
+			// { "foo": { "bar": {...} } }
+			// This isn't an unused node key, so we want to skip it
+			isNestedJSON := i > 0 && len(item.Keys) > 1
+			if !isNestedJSON && (k.Token.JSON || k.Token.Type == token.IDENT) {
+				fn := k.Token.Value().(string)
+				sl := unusedNodeKeys[fn]
+				unusedNodeKeys[fn] = append(sl, k.Token.Pos)
+			}
+		}
+	}
+
+	for _, f := range fields {
+		field, fieldValue := f.field, f.val
+		if !fieldValue.IsValid() {
+			// This should never happen
+			panic("field is not valid")
+		}
+
+		// If we can't set the field, then it is unexported or something,
+		// and we just continue onwards.
+		if !fieldValue.CanSet() {
+			continue
+		}
+
+		fieldName := field.Name
+
+		tagValue := field.Tag.Get(tagName)
+		tagParts := strings.SplitN(tagValue, ",", 2)
+		if len(tagParts) >= 2 {
+			switch tagParts[1] {
+			case "decodedFields":
+				decodedFieldsVal = append(decodedFieldsVal, fieldValue)
+				continue
+			case "key":
+				if item == nil {
+					return &parser.PosError{
+						Pos: node.Pos(),
+						Err: fmt.Errorf("%s: %s asked for 'key', impossible",
+							name, fieldName),
+					}
+				}
+
+				fieldValue.SetString(item.Keys[0].Token.Value().(string))
+				continue
+			case "unusedKeyPositions":
+				unusedKeysVal = append(unusedKeysVal, fieldValue)
+				continue
+			}
+		}
+
+		if tagParts[0] != "" {
+			fieldName = tagParts[0]
+		}
+
+		// Determine the element we'll use to decode. If it is a single
+		// match (only object with the field), then we decode it exactly.
+		// If it is a prefix match, then we decode the matches.
+		filter := list.Filter(fieldName)
+
+		prefixMatches := filter.Children()
+		matches := filter.Elem()
+		if len(matches.Items) == 0 && len(prefixMatches.Items) == 0 {
+			continue
+		}
+
+		// Track the used keys
+		usedKeys[fieldName] = struct{}{}
+		unusedNodeKeys = removeCaseFold(unusedNodeKeys, fieldName)
+
+		// Create the field name and decode. We range over the elements
+		// because we actually want the value.
+		fieldName = fmt.Sprintf("%s.%s", name, fieldName)
+		if len(prefixMatches.Items) > 0 {
+			if err := d.decode(fieldName, prefixMatches, fieldValue); err != nil {
+				return err
+			}
+		}
+		for _, match := range matches.Items {
+			var decodeNode ast.Node = match.Val
+			if ot, ok := decodeNode.(*ast.ObjectType); ok {
+				decodeNode = &ast.ObjectList{Items: ot.List.Items}
+			}
+
+			if err := d.decode(fieldName, decodeNode, fieldValue); err != nil {
+				return err
+			}
+		}
+
+		decodedFields = append(decodedFields, field.Name)
+	}
+
+	if len(decodedFieldsVal) > 0 {
+		// Sort it so that it is deterministic
+		sort.Strings(decodedFields)
+
+		for _, v := range decodedFieldsVal {
+			v.Set(reflect.ValueOf(decodedFields))
+		}
+	}
+
+	if len(unusedNodeKeys) > 0 {
+		// like decodedFields, populated the unusedKeys field(s)
+		for _, v := range unusedKeysVal {
+			v.Set(reflect.ValueOf(unusedNodeKeys))
+		}
+	}
+
+	return nil
+}
+
+// findNodeType returns the type of ast.Node
+func findNodeType() reflect.Type {
+	var nodeContainer struct {
+		Node ast.Node
+	}
+	value := reflect.ValueOf(nodeContainer).FieldByName("Node")
+	return value.Type()
+}
+
+func removeCaseFold(xs map[string][]token.Pos, y string) map[string][]token.Pos {
+	var toDel []string
+
+	for i := range xs {
+		if strings.EqualFold(i, y) {
+			toDel = append(toDel, i)
+		}
+	}
+	for _, i := range toDel {
+		delete(xs, i)
+	}
+	return xs
+}
+
+```
+
+#### hcl.go
+
+```text
+// Package hcl decodes HCL into usable Go structures.
+//
+// hcl input can come in either pure HCL format or JSON format.
+// It can be parsed into an AST, and then decoded into a structure,
+// or it can be decoded directly from a string into a structure.
+//
+// If you choose to parse HCL into a raw AST, the benefit is that you
+// can write custom visitor implementations to implement custom
+// semantic checks. By default, HCL does not perform any semantic
+// checks.
+package hcl
+
+```
+
+#### lex.go
+
+```text
+package hcl
+
+import (
+	"unicode"
+	"unicode/utf8"
+)
+
+type lexModeValue byte
+
+const (
+	lexModeUnknown lexModeValue = iota
+	lexModeHcl
+	lexModeJson
+)
+
+// lexMode returns whether we're going to be parsing in JSON
+// mode or HCL mode.
+func lexMode(v []byte) lexModeValue {
+	var (
+		r      rune
+		w      int
+		offset int
+	)
+
+	for {
+		r, w = utf8.DecodeRune(v[offset:])
+		offset += w
+		if unicode.IsSpace(r) {
+			continue
+		}
+		if r == '{' {
+			return lexModeJson
+		}
+		break
+	}
+
+	return lexModeHcl
+}
+
+```
+
+#### parse.go
+
+```text
+package hcl
+
+import (
+	"fmt"
+
+	"github.com/hashicorp/hcl/hcl/ast"
+	hclParser "github.com/hashicorp/hcl/hcl/parser"
+	jsonParser "github.com/hashicorp/hcl/json/parser"
+)
+
+// ParseBytes accepts as input byte slice and returns ast tree.
+//
+// Input can be either JSON or HCL
+func ParseBytes(in []byte) (*ast.File, error) {
+	return parse(in, true)
+}
+
+// ParseString accepts input as a string and returns ast tree.
+func ParseString(input string) (*ast.File, error) {
+	return parse([]byte(input), true)
+}
+
+func parse(in []byte, errorOnDuplicateKeys bool) (*ast.File, error) {
+	switch lexMode(in) {
+	case lexModeHcl:
+		if !errorOnDuplicateKeys {
+			return hclParser.ParseDontErrorOnDuplicateKeys(in)
+		}
+		return hclParser.Parse(in)
+	case lexModeJson:
+		return jsonParser.Parse(in)
+	}
+
+	return nil, fmt.Errorf("unknown config format")
+}
+
+// Parse parses the given input and returns the root object.
+//
+// The input format can be either HCL or JSON.
+func Parse(input string) (*ast.File, error) {
+	return parse([]byte(input), true)
+}
+
+```
+
+
+### github.com/hashicorp/vault/api
+
+* License: MPL-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/vault/api/LICENSE
+
+#### .copywrite.hcl
+
+```text
+schema_version = 1
+
+project {
+  license        = "MPL-2.0"
+  copyright_year = 2024
+
+  header_ignore = []
+}
+
+```
+
+#### LICENSE
+
+```text
+Copyright (c) 2015 HashiCorp, Inc.
+
+Mozilla Public License, version 2.0
+
+1. Definitions
+
+1.1. "Contributor"
+
+     means each individual or legal entity that creates, contributes to the
+     creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+
+     means the combination of the Contributions of others (if any) used by a
+     Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+
+     means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+
+     means Source Code Form to which the initial Contributor has attached the
+     notice in Exhibit A, the Executable Form of such Source Code Form, and
+     Modifications of such Source Code Form, in each case including portions
+     thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+     means
+
+     a. that the initial Contributor has attached the notice described in
+        Exhibit B to the Covered Software; or
+
+     b. that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the terms of
+        a Secondary License.
+
+1.6. "Executable Form"
+
+     means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+
+     means a work that combines Covered Software with other material, in a
+     separate file or files, that is not Covered Software.
+
+1.8. "License"
+
+     means this document.
+
+1.9. "Licensable"
+
+     means having the right to grant, to the maximum extent possible, whether
+     at the time of the initial grant or subsequently, any and all of the
+     rights conveyed by this License.
+
+1.10. "Modifications"
+
+     means any of the following:
+
+     a. any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered Software; or
+
+     b. any new file in Source Code Form that contains any Covered Software.
+
+1.11. "Patent Claims" of a Contributor
+
+      means any patent claim(s), including without limitation, method,
+      process, and apparatus claims, in any patent Licensable by such
+      Contributor that would be infringed, but for the grant of the License,
+      by the making, using, selling, offering for sale, having made, import,
+      or transfer of either its Contributions or its Contributor Version.
+
+1.12. "Secondary License"
+
+      means either the GNU General Public License, Version 2.0, the GNU Lesser
+      General Public License, Version 2.1, the GNU Affero General Public
+      License, Version 3.0, or any later versions of those licenses.
+
+1.13. "Source Code Form"
+
+      means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+
+      means an individual or a legal entity exercising rights under this
+      License. For legal entities, "You" includes any entity that controls, is
+      controlled by, or is under common control with You. For purposes of this
+      definition, "control" means (a) the power, direct or indirect, to cause
+      the direction or management of such entity, whether by contract or
+      otherwise, or (b) ownership of more than fifty percent (50%) of the
+      outstanding shares or beneficial ownership of such entity.
+
+
+2. License Grants and Conditions
+
+2.1. Grants
+
+     Each Contributor hereby grants You a world-wide, royalty-free,
+     non-exclusive license:
+
+     a. under intellectual property rights (other than patent or trademark)
+        Licensable by such Contributor to use, reproduce, make available,
+        modify, display, perform, distribute, and otherwise exploit its
+        Contributions, either on an unmodified basis, with Modifications, or
+        as part of a Larger Work; and
+
+     b. under Patent Claims of such Contributor to make, use, sell, offer for
+        sale, have made, import, and otherwise transfer either its
+        Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+     The licenses granted in Section 2.1 with respect to any Contribution
+     become effective for each Contribution on the date the Contributor first
+     distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+     The licenses granted in this Section 2 are the only rights granted under
+     this License. No additional rights or licenses will be implied from the
+     distribution or licensing of Covered Software under this License.
+     Notwithstanding Section 2.1(b) above, no patent license is granted by a
+     Contributor:
+
+     a. for any code that a Contributor has removed from Covered Software; or
+
+     b. for infringements caused by: (i) Your and any other third party's
+        modifications of Covered Software, or (ii) the combination of its
+        Contributions with other software (except as part of its Contributor
+        Version); or
+
+     c. under Patent Claims infringed by Covered Software in the absence of
+        its Contributions.
+
+     This License does not grant any rights in the trademarks, service marks,
+     or logos of any Contributor (except as may be necessary to comply with
+     the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+     No Contributor makes additional grants as a result of Your choice to
+     distribute the Covered Software under a subsequent version of this
+     License (see Section 10.2) or under the terms of a Secondary License (if
+     permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+     Each Contributor represents that the Contributor believes its
+     Contributions are its original creation(s) or it has sufficient rights to
+     grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+     This License is not intended to limit any rights You have under
+     applicable copyright doctrines of fair use, fair dealing, or other
+     equivalents.
+
+2.7. Conditions
+
+     Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted in
+     Section 2.1.
+
+
+3. Responsibilities
+
+3.1. Distribution of Source Form
+
+     All distribution of Covered Software in Source Code Form, including any
+     Modifications that You create or to which You contribute, must be under
+     the terms of this License. You must inform recipients that the Source
+     Code Form of the Covered Software is governed by the terms of this
+     License, and how they can obtain a copy of this License. You may not
+     attempt to alter or restrict the recipients' rights in the Source Code
+     Form.
+
+3.2. Distribution of Executable Form
+
+     If You distribute Covered Software in Executable Form then:
+
+     a. such Covered Software must also be made available in Source Code Form,
+        as described in Section 3.1, and You must inform recipients of the
+        Executable Form how they can obtain a copy of such Source Code Form by
+        reasonable means in a timely manner, at a charge no more than the cost
+        of distribution to the recipient; and
+
+     b. You may distribute such Executable Form under the terms of this
+        License, or sublicense it under different terms, provided that the
+        license for the Executable Form does not attempt to limit or alter the
+        recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+     You may create and distribute a Larger Work under terms of Your choice,
+     provided that You also comply with the requirements of this License for
+     the Covered Software. If the Larger Work is a combination of Covered
+     Software with a work governed by one or more Secondary Licenses, and the
+     Covered Software is not Incompatible With Secondary Licenses, this
+     License permits You to additionally distribute such Covered Software
+     under the terms of such Secondary License(s), so that the recipient of
+     the Larger Work may, at their option, further distribute the Covered
+     Software under the terms of either this License or such Secondary
+     License(s).
+
+3.4. Notices
+
+     You may not remove or alter the substance of any license notices
+     (including copyright notices, patent notices, disclaimers of warranty, or
+     limitations of liability) contained within the Source Code Form of the
+     Covered Software, except that You may alter any license notices to the
+     extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+     You may choose to offer, and to charge a fee for, warranty, support,
+     indemnity or liability obligations to one or more recipients of Covered
+     Software. However, You may do so only on Your own behalf, and not on
+     behalf of any Contributor. You must make it absolutely clear that any
+     such warranty, support, indemnity, or liability obligation is offered by
+     You alone, and You hereby agree to indemnify every Contributor for any
+     liability incurred by such Contributor as a result of warranty, support,
+     indemnity or liability terms You offer. You may include additional
+     disclaimers of warranty and limitations of liability specific to any
+     jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+
+   If it is impossible for You to comply with any of the terms of this License
+   with respect to some or all of the Covered Software due to statute,
+   judicial order, or regulation then You must: (a) comply with the terms of
+   this License to the maximum extent possible; and (b) describe the
+   limitations and the code they affect. Such description must be placed in a
+   text file included with all distributions of the Covered Software under
+   this License. Except to the extent prohibited by statute or regulation,
+   such description must be sufficiently detailed for a recipient of ordinary
+   skill to be able to understand it.
+
+5. Termination
+
+5.1. The rights granted under this License will terminate automatically if You
+     fail to comply with any of its terms. However, if You become compliant,
+     then the rights granted under this License from a particular Contributor
+     are reinstated (a) provisionally, unless and until such Contributor
+     explicitly and finally terminates Your grants, and (b) on an ongoing
+     basis, if such Contributor fails to notify You of the non-compliance by
+     some reasonable means prior to 60 days after You have come back into
+     compliance. Moreover, Your grants from a particular Contributor are
+     reinstated on an ongoing basis if such Contributor notifies You of the
+     non-compliance by some reasonable means, this is the first time You have
+     received notice of non-compliance with this License from such
+     Contributor, and You become compliant prior to 30 days after Your receipt
+     of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+     infringement claim (excluding declaratory judgment actions,
+     counter-claims, and cross-claims) alleging that a Contributor Version
+     directly or indirectly infringes any patent, then the rights granted to
+     You by any and all Contributors for the Covered Software under Section
+     2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all end user
+     license agreements (excluding distributors and resellers) which have been
+     validly granted by You or Your distributors under this License prior to
+     termination shall survive termination.
+
+6. Disclaimer of Warranty
+
+   Covered Software is provided under this License on an "as is" basis,
+   without warranty of any kind, either expressed, implied, or statutory,
+   including, without limitation, warranties that the Covered Software is free
+   of defects, merchantable, fit for a particular purpose or non-infringing.
+   The entire risk as to the quality and performance of the Covered Software
+   is with You. Should any Covered Software prove defective in any respect,
+   You (not any Contributor) assume the cost of any necessary servicing,
+   repair, or correction. This disclaimer of warranty constitutes an essential
+   part of this License. No use of  any Covered Software is authorized under
+   this License except under this disclaimer.
+
+7. Limitation of Liability
+
+   Under no circumstances and under no legal theory, whether tort (including
+   negligence), contract, or otherwise, shall any Contributor, or anyone who
+   distributes Covered Software as permitted above, be liable to You for any
+   direct, indirect, special, incidental, or consequential damages of any
+   character including, without limitation, damages for lost profits, loss of
+   goodwill, work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses, even if such party shall have been
+   informed of the possibility of such damages. This limitation of liability
+   shall not apply to liability for death or personal injury resulting from
+   such party's negligence to the extent applicable law prohibits such
+   limitation. Some jurisdictions do not allow the exclusion or limitation of
+   incidental or consequential damages, so this exclusion and limitation may
+   not apply to You.
+
+8. Litigation
+
+   Any litigation relating to this License may be brought only in the courts
+   of a jurisdiction where the defendant maintains its principal place of
+   business and such litigation shall be governed by laws of that
+   jurisdiction, without reference to its conflict-of-law provisions. Nothing
+   in this Section shall prevent a party's ability to bring cross-claims or
+   counter-claims.
+
+9. Miscellaneous
+
+   This License represents the complete agreement concerning the subject
+   matter hereof. If any provision of this License is held to be
+   unenforceable, such provision shall be reformed only to the extent
+   necessary to make it enforceable. Any law or regulation which provides that
+   the language of a contract shall be construed against the drafter shall not
+   be used to construe this License against a Contributor.
+
+
+10. Versions of the License
+
+10.1. New Versions
+
+      Mozilla Foundation is the license steward. Except as provided in Section
+      10.3, no one other than the license steward has the right to modify or
+      publish new versions of this License. Each version will be given a
+      distinguishing version number.
+
+10.2. Effect of New Versions
+
+      You may distribute the Covered Software under the terms of the version
+      of the License under which You originally received the Covered Software,
+      or under the terms of any subsequent version published by the license
+      steward.
+
+10.3. Modified Versions
+
+      If you create software not governed by this License, and you want to
+      create a new license for such software, you may create and use a
+      modified version of this License if you rename the license and remove
+      any references to the name of the license steward (except to note that
+      such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+      Licenses If You choose to distribute Source Code Form that is
+      Incompatible With Secondary Licenses under the terms of this version of
+      the License, the notice described in Exhibit B of this License must be
+      attached.
+
+Exhibit A - Source Code Form License Notice
+
+      This Source Code Form is subject to the
+      terms of the Mozilla Public License, v.
+      2.0. If a copy of the MPL was not
+      distributed with this file, You can
+      obtain one at
+      http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular file,
+then You may include the notice in a location (such as a LICENSE file in a
+relevant directory) where a recipient would be likely to look for such a
+notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+
+      This Source Code Form is "Incompatible
+      With Secondary Licenses", as defined by
+      the Mozilla Public License, v. 2.0.
+
+
+```
+
+#### README.md
+
+```text
+Vault API
+=================
+
+This provides the `github.com/hashicorp/vault/api` package which contains code useful for interacting with a Vault server.
+
+For examples of how to use this module, see the [vault-examples](https://github.com/hashicorp/vault-examples) repo.
+For a step-by-step walkthrough on using these client libraries, see the [developer quickstart](https://developer.hashicorp.com/vault/docs/get-started/developer-qs).
+
+[![GoDoc](https://godoc.org/github.com/hashicorp/vault/api?status.png)](https://godoc.org/github.com/hashicorp/vault/api)
+```
+
+#### auth.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"fmt"
+)
+
+// Auth is used to perform credential backend related operations.
+type Auth struct {
+	c *Client
+}
+
+type AuthMethod interface {
+	Login(ctx context.Context, client *Client) (*Secret, error)
+}
+
+// Auth is used to return the client for credential-backend API calls.
+func (c *Client) Auth() *Auth {
+	return &Auth{c: c}
+}
+
+// Login sets up the required request body for login requests to the given auth
+// method's /login API endpoint, and then performs a write to it. After a
+// successful login, this method will automatically set the client's token to
+// the login response's ClientToken as well.
+//
+// The Secret returned is the authentication secret, which if desired can be
+// passed as input to the NewLifetimeWatcher method in order to start
+// automatically renewing the token.
+func (a *Auth) Login(ctx context.Context, authMethod AuthMethod) (*Secret, error) {
+	if authMethod == nil {
+		return nil, fmt.Errorf("no auth method provided for login")
+	}
+	return a.login(ctx, authMethod)
+}
+
+// MFALogin is a wrapper that helps satisfy Vault's MFA implementation.
+// If optional credentials are provided a single-phase login will be attempted
+// and the resulting Secret will contain a ClientToken if the authentication is successful.
+// The client's token will also be set accordingly.
+//
+// If no credentials are provided a two-phase MFA login will be assumed and the resulting
+// Secret will have a MFARequirement containing the MFARequestID to be used in a follow-up
+// call to `sys/mfa/validate` or by passing it to the method (*Auth).MFAValidate.
+func (a *Auth) MFALogin(ctx context.Context, authMethod AuthMethod, creds ...string) (*Secret, error) {
+	if len(creds) > 0 {
+		a.c.SetMFACreds(creds)
+		return a.login(ctx, authMethod)
+	}
+
+	return a.twoPhaseMFALogin(ctx, authMethod)
+}
+
+// MFAValidate validates an MFA request using the appropriate payload and a secret containing
+// Auth.MFARequirement, like the one returned by MFALogin when credentials are not provided.
+// Upon successful validation the client token will be set accordingly.
+//
+// The Secret returned is the authentication secret, which if desired can be
+// passed as input to the NewLifetimeWatcher method in order to start
+// automatically renewing the token.
+func (a *Auth) MFAValidate(ctx context.Context, mfaSecret *Secret, payload map[string]interface{}) (*Secret, error) {
+	if mfaSecret == nil || mfaSecret.Auth == nil || mfaSecret.Auth.MFARequirement == nil {
+		return nil, fmt.Errorf("secret does not contain MFARequirements")
+	}
+
+	s, err := a.c.Sys().MFAValidateWithContext(ctx, mfaSecret.Auth.MFARequirement.MFARequestID, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return a.checkAndSetToken(s)
+}
+
+// login performs the (*AuthMethod).Login() with the configured client and checks that a ClientToken is returned
+func (a *Auth) login(ctx context.Context, authMethod AuthMethod) (*Secret, error) {
+	s, err := authMethod.Login(ctx, a.c)
+	if err != nil {
+		return nil, fmt.Errorf("unable to log in to auth method: %w", err)
+	}
+
+	return a.checkAndSetToken(s)
+}
+
+// twoPhaseMFALogin performs the (*AuthMethod).Login() with the configured client
+// and checks that an MFARequirement is returned
+func (a *Auth) twoPhaseMFALogin(ctx context.Context, authMethod AuthMethod) (*Secret, error) {
+	s, err := authMethod.Login(ctx, a.c)
+	if err != nil {
+		return nil, fmt.Errorf("unable to log in: %w", err)
+	}
+	if s == nil || s.Auth == nil || s.Auth.MFARequirement == nil {
+		if s != nil {
+			s.Warnings = append(s.Warnings, "expected secret to contain MFARequirements")
+		}
+		return s, fmt.Errorf("assumed two-phase MFA login, returned secret is missing MFARequirements")
+	}
+
+	return s, nil
+}
+
+func (a *Auth) checkAndSetToken(s *Secret) (*Secret, error) {
+	if s == nil || s.Auth == nil || s.Auth.ClientToken == "" {
+		if s != nil {
+			s.Warnings = append(s.Warnings, "expected secret to contain ClientToken")
+		}
+		return s, fmt.Errorf("response did not return ClientToken, client token not set")
+	}
+
+	a.c.SetToken(s.Auth.ClientToken)
+
+	return s, nil
+}
+
+```
+
+#### auth_token.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"net/http"
+)
+
+// TokenAuth is used to perform token backend operations on Vault
+type TokenAuth struct {
+	c *Client
+}
+
+// Token is used to return the client for token-backend API calls
+func (a *Auth) Token() *TokenAuth {
+	return &TokenAuth{c: a.c}
+}
+
+func (c *TokenAuth) Create(opts *TokenCreateRequest) (*Secret, error) {
+	return c.CreateWithContext(context.Background(), opts)
+}
+
+func (c *TokenAuth) CreateWithContext(ctx context.Context, opts *TokenCreateRequest) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/auth/token/create")
+	if err := r.SetJSONBody(opts); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *TokenAuth) CreateOrphan(opts *TokenCreateRequest) (*Secret, error) {
+	return c.CreateOrphanWithContext(context.Background(), opts)
+}
+
+func (c *TokenAuth) CreateOrphanWithContext(ctx context.Context, opts *TokenCreateRequest) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/auth/token/create-orphan")
+	if err := r.SetJSONBody(opts); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *TokenAuth) CreateWithRole(opts *TokenCreateRequest, roleName string) (*Secret, error) {
+	return c.CreateWithRoleWithContext(context.Background(), opts, roleName)
+}
+
+func (c *TokenAuth) CreateWithRoleWithContext(ctx context.Context, opts *TokenCreateRequest, roleName string) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/auth/token/create/"+roleName)
+	if err := r.SetJSONBody(opts); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *TokenAuth) Lookup(token string) (*Secret, error) {
+	return c.LookupWithContext(context.Background(), token)
+}
+
+func (c *TokenAuth) LookupWithContext(ctx context.Context, token string) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/auth/token/lookup")
+	if err := r.SetJSONBody(map[string]interface{}{
+		"token": token,
+	}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *TokenAuth) LookupAccessor(accessor string) (*Secret, error) {
+	return c.LookupAccessorWithContext(context.Background(), accessor)
+}
+
+func (c *TokenAuth) LookupAccessorWithContext(ctx context.Context, accessor string) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/auth/token/lookup-accessor")
+	if err := r.SetJSONBody(map[string]interface{}{
+		"accessor": accessor,
+	}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *TokenAuth) LookupSelf() (*Secret, error) {
+	return c.LookupSelfWithContext(context.Background())
+}
+
+func (c *TokenAuth) LookupSelfWithContext(ctx context.Context) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/auth/token/lookup-self")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *TokenAuth) RenewAccessor(accessor string, increment int) (*Secret, error) {
+	return c.RenewAccessorWithContext(context.Background(), accessor, increment)
+}
+
+func (c *TokenAuth) RenewAccessorWithContext(ctx context.Context, accessor string, increment int) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/auth/token/renew-accessor")
+	if err := r.SetJSONBody(map[string]interface{}{
+		"accessor":  accessor,
+		"increment": increment,
+	}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *TokenAuth) Renew(token string, increment int) (*Secret, error) {
+	return c.RenewWithContext(context.Background(), token, increment)
+}
+
+func (c *TokenAuth) RenewWithContext(ctx context.Context, token string, increment int) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/auth/token/renew")
+	if err := r.SetJSONBody(map[string]interface{}{
+		"token":     token,
+		"increment": increment,
+	}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *TokenAuth) RenewSelf(increment int) (*Secret, error) {
+	return c.RenewSelfWithContext(context.Background(), increment)
+}
+
+func (c *TokenAuth) RenewSelfWithContext(ctx context.Context, increment int) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/auth/token/renew-self")
+
+	body := map[string]interface{}{"increment": increment}
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+// RenewTokenAsSelf wraps RenewTokenAsSelfWithContext using context.Background.
+func (c *TokenAuth) RenewTokenAsSelf(token string, increment int) (*Secret, error) {
+	return c.RenewTokenAsSelfWithContext(context.Background(), token, increment)
+}
+
+// RenewTokenAsSelfWithContext behaves like renew-self, but authenticates using a provided
+// token instead of the token attached to the client.
+func (c *TokenAuth) RenewTokenAsSelfWithContext(ctx context.Context, token string, increment int) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/auth/token/renew-self")
+	r.ClientToken = token
+
+	body := map[string]interface{}{"increment": increment}
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+// RevokeAccessor wraps RevokeAccessorWithContext using context.Background.
+func (c *TokenAuth) RevokeAccessor(accessor string) error {
+	return c.RevokeAccessorWithContext(context.Background(), accessor)
+}
+
+// RevokeAccessorWithContext revokes a token associated with the given accessor
+// along with all the child tokens.
+func (c *TokenAuth) RevokeAccessorWithContext(ctx context.Context, accessor string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/auth/token/revoke-accessor")
+	if err := r.SetJSONBody(map[string]interface{}{
+		"accessor": accessor,
+	}); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// RevokeOrphan wraps RevokeOrphanWithContext using context.Background.
+func (c *TokenAuth) RevokeOrphan(token string) error {
+	return c.RevokeOrphanWithContext(context.Background(), token)
+}
+
+// RevokeOrphanWithContext revokes a token without revoking the tree underneath it (so
+// child tokens are orphaned rather than revoked)
+func (c *TokenAuth) RevokeOrphanWithContext(ctx context.Context, token string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/auth/token/revoke-orphan")
+	if err := r.SetJSONBody(map[string]interface{}{
+		"token": token,
+	}); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// RevokeSelf wraps RevokeSelfWithContext using context.Background.
+func (c *TokenAuth) RevokeSelf(token string) error {
+	return c.RevokeSelfWithContext(context.Background(), token)
+}
+
+// RevokeSelfWithContext revokes the token making the call. The `token` parameter is kept
+// for backwards compatibility but is ignored; only the client's set token has
+// an effect.
+func (c *TokenAuth) RevokeSelfWithContext(ctx context.Context, token string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/auth/token/revoke-self")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// RevokeTree wraps RevokeTreeWithContext using context.Background.
+func (c *TokenAuth) RevokeTree(token string) error {
+	return c.RevokeTreeWithContext(context.Background(), token)
+}
+
+// RevokeTreeWithContext is the "normal" revoke operation that revokes the given token and
+// the entire tree underneath -- all of its child tokens, their child tokens,
+// etc.
+func (c *TokenAuth) RevokeTreeWithContext(ctx context.Context, token string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/auth/token/revoke")
+	if err := r.SetJSONBody(map[string]interface{}{
+		"token": token,
+	}); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// TokenCreateRequest is the options structure for creating a token.
+type TokenCreateRequest struct {
+	ID              string            `json:"id,omitempty"`
+	Policies        []string          `json:"policies,omitempty"`
+	Metadata        map[string]string `json:"meta,omitempty"`
+	Lease           string            `json:"lease,omitempty"`
+	TTL             string            `json:"ttl,omitempty"`
+	ExplicitMaxTTL  string            `json:"explicit_max_ttl,omitempty"`
+	Period          string            `json:"period,omitempty"`
+	NoParent        bool              `json:"no_parent,omitempty"`
+	NoDefaultPolicy bool              `json:"no_default_policy,omitempty"`
+	DisplayName     string            `json:"display_name"`
+	NumUses         int               `json:"num_uses"`
+	Renewable       *bool             `json:"renewable,omitempty"`
+	Type            string            `json:"type"`
+	EntityAlias     string            `json:"entity_alias"`
+}
+
+```
+
+#### client.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	"github.com/hashicorp/errwrap"
+	"github.com/hashicorp/go-cleanhttp"
+	"github.com/hashicorp/go-retryablehttp"
+	"github.com/hashicorp/go-rootcerts"
+	"github.com/hashicorp/go-secure-stdlib/parseutil"
+	"github.com/hashicorp/go-secure-stdlib/strutil"
+	"golang.org/x/net/http2"
+	"golang.org/x/time/rate"
+)
+
+const (
+	EnvVaultAddress          = "VAULT_ADDR"
+	EnvVaultAgentAddr        = "VAULT_AGENT_ADDR"
+	EnvVaultCACert           = "VAULT_CACERT"
+	EnvVaultCACertBytes      = "VAULT_CACERT_BYTES"
+	EnvVaultCAPath           = "VAULT_CAPATH"
+	EnvVaultClientCert       = "VAULT_CLIENT_CERT"
+	EnvVaultClientKey        = "VAULT_CLIENT_KEY"
+	EnvVaultClientTimeout    = "VAULT_CLIENT_TIMEOUT"
+	EnvVaultHeaders          = "VAULT_HEADERS"
+	EnvVaultSRVLookup        = "VAULT_SRV_LOOKUP"
+	EnvVaultSkipVerify       = "VAULT_SKIP_VERIFY"
+	EnvVaultNamespace        = "VAULT_NAMESPACE"
+	EnvVaultTLSServerName    = "VAULT_TLS_SERVER_NAME"
+	EnvVaultWrapTTL          = "VAULT_WRAP_TTL"
+	EnvVaultMaxRetries       = "VAULT_MAX_RETRIES"
+	EnvVaultToken            = "VAULT_TOKEN"
+	EnvVaultMFA              = "VAULT_MFA"
+	EnvRateLimit             = "VAULT_RATE_LIMIT"
+	EnvHTTPProxy             = "VAULT_HTTP_PROXY"
+	EnvVaultProxyAddr        = "VAULT_PROXY_ADDR"
+	EnvVaultDisableRedirects = "VAULT_DISABLE_REDIRECTS"
+	HeaderIndex              = "X-Vault-Index"
+	HeaderForward            = "X-Vault-Forward"
+	HeaderInconsistent       = "X-Vault-Inconsistent"
+
+	// NamespaceHeaderName is the header set to specify which namespace the
+	// request is indented for.
+	NamespaceHeaderName = "X-Vault-Namespace"
+
+	// AuthHeaderName is the name of the header containing the token.
+	AuthHeaderName = "X-Vault-Token"
+
+	// RequestHeaderName is the name of the header used by the Agent for
+	// SSRF protection.
+	RequestHeaderName = "X-Vault-Request"
+
+	SnapshotHeaderName          = "X-Vault-Recover-Snapshot-Id"
+	RecoverSourcePathHeaderName = "X-Vault-Recover-Source-Path"
+
+	TLSErrorString = "This error usually means that the server is running with TLS disabled\n" +
+		"but the client is configured to use TLS. Please either enable TLS\n" +
+		"on the server or run the client with -address set to an address\n" +
+		"that uses the http protocol:\n\n" +
+		"    vault <command> -address http://<address>\n\n" +
+		"You can also set the VAULT_ADDR environment variable:\n\n\n" +
+		"    VAULT_ADDR=http://<address> vault <command>\n\n" +
+		"where <address> is replaced by the actual address to the server."
+)
+
+// Deprecated values
+const (
+	EnvVaultAgentAddress = "VAULT_AGENT_ADDR"
+	EnvVaultInsecure     = "VAULT_SKIP_VERIFY"
+
+	DefaultAddress = "https://127.0.0.1:8200"
+)
+
+// WrappingLookupFunc is a function that, given an HTTP verb and a path,
+// returns an optional string duration to be used for response wrapping (e.g.
+// "15s", or simply "15"). The path will not begin with "/v1/" or "v1/" or "/",
+// however, end-of-path forward slashes are not trimmed, so must match your
+// called path precisely. Response wrapping will only be used when the return
+// value is not the empty string.
+type WrappingLookupFunc func(operation, path string) string
+
+// Config is used to configure the creation of the client.
+type Config struct {
+	modifyLock sync.RWMutex
+
+	// Address is the address of the Vault server. This should be a complete
+	// URL such as "http://vault.example.com". If you need a custom SSL
+	// cert or want to enable insecure mode, you need to specify a custom
+	// HttpClient.
+	Address string
+
+	// AgentAddress is the address of the local Vault agent. This should be a
+	// complete URL such as "http://vault.example.com".
+	AgentAddress string
+
+	// HttpClient is the HTTP client to use. Vault sets sane defaults for the
+	// http.Client and its associated http.Transport created in DefaultConfig.
+	// If you must modify Vault's defaults, it is suggested that you start with
+	// that client and modify as needed rather than start with an empty client
+	// (or http.DefaultClient).
+	HttpClient *http.Client
+
+	// MinRetryWait controls the minimum time to wait before retrying when a 5xx
+	// error occurs. Defaults to 1000 milliseconds.
+	MinRetryWait time.Duration
+
+	// MaxRetryWait controls the maximum time to wait before retrying when a 5xx
+	// error occurs. Defaults to 1500 milliseconds.
+	MaxRetryWait time.Duration
+
+	// MaxRetries controls the maximum number of times to retry when a 5xx
+	// error occurs. Set to 0 to disable retrying. Defaults to 2 (for a total
+	// of three tries).
+	MaxRetries int
+
+	// Timeout, given a non-negative value, will apply the request timeout
+	// to each request function unless an earlier deadline is passed to the
+	// request function through context.Context. Note that this timeout is
+	// not applicable to Logical().ReadRaw* (raw response) functions.
+	// Defaults to 60 seconds.
+	Timeout time.Duration
+
+	// If there is an error when creating the configuration, this will be the
+	// error
+	Error error
+
+	// The Backoff function to use; a default is used if not provided
+	Backoff retryablehttp.Backoff
+
+	// The CheckRetry function to use; a default is used if not provided
+	CheckRetry retryablehttp.CheckRetry
+
+	// Logger is the leveled logger to provide to the retryable HTTP client.
+	Logger retryablehttp.LeveledLogger
+
+	// Limiter is the rate limiter used by the client.
+	// If this pointer is nil, then there will be no limit set.
+	// In contrast, if this pointer is set, even to an empty struct,
+	// then that limiter will be used. Note that an empty Limiter
+	// is equivalent blocking all events.
+	Limiter *rate.Limiter
+
+	// OutputCurlString causes the actual request to return an error of type
+	// *OutputStringError. Type asserting the error message will allow
+	// fetching a cURL-compatible string for the operation.
+	//
+	// Note: It is not thread-safe to set this and make concurrent requests
+	// with the same client. Cloning a client will not clone this value.
+	OutputCurlString bool
+
+	// OutputPolicy causes the actual request to return an error of type
+	// *OutputPolicyError. Type asserting the error message will display
+	// an example of the required policy HCL needed for the operation.
+	//
+	// Note: It is not thread-safe to set this and make concurrent requests
+	// with the same client. Cloning a client will not clone this value.
+	OutputPolicy bool
+
+	// curlCACert, curlCAPath, curlClientCert and curlClientKey are used to keep
+	// track of the name of the TLS certs and keys when OutputCurlString is set.
+	// Cloning a client will also not clone those values.
+	curlCACert, curlCAPath        string
+	curlClientCert, curlClientKey string
+
+	// SRVLookup enables the client to lookup the host through DNS SRV lookup
+	SRVLookup bool
+
+	// CloneHeaders ensures that the source client's headers are copied to
+	// its clone.
+	CloneHeaders bool
+
+	// CloneToken from parent.
+	CloneToken bool
+
+	// CloneTLSConfig from parent (tls.Config).
+	CloneTLSConfig bool
+
+	// ReadYourWrites ensures isolated read-after-write semantics by
+	// providing discovered cluster replication states in each request.
+	// The shared state is automatically propagated to all Client clones.
+	//
+	// Note: Careful consideration should be made prior to enabling this setting
+	// since there will be a performance penalty paid upon each request.
+	// This feature requires Enterprise server-side.
+	ReadYourWrites bool
+
+	// DisableRedirects when set to true, will prevent the client from
+	// automatically following a (single) redirect response to its initial
+	// request. This behavior may be desirable if using Vault CLI on the server
+	// side.
+	//
+	// Note: Disabling redirect following behavior could cause issues with
+	// commands such as 'vault operator raft snapshot' as this redirects to the
+	// primary node.
+	DisableRedirects bool
+	clientTLSConfig  *tls.Config
+}
+
+// TLSConfig contains the parameters needed to configure TLS on the HTTP client
+// used to communicate with Vault.
+type TLSConfig struct {
+	// CACert is the path to a PEM-encoded CA cert file to use to verify the
+	// Vault server SSL certificate. It takes precedence over CACertBytes
+	// and CAPath.
+	CACert string
+
+	// CACertBytes is a PEM-encoded certificate or bundle. It takes precedence
+	// over CAPath.
+	CACertBytes []byte
+
+	// CAPath is the path to a directory of PEM-encoded CA cert files to verify
+	// the Vault server SSL certificate.
+	CAPath string
+
+	// ClientCert is the path to the certificate for Vault communication
+	ClientCert string
+
+	// ClientKey is the path to the private key for Vault communication
+	ClientKey string
+
+	// TLSServerName, if set, is used to set the SNI host when connecting via
+	// TLS.
+	TLSServerName string
+
+	// Insecure enables or disables SSL verification
+	Insecure bool
+}
+
+// DefaultConfig returns a default configuration for the client. It is
+// safe to modify the return value of this function.
+//
+// The default Address is https://127.0.0.1:8200, but this can be overridden by
+// setting the `VAULT_ADDR` environment variable.
+//
+// If an error is encountered, the Error field on the returned *Config will be populated with the specific error.
+func DefaultConfig() *Config {
+	config := &Config{
+		Address:      DefaultAddress,
+		HttpClient:   cleanhttp.DefaultPooledClient(),
+		Timeout:      time.Second * 60,
+		MinRetryWait: time.Millisecond * 1000,
+		MaxRetryWait: time.Millisecond * 1500,
+		MaxRetries:   2,
+		Backoff:      retryablehttp.RateLimitLinearJitterBackoff,
+	}
+
+	transport := config.HttpClient.Transport.(*http.Transport)
+	transport.TLSHandshakeTimeout = 10 * time.Second
+	transport.TLSClientConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+	if err := http2.ConfigureTransport(transport); err != nil {
+		config.Error = err
+		return config
+	}
+
+	if err := config.ReadEnvironment(); err != nil {
+		config.Error = err
+		return config
+	}
+
+	// Ensure redirects are not automatically followed
+	// Note that this is sane for the API client as it has its own
+	// redirect handling logic (and thus also for command/meta),
+	// but in e.g. http_test actual redirect handling is necessary
+	config.HttpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		// Returning this value causes the Go net library to not close the
+		// response body and to nil out the error. Otherwise retry clients may
+		// try three times on every redirect because it sees an error from this
+		// function (to prevent redirects) passing through to it.
+		return http.ErrUseLastResponse
+	}
+
+	return config
+}
+
+// configureTLS is a lock free version of ConfigureTLS that can be used in
+// ReadEnvironment where the lock is already hold
+func (c *Config) configureTLS(t *TLSConfig) error {
+	if c.HttpClient == nil {
+		c.HttpClient = DefaultConfig().HttpClient
+	}
+
+	transport, ok := c.HttpClient.Transport.(*http.Transport)
+	if !ok {
+		return fmt.Errorf(
+			"unsupported HTTPClient transport type %T", c.HttpClient.Transport)
+	}
+
+	clientTLSConfig := transport.TLSClientConfig
+
+	var clientCert tls.Certificate
+	foundClientCert := false
+
+	switch {
+	case t.ClientCert != "" && t.ClientKey != "":
+		var err error
+		clientCert, err = tls.LoadX509KeyPair(t.ClientCert, t.ClientKey)
+		if err != nil {
+			return err
+		}
+		foundClientCert = true
+		c.curlClientCert = t.ClientCert
+		c.curlClientKey = t.ClientKey
+	case t.ClientCert != "" || t.ClientKey != "":
+		return fmt.Errorf("both client cert and client key must be provided")
+	}
+
+	if t.CACert != "" || len(t.CACertBytes) != 0 || t.CAPath != "" {
+		c.curlCACert = t.CACert
+		c.curlCAPath = t.CAPath
+		rootConfig := &rootcerts.Config{
+			CAFile:        t.CACert,
+			CACertificate: t.CACertBytes,
+			CAPath:        t.CAPath,
+		}
+		if err := rootcerts.ConfigureTLS(clientTLSConfig, rootConfig); err != nil {
+			return err
+		}
+	}
+
+	if t.Insecure {
+		clientTLSConfig.InsecureSkipVerify = true
+	}
+
+	if foundClientCert {
+		// We use this function to ignore the server's preferential list of
+		// CAs, otherwise any CA used for the cert auth backend must be in the
+		// server's CA pool
+		clientTLSConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return &clientCert, nil
+		}
+	}
+
+	if t.TLSServerName != "" {
+		clientTLSConfig.ServerName = t.TLSServerName
+	}
+	c.clientTLSConfig = clientTLSConfig
+
+	return nil
+}
+
+func (c *Config) TLSConfig() *tls.Config {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	return c.clientTLSConfig.Clone()
+}
+
+// ConfigureTLS takes a set of TLS configurations and applies those to the
+// HTTP client.
+func (c *Config) ConfigureTLS(t *TLSConfig) error {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+
+	return c.configureTLS(t)
+}
+
+// ReadEnvironment reads configuration information from the environment. If
+// there is an error, no configuration value is updated.
+func (c *Config) ReadEnvironment() error {
+	var envAddress string
+	var envAgentAddress string
+	var envCACert string
+	var envCACertBytes []byte
+	var envCAPath string
+	var envClientCert string
+	var envClientKey string
+	var envClientTimeout time.Duration
+	var envInsecure bool
+	var envTLSServerName string
+	var envMaxRetries *uint64
+	var envSRVLookup bool
+	var limit *rate.Limiter
+	var envVaultProxy string
+	var envVaultDisableRedirects bool
+
+	// Parse the environment variables
+	if v := os.Getenv(EnvVaultAddress); v != "" {
+		envAddress = v
+	}
+	if v := os.Getenv(EnvVaultAgentAddr); v != "" {
+		envAgentAddress = v
+	}
+	if v := os.Getenv(EnvVaultMaxRetries); v != "" {
+		maxRetries, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			return err
+		}
+		envMaxRetries = &maxRetries
+	}
+	if v := os.Getenv(EnvVaultCACert); v != "" {
+		envCACert = v
+	}
+	if v := os.Getenv(EnvVaultCACertBytes); v != "" {
+		envCACertBytes = []byte(v)
+	}
+	if v := os.Getenv(EnvVaultCAPath); v != "" {
+		envCAPath = v
+	}
+	if v := os.Getenv(EnvVaultClientCert); v != "" {
+		envClientCert = v
+	}
+	if v := os.Getenv(EnvVaultClientKey); v != "" {
+		envClientKey = v
+	}
+	if v := os.Getenv(EnvRateLimit); v != "" {
+		rateLimit, burstLimit, err := parseRateLimit(v)
+		if err != nil {
+			return err
+		}
+		limit = rate.NewLimiter(rate.Limit(rateLimit), burstLimit)
+	}
+	if t := os.Getenv(EnvVaultClientTimeout); t != "" {
+		clientTimeout, err := parseutil.ParseDurationSecond(t)
+		if err != nil {
+			return fmt.Errorf("could not parse %q", EnvVaultClientTimeout)
+		}
+		envClientTimeout = clientTimeout
+	}
+	if v := os.Getenv(EnvVaultSkipVerify); v != "" {
+		var err error
+		envInsecure, err = strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("could not parse %s", EnvVaultSkipVerify)
+		}
+	}
+	if v := os.Getenv(EnvVaultSRVLookup); v != "" {
+		var err error
+		envSRVLookup, err = strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("could not parse %s", EnvVaultSRVLookup)
+		}
+	}
+
+	if v := os.Getenv(EnvVaultTLSServerName); v != "" {
+		envTLSServerName = v
+	}
+
+	if v := os.Getenv(EnvHTTPProxy); v != "" {
+		envVaultProxy = v
+	}
+
+	// VAULT_PROXY_ADDR supersedes VAULT_HTTP_PROXY
+	if v := os.Getenv(EnvVaultProxyAddr); v != "" {
+		envVaultProxy = v
+	}
+
+	if v := os.Getenv(EnvVaultDisableRedirects); v != "" {
+		var err error
+		envVaultDisableRedirects, err = strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("could not parse %s", EnvVaultDisableRedirects)
+		}
+
+		c.DisableRedirects = envVaultDisableRedirects
+	}
+
+	// Configure the HTTP clients TLS configuration.
+	t := &TLSConfig{
+		CACert:        envCACert,
+		CACertBytes:   envCACertBytes,
+		CAPath:        envCAPath,
+		ClientCert:    envClientCert,
+		ClientKey:     envClientKey,
+		TLSServerName: envTLSServerName,
+		Insecure:      envInsecure,
+	}
+
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+
+	c.SRVLookup = envSRVLookup
+	c.Limiter = limit
+
+	if err := c.configureTLS(t); err != nil {
+		return err
+	}
+
+	if envAddress != "" {
+		c.Address = envAddress
+	}
+
+	if envAgentAddress != "" {
+		c.AgentAddress = envAgentAddress
+	}
+
+	if envMaxRetries != nil {
+		c.MaxRetries = int(*envMaxRetries)
+	}
+
+	if envClientTimeout != 0 {
+		c.Timeout = envClientTimeout
+	}
+
+	if envVaultProxy != "" {
+		u, err := url.Parse(envVaultProxy)
+		if err != nil {
+			return err
+		}
+
+		transport := c.HttpClient.Transport.(*http.Transport)
+		transport.Proxy = http.ProxyURL(u)
+	}
+
+	return nil
+}
+
+// ParseAddress transforms the provided address into a url.URL and handles
+// the case of Unix domain sockets by setting the DialContext in the
+// configuration's HttpClient.Transport. This function must be called with
+// c.modifyLock held for write access.
+func (c *Config) ParseAddress(address string) (*url.URL, error) {
+	u, err := url.Parse(address)
+	if err != nil {
+		return nil, err
+	}
+
+	previousAddress := c.Address
+	c.Address = address
+
+	if strings.HasPrefix(address, "unix://") {
+		// When the address begins with unix://, always change the transport's
+		// DialContext (to match previous behaviour)
+		socket := strings.TrimPrefix(address, "unix://")
+
+		if transport, ok := c.HttpClient.Transport.(*http.Transport); ok {
+			transport.DialContext = func(context.Context, string, string) (net.Conn, error) {
+				return net.Dial("unix", socket)
+			}
+
+			// Since the address points to a unix domain socket, the scheme in the
+			// *URL would be set to `unix`. The *URL in the client is expected to
+			// be pointing to the protocol used in the application layer and not to
+			// the transport layer. Hence, setting the fields accordingly.
+			u.Scheme = "http"
+			u.Host = "localhost"
+			u.Path = ""
+		} else {
+			return nil, fmt.Errorf("attempting to specify unix:// address with non-transport transport")
+		}
+	} else if strings.HasPrefix(previousAddress, "unix://") {
+		// When the address being set does not begin with unix:// but the previous
+		// address in the Config did, change the transport's DialContext back to
+		// use the default configuration that cleanhttp uses.
+
+		if transport, ok := c.HttpClient.Transport.(*http.Transport); ok {
+			transport.DialContext = cleanhttp.DefaultPooledTransport().DialContext
+		}
+	}
+
+	return u, nil
+}
+
+func parseRateLimit(val string) (rate float64, burst int, err error) {
+	_, err = fmt.Sscanf(val, "%f:%d", &rate, &burst)
+	if err != nil {
+		rate, err = strconv.ParseFloat(val, 64)
+		if err != nil {
+			err = fmt.Errorf("%v was provided but incorrectly formatted", EnvRateLimit)
+		}
+		burst = int(rate)
+	}
+
+	return rate, burst, err
+}
+
+// Client is the client to the Vault API. Create a client with NewClient.
+type Client struct {
+	modifyLock            sync.RWMutex
+	addr                  *url.URL
+	config                *Config
+	token                 string
+	headers               http.Header
+	wrappingLookupFunc    WrappingLookupFunc
+	mfaCreds              []string
+	policyOverride        bool
+	requestCallbacks      []RequestCallback
+	responseCallbacks     []ResponseCallback
+	replicationStateStore *replicationStateStore
+	hcpCookie             *http.Cookie
+}
+
+// NewClient returns a new client for the given configuration.
+//
+// If the configuration is nil, Vault will use configuration from
+// DefaultConfig(), which is the recommended starting configuration.
+//
+// If the environment variable `VAULT_TOKEN` is present, the token will be
+// automatically added to the client. Otherwise, you must manually call
+// `SetToken()`.
+func NewClient(c *Config) (*Client, error) {
+	def := DefaultConfig()
+	if def == nil {
+		return nil, fmt.Errorf("could not create/read default configuration")
+	}
+	if def.Error != nil {
+		return nil, errwrap.Wrapf("error encountered setting up default configuration: {{err}}", def.Error)
+	}
+
+	if c == nil {
+		c = def
+	}
+
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+
+	if c.MinRetryWait == 0 {
+		c.MinRetryWait = def.MinRetryWait
+	}
+
+	if c.MaxRetryWait == 0 {
+		c.MaxRetryWait = def.MaxRetryWait
+	}
+
+	if c.HttpClient == nil {
+		c.HttpClient = def.HttpClient
+	}
+	if c.HttpClient.Transport == nil {
+		c.HttpClient.Transport = def.HttpClient.Transport
+	}
+
+	address := c.Address
+	if c.AgentAddress != "" {
+		address = c.AgentAddress
+	}
+
+	u, err := c.ParseAddress(address)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &Client{
+		addr:    u,
+		config:  c,
+		headers: make(http.Header),
+	}
+
+	if c.ReadYourWrites {
+		client.replicationStateStore = &replicationStateStore{}
+	}
+
+	// Add the VaultRequest SSRF protection header
+	client.headers[RequestHeaderName] = []string{"true"}
+
+	if token := os.Getenv(EnvVaultToken); token != "" {
+		client.token = token
+	}
+
+	if namespace := os.Getenv(EnvVaultNamespace); namespace != "" {
+		client.setNamespace(namespace)
+	}
+
+	if envHeaders := os.Getenv(EnvVaultHeaders); envHeaders != "" {
+		var result map[string]any
+		err := json.Unmarshal([]byte(envHeaders), &result)
+		if err != nil {
+			return nil, fmt.Errorf("could not unmarshal environment-supplied headers")
+		}
+		var forbiddenHeaders []string
+		for key, value := range result {
+			if strings.HasPrefix(key, "X-Vault-") {
+				forbiddenHeaders = append(forbiddenHeaders, key)
+				continue
+			}
+
+			value, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("environment-supplied headers include non-string values")
+			}
+			client.AddHeader(key, value)
+		}
+		if len(forbiddenHeaders) > 0 {
+			return nil, fmt.Errorf("failed to setup Headers[%s]: Header starting by 'X-Vault-' are for internal usage only", strings.Join(forbiddenHeaders, ", "))
+		}
+	}
+
+	return client, nil
+}
+
+func (c *Client) CloneConfig() *Config {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+
+	newConfig := DefaultConfig()
+	newConfig.Address = c.config.Address
+	newConfig.AgentAddress = c.config.AgentAddress
+	newConfig.MinRetryWait = c.config.MinRetryWait
+	newConfig.MaxRetryWait = c.config.MaxRetryWait
+	newConfig.MaxRetries = c.config.MaxRetries
+	newConfig.Timeout = c.config.Timeout
+	newConfig.Backoff = c.config.Backoff
+	newConfig.CheckRetry = c.config.CheckRetry
+	newConfig.Logger = c.config.Logger
+	newConfig.Limiter = c.config.Limiter
+	newConfig.SRVLookup = c.config.SRVLookup
+	newConfig.CloneHeaders = c.config.CloneHeaders
+	newConfig.CloneToken = c.config.CloneToken
+	newConfig.ReadYourWrites = c.config.ReadYourWrites
+	newConfig.clientTLSConfig = c.config.clientTLSConfig
+
+	// we specifically want a _copy_ of the client here, not a pointer to the original one
+	newClient := *c.config.HttpClient
+	newConfig.HttpClient = &newClient
+
+	return newConfig
+}
+
+// SetAddress sets the address of Vault in the client. The format of address should be
+// "<Scheme>://<Host>:<Port>". Setting this on a client will override the
+// value of VAULT_ADDR environment variable.
+func (c *Client) SetAddress(addr string) error {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+
+	parsedAddr, err := c.config.ParseAddress(addr)
+	if err != nil {
+		return fmt.Errorf("failed to set address: %w", err)
+	}
+
+	c.addr = parsedAddr
+	return nil
+}
+
+// Address returns the Vault URL the client is configured to connect to
+func (c *Client) Address() string {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+
+	return c.addr.String()
+}
+
+func (c *Client) SetCheckRedirect(f func(*http.Request, []*http.Request) error) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.HttpClient.CheckRedirect = f
+}
+
+// SetLimiter will set the rate limiter for this client.
+// This method is thread-safe.
+// rateLimit and burst are specified according to https://godoc.org/golang.org/x/time/rate#NewLimiter
+func (c *Client) SetLimiter(rateLimit float64, burst int) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.Limiter = rate.NewLimiter(rate.Limit(rateLimit), burst)
+}
+
+func (c *Client) Limiter() *rate.Limiter {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.Limiter
+}
+
+// SetMinRetryWait sets the minimum time to wait before retrying in the case of certain errors.
+func (c *Client) SetMinRetryWait(retryWait time.Duration) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.MinRetryWait = retryWait
+}
+
+func (c *Client) MinRetryWait() time.Duration {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.MinRetryWait
+}
+
+// SetMaxRetryWait sets the maximum time to wait before retrying in the case of certain errors.
+func (c *Client) SetMaxRetryWait(retryWait time.Duration) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.MaxRetryWait = retryWait
+}
+
+func (c *Client) MaxRetryWait() time.Duration {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.MaxRetryWait
+}
+
+// SetMaxRetries sets the number of retries that will be used in the case of certain errors
+func (c *Client) SetMaxRetries(retries int) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.MaxRetries = retries
+}
+
+func (c *Client) SetMaxIdleConnections(idle int) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.HttpClient.Transport.(*http.Transport).MaxIdleConns = idle
+}
+
+func (c *Client) MaxIdleConnections() int {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	return c.config.HttpClient.Transport.(*http.Transport).MaxIdleConns
+}
+
+func (c *Client) SetDisableKeepAlives(disable bool) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.HttpClient.Transport.(*http.Transport).DisableKeepAlives = disable
+}
+
+func (c *Client) DisableKeepAlives() bool {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.HttpClient.Transport.(*http.Transport).DisableKeepAlives
+}
+
+func (c *Client) MaxRetries() int {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.MaxRetries
+}
+
+func (c *Client) SetSRVLookup(srv bool) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.SRVLookup = srv
+}
+
+func (c *Client) SRVLookup() bool {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.SRVLookup
+}
+
+// SetCheckRetry sets the CheckRetry function to be used for future requests.
+func (c *Client) SetCheckRetry(checkRetry retryablehttp.CheckRetry) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.CheckRetry = checkRetry
+}
+
+func (c *Client) CheckRetry() retryablehttp.CheckRetry {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.CheckRetry
+}
+
+// SetClientTimeout sets the client request timeout
+func (c *Client) SetClientTimeout(timeout time.Duration) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.Timeout = timeout
+}
+
+func (c *Client) ClientTimeout() time.Duration {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.Timeout
+}
+
+func (c *Client) OutputCurlString() bool {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.OutputCurlString
+}
+
+func (c *Client) SetOutputCurlString(curl bool) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.OutputCurlString = curl
+}
+
+func (c *Client) OutputPolicy() bool {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.OutputPolicy
+}
+
+func (c *Client) SetOutputPolicy(isSet bool) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.OutputPolicy = isSet
+}
+
+// CurrentWrappingLookupFunc sets a lookup function that returns desired wrap TTLs
+// for a given operation and path.
+func (c *Client) CurrentWrappingLookupFunc() WrappingLookupFunc {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	return c.wrappingLookupFunc
+}
+
+// SetWrappingLookupFunc sets a lookup function that returns desired wrap TTLs
+// for a given operation and path.
+func (c *Client) SetWrappingLookupFunc(lookupFunc WrappingLookupFunc) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.wrappingLookupFunc = lookupFunc
+}
+
+// SetMFACreds sets the MFA credentials supplied either via the environment
+// variable or via the command line.
+func (c *Client) SetMFACreds(creds []string) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.mfaCreds = creds
+}
+
+// SetNamespace sets the namespace supplied either via the environment
+// variable or via the command line.
+func (c *Client) SetNamespace(namespace string) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.setNamespace(namespace)
+}
+
+func (c *Client) setNamespace(namespace string) {
+	if c.headers == nil {
+		c.headers = make(http.Header)
+	}
+
+	c.headers.Set(NamespaceHeaderName, namespace)
+}
+
+// ClearNamespace removes the namespace header if set.
+func (c *Client) ClearNamespace() {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	if c.headers != nil {
+		c.headers.Del(NamespaceHeaderName)
+	}
+}
+
+// Namespace returns the namespace currently set in this client. It will
+// return an empty string if there is no namespace set.
+func (c *Client) Namespace() string {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	if c.headers == nil {
+		return ""
+	}
+	return c.headers.Get(NamespaceHeaderName)
+}
+
+// WithNamespace makes a shallow copy of Client, modifies it to use
+// the given namespace, and returns it. Passing an empty string will
+// temporarily unset the namespace.
+func (c *Client) WithNamespace(namespace string) *Client {
+	c2 := *c
+	c2.modifyLock = sync.RWMutex{}
+	c.modifyLock.RLock()
+	c2.headers = c.headersInternal()
+	c.modifyLock.RUnlock()
+	if namespace == "" {
+		c2.ClearNamespace()
+	} else {
+		c2.SetNamespace(namespace)
+	}
+	return &c2
+}
+
+// Token returns the access token being used by this client. It will
+// return the empty string if there is no token set.
+func (c *Client) Token() string {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	return c.token
+}
+
+// SetToken sets the token directly. This won't perform any auth
+// verification, it simply sets the token properly for future requests.
+func (c *Client) SetToken(v string) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.token = v
+}
+
+// HCPCookie returns the HCP cookie being used by this client. It will
+// return an empty cookie when no cookie is set.
+func (c *Client) HCPCookie() string {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+
+	if c.hcpCookie == nil {
+		return ""
+	}
+	return c.hcpCookie.String()
+}
+
+// SetHCPCookie sets the hcp cookie directly. This won't perform any auth
+// verification, it simply sets the token properly for future requests.
+func (c *Client) SetHCPCookie(v *http.Cookie) error {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+
+	if err := v.Valid(); err != nil {
+		return err
+	}
+
+	c.hcpCookie = v
+
+	return nil
+}
+
+// ClearToken deletes the token if it is set or does nothing otherwise.
+func (c *Client) ClearToken() {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.token = ""
+}
+
+// Headers gets the current set of headers used for requests. This returns a
+// copy; to modify it call AddHeader or SetHeaders.
+func (c *Client) Headers() http.Header {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	return c.headersInternal()
+}
+
+// headersInternal gets the current set of headers used for requests. Must be called
+// with the read modifyLock held.
+func (c *Client) headersInternal() http.Header {
+	if c.headers == nil {
+		return nil
+	}
+
+	ret := make(http.Header)
+	for k, v := range c.headers {
+		for _, val := range v {
+			ret[k] = append(ret[k], val)
+		}
+	}
+
+	return ret
+}
+
+// AddHeader allows a single header key/value pair to be added
+// in a race-safe fashion.
+func (c *Client) AddHeader(key, value string) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.headers.Add(key, value)
+}
+
+// SetHeaders clears all previous headers and uses only the given
+// ones going forward.
+func (c *Client) SetHeaders(headers http.Header) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.headers = headers
+}
+
+// SetBackoff sets the backoff function to be used for future requests.
+func (c *Client) SetBackoff(backoff retryablehttp.Backoff) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.Backoff = backoff
+}
+
+func (c *Client) SetLogger(logger retryablehttp.LeveledLogger) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.Logger = logger
+}
+
+// SetCloneHeaders to allow headers to be copied whenever the client is cloned.
+func (c *Client) SetCloneHeaders(cloneHeaders bool) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.CloneHeaders = cloneHeaders
+}
+
+// CloneHeaders gets the configured CloneHeaders value.
+func (c *Client) CloneHeaders() bool {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.CloneHeaders
+}
+
+// SetCloneToken from parent
+func (c *Client) SetCloneToken(cloneToken bool) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.CloneToken = cloneToken
+}
+
+// CloneToken gets the configured CloneToken value.
+func (c *Client) CloneToken() bool {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.CloneToken
+}
+
+// SetReadYourWrites to prevent reading stale cluster replication state.
+func (c *Client) SetReadYourWrites(preventStaleReads bool) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	if preventStaleReads {
+		if c.replicationStateStore == nil {
+			c.replicationStateStore = &replicationStateStore{}
+		}
+	} else {
+		c.replicationStateStore = nil
+	}
+
+	c.config.ReadYourWrites = preventStaleReads
+}
+
+// ReadYourWrites gets the configured value of ReadYourWrites
+func (c *Client) ReadYourWrites() bool {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.ReadYourWrites
+}
+
+// SetCloneTLSConfig from parent.
+func (c *Client) SetCloneTLSConfig(clone bool) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.config.modifyLock.Lock()
+	defer c.config.modifyLock.Unlock()
+
+	c.config.CloneTLSConfig = clone
+}
+
+// CloneTLSConfig gets the configured CloneTLSConfig value.
+func (c *Client) CloneTLSConfig() bool {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+
+	return c.config.CloneTLSConfig
+}
+
+// Clone creates a new client with the same configuration. Note that the same
+// underlying http.Client is used; modifying the client from more than one
+// goroutine at once may not be safe, so modify the client as needed and then
+// clone. The headers are cloned based on the CloneHeaders property of the
+// source config
+//
+// Also, only the client's config is currently copied; this means items not in
+// the api.Config struct, such as policy override and wrapping function
+// behavior, must currently then be set as desired on the new client.
+func (c *Client) Clone() (*Client, error) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+	return c.clone(c.config.CloneHeaders)
+}
+
+// CloneWithHeaders creates a new client similar to Clone, with the difference
+// being that the headers are always cloned
+func (c *Client) CloneWithHeaders() (*Client, error) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+	c.config.modifyLock.RLock()
+	defer c.config.modifyLock.RUnlock()
+	return c.clone(true)
+}
+
+// clone creates a new client, with the headers being cloned based on the
+// passed in cloneheaders boolean.
+// Must be called with the read lock and config read lock held.
+func (c *Client) clone(cloneHeaders bool) (*Client, error) {
+	config := c.config
+
+	newConfig := &Config{
+		Address:        config.Address,
+		HttpClient:     config.HttpClient,
+		MinRetryWait:   config.MinRetryWait,
+		MaxRetryWait:   config.MaxRetryWait,
+		MaxRetries:     config.MaxRetries,
+		Timeout:        config.Timeout,
+		Backoff:        config.Backoff,
+		CheckRetry:     config.CheckRetry,
+		Logger:         config.Logger,
+		Limiter:        config.Limiter,
+		AgentAddress:   config.AgentAddress,
+		SRVLookup:      config.SRVLookup,
+		CloneHeaders:   config.CloneHeaders,
+		CloneToken:     config.CloneToken,
+		ReadYourWrites: config.ReadYourWrites,
+	}
+
+	if config.CloneTLSConfig {
+		newConfig.clientTLSConfig = config.clientTLSConfig
+	}
+
+	client, err := NewClient(newConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	if cloneHeaders {
+		client.SetHeaders(c.headersInternal().Clone())
+	}
+
+	if config.CloneToken {
+		client.SetToken(c.token)
+	}
+
+	client.replicationStateStore = c.replicationStateStore
+
+	return client, nil
+}
+
+// SetPolicyOverride sets whether requests should be sent with the policy
+// override flag to request overriding soft-mandatory Sentinel policies (both
+// RGPs and EGPs)
+func (c *Client) SetPolicyOverride(override bool) {
+	c.modifyLock.Lock()
+	defer c.modifyLock.Unlock()
+	c.policyOverride = override
+}
+
+// NewRequest creates a new raw request object to query the Vault server
+// configured for this client. This is an advanced method and generally
+// doesn't need to be called externally.
+func (c *Client) NewRequest(method, requestPath string) *Request {
+	c.modifyLock.RLock()
+	addr := c.addr
+	token := c.token
+	mfaCreds := c.mfaCreds
+	wrappingLookupFunc := c.wrappingLookupFunc
+	policyOverride := c.policyOverride
+	headers := c.headersInternal()
+	c.modifyLock.RUnlock()
+
+	host := addr.Host
+	// if SRV records exist (see https://tools.ietf.org/html/draft-andrews-http-srv-02), lookup the SRV
+	// record and take the highest match; this is not designed for high-availability, just discovery
+	// Internet Draft specifies that the SRV record is ignored if a port is given
+	if addr.Port() == "" && c.config.SRVLookup {
+		_, addrs, err := net.LookupSRV("http", "tcp", addr.Hostname())
+		if err == nil && len(addrs) > 0 {
+			host = fmt.Sprintf("%s:%d", addrs[0].Target, addrs[0].Port)
+		}
+	}
+
+	req := &Request{
+		Method: method,
+		URL: &url.URL{
+			User:   addr.User,
+			Scheme: addr.Scheme,
+			Host:   host,
+			Path:   path.Join(addr.Path, requestPath),
+		},
+		Host:        addr.Host,
+		ClientToken: token,
+		Params:      make(map[string][]string),
+	}
+
+	req.HCPCookie = c.hcpCookie
+
+	var lookupPath string
+	switch {
+	case strings.HasPrefix(requestPath, "/v1/"):
+		lookupPath = strings.TrimPrefix(requestPath, "/v1/")
+	case strings.HasPrefix(requestPath, "v1/"):
+		lookupPath = strings.TrimPrefix(requestPath, "v1/")
+	default:
+		lookupPath = requestPath
+	}
+
+	req.MFAHeaderVals = mfaCreds
+
+	if wrappingLookupFunc != nil {
+		req.WrapTTL = wrappingLookupFunc(method, lookupPath)
+	} else {
+		req.WrapTTL = DefaultWrappingLookupFunc(method, lookupPath)
+	}
+
+	req.Headers = headers
+	req.PolicyOverride = policyOverride
+
+	return req
+}
+
+// RawRequest performs the raw request given. This request may be against
+// a Vault server not configured with this client. This is an advanced operation
+// that generally won't need to be called externally.
+//
+// Deprecated: RawRequest exists for historical compatibility and should not be
+// used directly. Use client.Logical().ReadRaw(...) or higher level methods
+// instead.
+func (c *Client) RawRequest(r *Request) (*Response, error) {
+	return c.RawRequestWithContext(context.Background(), r)
+}
+
+// RawRequestWithContext performs the raw request given. This request may be against
+// a Vault server not configured with this client. This is an advanced operation
+// that generally won't need to be called externally.
+//
+// Deprecated: RawRequestWithContext exists for historical compatibility and
+// should not be used directly. Use client.Logical().ReadRawWithContext(...)
+// or higher level methods instead.
+func (c *Client) RawRequestWithContext(ctx context.Context, r *Request) (*Response, error) {
+	// Note: we purposefully do not call cancel manually. The reason is
+	// when canceled, the request.Body will EOF when reading due to the way
+	// it streams data in. Cancel will still be run when the timeout is
+	// hit, so this doesn't really harm anything.
+	ctx, _ = c.withConfiguredTimeout(ctx)
+	return c.rawRequestWithContext(ctx, r)
+}
+
+func (c *Client) rawRequestWithContext(ctx context.Context, r *Request) (*Response, error) {
+	c.modifyLock.RLock()
+	token := c.token
+
+	c.config.modifyLock.RLock()
+	limiter := c.config.Limiter
+	minRetryWait := c.config.MinRetryWait
+	maxRetryWait := c.config.MaxRetryWait
+	maxRetries := c.config.MaxRetries
+	checkRetry := c.config.CheckRetry
+	backoff := c.config.Backoff
+	httpClient := c.config.HttpClient
+	ns := c.headers.Get(NamespaceHeaderName)
+	outputCurlString := c.config.OutputCurlString
+	outputPolicy := c.config.OutputPolicy
+	logger := c.config.Logger
+	disableRedirects := c.config.DisableRedirects
+	c.config.modifyLock.RUnlock()
+
+	c.modifyLock.RUnlock()
+
+	// ensure that the most current namespace setting is used at the time of the call
+	// e.g. calls using (*Client).WithNamespace
+	switch ns {
+	case "":
+		r.Headers.Del(NamespaceHeaderName)
+	default:
+		r.Headers.Set(NamespaceHeaderName, ns)
+	}
+
+	for _, cb := range c.requestCallbacks {
+		cb(r)
+	}
+
+	if c.config.ReadYourWrites {
+		c.replicationStateStore.requireState(r)
+	}
+
+	if limiter != nil {
+		limiter.Wait(ctx)
+	}
+
+	// check the token before potentially erroring from the API
+	if err := validateToken(token); err != nil {
+		return nil, err
+	}
+
+	redirectCount := 0
+START:
+	req, err := r.toRetryableHTTP()
+	if err != nil {
+		return nil, err
+	}
+	if req == nil {
+		return nil, fmt.Errorf("nil request created")
+	}
+
+	if outputCurlString {
+		// Note that although we're building this up here and returning it as an error object, the Error()
+		// interface method on it only gets called in a context where the actual string returned from that
+		// method is irrelevant, because it gets swallowed by an error buffer that's never output to the user.
+		// That's on purpose, not a bug, because in this case, OutputStringError is not really an _error_, per se.
+		// It's just a way of aborting the control flow so that requests don't actually execute, and instead,
+		// we can detect what's happened back in the CLI machinery and show the actual curl string to the user.
+		LastOutputStringError = &OutputStringError{
+			Request:       req,
+			TLSSkipVerify: c.config.HttpClient.Transport.(*http.Transport).TLSClientConfig.InsecureSkipVerify,
+			ClientCert:    c.config.curlClientCert,
+			ClientKey:     c.config.curlClientKey,
+			ClientCACert:  c.config.curlCACert,
+			ClientCAPath:  c.config.curlCAPath,
+		}
+		return nil, LastOutputStringError
+	}
+
+	if outputPolicy {
+		LastOutputPolicyError = &OutputPolicyError{
+			method: req.Method,
+			path:   strings.TrimPrefix(req.URL.Path, "/v1"),
+			params: req.URL.Query(),
+		}
+		return nil, LastOutputPolicyError
+	}
+
+	req.Request = req.Request.WithContext(ctx)
+
+	if backoff == nil {
+		backoff = retryablehttp.LinearJitterBackoff
+	}
+
+	if checkRetry == nil {
+		checkRetry = DefaultRetryPolicy
+	}
+
+	client := &retryablehttp.Client{
+		HTTPClient:   httpClient,
+		RetryWaitMin: minRetryWait,
+		RetryWaitMax: maxRetryWait,
+		RetryMax:     maxRetries,
+		Backoff:      backoff,
+		CheckRetry:   checkRetry,
+		Logger:       logger,
+		ErrorHandler: retryablehttp.PassthroughErrorHandler,
+	}
+
+	var result *Response
+	resp, err := client.Do(req)
+	if resp != nil {
+		result = &Response{Response: resp}
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "tls: oversized") {
+			err = errwrap.Wrapf("{{err}}\n\n"+TLSErrorString, err)
+		}
+		return result, err
+	}
+
+	// Check for a redirect, only allowing for a single redirect (if redirects aren't disabled)
+	if (resp.StatusCode == 301 || resp.StatusCode == 302 || resp.StatusCode == 307) && redirectCount == 0 && !disableRedirects {
+		// Parse the updated location
+		respLoc, err := resp.Location()
+		if err != nil {
+			return result, err
+		}
+
+		// Ensure a protocol downgrade doesn't happen
+		if req.URL.Scheme == "https" && respLoc.Scheme != "https" {
+			return result, fmt.Errorf("redirect would cause protocol downgrade")
+		}
+
+		// Update the request
+		r.URL = respLoc
+
+		// Reset the request body if any
+		if err := r.ResetJSONBody(); err != nil {
+			return result, err
+		}
+
+		// Retry the request
+		redirectCount++
+		goto START
+	}
+
+	if result != nil {
+		for _, cb := range c.responseCallbacks {
+			cb(result)
+		}
+
+		if c.config.ReadYourWrites {
+			c.replicationStateStore.recordState(result)
+		}
+	}
+	if err := result.Error(); err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+// httpRequestWithContext avoids the use of the go-retryable library found in RawRequestWithContext and is
+// useful when making calls where a net/http client is desirable. A single redirect (status code 301, 302,
+// or 307) will be followed but all retry and timeout logic is the responsibility of the caller as is
+// closing the Response body.
+func (c *Client) httpRequestWithContext(ctx context.Context, r *Request) (*Response, error) {
+	req, err := http.NewRequestWithContext(ctx, r.Method, r.URL.RequestURI(), r.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	c.modifyLock.RLock()
+	token := c.token
+
+	c.config.modifyLock.RLock()
+	limiter := c.config.Limiter
+	httpClient := c.config.HttpClient
+	outputCurlString := c.config.OutputCurlString
+	outputPolicy := c.config.OutputPolicy
+	disableRedirects := c.config.DisableRedirects
+
+	// add headers
+	if c.headers != nil {
+		for header, vals := range c.headers {
+			for _, val := range vals {
+				req.Header.Add(header, val)
+			}
+		}
+		// explicitly set the namespace header to current client
+		if ns := c.headers.Get(NamespaceHeaderName); ns != "" {
+			r.Headers.Set(NamespaceHeaderName, ns)
+		}
+	}
+
+	c.config.modifyLock.RUnlock()
+	c.modifyLock.RUnlock()
+
+	// OutputCurlString and OutputPolicy logic rely on the request type to be retryable.Request
+	if outputCurlString {
+		return nil, fmt.Errorf("output-curl-string is not implemented for this request")
+	}
+	if outputPolicy {
+		return nil, fmt.Errorf("output-policy is not implemented for this request")
+	}
+
+	req.URL.User = r.URL.User
+	req.URL.Scheme = r.URL.Scheme
+	req.URL.Host = r.URL.Host
+	req.Host = r.URL.Host
+
+	if len(r.ClientToken) != 0 {
+		req.Header.Set(AuthHeaderName, r.ClientToken)
+	}
+
+	if len(r.WrapTTL) != 0 {
+		req.Header.Set("X-Vault-Wrap-TTL", r.WrapTTL)
+	}
+
+	if len(r.MFAHeaderVals) != 0 {
+		for _, mfaHeaderVal := range r.MFAHeaderVals {
+			req.Header.Add("X-Vault-MFA", mfaHeaderVal)
+		}
+	}
+
+	if r.PolicyOverride {
+		req.Header.Set("X-Vault-Policy-Override", "true")
+	}
+
+	if limiter != nil {
+		limiter.Wait(ctx)
+	}
+
+	// check the token before potentially erroring from the API
+	if err := validateToken(token); err != nil {
+		return nil, err
+	}
+
+	var result *Response
+
+	resp, err := httpClient.Do(req)
+
+	if resp != nil {
+		result = &Response{Response: resp}
+	}
+
+	if err != nil {
+		if strings.Contains(err.Error(), "tls: oversized") {
+			err = errwrap.Wrapf("{{err}}\n\n"+TLSErrorString, err)
+		}
+		return result, err
+	}
+
+	// Check for a redirect, only allowing for a single redirect, if redirects aren't disabled
+	if (resp.StatusCode == 301 || resp.StatusCode == 302 || resp.StatusCode == 307) && !disableRedirects {
+		// Parse the updated location
+		respLoc, err := resp.Location()
+		if err != nil {
+			return result, fmt.Errorf("redirect failed: %s", err)
+		}
+
+		// Ensure a protocol downgrade doesn't happen
+		if req.URL.Scheme == "https" && respLoc.Scheme != "https" {
+			return result, fmt.Errorf("redirect would cause protocol downgrade")
+		}
+
+		// Update the request
+		req.URL = respLoc
+
+		// Reset the request body if any
+		if err := r.ResetJSONBody(); err != nil {
+			return result, fmt.Errorf("redirect failed: %s", err)
+		}
+
+		// Retry the request
+		resp, err = httpClient.Do(req)
+		if err != nil {
+			return result, fmt.Errorf("redirect failed: %s", err)
+		}
+	}
+
+	if err := result.Error(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+type (
+	RequestCallback  func(*Request)
+	ResponseCallback func(*Response)
+)
+
+// WithRequestCallbacks makes a shallow clone of Client, modifies it to use
+// the given callbacks, and returns it.  Each of the callbacks will be invoked
+// on every outgoing request.  A client may be used to issue requests
+// concurrently; any locking needed by callbacks invoked concurrently is the
+// callback's responsibility.
+func (c *Client) WithRequestCallbacks(callbacks ...RequestCallback) *Client {
+	c2 := *c
+	c2.modifyLock = sync.RWMutex{}
+	c2.requestCallbacks = callbacks
+	return &c2
+}
+
+// WithResponseCallbacks makes a shallow clone of Client, modifies it to use
+// the given callbacks, and returns it.  Each of the callbacks will be invoked
+// on every received response.  A client may be used to issue requests
+// concurrently; any locking needed by callbacks invoked concurrently is the
+// callback's responsibility.
+func (c *Client) WithResponseCallbacks(callbacks ...ResponseCallback) *Client {
+	c2 := *c
+	c2.modifyLock = sync.RWMutex{}
+	c2.responseCallbacks = callbacks
+	return &c2
+}
+
+// withConfiguredTimeout wraps the context with a timeout from the client configuration.
+func (c *Client) withConfiguredTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := c.ClientTimeout()
+
+	if timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+
+	return ctx, func() {}
+}
+
+// RecordState returns a response callback that will record the state returned
+// by Vault in a response header.
+func RecordState(state *string) ResponseCallback {
+	return func(resp *Response) {
+		*state = resp.Header.Get(HeaderIndex)
+	}
+}
+
+// RequireState returns a request callback that will add a request header to
+// specify the state we require of Vault. This state was obtained from a
+// response header seen previous, probably captured with RecordState.
+func RequireState(states ...string) RequestCallback {
+	return func(req *Request) {
+		for _, s := range states {
+			req.Headers.Add(HeaderIndex, s)
+		}
+	}
+}
+
+// compareReplicationStates returns 1 if s1 is newer or identical, -1 if s1 is older, and 0
+// if neither s1 or s2 is strictly greater. An error is returned if s1 or s2
+// are invalid or from different clusters.
+func compareReplicationStates(s1, s2 string) (int, error) {
+	w1, err := ParseReplicationState(s1, nil)
+	if err != nil {
+		return 0, err
+	}
+	w2, err := ParseReplicationState(s2, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	if w1.ClusterID != w2.ClusterID {
+		return 0, fmt.Errorf("can't compare replication states with different ClusterIDs")
+	}
+
+	switch {
+	case w1.LocalIndex >= w2.LocalIndex && w1.ReplicatedIndex >= w2.ReplicatedIndex:
+		return 1, nil
+	// We've already handled the case where both are equal above, so really we're
+	// asking here if one or both are lesser.
+	case w1.LocalIndex <= w2.LocalIndex && w1.ReplicatedIndex <= w2.ReplicatedIndex:
+		return -1, nil
+	}
+
+	return 0, nil
+}
+
+// MergeReplicationStates returns a merged array of replication states by iterating
+// through all states in `old`. An iterated state is merged to the result before `new`
+// based on the result of compareReplicationStates
+func MergeReplicationStates(old []string, new string) []string {
+	if len(old) == 0 || len(old) > 2 {
+		return []string{new}
+	}
+
+	var ret []string
+	for _, o := range old {
+		c, err := compareReplicationStates(o, new)
+		if err != nil {
+			return []string{new}
+		}
+		switch c {
+		case 1:
+			ret = append(ret, o)
+		case -1:
+			ret = append(ret, new)
+		case 0:
+			ret = append(ret, o, new)
+		}
+	}
+	return strutil.RemoveDuplicates(ret, false)
+}
+
+type WALState struct {
+	ClusterID       string
+	LocalIndex      uint64
+	ReplicatedIndex uint64
+}
+
+func ParseReplicationState(raw string, hmacKey []byte) (*WALState, error) {
+	cooked, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, err
+	}
+	s := string(cooked)
+
+	lastIndex := strings.LastIndexByte(s, ':')
+	if lastIndex == -1 {
+		return nil, fmt.Errorf("invalid full state header format")
+	}
+	state, stateHMACRaw := s[:lastIndex], s[lastIndex+1:]
+	stateHMAC, err := hex.DecodeString(stateHMACRaw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid state header HMAC: %v, %w", stateHMACRaw, err)
+	}
+
+	if len(hmacKey) != 0 {
+		hm := hmac.New(sha256.New, hmacKey)
+		hm.Write([]byte(state))
+		if !hmac.Equal(hm.Sum(nil), stateHMAC) {
+			return nil, fmt.Errorf("invalid state header HMAC (mismatch)")
+		}
+	}
+
+	pieces := strings.Split(state, ":")
+	if len(pieces) != 4 || pieces[0] != "v1" || pieces[1] == "" {
+		return nil, fmt.Errorf("invalid state header format")
+	}
+	localIndex, err := strconv.ParseUint(pieces[2], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid local index in state header: %w", err)
+	}
+	replicatedIndex, err := strconv.ParseUint(pieces[3], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid replicated index in state header: %w", err)
+	}
+
+	return &WALState{
+		ClusterID:       pieces[1],
+		LocalIndex:      localIndex,
+		ReplicatedIndex: replicatedIndex,
+	}, nil
+}
+
+// ForwardInconsistent returns a request callback that will add a request
+// header which says: if the state required isn't present on the node receiving
+// this request, forward it to the active node.  This should be used in
+// conjunction with RequireState.
+func ForwardInconsistent() RequestCallback {
+	return func(req *Request) {
+		req.Headers.Set(HeaderInconsistent, "forward-active-node")
+	}
+}
+
+// ForwardAlways returns a request callback which adds a header telling any
+// performance standbys handling the request to forward it to the active node.
+// This feature must be enabled in Vault's configuration.
+func ForwardAlways() RequestCallback {
+	return func(req *Request) {
+		req.Headers.Set(HeaderForward, "active-node")
+	}
+}
+
+// DefaultRetryPolicy is the default retry policy used by new Client objects.
+// It is the same as retryablehttp.DefaultRetryPolicy except that it also retries
+// 412 requests, which are returned by Vault when a X-Vault-Index header isn't
+// satisfied.
+func DefaultRetryPolicy(ctx context.Context, resp *http.Response, err error) (bool, error) {
+	retry, err := retryablehttp.DefaultRetryPolicy(ctx, resp, err)
+	if err != nil || retry {
+		return retry, err
+	}
+	if resp != nil && resp.StatusCode == 412 {
+		return true, nil
+	}
+	return false, nil
+}
+
+// replicationStateStore is used to track cluster replication states
+// in order to ensure proper read-after-write semantics for a Client.
+type replicationStateStore struct {
+	m     sync.RWMutex
+	store []string
+}
+
+// recordState updates the store's replication states with the merger of all
+// states.
+func (w *replicationStateStore) recordState(resp *Response) {
+	w.m.Lock()
+	defer w.m.Unlock()
+	newState := resp.Header.Get(HeaderIndex)
+	if newState != "" {
+		w.store = MergeReplicationStates(w.store, newState)
+	}
+}
+
+// requireState updates the Request with the store's current replication states.
+func (w *replicationStateStore) requireState(req *Request) {
+	w.m.RLock()
+	defer w.m.RUnlock()
+	for _, s := range w.store {
+		req.Headers.Add(HeaderIndex, s)
+	}
+}
+
+// states currently stored.
+func (w *replicationStateStore) states() []string {
+	w.m.RLock()
+	defer w.m.RUnlock()
+	c := make([]string, len(w.store))
+	copy(c, w.store)
+	return c
+}
+
+// validateToken will check for non-printable characters to prevent a call that will fail at the api
+func validateToken(t string) error {
+	idx := strings.IndexFunc(t, func(c rune) bool {
+		return !unicode.IsPrint(c)
+	})
+	if idx != -1 {
+		return fmt.Errorf("configured Vault token contains non-printable characters and cannot be used")
+	}
+	return nil
+}
+
+```
+
+#### hcl_dup_attr_deprecation.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/hashicorp/hcl"
+	"github.com/hashicorp/hcl/hcl/ast"
+	hclParser "github.com/hashicorp/hcl/hcl/parser"
+)
+
+// allowHclDuplicatesEnvVar is an environment variable that allows Vault to revert back to accepting HCL files with
+// duplicate attributes. It's temporary until we finish the deprecation process, at which point this will be removed
+const allowHclDuplicatesEnvVar = "VAULT_ALLOW_PENDING_REMOVAL_DUPLICATE_HCL_ATTRIBUTES"
+
+// parseAndCheckForDuplicateHclAttributes parses the input JSON/HCL file and if it is HCL it also checks
+// for duplicate keys in the HCL file, allowing callers to handle the issue accordingly. It now only accepts duplicate
+// keys if the environment variable VAULT_ALLOW_PENDING_REMOVAL_DUPLICATE_HCL_ATTRIBUTES is set to true. In a future
+// release we'll remove this function entirely and there will be no way to parse HCL files with duplicate keys.
+// TODO (HCL_DUP_KEYS_DEPRECATION): remove once not used anymore
+func parseAndCheckForDuplicateHclAttributes(input string) (res *ast.File, duplicate bool, err error) {
+	res, err = hcl.Parse(input)
+	if err != nil && strings.Contains(err.Error(), "Each argument can only be defined once") {
+		allowHclDuplicatesRaw := os.Getenv(allowHclDuplicatesEnvVar)
+		if allowHclDuplicatesRaw == "" {
+			// default is to not allow duplicates
+			return nil, false, err
+		}
+		allowHclDuplicates, envParseErr := strconv.ParseBool(allowHclDuplicatesRaw)
+		if envParseErr != nil {
+			return nil, false, fmt.Errorf("error parsing %q environment variable: %w", allowHclDuplicatesEnvVar, err)
+		}
+		if !allowHclDuplicates {
+			return nil, false, err
+		}
+
+		// if allowed by the environment variable, parse again without failing on duplicate attributes
+		duplicate = true
+		res, err = hclParser.ParseDontErrorOnDuplicateKeys([]byte(input))
+	}
+	return res, duplicate, err
+}
+
+```
+
+#### help.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+)
+
+// Help wraps HelpWithContext using context.Background.
+func (c *Client) Help(path string) (*Help, error) {
+	return c.HelpWithContext(context.Background(), path)
+}
+
+// HelpWithContext reads the help information for the given path.
+func (c *Client) HelpWithContext(ctx context.Context, path string) (*Help, error) {
+	ctx, cancelFunc := c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.NewRequest(http.MethodGet, fmt.Sprintf("/v1/%s", path))
+	r.Params.Add("help", "1")
+
+	resp, err := c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result Help
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+type Help struct {
+	Help    string                 `json:"help"`
+	SeeAlso []string               `json:"see_also"`
+	OpenAPI map[string]interface{} `json:"openapi"`
+}
+
+```
+
+#### kv.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import "errors"
+
+// ErrSecretNotFound is returned by KVv1 and KVv2 wrappers to indicate that the
+// secret is missing at the given location.
+var ErrSecretNotFound = errors.New("secret not found")
+
+// A KVSecret is a key-value secret returned by Vault's KV secrets engine,
+// and is the most basic type of secret stored in Vault.
+//
+// Data contains the key-value pairs of the secret itself,
+// while Metadata contains a subset of metadata describing
+// this particular version of the secret.
+// The Metadata field for a KV v1 secret will always be nil, as
+// metadata is only supported starting in KV v2.
+//
+// The Raw field can be inspected for information about the lease,
+// and passed to a LifetimeWatcher object for periodic renewal.
+type KVSecret struct {
+	Data            map[string]interface{}
+	VersionMetadata *KVVersionMetadata
+	CustomMetadata  map[string]interface{}
+	Raw             *Secret
+}
+
+// KVv1 is used to return a client for reads and writes against
+// a KV v1 secrets engine in Vault.
+//
+// The mount path is the location where the target KV secrets engine resides
+// in Vault.
+//
+// While v1 is not necessarily deprecated, Vault development servers tend to
+// use v2 as the version of the KV secrets engine, as this is what's mounted
+// by default when a server is started in -dev mode. See the kvv2 struct.
+//
+// Learn more about the KV secrets engine here:
+// https://developer.hashicorp.com/vault/docs/secrets/kv
+func (c *Client) KVv1(mountPath string) *KVv1 {
+	return &KVv1{c: c, mountPath: mountPath}
+}
+
+// KVv2 is used to return a client for reads and writes against
+// a KV v2 secrets engine in Vault.
+//
+// The mount path is the location where the target KV secrets engine resides
+// in Vault.
+//
+// Vault development servers tend to have "secret" as the mount path,
+// as these are the default settings when a server is started in -dev mode.
+//
+// Learn more about the KV secrets engine here:
+// https://developer.hashicorp.com/vault/docs/secrets/kv
+func (c *Client) KVv2(mountPath string) *KVv2 {
+	return &KVv2{c: c, mountPath: mountPath}
+}
+
+```
+
+#### kv_v1.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"fmt"
+)
+
+type KVv1 struct {
+	c         *Client
+	mountPath string
+}
+
+// Get returns a secret from the KV v1 secrets engine.
+func (kv *KVv1) Get(ctx context.Context, secretPath string) (*KVSecret, error) {
+	pathToRead := fmt.Sprintf("%s/%s", kv.mountPath, secretPath)
+
+	secret, err := kv.c.Logical().ReadWithContext(ctx, pathToRead)
+	if err != nil {
+		return nil, fmt.Errorf("error encountered while reading secret at %s: %w", pathToRead, err)
+	}
+	if secret == nil {
+		return nil, fmt.Errorf("%w: at %s", ErrSecretNotFound, pathToRead)
+	}
+
+	return &KVSecret{
+		Data:            secret.Data,
+		VersionMetadata: nil,
+		Raw:             secret,
+	}, nil
+}
+
+// Put inserts a key-value secret (e.g. {"password": "Hashi123"}) into the
+// KV v1 secrets engine.
+//
+// If the secret already exists, it will be overwritten.
+func (kv *KVv1) Put(ctx context.Context, secretPath string, data map[string]interface{}) error {
+	pathToWriteTo := fmt.Sprintf("%s/%s", kv.mountPath, secretPath)
+
+	_, err := kv.c.Logical().WriteWithContext(ctx, pathToWriteTo, data)
+	if err != nil {
+		return fmt.Errorf("error writing secret to %s: %w", pathToWriteTo, err)
+	}
+
+	return nil
+}
+
+// Delete deletes a secret from the KV v1 secrets engine.
+func (kv *KVv1) Delete(ctx context.Context, secretPath string) error {
+	pathToDelete := fmt.Sprintf("%s/%s", kv.mountPath, secretPath)
+
+	_, err := kv.c.Logical().DeleteWithContext(ctx, pathToDelete)
+	if err != nil {
+		return fmt.Errorf("error deleting secret at %s: %w", pathToDelete, err)
+	}
+
+	return nil
+}
+
+```
+
+#### kv_v2.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"sort"
+	"strconv"
+	"time"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+type KVv2 struct {
+	c         *Client
+	mountPath string
+}
+
+// KVMetadata is the full metadata for a given KV v2 secret.
+type KVMetadata struct {
+	CASRequired        bool                   `mapstructure:"cas_required"`
+	CreatedTime        time.Time              `mapstructure:"created_time"`
+	CurrentVersion     int                    `mapstructure:"current_version"`
+	CustomMetadata     map[string]interface{} `mapstructure:"custom_metadata"`
+	DeleteVersionAfter time.Duration          `mapstructure:"delete_version_after"`
+	MaxVersions        int                    `mapstructure:"max_versions"`
+	OldestVersion      int                    `mapstructure:"oldest_version"`
+	UpdatedTime        time.Time              `mapstructure:"updated_time"`
+	// Keys are stringified ints, e.g. "3". To get a sorted slice of version metadata, use GetVersionsAsList.
+	Versions map[string]KVVersionMetadata `mapstructure:"versions"`
+	Raw      *Secret
+}
+
+// KVMetadataPutInput is the subset of metadata that can be replaced for a
+// KV v2 secret using the PutMetadata method.
+//
+// All fields should be explicitly provided, as any fields left unset in the
+// struct will be reset to their zero value.
+type KVMetadataPutInput struct {
+	CASRequired        bool
+	CustomMetadata     map[string]interface{}
+	DeleteVersionAfter time.Duration
+	MaxVersions        int
+}
+
+// KVMetadataPatchInput is the subset of metadata that can be manually modified for
+// a KV v2 secret using the PatchMetadata method.
+//
+// The struct's fields are all pointers. A pointer to a field's zero
+// value (e.g. false for *bool) implies that field should be reset to its
+// zero value after update, whereas a field left as a nil pointer
+// (e.g. nil for *bool) implies the field should remain unchanged.
+//
+// Since maps are already pointers, use an empty map to remove all
+// custom metadata.
+type KVMetadataPatchInput struct {
+	CASRequired        *bool
+	CustomMetadata     map[string]interface{}
+	DeleteVersionAfter *time.Duration
+	MaxVersions        *int
+}
+
+// KVVersionMetadata is a subset of metadata for a given version of a KV v2 secret.
+type KVVersionMetadata struct {
+	Version      int       `mapstructure:"version"`
+	CreatedTime  time.Time `mapstructure:"created_time"`
+	DeletionTime time.Time `mapstructure:"deletion_time"`
+	Destroyed    bool      `mapstructure:"destroyed"`
+}
+
+// Currently supported options: WithOption, WithCheckAndSet, WithMethod
+type KVOption func() (key string, value interface{})
+
+const (
+	KVOptionCheckAndSet    = "cas"
+	KVOptionMethod         = "method"
+	KVMergeMethodPatch     = "patch"
+	KVMergeMethodReadWrite = "rw"
+)
+
+// WithOption can optionally be passed to provide generic options for a
+// KV request. Valid keys and values depend on the type of request.
+func WithOption(key string, value interface{}) KVOption {
+	return func() (string, interface{}) {
+		return key, value
+	}
+}
+
+// WithCheckAndSet can optionally be passed to perform a check-and-set
+// operation on a KV request. If not set, the write will be allowed.
+// If cas is set to 0, a write will only be allowed if the key doesn't exist.
+// If set to non-zero, the write will only be allowed if the key’s current
+// version matches the version specified in the cas parameter.
+func WithCheckAndSet(cas int) KVOption {
+	return WithOption(KVOptionCheckAndSet, cas)
+}
+
+// WithMergeMethod can optionally be passed to dictate which type of
+// patch to perform in a Patch request. If set to "patch", then an HTTP PATCH
+// request will be issued. If set to "rw", then a read will be performed,
+// then a local update, followed by a remote update. Defaults to "patch".
+func WithMergeMethod(method string) KVOption {
+	return WithOption(KVOptionMethod, method)
+}
+
+// Get returns the latest version of a secret from the KV v2 secrets engine.
+//
+// If the latest version has been deleted, an error will not be thrown, but
+// the Data field on the returned secret will be nil, and the Metadata field
+// will contain the deletion time.
+func (kv *KVv2) Get(ctx context.Context, secretPath string) (*KVSecret, error) {
+	pathToRead := fmt.Sprintf("%s/data/%s", kv.mountPath, secretPath)
+
+	secret, err := kv.c.Logical().ReadWithContext(ctx, pathToRead)
+	if err != nil {
+		return nil, fmt.Errorf("error encountered while reading secret at %s: %w", pathToRead, err)
+	}
+	if secret == nil {
+		return nil, fmt.Errorf("%w: at %s", ErrSecretNotFound, pathToRead)
+	}
+
+	kvSecret, err := extractDataAndVersionMetadata(secret)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing secret at %s: %w", pathToRead, err)
+	}
+
+	kvSecret.CustomMetadata = extractCustomMetadata(secret)
+
+	return kvSecret, nil
+}
+
+// GetVersion returns the data and metadata for a specific version of the
+// given secret.
+//
+// If that version has been deleted, the Data field on the
+// returned secret will be nil, and the Metadata field will contain the deletion time.
+//
+// GetVersionsAsList can provide a list of available versions sorted by
+// version number, while the response from GetMetadata contains them as a map.
+func (kv *KVv2) GetVersion(ctx context.Context, secretPath string, version int) (*KVSecret, error) {
+	pathToRead := fmt.Sprintf("%s/data/%s", kv.mountPath, secretPath)
+
+	queryParams := map[string][]string{"version": {strconv.Itoa(version)}}
+	secret, err := kv.c.Logical().ReadWithDataWithContext(ctx, pathToRead, queryParams)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil {
+		return nil, fmt.Errorf("%w: for version %d at %s", ErrSecretNotFound, version, pathToRead)
+	}
+
+	kvSecret, err := extractDataAndVersionMetadata(secret)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing secret at %s: %w", pathToRead, err)
+	}
+
+	kvSecret.CustomMetadata = extractCustomMetadata(secret)
+
+	return kvSecret, nil
+}
+
+// GetVersionsAsList returns a subset of the metadata for each version of the secret, sorted by version number.
+func (kv *KVv2) GetVersionsAsList(ctx context.Context, secretPath string) ([]KVVersionMetadata, error) {
+	pathToRead := fmt.Sprintf("%s/metadata/%s", kv.mountPath, secretPath)
+
+	secret, err := kv.c.Logical().ReadWithContext(ctx, pathToRead)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, fmt.Errorf("%w: no metadata at %s", ErrSecretNotFound, pathToRead)
+	}
+
+	md, err := extractFullMetadata(secret)
+	if err != nil {
+		return nil, fmt.Errorf("unable to extract metadata from secret to determine versions: %w", err)
+	}
+
+	versionsList := make([]KVVersionMetadata, 0, len(md.Versions))
+	for _, versionMetadata := range md.Versions {
+		versionsList = append(versionsList, versionMetadata)
+	}
+
+	sort.Slice(versionsList, func(i, j int) bool { return versionsList[i].Version < versionsList[j].Version })
+	return versionsList, nil
+}
+
+// GetMetadata returns the full metadata for a given secret, including a map of
+// its existing versions and their respective creation/deletion times, etc.
+func (kv *KVv2) GetMetadata(ctx context.Context, secretPath string) (*KVMetadata, error) {
+	pathToRead := fmt.Sprintf("%s/metadata/%s", kv.mountPath, secretPath)
+
+	secret, err := kv.c.Logical().ReadWithContext(ctx, pathToRead)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, fmt.Errorf("%w: no metadata at %s", ErrSecretNotFound, pathToRead)
+	}
+
+	md, err := extractFullMetadata(secret)
+	if err != nil {
+		return nil, fmt.Errorf("unable to extract metadata from secret: %w", err)
+	}
+
+	return md, nil
+}
+
+// Put inserts a key-value secret (e.g. {"password": "Hashi123"})
+// into the KV v2 secrets engine.
+//
+// If the secret already exists, a new version will be created
+// and the previous version can be accessed with the GetVersion method.
+// GetMetadata can provide a list of available versions.
+func (kv *KVv2) Put(ctx context.Context, secretPath string, data map[string]interface{}, opts ...KVOption) (*KVSecret, error) {
+	pathToWriteTo := fmt.Sprintf("%s/data/%s", kv.mountPath, secretPath)
+
+	wrappedData := map[string]interface{}{
+		"data": data,
+	}
+
+	// Add options such as check-and-set, etc.
+	// We leave this as an optional arg so that most users
+	// can just pass plain key-value secret data without
+	// having to remember to put the extra layer "data" in there.
+	options := make(map[string]interface{})
+	for _, opt := range opts {
+		k, v := opt()
+		options[k] = v
+	}
+	if len(opts) > 0 {
+		wrappedData["options"] = options
+	}
+
+	secret, err := kv.c.Logical().WriteWithContext(ctx, pathToWriteTo, wrappedData)
+	if err != nil {
+		return nil, fmt.Errorf("error writing secret to %s: %w", pathToWriteTo, err)
+	}
+	if secret == nil {
+		return nil, fmt.Errorf("%w: after writing to %s", ErrSecretNotFound, pathToWriteTo)
+	}
+
+	metadata, err := extractVersionMetadata(secret)
+	if err != nil {
+		return nil, fmt.Errorf("secret was written successfully, but unable to view version metadata from response: %w", err)
+	}
+
+	kvSecret := &KVSecret{
+		Data:            nil, // secret.Data in this case is the metadata
+		VersionMetadata: metadata,
+		Raw:             secret,
+	}
+
+	kvSecret.CustomMetadata = extractCustomMetadata(secret)
+
+	return kvSecret, nil
+}
+
+// PutMetadata can be used to fully replace a subset of metadata fields for a
+// given KV v2 secret. All fields will replace the corresponding values on the Vault server.
+// Any fields left as nil will reset the field on the Vault server back to its zero value.
+//
+// To only partially replace the values of these metadata fields, use PatchMetadata.
+//
+// This method can also be used to create a new secret with just metadata and no secret data yet.
+func (kv *KVv2) PutMetadata(ctx context.Context, secretPath string, metadata KVMetadataPutInput) error {
+	pathToWriteTo := fmt.Sprintf("%s/metadata/%s", kv.mountPath, secretPath)
+
+	const (
+		casRequiredKey        = "cas_required"
+		deleteVersionAfterKey = "delete_version_after"
+		maxVersionsKey        = "max_versions"
+		customMetadataKey     = "custom_metadata"
+	)
+
+	// convert values to a map we can pass to Logical
+	metadataMap := make(map[string]interface{})
+	metadataMap[maxVersionsKey] = metadata.MaxVersions
+	metadataMap[deleteVersionAfterKey] = metadata.DeleteVersionAfter.String()
+	metadataMap[casRequiredKey] = metadata.CASRequired
+	metadataMap[customMetadataKey] = metadata.CustomMetadata
+
+	_, err := kv.c.Logical().WriteWithContext(ctx, pathToWriteTo, metadataMap)
+	if err != nil {
+		return fmt.Errorf("error writing secret metadata to %s: %w", pathToWriteTo, err)
+	}
+
+	return nil
+}
+
+// Patch additively updates the most recent version of a key-value secret,
+// differentiating it from Put which will fully overwrite the previous data.
+// Only the key-value pairs that are new or changing need to be provided.
+//
+// The WithMethod KVOption function can optionally be passed to dictate which
+// kind of patch to perform, as older Vault server versions (pre-1.9.0) may
+// only be able to use the old "rw" (read-then-write) style of partial update,
+// whereas newer Vault servers can use the default value of "patch" if the
+// client token's policy has the "patch" capability.
+func (kv *KVv2) Patch(ctx context.Context, secretPath string, newData map[string]interface{}, opts ...KVOption) (*KVSecret, error) {
+	// determine patch method
+	var patchMethod string
+	var ok bool
+	for _, opt := range opts {
+		k, v := opt()
+		if k == "method" {
+			patchMethod, ok = v.(string)
+			if !ok {
+				return nil, fmt.Errorf("unsupported type provided for option value; value for patch method should be string \"rw\" or \"patch\"")
+			}
+		}
+	}
+
+	// Determine which kind of patch to use,
+	// the newer HTTP Patch style or the older read-then-write style
+	var kvs *KVSecret
+	var err error
+	switch patchMethod {
+	case "rw":
+		kvs, err = readThenWrite(ctx, kv.c, kv.mountPath, secretPath, newData)
+	case "patch":
+		kvs, err = mergePatch(ctx, kv.c, kv.mountPath, secretPath, newData, opts...)
+	case "":
+		kvs, err = mergePatch(ctx, kv.c, kv.mountPath, secretPath, newData, opts...)
+	default:
+		return nil, fmt.Errorf("unsupported patch method provided; value for patch method should be string \"rw\" or \"patch\"")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("unable to perform patch: %w", err)
+	}
+	if kvs == nil {
+		return nil, fmt.Errorf("no secret was written to %s", secretPath)
+	}
+
+	return kvs, nil
+}
+
+// PatchMetadata can be used to replace just a subset of a secret's
+// metadata fields at a time, as opposed to PutMetadata which is used to
+// completely replace all fields on the previous metadata.
+func (kv *KVv2) PatchMetadata(ctx context.Context, secretPath string, metadata KVMetadataPatchInput) error {
+	pathToWriteTo := fmt.Sprintf("%s/metadata/%s", kv.mountPath, secretPath)
+
+	md, err := toMetadataMap(metadata)
+	if err != nil {
+		return fmt.Errorf("unable to create map for JSON merge patch request: %w", err)
+	}
+
+	_, err = kv.c.Logical().JSONMergePatch(ctx, pathToWriteTo, md)
+	if err != nil {
+		return fmt.Errorf("error patching metadata at %s: %w", pathToWriteTo, err)
+	}
+
+	return nil
+}
+
+// Delete deletes the most recent version of a secret from the KV v2
+// secrets engine. To delete an older version, use DeleteVersions.
+func (kv *KVv2) Delete(ctx context.Context, secretPath string) error {
+	pathToDelete := fmt.Sprintf("%s/data/%s", kv.mountPath, secretPath)
+
+	_, err := kv.c.Logical().DeleteWithContext(ctx, pathToDelete)
+	if err != nil {
+		return fmt.Errorf("error deleting secret at %s: %w", pathToDelete, err)
+	}
+
+	return nil
+}
+
+// DeleteVersions deletes the specified versions of a secret from the KV v2
+// secrets engine. To delete the latest version of a secret, just use Delete.
+func (kv *KVv2) DeleteVersions(ctx context.Context, secretPath string, versions []int) error {
+	// verb and path are different when trying to delete past versions
+	pathToDelete := fmt.Sprintf("%s/delete/%s", kv.mountPath, secretPath)
+
+	if len(versions) == 0 {
+		return nil
+	}
+
+	var versionsToDelete []string
+	for _, version := range versions {
+		versionsToDelete = append(versionsToDelete, strconv.Itoa(version))
+	}
+	versionsMap := map[string]interface{}{
+		"versions": versionsToDelete,
+	}
+	_, err := kv.c.Logical().WriteWithContext(ctx, pathToDelete, versionsMap)
+	if err != nil {
+		return fmt.Errorf("error deleting secret at %s: %w", pathToDelete, err)
+	}
+
+	return nil
+}
+
+// DeleteMetadata deletes all versions and metadata of the secret at the
+// given path.
+func (kv *KVv2) DeleteMetadata(ctx context.Context, secretPath string) error {
+	pathToDelete := fmt.Sprintf("%s/metadata/%s", kv.mountPath, secretPath)
+
+	_, err := kv.c.Logical().DeleteWithContext(ctx, pathToDelete)
+	if err != nil {
+		return fmt.Errorf("error deleting secret metadata at %s: %w", pathToDelete, err)
+	}
+
+	return nil
+}
+
+// Undelete undeletes the given versions of a secret, restoring the data
+// so that it can be fetched again with Get requests.
+//
+// A list of existing versions can be retrieved using the GetVersionsAsList method.
+func (kv *KVv2) Undelete(ctx context.Context, secretPath string, versions []int) error {
+	pathToUndelete := fmt.Sprintf("%s/undelete/%s", kv.mountPath, secretPath)
+
+	data := map[string]interface{}{
+		"versions": versions,
+	}
+
+	_, err := kv.c.Logical().WriteWithContext(ctx, pathToUndelete, data)
+	if err != nil {
+		return fmt.Errorf("error undeleting secret metadata at %s: %w", pathToUndelete, err)
+	}
+
+	return nil
+}
+
+// Destroy permanently removes the specified secret versions' data
+// from the Vault server. If no secret exists at the given path, no
+// action will be taken.
+//
+// A list of existing versions can be retrieved using the GetVersionsAsList method.
+func (kv *KVv2) Destroy(ctx context.Context, secretPath string, versions []int) error {
+	pathToDestroy := fmt.Sprintf("%s/destroy/%s", kv.mountPath, secretPath)
+
+	data := map[string]interface{}{
+		"versions": versions,
+	}
+
+	_, err := kv.c.Logical().WriteWithContext(ctx, pathToDestroy, data)
+	if err != nil {
+		return fmt.Errorf("error destroying secret metadata at %s: %w", pathToDestroy, err)
+	}
+
+	return nil
+}
+
+// Rollback can be used to roll a secret back to a previous
+// non-deleted/non-destroyed version. That previous version becomes the
+// next/newest version for the path.
+func (kv *KVv2) Rollback(ctx context.Context, secretPath string, toVersion int) (*KVSecret, error) {
+	// First, do a read to get the current version for check-and-set
+	latest, err := kv.Get(ctx, secretPath)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get latest version of secret: %w", err)
+	}
+
+	// Make sure a value already exists
+	if latest == nil {
+		return nil, fmt.Errorf("no secret was found: %w", err)
+	}
+
+	// Verify metadata found
+	if latest.VersionMetadata == nil {
+		return nil, fmt.Errorf("no metadata found; rollback can only be used on existing data")
+	}
+
+	// Now run it again and read the version we want to roll back to
+	rollbackVersion, err := kv.GetVersion(ctx, secretPath, toVersion)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get previous version %d of secret: %w", toVersion, err)
+	}
+
+	err = validateRollbackVersion(rollbackVersion)
+	if err != nil {
+		return nil, fmt.Errorf("invalid rollback version %d: %w", toVersion, err)
+	}
+
+	casVersion := latest.VersionMetadata.Version
+	kvs, err := kv.Put(ctx, secretPath, rollbackVersion.Data, WithCheckAndSet(casVersion))
+	if err != nil {
+		return nil, fmt.Errorf("unable to roll back to previous secret version: %w", err)
+	}
+
+	return kvs, nil
+}
+
+func extractCustomMetadata(secret *Secret) map[string]interface{} {
+	// Logical Writes return the metadata directly, Reads return it nested inside the "metadata" key
+	customMetadataInterface, ok := secret.Data["custom_metadata"]
+	if !ok {
+		metadataInterface := secret.Data["metadata"]
+		metadataMap, ok := metadataInterface.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		customMetadataInterface = metadataMap["custom_metadata"]
+	}
+
+	cm, ok := customMetadataInterface.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	return cm
+}
+
+func extractDataAndVersionMetadata(secret *Secret) (*KVSecret, error) {
+	// A nil map is a valid value for data: secret.Data will be nil when this
+	// version of the secret has been deleted, but the metadata is still
+	// available.
+	var data map[string]interface{}
+	if secret.Data != nil {
+		dataInterface, ok := secret.Data["data"]
+		if !ok {
+			return nil, fmt.Errorf("missing expected 'data' element")
+		}
+
+		if dataInterface != nil {
+			data, ok = dataInterface.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("unexpected type for 'data' element: %T (%#v)", data, data)
+			}
+		}
+	}
+
+	metadata, err := extractVersionMetadata(secret)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get version metadata: %w", err)
+	}
+
+	return &KVSecret{
+		Data:            data,
+		VersionMetadata: metadata,
+		Raw:             secret,
+	}, nil
+}
+
+func extractVersionMetadata(secret *Secret) (*KVVersionMetadata, error) {
+	var metadata *KVVersionMetadata
+
+	if secret.Data == nil {
+		return nil, nil
+	}
+
+	// Logical Writes return the metadata directly, Reads return it nested inside the "metadata" key
+	var metadataMap map[string]interface{}
+	metadataInterface, ok := secret.Data["metadata"]
+	if ok {
+		metadataMap, ok = metadataInterface.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("unexpected type for 'metadata' element: %T (%#v)", metadataInterface, metadataInterface)
+		}
+	} else {
+		metadataMap = secret.Data
+	}
+
+	// deletion_time usually comes in as an empty string which can't be
+	// processed as time.RFC3339, so we reset it to a convertible value
+	if metadataMap["deletion_time"] == "" {
+		metadataMap["deletion_time"] = time.Time{}
+	}
+
+	d, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		DecodeHook: mapstructure.StringToTimeHookFunc(time.RFC3339),
+		Result:     &metadata,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error setting up decoder for API response: %w", err)
+	}
+
+	err = d.Decode(metadataMap)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding metadata from API response into VersionMetadata: %w", err)
+	}
+
+	return metadata, nil
+}
+
+func extractFullMetadata(secret *Secret) (*KVMetadata, error) {
+	var metadata *KVMetadata
+
+	if secret.Data == nil {
+		return nil, nil
+	}
+
+	if versions, ok := secret.Data["versions"]; ok {
+		versionsMap := versions.(map[string]interface{})
+		if len(versionsMap) > 0 {
+			for version, metadata := range versionsMap {
+				metadataMap := metadata.(map[string]interface{})
+				// deletion_time usually comes in as an empty string which can't be
+				// processed as time.RFC3339, so we reset it to a convertible value
+				if metadataMap["deletion_time"] == "" {
+					metadataMap["deletion_time"] = time.Time{}
+				}
+				versionInt, err := strconv.Atoi(version)
+				if err != nil {
+					return nil, fmt.Errorf("error converting version %s to integer: %w", version, err)
+				}
+				metadataMap["version"] = versionInt
+				versionsMap[version] = metadataMap // save the updated copy of the metadata map
+			}
+		}
+		secret.Data["versions"] = versionsMap // save the updated copy of the versions map
+	}
+
+	d, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeHookFunc(time.RFC3339),
+			mapstructure.StringToTimeDurationHookFunc(),
+		),
+		Result: &metadata,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error setting up decoder for API response: %w", err)
+	}
+
+	err = d.Decode(secret.Data)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding metadata from API response into KVMetadata: %w", err)
+	}
+
+	return metadata, nil
+}
+
+func validateRollbackVersion(rollbackVersion *KVSecret) error {
+	// Make sure a value already exists
+	if rollbackVersion == nil || rollbackVersion.Data == nil {
+		return fmt.Errorf("no secret found")
+	}
+
+	// Verify metadata found
+	if rollbackVersion.VersionMetadata == nil {
+		return fmt.Errorf("no version metadata found; rollback only works on existing data")
+	}
+
+	// Verify it hasn't been deleted
+	if !rollbackVersion.VersionMetadata.DeletionTime.IsZero() {
+		return fmt.Errorf("cannot roll back to a version that has been deleted")
+	}
+
+	if rollbackVersion.VersionMetadata.Destroyed {
+		return fmt.Errorf("cannot roll back to a version that has been destroyed")
+	}
+
+	// Verify old data found
+	if rollbackVersion.Data == nil {
+		return fmt.Errorf("no data found; rollback only works on existing data")
+	}
+
+	return nil
+}
+
+func mergePatch(ctx context.Context, client *Client, mountPath string, secretPath string, newData map[string]interface{}, opts ...KVOption) (*KVSecret, error) {
+	pathToMergePatch := fmt.Sprintf("%s/data/%s", mountPath, secretPath)
+
+	// take any other additional options provided
+	// and pass them along to the patch request
+	wrappedData := map[string]interface{}{
+		"data": newData,
+	}
+	options := make(map[string]interface{})
+	for _, opt := range opts {
+		k, v := opt()
+		options[k] = v
+	}
+	if len(opts) > 0 {
+		wrappedData["options"] = options
+	}
+
+	secret, err := client.Logical().JSONMergePatch(ctx, pathToMergePatch, wrappedData)
+	if err != nil {
+		var re *ResponseError
+
+		if errors.As(err, &re) {
+			switch re.StatusCode {
+			// 403
+			case http.StatusForbidden:
+				return nil, fmt.Errorf("received 403 from Vault server; please ensure that token's policy has \"patch\" capability: %w", err)
+
+			// 404
+			case http.StatusNotFound:
+				return nil, fmt.Errorf("%w: performing merge patch to %s", ErrSecretNotFound, pathToMergePatch)
+
+			// 405
+			case http.StatusMethodNotAllowed:
+				// If it's a 405, that probably means the server is running a pre-1.9
+				// Vault version that doesn't support the HTTP PATCH method.
+				// Fall back to the old way of doing it.
+				return readThenWrite(ctx, client, mountPath, secretPath, newData)
+			}
+		}
+
+		return nil, fmt.Errorf("error performing merge patch to %s: %w", pathToMergePatch, err)
+	}
+
+	metadata, err := extractVersionMetadata(secret)
+	if err != nil {
+		return nil, fmt.Errorf("secret was written successfully, but unable to view version metadata from response: %w", err)
+	}
+
+	kvSecret := &KVSecret{
+		Data:            nil, // secret.Data in this case is the metadata
+		VersionMetadata: metadata,
+		Raw:             secret,
+	}
+
+	kvSecret.CustomMetadata = extractCustomMetadata(secret)
+
+	return kvSecret, nil
+}
+
+func readThenWrite(ctx context.Context, client *Client, mountPath string, secretPath string, newData map[string]interface{}) (*KVSecret, error) {
+	// First, read the secret.
+	existingVersion, err := client.KVv2(mountPath).Get(ctx, secretPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading secret as part of read-then-write patch operation: %w", err)
+	}
+
+	// Make sure the secret already exists
+	if existingVersion == nil || existingVersion.Data == nil {
+		return nil, fmt.Errorf("%w: at %s as part of read-then-write patch operation", ErrSecretNotFound, secretPath)
+	}
+
+	// Verify existing secret has metadata
+	if existingVersion.VersionMetadata == nil {
+		return nil, fmt.Errorf("no metadata found at %s; patch can only be used on existing data", secretPath)
+	}
+
+	// Copy new data over with existing data
+	combinedData := existingVersion.Data
+	for k, v := range newData {
+		combinedData[k] = v
+	}
+
+	updatedSecret, err := client.KVv2(mountPath).Put(ctx, secretPath, combinedData, WithCheckAndSet(existingVersion.VersionMetadata.Version))
+	if err != nil {
+		return nil, fmt.Errorf("error writing secret to %s: %w", secretPath, err)
+	}
+
+	return updatedSecret, nil
+}
+
+func toMetadataMap(patchInput KVMetadataPatchInput) (map[string]interface{}, error) {
+	metadataMap := make(map[string]interface{})
+
+	const (
+		casRequiredKey        = "cas_required"
+		deleteVersionAfterKey = "delete_version_after"
+		maxVersionsKey        = "max_versions"
+		customMetadataKey     = "custom_metadata"
+	)
+
+	// The KVMetadataPatchInput struct is designed to have pointer fields so that
+	// the user can easily express the difference between explicitly setting a
+	// field back to its zero value (e.g. false), as opposed to just having
+	// the field remain unchanged (e.g. nil). This way, they only need to pass
+	// the fields they want to change.
+	if patchInput.MaxVersions != nil {
+		metadataMap[maxVersionsKey] = *(patchInput.MaxVersions)
+	}
+	if patchInput.CASRequired != nil {
+		metadataMap[casRequiredKey] = *(patchInput.CASRequired)
+	}
+	if patchInput.CustomMetadata != nil {
+		if len(patchInput.CustomMetadata) == 0 { // empty non-nil map means delete all the keys
+			metadataMap[customMetadataKey] = nil
+		} else {
+			metadataMap[customMetadataKey] = patchInput.CustomMetadata
+		}
+	}
+	if patchInput.DeleteVersionAfter != nil {
+		metadataMap[deleteVersionAfterKey] = patchInput.DeleteVersionAfter.String()
+	}
+
+	return metadataMap, nil
+}
+
+```
+
+#### lifetime_watcher.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"errors"
+	"math/rand"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
+)
+
+var (
+	ErrLifetimeWatcherMissingInput  = errors.New("missing input")
+	ErrLifetimeWatcherMissingSecret = errors.New("missing secret")
+	ErrLifetimeWatcherNotRenewable  = errors.New("secret is not renewable")
+	ErrLifetimeWatcherNoSecretData  = errors.New("returned empty secret data")
+
+	// Deprecated; kept for compatibility
+	ErrRenewerMissingInput  = errors.New("missing input to renewer")
+	ErrRenewerMissingSecret = errors.New("missing secret to renew")
+	ErrRenewerNotRenewable  = errors.New("secret is not renewable")
+	ErrRenewerNoSecretData  = errors.New("returned empty secret data")
+
+	// DefaultLifetimeWatcherRenewBuffer is the default size of the buffer for renew
+	// messages on the channel.
+	DefaultLifetimeWatcherRenewBuffer = 5
+	// Deprecated: kept for backwards compatibility
+	DefaultRenewerRenewBuffer = 5
+)
+
+//go:generate enumer -type=RenewBehavior -trimprefix=RenewBehavior
+type RenewBehavior uint
+
+const (
+	// RenewBehaviorIgnoreErrors means we will attempt to keep renewing until
+	// we hit the lifetime threshold. It also ignores errors stemming from
+	// passing a non-renewable lease in. In practice, this means you simply
+	// reauthenticate/refetch credentials when the watcher exits. This is the
+	// default.
+	RenewBehaviorIgnoreErrors RenewBehavior = iota
+
+	// RenewBehaviorRenewDisabled turns off renewal attempts entirely. This
+	// allows you to simply watch lifetime and have the watcher return at a
+	// reasonable threshold without actually making Vault calls.
+	RenewBehaviorRenewDisabled
+
+	// RenewBehaviorErrorOnErrors is the "legacy" behavior which always exits
+	// on some kind of error
+	RenewBehaviorErrorOnErrors
+)
+
+// LifetimeWatcher is a process for watching lifetime of a secret.
+//
+//	watcher, err := client.NewLifetimeWatcher(&LifetimeWatcherInput{
+//		Secret: mySecret,
+//	})
+//	go watcher.Start()
+//	defer watcher.Stop()
+//
+//	for {
+//		select {
+//		case err := <-watcher.DoneCh():
+//			if err != nil {
+//				log.Fatal(err)
+//			}
+//
+//			// Renewal is now over
+//		case renewal := <-watcher.RenewCh():
+//			log.Printf("Successfully renewed: %#v", renewal)
+//		}
+//	}
+//
+// `DoneCh` will return if renewal fails, or if the remaining lease duration is
+// under a built-in threshold and either renewing is not extending it or
+// renewing is disabled.  In both cases, the caller should attempt a re-read of
+// the secret. Clients should check the return value of the channel to see if
+// renewal was successful.
+type LifetimeWatcher struct {
+	l sync.Mutex
+
+	client        *Client
+	secret        *Secret
+	grace         time.Duration
+	random        *rand.Rand
+	increment     int
+	doneCh        chan error
+	renewCh       chan *RenewOutput
+	renewBehavior RenewBehavior
+
+	stopped bool
+	stopCh  chan struct{}
+
+	errLifetimeWatcherNotRenewable error
+	errLifetimeWatcherNoSecretData error
+}
+
+// LifetimeWatcherInput is used as input to the renew function.
+type LifetimeWatcherInput struct {
+	// Secret is the secret to renew
+	Secret *Secret
+
+	// DEPRECATED: this does not do anything.
+	Grace time.Duration
+
+	// Rand is the randomizer to use for underlying randomization. If not
+	// provided, one will be generated and seeded automatically. If provided, it
+	// is assumed to have already been seeded.
+	Rand *rand.Rand
+
+	// RenewBuffer is the size of the buffered channel where renew messages are
+	// dispatched.
+	RenewBuffer int
+
+	// The new TTL, in seconds, that should be set on the lease. The TTL set
+	// here may or may not be honored by the vault server, based on Vault
+	// configuration or any associated max TTL values. If specified, the
+	// minimum of this value and the remaining lease duration will be used
+	// for grace period calculations.
+	Increment int
+
+	// RenewBehavior controls what happens when a renewal errors or the
+	// passed-in secret is not renewable.
+	RenewBehavior RenewBehavior
+}
+
+// RenewOutput is the metadata returned to the client (if it's listening) to
+// renew messages.
+type RenewOutput struct {
+	// RenewedAt is the timestamp when the renewal took place (UTC).
+	RenewedAt time.Time
+
+	// Secret is the underlying renewal data. It's the same struct as all data
+	// that is returned from Vault, but since this is renewal data, it will not
+	// usually include the secret itself.
+	Secret *Secret
+}
+
+// NewLifetimeWatcher creates a new renewer from the given input.
+func (c *Client) NewLifetimeWatcher(i *LifetimeWatcherInput) (*LifetimeWatcher, error) {
+	if i == nil {
+		return nil, ErrLifetimeWatcherMissingInput
+	}
+
+	secret := i.Secret
+	if secret == nil {
+		return nil, ErrLifetimeWatcherMissingSecret
+	}
+
+	random := i.Rand
+	if random == nil {
+		// NOTE:
+		// Rather than a cryptographically secure random number generator (RNG),
+		// the default behavior uses the math/rand package. The random number is
+		// used to introduce a slight jitter when calculating the grace period
+		// for a monitored secret monitoring. This is intended to stagger renewal
+		// requests to the Vault server, but in a semi-predictable way, so there
+		// is no need to use a cryptographically secure RNG.
+		random = rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+	}
+
+	renewBuffer := i.RenewBuffer
+	if renewBuffer == 0 {
+		renewBuffer = DefaultLifetimeWatcherRenewBuffer
+	}
+
+	return &LifetimeWatcher{
+		client:        c,
+		secret:        secret,
+		increment:     i.Increment,
+		random:        random,
+		doneCh:        make(chan error, 1),
+		renewCh:       make(chan *RenewOutput, renewBuffer),
+		renewBehavior: i.RenewBehavior,
+
+		stopped: false,
+		stopCh:  make(chan struct{}),
+
+		errLifetimeWatcherNotRenewable: ErrLifetimeWatcherNotRenewable,
+		errLifetimeWatcherNoSecretData: ErrLifetimeWatcherNoSecretData,
+	}, nil
+}
+
+// Deprecated: exists only for backwards compatibility. Calls
+// NewLifetimeWatcher, and sets compatibility flags.
+func (c *Client) NewRenewer(i *LifetimeWatcherInput) (*LifetimeWatcher, error) {
+	if i == nil {
+		return nil, ErrRenewerMissingInput
+	}
+
+	secret := i.Secret
+	if secret == nil {
+		return nil, ErrRenewerMissingSecret
+	}
+
+	renewer, err := c.NewLifetimeWatcher(i)
+	if err != nil {
+		return nil, err
+	}
+
+	renewer.renewBehavior = RenewBehaviorErrorOnErrors
+	renewer.errLifetimeWatcherNotRenewable = ErrRenewerNotRenewable
+	renewer.errLifetimeWatcherNoSecretData = ErrRenewerNoSecretData
+	return renewer, err
+}
+
+// DoneCh returns the channel where the renewer will publish when renewal stops.
+// If there is an error, this will be an error.
+func (r *LifetimeWatcher) DoneCh() <-chan error {
+	return r.doneCh
+}
+
+// RenewCh is a channel that receives a message when a successful renewal takes
+// place and includes metadata about the renewal.
+func (r *LifetimeWatcher) RenewCh() <-chan *RenewOutput {
+	return r.renewCh
+}
+
+// Stop stops the renewer.
+func (r *LifetimeWatcher) Stop() {
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	if !r.stopped {
+		close(r.stopCh)
+		r.stopped = true
+	}
+}
+
+// Start starts a background process for watching the lifetime of this secret.
+// If renewal is enabled, when the secret has auth data, this attempts to renew
+// the auth (token); When the secret has a lease, this attempts to renew the
+// lease.
+func (r *LifetimeWatcher) Start() {
+	r.doneCh <- r.doRenew()
+}
+
+// Renew is for compatibility with the legacy api.Renewer. Calling Renew
+// simply chains to Start.
+func (r *LifetimeWatcher) Renew() {
+	r.Start()
+}
+
+type renewFunc func(string, int) (*Secret, error)
+
+// doRenew is a helper for renewing authentication.
+func (r *LifetimeWatcher) doRenew() error {
+	defaultInitialRetryInterval := 10 * time.Second
+	switch {
+	case r.secret.Auth != nil:
+		return r.doRenewWithOptions(true, !r.secret.Auth.Renewable,
+			r.secret.Auth.LeaseDuration, r.secret.Auth.ClientToken,
+			r.client.Auth().Token().RenewTokenAsSelf, defaultInitialRetryInterval)
+	default:
+		return r.doRenewWithOptions(false, !r.secret.Renewable,
+			r.secret.LeaseDuration, r.secret.LeaseID,
+			r.client.Sys().Renew, defaultInitialRetryInterval)
+	}
+}
+
+func (r *LifetimeWatcher) doRenewWithOptions(tokenMode bool, nonRenewable bool, initLeaseDuration int, credString string,
+	renew renewFunc, initialRetryInterval time.Duration,
+) error {
+	if credString == "" ||
+		(nonRenewable && r.renewBehavior == RenewBehaviorErrorOnErrors) {
+		return r.errLifetimeWatcherNotRenewable
+	}
+
+	initialTime := time.Now()
+	priorDuration := time.Duration(initLeaseDuration) * time.Second
+	r.calculateGrace(priorDuration, time.Duration(r.increment)*time.Second)
+	var errorBackoff backoff.BackOff
+
+	for {
+		// Check if we are stopped.
+		select {
+		case <-r.stopCh:
+			return nil
+		default:
+		}
+
+		var remainingLeaseDuration time.Duration
+		fallbackLeaseDuration := initialTime.Add(priorDuration).Sub(time.Now())
+		var renewal *Secret
+		var err error
+
+		switch {
+		case nonRenewable || r.renewBehavior == RenewBehaviorRenewDisabled:
+			// Can't or won't renew, just keep the same expiration so we exit
+			// when it's re-authentication time
+			remainingLeaseDuration = fallbackLeaseDuration
+
+		default:
+			// Renew the token
+			renewal, err = renew(credString, r.increment)
+			if err != nil && strings.Contains(err.Error(), "permission denied") {
+				// We can't renew since the token doesn't have permission to. Fall back
+				// to the code path for non-renewable tokens.
+				nonRenewable = true
+				continue
+			}
+			if err != nil || renewal == nil || (tokenMode && renewal.Auth == nil) {
+				if r.renewBehavior == RenewBehaviorErrorOnErrors {
+					if err != nil {
+						return err
+					}
+					if renewal == nil || (tokenMode && renewal.Auth == nil) {
+						return r.errLifetimeWatcherNoSecretData
+					}
+				}
+
+				// Calculate remaining duration until initial token lease expires
+				remainingLeaseDuration = initialTime.Add(time.Duration(initLeaseDuration) * time.Second).Sub(time.Now())
+				if errorBackoff == nil {
+					errorBackoff = &backoff.ExponentialBackOff{
+						MaxElapsedTime:      remainingLeaseDuration,
+						RandomizationFactor: backoff.DefaultRandomizationFactor,
+						InitialInterval:     initialRetryInterval,
+						MaxInterval:         5 * time.Minute,
+						Multiplier:          2,
+						Clock:               backoff.SystemClock,
+					}
+					errorBackoff.Reset()
+				}
+				break
+			}
+			errorBackoff = nil
+
+			// Push a message that a renewal took place.
+			select {
+			case r.renewCh <- &RenewOutput{time.Now().UTC(), renewal}:
+			default:
+			}
+
+			// Possibly error if we are not renewable
+			if ((tokenMode && !renewal.Auth.Renewable) || (!tokenMode && !renewal.Renewable)) &&
+				r.renewBehavior == RenewBehaviorErrorOnErrors {
+				return r.errLifetimeWatcherNotRenewable
+			}
+
+			// Reset initial time
+			initialTime = time.Now()
+
+			// Grab the lease duration
+			initLeaseDuration = renewal.LeaseDuration
+			if tokenMode {
+				initLeaseDuration = renewal.Auth.LeaseDuration
+			}
+
+			remainingLeaseDuration = time.Duration(initLeaseDuration) * time.Second
+		}
+
+		var sleepDuration time.Duration
+
+		if errorBackoff == nil {
+			sleepDuration = r.calculateSleepDuration(remainingLeaseDuration, priorDuration)
+		} else {
+			sleepDuration = errorBackoff.NextBackOff()
+			if sleepDuration == backoff.Stop {
+				return err
+			}
+		}
+
+		// remainingLeaseDuration becomes the priorDuration for the next loop
+		priorDuration = remainingLeaseDuration
+
+		// If we are within grace, return now; or, if the amount of time we
+		// would sleep would land us in the grace period. This helps with short
+		// tokens; for example, you don't want a current lease duration of 4
+		// seconds, a grace period of 3 seconds, and end up sleeping for more
+		// than three of those seconds and having a very small budget of time
+		// to renew.
+		if remainingLeaseDuration <= r.grace || remainingLeaseDuration-sleepDuration <= r.grace {
+			return nil
+		}
+
+		timer := time.NewTimer(sleepDuration)
+		select {
+		case <-r.stopCh:
+			timer.Stop()
+			return nil
+		case <-timer.C:
+			continue
+		}
+	}
+}
+
+// calculateSleepDuration calculates the amount of time the LifeTimeWatcher should sleep
+// before re-entering its loop.
+func (r *LifetimeWatcher) calculateSleepDuration(remainingLeaseDuration, priorDuration time.Duration) time.Duration {
+	// We keep evaluating a new grace period so long as the lease is
+	// extending. Once it stops extending, we've hit the max and need to
+	// rely on the grace duration.
+	if remainingLeaseDuration > priorDuration {
+		r.calculateGrace(remainingLeaseDuration, time.Duration(r.increment)*time.Second)
+	}
+
+	// The sleep duration is set to 2/3 of the current lease duration plus
+	// 1/3 of the current grace period, which adds jitter.
+	return time.Duration(float64(remainingLeaseDuration.Nanoseconds())*2/3 + float64(r.grace.Nanoseconds())/3)
+}
+
+// calculateGrace calculates the grace period based on the minimum of the
+// remaining lease duration and the token increment value; it also adds some
+// jitter to not have clients be in sync.
+func (r *LifetimeWatcher) calculateGrace(leaseDuration, increment time.Duration) {
+	minDuration := leaseDuration
+	if minDuration > increment && increment > 0 {
+		minDuration = increment
+	}
+
+	if minDuration <= 0 {
+		r.grace = 0
+		return
+	}
+
+	leaseNanos := float64(minDuration.Nanoseconds())
+	jitterMax := 0.1 * leaseNanos
+
+	// For a given lease duration, we want to allow 80-90% of that to elapse,
+	// so the remaining amount is the grace period
+	r.grace = time.Duration(jitterMax) + time.Duration(uint64(r.random.Int63())%uint64(jitterMax))
+}
+
+type (
+	Renewer      = LifetimeWatcher
+	RenewerInput = LifetimeWatcherInput
+)
+
+```
+
+#### logical.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+
+	"github.com/hashicorp/errwrap"
+)
+
+const (
+	wrappedResponseLocation = "cubbyhole/response"
+)
+
+var (
+	// The default TTL that will be used with `sys/wrapping/wrap`, can be
+	// changed
+	DefaultWrappingTTL = "5m"
+
+	// The default function used if no other function is set. It honors the env
+	// var to set the wrap TTL. The default wrap TTL will apply when when writing
+	// to `sys/wrapping/wrap` when the env var is not set.
+	DefaultWrappingLookupFunc = func(operation, path string) string {
+		if os.Getenv(EnvVaultWrapTTL) != "" {
+			return os.Getenv(EnvVaultWrapTTL)
+		}
+
+		if (operation == http.MethodPut || operation == http.MethodPost) && path == "sys/wrapping/wrap" {
+			return DefaultWrappingTTL
+		}
+
+		return ""
+	}
+)
+
+// Logical is used to perform logical backend operations on Vault.
+type Logical struct {
+	c *Client
+}
+
+// Logical is used to return the client for logical-backend API calls.
+func (c *Client) Logical() *Logical {
+	return &Logical{c: c}
+}
+
+func (c *Logical) Read(path string) (*Secret, error) {
+	return c.ReadWithDataWithContext(context.Background(), path, nil)
+}
+
+func (c *Logical) ReadWithContext(ctx context.Context, path string) (*Secret, error) {
+	return c.ReadWithDataWithContext(ctx, path, nil)
+}
+
+func (c *Logical) ReadWithData(path string, data map[string][]string) (*Secret, error) {
+	return c.ReadWithDataWithContext(context.Background(), path, data)
+}
+
+// ReadFromSnapshot reads the data at the given Vault path from a previously
+// loaded snapshot. The snapshotID parameter is the ID of the loaded snapshot
+func (c *Logical) ReadFromSnapshot(path string, snapshotID string) (*Secret, error) {
+	return c.ReadWithData(path, map[string][]string{"read_snapshot_id": {snapshotID}})
+}
+
+func (c *Logical) ReadWithDataWithContext(ctx context.Context, path string, data map[string][]string) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	resp, err := c.readRawWithDataWithContext(ctx, path, data, nil)
+	return c.ParseRawResponseAndCloseBody(resp, err)
+}
+
+// ReadWithRequest returns a Secret for the given LogicalReadRequest. This is a
+// more flexible version of ReadWithContext, which allows for passing extra
+// headers to the Vault server.
+func (c *Logical) ReadWithRequest(ctx context.Context, req LogicalReadRequest) (*Secret, error) {
+	resp, err := c.readRawWithDataWithContext(ctx, req.Path(), req.Values(), req.Headers())
+	return c.ParseRawResponseAndCloseBody(resp, err)
+}
+
+// ReadRaw attempts to read the value stored at the given Vault path
+// (without '/v1/' prefix) and returns a raw *http.Response.
+//
+// Note: the raw-response functions do not respect the client-configured
+// request timeout; if a timeout is desired, please use ReadRawWithContext
+// instead and set the timeout through context.WithTimeout or context.WithDeadline.
+func (c *Logical) ReadRaw(path string) (*Response, error) {
+	return c.ReadRawWithDataWithContext(context.Background(), path, nil)
+}
+
+// ReadRawWithContext attempts to read the value stored at the give Vault path
+// (without '/v1/' prefix) and returns a raw *http.Response.
+//
+// Note: the raw-response functions do not respect the client-configured
+// request timeout; if a timeout is desired, please set it through
+// context.WithTimeout or context.WithDeadline.
+func (c *Logical) ReadRawWithContext(ctx context.Context, path string) (*Response, error) {
+	return c.ReadRawWithDataWithContext(ctx, path, nil)
+}
+
+// ReadRawWithData attempts to read the value stored at the given Vault
+// path (without '/v1/' prefix) and returns a raw *http.Response. The 'data' map
+// is added as query parameters to the request.
+//
+// Note: the raw-response functions do not respect the client-configured
+// request timeout; if a timeout is desired, please use
+// ReadRawWithDataWithContext instead and set the timeout through
+// context.WithTimeout or context.WithDeadline.
+func (c *Logical) ReadRawWithData(path string, data map[string][]string) (*Response, error) {
+	return c.ReadRawWithDataWithContext(context.Background(), path, data)
+}
+
+func (c *Logical) ReadRawFromSnapshot(path string, snapshotID string) (*Response, error) {
+	return c.ReadRawWithDataWithContext(context.Background(), path, map[string][]string{"read_snapshot_id": {snapshotID}})
+}
+
+// ReadRawWithDataWithContext attempts to read the value stored at the given
+// Vault path (without '/v1/' prefix) and returns a raw *http.Response. The 'data'
+// map is added as query parameters to the request.
+//
+// Note: the raw-response functions do not respect the client-configured
+// request timeout; if a timeout is desired, please set it through
+// context.WithTimeout or context.WithDeadline.
+func (c *Logical) ReadRawWithDataWithContext(ctx context.Context, path string, data map[string][]string) (*Response, error) {
+	return c.readRawWithDataWithContext(ctx, path, data, nil)
+}
+
+func (c *Logical) ParseRawResponseAndCloseBody(resp *Response, err error) (*Secret, error) {
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if resp != nil && resp.StatusCode == 404 {
+		secret, parseErr := ParseSecret(resp.Body)
+		switch parseErr {
+		case nil:
+		case io.EOF:
+			return nil, nil
+		default:
+			return nil, parseErr
+		}
+		if secret != nil && (len(secret.Warnings) > 0 || len(secret.Data) > 0) {
+			return secret, nil
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *Logical) readRawWithDataWithContext(ctx context.Context, path string, values url.Values, extraHeaders http.Header) (*Response, error) {
+	r := c.c.NewRequest(http.MethodGet, "/v1/"+path)
+
+	if err := c.addExtraHeaders(r, extraHeaders); err != nil {
+		return nil, err
+	}
+
+	if values != nil {
+		r.Params = maps.Clone(values)
+	}
+
+	return c.c.RawRequestWithContext(ctx, r)
+}
+
+// ListFromSnapshot lists from the Vault path using a previously loaded
+// snapshot. The snapshotID parameter is the ID of the loaded snapshot
+func (c *Logical) ListFromSnapshot(path string, snapshotID string) (*Secret, error) {
+	r := c.c.NewRequest("LIST", "/v1/"+path)
+	r.Params.Set("read_snapshot_id", snapshotID)
+	return c.list(context.Background(), r)
+}
+
+func (c *Logical) List(path string) (*Secret, error) {
+	return c.ListWithContext(context.Background(), path)
+}
+
+func (c *Logical) ListWithContext(ctx context.Context, path string) (*Secret, error) {
+	return c.list(ctx, c.c.NewRequest("LIST", "/v1/"+path))
+}
+
+func (c *Logical) list(ctx context.Context, r *Request) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	// Set this for broader compatibility, but we use LIST above to be able to
+	// handle the wrapping lookup function
+	r.Method = http.MethodGet
+	r.Params.Set("list", "true")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if resp != nil && resp.StatusCode == 404 {
+		secret, parseErr := ParseSecret(resp.Body)
+		switch parseErr {
+		case nil:
+		case io.EOF:
+			return nil, nil
+		default:
+			return nil, parseErr
+		}
+		if secret != nil && (len(secret.Warnings) > 0 || len(secret.Data) > 0) {
+			return secret, nil
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *Logical) Write(path string, data map[string]interface{}) (*Secret, error) {
+	return c.WriteWithContext(context.Background(), path, data)
+}
+
+func (c *Logical) WriteWithContext(ctx context.Context, path string, data map[string]interface{}) (*Secret, error) {
+	r := c.c.NewRequest(http.MethodPut, "/v1/"+path)
+	if err := r.SetJSONBody(data); err != nil {
+		return nil, err
+	}
+
+	return c.write(ctx, path, r)
+}
+
+func (c *Logical) WriteRaw(path string, data []byte) (*Response, error) {
+	return c.WriteRawWithContext(context.Background(), path, data)
+}
+
+func (c *Logical) WriteRawWithContext(ctx context.Context, path string, data []byte) (*Response, error) {
+	r := c.c.NewRequest(http.MethodPut, "/v1/"+path)
+	r.BodyBytes = data
+
+	return c.writeRaw(ctx, r)
+}
+
+// WriteWithRequest returns a Secret for the given LogicalRequest. This is a
+// more flexible version of WriteWithContext, which allows for passing extra
+// headers to the Vault server.
+func (c *Logical) WriteWithRequest(ctx context.Context, req LogicalWriteRequest) (*Secret, error) {
+	r := c.c.NewRequest(http.MethodPut, "/v1/"+req.Path())
+	if err := c.addExtraHeaders(r, req.Headers()); err != nil {
+		return nil, err
+	}
+
+	if err := r.SetJSONBody(req.Data()); err != nil {
+		return nil, err
+	}
+
+	return c.write(ctx, req.Path(), r)
+}
+
+// addExtraHeaders adds the given headers to the request, but only if they are
+// not already set in the request. If a header is already set in the request, it
+// returns an error for each header that is already set.
+func (c *Logical) addExtraHeaders(r *Request, headers http.Header) error {
+	var errs error
+
+	if r == nil {
+		return fmt.Errorf("cannot add extra headers to nil request")
+	}
+
+	if len(headers) == 0 {
+		return nil
+	}
+
+	if r.Headers == nil {
+		r.Headers = headers
+		return nil
+	}
+
+	curHeaders := r.Headers.Clone()
+	for k, v := range headers {
+		ck := http.CanonicalHeaderKey(k)
+		if curVal := curHeaders.Get(ck); curVal != "" {
+			errs = errors.Join(errs, fmt.Errorf("cannot set extra header %q, it is reserved", ck))
+			continue
+		}
+		curHeaders[ck] = v
+	}
+	if errs != nil {
+		return fmt.Errorf("cannot add extra headers: %w", errs)
+	}
+
+	r.Headers = curHeaders
+	return nil
+}
+
+// Recover recovers the data at the given Vault path from a loaded snapshot.
+// The snapshotID parameter is the ID of the loaded snapshot
+func (c *Logical) Recover(ctx context.Context, path string, snapshotID string) (*Secret, error) {
+	return c.RecoverFromPath(ctx, path, snapshotID, "")
+}
+
+func (c *Logical) RecoverFromPath(ctx context.Context, newPath string, snapshotID string, originalPath string) (*Secret, error) {
+	r := c.c.NewRequest(http.MethodPut, "/v1/"+newPath)
+	r.Params.Set("recover_snapshot_id", snapshotID)
+	r.Headers.Set(SnapshotHeaderName, snapshotID)
+	if originalPath != "" && originalPath != newPath {
+		r.Headers.Set(RecoverSourcePathHeaderName, originalPath)
+	}
+	return c.write(ctx, originalPath, r)
+}
+
+func (c *Logical) JSONMergePatch(ctx context.Context, path string, data map[string]interface{}) (*Secret, error) {
+	r := c.c.NewRequest(http.MethodPatch, "/v1/"+path)
+	r.Headers.Set("Content-Type", "application/merge-patch+json")
+	if err := r.SetJSONBody(data); err != nil {
+		return nil, err
+	}
+
+	return c.write(ctx, path, r)
+}
+
+func (c *Logical) WriteBytes(path string, data []byte) (*Secret, error) {
+	return c.WriteBytesWithContext(context.Background(), path, data)
+}
+
+func (c *Logical) WriteBytesWithContext(ctx context.Context, path string, data []byte) (*Secret, error) {
+	r := c.c.NewRequest(http.MethodPut, "/v1/"+path)
+	r.BodyBytes = data
+
+	return c.write(ctx, path, r)
+}
+
+func (c *Logical) write(ctx context.Context, path string, request *Request) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	resp, err := c.c.rawRequestWithContext(ctx, request)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if resp != nil && resp.StatusCode == 404 {
+		secret, parseErr := ParseSecret(resp.Body)
+		switch parseErr {
+		case nil:
+		case io.EOF:
+			return nil, nil
+		default:
+			return nil, parseErr
+		}
+		if secret != nil && (len(secret.Warnings) > 0 || len(secret.Data) > 0) {
+			return secret, err
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *Logical) writeRaw(ctx context.Context, request *Request) (*Response, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	resp, err := c.c.rawRequestWithContext(ctx, request)
+	return resp, err
+}
+
+func (c *Logical) Delete(path string) (*Secret, error) {
+	return c.DeleteWithContext(context.Background(), path)
+}
+
+func (c *Logical) DeleteWithContext(ctx context.Context, path string) (*Secret, error) {
+	return c.DeleteWithDataWithContext(ctx, path, nil)
+}
+
+func (c *Logical) DeleteWithData(path string, data map[string][]string) (*Secret, error) {
+	return c.DeleteWithDataWithContext(context.Background(), path, data)
+}
+
+// DeleteWithRequest returns a Secret for the given LogicalDeleteRequest. This is a
+// more flexible version of DeleteWithContext, which allows for passing extra
+// headers to the Vault server.
+func (c *Logical) DeleteWithRequest(ctx context.Context, req LogicalDeleteRequest) (*Secret, error) {
+	return c.DeleteWithDataWithContext(ctx, req.Path(), req.Values())
+}
+
+func (c *Logical) DeleteWithDataWithContext(ctx context.Context, path string, data map[string][]string) (*Secret, error) {
+	return c.deleteWithDataWithContext(ctx, path, data)
+}
+
+func (c *Logical) deleteWithDataWithContext(ctx context.Context, path string, data map[string][]string) (*Secret, error) {
+	return c.delete(ctx, NewDeleteRequest(path, data, nil))
+}
+
+func (c *Logical) delete(ctx context.Context, req LogicalDeleteRequest) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, "/v1/"+req.Path())
+
+	if values := req.Values(); values != nil {
+		r.Params = values
+	}
+
+	if err := c.addExtraHeaders(r, req.Headers()); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if resp != nil && resp.StatusCode == 404 {
+		secret, parseErr := ParseSecret(resp.Body)
+		switch parseErr {
+		case nil:
+		case io.EOF:
+			return nil, nil
+		default:
+			return nil, parseErr
+		}
+		if secret != nil && (len(secret.Warnings) > 0 || len(secret.Data) > 0) {
+			return secret, err
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *Logical) Unwrap(wrappingToken string) (*Secret, error) {
+	return c.UnwrapWithContext(context.Background(), wrappingToken)
+}
+
+func (c *Logical) UnwrapWithContext(ctx context.Context, wrappingToken string) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	var data map[string]interface{}
+	wt := strings.TrimSpace(wrappingToken)
+	if wrappingToken != "" {
+		if c.c.Token() == "" {
+			c.c.SetToken(wt)
+		} else if wrappingToken != c.c.Token() {
+			data = map[string]interface{}{
+				"token": wt,
+			}
+		}
+	}
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/wrapping/unwrap")
+	if err := r.SetJSONBody(data); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if resp == nil || resp.StatusCode != 404 {
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil {
+			return nil, nil
+		}
+		return ParseSecret(resp.Body)
+	}
+
+	// In the 404 case this may actually be a wrapped 404 error
+	secret, parseErr := ParseSecret(resp.Body)
+	switch parseErr {
+	case nil:
+	case io.EOF:
+		return nil, nil
+	default:
+		return nil, parseErr
+	}
+	if secret != nil && (len(secret.Warnings) > 0 || len(secret.Data) > 0) {
+		return secret, nil
+	}
+
+	// Otherwise this might be an old-style wrapping token so attempt the old
+	// method
+	if wrappingToken != "" {
+		origToken := c.c.Token()
+		defer c.c.SetToken(origToken)
+		c.c.SetToken(wrappingToken)
+	}
+
+	secret, err = c.ReadWithContext(ctx, wrappedResponseLocation)
+	if err != nil {
+		return nil, errwrap.Wrapf(fmt.Sprintf("error reading %q: {{err}}", wrappedResponseLocation), err)
+	}
+	if secret == nil {
+		return nil, fmt.Errorf("no value found at %q", wrappedResponseLocation)
+	}
+	if secret.Data == nil {
+		return nil, fmt.Errorf("\"data\" not found in wrapping response")
+	}
+	if _, ok := secret.Data["response"]; !ok {
+		return nil, fmt.Errorf("\"response\" not found in wrapping response \"data\" map")
+	}
+
+	wrappedSecret := new(Secret)
+	buf := bytes.NewBufferString(secret.Data["response"].(string))
+	dec := json.NewDecoder(buf)
+	dec.UseNumber()
+	if err := dec.Decode(wrappedSecret); err != nil {
+		return nil, errwrap.Wrapf("error unmarshalling wrapped secret: {{err}}", err)
+	}
+
+	return wrappedSecret, nil
+}
+
+```
+
+#### logical_requests.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"maps"
+	"net/http"
+	"net/url"
+)
+
+var _ LogicalRequest = (*defaultLogicalRequest)(nil)
+
+// NewLogicalReadRequest creates a new LogicalReadRequest with the given path,
+// values, and headers.
+func NewLogicalReadRequest(path string, values url.Values, headers http.Header) LogicalReadRequest {
+	return newLogicalRequest(path, values, nil, headers)
+}
+
+// NewLogicalWriteRequest creates a new LogicalWriteRequest with the given path,
+// data, and headers.
+func NewLogicalWriteRequest(path string, data map[string]interface{}, headers http.Header) LogicalWriteRequest {
+	return newLogicalRequest(path, nil, data, headers)
+}
+
+// NewDeleteRequest creates a new LogicalDeleteRequest with the given path and values.
+func NewDeleteRequest(path string, values url.Values, headers http.Header) LogicalDeleteRequest {
+	return newLogicalRequest(path, values, nil, headers)
+}
+
+// newLogicalRequest creates a new LogicalRequest with the given path, values,
+// data, and headers.
+func newLogicalRequest(path string, values url.Values, data map[string]interface{}, headers http.Header) LogicalRequest {
+	return &defaultLogicalRequest{
+		path:    path,
+		values:  values,
+		data:    data,
+		headers: headers,
+	}
+}
+
+// BaseLogicalRequest is the interface for requests to Vault's logical backend
+// that do not include data or values.
+type BaseLogicalRequest interface {
+	// Path returns the path to write to in Vault, without the "/v1/" prefix.
+	Path() string
+	// Headers returns the headers to be included in the request to Vault. All
+	// headers are additive, and must not collide with any of the reserved headers.
+	Headers() http.Header
+}
+
+// LogicalRequest is the interface for requests to Vault's logical backend.
+type LogicalRequest interface {
+	BaseLogicalRequest
+	// Values returns the query parameters to be used in the request.
+	// Values are only used in read and delete requests.
+	Values() url.Values
+	// Data returns the data to be written to the path. It is marshaled to JSON.
+	// Data is only used in write requests.
+	Data() map[string]interface{}
+}
+
+// LogicalWriteRequest is the interface for requests that write data to Vault's
+// logical backend.
+type LogicalWriteRequest interface {
+	BaseLogicalRequest
+	Data() map[string]interface{}
+}
+
+// LogicalReadRequest is the interface for requests that read data from Vault's
+// logical backend.
+type LogicalReadRequest interface {
+	BaseLogicalRequest
+	Values() url.Values
+}
+
+// LogicalDeleteRequest is the interface for requests that delete data from Vault's
+// logical backend. It is semantically similar the same as a read request,
+type LogicalDeleteRequest interface {
+	BaseLogicalRequest
+	Values() url.Values
+}
+
+// defaultLogicalRequest is the default implementation of LogicalRequest.
+type defaultLogicalRequest struct {
+	path    string
+	values  url.Values
+	headers http.Header
+	data    map[string]interface{}
+}
+
+// Path returns the path to write to in Vault, without the "/v1/" prefix.
+func (r *defaultLogicalRequest) Path() string {
+	return r.path
+}
+
+// Headers returns a copy of the headers to be included in the request to Vault.
+func (r *defaultLogicalRequest) Headers() http.Header {
+	if r.headers == nil {
+		return nil
+	}
+	return maps.Clone(r.headers)
+}
+
+// Data returns a copy of the data to be written to the path.
+func (r *defaultLogicalRequest) Data() map[string]interface{} {
+	if r.data == nil {
+		return nil
+	}
+	return maps.Clone(r.data)
+}
+
+// Values returns a copy of the query parameters to be used in the request.
+func (r *defaultLogicalRequest) Values() url.Values {
+	if r.values == nil {
+		return nil
+	}
+	return maps.Clone(r.values)
+}
+
+```
+
+#### output_policy.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+)
+
+const (
+	ErrOutputPolicyRequest = "output a policy, please"
+)
+
+var LastOutputPolicyError *OutputPolicyError
+
+type OutputPolicyError struct {
+	method         string
+	path           string
+	params         url.Values
+	finalHCLString string
+}
+
+func (d *OutputPolicyError) Error() string {
+	if d.finalHCLString == "" {
+		p, err := d.buildSamplePolicy()
+		if err != nil {
+			return err.Error()
+		}
+		d.finalHCLString = p
+	}
+
+	return ErrOutputPolicyRequest
+}
+
+func (d *OutputPolicyError) HCLString() (string, error) {
+	if d.finalHCLString == "" {
+		p, err := d.buildSamplePolicy()
+		if err != nil {
+			return "", err
+		}
+		d.finalHCLString = p
+	}
+	return d.finalHCLString, nil
+}
+
+// Builds a sample policy document from the request
+func (d *OutputPolicyError) buildSamplePolicy() (string, error) {
+	operation := d.method
+	// List is often defined as a URL param instead of as an http.Method
+	// this will check for the header and properly switch off of the intended functionality
+	if d.params.Has("list") {
+		isList, err := strconv.ParseBool(d.params.Get("list"))
+		if err != nil {
+			return "", fmt.Errorf("the value of the list url param is not a bool: %v", err)
+		}
+
+		if isList {
+			operation = "LIST"
+		}
+	}
+
+	var capabilities []string
+	switch operation {
+	case http.MethodGet, "":
+		capabilities = append(capabilities, "read")
+	case http.MethodPost, http.MethodPut:
+		capabilities = append(capabilities, "create")
+		capabilities = append(capabilities, "update")
+	case http.MethodPatch:
+		capabilities = append(capabilities, "patch")
+	case http.MethodDelete:
+		capabilities = append(capabilities, "delete")
+	case "LIST":
+		capabilities = append(capabilities, "list")
+	}
+
+	// determine whether to add sudo capability
+	if IsSudoPath(d.path) {
+		capabilities = append(capabilities, "sudo")
+	}
+
+	return formatOutputPolicy(d.path, capabilities), nil
+}
+
+func formatOutputPolicy(path string, capabilities []string) string {
+	// the OpenAPI response has a / in front of each path,
+	// but policies need the path without that leading slash
+	path = strings.TrimLeft(path, "/")
+
+	capStr := strings.Join(capabilities, `", "`)
+	return fmt.Sprintf(
+		`path "%s" {
+  capabilities = ["%s"]
+}`, path, capStr)
+}
+
+```
+
+#### output_string.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/hashicorp/go-retryablehttp"
+)
+
+const (
+	ErrOutputStringRequest = "output a string, please"
+)
+
+var LastOutputStringError *OutputStringError
+
+type OutputStringError struct {
+	*retryablehttp.Request
+	TLSSkipVerify              bool
+	ClientCACert, ClientCAPath string
+	ClientCert, ClientKey      string
+	finalCurlString            string
+}
+
+// Error is here so that we can return this struct as an error from client.rawRequestWithContext(). Note that
+// the ErrOutputStringRequest constant is never actually used and is completely irrelevant to how this all functions.
+// We could've just as easily returned an empty string. What matters is the machinery that happens before then where
+// the curl string is built. So yes, this is confusing, but yes, this is also on purpose, and it is not incorrect.
+func (d *OutputStringError) Error() string {
+	if d.finalCurlString == "" {
+		cs, err := d.buildCurlString()
+		if err != nil {
+			return err.Error()
+		}
+		d.finalCurlString = cs
+	}
+
+	return ErrOutputStringRequest
+}
+
+func (d *OutputStringError) CurlString() (string, error) {
+	if d.finalCurlString == "" {
+		cs, err := d.buildCurlString()
+		if err != nil {
+			return "", err
+		}
+		d.finalCurlString = cs
+	}
+	return d.finalCurlString, nil
+}
+
+func (d *OutputStringError) buildCurlString() (string, error) {
+	body, err := d.Request.BodyBytes()
+	if err != nil {
+		return "", err
+	}
+
+	// Build cURL string
+	finalCurlString := "curl "
+	if d.TLSSkipVerify {
+		finalCurlString += "--insecure "
+	}
+	if d.Request.Method != http.MethodGet {
+		finalCurlString = fmt.Sprintf("%s-X %s ", finalCurlString, d.Request.Method)
+	}
+	if d.ClientCACert != "" {
+		clientCACert := strings.ReplaceAll(d.ClientCACert, "'", "'\"'\"'")
+		finalCurlString = fmt.Sprintf("%s--cacert '%s' ", finalCurlString, clientCACert)
+	}
+	if d.ClientCAPath != "" {
+		clientCAPath := strings.ReplaceAll(d.ClientCAPath, "'", "'\"'\"'")
+		finalCurlString = fmt.Sprintf("%s--capath '%s' ", finalCurlString, clientCAPath)
+	}
+	if d.ClientCert != "" {
+		clientCert := strings.ReplaceAll(d.ClientCert, "'", "'\"'\"'")
+		finalCurlString = fmt.Sprintf("%s--cert '%s' ", finalCurlString, clientCert)
+	}
+	if d.ClientKey != "" {
+		clientKey := strings.ReplaceAll(d.ClientKey, "'", "'\"'\"'")
+		finalCurlString = fmt.Sprintf("%s--key '%s' ", finalCurlString, clientKey)
+	}
+	for k, v := range d.Request.Header {
+		for _, h := range v {
+			if strings.ToLower(k) == "x-vault-token" {
+				h = `$(vault print token)`
+			}
+			finalCurlString = fmt.Sprintf("%s-H \"%s: %s\" ", finalCurlString, k, h)
+		}
+	}
+
+	if len(body) > 0 {
+		// We need to escape single quotes since that's what we're using to
+		// quote the body
+		escapedBody := strings.ReplaceAll(string(body), "'", "'\"'\"'")
+		finalCurlString = fmt.Sprintf("%s-d '%s' ", finalCurlString, escapedBody)
+	}
+
+	return fmt.Sprintf("%s%s", finalCurlString, d.Request.URL.String()), nil
+}
+
+```
+
+#### plugin_helpers.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"errors"
+	"flag"
+	"net/url"
+	"os"
+
+	jose "github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/hashicorp/errwrap"
+)
+
+// This file contains helper code used when writing Vault auth method or secrets engine plugins.
+//
+// As such, it would be better located in the sdk module with the rest of the code which is only to support plugins,
+// rather than api, but is here for historical reasons. (The api module used to depend on the sdk module, this code
+// calls NewClient within the api package, so placing it in the sdk would have created a dependency cycle. This reason
+// is now historical, as the dependency between sdk and api has since been reversed in direction.)
+// Moving this code to the sdk would be appropriate if an api v2.0.0 release is ever planned.
+//
+// This helper code is used when a plugin is hosted by Vault 1.11 and earlier. Vault 1.12 and sdk v0.6.0 introduced
+// version 5 of the backend plugin interface, which uses go-plugin's AutoMTLS feature instead of this code.
+
+const (
+	// PluginAutoMTLSEnv is used to ensure AutoMTLS is used. This will override
+	// setting a TLSProviderFunc for a plugin.
+	PluginAutoMTLSEnv = "VAULT_PLUGIN_AUTOMTLS_ENABLED"
+
+	// PluginMetadataModeEnv is an ENV name used to disable TLS communication
+	// to bootstrap mounting plugins.
+	PluginMetadataModeEnv = "VAULT_PLUGIN_METADATA_MODE"
+
+	// PluginUnwrapTokenEnv is the ENV name used to pass unwrap tokens to the
+	// plugin.
+	PluginUnwrapTokenEnv = "VAULT_UNWRAP_TOKEN"
+
+	// CubbyHoleJWTSignatureAlgorithm is the signature algorithm used for
+	// the unwrap token that Vault passes to a plugin when auto-mTLS is
+	// not enabled.
+	CubbyHoleJWTSignatureAlgorithm = jose.ES512
+)
+
+// PluginAPIClientMeta is a helper that plugins can use to configure TLS connections
+// back to Vault.
+type PluginAPIClientMeta struct {
+	// These are set by the command line flags.
+	flagCACert     string
+	flagCAPath     string
+	flagClientCert string
+	flagClientKey  string
+	flagServerName string
+	flagInsecure   bool
+}
+
+// FlagSet returns the flag set for configuring the TLS connection
+func (f *PluginAPIClientMeta) FlagSet() *flag.FlagSet {
+	fs := flag.NewFlagSet("vault plugin settings", flag.ContinueOnError)
+
+	fs.StringVar(&f.flagCACert, "ca-cert", "", "")
+	fs.StringVar(&f.flagCAPath, "ca-path", "", "")
+	fs.StringVar(&f.flagClientCert, "client-cert", "", "")
+	fs.StringVar(&f.flagClientKey, "client-key", "", "")
+	fs.StringVar(&f.flagServerName, "tls-server-name", "", "")
+	fs.BoolVar(&f.flagInsecure, "tls-skip-verify", false, "")
+
+	return fs
+}
+
+// GetTLSConfig will return a TLSConfig based off the values from the flags
+func (f *PluginAPIClientMeta) GetTLSConfig() *TLSConfig {
+	// If we need custom TLS configuration, then set it
+	if f.flagCACert != "" || f.flagCAPath != "" || f.flagClientCert != "" || f.flagClientKey != "" || f.flagInsecure || f.flagServerName != "" {
+		t := &TLSConfig{
+			CACert:        f.flagCACert,
+			CAPath:        f.flagCAPath,
+			ClientCert:    f.flagClientCert,
+			ClientKey:     f.flagClientKey,
+			TLSServerName: f.flagServerName,
+			Insecure:      f.flagInsecure,
+		}
+
+		return t
+	}
+
+	return nil
+}
+
+// VaultPluginTLSProvider wraps VaultPluginTLSProviderContext using context.Background.
+func VaultPluginTLSProvider(apiTLSConfig *TLSConfig) func() (*tls.Config, error) {
+	return VaultPluginTLSProviderContext(context.Background(), apiTLSConfig)
+}
+
+// VaultPluginTLSProviderContext is run inside a plugin and retrieves the response
+// wrapped TLS certificate from vault. It returns a configured TLS Config.
+func VaultPluginTLSProviderContext(ctx context.Context, apiTLSConfig *TLSConfig) func() (*tls.Config, error) {
+	if os.Getenv(PluginAutoMTLSEnv) == "true" || os.Getenv(PluginMetadataModeEnv) == "true" {
+		return nil
+	}
+
+	return func() (*tls.Config, error) {
+		unwrapToken := os.Getenv(PluginUnwrapTokenEnv)
+
+		parsedJWT, err := jwt.ParseSigned(unwrapToken, []jose.SignatureAlgorithm{CubbyHoleJWTSignatureAlgorithm})
+		if err != nil {
+			return nil, errwrap.Wrapf("error parsing wrapping token: {{err}}", err)
+		}
+
+		allClaims := make(map[string]interface{})
+		if err = parsedJWT.UnsafeClaimsWithoutVerification(&allClaims); err != nil {
+			return nil, errwrap.Wrapf("error parsing claims from wrapping token: {{err}}", err)
+		}
+
+		addrClaimRaw, ok := allClaims["addr"]
+		if !ok {
+			return nil, errors.New("could not validate addr claim")
+		}
+		vaultAddr, ok := addrClaimRaw.(string)
+		if !ok {
+			return nil, errors.New("could not parse addr claim")
+		}
+		if vaultAddr == "" {
+			return nil, errors.New(`no vault api_addr found`)
+		}
+
+		// Sanity check the value
+		if _, err := url.Parse(vaultAddr); err != nil {
+			return nil, errwrap.Wrapf("error parsing the vault api_addr: {{err}}", err)
+		}
+
+		// Unwrap the token
+		clientConf := DefaultConfig()
+		clientConf.Address = vaultAddr
+		if apiTLSConfig != nil {
+			err := clientConf.ConfigureTLS(apiTLSConfig)
+			if err != nil {
+				return nil, errwrap.Wrapf("error configuring api client {{err}}", err)
+			}
+		}
+		client, err := NewClient(clientConf)
+		if err != nil {
+			return nil, errwrap.Wrapf("error during api client creation: {{err}}", err)
+		}
+
+		// Reset token value to make sure nothing has been set by default
+		client.ClearToken()
+
+		secret, err := client.Logical().UnwrapWithContext(ctx, unwrapToken)
+		if err != nil {
+			return nil, errwrap.Wrapf("error during token unwrap request: {{err}}", err)
+		}
+		if secret == nil {
+			return nil, errors.New("error during token unwrap request: secret is nil")
+		}
+
+		// Retrieve and parse the server's certificate
+		serverCertBytesRaw, ok := secret.Data["ServerCert"].(string)
+		if !ok {
+			return nil, errors.New("error unmarshalling certificate")
+		}
+
+		serverCertBytes, err := base64.StdEncoding.DecodeString(serverCertBytesRaw)
+		if err != nil {
+			return nil, errwrap.Wrapf("error parsing certificate: {{err}}", err)
+		}
+
+		serverCert, err := x509.ParseCertificate(serverCertBytes)
+		if err != nil {
+			return nil, errwrap.Wrapf("error parsing certificate: {{err}}", err)
+		}
+
+		// Retrieve and parse the server's private key
+		serverKeyB64, ok := secret.Data["ServerKey"].(string)
+		if !ok {
+			return nil, errors.New("error unmarshalling certificate")
+		}
+
+		serverKeyRaw, err := base64.StdEncoding.DecodeString(serverKeyB64)
+		if err != nil {
+			return nil, errwrap.Wrapf("error parsing certificate: {{err}}", err)
+		}
+
+		serverKey, err := x509.ParseECPrivateKey(serverKeyRaw)
+		if err != nil {
+			return nil, errwrap.Wrapf("error parsing certificate: {{err}}", err)
+		}
+
+		// Add CA cert to the cert pool
+		caCertPool := x509.NewCertPool()
+		caCertPool.AddCert(serverCert)
+
+		// Build a certificate object out of the server's cert and private key.
+		cert := tls.Certificate{
+			Certificate: [][]byte{serverCertBytes},
+			PrivateKey:  serverKey,
+			Leaf:        serverCert,
+		}
+
+		// Setup TLS config
+		tlsConfig := &tls.Config{
+			ClientCAs:  caCertPool,
+			RootCAs:    caCertPool,
+			ClientAuth: tls.RequireAndVerifyClientCert,
+			// TLS 1.2 minimum
+			MinVersion:   tls.VersionTLS12,
+			Certificates: []tls.Certificate{cert},
+			ServerName:   serverCert.Subject.CommonName,
+		}
+
+		return tlsConfig, nil
+	}
+}
+
+```
+
+#### plugin_runtime_types.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+// NOTE: this file was copied from
+// https://github.com/hashicorp/vault/blob/main/sdk/helper/consts/plugin_runtime_types.go
+// Any changes made should be made to both files at the same time.
+
+import "fmt"
+
+var PluginRuntimeTypes = _PluginRuntimeTypeValues
+
+//go:generate enumer -type=PluginRuntimeType -trimprefix=PluginRuntimeType -transform=snake
+type PluginRuntimeType uint32
+
+// This is a list of PluginRuntimeTypes used by Vault.
+const (
+	PluginRuntimeTypeUnsupported PluginRuntimeType = iota
+	PluginRuntimeTypeContainer
+)
+
+// ParsePluginRuntimeType is a wrapper around PluginRuntimeTypeString kept for backwards compatibility.
+func ParsePluginRuntimeType(PluginRuntimeType string) (PluginRuntimeType, error) {
+	t, err := PluginRuntimeTypeString(PluginRuntimeType)
+	if err != nil {
+		return PluginRuntimeTypeUnsupported, fmt.Errorf("%q is not a supported plugin runtime type", PluginRuntimeType)
+	}
+	return t, nil
+}
+
+```
+
+#### plugin_types.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+// NOTE: this file was copied from
+// https://github.com/hashicorp/vault/blob/main/sdk/helper/consts/plugin_types.go
+// Any changes made should be made to both files at the same time.
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+var PluginTypes = []PluginType{
+	PluginTypeUnknown,
+	PluginTypeCredential,
+	PluginTypeDatabase,
+	PluginTypeSecrets,
+}
+
+type PluginType uint32
+
+// This is a list of PluginTypes used by Vault.
+// If we need to add any in the future, it would
+// be best to add them to the _end_ of the list below
+// because they resolve to incrementing numbers,
+// which may be saved in state somewhere. Thus if
+// the name for one of those numbers changed because
+// a value were added to the middle, that could cause
+// the wrong plugin types to be read from storage
+// for a given underlying number. Example of the problem
+// here: https://play.golang.org/p/YAaPw5ww3er
+const (
+	PluginTypeUnknown PluginType = iota
+	PluginTypeCredential
+	PluginTypeDatabase
+	PluginTypeSecrets
+)
+
+func (p PluginType) String() string {
+	switch p {
+	case PluginTypeUnknown:
+		return "unknown"
+	case PluginTypeCredential:
+		return "auth"
+	case PluginTypeDatabase:
+		return "database"
+	case PluginTypeSecrets:
+		return "secret"
+	default:
+		return "unsupported"
+	}
+}
+
+func ParsePluginType(pluginType string) (PluginType, error) {
+	switch pluginType {
+	case "unknown":
+		return PluginTypeUnknown, nil
+	case "auth":
+		return PluginTypeCredential, nil
+	case "database":
+		return PluginTypeDatabase, nil
+	case "secret":
+		return PluginTypeSecrets, nil
+	default:
+		return PluginTypeUnknown, fmt.Errorf("%q is not a supported plugin type", pluginType)
+	}
+}
+
+// UnmarshalJSON implements json.Unmarshaler. It supports unmarshaling either a
+// string or a uint32. All new serialization will be as a string, but we
+// previously serialized as a uint32 so we need to support that for backwards
+// compatibility.
+func (p *PluginType) UnmarshalJSON(data []byte) error {
+	var asString string
+	err := json.Unmarshal(data, &asString)
+	if err == nil {
+		*p, err = ParsePluginType(asString)
+		return err
+	}
+
+	var asUint32 uint32
+	err = json.Unmarshal(data, &asUint32)
+	if err != nil {
+		return err
+	}
+	*p = PluginType(asUint32)
+	switch *p {
+	case PluginTypeUnknown, PluginTypeCredential, PluginTypeDatabase, PluginTypeSecrets:
+		return nil
+	default:
+		return fmt.Errorf("%d is not a supported plugin type", asUint32)
+	}
+}
+
+// MarshalJSON implements json.Marshaler.
+func (p PluginType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(p.String())
+}
+
+```
+
+#### pluginruntimetype_enumer.go
+
+```text
+// Code generated by "enumer -type=PluginRuntimeType -trimprefix=PluginRuntimeType -transform=snake"; DO NOT EDIT.
+
+package api
+
+import (
+	"fmt"
+)
+
+const _PluginRuntimeTypeName = "unsupportedcontainer"
+
+var _PluginRuntimeTypeIndex = [...]uint8{0, 11, 20}
+
+func (i PluginRuntimeType) String() string {
+	if i >= PluginRuntimeType(len(_PluginRuntimeTypeIndex)-1) {
+		return fmt.Sprintf("PluginRuntimeType(%d)", i)
+	}
+	return _PluginRuntimeTypeName[_PluginRuntimeTypeIndex[i]:_PluginRuntimeTypeIndex[i+1]]
+}
+
+var _PluginRuntimeTypeValues = []PluginRuntimeType{0, 1}
+
+var _PluginRuntimeTypeNameToValueMap = map[string]PluginRuntimeType{
+	_PluginRuntimeTypeName[0:11]:  0,
+	_PluginRuntimeTypeName[11:20]: 1,
+}
+
+// PluginRuntimeTypeString retrieves an enum value from the enum constants string name.
+// Throws an error if the param is not part of the enum.
+func PluginRuntimeTypeString(s string) (PluginRuntimeType, error) {
+	if val, ok := _PluginRuntimeTypeNameToValueMap[s]; ok {
+		return val, nil
+	}
+	return 0, fmt.Errorf("%s does not belong to PluginRuntimeType values", s)
+}
+
+// PluginRuntimeTypeValues returns all values of the enum
+func PluginRuntimeTypeValues() []PluginRuntimeType {
+	return _PluginRuntimeTypeValues
+}
+
+// IsAPluginRuntimeType returns "true" if the value is listed in the enum definition. "false" otherwise
+func (i PluginRuntimeType) IsAPluginRuntimeType() bool {
+	for _, v := range _PluginRuntimeTypeValues {
+		if i == v {
+			return true
+		}
+	}
+	return false
+}
+
+```
+
+#### renewbehavior_enumer.go
+
+```text
+// Code generated by "enumer -type=RenewBehavior -trimprefix=RenewBehavior"; DO NOT EDIT.
+
+package api
+
+import (
+	"fmt"
+)
+
+const _RenewBehaviorName = "IgnoreErrorsRenewDisabledErrorOnErrors"
+
+var _RenewBehaviorIndex = [...]uint8{0, 12, 25, 38}
+
+func (i RenewBehavior) String() string {
+	if i >= RenewBehavior(len(_RenewBehaviorIndex)-1) {
+		return fmt.Sprintf("RenewBehavior(%d)", i)
+	}
+	return _RenewBehaviorName[_RenewBehaviorIndex[i]:_RenewBehaviorIndex[i+1]]
+}
+
+var _RenewBehaviorValues = []RenewBehavior{0, 1, 2}
+
+var _RenewBehaviorNameToValueMap = map[string]RenewBehavior{
+	_RenewBehaviorName[0:12]:  0,
+	_RenewBehaviorName[12:25]: 1,
+	_RenewBehaviorName[25:38]: 2,
+}
+
+// RenewBehaviorString retrieves an enum value from the enum constants string name.
+// Throws an error if the param is not part of the enum.
+func RenewBehaviorString(s string) (RenewBehavior, error) {
+	if val, ok := _RenewBehaviorNameToValueMap[s]; ok {
+		return val, nil
+	}
+	return 0, fmt.Errorf("%s does not belong to RenewBehavior values", s)
+}
+
+// RenewBehaviorValues returns all values of the enum
+func RenewBehaviorValues() []RenewBehavior {
+	return _RenewBehaviorValues
+}
+
+// IsARenewBehavior returns "true" if the value is listed in the enum definition. "false" otherwise
+func (i RenewBehavior) IsARenewBehavior() bool {
+	for _, v := range _RenewBehaviorValues {
+		if i == v {
+			return true
+		}
+	}
+	return false
+}
+
+```
+
+#### replication_status.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+const (
+	apiRepPerformanceStatusPath = "/v1/sys/replication/performance/status"
+	apiRepDRStatusPath          = "/v1/sys/replication/dr/status"
+	apiRepStatusPath            = "/v1/sys/replication/status"
+)
+
+type ClusterInfo struct {
+	APIAddr                           string `json:"api_address,omitempty" mapstructure:"api_address"`
+	ClusterAddress                    string `json:"cluster_address,omitempty" mapstructure:"cluster_address"`
+	ConnectionStatus                  string `json:"connection_status,omitempty" mapstructure:"connection_status"`
+	LastHeartBeat                     string `json:"last_heartbeat,omitempty" mapstructure:"last_heartbeat"`
+	LastHeartBeatDurationMillis       string `json:"last_heartbeat_duration_ms,omitempty" mapstructure:"last_heartbeat_duration_ms"`
+	ClockSkewMillis                   string `json:"clock_skew_ms,omitempty" mapstructure:"clock_skew_ms"`
+	NodeID                            string `json:"node_id,omitempty" mapstructure:"node_id"`
+	ReplicationPrimaryCanaryAgeMillis string `json:"replication_primary_canary_age_ms,omitempty" mapstructure:"replication_primary_canary_age_ms"`
+}
+
+type ReplicationStatusGenericResponse struct {
+	LastDRWAL             uint64 `json:"last_dr_wal,omitempty" mapstructure:"last_dr_wal"`
+	LastReindexEpoch      string `json:"last_reindex_epoch,omitempty" mapstructure:"last_reindex_epoch"`
+	ClusterID             string `json:"cluster_id,omitempty" mapstructure:"cluster_id"`
+	LastWAL               uint64 `json:"last_wal,omitempty" mapstructure:"last_wal"`
+	MerkleRoot            string `json:"merkle_root,omitempty" mapstructure:"merkle_root"`
+	Mode                  string `json:"mode,omitempty" mapstructure:"mode"`
+	PrimaryClusterAddr    string `json:"primary_cluster_addr,omitempty" mapstructure:"primary_cluster_addr"`
+	LastPerformanceWAL    uint64 `json:"last_performance_wal,omitempty" mapstructure:"last_performance_wal"`
+	State                 string `json:"state,omitempty" mapstructure:"state"`
+	LastRemoteWAL         uint64 `json:"last_remote_wal,omitempty" mapstructure:"last_remote_wal"`
+	SecondaryID           string `json:"secondary_id,omitempty" mapstructure:"secondary_id"`
+	SSCTGenerationCounter uint64 `json:"ssct_generation_counter,omitempty" mapstructure:"ssct_generation_counter"`
+
+	KnownSecondaries         []string      `json:"known_secondaries,omitempty" mapstructure:"known_secondaries"`
+	KnownPrimaryClusterAddrs []string      `json:"known_primary_cluster_addrs,omitempty" mapstructure:"known_primary_cluster_addrs"`
+	Primaries                []ClusterInfo `json:"primaries,omitempty" mapstructure:"primaries"`
+	Secondaries              []ClusterInfo `json:"secondaries,omitempty" mapstructure:"secondaries"`
+}
+
+type ReplicationStatusResponse struct {
+	DR          ReplicationStatusGenericResponse `json:"dr,omitempty" mapstructure:"dr"`
+	Performance ReplicationStatusGenericResponse `json:"performance,omitempty" mapstructure:"performance"`
+}
+
+func (c *Sys) ReplicationStatus() (*ReplicationStatusResponse, error) {
+	return c.ReplicationStatusWithContext(context.Background(), apiRepStatusPath)
+}
+
+func (c *Sys) ReplicationPerformanceStatusWithContext(ctx context.Context) (*ReplicationStatusGenericResponse, error) {
+	s, err := c.ReplicationStatusWithContext(ctx, apiRepPerformanceStatusPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &s.Performance, nil
+}
+
+func (c *Sys) ReplicationDRStatusWithContext(ctx context.Context) (*ReplicationStatusGenericResponse, error) {
+	s, err := c.ReplicationStatusWithContext(ctx, apiRepDRStatusPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &s.DR, nil
+}
+
+func (c *Sys) ReplicationStatusWithContext(ctx context.Context, path string) (*ReplicationStatusResponse, error) {
+	// default to replication/status
+	if path == "" {
+		path = apiRepStatusPath
+	}
+
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, path)
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// First decode response into a map[string]interface{}
+	data := make(map[string]interface{})
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&data); err != nil {
+		return nil, err
+	}
+
+	rawData, ok := data["data"]
+	if !ok {
+		return nil, fmt.Errorf("empty data in replication status response")
+	}
+
+	s := &ReplicationStatusResponse{}
+	g := &ReplicationStatusGenericResponse{}
+	switch {
+	case path == apiRepPerformanceStatusPath:
+		err = mapstructure.Decode(rawData, g)
+		if err != nil {
+			return nil, err
+		}
+		s.Performance = *g
+	case path == apiRepDRStatusPath:
+		err = mapstructure.Decode(rawData, g)
+		if err != nil {
+			return nil, err
+		}
+		s.DR = *g
+	default:
+		err = mapstructure.Decode(rawData, s)
+		if err != nil {
+			return nil, err
+		}
+		return s, err
+	}
+
+	return s, err
+}
+
+```
+
+#### request.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/url"
+
+	retryablehttp "github.com/hashicorp/go-retryablehttp"
+)
+
+// Request is a raw request configuration structure used to initiate
+// API requests to the Vault server.
+type Request struct {
+	Method        string
+	URL           *url.URL
+	Host          string
+	Params        url.Values
+	Headers       http.Header
+	ClientToken   string
+	MFAHeaderVals []string
+	WrapTTL       string
+	Obj           interface{}
+
+	// When possible, use BodyBytes as it is more efficient due to how the
+	// retry logic works
+	BodyBytes []byte
+
+	// Fallback
+	Body     io.Reader
+	BodySize int64
+
+	// Whether to request overriding soft-mandatory Sentinel policies (RGPs and
+	// EGPs). If set, the override flag will take effect for all policies
+	// evaluated during the request.
+	PolicyOverride bool
+
+	// HCPCookie is used to set a http cookie when client is connected to HCP
+	HCPCookie *http.Cookie
+}
+
+// SetJSONBody is used to set a request body that is a JSON-encoded value.
+func (r *Request) SetJSONBody(val interface{}) error {
+	buf, err := json.Marshal(val)
+	if err != nil {
+		return err
+	}
+
+	r.Obj = val
+	r.BodyBytes = buf
+	return nil
+}
+
+// ResetJSONBody is used to reset the body for a redirect
+func (r *Request) ResetJSONBody() error {
+	if r.BodyBytes == nil {
+		return nil
+	}
+	return r.SetJSONBody(r.Obj)
+}
+
+// DEPRECATED: ToHTTP turns this request into a valid *http.Request for use
+// with the net/http package.
+func (r *Request) ToHTTP() (*http.Request, error) {
+	req, err := r.toRetryableHTTP()
+	if err != nil {
+		return nil, err
+	}
+
+	switch {
+	case r.BodyBytes == nil && r.Body == nil:
+		// No body
+
+	case r.BodyBytes != nil:
+		req.Request.Body = io.NopCloser(bytes.NewReader(r.BodyBytes))
+
+	default:
+		if c, ok := r.Body.(io.ReadCloser); ok {
+			req.Request.Body = c
+		} else {
+			req.Request.Body = io.NopCloser(r.Body)
+		}
+	}
+
+	return req.Request, nil
+}
+
+func (r *Request) toRetryableHTTP() (*retryablehttp.Request, error) {
+	// Encode the query parameters
+	r.URL.RawQuery = r.Params.Encode()
+
+	// Create the HTTP request, defaulting to retryable
+	var req *retryablehttp.Request
+
+	var err error
+	var body interface{}
+
+	switch {
+	case r.BodyBytes == nil && r.Body == nil:
+		// No body
+
+	case r.BodyBytes != nil:
+		// Use bytes, it's more efficient
+		body = r.BodyBytes
+
+	default:
+		body = r.Body
+	}
+
+	req, err = retryablehttp.NewRequest(r.Method, r.URL.RequestURI(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.URL.User = r.URL.User
+	req.URL.Scheme = r.URL.Scheme
+	req.URL.Host = r.URL.Host
+	req.Host = r.Host
+
+	if r.Headers != nil {
+		for header, vals := range r.Headers {
+			for _, val := range vals {
+				req.Header.Add(header, val)
+			}
+		}
+	}
+
+	if len(r.ClientToken) != 0 {
+		req.Header.Set(AuthHeaderName, r.ClientToken)
+	}
+
+	if len(r.WrapTTL) != 0 {
+		req.Header.Set("X-Vault-Wrap-TTL", r.WrapTTL)
+	}
+
+	if len(r.MFAHeaderVals) != 0 {
+		for _, mfaHeaderVal := range r.MFAHeaderVals {
+			req.Header.Add("X-Vault-MFA", mfaHeaderVal)
+		}
+	}
+
+	if r.PolicyOverride {
+		req.Header.Set("X-Vault-Policy-Override", "true")
+	}
+
+	if r.HCPCookie != nil {
+		req.AddCookie(r.HCPCookie)
+	}
+
+	return req, nil
+}
+
+```
+
+#### response.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+)
+
+// Response is a raw response that wraps an HTTP response.
+type Response struct {
+	*http.Response
+}
+
+// DecodeJSON will decode the response body to a JSON structure. This
+// will consume the response body, but will not close it. Close must
+// still be called.
+func (r *Response) DecodeJSON(out interface{}) error {
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
+	return dec.Decode(out)
+}
+
+// Error returns an error response if there is one. If there is an error,
+// this will fully consume the response body, but will not close it. The
+// body must still be closed manually.
+func (r *Response) Error() error {
+	// 200 to 399 are okay status codes. 429 is the code for health status of
+	// standby nodes, otherwise, 429 is treated as quota limit reached.
+	if (r.StatusCode >= 200 && r.StatusCode < 400) || (r.StatusCode == 429 && r.Request.URL.Path == "/v1/sys/health") {
+		return nil
+	}
+
+	// We have an error. Let's copy the body into our own buffer first,
+	// so that if we can't decode JSON, we can at least copy it raw.
+	bodyBuf := &bytes.Buffer{}
+	if _, err := io.Copy(bodyBuf, r.Body); err != nil {
+		return err
+	}
+
+	r.Body.Close()
+	r.Body = io.NopCloser(bodyBuf)
+	ns := r.Header.Get(NamespaceHeaderName)
+
+	// Build up the error object
+	respErr := &ResponseError{
+		HTTPMethod:    r.Request.Method,
+		URL:           r.Request.URL.String(),
+		StatusCode:    r.StatusCode,
+		NamespacePath: ns,
+	}
+
+	// Decode the error response if we can. Note that we wrap the bodyBuf
+	// in a bytes.Reader here so that the JSON decoder doesn't move the
+	// read pointer for the original buffer.
+	var resp ErrorResponse
+	dec := json.NewDecoder(bytes.NewReader(bodyBuf.Bytes()))
+	dec.UseNumber()
+	if err := dec.Decode(&resp); err != nil {
+		// Store the fact that we couldn't decode the errors
+		respErr.RawError = true
+		respErr.Errors = []string{bodyBuf.String()}
+	} else {
+		// Store the decoded errors
+		respErr.Errors = resp.Errors
+	}
+
+	return respErr
+}
+
+// ErrorResponse is the raw structure of errors when they're returned by the
+// HTTP API.
+type ErrorResponse struct {
+	Errors []string
+}
+
+// ResponseError is the error returned when Vault responds with an error or
+// non-success HTTP status code. If a request to Vault fails because of a
+// network error a different error message will be returned. ResponseError gives
+// access to the underlying errors and status code.
+type ResponseError struct {
+	// HTTPMethod is the HTTP method for the request (PUT, GET, etc).
+	HTTPMethod string
+
+	// URL is the URL of the request.
+	URL string
+
+	// StatusCode is the HTTP status code.
+	StatusCode int
+
+	// RawError marks that the underlying error messages returned by Vault were
+	// not parsable. The Errors slice will contain the raw response body as the
+	// first and only error string if this value is set to true.
+	RawError bool
+
+	// Errors are the underlying errors returned by Vault.
+	Errors []string
+
+	// Namespace path to be reported to the client if it is set to anything other
+	// than root
+	NamespacePath string
+}
+
+// Error returns a human-readable error string for the response error.
+func (r *ResponseError) Error() string {
+	errString := "Errors"
+	if r.RawError {
+		errString = "Raw Message"
+	}
+
+	var ns string
+	if r.NamespacePath != "" && r.NamespacePath != "root/" {
+		ns = "Namespace: " + r.NamespacePath + "\n"
+	}
+
+	var errBody bytes.Buffer
+	errBody.WriteString(fmt.Sprintf(
+		"Error making API request.\n\n"+
+			ns+
+			"URL: %s %s\n"+
+			"Code: %d. %s:\n\n",
+		r.HTTPMethod, r.URL, r.StatusCode, errString))
+
+	if r.RawError && len(r.Errors) == 1 {
+		errBody.WriteString(r.Errors[0])
+	} else {
+		for _, err := range r.Errors {
+			errBody.WriteString(fmt.Sprintf("* %s", err))
+		}
+	}
+
+	return errBody.String()
+}
+
+```
+
+#### secret.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"strings"
+	"time"
+
+	"github.com/hashicorp/errwrap"
+	"github.com/hashicorp/go-secure-stdlib/parseutil"
+)
+
+// Secret is the structure returned for every secret within Vault.
+type Secret struct {
+	// The request ID that generated this response
+	RequestID string `json:"request_id"`
+
+	LeaseID       string `json:"lease_id"`
+	LeaseDuration int    `json:"lease_duration"`
+	Renewable     bool   `json:"renewable"`
+
+	// Data is the actual contents of the secret. The format of the data
+	// is arbitrary and up to the secret backend.
+	Data map[string]interface{} `json:"data"`
+
+	// Warnings contains any warnings related to the operation. These
+	// are not issues that caused the command to fail, but that the
+	// client should be aware of.
+	Warnings []string `json:"warnings"`
+
+	// Auth, if non-nil, means that there was authentication information
+	// attached to this response.
+	Auth *SecretAuth `json:"auth,omitempty"`
+
+	// WrapInfo, if non-nil, means that the initial response was wrapped in the
+	// cubbyhole of the given token (which has a TTL of the given number of
+	// seconds)
+	WrapInfo *SecretWrapInfo `json:"wrap_info,omitempty"`
+
+	// MountType, if non-empty, provides some information about what kind
+	// of mount this secret came from.
+	MountType string `json:"mount_type,omitempty"`
+}
+
+// TokenID returns the standardized token ID (token) for the given secret.
+func (s *Secret) TokenID() (string, error) {
+	if s == nil {
+		return "", nil
+	}
+
+	if s.Auth != nil && len(s.Auth.ClientToken) > 0 {
+		return s.Auth.ClientToken, nil
+	}
+
+	if s.Data == nil || s.Data["id"] == nil {
+		return "", nil
+	}
+
+	id, ok := s.Data["id"].(string)
+	if !ok {
+		return "", fmt.Errorf("token found but in the wrong format")
+	}
+
+	return id, nil
+}
+
+// TokenAccessor returns the standardized token accessor for the given secret.
+// If the secret is nil or does not contain an accessor, this returns the empty
+// string.
+func (s *Secret) TokenAccessor() (string, error) {
+	if s == nil {
+		return "", nil
+	}
+
+	if s.Auth != nil && len(s.Auth.Accessor) > 0 {
+		return s.Auth.Accessor, nil
+	}
+
+	if s.Data == nil || s.Data["accessor"] == nil {
+		return "", nil
+	}
+
+	accessor, ok := s.Data["accessor"].(string)
+	if !ok {
+		return "", fmt.Errorf("token found but in the wrong format")
+	}
+
+	return accessor, nil
+}
+
+// TokenRemainingUses returns the standardized remaining uses for the given
+// secret. If the secret is nil or does not contain the "num_uses", this
+// returns -1. On error, this will return -1 and a non-nil error.
+func (s *Secret) TokenRemainingUses() (int, error) {
+	if s == nil || s.Data == nil || s.Data["num_uses"] == nil {
+		return -1, nil
+	}
+
+	return parseutil.SafeParseInt(s.Data["num_uses"])
+}
+
+// TokenPolicies returns the standardized list of policies for the given secret.
+// If the secret is nil or does not contain any policies, this returns nil. It
+// also populates the secret's Auth info with identity/token policy info.
+func (s *Secret) TokenPolicies() ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+
+	if s.Auth != nil && len(s.Auth.Policies) > 0 {
+		return s.Auth.Policies, nil
+	}
+
+	if s.Data == nil || s.Data["policies"] == nil {
+		return nil, nil
+	}
+
+	var tokenPolicies []string
+
+	// Token policies
+	{
+		_, ok := s.Data["policies"]
+		if !ok {
+			goto TOKEN_DONE
+		}
+
+		sList, ok := s.Data["policies"].([]string)
+		if ok {
+			tokenPolicies = sList
+			goto TOKEN_DONE
+		}
+
+		list, ok := s.Data["policies"].([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("unable to convert token policies to expected format")
+		}
+		for _, v := range list {
+			p, ok := v.(string)
+			if !ok {
+				return nil, fmt.Errorf("unable to convert policy %v to string", v)
+			}
+			tokenPolicies = append(tokenPolicies, p)
+		}
+	}
+
+TOKEN_DONE:
+	var identityPolicies []string
+
+	// Identity policies
+	{
+		v, ok := s.Data["identity_policies"]
+		if !ok || v == nil {
+			goto DONE
+		}
+
+		if s.Data["identity_policies"] == nil {
+			goto DONE
+		}
+
+		sList, ok := s.Data["identity_policies"].([]string)
+		if ok {
+			identityPolicies = sList
+			goto DONE
+		}
+
+		list, ok := s.Data["identity_policies"].([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("unable to convert identity policies to expected format")
+		}
+		for _, v := range list {
+			p, ok := v.(string)
+			if !ok {
+				return nil, fmt.Errorf("unable to convert policy %v to string", v)
+			}
+			identityPolicies = append(identityPolicies, p)
+		}
+	}
+
+DONE:
+
+	if s.Auth == nil {
+		s.Auth = &SecretAuth{}
+	}
+
+	policies := append(tokenPolicies, identityPolicies...)
+
+	s.Auth.TokenPolicies = tokenPolicies
+	s.Auth.IdentityPolicies = identityPolicies
+	s.Auth.Policies = policies
+
+	return policies, nil
+}
+
+// TokenMetadata returns the map of metadata associated with this token, if any
+// exists. If the secret is nil or does not contain the "metadata" key, this
+// returns nil.
+func (s *Secret) TokenMetadata() (map[string]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+
+	if s.Auth != nil && len(s.Auth.Metadata) > 0 {
+		return s.Auth.Metadata, nil
+	}
+
+	if s.Data == nil || (s.Data["metadata"] == nil && s.Data["meta"] == nil) {
+		return nil, nil
+	}
+
+	data, ok := s.Data["metadata"].(map[string]interface{})
+	if !ok {
+		data, ok = s.Data["meta"].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("unable to convert metadata field to expected format")
+		}
+	}
+
+	metadata := make(map[string]string, len(data))
+	for k, v := range data {
+		typed, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("unable to convert metadata value %v to string", v)
+		}
+		metadata[k] = typed
+	}
+
+	return metadata, nil
+}
+
+// TokenIsRenewable returns the standardized token renewability for the given
+// secret. If the secret is nil or does not contain the "renewable" key, this
+// returns false.
+func (s *Secret) TokenIsRenewable() (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+
+	if s.Auth != nil && s.Auth.Renewable {
+		return s.Auth.Renewable, nil
+	}
+
+	if s.Data == nil || s.Data["renewable"] == nil {
+		return false, nil
+	}
+
+	renewable, err := parseutil.ParseBool(s.Data["renewable"])
+	if err != nil {
+		return false, errwrap.Wrapf("could not convert renewable value to a boolean: {{err}}", err)
+	}
+
+	return renewable, nil
+}
+
+// TokenTTL returns the standardized remaining token TTL for the given secret.
+// If the secret is nil or does not contain a TTL, this returns 0.
+func (s *Secret) TokenTTL() (time.Duration, error) {
+	if s == nil {
+		return 0, nil
+	}
+
+	if s.Auth != nil && s.Auth.LeaseDuration > 0 {
+		return time.Duration(s.Auth.LeaseDuration) * time.Second, nil
+	}
+
+	if s.Data == nil || s.Data["ttl"] == nil {
+		return 0, nil
+	}
+
+	ttl, err := parseutil.ParseDurationSecond(s.Data["ttl"])
+	if err != nil {
+		return 0, err
+	}
+
+	return ttl, nil
+}
+
+// SecretWrapInfo contains wrapping information if we have it. If what is
+// contained is an authentication token, the accessor for the token will be
+// available in WrappedAccessor.
+type SecretWrapInfo struct {
+	Token           string    `json:"token"`
+	Accessor        string    `json:"accessor"`
+	TTL             int       `json:"ttl"`
+	CreationTime    time.Time `json:"creation_time"`
+	CreationPath    string    `json:"creation_path"`
+	WrappedAccessor string    `json:"wrapped_accessor"`
+}
+
+type MFAMethodID struct {
+	Type         string `json:"type,omitempty"`
+	ID           string `json:"id,omitempty"`
+	UsesPasscode bool   `json:"uses_passcode,omitempty"`
+	Name         string `json:"name,omitempty"`
+	// SelfEnrollmentEnabled indicates whether the user does not yet have an MFA
+	// secret for this method and self-enrollment is enabled for it. Clients (like the UI) can use
+	// this to determine whether to offer the user a way to generate an MFA secret
+	// for this method.
+	SelfEnrollmentEnabled bool `json:"self_enrollment_enabled,omitempty"`
+}
+
+type MFAConstraintAny struct {
+	Any []*MFAMethodID `json:"any,omitempty"`
+}
+
+type MFARequirement struct {
+	MFARequestID   string                       `json:"mfa_request_id,omitempty"`
+	MFAConstraints map[string]*MFAConstraintAny `json:"mfa_constraints,omitempty"`
+}
+
+// SecretAuth is the structure containing auth information if we have it.
+type SecretAuth struct {
+	ClientToken      string            `json:"client_token"`
+	Accessor         string            `json:"accessor"`
+	Policies         []string          `json:"policies"`
+	TokenPolicies    []string          `json:"token_policies"`
+	IdentityPolicies []string          `json:"identity_policies"`
+	Metadata         map[string]string `json:"metadata"`
+	Orphan           bool              `json:"orphan"`
+	EntityID         string            `json:"entity_id"`
+
+	LeaseDuration int  `json:"lease_duration"`
+	Renewable     bool `json:"renewable"`
+
+	MFARequirement *MFARequirement `json:"mfa_requirement"`
+}
+
+// ParseSecret is used to parse a secret value from JSON from an io.Reader.
+func ParseSecret(r io.Reader) (*Secret, error) {
+	// First read the data into a buffer. Not super efficient but we want to
+	// know if we actually have a body or not.
+	var buf bytes.Buffer
+
+	// io.Reader is treated like a stream and cannot be read
+	// multiple times. Duplicating this stream using TeeReader
+	// to use this data in case there is no top-level data from
+	// api response
+	var teebuf bytes.Buffer
+	tee := io.TeeReader(r, &teebuf)
+
+	_, err := buf.ReadFrom(tee)
+	if err != nil {
+		return nil, err
+	}
+	if buf.Len() == 0 {
+		return nil, nil
+	}
+
+	// First decode the JSON into a map[string]interface{}
+	var secret Secret
+	dec := json.NewDecoder(&buf)
+	dec.UseNumber()
+	if err := dec.Decode(&secret); err != nil {
+		return nil, err
+	}
+
+	// If the secret is null, add raw data to secret data if present
+	if reflect.DeepEqual(secret, Secret{}) {
+		data := make(map[string]interface{})
+		dec := json.NewDecoder(&teebuf)
+		dec.UseNumber()
+		if err := dec.Decode(&data); err != nil {
+			return nil, err
+		}
+		errRaw, errPresent := data["errors"]
+
+		// if only errors are present in the resp.Body return nil
+		// to return value not found as it does not have any raw data
+		if len(data) == 1 && errPresent {
+			return nil, nil
+		}
+
+		// if errors are present along with raw data return the error
+		if errPresent {
+			var errStrArray []string
+			errBytes, err := json.Marshal(errRaw)
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(errBytes, &errStrArray); err != nil {
+				return nil, err
+			}
+			return nil, errors.New(strings.Join(errStrArray, " "))
+		}
+
+		// if any raw data is present in resp.Body, add it to secret
+		if len(data) > 0 {
+			secret.Data = data
+		}
+	}
+
+	return &secret, nil
+}
+
+```
+
+#### ssh.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+)
+
+// SSH is used to return a client to invoke operations on SSH backend.
+type SSH struct {
+	c          *Client
+	MountPoint string
+}
+
+// SSH returns the client for logical-backend API calls.
+func (c *Client) SSH() *SSH {
+	return c.SSHWithMountPoint(SSHHelperDefaultMountPoint)
+}
+
+// SSHWithMountPoint returns the client with specific SSH mount point.
+func (c *Client) SSHWithMountPoint(mountPoint string) *SSH {
+	return &SSH{
+		c:          c,
+		MountPoint: mountPoint,
+	}
+}
+
+// Credential wraps CredentialWithContext using context.Background.
+func (c *SSH) Credential(role string, data map[string]interface{}) (*Secret, error) {
+	return c.CredentialWithContext(context.Background(), role, data)
+}
+
+// CredentialWithContext invokes the SSH backend API to create a credential to establish an SSH session.
+func (c *SSH) CredentialWithContext(ctx context.Context, role string, data map[string]interface{}) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, fmt.Sprintf("/v1/%s/creds/%s", c.MountPoint, role))
+	if err := r.SetJSONBody(data); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+// SignKey wraps SignKeyWithContext using context.Background.
+func (c *SSH) SignKey(role string, data map[string]interface{}) (*Secret, error) {
+	return c.SignKeyWithContext(context.Background(), role, data)
+}
+
+// SignKeyWithContext signs the given public key and returns a signed public key to pass
+// along with the SSH request.
+func (c *SSH) SignKeyWithContext(ctx context.Context, role string, data map[string]interface{}) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, fmt.Sprintf("/v1/%s/sign/%s", c.MountPoint, role))
+	if err := r.SetJSONBody(data); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+```
+
+#### ssh_agent.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"os"
+
+	"github.com/hashicorp/errwrap"
+	cleanhttp "github.com/hashicorp/go-cleanhttp"
+	multierror "github.com/hashicorp/go-multierror"
+	rootcerts "github.com/hashicorp/go-rootcerts"
+	"github.com/hashicorp/hcl"
+	"github.com/hashicorp/hcl/hcl/ast"
+	"github.com/mitchellh/mapstructure"
+)
+
+const (
+	// SSHHelperDefaultMountPoint is the default path at which SSH backend will be
+	// mounted in the Vault server.
+	SSHHelperDefaultMountPoint = "ssh"
+
+	// VerifyEchoRequest is the echo request message sent as OTP by the helper.
+	VerifyEchoRequest = "verify-echo-request"
+
+	// VerifyEchoResponse is the echo response message sent as a response to OTP
+	// matching echo request.
+	VerifyEchoResponse = "verify-echo-response"
+)
+
+// SSHHelper is a structure representing a vault-ssh-helper which can talk to vault server
+// in order to verify the OTP entered by the user. It contains the path at which
+// SSH backend is mounted at the server.
+type SSHHelper struct {
+	c          *Client
+	MountPoint string
+}
+
+// SSHVerifyResponse is a structure representing the fields in Vault server's
+// response.
+type SSHVerifyResponse struct {
+	// Usually empty. If the request OTP is echo request message, this will
+	// be set to the corresponding echo response message.
+	Message string `json:"message" mapstructure:"message"`
+
+	// Username associated with the OTP
+	Username string `json:"username" mapstructure:"username"`
+
+	// IP associated with the OTP
+	IP string `json:"ip" mapstructure:"ip"`
+
+	// Name of the role against which the OTP was issued
+	RoleName string `json:"role_name" mapstructure:"role_name"`
+}
+
+// SSHHelperConfig is a structure which represents the entries from the vault-ssh-helper's configuration file.
+type SSHHelperConfig struct {
+	VaultAddr       string `hcl:"vault_addr"`
+	SSHMountPoint   string `hcl:"ssh_mount_point"`
+	Namespace       string `hcl:"namespace"`
+	CACert          string `hcl:"ca_cert"`
+	CAPath          string `hcl:"ca_path"`
+	AllowedCidrList string `hcl:"allowed_cidr_list"`
+	AllowedRoles    string `hcl:"allowed_roles"`
+	TLSSkipVerify   bool   `hcl:"tls_skip_verify"`
+	TLSServerName   string `hcl:"tls_server_name"`
+}
+
+// SetTLSParameters sets the TLS parameters for this SSH agent.
+func (c *SSHHelperConfig) SetTLSParameters(clientConfig *Config, certPool *x509.CertPool) {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: c.TLSSkipVerify,
+		MinVersion:         tls.VersionTLS12,
+		RootCAs:            certPool,
+		ServerName:         c.TLSServerName,
+	}
+
+	transport := cleanhttp.DefaultTransport()
+	transport.TLSClientConfig = tlsConfig
+	clientConfig.HttpClient.Transport = transport
+}
+
+// Returns true if any of the following conditions are true:
+//   - CA cert is configured
+//   - CA path is configured
+//   - configured to skip certificate verification
+//   - TLS server name is configured
+func (c *SSHHelperConfig) shouldSetTLSParameters() bool {
+	return c.CACert != "" || c.CAPath != "" || c.TLSServerName != "" || c.TLSSkipVerify
+}
+
+// NewClient returns a new client for the configuration. This client will be used by the
+// vault-ssh-helper to communicate with Vault server and verify the OTP entered by user.
+// If the configuration supplies Vault SSL certificates, then the client will
+// have TLS configured in its transport.
+func (c *SSHHelperConfig) NewClient() (*Client, error) {
+	// Creating a default client configuration for communicating with vault server.
+	clientConfig := DefaultConfig()
+
+	// Pointing the client to the actual address of vault server.
+	clientConfig.Address = c.VaultAddr
+
+	// Check if certificates are provided via config file.
+	if c.shouldSetTLSParameters() {
+		rootConfig := &rootcerts.Config{
+			CAFile: c.CACert,
+			CAPath: c.CAPath,
+		}
+		certPool, err := rootcerts.LoadCACerts(rootConfig)
+		if err != nil {
+			return nil, err
+		}
+		// Enable TLS on the HTTP client information
+		c.SetTLSParameters(clientConfig, certPool)
+	}
+
+	// Creating the client object for the given configuration
+	client, err := NewClient(clientConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// Configure namespace
+	if c.Namespace != "" {
+		client.SetNamespace(c.Namespace)
+	}
+
+	return client, nil
+}
+
+// LoadSSHHelperConfig loads ssh-helper's configuration from the file and populates the corresponding
+// in-memory structure.
+//
+// Vault address is a required parameter.
+// Mount point defaults to "ssh".
+func LoadSSHHelperConfig(path string) (*SSHHelperConfig, error) {
+	contents, err := ioutil.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, multierror.Prefix(err, "ssh_helper:")
+	}
+	return ParseSSHHelperConfig(string(contents))
+}
+
+// ParseSSHHelperConfig parses the given contents as a string for the SSHHelper
+// configuration.
+func ParseSSHHelperConfig(contents string) (*SSHHelperConfig, error) {
+	// TODO (HCL_DUP_KEYS_DEPRECATION): replace with simple call to hcl.Parse once deprecation of duplicate attributes
+	// is over, for now just ignore duplicates
+	root, _, err := parseAndCheckForDuplicateHclAttributes(contents)
+	if err != nil {
+		return nil, errwrap.Wrapf("error parsing config: {{err}}", err)
+	}
+
+	list, ok := root.Node.(*ast.ObjectList)
+	if !ok {
+		return nil, fmt.Errorf("error parsing config: file doesn't contain a root object")
+	}
+
+	valid := []string{
+		"vault_addr",
+		"ssh_mount_point",
+		"namespace",
+		"ca_cert",
+		"ca_path",
+		"allowed_cidr_list",
+		"allowed_roles",
+		"tls_skip_verify",
+		"tls_server_name",
+	}
+	if err := CheckHCLKeys(list, valid); err != nil {
+		return nil, multierror.Prefix(err, "ssh_helper:")
+	}
+
+	var c SSHHelperConfig
+	c.SSHMountPoint = SSHHelperDefaultMountPoint
+	if err := hcl.DecodeObject(&c, list); err != nil {
+		return nil, multierror.Prefix(err, "ssh_helper:")
+	}
+
+	if c.VaultAddr == "" {
+		return nil, fmt.Errorf(`missing config "vault_addr"`)
+	}
+	return &c, nil
+}
+
+func CheckHCLKeys(node ast.Node, valid []string) error {
+	var list *ast.ObjectList
+	switch n := node.(type) {
+	case *ast.ObjectList:
+		list = n
+	case *ast.ObjectType:
+		list = n.List
+	default:
+		return fmt.Errorf("cannot check HCL keys of type %T", n)
+	}
+
+	validMap := make(map[string]struct{}, len(valid))
+	for _, v := range valid {
+		validMap[v] = struct{}{}
+	}
+
+	var result error
+	for _, item := range list.Items {
+		key := item.Keys[0].Token.Value().(string)
+		if _, ok := validMap[key]; !ok {
+			result = multierror.Append(result, fmt.Errorf("invalid key %q on line %d", key, item.Assign.Line))
+		}
+	}
+
+	return result
+}
+
+// SSHHelper creates an SSHHelper object which can talk to Vault server with SSH backend
+// mounted at default path ("ssh").
+func (c *Client) SSHHelper() *SSHHelper {
+	return c.SSHHelperWithMountPoint(SSHHelperDefaultMountPoint)
+}
+
+// SSHHelperWithMountPoint creates an SSHHelper object which can talk to Vault server with SSH backend
+// mounted at a specific mount point.
+func (c *Client) SSHHelperWithMountPoint(mountPoint string) *SSHHelper {
+	return &SSHHelper{
+		c:          c,
+		MountPoint: mountPoint,
+	}
+}
+
+// Verify verifies if the key provided by user is present in Vault server. The response
+// will contain the IP address and username associated with the OTP. In case the
+// OTP matches the echo request message, instead of searching an entry for the OTP,
+// an echo response message is returned. This feature is used by ssh-helper to verify if
+// its configured correctly.
+func (c *SSHHelper) Verify(otp string) (*SSHVerifyResponse, error) {
+	return c.VerifyWithContext(context.Background(), otp)
+}
+
+// VerifyWithContext the same as Verify but with a custom context.
+func (c *SSHHelper) VerifyWithContext(ctx context.Context, otp string) (*SSHVerifyResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	data := map[string]interface{}{
+		"otp": otp,
+	}
+	verifyPath := fmt.Sprintf("/v1/%s/verify", c.MountPoint)
+	r := c.c.NewRequest(http.MethodPut, verifyPath)
+	if err := r.SetJSONBody(data); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if secret.Data == nil {
+		return nil, nil
+	}
+
+	var verifyResp SSHVerifyResponse
+	err = mapstructure.Decode(secret.Data, &verifyResp)
+	if err != nil {
+		return nil, err
+	}
+	return &verifyResp, nil
+}
+
+```
+
+#### sudo_paths.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"regexp"
+)
+
+// sudoPaths is a map containing the paths that require a token's policy
+// to have the "sudo" capability. The keys are the paths as strings, in
+// the same format as they are returned by the OpenAPI spec. The values
+// are the regular expressions that can be used to test whether a given
+// path matches that path or not (useful specifically for the paths that
+// contain templated fields.)
+var sudoPaths = map[string]*regexp.Regexp{
+	"/auth/token/accessors":                         regexp.MustCompile(`^/auth/token/accessors/?$`),
+	"/auth/token/revoke-orphan":                     regexp.MustCompile(`^/auth/token/revoke-orphan$`),
+	"/pki/root":                                     regexp.MustCompile(`^/pki/root$`),
+	"/pki/root/sign-self-issued":                    regexp.MustCompile(`^/pki/root/sign-self-issued$`),
+	"/sys/audit":                                    regexp.MustCompile(`^/sys/audit$`),
+	"/sys/audit/{path}":                             regexp.MustCompile(`^/sys/audit/.+$`),
+	"/sys/auth/{path}":                              regexp.MustCompile(`^/sys/auth/.+$`),
+	"/sys/auth/{path}/tune":                         regexp.MustCompile(`^/sys/auth/.+/tune$`),
+	"/sys/config/auditing/request-headers":          regexp.MustCompile(`^/sys/config/auditing/request-headers$`),
+	"/sys/config/auditing/request-headers/{header}": regexp.MustCompile(`^/sys/config/auditing/request-headers/.+$`),
+	"/sys/config/cors":                              regexp.MustCompile(`^/sys/config/cors$`),
+	"/sys/config/ui/headers":                        regexp.MustCompile(`^/sys/config/ui/headers/?$`),
+	"/sys/config/ui/headers/{header}":               regexp.MustCompile(`^/sys/config/ui/headers/.+$`),
+	"/sys/internal/inspect/router/{tag}":            regexp.MustCompile(`^/sys/internal/inspect/router/.+$`),
+	"/sys/internal/counters/activity/export":        regexp.MustCompile(`^/sys/internal/counters/activity/export$`),
+	"/sys/leases":                                   regexp.MustCompile(`^/sys/leases$`),
+	// This entry is a bit wrong... sys/leases/lookup does NOT require sudo. But sys/leases/lookup/ with a trailing
+	// slash DOES require sudo. But the part of the Vault CLI that uses this logic doesn't pass operation-appropriate
+	// trailing slashes, it always strips them off, so we end up giving the wrong answer for one of these.
+	"/sys/leases/lookup/{prefix}":                 regexp.MustCompile(`^/sys/leases/lookup(?:/.+)?$`),
+	"/sys/leases/revoke-force/{prefix}":           regexp.MustCompile(`^/sys/leases/revoke-force/.+$`),
+	"/sys/leases/revoke-prefix/{prefix}":          regexp.MustCompile(`^/sys/leases/revoke-prefix/.+$`),
+	"/sys/plugins/catalog/{name}":                 regexp.MustCompile(`^/sys/plugins/catalog/[^/]+$`),
+	"/sys/plugins/catalog/{type}":                 regexp.MustCompile(`^/sys/plugins/catalog/[\w-]+$`),
+	"/sys/plugins/catalog/{type}/{name}":          regexp.MustCompile(`^/sys/plugins/catalog/[\w-]+/[^/]+$`),
+	"/sys/plugins/runtimes/catalog":               regexp.MustCompile(`^/sys/plugins/runtimes/catalog/?$`),
+	"/sys/plugins/runtimes/catalog/{type}/{name}": regexp.MustCompile(`^/sys/plugins/runtimes/catalog/[\w-]+/[^/]+$`),
+	"/sys/raw/{path}":                             regexp.MustCompile(`^/sys/raw(?:/.+)?$`),
+	"/sys/remount":                                regexp.MustCompile(`^/sys/remount$`),
+	"/sys/revoke-force/{prefix}":                  regexp.MustCompile(`^/sys/revoke-force/.+$`),
+	"/sys/revoke-prefix/{prefix}":                 regexp.MustCompile(`^/sys/revoke-prefix/.+$`),
+	"/sys/rotate":                                 regexp.MustCompile(`^/sys/rotate$`),
+	"/sys/seal":                                   regexp.MustCompile(`^/sys/seal$`),
+	"/sys/step-down":                              regexp.MustCompile(`^/sys/step-down$`),
+
+	// enterprise-only paths
+	"/sys/replication/dr/primary/secondary-token":          regexp.MustCompile(`^/sys/replication/dr/primary/secondary-token$`),
+	"/sys/replication/performance/primary/secondary-token": regexp.MustCompile(`^/sys/replication/performance/primary/secondary-token$`),
+	"/sys/replication/primary/secondary-token":             regexp.MustCompile(`^/sys/replication/primary/secondary-token$`),
+	"/sys/replication/reindex":                             regexp.MustCompile(`^/sys/replication/reindex$`),
+	"/sys/storage/raft/snapshot-auto/config":               regexp.MustCompile(`^/sys/storage/raft/snapshot-auto/config/?$`),
+	"/sys/storage/raft/snapshot-auto/config/{name}":        regexp.MustCompile(`^/sys/storage/raft/snapshot-auto/config/[^/]+$`),
+}
+
+func SudoPaths() map[string]*regexp.Regexp {
+	return sudoPaths
+}
+
+// Determine whether the given path requires the sudo capability.
+// Note that this uses hardcoded static path information, so will return incorrect results for paths in namespaces,
+// or for secret engines mounted at non-default paths.
+// Expects to receive a path with an initial slash, but no trailing slashes, as the Vault CLI (the only known and
+// expected user of this function) sanitizes its paths that way.
+func IsSudoPath(path string) bool {
+	// Return early if the path is any of the non-templated sudo paths.
+	if _, ok := sudoPaths[path]; ok {
+		return true
+	}
+
+	// Some sudo paths have templated fields in them.
+	// (e.g. /sys/revoke-prefix/{prefix})
+	// The values in the sudoPaths map are actually regular expressions,
+	// so we can check if our path matches against them.
+	for _, sudoPathRegexp := range sudoPaths {
+		match := sudoPathRegexp.MatchString(path)
+		if match {
+			return true
+		}
+	}
+
+	return false
+}
+
+```
+
+#### sys.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+// Sys is used to perform system-related operations on Vault.
+type Sys struct {
+	c *Client
+}
+
+// Sys is used to return the client for sys-related API calls.
+func (c *Client) Sys() *Sys {
+	return &Sys{c: c}
+}
+
+```
+
+#### sys_audit.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) AuditHash(path string, input string) (string, error) {
+	return c.AuditHashWithContext(context.Background(), path, input)
+}
+
+func (c *Sys) AuditHashWithContext(ctx context.Context, path string, input string) (string, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"input": input,
+	}
+
+	r := c.c.NewRequest(http.MethodPut, fmt.Sprintf("/v1/sys/audit-hash/%s", path))
+	if err := r.SetJSONBody(body); err != nil {
+		return "", err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if secret == nil || secret.Data == nil {
+		return "", errors.New("data from server response is empty")
+	}
+
+	hash, ok := secret.Data["hash"]
+	if !ok {
+		return "", errors.New("hash not found in response data")
+	}
+	hashStr, ok := hash.(string)
+	if !ok {
+		return "", errors.New("could not parse hash in response data")
+	}
+
+	return hashStr, nil
+}
+
+func (c *Sys) ListAudit() (map[string]*Audit, error) {
+	return c.ListAuditWithContext(context.Background())
+}
+
+func (c *Sys) ListAuditWithContext(ctx context.Context) (map[string]*Audit, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/audit")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	mounts := map[string]*Audit{}
+	err = mapstructure.Decode(secret.Data, &mounts)
+	if err != nil {
+		return nil, err
+	}
+
+	return mounts, nil
+}
+
+// DEPRECATED: Use EnableAuditWithOptions instead
+func (c *Sys) EnableAudit(
+	path string, auditType string, desc string, opts map[string]string,
+) error {
+	return c.EnableAuditWithOptions(path, &EnableAuditOptions{
+		Type:        auditType,
+		Description: desc,
+		Options:     opts,
+	})
+}
+
+func (c *Sys) EnableAuditWithOptions(path string, options *EnableAuditOptions) error {
+	return c.EnableAuditWithOptionsWithContext(context.Background(), path, options)
+}
+
+func (c *Sys) EnableAuditWithOptionsWithContext(ctx context.Context, path string, options *EnableAuditOptions) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, fmt.Sprintf("/v1/sys/audit/%s", path))
+	if err := r.SetJSONBody(options); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+func (c *Sys) DisableAudit(path string) error {
+	return c.DisableAuditWithContext(context.Background(), path)
+}
+
+func (c *Sys) DisableAuditWithContext(ctx context.Context, path string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, fmt.Sprintf("/v1/sys/audit/%s", path))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+// Structures for the requests/response are all down here. They aren't
+// individually documented because the map almost directly to the raw HTTP API
+// documentation. Please refer to that documentation for more details.
+
+type EnableAuditOptions struct {
+	Type        string            `json:"type" mapstructure:"type"`
+	Description string            `json:"description" mapstructure:"description"`
+	Options     map[string]string `json:"options" mapstructure:"options"`
+	Local       bool              `json:"local" mapstructure:"local"`
+}
+
+type Audit struct {
+	Type        string            `json:"type" mapstructure:"type"`
+	Description string            `json:"description" mapstructure:"description"`
+	Options     map[string]string `json:"options" mapstructure:"options"`
+	Local       bool              `json:"local" mapstructure:"local"`
+	Path        string            `json:"path" mapstructure:"path"`
+}
+
+```
+
+#### sys_auth.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) GetAuth(path string) (*AuthMount, error) {
+	return c.GetAuthWithContext(context.Background(), path)
+}
+
+func (c *Sys) GetAuthWithContext(ctx context.Context, path string) (*AuthMount, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	// use `sys/mounts/auth/:path` so we don't require sudo permissions
+	// historically, `sys/auth` doesn't require sudo, so we don't require it here either
+	r := c.c.NewRequest(http.MethodGet, fmt.Sprintf("/v1/sys/mounts/auth/%s", path))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	mount := AuthMount{}
+	err = mapstructure.Decode(secret.Data, &mount)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mount, nil
+}
+
+func (c *Sys) ListAuth() (map[string]*AuthMount, error) {
+	return c.ListAuthWithContext(context.Background())
+}
+
+func (c *Sys) ListAuthWithContext(ctx context.Context) (map[string]*AuthMount, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/auth")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	mounts := map[string]*AuthMount{}
+	err = mapstructure.Decode(secret.Data, &mounts)
+	if err != nil {
+		return nil, err
+	}
+
+	return mounts, nil
+}
+
+// DEPRECATED: Use EnableAuthWithOptions instead
+func (c *Sys) EnableAuth(path, authType, desc string) error {
+	return c.EnableAuthWithOptions(path, &EnableAuthOptions{
+		Type:        authType,
+		Description: desc,
+	})
+}
+
+func (c *Sys) EnableAuthWithOptions(path string, options *EnableAuthOptions) error {
+	return c.EnableAuthWithOptionsWithContext(context.Background(), path, options)
+}
+
+func (c *Sys) EnableAuthWithOptionsWithContext(ctx context.Context, path string, options *EnableAuthOptions) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, fmt.Sprintf("/v1/sys/auth/%s", path))
+	if err := r.SetJSONBody(options); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+func (c *Sys) DisableAuth(path string) error {
+	return c.DisableAuthWithContext(context.Background(), path)
+}
+
+func (c *Sys) DisableAuthWithContext(ctx context.Context, path string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, fmt.Sprintf("/v1/sys/auth/%s", path))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+// Rather than duplicate, we can use modern Go's type aliasing
+type (
+	EnableAuthOptions = MountInput
+	AuthConfigInput   = MountConfigInput
+	AuthMount         = MountOutput
+	AuthConfigOutput  = MountConfigOutput
+)
+
+```
+
+#### sys_capabilities.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) CapabilitiesSelf(path string) ([]string, error) {
+	return c.CapabilitiesSelfWithContext(context.Background(), path)
+}
+
+func (c *Sys) CapabilitiesSelfWithContext(ctx context.Context, path string) ([]string, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	return c.CapabilitiesWithContext(ctx, c.c.Token(), path)
+}
+
+func (c *Sys) Capabilities(token, path string) ([]string, error) {
+	return c.CapabilitiesWithContext(context.Background(), token, path)
+}
+
+func (c *Sys) CapabilitiesWithContext(ctx context.Context, token, path string) ([]string, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]string{
+		"token": token,
+		"path":  path,
+	}
+
+	reqPath := "/v1/sys/capabilities"
+	if token == c.c.Token() {
+		reqPath = fmt.Sprintf("%s-self", reqPath)
+	}
+
+	r := c.c.NewRequest(http.MethodPost, reqPath)
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var res []string
+	err = mapstructure.Decode(secret.Data[path], &res)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(res) == 0 {
+		_, ok := secret.Data["capabilities"]
+		if ok {
+			err = mapstructure.Decode(secret.Data["capabilities"], &res)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return res, nil
+}
+
+func (c *Sys) CapabilitiesAccessor(accessor, path string) ([]string, error) {
+	return c.CapabilitiesAccessorWithContext(context.Background(), accessor, path)
+}
+
+func (c *Sys) CapabilitiesAccessorWithContext(ctx context.Context, accessor, path string) ([]string, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]string{
+		"accessor": accessor,
+		"path":     path,
+	}
+
+	reqPath := "/v1/sys/capabilities-accessor"
+
+	r := c.c.NewRequest(http.MethodPost, reqPath)
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var res []string
+	err = mapstructure.Decode(secret.Data[path], &res)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(res) == 0 {
+		_, ok := secret.Data["capabilities"]
+		if ok {
+			err = mapstructure.Decode(secret.Data["capabilities"], &res)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return res, nil
+}
+
+```
+
+#### sys_config_cors.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) CORSStatus() (*CORSResponse, error) {
+	return c.CORSStatusWithContext(context.Background())
+}
+
+func (c *Sys) CORSStatusWithContext(ctx context.Context) (*CORSResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/config/cors")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result CORSResponse
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+func (c *Sys) ConfigureCORS(req *CORSRequest) error {
+	return c.ConfigureCORSWithContext(context.Background(), req)
+}
+
+func (c *Sys) ConfigureCORSWithContext(ctx context.Context, req *CORSRequest) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/config/cors")
+	if err := r.SetJSONBody(req); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) DisableCORS() error {
+	return c.DisableCORSWithContext(context.Background())
+}
+
+func (c *Sys) DisableCORSWithContext(ctx context.Context) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, "/v1/sys/config/cors")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+type CORSRequest struct {
+	AllowedOrigins []string `json:"allowed_origins" mapstructure:"allowed_origins"`
+	AllowedHeaders []string `json:"allowed_headers" mapstructure:"allowed_headers"`
+	Enabled        bool     `json:"enabled" mapstructure:"enabled"`
+}
+
+type CORSResponse struct {
+	AllowedOrigins []string `json:"allowed_origins" mapstructure:"allowed_origins"`
+	AllowedHeaders []string `json:"allowed_headers" mapstructure:"allowed_headers"`
+	Enabled        bool     `json:"enabled" mapstructure:"enabled"`
+}
+
+```
+
+#### sys_generate_root.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"net/http"
+)
+
+func (c *Sys) GenerateRootStatus() (*GenerateRootStatusResponse, error) {
+	return c.GenerateRootStatusWithContext(context.Background())
+}
+
+func (c *Sys) GenerateDROperationTokenStatus() (*GenerateRootStatusResponse, error) {
+	return c.GenerateDROperationTokenStatusWithContext(context.Background())
+}
+
+func (c *Sys) GenerateRecoveryOperationTokenStatus() (*GenerateRootStatusResponse, error) {
+	return c.GenerateRecoveryOperationTokenStatusWithContext(context.Background())
+}
+
+func (c *Sys) GenerateRootStatusWithContext(ctx context.Context) (*GenerateRootStatusResponse, error) {
+	return c.generateRootStatusCommonWithContext(ctx, "/v1/sys/generate-root/attempt")
+}
+
+func (c *Sys) GenerateDROperationTokenStatusWithContext(ctx context.Context) (*GenerateRootStatusResponse, error) {
+	return c.generateRootStatusCommonWithContext(ctx, "/v1/sys/replication/dr/secondary/generate-operation-token/attempt")
+}
+
+func (c *Sys) GenerateRecoveryOperationTokenStatusWithContext(ctx context.Context) (*GenerateRootStatusResponse, error) {
+	return c.generateRootStatusCommonWithContext(ctx, "/v1/sys/generate-recovery-token/attempt")
+}
+
+func (c *Sys) generateRootStatusCommonWithContext(ctx context.Context, path string) (*GenerateRootStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, path)
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result GenerateRootStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) GenerateRootInit(otp, pgpKey string) (*GenerateRootStatusResponse, error) {
+	return c.GenerateRootInitWithContext(context.Background(), otp, pgpKey)
+}
+
+func (c *Sys) GenerateDROperationTokenInit(otp, pgpKey string) (*GenerateRootStatusResponse, error) {
+	return c.GenerateDROperationTokenInitWithContext(context.Background(), otp, pgpKey)
+}
+
+func (c *Sys) GenerateRecoveryOperationTokenInit(otp, pgpKey string) (*GenerateRootStatusResponse, error) {
+	return c.GenerateRecoveryOperationTokenInitWithContext(context.Background(), otp, pgpKey)
+}
+
+func (c *Sys) GenerateRootInitWithContext(ctx context.Context, otp, pgpKey string) (*GenerateRootStatusResponse, error) {
+	return c.generateRootInitCommonWithContext(ctx, "/v1/sys/generate-root/attempt", otp, pgpKey)
+}
+
+func (c *Sys) GenerateDROperationTokenInitWithContext(ctx context.Context, otp, pgpKey string) (*GenerateRootStatusResponse, error) {
+	return c.generateRootInitCommonWithContext(ctx, "/v1/sys/replication/dr/secondary/generate-operation-token/attempt", otp, pgpKey)
+}
+
+func (c *Sys) GenerateRecoveryOperationTokenInitWithContext(ctx context.Context, otp, pgpKey string) (*GenerateRootStatusResponse, error) {
+	return c.generateRootInitCommonWithContext(ctx, "/v1/sys/generate-recovery-token/attempt", otp, pgpKey)
+}
+
+func (c *Sys) generateRootInitCommonWithContext(ctx context.Context, path, otp, pgpKey string) (*GenerateRootStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"otp":     otp,
+		"pgp_key": pgpKey,
+	}
+
+	r := c.c.NewRequest(http.MethodPut, path)
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result GenerateRootStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) GenerateRootCancel() error {
+	return c.GenerateRootCancelWithContext(context.Background())
+}
+
+func (c *Sys) GenerateDROperationTokenCancel() error {
+	return c.GenerateDROperationTokenCancelWithContext(context.Background())
+}
+
+func (c *Sys) GenerateRecoveryOperationTokenCancel() error {
+	return c.GenerateRecoveryOperationTokenCancelWithContext(context.Background())
+}
+
+func (c *Sys) GenerateRootCancelWithContext(ctx context.Context) error {
+	return c.generateRootCancelCommonWithContext(ctx, "/v1/sys/generate-root/attempt")
+}
+
+func (c *Sys) GenerateDROperationTokenCancelWithContext(ctx context.Context) error {
+	return c.generateRootCancelCommonWithContext(ctx, "/v1/sys/replication/dr/secondary/generate-operation-token/attempt")
+}
+
+func (c *Sys) GenerateRecoveryOperationTokenCancelWithContext(ctx context.Context) error {
+	return c.generateRootCancelCommonWithContext(ctx, "/v1/sys/generate-recovery-token/attempt")
+}
+
+func (c *Sys) generateRootCancelCommonWithContext(ctx context.Context, path string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, path)
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) GenerateRootUpdate(shard, nonce string) (*GenerateRootStatusResponse, error) {
+	return c.GenerateRootUpdateWithContext(context.Background(), shard, nonce)
+}
+
+func (c *Sys) GenerateDROperationTokenUpdate(shard, nonce string) (*GenerateRootStatusResponse, error) {
+	return c.GenerateDROperationTokenUpdateWithContext(context.Background(), shard, nonce)
+}
+
+func (c *Sys) GenerateRecoveryOperationTokenUpdate(shard, nonce string) (*GenerateRootStatusResponse, error) {
+	return c.GenerateRecoveryOperationTokenUpdateWithContext(context.Background(), shard, nonce)
+}
+
+func (c *Sys) GenerateRootUpdateWithContext(ctx context.Context, shard, nonce string) (*GenerateRootStatusResponse, error) {
+	return c.generateRootUpdateCommonWithContext(ctx, "/v1/sys/generate-root/update", shard, nonce)
+}
+
+func (c *Sys) GenerateDROperationTokenUpdateWithContext(ctx context.Context, shard, nonce string) (*GenerateRootStatusResponse, error) {
+	return c.generateRootUpdateCommonWithContext(ctx, "/v1/sys/replication/dr/secondary/generate-operation-token/update", shard, nonce)
+}
+
+func (c *Sys) GenerateRecoveryOperationTokenUpdateWithContext(ctx context.Context, shard, nonce string) (*GenerateRootStatusResponse, error) {
+	return c.generateRootUpdateCommonWithContext(ctx, "/v1/sys/generate-recovery-token/update", shard, nonce)
+}
+
+func (c *Sys) generateRootUpdateCommonWithContext(ctx context.Context, path, shard, nonce string) (*GenerateRootStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"key":   shard,
+		"nonce": nonce,
+	}
+
+	r := c.c.NewRequest(http.MethodPut, path)
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result GenerateRootStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+type GenerateRootStatusResponse struct {
+	Nonce            string `json:"nonce"`
+	Started          bool   `json:"started"`
+	Progress         int    `json:"progress"`
+	Required         int    `json:"required"`
+	Complete         bool   `json:"complete"`
+	EncodedToken     string `json:"encoded_token"`
+	EncodedRootToken string `json:"encoded_root_token"`
+	PGPFingerprint   string `json:"pgp_fingerprint"`
+	OTP              string `json:"otp"`
+	OTPLength        int    `json:"otp_length"`
+}
+
+```
+
+#### sys_hastatus.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"net/http"
+	"time"
+)
+
+func (c *Sys) HAStatus() (*HAStatusResponse, error) {
+	return c.HAStatusWithContext(context.Background())
+}
+
+func (c *Sys) HAStatusWithContext(ctx context.Context) (*HAStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/ha-status")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result HAStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+type HAStatusResponse struct {
+	Nodes []HANode
+}
+
+type HANode struct {
+	Hostname                          string     `json:"hostname"`
+	APIAddress                        string     `json:"api_address"`
+	ClusterAddress                    string     `json:"cluster_address"`
+	ActiveNode                        bool       `json:"active_node"`
+	LastEcho                          *time.Time `json:"last_echo"`
+	EchoDurationMillis                int64      `json:"echo_duration_ms"`
+	ClockSkewMillis                   int64      `json:"clock_skew_ms"`
+	Version                           string     `json:"version"`
+	UpgradeVersion                    string     `json:"upgrade_version,omitempty"`
+	RedundancyZone                    string     `json:"redundancy_zone,omitempty"`
+	ReplicationPrimaryCanaryAgeMillis int64      `json:"replication_primary_canary_age_ms"`
+}
+
+```
+
+#### sys_health.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"net/http"
+)
+
+func (c *Sys) Health() (*HealthResponse, error) {
+	return c.HealthWithContext(context.Background())
+}
+
+func (c *Sys) HealthWithContext(ctx context.Context) (*HealthResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/health")
+	// If the code is 400 or above it will automatically turn into an error,
+	// but the sys/health API defaults to returning 5xx when not sealed or
+	// inited, so we force this code to be something else so we parse correctly
+	r.Params.Add("uninitcode", "299")
+	r.Params.Add("sealedcode", "299")
+	r.Params.Add("standbycode", "299")
+	r.Params.Add("drsecondarycode", "299")
+	r.Params.Add("performancestandbycode", "299")
+	r.Params.Add("removedcode", "299")
+	r.Params.Add("haunhealthycode", "299")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result HealthResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+type HealthResponse struct {
+	Initialized                          bool   `json:"initialized"`
+	Sealed                               bool   `json:"sealed"`
+	Standby                              bool   `json:"standby"`
+	PerformanceStandby                   bool   `json:"performance_standby"`
+	ReplicationPerformanceMode           string `json:"replication_performance_mode"`
+	ReplicationDRMode                    string `json:"replication_dr_mode"`
+	ServerTimeUTC                        int64  `json:"server_time_utc"`
+	Version                              string `json:"version"`
+	ClusterName                          string `json:"cluster_name,omitempty"`
+	ClusterID                            string `json:"cluster_id,omitempty"`
+	LastWAL                              uint64 `json:"last_wal,omitempty"`
+	Enterprise                           bool   `json:"enterprise"`
+	EchoDurationMillis                   int64  `json:"echo_duration_ms"`
+	ClockSkewMillis                      int64  `json:"clock_skew_ms"`
+	ReplicationPrimaryCanaryAgeMillis    int64  `json:"replication_primary_canary_age_ms"`
+	RemovedFromCluster                   *bool  `json:"removed_from_cluster,omitempty"`
+	HAConnectionHealthy                  *bool  `json:"ha_connection_healthy,omitempty"`
+	LastRequestForwardingHeartbeatMillis int64  `json:"last_request_forwarding_heartbeat_ms,omitempty"`
+}
+
+```
+
+#### sys_init.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"net/http"
+)
+
+func (c *Sys) InitStatus() (bool, error) {
+	return c.InitStatusWithContext(context.Background())
+}
+
+func (c *Sys) InitStatusWithContext(ctx context.Context) (bool, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/init")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	var result InitStatusResponse
+	err = resp.DecodeJSON(&result)
+	return result.Initialized, err
+}
+
+func (c *Sys) Init(opts *InitRequest) (*InitResponse, error) {
+	return c.InitWithContext(context.Background(), opts)
+}
+
+func (c *Sys) InitWithContext(ctx context.Context, opts *InitRequest) (*InitResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/init")
+	if err := r.SetJSONBody(opts); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result InitResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+type InitRequest struct {
+	SecretShares      int      `json:"secret_shares"`
+	SecretThreshold   int      `json:"secret_threshold"`
+	StoredShares      int      `json:"stored_shares"`
+	PGPKeys           []string `json:"pgp_keys"`
+	RecoveryShares    int      `json:"recovery_shares"`
+	RecoveryThreshold int      `json:"recovery_threshold"`
+	RecoveryPGPKeys   []string `json:"recovery_pgp_keys"`
+	RootTokenPGPKey   string   `json:"root_token_pgp_key"`
+}
+
+type InitStatusResponse struct {
+	Initialized bool
+}
+
+type InitResponse struct {
+	Keys            []string `json:"keys"`
+	KeysB64         []string `json:"keys_base64"`
+	RecoveryKeys    []string `json:"recovery_keys"`
+	RecoveryKeysB64 []string `json:"recovery_keys_base64"`
+	RootToken       string   `json:"root_token"`
+}
+
+```
+
+#### sys_leader.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"net/http"
+	"time"
+)
+
+func (c *Sys) Leader() (*LeaderResponse, error) {
+	return c.LeaderWithContext(context.Background())
+}
+
+func (c *Sys) LeaderWithContext(ctx context.Context) (*LeaderResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/leader")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result LeaderResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+type LeaderResponse struct {
+	HAEnabled                bool      `json:"ha_enabled"`
+	IsSelf                   bool      `json:"is_self"`
+	ActiveTime               time.Time `json:"active_time"`
+	LeaderAddress            string    `json:"leader_address"`
+	LeaderClusterAddress     string    `json:"leader_cluster_address"`
+	PerfStandby              bool      `json:"performance_standby"`
+	PerfStandbyLastRemoteWAL uint64    `json:"performance_standby_last_remote_wal"`
+	LastWAL                  uint64    `json:"last_wal"`
+	RaftCommittedIndex       uint64    `json:"raft_committed_index,omitempty"`
+	RaftAppliedIndex         uint64    `json:"raft_applied_index,omitempty"`
+}
+
+```
+
+#### sys_leases.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+)
+
+func (c *Sys) Renew(id string, increment int) (*Secret, error) {
+	return c.RenewWithContext(context.Background(), id, increment)
+}
+
+func (c *Sys) RenewWithContext(ctx context.Context, id string, increment int) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/leases/renew")
+
+	body := map[string]interface{}{
+		"increment": increment,
+		"lease_id":  id,
+	}
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *Sys) Lookup(id string) (*Secret, error) {
+	return c.LookupWithContext(context.Background(), id)
+}
+
+func (c *Sys) LookupWithContext(ctx context.Context, id string) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/leases/lookup")
+
+	body := map[string]interface{}{
+		"lease_id": id,
+	}
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+func (c *Sys) Revoke(id string) error {
+	return c.RevokeWithContext(context.Background(), id)
+}
+
+func (c *Sys) RevokeWithContext(ctx context.Context, id string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/leases/revoke")
+	body := map[string]interface{}{
+		"lease_id": id,
+	}
+	if err := r.SetJSONBody(body); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) RevokePrefix(id string) error {
+	return c.RevokePrefixWithContext(context.Background(), id)
+}
+
+func (c *Sys) RevokePrefixWithContext(ctx context.Context, id string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/leases/revoke-prefix/"+id)
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) RevokeForce(id string) error {
+	return c.RevokeForceWithContext(context.Background(), id)
+}
+
+func (c *Sys) RevokeForceWithContext(ctx context.Context, id string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/leases/revoke-force/"+id)
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) RevokeWithOptions(opts *RevokeOptions) error {
+	return c.RevokeWithOptionsWithContext(context.Background(), opts)
+}
+
+func (c *Sys) RevokeWithOptionsWithContext(ctx context.Context, opts *RevokeOptions) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	if opts == nil {
+		return errors.New("nil options provided")
+	}
+
+	// Construct path
+	path := "/v1/sys/leases/revoke/"
+	switch {
+	case opts.Force:
+		path = "/v1/sys/leases/revoke-force/"
+	case opts.Prefix:
+		path = "/v1/sys/leases/revoke-prefix/"
+	}
+	path += opts.LeaseID
+
+	r := c.c.NewRequest(http.MethodPut, path)
+	if !opts.Force {
+		body := map[string]interface{}{
+			"sync": opts.Sync,
+		}
+		if err := r.SetJSONBody(body); err != nil {
+			return err
+		}
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+type RevokeOptions struct {
+	LeaseID string
+	Force   bool
+	Prefix  bool
+	Sync    bool
+}
+
+```
+
+#### sys_mfa.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+)
+
+func (c *Sys) MFAValidate(requestID string, payload map[string]interface{}) (*Secret, error) {
+	return c.MFAValidateWithContext(context.Background(), requestID, payload)
+}
+
+func (c *Sys) MFAValidateWithContext(ctx context.Context, requestID string, payload map[string]interface{}) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"mfa_request_id": requestID,
+		"mfa_payload":    payload,
+	}
+
+	r := c.c.NewRequest(http.MethodPost, fmt.Sprintf("/v1/sys/mfa/validate"))
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, fmt.Errorf("failed to set request body: %w", err)
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse secret from response: %w", err)
+	}
+
+	if secret == nil {
+		return nil, fmt.Errorf("data from server response is empty")
+	}
+
+	return secret, nil
+}
+
+```
+
+#### sys_monitor.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"net/http"
+)
+
+// Monitor returns a channel that outputs strings containing the log messages
+// coming from the server.
+func (c *Sys) Monitor(ctx context.Context, logLevel string, logFormat string) (chan string, error) {
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/monitor")
+
+	if logLevel == "" {
+		r.Params.Add("log_level", "info")
+	} else {
+		r.Params.Add("log_level", logLevel)
+	}
+
+	if logFormat == "" {
+		r.Params.Add("log_format", "standard")
+	} else {
+		r.Params.Add("log_format", logFormat)
+	}
+
+	resp, err := c.c.RawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+
+	logCh := make(chan string, 64)
+
+	go func() {
+		scanner := bufio.NewScanner(resp.Body)
+		droppedCount := 0
+
+		defer close(logCh)
+		defer resp.Body.Close()
+
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+
+			if !scanner.Scan() {
+				return
+			}
+
+			logMessage := scanner.Text()
+
+			if droppedCount > 0 {
+				select {
+				case logCh <- fmt.Sprintf("Monitor dropped %d logs during monitor request\n", droppedCount):
+					droppedCount = 0
+				default:
+					droppedCount++
+					continue
+				}
+			}
+
+			select {
+			case logCh <- logMessage:
+			default:
+				droppedCount++
+			}
+		}
+	}()
+
+	return logCh, nil
+}
+
+```
+
+#### sys_mounts.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) GetMount(path string) (*MountOutput, error) {
+	return c.GetMountWithContext(context.Background(), path)
+}
+
+func (c *Sys) GetMountWithContext(ctx context.Context, path string) (*MountOutput, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, fmt.Sprintf("/v1/sys/mounts/%s", path))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	mount := MountOutput{}
+	err = mapstructure.Decode(secret.Data, &mount)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mount, nil
+}
+
+func (c *Sys) ListMounts() (map[string]*MountOutput, error) {
+	return c.ListMountsWithContext(context.Background())
+}
+
+func (c *Sys) ListMountsWithContext(ctx context.Context) (map[string]*MountOutput, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/mounts")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	mounts := map[string]*MountOutput{}
+	err = mapstructure.Decode(secret.Data, &mounts)
+	if err != nil {
+		return nil, err
+	}
+
+	return mounts, nil
+}
+
+func (c *Sys) Mount(path string, mountInfo *MountInput) error {
+	return c.MountWithContext(context.Background(), path, mountInfo)
+}
+
+func (c *Sys) MountWithContext(ctx context.Context, path string, mountInfo *MountInput) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, fmt.Sprintf("/v1/sys/mounts/%s", path))
+	if err := r.SetJSONBody(mountInfo); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+func (c *Sys) Unmount(path string) error {
+	return c.UnmountWithContext(context.Background(), path)
+}
+
+func (c *Sys) UnmountWithContext(ctx context.Context, path string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, fmt.Sprintf("/v1/sys/mounts/%s", path))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+// Remount wraps RemountWithContext using context.Background.
+func (c *Sys) Remount(from, to string) error {
+	return c.RemountWithContext(context.Background(), from, to)
+}
+
+// RemountWithContext kicks off a remount operation, polls the status endpoint using
+// the migration ID till either success or failure state is observed
+func (c *Sys) RemountWithContext(ctx context.Context, from, to string) error {
+	remountResp, err := c.StartRemountWithContext(ctx, from, to)
+	if err != nil {
+		return err
+	}
+
+	for {
+		remountStatusResp, err := c.RemountStatusWithContext(ctx, remountResp.MigrationID)
+		if err != nil {
+			return err
+		}
+		if remountStatusResp.MigrationInfo.MigrationStatus == "success" {
+			return nil
+		}
+		if remountStatusResp.MigrationInfo.MigrationStatus == "failure" {
+			return fmt.Errorf("Failure! Error encountered moving mount %s to %s, with migration ID %s", from, to, remountResp.MigrationID)
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// StartRemount wraps StartRemountWithContext using context.Background.
+func (c *Sys) StartRemount(from, to string) (*MountMigrationOutput, error) {
+	return c.StartRemountWithContext(context.Background(), from, to)
+}
+
+// StartRemountWithContext kicks off a mount migration and returns a response with the migration ID
+func (c *Sys) StartRemountWithContext(ctx context.Context, from, to string) (*MountMigrationOutput, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"from": from,
+		"to":   to,
+	}
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/sys/remount")
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result MountMigrationOutput
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+// RemountStatus wraps RemountStatusWithContext using context.Background.
+func (c *Sys) RemountStatus(migrationID string) (*MountMigrationStatusOutput, error) {
+	return c.RemountStatusWithContext(context.Background(), migrationID)
+}
+
+// RemountStatusWithContext checks the status of a mount migration operation with the provided ID
+func (c *Sys) RemountStatusWithContext(ctx context.Context, migrationID string) (*MountMigrationStatusOutput, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, fmt.Sprintf("/v1/sys/remount/status/%s", migrationID))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result MountMigrationStatusOutput
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+// TuneMountConfigInput is a pointer-only version of MountConfigInput.  This allows proper update calls where only
+// Values provided by the user are changed, but values can be changed to an empty (but non-nil) value.
+type TuneMountConfigInput struct {
+	Options                    *map[string]string          `json:"options,omitempty" mapstructure:"options"`
+	DefaultLeaseTTL            *string                     `json:"default_lease_ttl,omitempty" mapstructure:"default_lease_ttl"`
+	Description                *string                     `json:"description,omitempty" mapstructure:"description"`
+	MaxLeaseTTL                *string                     `json:"max_lease_ttl,omitempty" mapstructure:"max_lease_ttl"`
+	ForceNoCache               *bool                       `json:"force_no_cache,omitempty" mapstructure:"force_no_cache"`
+	AuditNonHMACRequestKeys    *[]string                   `json:"audit_non_hmac_request_keys,omitempty" mapstructure:"audit_non_hmac_request_keys"`
+	AuditNonHMACResponseKeys   *[]string                   `json:"audit_non_hmac_response_keys,omitempty" mapstructure:"audit_non_hmac_response_keys"`
+	ListingVisibility          *string                     `json:"listing_visibility,omitempty" mapstructure:"listing_visibility"`
+	PassthroughRequestHeaders  *[]string                   `json:"passthrough_request_headers,omitempty" mapstructure:"passthrough_request_headers"`
+	AllowedResponseHeaders     *[]string                   `json:"allowed_response_headers,omitempty" mapstructure:"allowed_response_headers"`
+	TokenType                  *string                     `json:"token_type,omitempty" mapstructure:"token_type"`
+	AllowedManagedKeys         *[]string                   `json:"allowed_managed_keys,omitempty" mapstructure:"allowed_managed_keys"`
+	PluginVersion              *string                     `json:"plugin_version,omitempty"`
+	UserLockoutConfig          *TuneUserLockoutConfigInput `json:"user_lockout_config,omitempty"`
+	DelegatedAuthAccessors     *[]string                   `json:"delegated_auth_accessors,omitempty" mapstructure:"delegated_auth_accessors"`
+	IdentityTokenKey           *string                     `json:"identity_token_key,omitempty" mapstructure:"identity_token_key"`
+	TrimRequestTrailingSlashes *bool                       `json:"trim_request_trailing_slashes,omitempty" mapstructure:"trim_request_trailing_slashes"`
+	// Deprecated: This field will always be blank for newer server responses.
+	PluginName *string `json:"plugin_name,omitempty" mapstructure:"plugin_name"`
+}
+
+type TuneUserLockoutConfigInput struct {
+	LockoutThreshold            *string `json:"lockout_threshold,omitempty" structs:"lockout_threshold" mapstructure:"lockout_threshold"`
+	LockoutDuration             *string `json:"lockout_duration,omitempty" structs:"lockout_duration" mapstructure:"lockout_duration"`
+	LockoutCounterResetDuration *string `json:"lockout_counter_reset_duration,omitempty" structs:"lockout_counter_reset_duration" mapstructure:"lockout_counter_reset_duration"`
+	DisableLockout              *bool   `json:"lockout_disable,omitempty" structs:"lockout_disable" mapstructure:"lockout_disable"`
+}
+
+func (c *Sys) TuneMountAllowNil(path string, config TuneMountConfigInput) error {
+	return c.TuneMountAllowNilWithContext(context.Background(), path, config)
+}
+
+// Deprecated: newer functionality should use TuneMountAllowNil instead so that parameters can be set to the nil value
+func (c *Sys) TuneMount(path string, config MountConfigInput) error {
+	return c.TuneMountWithContext(context.Background(), path, config)
+}
+
+func (c *Sys) TuneMountAllowNilWithContext(ctx context.Context, path string, config TuneMountConfigInput) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, fmt.Sprintf("/v1/sys/mounts/%s/tune", path))
+	if err := r.SetJSONBody(config); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+// Deprecated: newer functionality should use TuneMountAllowNilWithContext instead, so that configuration can be set to
+// a nil value.
+func (c *Sys) TuneMountWithContext(ctx context.Context, path string, config MountConfigInput) error {
+	tuneConfig := TuneMountConfigInput{}
+
+	tuneConfig.Options = &config.Options                 // Not omitted if empty
+	tuneConfig.DefaultLeaseTTL = &config.DefaultLeaseTTL // Not omitted if empty
+	tuneConfig.Description = config.Description          // Already a pointer value
+	tuneConfig.MaxLeaseTTL = &config.MaxLeaseTTL         // Not omitted if empty
+	tuneConfig.ForceNoCache = &config.ForceNoCache       // Not omitted if empty
+
+	if len(config.AuditNonHMACRequestKeys) != 0 { // Because omitempty in the JSON
+		tuneConfig.AuditNonHMACRequestKeys = &config.AuditNonHMACRequestKeys
+	}
+
+	if len(config.AuditNonHMACResponseKeys) != 0 { // Because omitempty in the JSON
+		tuneConfig.AuditNonHMACResponseKeys = &config.AuditNonHMACResponseKeys
+	}
+
+	if config.ListingVisibility != "" { // Because omitempty in the JSON
+		tuneConfig.ListingVisibility = &config.ListingVisibility
+	}
+
+	if len(config.PassthroughRequestHeaders) != 0 { // Because omitempty in the JSON
+		tuneConfig.PassthroughRequestHeaders = &config.PassthroughRequestHeaders
+	}
+
+	if len(config.AllowedResponseHeaders) != 0 { // Because omitempty in the JSON
+		tuneConfig.AllowedResponseHeaders = &config.AllowedResponseHeaders
+	}
+
+	if config.TokenType != "" { // Because omitempty in the JSON
+		tuneConfig.TokenType = &config.TokenType
+	}
+
+	if len(config.AllowedManagedKeys) != 0 { // Because omitempty in the JSON
+		tuneConfig.AllowedManagedKeys = &config.AllowedManagedKeys
+	}
+
+	if config.PluginVersion != "" { // Because omitempty in the JSON
+		tuneConfig.PluginVersion = &config.PluginVersion
+	}
+
+	if config.UserLockoutConfig != nil {
+		userLockoutConfig := TuneUserLockoutConfigInput{}
+		if config.UserLockoutConfig.LockoutDuration != "" {
+			userLockoutConfig.LockoutDuration = &config.UserLockoutConfig.LockoutDuration
+		}
+		if config.UserLockoutConfig.LockoutCounterResetDuration != "" {
+			userLockoutConfig.LockoutCounterResetDuration = &config.UserLockoutConfig.LockoutCounterResetDuration
+		}
+		if config.UserLockoutConfig.LockoutThreshold != "" {
+			userLockoutConfig.LockoutThreshold = &config.UserLockoutConfig.LockoutThreshold
+		}
+		if config.UserLockoutConfig.DisableLockout != nil {
+			userLockoutConfig.DisableLockout = config.UserLockoutConfig.DisableLockout
+		}
+		tuneConfig.UserLockoutConfig = &userLockoutConfig
+	}
+
+	if len(config.DelegatedAuthAccessors) != 0 { // Because omitempty in the JSON
+		tuneConfig.DelegatedAuthAccessors = &config.DelegatedAuthAccessors
+	}
+
+	if config.IdentityTokenKey != "" { // Because omitempty in the JSON
+		tuneConfig.IdentityTokenKey = &config.IdentityTokenKey
+	}
+
+	tuneConfig.TrimRequestTrailingSlashes = config.TrimRequestTrailingSlashes // Already a pointer despite being omitempty
+
+	if config.PluginName != "" { // Because omitempty in the JSON
+		tuneConfig.PluginName = &config.PluginName
+	}
+
+	return c.TuneMountAllowNilWithContext(ctx, path, tuneConfig)
+}
+
+func (c *Sys) MountConfig(path string) (*MountConfigOutput, error) {
+	return c.MountConfigWithContext(context.Background(), path)
+}
+
+func (c *Sys) MountConfigWithContext(ctx context.Context, path string) (*MountConfigOutput, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, fmt.Sprintf("/v1/sys/mounts/%s/tune", path))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result MountConfigOutput
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+type MountInput struct {
+	Type                  string            `json:"type"`
+	Description           string            `json:"description"`
+	Config                MountConfigInput  `json:"config"`
+	Local                 bool              `json:"local"`
+	SealWrap              bool              `json:"seal_wrap" mapstructure:"seal_wrap"`
+	ExternalEntropyAccess bool              `json:"external_entropy_access" mapstructure:"external_entropy_access"`
+	Options               map[string]string `json:"options"`
+
+	// Deprecated: Newer server responses should be returning this information in the
+	// Type field (json: "type") instead.
+	PluginName string `json:"plugin_name,omitempty"`
+}
+
+type MountConfigInput struct {
+	Options                    map[string]string       `json:"options" mapstructure:"options"`
+	DefaultLeaseTTL            string                  `json:"default_lease_ttl" mapstructure:"default_lease_ttl"`
+	Description                *string                 `json:"description,omitempty" mapstructure:"description"`
+	MaxLeaseTTL                string                  `json:"max_lease_ttl" mapstructure:"max_lease_ttl"`
+	ForceNoCache               bool                    `json:"force_no_cache" mapstructure:"force_no_cache"`
+	AuditNonHMACRequestKeys    []string                `json:"audit_non_hmac_request_keys,omitempty" mapstructure:"audit_non_hmac_request_keys"`
+	AuditNonHMACResponseKeys   []string                `json:"audit_non_hmac_response_keys,omitempty" mapstructure:"audit_non_hmac_response_keys"`
+	ListingVisibility          string                  `json:"listing_visibility,omitempty" mapstructure:"listing_visibility"`
+	PassthroughRequestHeaders  []string                `json:"passthrough_request_headers,omitempty" mapstructure:"passthrough_request_headers"`
+	AllowedResponseHeaders     []string                `json:"allowed_response_headers,omitempty" mapstructure:"allowed_response_headers"`
+	TokenType                  string                  `json:"token_type,omitempty" mapstructure:"token_type"`
+	AllowedManagedKeys         []string                `json:"allowed_managed_keys,omitempty" mapstructure:"allowed_managed_keys"`
+	PluginVersion              string                  `json:"plugin_version,omitempty"`
+	UserLockoutConfig          *UserLockoutConfigInput `json:"user_lockout_config,omitempty"`
+	DelegatedAuthAccessors     []string                `json:"delegated_auth_accessors,omitempty" mapstructure:"delegated_auth_accessors"`
+	IdentityTokenKey           string                  `json:"identity_token_key,omitempty" mapstructure:"identity_token_key"`
+	TrimRequestTrailingSlashes *bool                   `json:"trim_request_trailing_slashes,omitempty" mapstructure:"trim_request_trailing_slashes"`
+	// Deprecated: This field will always be blank for newer server responses.
+	PluginName string `json:"plugin_name,omitempty" mapstructure:"plugin_name"`
+}
+
+type MountOutput struct {
+	UUID                  string            `json:"uuid"`
+	Type                  string            `json:"type"`
+	Description           string            `json:"description"`
+	Accessor              string            `json:"accessor"`
+	Config                MountConfigOutput `json:"config"`
+	Options               map[string]string `json:"options"`
+	Local                 bool              `json:"local"`
+	SealWrap              bool              `json:"seal_wrap" mapstructure:"seal_wrap"`
+	ExternalEntropyAccess bool              `json:"external_entropy_access" mapstructure:"external_entropy_access"`
+	PluginVersion         string            `json:"plugin_version" mapstructure:"plugin_version"`
+	RunningVersion        string            `json:"running_plugin_version" mapstructure:"running_plugin_version"`
+	RunningSha256         string            `json:"running_sha256" mapstructure:"running_sha256"`
+	DeprecationStatus     string            `json:"deprecation_status" mapstructure:"deprecation_status"`
+}
+
+type MountConfigOutput struct {
+	DefaultLeaseTTL            int                      `json:"default_lease_ttl" mapstructure:"default_lease_ttl"`
+	MaxLeaseTTL                int                      `json:"max_lease_ttl" mapstructure:"max_lease_ttl"`
+	ForceNoCache               bool                     `json:"force_no_cache" mapstructure:"force_no_cache"`
+	AuditNonHMACRequestKeys    []string                 `json:"audit_non_hmac_request_keys,omitempty" mapstructure:"audit_non_hmac_request_keys"`
+	AuditNonHMACResponseKeys   []string                 `json:"audit_non_hmac_response_keys,omitempty" mapstructure:"audit_non_hmac_response_keys"`
+	ListingVisibility          string                   `json:"listing_visibility,omitempty" mapstructure:"listing_visibility"`
+	PassthroughRequestHeaders  []string                 `json:"passthrough_request_headers,omitempty" mapstructure:"passthrough_request_headers"`
+	AllowedResponseHeaders     []string                 `json:"allowed_response_headers,omitempty" mapstructure:"allowed_response_headers"`
+	TokenType                  string                   `json:"token_type,omitempty" mapstructure:"token_type"`
+	AllowedManagedKeys         []string                 `json:"allowed_managed_keys,omitempty" mapstructure:"allowed_managed_keys"`
+	UserLockoutConfig          *UserLockoutConfigOutput `json:"user_lockout_config,omitempty"`
+	DelegatedAuthAccessors     []string                 `json:"delegated_auth_accessors,omitempty" mapstructure:"delegated_auth_accessors"`
+	IdentityTokenKey           string                   `json:"identity_token_key,omitempty" mapstructure:"identity_token_key"`
+	TrimRequestTrailingSlashes bool                     `json:"trim_request_trailing_slashes,omitempty" mapstructure:"trim_request_trailing_slashes"`
+
+	// Deprecated: This field will always be blank for newer server responses.
+	PluginName string `json:"plugin_name,omitempty" mapstructure:"plugin_name"`
+}
+
+type UserLockoutConfigInput struct {
+	LockoutThreshold            string `json:"lockout_threshold,omitempty" structs:"lockout_threshold" mapstructure:"lockout_threshold"`
+	LockoutDuration             string `json:"lockout_duration,omitempty" structs:"lockout_duration" mapstructure:"lockout_duration"`
+	LockoutCounterResetDuration string `json:"lockout_counter_reset_duration,omitempty" structs:"lockout_counter_reset_duration" mapstructure:"lockout_counter_reset_duration"`
+	DisableLockout              *bool  `json:"lockout_disable,omitempty" structs:"lockout_disable" mapstructure:"lockout_disable"`
+}
+
+type UserLockoutConfigOutput struct {
+	LockoutThreshold    uint  `json:"lockout_threshold,omitempty" structs:"lockout_threshold" mapstructure:"lockout_threshold"`
+	LockoutDuration     int   `json:"lockout_duration,omitempty" structs:"lockout_duration" mapstructure:"lockout_duration"`
+	LockoutCounterReset int   `json:"lockout_counter_reset,omitempty" structs:"lockout_counter_reset" mapstructure:"lockout_counter_reset"`
+	DisableLockout      *bool `json:"disable_lockout,omitempty" structs:"disable_lockout" mapstructure:"disable_lockout"`
+}
+
+type MountMigrationOutput struct {
+	MigrationID string `mapstructure:"migration_id"`
+}
+
+type MountMigrationStatusOutput struct {
+	MigrationID   string                    `mapstructure:"migration_id"`
+	MigrationInfo *MountMigrationStatusInfo `mapstructure:"migration_info"`
+}
+
+type MountMigrationStatusInfo struct {
+	SourceMount     string `mapstructure:"source_mount"`
+	TargetMount     string `mapstructure:"target_mount"`
+	MigrationStatus string `mapstructure:"status"`
+}
+
+```
+
+#### sys_plugins.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+// ListPluginsInput is used as input to the ListPlugins function.
+type ListPluginsInput struct {
+	// Type of the plugin. Required.
+	Type PluginType `json:"type"`
+}
+
+// ListPluginsResponse is the response from the ListPlugins call.
+type ListPluginsResponse struct {
+	// PluginsByType is the list of plugins by type.
+	PluginsByType map[PluginType][]string `json:"types"`
+
+	Details []PluginDetails `json:"details,omitempty"`
+
+	// Names is the list of names of the plugins.
+	//
+	// Deprecated: Newer server responses should be returning PluginsByType (json:
+	// "types") instead.
+	Names []string `json:"names"`
+}
+
+type PluginDetails struct {
+	Type              string `json:"type"`
+	Name              string `json:"name"`
+	OCIImage          string `json:"oci_image,omitempty" mapstructure:"oci_image"`
+	Runtime           string `json:"runtime,omitempty"`
+	Version           string `json:"version,omitempty"`
+	Builtin           bool   `json:"builtin"`
+	DeprecationStatus string `json:"deprecation_status,omitempty" mapstructure:"deprecation_status"`
+}
+
+// ListPlugins wraps ListPluginsWithContext using context.Background.
+func (c *Sys) ListPlugins(i *ListPluginsInput) (*ListPluginsResponse, error) {
+	return c.ListPluginsWithContext(context.Background(), i)
+}
+
+// ListPluginsWithContext lists all plugins in the catalog and returns their names as a
+// list of strings.
+func (c *Sys) ListPluginsWithContext(ctx context.Context, i *ListPluginsInput) (*ListPluginsResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	resp, err := c.c.rawRequestWithContext(ctx, c.c.NewRequest(http.MethodGet, "/v1/sys/plugins/catalog"))
+	if err != nil && resp == nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	result := &ListPluginsResponse{
+		PluginsByType: make(map[PluginType][]string),
+	}
+	switch i.Type {
+	case PluginTypeUnknown:
+		for _, pluginType := range PluginTypes {
+			pluginsRaw, ok := secret.Data[pluginType.String()]
+			if !ok {
+				continue
+			}
+
+			pluginsIfc, ok := pluginsRaw.([]interface{})
+			if !ok {
+				return nil, fmt.Errorf("unable to parse plugins for %q type", pluginType.String())
+			}
+
+			plugins := make([]string, 0, len(pluginsIfc))
+			for _, nameIfc := range pluginsIfc {
+				name, ok := nameIfc.(string)
+				if !ok {
+					continue
+				}
+				plugins = append(plugins, name)
+			}
+			result.PluginsByType[pluginType] = plugins
+		}
+	default:
+		pluginsRaw, ok := secret.Data[i.Type.String()]
+		if !ok {
+			return nil, fmt.Errorf("no %s entry in returned data", i.Type.String())
+		}
+
+		var respKeys []string
+		if err := mapstructure.Decode(pluginsRaw, &respKeys); err != nil {
+			return nil, err
+		}
+		result.PluginsByType[i.Type] = respKeys
+	}
+
+	if detailed, ok := secret.Data["detailed"]; ok {
+		var details []PluginDetails
+		if err := mapstructure.Decode(detailed, &details); err != nil {
+			return nil, err
+		}
+
+		switch i.Type {
+		case PluginTypeUnknown:
+			result.Details = details
+		default:
+			// Filter for just the queried type.
+			for _, entry := range details {
+				if entry.Type == i.Type.String() {
+					result.Details = append(result.Details, entry)
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// GetPluginInput is used as input to the GetPlugin function.
+type GetPluginInput struct {
+	Name string `json:"-"`
+
+	// Type of the plugin. Required.
+	Type    PluginType `json:"type"`
+	Version string     `json:"version"`
+}
+
+// GetPluginResponse is the response from the GetPlugin call.
+type GetPluginResponse struct {
+	Args              []string `json:"args"`
+	Builtin           bool     `json:"builtin"`
+	Command           string   `json:"command"`
+	Name              string   `json:"name"`
+	SHA256            string   `json:"sha256"`
+	OCIImage          string   `json:"oci_image,omitempty"`
+	Runtime           string   `json:"runtime,omitempty"`
+	DeprecationStatus string   `json:"deprecation_status,omitempty"`
+	Version           string   `json:"version,omitempty"`
+}
+
+// GetPlugin wraps GetPluginWithContext using context.Background.
+func (c *Sys) GetPlugin(i *GetPluginInput) (*GetPluginResponse, error) {
+	return c.GetPluginWithContext(context.Background(), i)
+}
+
+// GetPluginWithContext retrieves information about the plugin.
+func (c *Sys) GetPluginWithContext(ctx context.Context, i *GetPluginInput) (*GetPluginResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	path := catalogPathByType(i.Type, i.Name)
+	req := c.c.NewRequest(http.MethodGet, path)
+	if i.Version != "" {
+		req.Params.Set("version", i.Version)
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data *GetPluginResponse
+	}
+	err = resp.DecodeJSON(&result)
+	if err != nil {
+		return nil, err
+	}
+	return result.Data, err
+}
+
+// RegisterPluginInput is used as input to the RegisterPlugin function.
+type RegisterPluginInput struct {
+	// Name is the name of the plugin. Required.
+	Name string `json:"-"`
+
+	// Type of the plugin. Required.
+	Type PluginType `json:"type"`
+
+	// Args is the list of args to spawn the process with.
+	Args []string `json:"args,omitempty"`
+
+	// Command is the command to run.
+	Command string `json:"command,omitempty"`
+
+	// SHA256 is the shasum of the plugin.
+	SHA256 string `json:"sha256,omitempty"`
+
+	// Version is the optional version of the plugin being registered
+	Version string `json:"version,omitempty"`
+
+	// OCIImage specifies the container image to run as a plugin.
+	OCIImage string `json:"oci_image,omitempty"`
+
+	// Runtime is the Vault plugin runtime to use when running the plugin.
+	Runtime string `json:"runtime,omitempty"`
+
+	// Env specifies a list of key=value pairs to add to the plugin's environment
+	// variables.
+	Env []string `json:"env,omitempty"`
+
+	// Download the plugin when set to true. This is only applicable for external plugins.
+	Download bool `json:"download,omitempty"`
+}
+
+// RegisterPluginResponse is the response from the RegisterPluginDetailed call.
+type RegisterPluginResponse struct {
+	Warnings []string `json:"warnings"`
+}
+
+// RegisterPlugin wraps RegisterPluginWithContext using context.Background.
+// Deprecated: Use RegisterPluginDetailed instead.
+func (c *Sys) RegisterPlugin(i *RegisterPluginInput) error {
+	return c.RegisterPluginWithContext(context.Background(), i)
+}
+
+// RegisterPluginWithContext registers the plugin with the given information.
+// Deprecated: Use RegisterPluginWithContextDetailed instead.
+func (c *Sys) RegisterPluginWithContext(ctx context.Context, i *RegisterPluginInput) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	path := catalogPathByType(i.Type, i.Name)
+	req := c.c.NewRequest(http.MethodPut, path)
+
+	if err := req.SetJSONBody(i); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+// RegisterPluginDetailed wraps RegisterPluginWtihContextDetailed using context.Background.
+func (c *Sys) RegisterPluginDetailed(i *RegisterPluginInput) (*RegisterPluginResponse, error) {
+	return c.RegisterPluginWithContextDetailed(context.Background(), i)
+}
+
+// RegisterPluginWithContextDetailed registers the plugin with the given information.
+func (c *Sys) RegisterPluginWithContextDetailed(ctx context.Context, i *RegisterPluginInput) (*RegisterPluginResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	path := catalogPathByType(i.Type, i.Name)
+	req := c.c.NewRequest(http.MethodPut, path)
+
+	if err := req.SetJSONBody(i); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var registerResp RegisterPluginResponse
+	if resp != nil && resp.StatusCode != http.StatusNoContent {
+		if err := resp.DecodeJSON(&registerResp); err != nil {
+			return nil, err
+		}
+	}
+
+	// Filter out the `Endpoint replaced the value of these parameters with the values captured from the endpoint's path: [type]`
+	// warning because it is expected behavior from this function, as we set the type parameter in both the path and request body,
+	// and the warning informs us the path parameter takes precedence. However, this warning is not relevant for an end user so we
+	// omit it before returning to any client.
+	// TODO: This can likely be removed once https://hashicorp.atlassian.net/browse/VAULT-36722 is addressed.
+	var filteredWarnings []string
+	if len(registerResp.Warnings) > 0 {
+		filteredWarnings = make([]string, 0, len(registerResp.Warnings))
+	}
+
+	for _, warning := range registerResp.Warnings {
+		if !strings.Contains(warning, "Endpoint replaced the value of these parameters with the values captured from the endpoint's path") {
+			filteredWarnings = append(filteredWarnings, warning)
+		}
+	}
+	registerResp.Warnings = filteredWarnings
+
+	return &registerResp, err
+}
+
+// DeregisterPluginInput is used as input to the DeregisterPlugin function.
+type DeregisterPluginInput struct {
+	// Name is the name of the plugin. Required.
+	Name string `json:"-"`
+
+	// Type of the plugin. Required.
+	Type PluginType `json:"type"`
+
+	// Version of the plugin. Optional.
+	Version string `json:"version,omitempty"`
+}
+
+// DeregisterPlugin wraps DeregisterPluginWithContext using context.Background.
+func (c *Sys) DeregisterPlugin(i *DeregisterPluginInput) error {
+	return c.DeregisterPluginWithContext(context.Background(), i)
+}
+
+// DeregisterPluginWithContext removes the plugin with the given name from the plugin
+// catalog.
+func (c *Sys) DeregisterPluginWithContext(ctx context.Context, i *DeregisterPluginInput) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	path := catalogPathByType(i.Type, i.Name)
+	req := c.c.NewRequest(http.MethodDelete, path)
+	req.Params.Set("version", i.Version)
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+// RootReloadPluginInput is used as input to the RootReloadPlugin function.
+type RootReloadPluginInput struct {
+	Plugin string     `json:"-"`               // Plugin name, as registered in the plugin catalog.
+	Type   PluginType `json:"-"`               // Plugin type: auth, secret, or database.
+	Scope  string     `json:"scope,omitempty"` // Empty to reload on current node, "global" for all nodes.
+}
+
+// RootReloadPlugin reloads plugins, possibly returning reloadID for a global
+// scoped reload. This is only available in the root namespace, and reloads
+// plugins across all namespaces, whereas ReloadPlugin is available in all
+// namespaces but only reloads plugins in use in the request's namespace.
+func (c *Sys) RootReloadPlugin(ctx context.Context, i *RootReloadPluginInput) (string, error) {
+	path := fmt.Sprintf("/v1/sys/plugins/reload/%s/%s", i.Type.String(), i.Plugin)
+	return c.reloadPluginInternal(ctx, path, i, i.Scope == "global")
+}
+
+// ReloadPluginInput is used as input to the ReloadPlugin function.
+type ReloadPluginInput struct {
+	// Plugin is the name of the plugin to reload, as registered in the plugin catalog
+	Plugin string `json:"plugin"`
+
+	// Mounts is the array of string mount paths of the plugin backends to reload
+	Mounts []string `json:"mounts"`
+
+	// Scope is the scope of the plugin reload
+	Scope string `json:"scope"`
+}
+
+// ReloadPlugin wraps ReloadPluginWithContext using context.Background.
+func (c *Sys) ReloadPlugin(i *ReloadPluginInput) (string, error) {
+	return c.ReloadPluginWithContext(context.Background(), i)
+}
+
+// ReloadPluginWithContext reloads mounted plugin backends, possibly returning
+// reloadID for a cluster scoped reload. It is limited to reloading plugins that
+// are in use in the request's namespace. See RootReloadPlugin for an API that
+// can reload plugins across all namespaces.
+func (c *Sys) ReloadPluginWithContext(ctx context.Context, i *ReloadPluginInput) (string, error) {
+	return c.reloadPluginInternal(ctx, "/v1/sys/plugins/reload/backend", i, i.Scope == "global")
+}
+
+func (c *Sys) reloadPluginInternal(ctx context.Context, path string, body any, global bool) (string, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	req := c.c.NewRequest(http.MethodPut, path)
+
+	if err := req.SetJSONBody(body); err != nil {
+		return "", err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if global {
+		// Get the reload id
+		secret, parseErr := ParseSecret(resp.Body)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		if _, ok := secret.Data["reload_id"]; ok {
+			return secret.Data["reload_id"].(string), nil
+		}
+	}
+	return "", err
+}
+
+// ReloadStatus is the status of an individual node's plugin reload
+type ReloadStatus struct {
+	Timestamp time.Time `json:"timestamp" mapstructure:"timestamp"`
+	Error     string    `json:"error" mapstructure:"error"`
+}
+
+// ReloadStatusResponse is the combined response of all known completed plugin reloads
+type ReloadStatusResponse struct {
+	ReloadID string                   `mapstructure:"reload_id"`
+	Results  map[string]*ReloadStatus `mapstructure:"results"`
+}
+
+// ReloadPluginStatusInput is used as input to the ReloadStatusPlugin function.
+type ReloadPluginStatusInput struct {
+	// ReloadID is the ID of the reload operation
+	ReloadID string `json:"reload_id"`
+}
+
+// ReloadPluginStatus wraps ReloadPluginStatusWithContext using context.Background.
+func (c *Sys) ReloadPluginStatus(reloadStatusInput *ReloadPluginStatusInput) (*ReloadStatusResponse, error) {
+	return c.ReloadPluginStatusWithContext(context.Background(), reloadStatusInput)
+}
+
+// ReloadPluginStatusWithContext retrieves the status of a reload operation
+func (c *Sys) ReloadPluginStatusWithContext(ctx context.Context, reloadStatusInput *ReloadPluginStatusInput) (*ReloadStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	path := "/v1/sys/plugins/reload/backend/status"
+	req := c.c.NewRequest(http.MethodGet, path)
+	req.Params.Add("reload_id", reloadStatusInput.ReloadID)
+
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp != nil {
+		secret, parseErr := ParseSecret(resp.Body)
+		if parseErr != nil {
+			return nil, err
+		}
+
+		var r ReloadStatusResponse
+		d, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+			DecodeHook: mapstructure.StringToTimeHookFunc(time.RFC3339),
+			Result:     &r,
+		})
+		if err != nil {
+			return nil, err
+		}
+		err = d.Decode(secret.Data)
+		if err != nil {
+			return nil, err
+		}
+		return &r, nil
+	}
+	return nil, nil
+}
+
+// catalogPathByType is a helper to construct the proper API path by plugin type
+func catalogPathByType(pluginType PluginType, name string) string {
+	path := fmt.Sprintf("/v1/sys/plugins/catalog/%s/%s", pluginType, name)
+
+	// Backwards compat, if type is not provided then use old path
+	if pluginType == PluginTypeUnknown {
+		path = fmt.Sprintf("/v1/sys/plugins/catalog/%s", name)
+	}
+
+	return path
+}
+
+```
+
+#### sys_plugins_runtimes.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+// GetPluginRuntimeInput is used as input to the GetPluginRuntime function.
+type GetPluginRuntimeInput struct {
+	Name string `json:"-"`
+
+	// Type of the plugin runtime. Required.
+	Type PluginRuntimeType `json:"type"`
+}
+
+// GetPluginRuntimeResponse is the response from the GetPluginRuntime call.
+type GetPluginRuntimeResponse struct {
+	Type         string `json:"type"`
+	Name         string `json:"name"`
+	OCIRuntime   string `json:"oci_runtime"`
+	CgroupParent string `json:"cgroup_parent"`
+	CPU          int64  `json:"cpu_nanos"`
+	Memory       int64  `json:"memory_bytes"`
+}
+
+// GetPluginRuntime retrieves information about the plugin.
+func (c *Sys) GetPluginRuntime(ctx context.Context, i *GetPluginRuntimeInput) (*GetPluginRuntimeResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	path := pluginRuntimeCatalogPathByType(i.Type, i.Name)
+	req := c.c.NewRequest(http.MethodGet, path)
+
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data *GetPluginRuntimeResponse
+	}
+	err = resp.DecodeJSON(&result)
+	if err != nil {
+		return nil, err
+	}
+	return result.Data, err
+}
+
+// RegisterPluginRuntimeInput is used as input to the RegisterPluginRuntime function.
+type RegisterPluginRuntimeInput struct {
+	// Name is the name of the plugin. Required.
+	Name string `json:"-"`
+
+	// Type of the plugin. Required.
+	Type PluginRuntimeType `json:"type"`
+
+	OCIRuntime   string `json:"oci_runtime,omitempty"`
+	CgroupParent string `json:"cgroup_parent,omitempty"`
+	CPU          int64  `json:"cpu_nanos,omitempty"`
+	Memory       int64  `json:"memory_bytes,omitempty"`
+	Rootless     bool   `json:"rootless,omitempty"`
+}
+
+// RegisterPluginRuntime registers the plugin with the given information.
+func (c *Sys) RegisterPluginRuntime(ctx context.Context, i *RegisterPluginRuntimeInput) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	path := pluginRuntimeCatalogPathByType(i.Type, i.Name)
+	req := c.c.NewRequest(http.MethodPut, path)
+
+	if err := req.SetJSONBody(i); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+// DeregisterPluginRuntimeInput is used as input to the DeregisterPluginRuntime function.
+type DeregisterPluginRuntimeInput struct {
+	// Name is the name of the plugin runtime. Required.
+	Name string `json:"-"`
+
+	// Type of the plugin. Required.
+	Type PluginRuntimeType `json:"type"`
+}
+
+// DeregisterPluginRuntime removes the plugin with the given name from the plugin
+// catalog.
+func (c *Sys) DeregisterPluginRuntime(ctx context.Context, i *DeregisterPluginRuntimeInput) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	path := pluginRuntimeCatalogPathByType(i.Type, i.Name)
+	req := c.c.NewRequest(http.MethodDelete, path)
+	resp, err := c.c.rawRequestWithContext(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+type PluginRuntimeDetails struct {
+	Type         string `json:"type" mapstructure:"type"`
+	Name         string `json:"name" mapstructure:"name"`
+	OCIRuntime   string `json:"oci_runtime" mapstructure:"oci_runtime"`
+	CgroupParent string `json:"cgroup_parent" mapstructure:"cgroup_parent"`
+	CPU          int64  `json:"cpu_nanos" mapstructure:"cpu_nanos"`
+	Memory       int64  `json:"memory_bytes" mapstructure:"memory_bytes"`
+}
+
+// ListPluginRuntimesInput is used as input to the ListPluginRuntimes function.
+type ListPluginRuntimesInput struct {
+	// Type of the plugin. Required.
+	Type PluginRuntimeType `json:"type"`
+}
+
+// ListPluginRuntimesResponse is the response from the ListPluginRuntimes call.
+type ListPluginRuntimesResponse struct {
+	// RuntimesByType is the list of plugin runtimes by type.
+	Runtimes []PluginRuntimeDetails `json:"runtimes"`
+}
+
+// ListPluginRuntimes lists all plugin runtimes in the catalog and returns their names as a
+// list of strings.
+func (c *Sys) ListPluginRuntimes(ctx context.Context, input *ListPluginRuntimesInput) (*ListPluginRuntimesResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	if input != nil && input.Type == PluginRuntimeTypeUnsupported {
+		return nil, fmt.Errorf("%q is not a supported runtime type", input.Type.String())
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, c.c.NewRequest(http.MethodGet, "/v1/sys/plugins/runtimes/catalog"))
+	if err != nil && resp == nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+	if _, ok := secret.Data["runtimes"]; !ok {
+		return nil, fmt.Errorf("data from server response does not contain runtimes")
+	}
+
+	var runtimes []PluginRuntimeDetails
+	if err = mapstructure.Decode(secret.Data["runtimes"], &runtimes); err != nil {
+		return nil, err
+	}
+
+	// return all runtimes in the catalog
+	if input == nil {
+		return &ListPluginRuntimesResponse{Runtimes: runtimes}, nil
+	}
+
+	result := &ListPluginRuntimesResponse{
+		Runtimes: []PluginRuntimeDetails{},
+	}
+	for _, runtime := range runtimes {
+		if runtime.Type == input.Type.String() {
+			result.Runtimes = append(result.Runtimes, runtime)
+		}
+	}
+	return result, nil
+}
+
+// pluginRuntimeCatalogPathByType is a helper to construct the proper API path by plugin type
+func pluginRuntimeCatalogPathByType(runtimeType PluginRuntimeType, name string) string {
+	return fmt.Sprintf("/v1/sys/plugins/runtimes/catalog/%s/%s", runtimeType, name)
+}
+
+```
+
+#### sys_policy.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) ListPolicies() ([]string, error) {
+	return c.ListPoliciesWithContext(context.Background())
+}
+
+func (c *Sys) ListPoliciesWithContext(ctx context.Context) ([]string, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest("LIST", "/v1/sys/policies/acl")
+	// Set this for broader compatibility, but we use LIST above to be able to
+	// handle the wrapping lookup function
+	r.Method = http.MethodGet
+	r.Params.Set("list", "true")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result []string
+	err = mapstructure.Decode(secret.Data["keys"], &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, err
+}
+
+func (c *Sys) GetPolicy(name string) (string, error) {
+	return c.GetPolicyWithContext(context.Background(), name)
+}
+
+func (c *Sys) GetPolicyWithContext(ctx context.Context, name string) (string, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, fmt.Sprintf("/v1/sys/policies/acl/%s", name))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if resp != nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == 404 {
+			return "", nil
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if secret == nil || secret.Data == nil {
+		return "", errors.New("data from server response is empty")
+	}
+
+	if policyRaw, ok := secret.Data["policy"]; ok {
+		return policyRaw.(string), nil
+	}
+
+	return "", fmt.Errorf("no policy found in response")
+}
+
+func (c *Sys) PutPolicy(name, rules string) error {
+	return c.PutPolicyWithContext(context.Background(), name, rules)
+}
+
+func (c *Sys) PutPolicyWithContext(ctx context.Context, name, rules string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]string{
+		"policy": rules,
+	}
+
+	r := c.c.NewRequest(http.MethodPut, fmt.Sprintf("/v1/sys/policies/acl/%s", name))
+	if err := r.SetJSONBody(body); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+func (c *Sys) DeletePolicy(name string) error {
+	return c.DeletePolicyWithContext(context.Background(), name)
+}
+
+func (c *Sys) DeletePolicyWithContext(ctx context.Context, name string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, fmt.Sprintf("/v1/sys/policies/acl/%s", name))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+type getPoliciesResp struct {
+	Rules string `json:"rules"`
+}
+
+type listPoliciesResp struct {
+	Policies []string `json:"policies"`
+}
+
+```
+
+#### sys_raft.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"archive/tar"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"sync"
+	"time"
+
+	"github.com/hashicorp/go-secure-stdlib/parseutil"
+	"github.com/mitchellh/mapstructure"
+)
+
+var ErrIncompleteSnapshot = errors.New("incomplete snapshot, unable to read SHA256SUMS.sealed file")
+
+// RaftJoinResponse represents the response of the raft join API
+type RaftJoinResponse struct {
+	Joined bool `json:"joined"`
+}
+
+// RaftJoinRequest represents the parameters consumed by the raft join API
+type RaftJoinRequest struct {
+	AutoJoin         string `json:"auto_join"`
+	AutoJoinScheme   string `json:"auto_join_scheme"`
+	AutoJoinPort     uint   `json:"auto_join_port"`
+	LeaderAPIAddr    string `json:"leader_api_addr"`
+	LeaderCACert     string `json:"leader_ca_cert"`
+	LeaderClientCert string `json:"leader_client_cert"`
+	LeaderClientKey  string `json:"leader_client_key"`
+	Retry            bool   `json:"retry"`
+	NonVoter         bool   `json:"non_voter"`
+}
+
+// AutopilotConfig is used for querying/setting the Autopilot configuration.
+type AutopilotConfig struct {
+	CleanupDeadServers             bool          `json:"cleanup_dead_servers" mapstructure:"cleanup_dead_servers"`
+	LastContactThreshold           time.Duration `json:"last_contact_threshold" mapstructure:"-"`
+	DeadServerLastContactThreshold time.Duration `json:"dead_server_last_contact_threshold" mapstructure:"-"`
+	MaxTrailingLogs                uint64        `json:"max_trailing_logs" mapstructure:"max_trailing_logs"`
+	MinQuorum                      uint          `json:"min_quorum" mapstructure:"min_quorum"`
+	ServerStabilizationTime        time.Duration `json:"server_stabilization_time" mapstructure:"-"`
+	DisableUpgradeMigration        bool          `json:"disable_upgrade_migration" mapstructure:"disable_upgrade_migration"`
+}
+
+// MarshalJSON makes the autopilot config fields JSON compatible
+func (ac *AutopilotConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"cleanup_dead_servers":               ac.CleanupDeadServers,
+		"last_contact_threshold":             ac.LastContactThreshold.String(),
+		"dead_server_last_contact_threshold": ac.DeadServerLastContactThreshold.String(),
+		"max_trailing_logs":                  ac.MaxTrailingLogs,
+		"min_quorum":                         ac.MinQuorum,
+		"server_stabilization_time":          ac.ServerStabilizationTime.String(),
+		"disable_upgrade_migration":          ac.DisableUpgradeMigration,
+	})
+}
+
+// UnmarshalJSON parses the autopilot config JSON blob
+func (ac *AutopilotConfig) UnmarshalJSON(b []byte) error {
+	var data interface{}
+	err := json.Unmarshal(b, &data)
+	if err != nil {
+		return err
+	}
+
+	conf := data.(map[string]interface{})
+	if err = mapstructure.WeakDecode(conf, ac); err != nil {
+		return err
+	}
+	if ac.LastContactThreshold, err = parseutil.ParseDurationSecond(conf["last_contact_threshold"]); err != nil {
+		return err
+	}
+	if ac.DeadServerLastContactThreshold, err = parseutil.ParseDurationSecond(conf["dead_server_last_contact_threshold"]); err != nil {
+		return err
+	}
+	if ac.ServerStabilizationTime, err = parseutil.ParseDurationSecond(conf["server_stabilization_time"]); err != nil {
+		return err
+	}
+	return nil
+}
+
+// AutopilotState represents the response of the raft autopilot state API
+type AutopilotState struct {
+	Healthy                    bool                        `mapstructure:"healthy"`
+	FailureTolerance           int                         `mapstructure:"failure_tolerance"`
+	Servers                    map[string]*AutopilotServer `mapstructure:"servers"`
+	Leader                     string                      `mapstructure:"leader"`
+	Voters                     []string                    `mapstructure:"voters"`
+	NonVoters                  []string                    `mapstructure:"non_voters"`
+	RedundancyZones            map[string]AutopilotZone    `mapstructure:"redundancy_zones,omitempty"`
+	Upgrade                    *AutopilotUpgrade           `mapstructure:"upgrade_info,omitempty"`
+	OptimisticFailureTolerance int                         `mapstructure:"optimistic_failure_tolerance,omitempty"`
+}
+
+func (a *AutopilotState) String() string {
+	var result string
+	result += fmt.Sprintf("Healthy: %t. FailureTolerance: %d. Leader: %s. OptimisticFailureTolerance: %d\n", a.Healthy, a.FailureTolerance, a.Leader, a.OptimisticFailureTolerance)
+	for _, s := range a.Servers {
+		result += fmt.Sprintf("Server: %s\n", s)
+	}
+	result += fmt.Sprintf("Voters: %v\n", a.Voters)
+	result += fmt.Sprintf("NonVoters: %v\n", a.NonVoters)
+
+	for name, zone := range a.RedundancyZones {
+		result += fmt.Sprintf("RedundancyZone %s: %s\n", name, &zone)
+	}
+
+	result += fmt.Sprintf("Upgrade: %s", a.Upgrade)
+	return result
+}
+
+// AutopilotServer represents the server blocks in the response of the raft
+// autopilot state API.
+type AutopilotServer struct {
+	ID             string `mapstructure:"id"`
+	Name           string `mapstructure:"name"`
+	Address        string `mapstructure:"address"`
+	NodeStatus     string `mapstructure:"node_status"`
+	LastContact    string `mapstructure:"last_contact"`
+	LastTerm       uint64 `mapstructure:"last_term"`
+	LastIndex      uint64 `mapstructure:"last_index"`
+	Healthy        bool   `mapstructure:"healthy"`
+	StableSince    string `mapstructure:"stable_since"`
+	Status         string `mapstructure:"status"`
+	Version        string `mapstructure:"version"`
+	UpgradeVersion string `mapstructure:"upgrade_version,omitempty"`
+	RedundancyZone string `mapstructure:"redundancy_zone,omitempty"`
+	NodeType       string `mapstructure:"node_type,omitempty"`
+}
+
+func (a *AutopilotServer) String() string {
+	return fmt.Sprintf("ID: %s. Name: %s. Address: %s. NodeStatus: %s. LastContact: %s. LastTerm: %d. LastIndex: %d. Healthy: %t. StableSince: %s. Status: %s. Version: %s. UpgradeVersion: %s. RedundancyZone: %s. NodeType: %s",
+		a.ID, a.Name, a.Address, a.NodeStatus, a.LastContact, a.LastTerm, a.LastIndex, a.Healthy, a.StableSince, a.Status, a.Version, a.UpgradeVersion, a.RedundancyZone, a.NodeType)
+}
+
+type AutopilotZone struct {
+	Servers          []string `mapstructure:"servers,omitempty"`
+	Voters           []string `mapstructure:"voters,omitempty"`
+	FailureTolerance int      `mapstructure:"failure_tolerance,omitempty"`
+}
+
+func (a *AutopilotZone) String() string {
+	return fmt.Sprintf("Servers: %v. Voters: %v. FailureTolerance: %d", a.Servers, a.Voters, a.FailureTolerance)
+}
+
+type AutopilotUpgrade struct {
+	Status                    string                                  `mapstructure:"status"`
+	TargetVersion             string                                  `mapstructure:"target_version,omitempty"`
+	TargetVersionVoters       []string                                `mapstructure:"target_version_voters,omitempty"`
+	TargetVersionNonVoters    []string                                `mapstructure:"target_version_non_voters,omitempty"`
+	TargetVersionReadReplicas []string                                `mapstructure:"target_version_read_replicas,omitempty"`
+	OtherVersionVoters        []string                                `mapstructure:"other_version_voters,omitempty"`
+	OtherVersionNonVoters     []string                                `mapstructure:"other_version_non_voters,omitempty"`
+	OtherVersionReadReplicas  []string                                `mapstructure:"other_version_read_replicas,omitempty"`
+	RedundancyZones           map[string]AutopilotZoneUpgradeVersions `mapstructure:"redundancy_zones,omitempty"`
+}
+
+func (a *AutopilotUpgrade) String() string {
+	result := fmt.Sprintf("Status: %s. TargetVersion: %s. TargetVersionVoters: %v. TargetVersionNonVoters: %v. TargetVersionReadReplicas: %v. OtherVersionVoters: %v. OtherVersionNonVoters: %v. OtherVersionReadReplicas: %v",
+		a.Status, a.TargetVersion, a.TargetVersionVoters, a.TargetVersionNonVoters, a.TargetVersionReadReplicas, a.OtherVersionVoters, a.OtherVersionNonVoters, a.OtherVersionReadReplicas)
+
+	for name, zone := range a.RedundancyZones {
+		result += fmt.Sprintf("Redundancy Zone %s: %s", name, zone)
+	}
+
+	return result
+}
+
+type AutopilotZoneUpgradeVersions struct {
+	TargetVersionVoters    []string `mapstructure:"target_version_voters,omitempty"`
+	TargetVersionNonVoters []string `mapstructure:"target_version_non_voters,omitempty"`
+	OtherVersionVoters     []string `mapstructure:"other_version_voters,omitempty"`
+	OtherVersionNonVoters  []string `mapstructure:"other_version_non_voters,omitempty"`
+}
+
+func (a *AutopilotZoneUpgradeVersions) String() string {
+	return fmt.Sprintf("TargetVersionVoters: %v. TargetVersionNonVoters: %v. OtherVersionVoters: %v. OtherVersionNonVoters: %v",
+		a.TargetVersionVoters, a.TargetVersionNonVoters, a.OtherVersionVoters, a.OtherVersionNonVoters)
+}
+
+// RaftJoin wraps RaftJoinWithContext using context.Background.
+func (c *Sys) RaftJoin(opts *RaftJoinRequest) (*RaftJoinResponse, error) {
+	return c.RaftJoinWithContext(context.Background(), opts)
+}
+
+// RaftJoinWithContext adds the node from which this call is invoked from to the raft
+// cluster represented by the leader address in the parameter.
+func (c *Sys) RaftJoinWithContext(ctx context.Context, opts *RaftJoinRequest) (*RaftJoinResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/sys/storage/raft/join")
+
+	if err := r.SetJSONBody(opts); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RaftJoinResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+// RaftSnapshot wraps RaftSnapshotWithContext using context.Background.
+func (c *Sys) RaftSnapshot(snapWriter io.Writer) error {
+	return c.RaftSnapshotWithContext(context.Background(), snapWriter)
+}
+
+// RaftSnapshotWithContext invokes the API that takes the snapshot of the raft cluster and
+// writes it to the supplied io.Writer.
+func (c *Sys) RaftSnapshotWithContext(ctx context.Context, snapWriter io.Writer) error {
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/storage/raft/snapshot")
+	r.URL.RawQuery = r.Params.Encode()
+
+	resp, err := c.c.httpRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Make sure that the last file in the archive, SHA256SUMS.sealed, is present
+	// and non-empty.  This is to catch cases where the snapshot failed midstream,
+	// e.g. due to a problem with the seal that prevented encryption of that file.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var verified bool
+
+	rPipe, wPipe := io.Pipe()
+	dup := io.TeeReader(resp.Body, wPipe)
+	go func() {
+		defer func() {
+			io.Copy(ioutil.Discard, rPipe)
+			rPipe.Close()
+			wg.Done()
+		}()
+
+		uncompressed, err := gzip.NewReader(rPipe)
+		if err != nil {
+			return
+		}
+
+		t := tar.NewReader(uncompressed)
+		var h *tar.Header
+		for {
+			h, err = t.Next()
+			if err != nil {
+				return
+			}
+			if h.Name != "SHA256SUMS.sealed" {
+				continue
+			}
+			var b []byte
+			b, err = io.ReadAll(t)
+			if err != nil || len(b) == 0 {
+				return
+			}
+			verified = true
+			return
+		}
+	}()
+
+	// Copy bytes from dup to snapWriter.  This will have a side effect that
+	// everything read from dup will be written to wPipe.
+	_, err = io.Copy(snapWriter, dup)
+	wPipe.Close()
+	if err != nil {
+		rPipe.CloseWithError(err)
+		return err
+	}
+	wg.Wait()
+
+	if !verified {
+		return ErrIncompleteSnapshot
+	}
+	return nil
+}
+
+// RaftSnapshotRestore wraps RaftSnapshotRestoreWithContext using context.Background.
+func (c *Sys) RaftSnapshotRestore(snapReader io.Reader, force bool) error {
+	return c.RaftSnapshotRestoreWithContext(context.Background(), snapReader, force)
+}
+
+// RaftSnapshotRestoreWithContext reads the snapshot from the io.Reader and installs that
+// snapshot, returning the cluster to the state defined by it.
+func (c *Sys) RaftSnapshotRestoreWithContext(ctx context.Context, snapReader io.Reader, force bool) error {
+	path := "/v1/sys/storage/raft/snapshot"
+	if force {
+		path = "/v1/sys/storage/raft/snapshot-force"
+	}
+
+	r := c.c.NewRequest(http.MethodPost, path)
+	r.Body = snapReader
+
+	resp, err := c.c.httpRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// RaftAutopilotState wraps RaftAutopilotStateWithContext using context.Background.
+func (c *Sys) RaftAutopilotState() (*AutopilotState, error) {
+	return c.RaftAutopilotStateWithContext(context.Background())
+}
+
+// RaftAutopilotStateWithToken wraps RaftAutopilotStateWithContext using the given token.
+func (c *Sys) RaftAutopilotStateWithDRToken(drToken string) (*AutopilotState, error) {
+	return c.RaftAutopilotStateWithContext(context.WithValue(context.Background(), "dr-token", drToken))
+}
+
+// RaftAutopilotStateWithContext returns the state of the raft cluster as seen by autopilot.
+func (c *Sys) RaftAutopilotStateWithContext(ctx context.Context) (*AutopilotState, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	if ctx.Value("dr-token") != nil {
+		c.c.SetToken(ctx.Value("dr-token").(string))
+	}
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/storage/raft/autopilot/state")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if resp != nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == 404 {
+			return nil, nil
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result AutopilotState
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+// RaftAutopilotConfiguration wraps RaftAutopilotConfigurationWithContext using context.Background.
+func (c *Sys) RaftAutopilotConfiguration() (*AutopilotConfig, error) {
+	return c.RaftAutopilotConfigurationWithContext(context.Background())
+}
+
+// RaftAutopilotConfigurationWithDRToken wraps RaftAutopilotConfigurationWithContext using the given token.
+func (c *Sys) RaftAutopilotConfigurationWithDRToken(drToken string) (*AutopilotConfig, error) {
+	return c.RaftAutopilotConfigurationWithContext(context.WithValue(context.Background(), "dr-token", drToken))
+}
+
+// RaftAutopilotConfigurationWithContext fetches the autopilot config.
+func (c *Sys) RaftAutopilotConfigurationWithContext(ctx context.Context) (*AutopilotConfig, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	if ctx.Value("dr-token") != nil {
+		c.c.SetToken(ctx.Value("dr-token").(string))
+	}
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/storage/raft/autopilot/configuration")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if resp != nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == 404 {
+			return nil, nil
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result AutopilotConfig
+	if err = mapstructure.Decode(secret.Data, &result); err != nil {
+		return nil, err
+	}
+	if result.LastContactThreshold, err = parseutil.ParseDurationSecond(secret.Data["last_contact_threshold"]); err != nil {
+		return nil, err
+	}
+	if result.DeadServerLastContactThreshold, err = parseutil.ParseDurationSecond(secret.Data["dead_server_last_contact_threshold"]); err != nil {
+		return nil, err
+	}
+	if result.ServerStabilizationTime, err = parseutil.ParseDurationSecond(secret.Data["server_stabilization_time"]); err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+// PutRaftAutopilotConfiguration wraps PutRaftAutopilotConfigurationWithContext using context.Background.
+func (c *Sys) PutRaftAutopilotConfiguration(opts *AutopilotConfig) error {
+	return c.PutRaftAutopilotConfigurationWithContext(context.Background(), opts)
+}
+
+// PutRaftAutopilotConfigurationWithContext allows modifying the raft autopilot configuration
+func (c *Sys) PutRaftAutopilotConfigurationWithContext(ctx context.Context, opts *AutopilotConfig) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/sys/storage/raft/autopilot/configuration")
+
+	if err := r.SetJSONBody(opts); err != nil {
+		return err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// RaftLoadLocalSnapshot wraps RaftLoadLocalSnapshotWithContext using context.Background.
+func (c *Sys) RaftLoadLocalSnapshot(snapReader io.Reader) (*Secret, error) {
+	return c.RaftLoadLocalSnapshotWithContext(context.Background(), snapReader)
+}
+
+// RaftLoadLocalSnapshotWithContext loads a snapshot into the raft cluster.
+// It accepts a reader that reads the snapshot file data.
+func (c *Sys) RaftLoadLocalSnapshotWithContext(ctx context.Context, snapReader io.Reader) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/sys/storage/raft/snapshot-load")
+	r.Body = snapReader
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+// RaftLoadCloudSnapshot wraps RaftLoadCloudSnapshotWithContext using context.Background.
+func (c *Sys) RaftLoadCloudSnapshot(name string, url *url.URL) (*Secret, error) {
+	return c.RaftLoadCloudSnapshotWithContext(context.Background(), name, url)
+}
+
+// RaftLoadCloudSnapshotWithContext loads a snapshot from cloud storage into the raft cluster.
+// It accepts a name for the cloud auto snapshot configuration and a URL to the snapshot location in cloud storage.
+func (c *Sys) RaftLoadCloudSnapshotWithContext(ctx context.Context, name string, url *url.URL) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/sys/storage/raft/snapshot-auto/snapshot-load/"+name)
+	if err := r.SetJSONBody(map[string]interface{}{
+		"url": url.String(),
+	}); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+// RaftUnloadSnapshot wraps RaftUnloadSnapshotWithContext using context.Background.
+func (c *Sys) RaftUnloadSnapshot(snapID string) (*Secret, error) {
+	return c.RaftUnloadSnapshotWithContext(context.Background(), snapID)
+}
+
+// RaftUnloadSnapshotWithContext unloads a snapshot from the raft cluster.
+// It accepts a snapshot ID to identify the snapshot to be unloaded.
+func (c *Sys) RaftUnloadSnapshotWithContext(ctx context.Context, snapID string) (*Secret, error) {
+	return c.raftUnloadSnapshotWithContext(ctx, snapID, false)
+}
+
+// RaftForceUnloadSnapshot wraps RaftForceUnloadSnapshotWithContext using context.Background.
+func (c *Sys) RaftForceUnloadSnapshot(snapID string) (*Secret, error) {
+	return c.RaftForceUnloadSnapshotWithContext(context.Background(), snapID)
+}
+
+// RaftForceUnloadSnapshotWithContext forcefully unloads the given snapshot
+func (c *Sys) RaftForceUnloadSnapshotWithContext(ctx context.Context, snapID string) (*Secret, error) {
+	return c.raftUnloadSnapshotWithContext(ctx, snapID, true)
+}
+
+func (c *Sys) raftUnloadSnapshotWithContext(ctx context.Context, snapID string, force bool) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, "/v1/sys/storage/raft/snapshot-load/"+snapID)
+	if force {
+		r.Params.Set("force", "true")
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
+```
+
+#### sys_rekey.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) RekeyStatus() (*RekeyStatusResponse, error) {
+	return c.RekeyStatusWithContext(context.Background())
+}
+
+func (c *Sys) RekeyStatusWithContext(ctx context.Context) (*RekeyStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/rekey/init")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyRecoveryKeyStatus() (*RekeyStatusResponse, error) {
+	return c.RekeyRecoveryKeyStatusWithContext(context.Background())
+}
+
+func (c *Sys) RekeyRecoveryKeyStatusWithContext(ctx context.Context) (*RekeyStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/rekey-recovery-key/init")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyVerificationStatus() (*RekeyVerificationStatusResponse, error) {
+	return c.RekeyVerificationStatusWithContext(context.Background())
+}
+
+func (c *Sys) RekeyVerificationStatusWithContext(ctx context.Context) (*RekeyVerificationStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/rekey/verify")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyVerificationStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyRecoveryKeyVerificationStatus() (*RekeyVerificationStatusResponse, error) {
+	return c.RekeyRecoveryKeyVerificationStatusWithContext(context.Background())
+}
+
+func (c *Sys) RekeyRecoveryKeyVerificationStatusWithContext(ctx context.Context) (*RekeyVerificationStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/rekey-recovery-key/verify")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyVerificationStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyInit(config *RekeyInitRequest) (*RekeyStatusResponse, error) {
+	return c.RekeyInitWithContext(context.Background(), config)
+}
+
+func (c *Sys) RekeyInitWithContext(ctx context.Context, config *RekeyInitRequest) (*RekeyStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/rekey/init")
+	if err := r.SetJSONBody(config); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyRecoveryKeyInit(config *RekeyInitRequest) (*RekeyStatusResponse, error) {
+	return c.RekeyRecoveryKeyInitWithContext(context.Background(), config)
+}
+
+func (c *Sys) RekeyRecoveryKeyInitWithContext(ctx context.Context, config *RekeyInitRequest) (*RekeyStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/rekey-recovery-key/init")
+	if err := r.SetJSONBody(config); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyCancel() error {
+	return c.RekeyCancelWithContext(context.Background())
+}
+
+func (c *Sys) RekeyCancelWithNonce(nonce string) error {
+	return c.RekeyCancelWithContextWithNonce(context.Background(), nonce)
+}
+
+func (c *Sys) RekeyCancelWithContext(ctx context.Context) error {
+	return c.RekeyCancelWithContextWithNonce(ctx, "")
+}
+
+func (c *Sys) RekeyCancelWithContextWithNonce(ctx context.Context, nonce string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, "/v1/sys/rekey/init")
+	if nonce != "" {
+		body := map[string]interface{}{
+			"nonce": nonce,
+		}
+
+		if err := r.SetJSONBody(body); err != nil {
+			return err
+		}
+
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) RekeyRecoveryKeyCancel() error {
+	return c.RekeyRecoveryKeyCancelWithContext(context.Background())
+}
+
+func (c *Sys) RekeyRecoveryKeyCancelWithNonce(nonce string) error {
+	return c.RekeyRecoveryKeyCancelWithContextWithNonce(context.Background(), nonce)
+}
+
+func (c *Sys) RekeyRecoveryKeyCancelWithContext(ctx context.Context) error {
+	return c.RekeyCancelWithContextWithNonce(ctx, "")
+}
+
+func (c *Sys) RekeyRecoveryKeyCancelWithContextWithNonce(ctx context.Context, nonce string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+	r := c.c.NewRequest(http.MethodDelete, "/v1/sys/rekey-recovery-key/init")
+
+	if nonce != "" {
+		body := map[string]interface{}{
+			"nonce": nonce,
+		}
+
+		if err := r.SetJSONBody(body); err != nil {
+			return err
+		}
+	}
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) RekeyVerificationCancel() error {
+	return c.RekeyVerificationCancelWithContext(context.Background())
+}
+
+func (c *Sys) RekeyVerificationCancelWithContext(ctx context.Context) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, "/v1/sys/rekey/verify")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) RekeyRecoveryKeyVerificationCancel() error {
+	return c.RekeyRecoveryKeyVerificationCancelWithContext(context.Background())
+}
+
+func (c *Sys) RekeyRecoveryKeyVerificationCancelWithContext(ctx context.Context) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, "/v1/sys/rekey-recovery-key/verify")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) RekeyUpdate(shard, nonce string) (*RekeyUpdateResponse, error) {
+	return c.RekeyUpdateWithContext(context.Background(), shard, nonce)
+}
+
+func (c *Sys) RekeyUpdateWithContext(ctx context.Context, shard, nonce string) (*RekeyUpdateResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"key":   shard,
+		"nonce": nonce,
+	}
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/rekey/update")
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyUpdateResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyRecoveryKeyUpdate(shard, nonce string) (*RekeyUpdateResponse, error) {
+	return c.RekeyRecoveryKeyUpdateWithContext(context.Background(), shard, nonce)
+}
+
+func (c *Sys) RekeyRecoveryKeyUpdateWithContext(ctx context.Context, shard, nonce string) (*RekeyUpdateResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"key":   shard,
+		"nonce": nonce,
+	}
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/rekey-recovery-key/update")
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyUpdateResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyRetrieveBackup() (*RekeyRetrieveResponse, error) {
+	return c.RekeyRetrieveBackupWithContext(context.Background())
+}
+
+func (c *Sys) RekeyRetrieveBackupWithContext(ctx context.Context) (*RekeyRetrieveResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/rekey/backup")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result RekeyRetrieveResponse
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+func (c *Sys) RekeyRetrieveRecoveryBackup() (*RekeyRetrieveResponse, error) {
+	return c.RekeyRetrieveRecoveryBackupWithContext(context.Background())
+}
+
+func (c *Sys) RekeyRetrieveRecoveryBackupWithContext(ctx context.Context) (*RekeyRetrieveResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/rekey/recovery-key-backup")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result RekeyRetrieveResponse
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+func (c *Sys) RekeyDeleteBackup() error {
+	return c.RekeyDeleteBackupWithContext(context.Background())
+}
+
+func (c *Sys) RekeyDeleteBackupWithContext(ctx context.Context) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, "/v1/sys/rekey/backup")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+
+	return err
+}
+
+func (c *Sys) RekeyDeleteRecoveryBackup() error {
+	return c.RekeyDeleteRecoveryBackupWithContext(context.Background())
+}
+
+func (c *Sys) RekeyDeleteRecoveryBackupWithContext(ctx context.Context) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, "/v1/sys/rekey/recovery-key-backup")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+
+	return err
+}
+
+func (c *Sys) RekeyVerificationUpdate(shard, nonce string) (*RekeyVerificationUpdateResponse, error) {
+	return c.RekeyVerificationUpdateWithContext(context.Background(), shard, nonce)
+}
+
+func (c *Sys) RekeyVerificationUpdateWithContext(ctx context.Context, shard, nonce string) (*RekeyVerificationUpdateResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"key":   shard,
+		"nonce": nonce,
+	}
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/rekey/verify")
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyVerificationUpdateResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+func (c *Sys) RekeyRecoveryKeyVerificationUpdate(shard, nonce string) (*RekeyVerificationUpdateResponse, error) {
+	return c.RekeyRecoveryKeyVerificationUpdateWithContext(context.Background(), shard, nonce)
+}
+
+func (c *Sys) RekeyRecoveryKeyVerificationUpdateWithContext(ctx context.Context, shard, nonce string) (*RekeyVerificationUpdateResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	body := map[string]interface{}{
+		"key":   shard,
+		"nonce": nonce,
+	}
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/rekey-recovery-key/verify")
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result RekeyVerificationUpdateResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+type RekeyInitRequest struct {
+	SecretShares        int      `json:"secret_shares"`
+	SecretThreshold     int      `json:"secret_threshold"`
+	StoredShares        int      `json:"stored_shares"`
+	PGPKeys             []string `json:"pgp_keys"`
+	Backup              bool
+	RequireVerification bool `json:"require_verification"`
+}
+
+type RekeyStatusResponse struct {
+	Nonce                string   `json:"nonce"`
+	Started              bool     `json:"started"`
+	T                    int      `json:"t"`
+	N                    int      `json:"n"`
+	Progress             int      `json:"progress"`
+	Required             int      `json:"required"`
+	PGPFingerprints      []string `json:"pgp_fingerprints"`
+	Backup               bool     `json:"backup"`
+	VerificationRequired bool     `json:"verification_required"`
+	VerificationNonce    string   `json:"verification_nonce"`
+}
+
+type RekeyUpdateResponse struct {
+	Nonce                string   `json:"nonce"`
+	Complete             bool     `json:"complete"`
+	Keys                 []string `json:"keys"`
+	KeysB64              []string `json:"keys_base64"`
+	PGPFingerprints      []string `json:"pgp_fingerprints"`
+	Backup               bool     `json:"backup"`
+	VerificationRequired bool     `json:"verification_required"`
+	VerificationNonce    string   `json:"verification_nonce,omitempty"`
+}
+
+type RekeyRetrieveResponse struct {
+	Nonce   string              `json:"nonce" mapstructure:"nonce"`
+	Keys    map[string][]string `json:"keys" mapstructure:"keys"`
+	KeysB64 map[string][]string `json:"keys_base64" mapstructure:"keys_base64"`
+}
+
+type RekeyVerificationStatusResponse struct {
+	Nonce    string `json:"nonce"`
+	Started  bool   `json:"started"`
+	T        int    `json:"t"`
+	N        int    `json:"n"`
+	Progress int    `json:"progress"`
+}
+
+type RekeyVerificationUpdateResponse struct {
+	Nonce    string `json:"nonce"`
+	Complete bool   `json:"complete"`
+}
+
+```
+
+#### sys_rotate.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"time"
+)
+
+func (c *Sys) Rotate() error {
+	return c.RotateWithContext(context.Background())
+}
+
+func (c *Sys) RotateWithContext(ctx context.Context) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/sys/rotate")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	return err
+}
+
+func (c *Sys) KeyStatus() (*KeyStatus, error) {
+	return c.KeyStatusWithContext(context.Background())
+}
+
+func (c *Sys) KeyStatusWithContext(ctx context.Context) (*KeyStatus, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/key-status")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result KeyStatus
+
+	termRaw, ok := secret.Data["term"]
+	if !ok {
+		return nil, errors.New("term not found in response")
+	}
+	term, ok := termRaw.(json.Number)
+	if !ok {
+		return nil, errors.New("could not convert term to a number")
+	}
+	term64, err := term.Int64()
+	if err != nil {
+		return nil, err
+	}
+	result.Term = int(term64)
+
+	installTimeRaw, ok := secret.Data["install_time"]
+	if !ok {
+		return nil, errors.New("install_time not found in response")
+	}
+	installTimeStr, ok := installTimeRaw.(string)
+	if !ok {
+		return nil, errors.New("could not convert install_time to a string")
+	}
+	installTime, err := time.Parse(time.RFC3339Nano, installTimeStr)
+	if err != nil {
+		return nil, err
+	}
+	result.InstallTime = installTime
+
+	encryptionsRaw, ok := secret.Data["encryptions"]
+	if ok {
+		encryptions, ok := encryptionsRaw.(json.Number)
+		if !ok {
+			return nil, errors.New("could not convert encryptions to a number")
+		}
+		encryptions64, err := encryptions.Int64()
+		if err != nil {
+			return nil, err
+		}
+		result.Encryptions = int(encryptions64)
+	}
+
+	return &result, err
+}
+
+type KeyStatus struct {
+	Term        int       `json:"term"`
+	InstallTime time.Time `json:"install_time"`
+	Encryptions int       `json:"encryptions"`
+}
+
+```
+
+#### sys_seal.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"net/http"
+)
+
+func (c *Sys) SealStatus() (*SealStatusResponse, error) {
+	return c.SealStatusWithContext(context.Background())
+}
+
+func (c *Sys) SealStatusWithContext(ctx context.Context) (*SealStatusResponse, error) {
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/seal-status")
+	return sealStatusRequestWithContext(ctx, c, r)
+}
+
+func (c *Sys) Seal() error {
+	return c.SealWithContext(context.Background())
+}
+
+func (c *Sys) SealWithContext(ctx context.Context) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/seal")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+func (c *Sys) ResetUnsealProcess() (*SealStatusResponse, error) {
+	return c.ResetUnsealProcessWithContext(context.Background())
+}
+
+func (c *Sys) ResetUnsealProcessWithContext(ctx context.Context) (*SealStatusResponse, error) {
+	body := map[string]interface{}{"reset": true}
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/unseal")
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	return sealStatusRequestWithContext(ctx, c, r)
+}
+
+func (c *Sys) Unseal(shard string) (*SealStatusResponse, error) {
+	return c.UnsealWithContext(context.Background(), shard)
+}
+
+func (c *Sys) UnsealWithContext(ctx context.Context, shard string) (*SealStatusResponse, error) {
+	body := map[string]interface{}{"key": shard}
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/unseal")
+	if err := r.SetJSONBody(body); err != nil {
+		return nil, err
+	}
+
+	return sealStatusRequestWithContext(ctx, c, r)
+}
+
+func (c *Sys) UnsealWithOptions(opts *UnsealOpts) (*SealStatusResponse, error) {
+	return c.UnsealWithOptionsWithContext(context.Background(), opts)
+}
+
+func (c *Sys) UnsealWithOptionsWithContext(ctx context.Context, opts *UnsealOpts) (*SealStatusResponse, error) {
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/unseal")
+
+	if err := r.SetJSONBody(opts); err != nil {
+		return nil, err
+	}
+
+	return sealStatusRequestWithContext(ctx, c, r)
+}
+
+func sealStatusRequestWithContext(ctx context.Context, c *Sys, r *Request) (*SealStatusResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result SealStatusResponse
+	err = resp.DecodeJSON(&result)
+	return &result, err
+}
+
+type SealStatusResponse struct {
+	Type               string   `json:"type"`
+	Initialized        bool     `json:"initialized"`
+	Sealed             bool     `json:"sealed"`
+	T                  int      `json:"t"`
+	N                  int      `json:"n"`
+	Progress           int      `json:"progress"`
+	Nonce              string   `json:"nonce"`
+	Version            string   `json:"version"`
+	BuildDate          string   `json:"build_date"`
+	Migration          bool     `json:"migration"`
+	ClusterName        string   `json:"cluster_name,omitempty"`
+	ClusterID          string   `json:"cluster_id,omitempty"`
+	RecoverySeal       bool     `json:"recovery_seal"`
+	RecoverySealType   string   `json:"recovery_seal_type,omitempty"`
+	StorageType        string   `json:"storage_type,omitempty"`
+	HCPLinkStatus      string   `json:"hcp_link_status,omitempty"`
+	HCPLinkResourceID  string   `json:"hcp_link_resource_ID,omitempty"`
+	RemovedFromCluster *bool    `json:"removed_from_cluster,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+}
+
+type UnsealOpts struct {
+	Key     string `json:"key"`
+	Reset   bool   `json:"reset"`
+	Migrate bool   `json:"migrate"`
+}
+
+```
+
+#### sys_stepdown.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"net/http"
+)
+
+func (c *Sys) StepDown() error {
+	return c.StepDownWithContext(context.Background())
+}
+
+func (c *Sys) StepDownWithContext(ctx context.Context) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPut, "/v1/sys/step-down")
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	return err
+}
+
+```
+
+#### sys_ui_custom_message.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+)
+
+const (
+	// baseEndpoint is the common base URL path for all endpoints used in this
+	// module.
+	baseEndpoint string = "/v1/sys/config/ui/custom-messages"
+)
+
+// ListUICustomMessages calls ListUICustomMessagesWithContext using a background
+// Context.
+func (c *Sys) ListUICustomMessages(req UICustomMessageListRequest) (*Secret, error) {
+	return c.ListUICustomMessagesWithContext(context.Background(), req)
+}
+
+// ListUICustomMessagesWithContext sends a request to the List custom messages
+// endpoint using the provided Context and UICustomMessageListRequest value as
+// the inputs. It returns a pointer to a Secret if a response was obtained from
+// the server, including error responses; or an error if a response could not be
+// obtained due to an error.
+func (c *Sys) ListUICustomMessagesWithContext(ctx context.Context, req UICustomMessageListRequest) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest("LIST", fmt.Sprintf("%s/", baseEndpoint))
+	if req.Active != nil {
+		r.Params.Add("active", strconv.FormatBool(*req.Active))
+	}
+	if req.Authenticated != nil {
+		r.Params.Add("authenticated", strconv.FormatBool(*req.Authenticated))
+	}
+	if req.Type != nil {
+		r.Params.Add("type", *req.Type)
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	return secret, nil
+}
+
+// CreateUICustomMessage calls CreateUICustomMessageWithContext using a
+// background Context.
+func (c *Sys) CreateUICustomMessage(req UICustomMessageRequest) (*Secret, error) {
+	return c.CreateUICustomMessageWithContext(context.Background(), req)
+}
+
+// CreateUICustomMessageWithContext sends a request to the Create custom
+// messages endpoint using the provided Context and UICustomMessageRequest
+// values as the inputs. It returns a pointer to a Secret if a response was
+// obtained from the server, including error responses; or an error if a
+// response could not be obtained due to an error.
+func (c *Sys) CreateUICustomMessageWithContext(ctx context.Context, req UICustomMessageRequest) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, baseEndpoint)
+	if err := r.SetJSONBody(&req); err != nil {
+		return nil, fmt.Errorf("error encoding request body to json: %w", err)
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request to server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse secret from server response: %w", err)
+	}
+
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	return secret, nil
+}
+
+// ReadUICustomMessage calls ReadUICustomMessageWithContext using a background
+// Context.
+func (c *Sys) ReadUICustomMessage(id string) (*Secret, error) {
+	return c.ReadUICustomMessageWithContext(context.Background(), id)
+}
+
+// ReadUICustomMessageWithContext sends a request to the Read custom message
+// endpoint using the provided Context and id values. It returns a pointer to a
+// Secret if a response was obtained from the server, including error responses;
+// or an error if a response could not be obtained due to an error.
+func (c *Sys) ReadUICustomMessageWithContext(ctx context.Context, id string) (*Secret, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", baseEndpoint, id))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request to server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse secret from server response: %w", err)
+	}
+
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	return secret, nil
+}
+
+// UpdateUICustomMessage calls UpdateUICustomMessageWithContext using a
+// background Context.
+func (c *Sys) UpdateUICustomMessage(id string, req UICustomMessageRequest) error {
+	return c.UpdateUICustomMessageWithContext(context.Background(), id, req)
+}
+
+// UpdateUICustomMessageWithContext sends a request to the Update custom message
+// endpoint using the provided Context, id, and UICustomMessageRequest values.
+// It returns a pointer to a Secret if a response was obtained from the server,
+// including error responses; or an error if a response could not be obtained
+// due to an error.
+func (c *Sys) UpdateUICustomMessageWithContext(ctx context.Context, id string, req UICustomMessageRequest) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, fmt.Sprintf("%s/%s", baseEndpoint, id))
+	if err := r.SetJSONBody(&req); err != nil {
+		return fmt.Errorf("error encoding request body to json: %w", err)
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return fmt.Errorf("error sending request to server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// DeleteUICustomMessage calls DeleteUICustomMessageWithContext using a
+// background Context.
+func (c *Sys) DeleteUICustomMessage(id string) error {
+	return c.DeletePolicyWithContext(context.Background(), id)
+}
+
+// DeleteUICustomMessageWithContext sends a request to the Delete custom message
+// endpoint using the provided Context and id values. It returns a pointer to a
+// Secret if a response was obtained from the server, including error responses;
+// or an error if a response could not be obtained due to an error.
+func (c *Sys) DeleteUICustomMessageWithContext(ctx context.Context, id string) error {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodDelete, fmt.Sprintf("%s/%s", baseEndpoint, id))
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return fmt.Errorf("error sending request to server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// UICustomMessageListRequest is a struct used to contain inputs for the List
+// custom messages request. Each field is optional, so their types are pointers.
+// The With... methods can be used to easily set the fields with pointers to
+// values.
+type UICustomMessageListRequest struct {
+	Authenticated *bool
+	Type          *string
+	Active        *bool
+}
+
+// WithAuthenticated sets the Authenticated field to a pointer referencing the
+// provided bool value.
+func (r *UICustomMessageListRequest) WithAuthenticated(value bool) *UICustomMessageListRequest {
+	r.Authenticated = &value
+
+	return r
+}
+
+// WithType sets the Type field to a pointer referencing the provided string
+// value.
+func (r *UICustomMessageListRequest) WithType(value string) *UICustomMessageListRequest {
+	r.Type = &value
+
+	return r
+}
+
+// WithActive sets the Active field to a pointer referencing the provided bool
+// value.
+func (r *UICustomMessageListRequest) WithActive(value bool) *UICustomMessageListRequest {
+	r.Active = &value
+
+	return r
+}
+
+// UICustomMessageRequest is a struct containing the properties of a custom
+// message. The Link field can be set using the WithLink method.
+type UICustomMessageRequest struct {
+	Title         string               `json:"title"`
+	Message       string               `json:"message"`
+	Authenticated bool                 `json:"authenticated"`
+	Type          string               `json:"type"`
+	StartTime     string               `json:"start_time"`
+	EndTime       string               `json:"end_time,omitempty"`
+	Link          *uiCustomMessageLink `json:"link,omitempty"`
+	Options       map[string]any       `json:"options,omitempty"`
+}
+
+// WithLink sets the Link field to the address of a new uiCustomMessageLink
+// struct constructed from the provided title and href values.
+func (r *UICustomMessageRequest) WithLink(title, href string) *UICustomMessageRequest {
+	r.Link = &uiCustomMessageLink{
+		Title: title,
+		Href:  href,
+	}
+
+	return r
+}
+
+// uiCustomMessageLink is a utility struct used to represent a link associated
+// with a custom message.
+type uiCustomMessageLink struct {
+	Title string
+	Href  string
+}
+
+// MarshalJSON encodes the state of the receiver uiCustomMessageLink as JSON and
+// returns those encoded bytes or an error.
+func (l uiCustomMessageLink) MarshalJSON() ([]byte, error) {
+	m := make(map[string]string)
+
+	m[l.Title] = l.Href
+
+	return json.Marshal(m)
+}
+
+// UnmarshalJSON updates the state of the receiver uiCustomMessageLink from the
+// provided JSON encoded bytes. It returns an error if there was a failure.
+func (l *uiCustomMessageLink) UnmarshalJSON(b []byte) error {
+	m := make(map[string]string)
+
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+
+	for k, v := range m {
+		l.Title = k
+		l.Href = v
+		break
+	}
+
+	return nil
+}
+
+```
+
+#### sys_utilization_report.go
+
+```text
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) UtilizationReport() (*UtilizationReportOutput, error) {
+	return c.UtilizationReportWithContext(context.Background(), "")
+}
+
+func (c *Sys) UtilizationReportWithNamespace(nsPath string) (*UtilizationReportOutput, error) {
+	return c.UtilizationReportWithContext(context.Background(), nsPath)
+}
+
+func (c *Sys) UtilizationReportWithContext(ctx context.Context, nsPath string) (*UtilizationReportOutput, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/utilization-report")
+
+	if nsPath != "" {
+		r.Params.Add("namespace", nsPath)
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result UtilizationReportOutput
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+type UtilizationReportOutput struct {
+	Namespaces int `json:"namespaces,omitempty" structs:"namespaces" mapstructure:"namespaces"`
+
+	KVV1Secrets int `json:"kvv1_secrets,omitempty" structs:"kvv1_secrets" mapstructure:"kvv1_secrets"`
+	KVV2Secrets int `json:"kvv2_secrets,omitempty" structs:"kvv2_secrets" mapstructure:"kvv2_secrets"`
+
+	AuthMethods   map[string]int `json:"auth_methods,omitempty" structs:"auth_methods" mapstructure:"auth_methods"`
+	SecretEngines map[string]int `json:"secret_engines,omitempty" structs:"secret_engines" mapstructure:"secret_engines"`
+
+	LeasesByAuthMethod map[string]int `json:"leases_by_auth_method,omitempty" structs:"leases_by_auth_method" mapstructure:"leases_by_auth_method"`
+
+	ReplicationStatus *UtilizationReportReplicationStatusInformation `json:"replication_status,omitempty" structs:"replication_status" mapstructure:"replication_status"`
+
+	PKI *UtilizationReportPKIInformation `json:"pki,omitempty" structs:"pki" mapstructure:"pki"`
+
+	SecretSync *UtilizationReportSecretSyncInformation `json:"secret_sync,omitempty" structs:"secret_sync" mapstructure:"secret_sync"`
+
+	LeaseCountQuotas *UtilizationReportLeaseCountQuotaInformation `json:"lease_count_quotas,omitempty" structs:"lease_count_quotas" mapstructure:"lease_count_quotas"`
+}
+
+type UtilizationReportReplicationStatusInformation struct {
+	DRPrimary bool   `json:"dr_primary,omitempty" structs:"dr_primary" mapstructure:"dr_primary"`
+	DRState   string `json:"dr_state,omitempty" structs:"dr_state" mapstructure:"dr_state"`
+	PRPrimary bool   `json:"pr_primary,omitempty" structs:"pr_primary" mapstructure:"pr_primary"`
+	PRState   string `json:"pr_state,omitempty" structs:"pr_state" mapstructure:"pr_state"`
+}
+
+type UtilizationReportPKIInformation struct {
+	TotalRoles   int `json:"total_roles,omitempty" structs:"total_roles" mapstructure:"total_roles"`
+	TotalIssuers int `json:"total_issuers,omitempty" structs:"total_issuers" mapstructure:"total_issuers"`
+}
+
+type UtilizationReportSecretSyncInformation struct {
+	TotalSources      int `json:"total_sources,omitempty" structs:"total_sources" mapstructure:"total_sources"`
+	TotalDestinations int `json:"total_destinations,omitempty" structs:"total_destinations" mapstructure:"total_destinations"`
+}
+
+type UtilizationReportLeaseCountQuotaInformation struct {
+	TotalLeaseCountQuotas            int                                                `json:"total_lease_count_quotas,omitempty" structs:"total_lease_count_quotas" mapstructure:"total_lease_count_quotas"`
+	GlobalLeaseCountQuotaInformation *UtilizationReportGlobalLeaseCountQuotaInformation `json:"global_lease_count_quota,omitempty" structs:"global_lease_count_quota" mapstructure:"global_lease_count_quota"`
+}
+
+type UtilizationReportGlobalLeaseCountQuotaInformation struct {
+	Name     string `json:"name,omitempty" structs:"name" mapstructure:"name"`
+	Capacity int    `json:"capacity,omitempty" structs:"capacity" mapstructure:"capacity"`
+	Count    int    `json:"count,omitempty" structs:"count" mapstructure:"count"`
+}
+
+```
+
+
 ### github.com/huandu/xstrings
 
 * License: MIT
@@ -18556,6 +41286,72 @@ THE SOFTWARE.
 ```
 
 
+### github.com/mitchellh/go-homedir
+
+* License: MIT
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/mitchellh/go-homedir/LICENSE
+
+#### LICENSE
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2013 Mitchell Hashimoto
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+```
+
+
+### github.com/mitchellh/mapstructure
+
+* License: MIT
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/mitchellh/mapstructure/LICENSE
+
+#### LICENSE
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2013 Mitchell Hashimoto
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+```
+
+
 ### github.com/mitchellh/reflectwalk
 
 * License: MIT
@@ -19363,6 +42159,40 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+```
+
+
+### github.com/natefinch/atomic
+
+* License: MIT
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/natefinch/atomic/LICENSE
+
+#### LICENSE
+
+```text
+The MIT License (MIT) 
+
+Copyright (c) 2015 Nate Finch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 
 ```
 
@@ -21255,6 +44085,39 @@ Copyright 2014-2015 The Prometheus Authors
 
 This product includes software developed at
 SoundCloud Ltd. (http://soundcloud.com/).
+
+```
+
+
+### github.com/ryanuber/go-glob
+
+* License: MIT
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/ryanuber/go-glob/LICENSE
+
+#### LICENSE
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2014 Ryan Uber
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ```
 
@@ -23276,6 +46139,220 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 * License: Apache-2.0
 * Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/sigstore/sigstore/pkg/signature/kms/gcp/LICENSE
+
+#### LICENSE
+
+```text
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+```
+
+
+### github.com/sigstore/sigstore/pkg/signature/kms/hashivault
+
+* License: Apache-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/sigstore/sigstore/pkg/signature/kms/hashivault/LICENSE
 
 #### LICENSE
 

@@ -32,6 +32,33 @@ func TestResolveKMSPublicKey_UnknownScheme(t *testing.T) {
 	}
 }
 
+// TestResolveKMSPublicKey_HashivaultProviderRegistered pins the blank import of
+// the hashivault KMS provider (kmsidentity.go). A hashivault:// URI must route
+// to a registered provider rather than be rejected as an unknown scheme. With
+// VAULT_ADDR/BAO_ADDR unset the provider fails to initialize before any network
+// call, which resolveKMSPublicKey classifies as ErrCodeUnavailable — distinct
+// from the ErrCodeInvalidRequest returned for an unregistered scheme (see
+// TestResolveKMSPublicKey_UnknownScheme). If the blank import were dropped,
+// kms.Get would surface ProviderNotFoundError and the code would flip to
+// ErrCodeInvalidRequest, failing this test.
+func TestResolveKMSPublicKey_HashivaultProviderRegistered(t *testing.T) {
+	t.Setenv("VAULT_ADDR", "")
+	t.Setenv("BAO_ADDR", "")
+
+	_, _, err := resolveKMSPublicKey(context.Background(), "hashivault://transit/keys/k")
+	if err == nil {
+		t.Fatal("want error resolving hashivault:// with VAULT_ADDR unset")
+	}
+	// A registered provider that cannot initialize (here: no VAULT_ADDR/BAO_ADDR)
+	// is classified ErrCodeUnavailable — distinct from the ErrCodeInvalidRequest
+	// reserved for an unregistered/unknown scheme. Asserting the specific code
+	// both pins the blank import (an unregistered scheme would surface
+	// ErrCodeInvalidRequest instead) and confirms the provider-init failure path.
+	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+		t.Errorf("want ErrCodeUnavailable (provider registered, init failed), got %v", err)
+	}
+}
+
 func TestIsKMSURI(t *testing.T) {
 	tests := []struct {
 		name string
@@ -41,9 +68,11 @@ func TestIsKMSURI(t *testing.T) {
 		{"aws lowercase", "awskms://alias/key", true},
 		{"gcp lowercase", "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k", true},
 		{"azure lowercase", "azurekms://vault.vault.azure.net/keys/k", true},
+		{"hashivault lowercase", "hashivault://transit/keys/k", true},
 		{"aws uppercase scheme", "AWSKMS://alias/key", true},
 		{"gcp uppercase scheme", "GCPKMS://projects/p/locations/l/keyRings/r/cryptoKeys/k", true},
 		{"azure mixed case scheme", "AzureKMS://vault.vault.azure.net/keys/k", true},
+		{"hashivault mixed case scheme", "HashiVault://transit/keys/k", true},
 		{"local pem path", "./bundle-signer.pub", false},
 		{"absolute pem path", "/etc/keys/signer.pem", false},
 		{"scheme as substring not prefix", "prefix-awskms://alias/key", false},
@@ -70,6 +99,7 @@ func TestNormalizeURIScheme(t *testing.T) {
 	}{
 		{"uppercase scheme", "GCPKMS://projects/P/keyRings/R", "gcpkms://projects/P/keyRings/R"},
 		{"mixed case scheme", "AzureKMS://Vault/keys/K", "azurekms://Vault/keys/K"},
+		{"hashivault mixed case scheme", "HashiVault://Transit/keys/K", "hashivault://Transit/keys/K"},
 		{"already lowercase", "awskms://alias/Key", "awskms://alias/Key"},
 		{"preserves path case", "awskms://arn:aws:kms:us-East-1:ABC", "awskms://arn:aws:kms:us-East-1:ABC"},
 		{"no scheme separator", "/etc/keys/signer.pem", "/etc/keys/signer.pem"},

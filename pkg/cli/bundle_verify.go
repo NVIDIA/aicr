@@ -93,7 +93,7 @@ Output as JSON:
 			},
 			&cli.StringFlag{
 				Name:  "key",
-				Usage: "Verify a key-signed bundle attestation against a KMS key URI (awskms:// | gcpkms:// | azurekms://) or a local PEM public-key file. The counterpart to `bundle --signing-key`. Coexists with --certificate-identity-regexp (which pins the separate binary attestation).",
+				Usage: "Verify a key-signed bundle attestation against a KMS key URI (awskms:// | gcpkms:// | azurekms:// | hashivault://) or a local PEM public-key file. The counterpart to `bundle --signing-key`. Coexists with --certificate-identity-regexp (which pins the separate binary attestation).",
 			},
 			&cli.StringFlag{
 				Name:  "trust-root",

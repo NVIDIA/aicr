@@ -1,0 +1,240 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# HashiCorp Vault-backed bundle signing and verification e2e tests against
+# OpenBAO (https://openbao.org), the Apache-2.0 fork of Vault. Starts OpenBAO in
+# dev mode, enables the Transit secrets engine, provisions an ephemeral
+# ecdsa-p256 signing key, builds the aicr binary, then runs the chainsaw suite
+# gated by --selector 'requires=openbao'. Exercises the hashivault:// path added
+# in #1577.
+#
+# Dev-mode OpenBAO serves plain HTTP with a known root token, so no TLS/mkcert
+# dance is needed (contrast kms-ministack-e2e.yaml, whose awskms signer requires
+# https). The OpenBAO image is pinned in .settings.yaml
+# (testing_tools.openbao_image) and resolved via load-versions, so it is never
+# floated to :latest. The server runs as a plain `docker run` step (not a
+# services: container) because a service container starts before any step and
+# therefore cannot reference the load-versions step output.
+
+name: Vault KMS E2E
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  # Validate on PRs that touch the test, its workflow/tooling, or the signing
+  # code under test. Gated to same-repo in the job `if` below: fork PRs lack the
+  # OIDC token needed to attest the binary, so they skip rather than fail.
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tests/chainsaw/signing/bundle-attestation-vault/**'
+      - '.github/workflows/vault-kms-e2e.yaml'
+      - '.github/actions/load-versions/**'
+      - '.github/actions/generate-slsa-predicate/**'
+      - '.github/actions/setup-build-tools/**'
+      - '.settings.yaml'
+      - '.goreleaser.yaml'
+      - 'pkg/bundler/**'
+      # The keyless/trust-root verification path imports pkg/trust directly.
+      - 'pkg/trust/**'
+      # The `bundle --signing-key`, `verify --key`, and identity-regexp plumbing
+      # under test lives in pkg/cli; cmd/aicr is the thin entrypoint. go.mod/sum
+      # cover dependency bumps (e.g. sigstore) that change the signing path.
+      - 'pkg/cli/**'
+      - 'cmd/aicr/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'vendor/**'
+
+# Least privilege at the workflow level; id-token is granted only to the job
+# that needs it (below).
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Dev-mode OpenBAO: plain HTTP, fixed root token. Nothing here is a real secret.
+  VAULT_ADDR: http://127.0.0.1:8200
+  VAULT_TOKEN: root
+  VAULT_KMS_KEY: aicr
+
+jobs:
+  vault-kms-e2e:
+    name: Vault KMS E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # id-token: write mints the GitHub OIDC token for Sigstore keyless signing.
+    # The "Build aicr binary" step runs goreleaser, whose cosign attest-blob hook
+    # uses that identity to produce the binary's SLSA provenance (fed by
+    # "Generate SLSA predicate" and checked by --min-trust-level verified).
+    permissions:
+      contents: read
+      id-token: write
+    # Skip on fork PRs: they get a read-only token, so `cosign attest-blob`
+    # (binary attestation) cannot run. push/workflow_dispatch always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        with:
+          version: ${{ steps.versions.outputs.goreleaser }}
+          install-only: true
+
+      - name: Install Chainsaw
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_chainsaw: 'true'
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          # Pin from .settings.yaml (>= v3.1.0) so cosign logs DSSE attestations
+          # to Rekor v2 as hashedrekord/PAE. The installer default (v3.0.6) writes
+          # the legacy dsse entry type, which sigstore-go cannot verify. See #1650.
+          cosign-release: ${{ steps.versions.outputs.cosign }}
+
+      - name: Generate SLSA predicate
+        uses: ./.github/actions/generate-slsa-predicate
+        with:
+          workflow_file: vault-kms-e2e.yaml
+
+      - name: Start OpenBAO
+        env:
+          OPENBAO_IMAGE: ${{ steps.versions.outputs.openbao_image }}
+        run: |
+          set -euo pipefail
+
+          # Dev mode: single in-memory node, auto-unsealed, fixed root token,
+          # HTTP listener on 0.0.0.0:8200. IPC_LOCK lets the server mlock memory.
+          docker run -d --name openbao \
+            --cap-add IPC_LOCK \
+            -p 8200:8200 \
+            "${OPENBAO_IMAGE}" \
+            server -dev \
+            -dev-root-token-id="${VAULT_TOKEN}" \
+            -dev-listen-address=0.0.0.0:8200 >/dev/null
+
+          # sys/health returns 200 only when initialized, unsealed, and active.
+          for _ in $(seq 1 45); do
+            if [ "$(docker inspect -f '{{.State.Running}}' openbao 2>/dev/null)" != "true" ]; then
+              docker logs openbao 2>&1 | tail -20
+              echo "::error::OpenBAO container exited unexpectedly"
+              exit 1
+            fi
+            if curl -sf --max-time 3 "${VAULT_ADDR}/v1/sys/health" >/dev/null 2>&1; then
+              echo "OpenBAO is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs openbao 2>&1 | tail -20
+          echo "::error::OpenBAO did not become ready in time"
+          exit 1
+
+      - name: Provision Transit key in OpenBAO
+        run: |
+          set -euo pipefail
+
+          # Enable the Transit secrets engine at the default mount path.
+          curl -sf -H "X-Vault-Token: ${VAULT_TOKEN}" \
+            -X POST -d '{"type":"transit"}' \
+            "${VAULT_ADDR}/v1/sys/mounts/transit"
+
+          # Create an ecdsa-p256 signing key (signs over the SHA-256 digest the
+          # bundler uses).
+          curl -sf -H "X-Vault-Token: ${VAULT_TOKEN}" \
+            -X POST -d '{"type":"ecdsa-p256"}' \
+            "${VAULT_ADDR}/v1/transit/keys/${VAULT_KMS_KEY}"
+
+          echo "Provisioned Transit key: ${VAULT_KMS_KEY} (URI: hashivault://${VAULT_KMS_KEY})"
+
+      - name: Build aicr binary
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          set -euo pipefail
+          goreleaser build --clean --single-target --snapshot --timeout 10m
+
+      - name: Locate binary and detect attestation
+        run: |
+          set -euo pipefail
+          AICR_BIN=""
+          for pattern in dist/aicr_linux_amd64_v1/aicr dist/aicr_linux_amd64/aicr; do
+            if [ -x "$pattern" ]; then
+              AICR_BIN="$(pwd)/$pattern"
+              break
+            fi
+          done
+          if [ -z "$AICR_BIN" ]; then
+            echo "::error::Built binary not found in dist/"
+            exit 1
+          fi
+          echo "AICR_BIN=${AICR_BIN}" >> "$GITHUB_ENV"
+          echo "Binary: ${AICR_BIN}"
+
+          ATTEST_FILE="$(dirname "$AICR_BIN")/aicr-attestation.sigstore.json"
+          if [ -f "$ATTEST_FILE" ]; then
+            echo "AICR_ATTESTED=true" >> "$GITHUB_ENV"
+            echo "AICR_IDENTITY_REGEXP=https://github.com/${{ github.repository }}/.github/workflows/vault-kms-e2e\\.yaml@.*" >> "$GITHUB_ENV"
+            echo "Binary attestation found: $ATTEST_FILE"
+          else
+            echo "AICR_ATTESTED=false" >> "$GITHUB_ENV"
+            echo "::warning::No binary attestation found; verify-min-trust-verified step will be skipped"
+          fi
+
+      - name: Run Vault KMS chainsaw tests
+        env:
+          AICR_ATTESTED: ${{ env.AICR_ATTESTED }}
+          AICR_IDENTITY_REGEXP: ${{ env.AICR_IDENTITY_REGEXP }}
+        run: |
+          set -euo pipefail
+          chainsaw test \
+            --no-cluster \
+            --config tests/chainsaw/chainsaw-config.yaml \
+            --test-dir tests/chainsaw/signing/bundle-attestation-vault/ \
+            --selector 'requires=openbao'
+
+      - name: Stop OpenBAO
+        if: always()
+        run: docker rm -f openbao >/dev/null 2>&1 || true

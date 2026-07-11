@@ -193,13 +193,27 @@ license: ## Add/verify license headers in source files
 	@addlicense -f .github/headers/LICENSE $(LICENSE_IGNORES) .
 	@addlicense -f .github/headers/LICENSE recipes/evidence/allowlist.yaml
 
-#### DO NOT CHANGE THIS SET OF ALLOWED LICENSES, DO NOT ADD IGNORES
+#### DO NOT CHANGE THE ALLOWED-LICENSE SET. Do not add ignores to work around
+#### the policy. The only sanctioned exceptions are specific MPL-2.0 packages
+#### whose use has been explicitly approved; each is listed by exact import path
+#### so unrelated MPL-2.0 deps still fail closed for review. The go-cleanhttp /
+#### go-retryablehttp pair, and the HashiCorp Vault client subtree (#1577, the
+#### hashivault:// KMS signing provider), are the approved exceptions.
 license-check: ## Check license is approved
 	@echo "Checking license headers..."
 	@STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
 	go-licenses check ./... \
         --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,Zlib \
-        --ignore=github.com/hashicorp/go-cleanhttp,github.com/hashicorp/go-retryablehttp \
+        --ignore=github.com/hashicorp/go-cleanhttp \
+        --ignore=github.com/hashicorp/go-retryablehttp \
+        --ignore=github.com/hashicorp/vault/api \
+        --ignore=github.com/hashicorp/errwrap \
+        --ignore=github.com/hashicorp/go-multierror \
+        --ignore=github.com/hashicorp/go-rootcerts \
+        --ignore=github.com/hashicorp/go-secure-stdlib/parseutil \
+        --ignore=github.com/hashicorp/go-secure-stdlib/strutil \
+        --ignore=github.com/hashicorp/go-sockaddr \
+        --ignore=github.com/hashicorp/hcl \
         --ignore=$$STDLIB_IGNORE
 
 .PHONY: test

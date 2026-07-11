@@ -70,7 +70,7 @@ type ResolveOptions struct {
 
 	// SigningKey selects KMS-backed (key-based) signing instead of keyless OIDC.
 	// When non-empty it is a cosign-style KMS URI (awskms:// | gcpkms:// |
-	// azurekms://) and takes precedence over all OIDC source fields, which are
+	// azurekms:// | hashivault://) and takes precedence over all OIDC source fields, which are
 	// keyless-only. Mutual exclusivity with the keyless flags is enforced at the
 	// CLI boundary (pkg/cli). See issue #407.
 	SigningKey string

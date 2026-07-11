@@ -28,7 +28,7 @@ import (
 )
 
 // resolveKMSPublicKey looks up a cosign-style KMS key URI
-// (awskms:// | gcpkms:// | azurekms://), reads its public half, and returns
+// (awskms:// | gcpkms:// | azurekms:// | hashivault://), reads its public half, and returns
 // both the live SignerVerifier seam and the resolved public key. It is shared
 // by KMS signing (kmsidentity.go, which uses the returned signer for
 // SignDigest) and KMS verification (which needs only the public key) so both

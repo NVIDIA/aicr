@@ -47,7 +47,7 @@ type keyVerificationIdentity struct {
 
 // NewKeyVerificationIdentity resolves keyRef to a public key and returns the
 // key-based VerificationIdentity. keyRef is a KMS key URI
-// (awskms:// | gcpkms:// | azurekms://) or a path to a local PEM public-key
+// (awskms:// | gcpkms:// | azurekms:// | hashivault://) or a path to a local PEM public-key
 // file. This factory is the only input-form branch in the feature: a KMS URI
 // is resolved via the shared resolveKMSPublicKey seam (so signing and verifying
 // agree on provider resolution and error classification), and anything else is

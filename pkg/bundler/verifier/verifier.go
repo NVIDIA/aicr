@@ -83,7 +83,7 @@ type VerifyOptions struct {
 
 	// Key selects public-key verification of the bundle attestation instead of
 	// keyless certificate-identity verification. A KMS key URI
-	// (awskms:// | gcpkms:// | azurekms://) or a local PEM public-key file.
+	// (awskms:// | gcpkms:// | azurekms:// | hashivault://) or a local PEM public-key file.
 	// Independent of CertificateIdentityRegexp, which pins the (separate) binary
 	// attestation; the two coexist (see #1152).
 	Key string

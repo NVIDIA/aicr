@@ -1263,7 +1263,7 @@ aicr bundle [flags]
 | `--fulcio-url` | | string | Override the Fulcio CA URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Fulcio when omitted. Also reads `AICR_FULCIO_URL`. |
 | `--rekor-url` | | string | Sign the `--attest` bundle to **Rekor v1** at this URL instead of the **Rekor v2 default** (a private Sigstore instance, or the public-good v1 URL). Must be an absolute `https://` URL with no embedded credentials. Also reads `AICR_REKOR_URL`. Independent of `--fulcio-url`. Mutually exclusive with `--signing-config`. |
 | `--signing-config` | | string | Sign the `--attest` bundle with a custom Sigstore signing config JSON instead of the default Rekor v2 config (advanced — e.g. an edited config or a private v2 instance). Also reads `AICR_SIGNING_CONFIG`. Mutually exclusive with `--rekor-url`. |
-| `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a cloud KMS URI; supported schemes are `awskms://`, `gcpkms://`, and `azurekms://`. Like keyless signing, KMS signs to Rekor v2 by default; opt out with `--rekor-url` (v1) or `--signing-config` (custom). Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. See [KMS-Backed Signing](#kms-backed-signing). |
+| `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a KMS URI; supported schemes are `awskms://`, `gcpkms://`, `azurekms://`, and `hashivault://`. Like keyless signing, KMS signs to Rekor v2 by default; opt out with `--rekor-url` (v1) or `--signing-config` (custom). Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. See [KMS-Backed Signing](#kms-backed-signing). |
 | `--yes` | `--assume-yes` | bool | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 
 #### Bundle Config File Mode
@@ -2172,7 +2172,7 @@ When `--attest` is passed, the bundle command performs five steps:
 4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated payload files listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
-Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a cloud KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
+Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
 
 **Rekor v1 / private Sigstore:** pass `--rekor-url` to sign to Rekor **v1** at a specific URL — a private instance, or the public-good v1 URL — instead of the v2 default. Organizations running their own Fulcio CA can also redirect with `--fulcio-url` (both must be absolute `https://` URLs with no embedded credentials); the two are independent. For a fully custom v2 setup, `--signing-config` takes a Sigstore signing config JSON (mutually exclusive with `--rekor-url`).
 
@@ -2259,12 +2259,13 @@ trusted interactive automation; the banner is still printed.
 Keyless signing depends on an OIDC identity provider. Some CI/CD environments
 (Jenkins, internal pipelines, air-gapped build hosts) have no OIDC issuer that
 Sigstore trusts. For those, `--signing-key` signs the `--attest` bundle with a
-cloud-KMS-backed key instead of a short-lived Fulcio certificate. The flag takes
+KMS-backed key instead of a short-lived Fulcio certificate. The flag takes
 a KMS URI; the supported schemes are:
 
 - `awskms://`: AWS Key Management Service
 - `gcpkms://`: Google Cloud KMS
 - `azurekms://`: Azure Key Vault
+- `hashivault://`: HashiCorp Vault (Transit secrets engine)
 
 ```shell
 aicr bundle --recipe recipe.yaml --attest \
@@ -2292,7 +2293,7 @@ Fulcio certificate.
 > (`cosign verify-blob-attestation --key <same-kms-uri> ...`) also works, since
 > the bundle uses the standard Sigstore bundle format.
 
-HashiCorp Vault (`hashivault://`) is not supported: its client libraries are MPL-2.0 licensed, which is incompatible with this project's license policy. This is a deliberate, ongoing exclusion rather than a not-yet-implemented feature at this time.
+The `hashivault://<transit-key-name>` scheme signs through HashiCorp Vault's Transit secrets engine (or an API-compatible server such as OpenBAO). It reads the server address and token from the standard `VAULT_ADDR` and `VAULT_TOKEN` environment variables (the OpenBAO equivalents `BAO_ADDR` and `BAO_TOKEN` are honored as fallbacks), so no additional flags are required; set `TRANSIT_SECRET_ENGINE_PATH` if the Transit engine is mounted somewhere other than the default `transit/`. Verify the resulting bundle with the same URI via `aicr verify --key hashivault://<transit-key-name>`.
 
 ##### Attestation Scope
 
@@ -2569,7 +2570,7 @@ aicr verify <bundle-dir> [flags]
 | `--require-creator` | string | | Require a specific creator identity, matched against the bundle attestation signing certificate. |
 | `--cli-version-constraint` | string | | Version constraint for the aicr CLI version in the attestation predicate. Supports `>=`, `>`, `<=`, `<`, `==`, `!=`. A bare version (e.g. `"0.8.0"`) defaults to `>=`. |
 | `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
-| `--key` | string | | Verify a key-signed bundle attestation against a KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://`) or a local PEM public-key file. This is the counterpart to `bundle --signing-key`. It coexists with `--certificate-identity-regexp`, which pins the binary attestation; the two verify different attestations. |
+| `--key` | string | | Verify a key-signed bundle attestation against a KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`) or a local PEM public-key file. This is the counterpart to `bundle --signing-key`. It coexists with `--certificate-identity-regexp`, which pins the binary attestation; the two verify different attestations. |
 | `--trust-root` | string | | Verify the bundle attestation against a private Sigstore trusted root (a `trusted_root.json` from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with `--key` and `--certificate-identity-regexp`. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`. |
 | `--format` | string | `text` | Output format: `text` or `json`. |
 
@@ -2616,7 +2617,7 @@ aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
 aicr verify ./my-bundle --trust-root ./trusted_root.json
 ```
 
-> **`--key` network behavior:** Resolving a **KMS URI** (`awskms://`, `gcpkms://`, `azurekms://`) makes network calls to the KMS provider to fetch the public key, so credentials for that provider must be available in the environment. A **local PEM** public-key file is read from disk with no provider calls; export it once with `cosign public-key --key <kms-uri>` (or your provider's console) and verify anywhere.
+> **`--key` network behavior:** Resolving a **KMS URI** (`awskms://`, `gcpkms://`, `azurekms://`, `hashivault://`) makes network calls to the KMS provider to fetch the public key, so credentials for that provider must be available in the environment. A **local PEM** public-key file is read from disk with no provider calls; export it once with `cosign public-key --key <kms-uri>` (or your provider's console) and verify anywhere.
 >
 > Resolving the key is only part of verification: by default the bundle's Rekor transparency-log entry is also checked. Its inclusion proof is embedded in the bundle, so no live Rekor call is made, but the check needs the Sigstore trusted root. That root is loaded from the local cache and falls back to the embedded trusted root on a cache miss, so no network fetch happens on the verify path and `aicr trust update` is not required for offline use. Verification that drops the transparency-log requirement entirely, for true air-gapped use, is tracked in [#1154](https://github.com/NVIDIA/aicr/issues/1154).
 >
