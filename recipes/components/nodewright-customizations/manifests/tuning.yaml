@@ -126,10 +126,17 @@ spec:
       interrupt:
         type: reboot
       resources:
-        cpuLimit: 4000m
-        cpuRequest: 2000m
-        memoryLimit: 8192Mi
-        memoryRequest: 4096Mi
+        # Elevated from 4000m/8192Mi for the EFA DKMS build. efa_installer.sh's
+        # "Inspecting kernel" autoconf is a highly parallel kernel-module build;
+        # inside the skyhook chroot nproc reports the host core count, so make -j
+        # oversubscribes. Under the prior 4 CPU / 8Gi cgroup it was CFS-throttled
+        # and its feature probes were starved/OOM-killed, so efa misdetected the
+        # kernel and emitted compat shims that fail to compile on 6.17. More CPU
+        # and memory headroom lets the probes complete and detect correctly.
+        cpuLimit: 8000m
+        cpuRequest: 4000m
+        memoryLimit: 16384Mi
+        memoryRequest: 8192Mi
       configMap:
         {{- if $cust.service }}
         service: {{ $cust.service }}
