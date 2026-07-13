@@ -23,7 +23,8 @@
 # `testing_tools.gitea_image`) — never hardcoded.
 #
 # Components installed (controller installs branch on $DEPLOYER):
-#   1. ALWAYS: `registry:2` Deployment + NodePort Service in the
+#   1. ALWAYS: OCI registry Deployment (image pinned via .settings.yaml
+#      `testing_tools.registry_image`) + NodePort Service in the
 #      `aicr-registry` namespace. Service is exposed on nodePort 30500;
 #      kwok/kind-config.yaml maps host port 5500 -> nodePort 30500 so
 #      `aicr bundle --output oci://localhost:5500/...` works from the
