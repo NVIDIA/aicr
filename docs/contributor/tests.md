@@ -368,7 +368,7 @@ scheduling-shape failures.
 
 ### Tuning the Sync Deadline
 
-Four environment variables shape how long the GitOps lanes wait
+Five environment variables shape how long the GitOps lanes wait
 before declaring a sync timeout. Argo CD and Flux pairs are
 independent.
 
@@ -378,6 +378,19 @@ independent.
 | `KWOK_ARGOCD_ROOT_GRACE` | `30` s | Grace period for the root Application before deadline counting starts |
 | `KWOK_FLUX_SYNC_TIMEOUT` | `500` s | Deadline for source fetch (OCIRepository or GitRepository) + Kustomization apply + HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `KWOK_FLUX_ROOT_GRACE` | `30` s | Grace period for the outer Kustomization before deadline counting starts |
+| `KWOK_SYNC_DEADLINE_EPOCH` | unset | Absolute epoch deadline for sync-gate work (CI only). When set, each gate budget becomes min(default, deadline − now); below a 120 s floor the gate fails fast with exit 50 so chainsaw's catch-block diagnostics always print before GitHub's job timeout |
+
+In CI, the `kwok-test` action derives `KWOK_SYNC_DEADLINE_EPOCH` in its
+first step — before toolchain setup and the `aicr` build, so the anchor
+sits within ~60 s of job start — from its `job_timeout_minutes` input
+(required, no default — every caller must wire its own value, which
+must equal that caller's `timeout-minutes`; currently `18` for the
+KWOK jobs) minus a 240 s margin reserved for chainsaw catch-block
+diagnostics, pod verification, and debug-artifact upload. The input
+must be a positive integer with no leading zeros, and must leave at
+least 120 s of usable budget after the 240 s margin (i.e. `>= 6`); the
+step fails fast otherwise. Local runs leave it unset and keep the
+fixed defaults above.
 
 The Git-source lanes (`flux-git`, `argocd-git`) additionally honor
 `KWOK_GITEA_HOST_PORT` (default `3300`), `KWOK_GITEA_USER` (default

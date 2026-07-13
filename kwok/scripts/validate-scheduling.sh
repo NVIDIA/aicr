@@ -80,6 +80,19 @@
 #                            Kustomization after the grace window indicates
 #                            kubectl apply silently produced no resource
 #                            (RBAC denial, CRD missing). Default: 30.
+#   KWOK_SYNC_DEADLINE_EPOCH Absolute unix-epoch deadline for sync-gate work.
+#                            Set by CI (.github/actions/kwok-test) in the
+#                            action's FIRST step — before toolchain setup
+#                            and the aicr build — from the job's
+#                            timeout-minutes minus a 240s diagnostics
+#                            margin, so pre-action drift stays within the
+#                            margin's 60s allowance. When set, each
+#                            sync-gate budget becomes min(default, deadline
+#                            − now); below a 120s floor the gate fails
+#                            fast with exit 50 instead of letting the job
+#                            timeout destroy chainsaw's catch-block
+#                            diagnostics. Unset locally: fixed defaults
+#                            apply.
 #   KWOK_GITEA_HOST_PORT     (flux-git / argocd-git) Host port the in-cluster
 #                            Gitea is reachable on from the runner for
 #                            `git push`. MUST match install-infra.sh /
@@ -123,6 +136,7 @@ REPO_ROOT="$(cd "${KWOK_DIR}/.." && pwd)"
 # run-all-recipes.sh so the system-ns allowlist lives in one place.
 # shellcheck source=lib/cleanup.sh
 source "${SCRIPT_DIR}/lib/cleanup.sh"
+source "${SCRIPT_DIR}/lib/sync-budget.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -1553,9 +1567,14 @@ wait_for_argocd_sync() {
             test_dir="${REPO_ROOT}/tests/chainsaw/kwok/argocd-sync"
             ;;
     esac
-    local sync_timeout="${KWOK_ARGOCD_SYNC_TIMEOUT:-480}s"
+    local budget_seconds
+    if ! budget_seconds=$(compute_sync_budget "${KWOK_ARGOCD_SYNC_TIMEOUT:-480}"); then
+        log_error "Argo CD sync gate: <${SYNC_BUDGET_FLOOR_SECONDS}s left before the job deadline (KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH:-unset}) — setup consumed the budget"
+        return "$EXIT_ARGOCD_SYNC_TIMEOUT"
+    fi
+    local sync_timeout="${budget_seconds}s"
 
-    log_info "Argo CD sync gate (chainsaw): rootApp=${ARGOCD_ROOT_APP} timeout=${sync_timeout}"
+    log_info "Argo CD sync gate (chainsaw): rootApp=${ARGOCD_ROOT_APP} timeout=${sync_timeout} (default ${KWOK_ARGOCD_SYNC_TIMEOUT:-480}s; deadline-derived when KWOK_SYNC_DEADLINE_EPOCH is set)"
 
     # --assert-timeout overrides spec.timeouts.assert per CLI invocation,
     # letting the bash driver vary the deadline by env var without forking
@@ -1638,8 +1657,13 @@ wait_for_flux_sync() {
             ;;
     esac
 
-    local sync_timeout="${KWOK_FLUX_SYNC_TIMEOUT:-500}s"
-    log_info "Flux sync timeout: ${sync_timeout}"
+    local budget_seconds
+    if ! budget_seconds=$(compute_sync_budget "${KWOK_FLUX_SYNC_TIMEOUT:-500}"); then
+        log_error "Flux sync gate: <${SYNC_BUDGET_FLOOR_SECONDS}s left before the job deadline (KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH:-unset}) — setup consumed the budget"
+        return "$EXIT_ARGOCD_SYNC_TIMEOUT"
+    fi
+    local sync_timeout="${budget_seconds}s"
+    log_info "Flux sync timeout: ${sync_timeout} (default ${KWOK_FLUX_SYNC_TIMEOUT:-500}s; deadline-derived when KWOK_SYNC_DEADLINE_EPOCH is set)"
 
     # See the argocd shim's comment for the --set vs --values choice;
     # --values requires YAML, --set takes inline key=value pairs.

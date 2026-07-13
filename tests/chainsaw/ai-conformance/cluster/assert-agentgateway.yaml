@@ -14,7 +14,7 @@
 
 # Assert agentgateway controller is available.
 # fullnameOverride: agentgateway (from values.yaml)
-# Chart: agentgateway v2.2.1 (oci://cr.agentgateway.dev/charts)
+# Chart: agentgateway v1.3.1 (oci://cr.agentgateway.dev/charts)
 # Satisfies CNCF AI Conformance Advanced Ingress for AI/ML Inference.
 # Implements Gateway API + Inference Extension for InferencePool routing.
 apiVersion: apps/v1
