@@ -50,7 +50,7 @@ const (
 const firstPartyIssuer = "https://token.actions.githubusercontent.com"
 
 // firstPartyIdentity matches the SubjectAlternativeName of AICR's own UAT
-// workflows (uat-aws.yaml / uat-gcp.yaml on a branch ref) — the only
+// workflows (uat-aws.yaml / uat-gcp.yaml / uat-azure.yaml on a branch ref) — the only
 // identity the interim heuristic may admit as first-party. Fully anchored
 // (^…$) so neither a look-alike host nor an arbitrary other path/ref under
 // NVIDIA/aicr (e.g. a fork-PR workflow or a non-UAT workflow) can satisfy
@@ -58,7 +58,7 @@ const firstPartyIssuer = "https://token.actions.githubusercontent.com"
 // firstParty entries in recipes/evidence/allowlist.yaml. Used only when no
 // allowlist file is loaded (nil *Allowlist).
 var firstPartyIdentity = regexp.MustCompile(
-	`^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/.+$`)
+	`^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp|azure)\.yaml@refs/heads/.+$`)
 
 // Allowlist wraps the shared GP1 allowlist loader (pkg/evidence/allowlist)
 // for the GP2 producer. A nil *Allowlist is valid and applies only the

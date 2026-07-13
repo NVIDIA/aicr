@@ -96,6 +96,43 @@ func TestUpdate_CancelledContext(t *testing.T) {
 	}
 }
 
+// TestResolveSigningConfig contacts the public Sigstore TUF CDN to resolve the
+// Rekor v2 signing config (cache-first, network fallback). Integration test
+// (network); skipped in short mode like TestUpdate_Success. It must offer a
+// Rekor v2 log and a timestamp authority — a v2 bundle carries no inline Rekor
+// SET, so a TSA is required for trusted time. See NVIDIA/aicr#1650.
+func TestResolveSigningConfig(t *testing.T) {
+	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sc, err := ResolveSigningConfig(ctx)
+	if err != nil {
+		t.Fatalf("ResolveSigningConfig() error: %v", err)
+	}
+	if sc == nil {
+		t.Fatal("ResolveSigningConfig() returned nil")
+	}
+
+	hasV2 := false
+	for _, s := range sc.RekorLogURLs() {
+		if s.MajorAPIVersion >= 2 {
+			hasV2 = true
+		}
+	}
+	if !hasV2 {
+		t.Error("expected a Rekor v2 log URL in the resolved signing config")
+	}
+	if len(sc.TimestampAuthorityURLs()) == 0 {
+		t.Error("expected a timestamp authority in the resolved signing config")
+	}
+}
+
 func TestLoadTrustedMaterialFromFile(t *testing.T) {
 	t.Run("valid file", func(t *testing.T) {
 		tm, err := LoadTrustedMaterialFromFile("testdata/trusted_root.json")

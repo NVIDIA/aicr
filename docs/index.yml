@@ -24,6 +24,8 @@ navigation:
         path: user/installation.md
       - page: CLI Reference
         path: user/cli-reference.md
+      - page: CLI Configuration File
+        path: user/cli-config.md
       - page: Artifact Verification
         path: user/artifact-verification.md
       - page: API Reference
@@ -106,6 +108,8 @@ navigation:
         path: contributor/skills.md
       - page: Maintaining AICR
         path: contributor/maintaining.md
+      - page: Rekor v2 Signing
+        path: contributor/rekor-v2-signing.md
       - page: Publishing Recipe Evidence
         path: contributor/evidence-publishing.md
       - page: UAT Day/Night Cycle

@@ -155,10 +155,12 @@ func TestLoadAllowlist_CanonicalFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAllowlist(recipes/evidence/allowlist.yaml): %v", err)
 	}
-	class, ok := al.Classify(ghaIssuer,
-		"https://github.com/NVIDIA/aicr/.github/workflows/uat-gcp.yaml@refs/heads/main")
-	if class != ClassFirstParty || !ok {
-		t.Errorf("canonical allowlist classified UAT signer as (%q,%v), want (first-party,true)", class, ok)
+	for _, cloud := range []string{"aws", "gcp", "azure"} {
+		identity := "https://github.com/NVIDIA/aicr/.github/workflows/uat-" + cloud + ".yaml@refs/heads/main"
+		class, ok := al.Classify(ghaIssuer, identity)
+		if class != ClassFirstParty || !ok {
+			t.Errorf("canonical allowlist classified %s UAT signer as (%q,%v), want (first-party,true)", cloud, class, ok)
+		}
 	}
 }
 
@@ -175,6 +177,7 @@ func TestClassify_NilAllowlist(t *testing.T) {
 		wantAllowed bool
 	}{
 		{"first-party heuristic", ghaIssuer, "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main", ClassFirstParty, true},
+		{"first-party heuristic (azure)", ghaIssuer, "https://github.com/NVIDIA/aicr/.github/workflows/uat-azure.yaml@refs/heads/main", ClassFirstParty, true},
 		{"foreign repo is community", ghaIssuer, "https://github.com/evil/aicr/.github/workflows/x.yaml@refs/heads/main", ClassCommunity, false},
 		{"look-alike host not first-party", ghaIssuer, "https://github.com.evil.example/NVIDIA/aicr/x.yaml", ClassCommunity, false},
 		{"community email", communityIssuer, "yuanchen97@gmail.com", ClassCommunity, false},

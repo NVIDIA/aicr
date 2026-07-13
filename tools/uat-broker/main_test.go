@@ -113,6 +113,40 @@ reservations:
 	}
 }
 
+// TestReservationsResolveNightlyIntentsOptOut asserts an explicit empty
+// nightly-intents list resolves to an EMPTY value (nightly opt-out), while
+// remaining a present key — the nightly batch skips the leg on an empty
+// value but fails closed when the key is missing entirely.
+func TestReservationsResolveNightlyIntentsOptOut(t *testing.T) {
+	const reg = `
+reservations:
+  - name: azure-h100
+    cloud: azure
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: tests/uat/azure/cluster-config.yaml
+    test-config-dir: tests/uat/azure/tests
+    nightly-intents: []
+`
+	p := filepath.Join(t.TempDir(), "reservations.yaml")
+	if err := os.WriteFile(p, []byte(reg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := invoke("", "reservations", "--file", p, "--name", "azure-h100")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "nightly-intents=\n") {
+		t.Errorf("stdout missing empty nightly-intents= line (opt-out)\ngot:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "cloud=azure\n") {
+		t.Errorf("stdout missing cloud=azure\ngot:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "reservation-id=\n") {
+		t.Errorf("stdout missing empty reservation-id= line\ngot:\n%s", stdout)
+	}
+}
+
 func TestReservationsList(t *testing.T) {
 	reg := writeRegistry(t)
 	code, stdout, _ := invoke("", "reservations", "--file", reg, "--list")

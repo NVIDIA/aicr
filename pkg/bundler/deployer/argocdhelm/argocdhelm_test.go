@@ -2076,7 +2076,8 @@ func TestGenerate_DeployerDefaults_NoOptions(t *testing.T) {
 	}
 	values := readBundleFile(t, outputDir, "values.yaml")
 	// Defaults documented in values.yaml even without overrides.
-	for _, want := range []string{"destinationServer: https://kubernetes.default.svc", "project: default"} {
+	for _, want := range []string{"destinationServer: https://kubernetes.default.svc", "project: default",
+		"includeRootApp: true"} {
 		if !strings.Contains(string(values), want) {
 			t.Errorf("values.yaml missing default %q\n%s", want, values)
 		}
@@ -2084,6 +2085,14 @@ func TestGenerate_DeployerDefaults_NoOptions(t *testing.T) {
 	parent := readBundleFile(t, outputDir, "templates/aicr-stack.yaml")
 	if strings.Contains(string(parent), "finalizers") {
 		t.Error("parent template must not carry finalizers by default")
+	}
+	if !strings.Contains(string(parent), `dig "includeRootApp" true`) {
+		t.Error("parent template missing includeRootApp gate")
+	}
+
+	schema := readBundleFile(t, outputDir, "values.schema.json")
+	if !strings.Contains(string(schema), `"includeRootApp"`) {
+		t.Error("values.schema.json missing includeRootApp property (additionalProperties:false would reject the --set)")
 	}
 }
 
@@ -2156,6 +2165,95 @@ func TestHelmTemplate_DeployerNamePrefixOverride(t *testing.T) {
 	if _, ok := found[DefaultAppName]; !ok {
 		t.Errorf("rendered output missing unprefixed parent %q", DefaultAppName)
 	}
+}
+
+// TestHelmTemplate_IncludeRootAppToggle is the live-render check for
+// deployer.includeRootApp (#1723): default renders the parent app-of-apps,
+// `--set deployer.includeRootApp=false` renders children-only so an
+// externally managed root Application pointing at the published chart does
+// not fight the bundled parent over the same children, and a string value
+// fails the values schema loudly instead of rendering as truthy.
+// Skipped when helm is not on PATH.
+func TestHelmTemplate_IncludeRootAppToggle(t *testing.T) {
+	requireHelm(t)
+
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	render := func(t *testing.T, extraArgs ...string) (string, error) {
+		t.Helper()
+		cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		args := append([]string{"template", "test-release", outputDir,
+			"--set", "repoURL=oci://example.test/myorg",
+			"--set", "targetRevision=v1.0.0",
+		}, extraArgs...)
+		cmd := exec.CommandContext(cmdCtx, "helm", args...) //nolint:gosec // controlled args
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	appNames := func(t *testing.T, rendered string) map[string]bool {
+		t.Helper()
+		dec := yaml.NewDecoder(strings.NewReader(rendered))
+		type appLite struct {
+			Kind     string                `yaml:"kind"`
+			Metadata struct{ Name string } `yaml:"metadata"`
+		}
+		names := map[string]bool{}
+		for {
+			var a appLite
+			decErr := dec.Decode(&a)
+			if errors.Is(decErr, io.EOF) {
+				break
+			}
+			if decErr != nil {
+				t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, rendered)
+			}
+			if a.Kind == "Application" && a.Metadata.Name != "" {
+				names[a.Metadata.Name] = true
+			}
+		}
+		return names
+	}
+
+	t.Run("default renders parent and children", func(t *testing.T) {
+		out, err := render(t)
+		if err != nil {
+			t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+		}
+		names := appNames(t, out)
+		if !names[DefaultAppName] {
+			t.Errorf("default render missing parent %q\noutput:\n%s", DefaultAppName, out)
+		}
+		if !names["gpu-operator"] {
+			t.Errorf("default render missing child gpu-operator\noutput:\n%s", out)
+		}
+	})
+
+	t.Run("includeRootApp=false renders children-only", func(t *testing.T) {
+		out, err := render(t, "--set", "deployer.includeRootApp=false")
+		if err != nil {
+			t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+		}
+		names := appNames(t, out)
+		if names[DefaultAppName] {
+			t.Errorf("parent %q rendered despite includeRootApp=false\noutput:\n%s", DefaultAppName, out)
+		}
+		if !names["gpu-operator"] {
+			t.Errorf("children must still render with includeRootApp=false\noutput:\n%s", out)
+		}
+	})
+
+	t.Run("string value fails values schema", func(t *testing.T) {
+		out, err := render(t, "--set-string", "deployer.includeRootApp=false")
+		if err == nil {
+			t.Fatalf("expected helm template to fail schema validation for string value, but it succeeded:\n%s", out)
+		}
+	})
 }
 
 // TestGenerate_ChildNameLimits verifies the bundle-time guards for

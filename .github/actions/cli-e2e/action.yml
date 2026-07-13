@@ -34,10 +34,21 @@ inputs:
   helmfile_sha256:
     description: 'Helmfile SHA256 checksum for linux/amd64 (from .settings.yaml)'
     required: true
+  cosign_version:
+    description: 'Cosign version (from .settings.yaml via load-versions; must be >= v3.1.0 so DSSE attestations are logged to Rekor v2 as hashedrekord/PAE)'
+    required: true
 
 runs:
   using: 'composite'
   steps:
+    # `required: true` on composite-action inputs is not enforced at runtime, so
+    # a caller that omits cosign_version would silently get the cosign-installer
+    # default (which lags the v3.1.0 floor DSSE-on-v2 needs). Fail closed. See #1650.
+    - name: Require cosign_version
+      shell: bash
+      env:
+        COSIGN_VERSION: ${{ inputs.cosign_version }}
+      run: '[ -n "$COSIGN_VERSION" ] || { echo "cosign_version input is required (>= v3.1.0 for Rekor v2)" >&2; exit 1; }'
     - name: Setup Go
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
@@ -46,6 +57,11 @@ runs:
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
+      with:
+        # Pin from .settings.yaml (>= v3.1.0) so cosign logs DSSE attestations to
+        # Rekor v2 as hashedrekord/PAE. The installer default (v3.0.2) writes the
+        # legacy dsse entry type, which sigstore-go cannot verify. See #1650.
+        cosign-release: '${{ inputs.cosign_version }}'
 
     - name: Install GoReleaser
       uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29  # v7.0.0

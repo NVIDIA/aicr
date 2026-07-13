@@ -25,9 +25,6 @@
 apiVersion: helm/v1
 kind: Values
 
-# ── NodeFeature API enabled ──────────────────────────────────────────
-enableNodeFeatureApi: true
-
 # ── Scheduling: master on system nodes ───────────────────────────────
 master:
   nodeSelector:

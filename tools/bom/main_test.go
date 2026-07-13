@@ -30,8 +30,12 @@ func writeTestRegistry(t *testing.T, content string) string {
 	t.Helper()
 	root := t.TempDir()
 	dir := filepath.Join(root, "recipes")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir recipes: %v", err)
+	// overlays/ and mixins/ always exist in a real repo root; variant
+	// discovery fails closed when either is missing.
+	for _, sub := range []string{"overlays", "mixins"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatalf("mkdir recipes/%s: %v", sub, err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)

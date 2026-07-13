@@ -17,7 +17,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/trust"
 	"github.com/urfave/cli/v3"
 )
@@ -37,16 +39,27 @@ func trustUpdateCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "update",
 		Usage: "Fetch the latest Sigstore trusted root via TUF.",
-		Description: `Fetches the latest Sigstore trusted root from the TUF CDN and
-updates the local cache. This is needed when Sigstore rotates
-their signing keys (a few times per year).
+		Description: `Fetches the latest Sigstore trusted root and Rekor v2 signing
+config from the TUF CDN and updates the local cache. This is needed
+when Sigstore rotates their signing keys (a few times per year).
 
 The trusted root enables offline verification of bundle attestations
-without contacting Sigstore infrastructure.
+without contacting Sigstore infrastructure. The signing config drives
+which Rekor/timestamp endpoints signing writes to (e.g. Rekor v2).
+
+Use --emit-signing-config to also write the signing config to a file
+for tools that take a signing-config path (e.g. cosign attest-blob).
 
 Example:
   aicr trust update
+  aicr trust update --emit-signing-config signing-config.json
 `,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  flagEmitSigningConfig,
+				Usage: "Write the fetched Rekor v2 signing config to this file path.",
+			},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			material, err := trust.Update(ctx)
 			if err != nil {
@@ -60,6 +73,33 @@ Example:
 			fmt.Fprintf(w, "  ✓ Trusted root updated\n")
 			fmt.Fprintf(w, "  CAs: %d certificate authorities\n", len(material.FulcioCertificateAuthorities()))
 			fmt.Fprintf(w, "  Logs: %d transparency logs\n", len(material.RekorLogs()))
+
+			// Report the Rekor v2 signing config warmed into the cache by Update.
+			// Best-effort: the trusted root (verification) is the primary result,
+			// so a missing/failed signing config is surfaced as a note, not an
+			// error — signers that need it get a clear error at sign time.
+			if sc, scErr := trust.GetSigningConfig(); scErr != nil {
+				fmt.Fprintf(w, "  Signing config: unavailable (%v)\n", scErr)
+			} else {
+				fmt.Fprintf(w, "  ✓ Signing config updated\n")
+				for _, s := range sc.RekorLogURLs() {
+					fmt.Fprintf(w, "  Rekor: %s (v%d)\n", s.URL, s.MajorAPIVersion)
+				}
+			}
+
+			// Optionally materialize the signing config to a file for tools that
+			// take a signing-config path (cosign). Writes the raw TUF-verified
+			// bytes so the file is byte-identical to what Sigstore distributes.
+			if out := cmd.String(flagEmitSigningConfig); out != "" {
+				scJSON, err := trust.SigningConfigJSON()
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(out, scJSON, 0o600); err != nil {
+					return errors.Wrap(errors.ErrCodeInternal, "failed to write signing config file", err)
+				}
+				fmt.Fprintf(w, "  ✓ Signing config written to %s\n", out)
+			}
 
 			return nil
 		},

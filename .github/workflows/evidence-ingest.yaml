@@ -74,8 +74,9 @@ env:
   FIRST_PARTY_ISSUER: 'https://token.actions.githubusercontent.com'
   # Identity regexp pinning first-party UAT signatures to the NVIDIA/aicr
   # UAT workflows. Fully anchored so the verifier's signer match is exact
-  # (matches what uat-aws.yaml / uat-gcp.yaml pin in their own verify step).
-  FIRST_PARTY_IDENTITY: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/.+$'
+  # (matches what uat-aws.yaml / uat-gcp.yaml / uat-azure.yaml pin in their
+  # own verify step).
+  FIRST_PARTY_IDENTITY: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp|azure)\.yaml@refs/heads/.+$'
 
 jobs:
   # ---------------------------------------------------------------------

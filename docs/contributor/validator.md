@@ -267,10 +267,11 @@ last stable release is absent from `:latest` until the next one. Running
 `AICR_VALIDATOR_IMAGE_TAG=latest` against a `main`-tracking recipe can
 therefore silently run *older* validator behavior — e.g. a
 `performance.constraints` pin such as `inference-model` /
-`inference-concurrency-per-gpu` is only honored by a validator new enough
-to read it; an older `:latest` validator ignores the pin and runs its
-compiled default, which can surface as a misleading result rather than a
-clear version error.
+`inference-concurrency-per-gpu` / `nccl-benchmark-profile` is only honored
+by a validator new enough to read it; an older `:latest` validator ignores
+the pin and runs its compiled default, which can surface as a misleading
+result (for `nccl-benchmark-profile`, a silent skip) rather than a clear
+version error.
 
 **To run the validator built on `main`** (e.g. testing a recipe whose pins
 are not yet in a release), point at `:edge` or a published `main` commit —
@@ -397,6 +398,26 @@ package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 > running the `-net` or `-nvls` variant **must** declare a same-named
 > constraint; the variant will Skip if only the generic
 > `nccl-all-reduce-bw` constraint is present.
+
+#### NCCL: recipe-driven applicability (`nccl-benchmark-profile`)
+
+NCCL applicability defaults to the compiled `supportedNCCLCombinations`
+matrix (variant → service → accelerators), keyed to the recipe's
+`criteria`. The optional `nccl-benchmark-profile` performance constraint
+(bare `{accelerator}/{service}` value, e.g. `gb200/eks`) overrides that
+default so external `--data` recipes — new services, or embedded services
+extended to new accelerators — can run the embedded benchmarks
+([#1703](https://github.com/NVIDIA/aicr/issues/1703)). Resolution is
+recipe-only (no env tier), and parsing fails closed: a malformed or
+unknown profile aborts the check with `ErrCodeInvalidRequest` instead of
+skipping. The profile keys template selection, service-specific fabric
+plumbing (EFA / GKE NIC discovery, worker scheduling defaults), and
+preflights; node identification (the GFD `gpu.product` filter) stays on
+the recipe's own `criteria.accelerator`. Profiles are restricted to pairs
+already present in the compiled matrix, so the
+`TestSupportedNCCLCombinationsHaveRuntimeTemplates` wiring guard
+(advertised tuple ⇒ parseable template) covers every profile a recipe can
+name. See `validators/performance/nccl_benchmark_profile.go`.
 
 #### `inference-perf`: model, concurrency, and weights cache
 

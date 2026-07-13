@@ -1315,19 +1315,28 @@ func (s *RecipeMetadataSpec) TopologicalLevels() ([][]string, error) {
 	return ComponentRefsTopologicalLevels(s.ComponentRefs)
 }
 
-// ComponentRefsTopologicalLevels is the free-function form of
-// RecipeMetadataSpec.TopologicalLevels — operates on a bare
-// []ComponentRef slice. Callers that have refs but not a full
-// RecipeMetadataSpec (e.g., the bundler post-resolution) use this.
-func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
+// buildDependencyGraph constructs the dependency graph shared by
+// TopologicalSort and ComponentRefsTopologicalLevels. It centralizes the
+// enabled-filtering and external-satisfaction semantics so the two traversals
+// (flat Kahn sort vs. level-grouped BFS) stay in lock-step — the duplication
+// this removes is exactly what caused the double-fix in #1465 (see #1466).
+//
+// Only enabled components are nodes. A dependency edge pointing at a declared-
+// but-disabled component is treated as already satisfied (the dependency is
+// assumed provided externally, e.g. a CSP-managed cert-manager) and excluded
+// from the in-degree count. An edge to an undeclared component is retained so
+// it still surfaces as a cycle/missing-dependency error. See componentSets and
+// edgeSatisfiedExternally.
+//
+// Returns the per-node in-degree, the reverse adjacency (dependency name → the
+// components that depend on it), and the number of enabled nodes. Callers
+// compare their processed count against enabledCount to detect cycles/missing
+// dependencies (a node whose in-degree never drains to zero is never emitted).
+func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, dependents map[string][]string, enabledCount int) {
 	declared, enabled := componentSets(refs)
 
-	// Only enabled components are nodes; an edge pointing at a declared-but-
-	// disabled (externally-provided) component is treated as satisfied, while
-	// an edge to an undeclared component is retained so it still surfaces as a
-	// cycle/missing-dependency error. See componentSets and TopologicalSort.
-	inDegree := make(map[string]int, len(enabled))
-	dependents := make(map[string][]string, len(enabled))
+	inDegree = make(map[string]int, len(enabled))
+	dependents = make(map[string][]string, len(enabled))
 	for _, c := range refs {
 		if _, ok := enabled[c.Name]; !ok {
 			continue
@@ -1342,6 +1351,15 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 		}
 		inDegree[c.Name] = degree
 	}
+	return inDegree, dependents, len(enabled)
+}
+
+// ComponentRefsTopologicalLevels is the free-function form of
+// RecipeMetadataSpec.TopologicalLevels — operates on a bare
+// []ComponentRef slice. Callers that have refs but not a full
+// RecipeMetadataSpec (e.g., the bundler post-resolution) use this.
+func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
+	inDegree, dependents, enabledCount := buildDependencyGraph(refs)
 
 	// Seed level 0: components with no incoming edges.
 	current := make([]string, 0, len(inDegree))
@@ -1371,7 +1389,7 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 		current = next
 	}
 
-	if processed != len(enabled) {
+	if processed != enabledCount {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"cannot determine deployment levels: circular dependencies exist")
 	}
@@ -1382,30 +1400,7 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 // Components with no dependencies come first, then components that depend only
 // on already-listed components, etc.
 func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
-	declared, enabled := componentSets(s.ComponentRefs)
-
-	// Only enabled components are nodes. A dependency edge pointing at a
-	// declared-but-disabled component is treated as already satisfied (the
-	// dependency is assumed to be provided externally, e.g. a CSP-managed
-	// cert-manager) and excluded from the in-degree count. An edge to an
-	// undeclared component is still counted so it surfaces as a cycle/missing
-	// dependency error, matching the prior behavior. See componentSets.
-	inDegree := make(map[string]int, len(enabled))
-	dependents := make(map[string][]string) // dep -> list of components that depend on it
-	for _, c := range s.ComponentRefs {
-		if _, ok := enabled[c.Name]; !ok {
-			continue
-		}
-		degree := 0
-		for _, dep := range c.DependencyRefs {
-			if edgeSatisfiedExternally(dep, declared, enabled) {
-				continue
-			}
-			degree++
-			dependents[dep] = append(dependents[dep], c.Name)
-		}
-		inDegree[c.Name] = degree
-	}
+	inDegree, dependents, enabledCount := buildDependencyGraph(s.ComponentRefs)
 
 	// Kahn's algorithm
 	// https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/
@@ -1418,7 +1413,7 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 	// Sort queue for deterministic output
 	sort.Strings(queue)
 
-	result := make([]string, 0, len(enabled))
+	result := make([]string, 0, enabledCount)
 	for len(queue) > 0 {
 		node := queue[0]
 		queue = queue[1:]
@@ -1434,7 +1429,7 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 	}
 
 	// Check if all enabled nodes were processed (no cycles)
-	if len(result) != len(enabled) {
+	if len(result) != enabledCount {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "cannot determine deployment order: circular dependencies exist")
 	}
 

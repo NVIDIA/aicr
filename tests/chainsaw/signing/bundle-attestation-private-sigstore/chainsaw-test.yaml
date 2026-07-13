@@ -93,6 +93,13 @@ spec:
               REKOR_URL="${REKOR_URL:?Set REKOR_URL to the local Rekor endpoint (https://)}"
               OIDC_TOKEN="${OIDC_TOKEN:?Set OIDC_TOKEN to a valid OIDC token for the local issuer}"
               WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              # This suite signs the bundle attestation against the PRIVATE stack
+              # via --rekor-url. The CI job also exports AICR_SIGNING_CONFIG (the
+              # public-good Rekor v2 signing config, used to attest the binary),
+              # which the bundle command would otherwise pick up as --signing-config
+              # and reject as mutually exclusive with --rekor-url. Drop it so the
+              # explicit private-stack flags are the only signing target. See #1650.
+              unset AICR_SIGNING_CONFIG
               # --certificate-identity-regexp pins the *binary* attestation identity
               # (verified against public Sigstore). The CI binary is attested by this
               # e2e/build-attested workflow, not on-tag, so the bundler must be told

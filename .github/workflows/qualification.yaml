@@ -118,6 +118,7 @@ jobs:
           chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
           helmfile_version: ${{ steps.versions.outputs.helmfile }}
           helmfile_sha256: ${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}
+          cosign_version: ${{ steps.versions.outputs.cosign }}
 
   e2e:
     name: E2E
