@@ -1,0 +1,149 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# slinky-topograph Health Check
+#
+# Validates that slinky-topograph and its sub-charts (node-observer,
+# node-data-broker) are running and healthy, and that the topology generation
+# pipeline has produced a result. Specifically:
+#   1. All three Deployments are available (topograph API, node-observer, node-data-broker).
+#   2. No pods in the topograph namespace are in a failed/stuck state.
+#   3. The topology ConfigMap written by topograph exists in the slurm namespace
+#      and contains a non-empty topology.conf key, confirming end-to-end pipeline
+#      success — not just process readiness.
+# Deployment names are stabilized via fullnameOverride in
+# components/slinky-topograph/values.yaml.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: slinky-topograph-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-topograph-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slinky-topograph
+                namespace: topograph
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-node-observer-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slinky-topograph-node-observer
+                namespace: topograph
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-node-data-broker-daemonset
+      # node-data-broker is enabled by default. When an overlay sets
+      # node-data-broker.enabled: false the DaemonSet is not deployed and this
+      # step must be skipped rather than retried until timeout. A script step
+      # handles the conditional: if the DaemonSet is absent, exit 0 (skip);
+      # if present, wait for a full rollout before declaring success.
+      try:
+        - script:
+            content: |
+              kubectl get daemonset -n topograph slinky-topograph-node-data-broker \
+                >/dev/null 2>&1 || exit 0
+              kubectl rollout status daemonset/slinky-topograph-node-data-broker \
+                -n topograph --timeout=5m
+    - name: validate-all-pods-healthy
+      try:
+        # Assert no pods are in unhealthy phases (Pending / Failed /
+        # Unknown) or stuck in Running phase with a known-bad
+        # container-waiting reason (CrashLoopBackOff,
+        # ImagePullBackOff, ErrImagePull, CreateContainerConfigError).
+        # Phase-only filtering misses CrashLoopBackOff because such
+        # pods typically remain in Running phase with an unhealthy
+        # container.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                phase: Unknown
+        # JMESPath projection (not single-element match): kyverno-json's
+        # sliceNode.Assert gates on exact slice length before per-element
+        # comparison, so a `containerStatuses: - state: ...` shape only
+        # matches single-container pods and silently passes sidecars. Use
+        # `containerStatuses[?...] | length(@) > 0` to fire on any
+        # container at any index. Parallel initContainerStatuses block
+        # below catches init-container failures (invisible to
+        # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    - name: validate-topology-configmap
+      # End-to-end pipeline gate: topograph writes this ConfigMap only after a
+      # successful cloud-provider topology query. The exact content asserts the
+      # full tree from small-tree.yaml (S1→S2/S3, 3 nodes each) was rendered —
+      # not just that the key is non-empty.
+      # ConfigMap name and namespace are set by global.engine.params in
+      # components/slinky-topograph/values.yaml.
+      # Node names (I21, I22, I25, I34-I36) are the instance IDs from the model;
+      # cluset compacts them to I[21-22,25] and I[34-36]. Switch order (S2 before
+      # S3) is deterministic because toTreeTopology does a sorted BFS.
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: slinky-slurm-config-topo
+                namespace: slurm
+              data:
+                topology.conf: |
+                  SwitchName=S1 Switches=S[2-3]
+                  SwitchName=S2 Nodes=I[21-22,25]
+                  SwitchName=S3 Nodes=I[34-36]

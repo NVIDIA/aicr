@@ -58,12 +58,35 @@ spec:
         - cert-manager
         - slinky-slurm-operator-crds
 
+    - name: slinky-topograph
+      type: Helm
+      valuesFile: components/slinky-topograph/values.yaml
+      dependencyRefs:
+        - slinky-slurm-operator
+        - slinky-slurm-operator-crds
+      overrides:
+        global:
+          provider:
+            name: test
+            params:
+              modelFileName: small-tree.yaml
+          engine:
+            name: slinky
+        # Disable the node-data-broker in the kind environment.
+        node-data-broker:
+          enabled: false
+        node-observer:
+          topograph:
+            nodeDataBroker:
+              enabled: false
+
     - name: slinky-slurm
       type: Helm
       valuesFile: components/slinky-slurm/values.yaml
       dependencyRefs:
         - slinky-slurm-operator
         - slinky-slurm-operator-crds
+        - slinky-topograph
 
   validation:
     conformance:

@@ -125,6 +125,57 @@ For example, `--platform slurm` leaves inline three `componentRefs`:
 
 This is the same shape `dynamo-platform` uses across the `*-inference-dynamo` leaves. See `recipes/overlays/h100-eks-ubuntu-training-slurm.yaml` for the full example.
 
+### Slinky Slurm Inline Components
+
+Leaves that need topology-aware scheduling can optionally add `slinky-topograph` as a fourth `componentRef`. It must be placed between `slinky-slurm-operator` and `slinky-slurm`, with `slinky-slurm` declaring it as a `dependencyRef`. The `overrides` block supplies the provider and engine that are specific to each leaf:
+
+```yaml
+- name: slinky-topograph
+  type: Helm
+  valuesFile: components/slinky-topograph/values.yaml
+  dependencyRefs:
+    - slinky-slurm-operator
+    - slinky-slurm-operator-crds
+  overrides:
+    global:
+      provider:
+        name: gcp      # cloud provider: gcp | aws | oci | nebius | …
+      engine:
+        name: slinky   # scheduler consumer: slinky | slurm | k8s | graph
+
+- name: slinky-slurm
+  type: Helm
+  valuesFile: components/slinky-slurm/values.yaml
+  dependencyRefs:
+    - slinky-slurm-operator
+    - slinky-slurm-operator-crds
+    - slinky-topograph   # ensures topograph is ready before Slurm starts
+  overrides:
+    # ... GPU GRES and other leaf-specific tuning ...
+```
+
+For cloud providers (gcp, aws, oci, nebius, …), `slinky-topograph` requires IAM access to call the cloud's topology API. For GKE, bind a GCP service account that has `roles/compute.viewer` on the project via Workload Identity:
+
+```yaml
+overrides:
+  global:
+    provider:
+      name: gcp
+  serviceAccount:
+    annotations:
+      iam.gke.io/gcp-service-account: <sa-name>@<project-id>.iam.gserviceaccount.com
+```
+
+If you prefer not to bake the GCP service account into the recipe, supply it at bundle time instead:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set-json 'slinkytopograph:serviceAccount.annotations={"iam.gke.io/gcp-service-account":"<sa-name>@<project-id>.iam.gserviceaccount.com"}' \
+  -o ./bundle
+```
+
+For `provider.name: dra` (Kubernetes Dynamic Resource Allocation, GA in K8s 1.34), topology is sourced from the DRA API — no cloud provider IAM or ServiceAccount annotations are needed. Use `dra` for local or non-cloud environments such as Kind-based CI clusters.
+
 When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-talos` mixin to your overlay's `spec.mixins` list (e.g. `spec.mixins: [os-talos]`, or `[platform-kubeflow, os-talos]` if you already mix in a non-OS fragment). OS-scoped mixins are mutually exclusive — combining `os-ubuntu` and `os-talos` in one overlay is a recipe authoring error, not a supported composition. The mixin overrides namespaces for affected components and supplies PSA-privileged Namespace manifests via `componentRefs[].preManifestFiles`, which are applied before each chart — see [Talos integration](talos-integration.md) for the component list and labels.
 
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
