@@ -120,22 +120,72 @@ wait_for_port() {
 # Format: "name:status" entries separated by newlines.
 CHECK_RESULTS=""
 
+# Parse the single authoritative verdict from an evidence file. Verdict lines
+# begin at column zero so numbered prose such as "6. **Result: PASS**" in a
+# section overview cannot mask the result written after the checks run.
+#
+# Every collector must write exactly one PASS, SKIP, or FAIL verdict. Missing,
+# unknown, or conflicting verdicts fail closed; optional prerequisites are
+# represented by an explicit SKIP in the evidence file.
+evidence_result() {
+    local evidence_path="$1"
+
+    if [ ! -f "${evidence_path}" ]; then
+        return 1
+    fi
+
+    local result_count=0 result_line="" status=""
+    while IFS= read -r line; do
+        case "${line}" in
+            '**Result:'*)
+                result_count=$((result_count + 1))
+                result_line="${line}"
+                ;;
+        esac
+    done < "${evidence_path}"
+
+    if [ "${result_count}" -ne 1 ]; then
+        return 1
+    fi
+
+    status=$(printf '%s\n' "${result_line}" | sed -nE \
+        's/^\*\*Result:[[:space:]]*(PASS|SKIP|FAIL)([[:space:]]+\([^*]+\))?\*\*([[:space:]]+—.*)?[[:space:]]*$/\1/p')
+    if [ -z "${status}" ]; then
+        return 1
+    fi
+
+    echo "${status}"
+}
+
 # Run a collector and record its result based on the evidence file it produces.
 # Usage: run_check "DRA Support" "dra-support" collect_dra
 run_check() {
     local display_name="$1" file_key="$2" collector_fn="$3"
     local evidence_path="${EVIDENCE_DIR}/${file_key}.md"
+    local collector_rc=0 status=""
 
-    "${collector_fn}"
-
-    if [ ! -f "${evidence_path}" ]; then
-        CHECK_RESULTS="${CHECK_RESULTS}${display_name}:SKIP\n"
-    elif grep -q "Result: PASS" "${evidence_path}" 2>/dev/null; then
-        CHECK_RESULTS="${CHECK_RESULTS}${display_name}:PASS\n"
-    elif grep -q "Result: FAIL" "${evidence_path}" 2>/dev/null; then
+    # Do not let an artifact from a prior run satisfy the current check.
+    if ! rm -f "${evidence_path}"; then
+        log_error "Could not remove stale evidence for ${display_name}: ${evidence_path}"
         CHECK_RESULTS="${CHECK_RESULTS}${display_name}:FAIL\n"
+        return 1
+    fi
+
+    "${collector_fn}" || collector_rc=$?
+
+    if [ "${collector_rc}" -ne 0 ]; then
+        log_error "Collector for ${display_name} exited with status ${collector_rc}"
+        status="FAIL"
+    elif ! status=$(evidence_result "${evidence_path}"); then
+        log_error "Evidence for ${display_name} has no single valid PASS/SKIP/FAIL result: ${evidence_path}"
+        status="FAIL"
+    fi
+
+    CHECK_RESULTS="${CHECK_RESULTS}${display_name}:${status}\n"
+    if [ "${status}" = "FAIL" ]; then
+        return 1
     else
-        CHECK_RESULTS="${CHECK_RESULTS}${display_name}:UNKNOWN\n"
+        return 0
     fi
 }
 
@@ -1355,7 +1405,7 @@ EOF
             deployed_dynamo=true
         else
             log_warn "No Dynamo workload running and manifest not found at ${manifest}"
-            echo "**Result: SKIP** — No Dynamo workload found. Deploy vllm-agg.yaml first." >> "${EVIDENCE_FILE}"
+            echo "**Result: SKIP (prerequisite absent)** — no Dynamo workload or deployment manifest was found." >> "${EVIDENCE_FILE}"
             return
         fi
     fi
@@ -1379,8 +1429,8 @@ EOF
     done
 
     if [ "${workload_ready}" != "true" ]; then
-        log_warn "Dynamo workload not ready in ${NS} after 5 minutes, skipping service metrics"
-        echo "**Result: SKIP** — Dynamo workload not ready in ${NS}. Deploy vllm-agg.yaml first." >> "${EVIDENCE_FILE}"
+        log_warn "Dynamo workload not ready in ${NS} after 5 minutes"
+        echo "**Result: FAIL** — Dynamo workload is present but did not become ready in ${NS}." >> "${EVIDENCE_FILE}"
         return
     fi
 
@@ -1538,7 +1588,7 @@ for r in data['data']['result']:
         fi
     else
         echo "" >> "${EVIDENCE_FILE}"
-        echo "**WARNING:** Could not port-forward to Prometheus" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — Could not connect to Prometheus." >> "${EVIDENCE_FILE}"
     fi
     kill "${pf_pid}" 2>/dev/null || true
 
@@ -1583,8 +1633,8 @@ EOF
         --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
     if [ -z "${nim_pod}" ]; then
-        log_warn "No running NIM pod found in ${NS}"
-        echo "**Result: SKIP** — No running NIM pod found in ${NS}." >> "${EVIDENCE_FILE}"
+        log_warn "NIM workload is present but has no running pod in ${NS}"
+        echo "**Result: FAIL** — NIM workload is present but has no running pod in ${NS}." >> "${EVIDENCE_FILE}"
         return
     fi
 
@@ -1803,7 +1853,7 @@ EOF
         deployed_training=true
     else
         log_warn "trainer-pytorch-test.yaml not found at ${train_manifest}"
-        echo "**Result: SKIP** — Training manifest not found." >> "${EVIDENCE_FILE}"
+        echo "**Result: SKIP (prerequisite absent)** — training manifest not found." >> "${EVIDENCE_FILE}"
         return
     fi
 
@@ -1943,7 +1993,7 @@ EOF
         fi
     else
         echo "" >> "${EVIDENCE_FILE}"
-        echo "**WARNING:** Could not port-forward to Prometheus" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — Could not connect to Prometheus." >> "${EVIDENCE_FILE}"
     fi
     kill "${pf_pid}" 2>/dev/null || true
 
@@ -1963,6 +2013,8 @@ collect_gateway() {
 
     # Skip if agentgateway is not installed (training clusters don't have inference gateway)
     if ! kubectl get deploy -n agentgateway-system --no-headers 2>/dev/null | grep -q .; then
+        write_section_header "Inference API Gateway (agentgateway)"
+        echo "**Result: SKIP (prerequisite absent)** — agentgateway is not installed." >> "${EVIDENCE_FILE}"
         log_info "Inference gateway evidence collection skipped — agentgateway not installed."
         return
     fi
@@ -2072,6 +2124,8 @@ collect_operator() {
     elif kubectl get deploy -n kubeflow kubeflow-trainer-controller-manager --no-headers 2>/dev/null | grep -q .; then
         collect_operator_kubeflow
     else
+        write_section_header "Robust AI Operator"
+        echo "**Result: SKIP (prerequisite absent)** — no supported Dynamo, NIM, or Kubeflow Trainer operator is installed." >> "${EVIDENCE_FILE}"
         log_info "Robust operator evidence collection skipped — no supported operator found."
         return
     fi
@@ -2416,23 +2470,33 @@ INVALID_CR
         echo "WARNING: Webhook did not reject the invalid resource." >> "${EVIDENCE_FILE}"
     fi
 
-    # Verdict — require DGD + healthy workload pods; webhook rejection strengthens but is optional
+    # Verdict — require DGD + healthy workload pods; webhook rejection strengthens but is optional.
+    # Distinguish a failed DGD query (fail closed) from a successful query returning
+    # zero rows: an absent inference workload is an absent prerequisite (SKIP), not a
+    # failure, because a stock inference recipe deploys the operator but no persistent
+    # DynamoGraphDeployment (the service-metrics section deploys and cleans up its own).
     echo "" >> "${EVIDENCE_FILE}"
-    local dgd_count
-    dgd_count=$(kubectl get dynamographdeployments -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    local dgd_query_ok=true dgd_count=0 dgd_out
+    if dgd_out=$(kubectl get dynamographdeployments -A --no-headers 2>/dev/null); then
+        dgd_count=$(printf '%s' "${dgd_out}" | grep -c . || true)
+    else
+        dgd_query_ok=false
+    fi
     local running_pods
     running_pods=$(kubectl get pods -n dynamo-workload -l nvidia.com/dynamo-graph-deployment-name --no-headers 2>/dev/null | grep -c "Running" || true)
     local webhook_ok
     webhook_ok=$(echo "${webhook_result}" | grep -ci "denied\|forbidden\|invalid\|error" || true)
 
-    if [ "${dgd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
+    if [ "${dgd_query_ok}" != "true" ]; then
+        echo "**Result: FAIL** — DynamoGraphDeployment query failed (fail closed); rerun against a reachable API server." >> "${EVIDENCE_FILE}"
+    elif [ "${dgd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
         echo "**Result: PASS** — Dynamo operator running, webhooks operational (rejection verified), CRDs registered, DynamoGraphDeployment reconciled with ${running_pods} healthy workload pod(s)." >> "${EVIDENCE_FILE}"
     elif [ "${dgd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ]; then
         echo "**Result: PASS** — Dynamo operator running, CRDs registered, DynamoGraphDeployment reconciled with ${running_pods} healthy workload pod(s)." >> "${EVIDENCE_FILE}"
     elif [ "${dgd_count}" -gt 0 ]; then
         echo "**Result: FAIL** — DynamoGraphDeployment found but no healthy workload pods." >> "${EVIDENCE_FILE}"
     else
-        echo "**Result: FAIL** — No DynamoGraphDeployment found." >> "${EVIDENCE_FILE}"
+        echo "**Result: SKIP (prerequisite absent)** — Dynamo operator present but no DynamoGraphDeployment exists; deploy an inference workload (e.g. demos/workloads/inference/vllm-agg.yaml) to exercise operator reconciliation." >> "${EVIDENCE_FILE}"
     fi
 
     log_info "Robust operator evidence collection complete."
@@ -2613,8 +2677,8 @@ autoscaler that manages node pool scaling based on workload demand.
 EOF
         collect_gke_autoscaling_evidence
     else
+        echo "**Result: SKIP (prerequisite absent)** — no supported EKS or GKE cluster-autoscaling prerequisite was detected (providerID=${provider_id:-<empty>})." >> "${EVIDENCE_FILE}"
         log_info "Cluster autoscaling evidence collection skipped — unknown provider (providerID=${provider_id})."
-        rm -f "${EVIDENCE_FILE}"
         return
     fi
 
@@ -2954,15 +3018,22 @@ main() {
     echo ""
     echo "  Total: $((passed + failed + skipped)) | Passed: ${passed} | Failed: ${failed} | Skipped: ${skipped}"
     echo ""
+
+    if [ "${failed}" -ne 0 ]; then
+        return 1
+    fi
+    return 0
 }
 
 # Hidden subcommand for unit tests (pkg/evidence/cncf/claim_shape_test.go):
 # print the version-correct ResourceClaim YAML and exit without contacting a
 # cluster. Not part of the documented section interface.
 # Usage: collect-evidence.sh emit-claim <version> [name] [namespace] [deviceclass]
-if [ "${SECTION}" = "emit-claim" ]; then
-    emit_resourceclaim_yaml "${2:-}" "${3:-gpu-claim}" "${4:-dra-test}" "${5:-gpu.nvidia.com}"
-    exit $?
-fi
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    if [ "${SECTION}" = "emit-claim" ]; then
+        emit_resourceclaim_yaml "${2:-}" "${3:-gpu-claim}" "${4:-dra-test}" "${5:-gpu.nvidia.com}"
+        exit $?
+    fi
 
-main
+    main
+fi

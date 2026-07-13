@@ -95,6 +95,14 @@ names are `dra`, `gang`, `secure`, `accelerator-metrics`, `service-metrics`,
 > type (NIM inference, Dynamo inference, or Kubeflow training) and collects
 > appropriate metrics and operator evidence.
 
+Each section writes exactly one **PASS**, **SKIP**, or **FAIL** verdict.
+**SKIP** marks an absent optional prerequisite (no inference gateway, no
+supported operator, an unsupported cluster-autoscaling provider, or an
+operator present with no workload to reconcile) and is not a failure. A
+**FAIL** — an unhealthy present capability, a failed query, or a missing/
+malformed verdict — fails closed and makes the collection exit non-zero, so a
+recorded section failure is no longer masked as overall success.
+
 ### Two Modes
 
 | | `aicr validate --phase conformance` | `--cncf-submission` |

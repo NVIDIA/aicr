@@ -514,7 +514,7 @@ components:
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway-crds
-      defaultVersion: v2.2.1
+      defaultVersion: v1.3.1
       defaultNamespace: agentgateway-system
 
   - name: agentgateway
@@ -526,7 +526,7 @@ components:
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway
-      defaultVersion: v2.2.1
+      defaultVersion: v1.3.1
       defaultNamespace: agentgateway-system
     nodeScheduling:
       system:

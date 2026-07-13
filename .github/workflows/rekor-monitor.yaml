@@ -12,16 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Transparency-log monitoring for AICR's release supply chain.
+# Transparency-log monitoring for AICR's release supply chain, on Rekor v2.
 #
-# Hourly, this calls the upstream sigstore/rekor-monitor reusable workflow to:
-#   - Consistency: verify the public-good Rekor log stays append-only between
-#     runs (checkpoint persisted as the `checkpoint` artifact).
-#   - Identity: scan entries added since the last run for AICR's release signing
-#     identity. An entry under that identity that a release did not produce
-#     signals OIDC/key compromise.
+# Hourly, this calls the upstream sigstore/rekor-monitor reusable workflow to do
+# both checks in a single job (see internal/cmd MonitorLoop upstream):
+#   - Consistency: prove the Rekor v2 log stays append-only between runs (Merkle
+#     consistency from the last checkpoint to the current tree head). O(log n),
+#     always finishes in seconds. Checkpoint persisted as the `checkpoint`
+#     artifact.
+#   - Identity: scan entries added since the last checkpoint for AICR's release
+#     signing identity. An entry under that identity that a release did not
+#     produce signals OIDC/key compromise.
 # On any failure (consistency break or matched identity), it files an issue
 # (`file_issue: true`).
+#
+# Why v2 (NVIDIA/aicr#1623). Identity monitoring is a linear scan of every entry
+# added since the last checkpoint (Rekor's index cannot be queried by
+# certificate SAN, and our keyless release identity has no email or fixed key).
+# On the Rekor **v1** firehose that scan runs ~50x slower than the log grows, so
+# it can never keep up in a bounded CI job: the earlier v1 config timed out
+# every run and never completed a single scan. Rekor **v2** is tile-based: bulk
+# 256-entry reads make a single-worker scan outpace the log, so identity
+# monitoring becomes one cheap job. This rides on release signing having moved to
+# v2 in NVIDIA/aicr#1650 (only entries actually in v2 can be watched there).
+#
+# Selecting v2. The monitor picks its Rekor API version by matching its `url`
+# against the services in the TUF-distributed Sigstore SigningConfig; a match on
+# a v2 service switches it to v2. The resolve-v2-shard job computes that URL at
+# run time from the same signing config release signing uses (via `aicr trust
+# update --emit-signing-config`), so we never hardcode a shard and yearly shard
+# rotation (log2025-1 -> log2026-1 -> ...) needs no change here. Once v2 is
+# selected the *full* shard set is auto-discovered from the SigningConfig and
+# refreshed each run.
 #
 # The monitored identity is AICR's release signer (see .goreleaser.yaml and
 # .github/workflows/on-tag.yaml): the GitHub Actions OIDC SAN for on-tag.yaml,
@@ -52,8 +74,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Resolve the current Rekor v2 shard from the Sigstore signing config, so the
+  # monitor always selects v2 against a live shard without a hardcoded URL. We
+  # read the same TUF-distributed signing config that release signing resolves
+  # (`aicr trust update --emit-signing-config`, see pkg/trust), so the monitor
+  # provably watches where releases actually write, and yearly shard rotation
+  # (log2025-1 -> log2026-1 -> ...) needs no change here.
+  resolve-v2-shard:
+    name: Resolve current Rekor v2 shard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # checkout to build the aicr CLI
+    outputs:
+      url: ${{ steps.resolve.outputs.url }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+      - id: resolve
+        name: Resolve v2 shard URL from the signing config
+        run: |
+          set -euo pipefail
+          go run ./cmd/aicr trust update --emit-signing-config signing-config.json
+          # Newest currently-listed v2 shard (majorApiVersion 2). Any live v2
+          # shard selects v2; the monitor then discovers the full set from TUF.
+          url="$(jq -er '[.rekorTlogUrls[] | select(.majorApiVersion == 2)] | sort_by(.validFor.start) | last | .url' signing-config.json)"
+          echo "Resolved Rekor v2 shard: $url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
   monitor:
-    name: AICR release identity + log consistency
+    name: AICR release identity + log consistency (Rekor v2)
+    needs: resolve-v2-shard
     permissions:
       contents: read  # checkout performed by the reusable workflow
       issues: write   # file an issue on monitoring failure
@@ -64,6 +116,10 @@ jobs:
       # Must exceed the hourly cron so the consistency checkpoint never expires
       # between runs; wide enough to survive a brief scheduling pause.
       artifact_retention_days: 30
+      # Rekor v2 shard resolved at run time from the signing config (see the
+      # resolve-v2-shard job). Selecting a v2 service switches the monitor to v2;
+      # it then auto-discovers the full shard set from TUF.
+      url: ${{ needs.resolve-v2-shard.outputs.url }}
       config: |
         monitoredValues:
           certIdentities:

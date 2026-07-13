@@ -71,10 +71,54 @@ inputs:
     description: 'Number of days to retain debug artifacts'
     required: false
     default: '7'
+  job_timeout_minutes:
+    description: >-
+      The calling job's timeout-minutes. Used to derive
+      KWOK_SYNC_DEADLINE_EPOCH (deadline = step start + this budget - 240s
+      diagnostics margin) so each chainsaw sync gate's budget stays within
+      that margin, letting the gate finish - and print its catch-block
+      diagnostics - before GitHub kills the job in the expected
+      single-gate-dominates case (this bounds each gate operation, not the
+      job's overall wall time). Required with no default: every caller
+      must wire its own timeout-minutes here, so a job that changes its
+      timeout cannot silently drift from a stale default (a missing value
+      fails the integer validation below loudly).
+    required: true
 
 runs:
   using: 'composite'
   steps:
+    - name: Derive sync-gate deadline
+      shell: bash
+      env:
+        JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
+      run: |
+        # Anchor the sync-gate deadline as early as possible in the job:
+        # only checkout + load-versions run before this step, so the
+        # unaccounted job-start drift stays inside the 240s margin's 60s
+        # allowance (the other 180s is reserved for post-gate work:
+        # chainsaw catch diagnostics, verify_pods, debug-artifact upload).
+        # Anchoring later (at the test step, after setup-go + tool installs
+        # + make build) lets the deadline land past GitHub's job kill and
+        # silently re-creates the CANCELLED-without-diagnostics failure
+        # this mechanism exists to prevent.
+        # See kwok/scripts/lib/sync-budget.sh for the consuming side.
+        if ! [[ "${JOB_TIMEOUT_MINUTES}" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::job_timeout_minutes must be a positive integer, no leading zeros, got '${JOB_TIMEOUT_MINUTES}'"
+          exit 1
+        fi
+        # 120 must equal SYNC_BUDGET_FLOOR_SECONDS in kwok/scripts/lib/sync-budget.sh
+        # (hand-synced literal, guarded by sync-budget_test.sh — same contract as the
+        # 240s margin). A budget under the floor would compute an already-unusable
+        # deadline that only fails later, inside the job, after setup burned CI minutes.
+        if (( 10#${JOB_TIMEOUT_MINUTES} * 60 - 240 < 120 )); then
+          echo "::error::job_timeout_minutes=${JOB_TIMEOUT_MINUTES} leaves no usable sync budget after the 240s diagnostics margin (need >= 6)"
+          exit 1
+        fi
+        KWOK_SYNC_DEADLINE_EPOCH=$(( $(date +%s) + 10#${JOB_TIMEOUT_MINUTES} * 60 - 240 ))
+        echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH}" >> "$GITHUB_ENV"
+        echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH} (job_timeout_minutes=${JOB_TIMEOUT_MINUTES}, margin=240s, job kill in ~$(( 10#${JOB_TIMEOUT_MINUTES} * 60 ))s)"
+
     - name: Set up Go
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:

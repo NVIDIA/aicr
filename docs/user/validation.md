@@ -536,6 +536,22 @@ Valid feature names (from `pkg/evidence/cncf/collector.go`):
 | `pod-autoscaling` | HPA-driven pod autoscaling: external GPU metric + behavioral scale-up/down test (pod-scoped custom metrics collected best-effort — absent for DRA-allocated GPUs, not a failure) |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
 
+### Evidence verdicts and exit status
+
+Each collected feature records exactly one verdict in its evidence file:
+
+- **PASS** — the capability was exercised and behaved as expected.
+- **SKIP** — an optional prerequisite is absent (e.g. no inference gateway,
+  no supported operator, an unsupported cluster-autoscaling provider, or an
+  operator that is installed but has no workload to reconcile). A SKIP is not
+  a failure.
+- **FAIL** — a present capability was unhealthy, a required query failed, or
+  the evidence file carried no single valid verdict (fail closed).
+
+A **FAIL** in any feature makes `--cncf-submission` exit non-zero, so a
+submission that records a genuine failure no longer reports overall success.
+Absent optional prerequisites remain successful SKIPs and do not fail the run.
+
 ## Emitting recipe evidence
 
 When a recipe PR targets hardware AICR maintainers cannot independently

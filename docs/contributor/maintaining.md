@@ -53,16 +53,70 @@ failure during the first 60s after tag publish. Re-run the workflow.
 
 The `Rekor Monitor` workflow (`.github/workflows/rekor-monitor.yaml`) runs
 hourly and calls the upstream `sigstore/rekor-monitor` reusable workflow. It
-watches the public-good Rekor transparency log for two things: that the log
-stays append-only (consistency), and that no entry appears under AICR's release
-signing identity that a release did not produce (identity). On either failure it
-opens an issue.
+watches the **Rekor v2** transparency log (where AICR release signing writes
+since [#1650](https://github.com/NVIDIA/aicr/issues/1650)) for two things, both
+in one job: that the log stays append-only (consistency), and that no entry
+appears under AICR's release signing identity that a release did not produce
+(identity). On either failure it opens an issue.
 
 This protects the trust root every AICR consumer depends on: the release
 binaries, the signed recipe catalog, and the container images all chain to that
 one identity. When the workflow files an issue, follow the triage steps in the
 workflow file's header comment; an unrecognized identity hit should be treated
 as potential OIDC/key compromise.
+
+### Why v2, and why identity monitoring is feasible now
+
+Identity monitoring is a linear scan of every entry added to the log since the
+last checkpoint, because Rekor's index cannot be queried by certificate SAN and
+AICR's keyless release identity has no email or fixed public key to search on.
+On the Rekor **v1** firehose that scan runs roughly 50x slower than the log
+grows, so it can never keep up inside a bounded CI job: the earlier v1
+identity config timed out on every run and never completed a single scan
+([#1623](https://github.com/NVIDIA/aicr/issues/1623)). Rekor **v2** is
+tile-based: bulk 256-entry reads let a single worker outpace the log, so the
+identity scan is a cheap job that always finishes. This is why the whole design
+is a single unbounded scan again rather than sharded paging.
+
+### Shard selection (automatic, no manual re-tune)
+
+The monitor selects Rekor v2 by pointing its `url` at a v2 shard listed in the
+Sigstore `SigningConfig`; a match on a v2 service switches it to v2, after which
+it auto-discovers the **full** shard set from TUF and refreshes it every run.
+
+The shard URL is **not hardcoded**. The `resolve-v2-shard` job computes it at run
+time from the same TUF-distributed signing config that release signing resolves,
+then feeds it to the monitor:
+
+```bash
+# Same command the resolve-v2-shard job runs (works from a fresh checkout).
+go run ./cmd/aicr trust update --emit-signing-config signing-config.json
+jq -er '[.rekorTlogUrls[] | select(.majorApiVersion == 2)] | sort_by(.validFor.start) | last | .url' signing-config.json
+```
+
+Because it reads the signing config directly, the monitor provably watches where
+releases actually write, and yearly shard rotation (`log2025-1` -> `log2026-1`
+-> ...) needs no change to this workflow. If the resolve job ever fails (for
+example the TUF CDN is unreachable), the monitor job is skipped for that run and
+retries on the next hourly tick.
+
+### First run after switching from v1: reset the checkpoint
+
+The `checkpoint` artifact persists a **v1** checkpoint from the prior config; a
+v2 run cannot parse it and will fail. After merging a change that moves this
+workflow to v2, delete the stale artifact once so the first v2 run establishes a
+fresh v2 baseline (it saves the current v2 tree head and scans forward from
+there):
+
+```bash
+gh api "repos/NVIDIA/aicr/actions/artifacts?name=checkpoint" \
+  --jq '.artifacts[].id' \
+  | xargs -I{} gh api -X DELETE "repos/NVIDIA/aicr/actions/artifacts/{}"
+```
+
+The first v2 run then watches forward from the current head; historical entries
+predating the baseline are covered by release-time verification (the `aicr
+verify` path), not by this monitor.
 
 ## Reviewing Recipe Contributions
 
