@@ -107,6 +107,14 @@ runs:
           echo "::error::job_timeout_minutes must be a positive integer, no leading zeros, got '${JOB_TIMEOUT_MINUTES}'"
           exit 1
         fi
+        # 120 must equal SYNC_BUDGET_FLOOR_SECONDS in kwok/scripts/lib/sync-budget.sh
+        # (hand-synced literal, guarded by sync-budget_test.sh — same contract as the
+        # 240s margin). A budget under the floor would compute an already-unusable
+        # deadline that only fails later, inside the job, after setup burned CI minutes.
+        if (( 10#${JOB_TIMEOUT_MINUTES} * 60 - 240 < 120 )); then
+          echo "::error::job_timeout_minutes=${JOB_TIMEOUT_MINUTES} leaves no usable sync budget after the 240s diagnostics margin (need >= 6)"
+          exit 1
+        fi
         KWOK_SYNC_DEADLINE_EPOCH=$(( $(date +%s) + 10#${JOB_TIMEOUT_MINUTES} * 60 - 240 ))
         echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH}" >> "$GITHUB_ENV"
         echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH} (job_timeout_minutes=${JOB_TIMEOUT_MINUTES}, margin=240s, job kill in ~$(( 10#${JOB_TIMEOUT_MINUTES} * 60 ))s)"

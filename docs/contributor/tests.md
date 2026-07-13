@@ -387,8 +387,10 @@ sits within ~60 s of job start — from its `job_timeout_minutes` input
 must equal that caller's `timeout-minutes`; currently `18` for the
 KWOK jobs) minus a 240 s margin reserved for chainsaw catch-block
 diagnostics, pod verification, and debug-artifact upload. The input
-must be a positive integer with no leading zeros; the step fails fast
-otherwise. Local runs leave it unset and keep the fixed defaults above.
+must be a positive integer with no leading zeros, and must leave at
+least 120 s of usable budget after the 240 s margin (i.e. `>= 6`); the
+step fails fast otherwise. Local runs leave it unset and keep the
+fixed defaults above.
 
 The Git-source lanes (`flux-git`, `argocd-git`) additionally honor
 `KWOK_GITEA_HOST_PORT` (default `3300`), `KWOK_GITEA_USER` (default
