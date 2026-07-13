@@ -118,6 +118,19 @@ catalog-load time and the CLI admits it.
 The same applies to `accelerator`, `intent`, `os`, and `platform` — any
 field on a `RecipeMetadata`'s `spec.criteria`.
 
+**Validating a recipe with a new criteria value.** Most validation checks
+apply to an external recipe as-is: the deployment and conformance phases gate
+on component presence and cluster state, not criteria. The NCCL performance
+benchmarks additionally key their default applicability to embedded
+`service` + `accelerator` pairs, so a recipe with a new **service or
+accelerator** value would skip them (new `intent`, `os`, or `platform` values
+alone do not affect NCCL applicability) — declare an `nccl-benchmark-profile`
+performance constraint (e.g. `gb200/eks`) in the overlay's `validation` block
+to opt into one of the embedded benchmarks. The profile selects the benchmark
+template and fabric handling; node identification still follows the recipe's
+own accelerator. See
+[Opting external recipes into a benchmark profile](../user/validation.md#opting-external-recipes-into-a-benchmark-profile).
+
 ## Adding a component
 
 `registry.yaml` declares the component's identity and source:

@@ -565,10 +565,10 @@ func TestCommittedRegistryValid(t *testing.T) {
 	wantNightly := map[string][]string{
 		"aws-h100": {IntentTraining, IntentInference},
 		"gcp-h100": {IntentTraining, IntentInference},
-		// azure-h100 is bring-up-phase: explicitly opted out of the nightly
-		// batch (nightly-intents: []) until the pipeline has green manual
-		// runs; flipped to [training] (then both) in the follow-up PR.
-		"azure-h100": {},
+		// azure-h100 enrolled with [training] after the green manual
+		// acceptance run (29125390442); inference joins after a green
+		// manual intent=inference dispatch.
+		"azure-h100": {IntentTraining},
 	}
 	for name, want := range wantNightly {
 		res, lookupErr := reg.Lookup(name)

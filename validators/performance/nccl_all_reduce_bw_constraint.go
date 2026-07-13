@@ -208,6 +208,12 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 // TrainJob + MPI with per-platform TrainingRuntimes and a shared TrainJob.
 // variantDefault preserves the pre-variant behavior; named variants opt in
 // targeted transport-class coverage.
+//
+// This matrix is the criteria-derived DEFAULT applicability. A recipe whose
+// criteria are not listed here (e.g. a service registered only via --data)
+// can still run these benchmarks by naming one of the listed tuples through
+// the nccl-benchmark-profile performance constraint — see
+// nccl_benchmark_profile.go and NVIDIA/aicr#1703.
 var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	variantDefault: {
 		// H200 is Hopper on EFA, electrically identical to H100 for NCCL
@@ -235,6 +241,8 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 // Each platform has its own TrainingRuntime; the TrainJob is shared (just runtimeRef + numNodes).
 // The variant selects a transport-class template (NET, NVLS) when the recipe needs per-fabric
 // coverage on clusters that expose multiple inter-node fabrics (e.g. GB200/EKS).
+// Applicability derives from the recipe criteria via supportedNCCLCombinations, overridable
+// through the nccl-benchmark-profile constraint (see nccl_benchmark_profile.go).
 // Returns actual bandwidth value, whether it passed the threshold, and any error.
 func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constraint, variant ncclVariant) (string, bool, error) {
 	slog.Info("Starting NCCL All Reduce bandwidth validation", "variant", string(variant))
@@ -253,27 +261,34 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		return "", false, err
 	}
 
-	supported := false
-	if fabric == fabricRoCE && variant == variantNET {
-		// RoCE NET is fabric-keyed and accelerator-agnostic — supported on any
-		// service with a testdata/roce/{service} template. Only NET has a RoCE
-		// path; NVLS (NVLink/IMEX) is fabric-independent and uses the normal
-		// accelerator-keyed combinations below.
-		supported = roceNETSupportedServices[service]
-	} else if byService, ok := supportedNCCLCombinations[variant]; ok {
-		if supportedAccelerators, ok := byService[service]; ok {
-			for _, a := range supportedAccelerators {
-				if accelerator == a {
-					supported = true
-					break
-				}
-			}
-		}
+	// The benchmark target defaults to the recipe's criteria; an explicit
+	// nccl-benchmark-profile constraint overrides it so recipes whose criteria
+	// are absent from the compiled matrix (external --data services, new
+	// accelerators) can opt into an embedded benchmark profile. The target
+	// keys applicability, template selection, service-specific fabric
+	// plumbing, and preflights; node identification below keeps using the
+	// criteria accelerator.
+	target := ncclBenchmarkTarget{accelerator: accelerator, service: service}
+	profile, err := resolveNCCLBenchmarkProfile(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if profile != nil {
+		target = *profile
+		slog.Info("Recipe declares an NCCL benchmark profile — overriding criteria-derived applicability",
+			"profile", target.String(), "criteriaService", service, "criteriaAccelerator", accelerator)
 	}
 
-	if !supported {
+	if !ncclCombinationSupported(variant, fabric, target) {
 		slog.Info("Skipping NCCL All Reduce bandwidth validation: unsupported variant/service/accelerator combination",
-			"variant", string(variant), "service", service, "accelerator", accelerator, "fabric", string(fabric))
+			"variant", string(variant), "target", target.String(), "fromProfile", target.fromProfile, "fabric", string(fabric))
+		if target.fromProfile {
+			// The profile itself is valid (resolveNCCLBenchmarkProfile fails
+			// closed on unknown pairs); it just doesn't implement this variant
+			// — e.g. gb200/eks covers net and nvls but not the default check.
+			return fmt.Sprintf("skipped - benchmark profile %s does not implement the %s NCCL variant",
+				target.String(), constraintNameForVariant(variant)), true, nil
+		}
 		return "skipped - requires Service + Accelerator to be implemented", true, nil
 	}
 
@@ -284,8 +299,13 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 	slog.Info("Target bandwidth threshold", "threshold", threshold, "tolerance", "10%")
 
-	// Determine GPU configuration from cluster.
-	gpuConfig, err := determineGPUConfig(ctx, service, accelerator)
+	// Determine GPU configuration from cluster. The service comes from the
+	// benchmark target (an EKS-profiled cluster gets the EKS instance-type
+	// narrowing) but the accelerator stays the recipe's own criteria value:
+	// the GFD gpu.product node filter identifies the cluster's hardware, and
+	// a profile naming gb200 must not filter a cluster of an unmatched newer
+	// accelerator down to zero nodes.
+	gpuConfig, err := determineGPUConfig(ctx, target.service, accelerator)
 	if err != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
 	}
@@ -302,8 +322,10 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Preflight cluster-side prerequisites before spending TrainJob time.
 	// On GB200/EKS the NET variant needs NVreg_GrdmaPciTopoCheckOverride=1
 	// on the NVIDIA driver; without it, EFA can't attach dma-buf to GPU HBM
-	// and NCCL silently falls back to Socket.
-	if fabric == fabricEFA && gb200NetPreflightApplies(variant, accelerator, service) {
+	// and NCCL silently falls back to Socket. Preflights key off the
+	// benchmark target: opting into a profile opts into that profile's
+	// environment contract, preflights included.
+	if fabric == fabricEFA && gb200NetPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}
@@ -316,7 +338,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// artifacts the workers never start sshd and the launcher mpirun fails
 	// with an opaque "pod failed" minutes later. Fail fast with an actionable
 	// error naming the unready nodes instead.
-	if gkeTCPXOPreflightApplies(variant, accelerator, service) {
+	if gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}
@@ -325,7 +347,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, accelerator, service, variant, fabric)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric)
 	if err != nil {
 		return "", false, err
 	}
