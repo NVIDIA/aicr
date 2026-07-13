@@ -644,10 +644,6 @@ github.com/nvidia/k8s-launch-kit/pkg/ui
 # github.com/oklog/ulid/v2 v2.1.1
 ## explicit; go 1.15
 github.com/oklog/ulid/v2
-# github.com/onsi/ginkgo/v2 v2.32.0
-## explicit; go 1.25.0
-# github.com/onsi/gomega v1.42.1
-## explicit; go 1.25.0
 # github.com/opencontainers/go-digest v1.0.0
 ## explicit; go 1.13
 github.com/opencontainers/go-digest
@@ -1829,15 +1825,15 @@ sigs.k8s.io/kustomize/kyaml/yaml/internal/k8sgen/pkg/util/validation/field
 sigs.k8s.io/kustomize/kyaml/yaml/merge2
 sigs.k8s.io/kustomize/kyaml/yaml/schema
 sigs.k8s.io/kustomize/kyaml/yaml/walk
-# sigs.k8s.io/node-feature-discovery v0.18.3
-## explicit; go 1.25.0
+# sigs.k8s.io/node-feature-discovery v0.19.0
+## explicit; go 1.26
 sigs.k8s.io/node-feature-discovery/pkg/utils
 sigs.k8s.io/node-feature-discovery/pkg/utils/hostpath
 sigs.k8s.io/node-feature-discovery/source
 sigs.k8s.io/node-feature-discovery/source/kernel
 sigs.k8s.io/node-feature-discovery/source/pci
-# sigs.k8s.io/node-feature-discovery/api/nfd v0.18.3
-## explicit; go 1.23.0
+# sigs.k8s.io/node-feature-discovery/api/nfd v0.19.0
+## explicit; go 1.25.0
 sigs.k8s.io/node-feature-discovery/api/nfd/v1alpha1
 # sigs.k8s.io/randfill v1.0.0
 ## explicit; go 1.18
