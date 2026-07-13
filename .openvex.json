@@ -3,8 +3,8 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-07-09T00:00:00Z",
-  "version": 6,
+  "timestamp": "2026-07-13T00:00:00Z",
+  "version": 7,
   "tooling": "manual; aiperf-bench statements verified against aiperf v0.7.0 source; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); aicr-gate statements suppress CVEs in the embedded upstream kyverno/chainsaw binary (affected packages identified via vuln.go.dev), justified by chainsaw's ephemeral cluster-internal readiness-gate usage",
   "statements": [
     {
@@ -305,6 +305,29 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The attack requires parsing a crafted (attacker-controlled) XML document through xml.parsers.expat or xml.etree.ElementTree to trigger hash flooding. AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go). That subcommand communicates with the inference endpoint via JSON over HTTP only; all data transport uses aiohttp + orjson/msgspec. aiperf v0.7.0's declared dependencies contain no XML parsing libraries \u2014 the runtime stack (aiohttp, msgspec, orjson, numpy, transformers, uvicorn, fastapi) is entirely JSON/binary-based. While xml.parsers.expat is present in the Python 3.13 stdlib image, no attacker-controlled XML document can enter the aiperf profile execution path, making the hash-flooding trigger unreachable."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-15308",
+        "description": "cpython CPU-exhaustion DoS in html.parser.HTMLParser incremental feed() via repeated unterminated markup declarations (PSF-2026-33, CWE-407, High CVSS 7.5/8.7). Fix merged to the cpython 3.13 branch on 2026-07-04 (PR #153040) but as of 2026-07-13 no released CPython contains it — v3.13.14 (2026-06-10), v3.14.6, and v3.15.0b3 all predate the fix, so no base-image bump can remediate yet."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger requires incrementally feeding attacker-controlled HTML containing repeated unterminated markup declarations into html.parser.HTMLParser.feed(). aiperf v0.7.0 source contains zero references to html.parser, HTMLParser, or any html stdlib import (verified with `grep -rn -E 'html\\.parser|HTMLParser|^(import|from) html'` against the PyPI sdist — no hits). AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go); the workload exchanges only JSON over HTTP via aiohttp + msgspec/orjson and never parses HTML documents from the inference endpoint or any other source. No attacker-controlled markup can reach the vulnerable parser, so the quadratic-complexity code path is unreachable."
     },
     {
       "vulnerability": {
