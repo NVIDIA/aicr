@@ -1,0 +1,116 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+navigation:
+  - section: Overview
+    contents:
+      - page: Introduction
+        path: v0.17.0-content/README.md
+
+  - section: User Guide
+    contents:
+      - page: Installation
+        path: v0.17.0-content/user/installation.md
+      - page: CLI Reference
+        path: v0.17.0-content/user/cli-reference.md
+      - page: CLI Configuration File
+        path: v0.17.0-content/user/cli-config.md
+      - page: Artifact Verification
+        path: v0.17.0-content/user/artifact-verification.md
+      - page: API Reference
+        path: v0.17.0-content/user/api-reference.md
+      - page: Agent Deployment
+        path: v0.17.0-content/user/agent-deployment.md
+      - page: Air-Gapped Mirroring
+        path: v0.17.0-content/user/air-gap-mirror.md
+      - page: Component Catalog
+        path: v0.17.0-content/user/component-catalog.md
+      - page: Recipe Health
+        path: v0.17.0-content/user/recipe-health.md
+      - page: TestGrid
+        path: v0.17.0-content/user/testgrid.md
+      - page: Validation
+        path: v0.17.0-content/user/validation.md
+      - page: Coverage Matrix
+        path: v0.17.0-content/user/coverage-matrix.md
+
+  - section: Integrator Guide
+    contents:
+      - page: Automation
+        path: v0.17.0-content/integrator/automation.md
+      - page: Data Flow
+        path: v0.17.0-content/integrator/data-flow.md
+      - page: Kubernetes Deployment
+        path: v0.17.0-content/integrator/kubernetes-deployment.md
+      - page: AKS GPU Setup
+        path: v0.17.0-content/integrator/aks-gpu-setup.md
+      - page: EKS Dynamo Networking
+        path: v0.17.0-content/integrator/eks-dynamo-networking.md
+      - page: GKE TCPXO Networking
+        path: v0.17.0-content/integrator/gke-tcpxo-networking.md
+      - page: OpenShift Deployment
+        path: v0.17.0-content/integrator/openshift.md
+      - page: Talos Integration
+        path: v0.17.0-content/integrator/talos-integration.md
+      - page: Recipe Development
+        path: v0.17.0-content/integrator/recipe-development.md
+      - page: Data Extension
+        path: v0.17.0-content/integrator/data-extension.md
+      - page: Validator Extension
+        path: v0.17.0-content/integrator/validator-extension.md
+      - page: Supply Chain Verification
+        path: v0.17.0-content/integrator/supply-chain-verification.md
+      - page: Go Library Integration
+        path: v0.17.0-content/integrator/go-library.md
+      - page: Public API Surface
+        path: v0.17.0-content/integrator/public-api.md
+      - page: Measurement Schema
+        path: v0.17.0-content/integrator/measurement-api.md
+      - section: Components
+        contents:
+          - page: Nodewright
+            path: v0.17.0-content/integrator/components/nodewright.md
+
+  - section: Contributor Guide
+    contents:
+      - page: Architecture Overview
+        path: v0.17.0-content/contributor/index.md
+      - page: Recipes, Overlays, and Mixins
+        path: v0.17.0-content/contributor/recipe.md
+      - page: Components
+        path: v0.17.0-content/contributor/component.md
+      - page: Collectors
+        path: v0.17.0-content/contributor/collector.md
+      - page: Validators
+        path: v0.17.0-content/contributor/validator.md
+      - page: Evidence Ingest
+        path: v0.17.0-content/contributor/evidence-ingest.md
+      - page: Inference-Perf Fluctuation (investigation)
+        path: v0.17.0-content/contributor/inference-perf-fluctuation.md
+      - page: CLI
+        path: v0.17.0-content/contributor/cli.md
+      - page: API Server
+        path: v0.17.0-content/contributor/api-server.md
+      - page: Testing
+        path: v0.17.0-content/contributor/tests.md
+      - page: Claude Skills
+        path: v0.17.0-content/contributor/skills.md
+      - page: Maintaining AICR
+        path: v0.17.0-content/contributor/maintaining.md
+      - page: Rekor v2 Signing
+        path: v0.17.0-content/contributor/rekor-v2-signing.md
+      - page: Publishing Recipe Evidence
+        path: v0.17.0-content/contributor/evidence-publishing.md
+      - page: UAT Day/Night Cycle
+        path: v0.17.0-content/contributor/uat.md

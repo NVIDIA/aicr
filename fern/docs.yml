@@ -30,6 +30,10 @@ products:
         path: ../docs/index.yml
         slug: latest
         availability: stable
+      - display-name: v0.17.0
+        path: versions/v0.17.0.yml
+        slug: v0.17.0
+        availability: stable
       - display-name: v0.16.0
         path: versions/v0.16.0.yml
         slug: v0.16.0
@@ -37,10 +41,6 @@ products:
       - display-name: v0.15.0
         path: versions/v0.15.0.yml
         slug: v0.15.0
-        availability: stable
-      - display-name: v0.14.0
-        path: versions/v0.14.0.yml
-        slug: v0.14.0
         availability: stable
 redirects:
   - source: "/aicr/index.html"
