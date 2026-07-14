@@ -35,9 +35,9 @@ criteria:
 # Constraints validated during readiness phase
 constraints:
   - name: K8s.server.version
-    value: '>= 1.32.4'
+    value: '>= 1.34'
     severity: error
-    remediation: "Upgrade Kubernetes to version 1.32.4 or later"
+    remediation: "Upgrade Kubernetes to version 1.34 or later"
   - name: OS.release.ID
     value: ubuntu
     severity: error

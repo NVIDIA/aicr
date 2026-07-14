@@ -62,7 +62,7 @@ are pulled in at bundle time, not at recipe resolution.
 | **Kind** | `ComponentRegistry` | `RecipeMetadata` | `RecipeMixin` |
 | **Carries criteria?** | No | Yes (`spec.criteria`) | No (rejected at load) |
 | **Carries `base`?** | No | Yes (single-parent chain) | No |
-| **Example** | "make `gpu-operator` available, default to chart v25.10.1" | "for `eks` + `gb200` + `training` + `ubuntu`, pin K8s ≥ 1.32.4" | "for any overlay opting in via `mixins: [os-ubuntu]`, require Ubuntu 24.04" |
+| **Example** | "make `gpu-operator` available, default to chart v25.10.1" | "for `eks` + `gb200` + `training` + `ubuntu`, pin K8s ≥ 1.34" | "for any overlay opting in via `mixins: [os-ubuntu]`, require Ubuntu 24.04" |
 
 Rule of thumb: a change targeting *all* recipes goes in registry; a
 change targeting *one* cluster shape goes in an overlay; a change
@@ -140,7 +140,7 @@ spec:
     # platform: kubeflow         # optional 6th dimension
   constraints:                   # OS/K8s/GPU/SystemD constraints
     - name: K8s.server.version
-      value: ">= 1.32.4"
+      value: ">= 1.34"
   componentRefs: []              # overrides on inherited components
   validation:                    # per-phase validation config
     readiness:   { ... }

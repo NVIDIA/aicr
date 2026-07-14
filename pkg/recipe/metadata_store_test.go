@@ -2119,6 +2119,79 @@ func TestLoadMetadataStore_ConcurrentSameProviderIsCached(t *testing.T) {
 	}
 }
 
+// TestGB200EKSTrainingFloor verifies that the fully resolved GB200 EKS training
+// recipes require Kubernetes 1.34 for the GA resource.k8s.io/v1 API used by the
+// NVLS performance validation path.
+func TestGB200EKSTrainingFloor(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		criteria *Criteria
+	}{
+		{
+			name: "gb200 eks training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorGB200,
+				Intent:      CriteriaIntentTraining,
+			},
+		},
+		{
+			name: "gb200 eks ubuntu training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorGB200,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+			},
+		},
+		{
+			name: "gb200 eks ubuntu kubeflow training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorGB200,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformKubeflow,
+			},
+		},
+		{
+			name: "gb200 eks ubuntu slurm training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorGB200,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformSlurm,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, tt.criteria)
+			if err != nil {
+				t.Fatalf("BuildRecipeResult failed: %v", err)
+			}
+			var k8sFloor string
+			for _, constraint := range result.Constraints {
+				if constraint.Name == testK8sVersionConstant {
+					k8sFloor = constraint.Value
+					break
+				}
+			}
+			if k8sFloor != ">= 1.34" {
+				t.Errorf("K8s.server.version floor = %q, want %q", k8sFloor, ">= 1.34")
+			}
+		})
+	}
+}
+
 // TestGB200OKEFloorNotClobbered is a regression test for the GB200 OKE K8s floor
 // clobber: when oke-ol-training (>= 1.30, accelerator-generic) co-matched
 // gb200-oke-training (>= 1.34) as a sibling leaf, the last-writer-wins constraint
