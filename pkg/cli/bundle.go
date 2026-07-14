@@ -78,6 +78,11 @@ type bundleCmdOptions struct {
 	// component that ships a readiness.yaml. Off by default. See #904.
 	readinessHooks bool
 
+	// serial forces deployers to install components strictly one at a time in
+	// deployment order, disabling the parallel rollout of independent
+	// components. Off by default (parallel). An escape hatch for operators.
+	serial bool
+
 	// attest enables bundle attestation and binary verification.
 	attest bool
 
@@ -179,6 +184,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		attest:                    boolFlagOrConfig(cmd, "attest", resolved.Attest),
 		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", resolved.VendorCharts),
 		readinessHooks:            cmd.Bool("readiness-hooks"),
+		serial:                    cmd.Bool("serial"),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
 		signingKey:                cmd.String(flagSigningKey),
@@ -760,6 +766,18 @@ Package with explicit tag (overrides CLI version):
 	default. See #904.`,
 				Category: catDeployment,
 			},
+			&cli.BoolFlag{
+				Name: "serial",
+				Usage: `Sequence components strictly one at a time in deployment order,
+	disabling the parallel rollout of independent components. Affects the
+	argocd, argocd-helm, flux, and helmfile deployers (helm is already
+	serial): argocd falls back to a linear sync-wave per folder, flux chains
+	each HelmRelease dependsOn to the previous component, and helmfile chains
+	every release via needs: into one linear apply order. An escape hatch for
+	reproducing the pre-parallelism ordering or bisecting a misbehaving
+	rollout; off by default.`,
+				Category: catDeployment,
+			},
 			&cli.StringFlag{
 				Name: "flux-oci-source-name",
 				Usage: "Name of the OCIRepository CR that Flux uses to pull the bundle " +
@@ -1047,6 +1065,7 @@ func runBundleCmdWithDependencies(
 		config.WithStorageClass(opts.storageClass),
 		config.WithVendorCharts(opts.vendorCharts),
 		config.WithReadinessHooks(opts.readinessHooks),
+		config.WithSerial(opts.serial),
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
 		config.WithBundleChartName(opts.bundleChartName),
