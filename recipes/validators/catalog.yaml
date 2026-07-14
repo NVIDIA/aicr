@@ -123,6 +123,10 @@ validators:
     #   AICR_INFERENCE_PERF_INPUT_TOKENS_MEAN        (default 128)
     #   AICR_INFERENCE_PERF_OUTPUT_TOKENS_MEAN       (default 128)
     #   AICR_INFERENCE_PERF_MODEL                    (default Qwen/Qwen3-8B; HF model ID)
+    #   AICR_INFERENCE_PERF_ROUTER_MODE              (default least-loaded; Dynamo frontend
+    #     DYN_ROUTER_MODE for the benchmark workload: kv, round-robin, random, power-of-two,
+    #     least-loaded, or device-aware-weighted. Consumed only in dynamo-router routing mode;
+    #     a set value is validated in either mode and an unknown value fails closed.)
     #   AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT   (default 10m; Go duration. Large models
     #     load slower — raise this AND the `timeout` field above in tandem, since the parent
     #     check deadline derives from `timeout`.)

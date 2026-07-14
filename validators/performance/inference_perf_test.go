@@ -772,6 +772,7 @@ func TestParseDynamoTemplate_ScalarModelStaysString(t *testing.T) {
 			obj, err := parseYAMLTemplate(deployPath, map[string]string{
 				"NAMESPACE":       "aicr-test",
 				"MODEL":           model,
+				"ROUTER_MODE":     dynRouterModeDefault,
 				"GPU_COUNT":       "1",
 				"DEPLOYMENT_NAME": "aicr-inference",
 			})
@@ -800,6 +801,35 @@ func TestParseDynamoTemplate_ScalarModelStaysString(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestParseDynamoTemplate_RouterModeSubstituted guards the ${ROUTER_MODE}
+// placeholder in testdata/inference/dynamo-deployment.yaml: the Frontend's
+// DYN_ROUTER_MODE env must carry the resolved strategy verbatim. If someone
+// hardcodes the value again (dropping the placeholder), this fails.
+func TestParseDynamoTemplate_RouterModeSubstituted(t *testing.T) {
+	deployPath := filepath.Join("testdata", "inference", "dynamo-deployment.yaml")
+	obj, err := parseYAMLTemplate(deployPath, map[string]string{
+		"NAMESPACE":       "aicr-test",
+		"MODEL":           "Qwen/Qwen3-8B",
+		"ROUTER_MODE":     "kv",
+		"GPU_COUNT":       "1",
+		"DEPLOYMENT_NAME": "aicr-inference",
+	})
+	if err != nil {
+		t.Fatalf("parseYAMLTemplate() error: %v", err)
+	}
+	envs := componentContainerEnv(t, obj, "Frontend", mainContainerName)
+	for _, e := range envs {
+		m, ok := e.(map[string]interface{})
+		if ok && m["name"] == "DYN_ROUTER_MODE" {
+			if got := m["value"]; got != "kv" {
+				t.Errorf("DYN_ROUTER_MODE = %v, want %q", got, "kv")
+			}
+			return
+		}
+	}
+	t.Fatal("DYN_ROUTER_MODE env not found in Frontend envs")
 }
 
 func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, componentName, containerName string) []interface{} {
@@ -975,6 +1005,7 @@ func clearTuningEnvs(t *testing.T) {
 		envConcurrencyPerGPU, envWarmupPerConcurrency, envMinRequests,
 		envRequestsPerConcurrency, envInputTokensMean, envOutputTokensMean,
 		envModel, envWorkloadReadyTimeout, envHealthTimeout, envModelCacheSize,
+		envRouterMode,
 	} {
 		t.Setenv(e, "")
 	}
@@ -1173,6 +1204,68 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 			t.Errorf("unexpected error for valid cache size: %v", err)
 		}
 	})
+	t.Run("unknown router mode → ErrCodeInvalidRequest", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envRouterMode, "fastest") // not a Dynamo frontend strategy
+		err := validatePerfTuningEnvs()
+		if err == nil {
+			t.Fatal("expected an error for an unknown router-mode knob")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+	t.Run("valid router mode → ok", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envRouterMode, "kv")
+		if err := validatePerfTuningEnvs(); err != nil {
+			t.Errorf("unexpected error for valid router mode: %v", err)
+		}
+	})
+}
+
+// TestResolveRouterMode verifies the DYN_ROUTER_MODE knob: unset/empty/
+// whitespace falls back to the least-loaded default, every Dynamo frontend
+// strategy is accepted (trimmed), and anything else fails closed with
+// ErrCodeInvalidRequest so a catalog/env typo aborts before deploy.
+func TestResolveRouterMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		val     string
+		want    string
+		wantErr bool
+	}{
+		{"unset → default", "", dynRouterModeDefault, false},
+		{"whitespace → default", "   ", dynRouterModeDefault, false},
+		{"kv", "kv", "kv", false},
+		{"round-robin", "round-robin", "round-robin", false},
+		{"random", "random", "random", false},
+		{"power-of-two", "power-of-two", "power-of-two", false},
+		{"least-loaded", "least-loaded", "least-loaded", false},
+		{"device-aware-weighted", "device-aware-weighted", "device-aware-weighted", false},
+		{"trimmed", "  kv  ", "kv", false},
+		{"unknown → error", "fastest", "", true},
+		{"direct excluded → error", "direct", "", true},
+		{"case-sensitive → error", "KV", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envRouterMode, tt.val)
+			got, err := resolveRouterMode()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveRouterMode() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("resolveRouterMode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 // TestResolveInferenceModel verifies the model knob: unset/empty/whitespace

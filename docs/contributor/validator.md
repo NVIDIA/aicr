@@ -455,6 +455,7 @@ default** (`Qwen/Qwen3-8B` at 256/GPU). A non-positive / non-integer
 |----------|---------|--------|
 | `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU` | `256` | Concurrent requests per GPU; total is this × free GPUs on the chosen node. Prefer the per-accelerator `inference-concurrency-per-gpu` recipe constraint over this global knob. |
 | `AICR_INFERENCE_PERF_MODEL` | `Qwen/Qwen3-8B` | Hugging Face model ID to benchmark. Override per accelerator via the `inference-model` recipe constraint. |
+| `AICR_INFERENCE_PERF_ROUTER_MODE` | `least-loaded` | Dynamo frontend routing strategy (`DYN_ROUTER_MODE`): one of `kv`, `round-robin`, `random`, `power-of-two`, `least-loaded`, `device-aware-weighted` (upstream's `direct` is excluded — it needs per-request worker IDs the benchmark never sends). Lets a characterization run A/B strategies without rebuilding the image. Consumed only when `inference-routing-mode` is `dynamo-router`; in `gateway-epp` mode the EPP selects endpoints and the value is unused. A **set** value is validated in either mode — an unknown value fails closed with `ErrCodeInvalidRequest` rather than being silently ignored (the routing mode is a recipe decision, so a typo must not pass under one recipe and abort under another). |
 | `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` | `10m` | Wait for the `DynamoGraphDeployment` to become ready (image pull + model load + worker health). Large models load slower — raise this **and** the catalog entry's `timeout` in tandem, or the parent deadline caps it. |
 | `AICR_INFERENCE_PERF_HEALTH_TIMEOUT` | `5m` | Wait for the endpoint to serve a real chat-completion *after* the workload reports Ready. Concurrent first-load from one RWO cache PVC can push first-serve past 5m; raise it (bounded by the catalog `timeout`). |
 | `AICR_INFERENCE_PERF_MODEL_CACHE_SIZE` | `100Gi` (on) | The PVC-backed model-weights cache is **on by default**. Set a different K8s quantity to resize, or a disable sentinel (`off`/`0`/`none`/`disabled`) to turn it off and download from HF directly. |
@@ -517,8 +518,9 @@ run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
   counts (stddev 0), a pinned prompt pool, and greedy decoding
   (`temperature: 0`). Input determinism stabilizes *throughput*; it does not
   remove system-side p99 jitter at the knee.
-- **Routing matters.** The inference-perf workload uses Dynamo's load-aware
-  least-loaded router (`DYN_ROUTER_MODE=least-loaded`), which balances by each
+- **Routing matters.** The inference-perf workload defaults to Dynamo's
+  load-aware least-loaded router (`DYN_ROUTER_MODE=least-loaded`; override via
+  the `AICR_INFERENCE_PERF_ROUTER_MODE` knob above), which balances by each
   worker's active in-flight load so a transiently-slow worker stops receiving
   its full share — mitigating the stochastic EKS H100 worker-stall / throughput
   degradation at the saturation knee (issue #1197). Frontend-to-worker
