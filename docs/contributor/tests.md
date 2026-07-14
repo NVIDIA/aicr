@@ -517,6 +517,17 @@ the pre-push gate is local.
   re-render comparison) is its **opt-in** blocking check, and the weekly
   BOM-refresh workflow auto-detects it and opens a PR. So run
   `make bom-docs` locally any time the change touches charts.
+- **Forgetting `make notices`** after a `go.mod`, `go.sum`, or `vendor/`
+  change. `THIRD_PARTY_NOTICES.md` is the union of every vendored
+  dependency's license across the released OS/arch matrix
+  (linux+darwin × amd64+arm64), so a dependency-graph change can add or
+  drop entries. `make tidy` regenerates the file as its last step (right
+  after `go mod vendor`), so the normal dependency-update flow keeps it
+  fresh with nothing to remember — but if you edit `go.mod`/vendor by
+  hand, run `make notices` yourself. The `notices-freshness` merge-gate
+  job regenerates the file and fails CI if the committed copy is stale.
+  The generator sets a fixed platform matrix and `LC_ALL=C`, so
+  `make notices` produces byte-identical output on macOS and Linux.
 - **Coverage decrease > 0.5%** is flagged for justification (the project-wide
   75% floor is what blocks). Add tests rather than
   reaching for `// nolint` or `t.Skip` — both are review-blockers

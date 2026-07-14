@@ -15,9 +15,26 @@
 #
 # Standard library packages are excluded (covered by Go's own license).
 #
+# Why this wrapper instead of the upstream tool directly:
+#   The upstream generators (`go-licenses save`/`csv`, goreleaser's built-in
+#   license collection, and the off-the-shelf GitHub Actions around them) all
+#   resolve the dependency graph for a SINGLE platform — the host's GOOS/GOARCH
+#   by default. Our released binaries span darwin+linux × amd64+arm64, and Go's
+#   build-tagged sources (e.g. *_linux.go vs *_darwin.go) import different
+#   transitive dependencies per platform. Running the upstream tool once
+#   therefore produces a notices file that is (a) INCOMPLETE — missing the deps
+#   of every non-host platform — and (b) NON-REPRODUCIBLE — a macOS developer
+#   and a Linux CI runner emit different files, so any freshness gate would
+#   flap. Neither go-licenses nor goreleaser exposes a multi-GOOS "union" mode,
+#   so this script wraps go-licenses: it re-runs the tool once per released
+#   target, unions the results, and sorts deterministically (LC_ALL=C) to make
+#   the output complete and byte-identical on any host. Keep the PLATFORMS
+#   matrix below in sync with the goos/goarch blocks in .goreleaser.yaml.
+#
 # Requirements:
 #   - go-licenses (version pinned in .settings.yaml linting.go_licenses)
 #   - go (version pinned in .settings.yaml languages.go)
+#   - yq (mikefarah) — verifies the PLATFORMS matrix matches .goreleaser.yaml
 
 set -euo pipefail
 
@@ -27,7 +44,7 @@ PACKAGES=("./...")
 
 if ! command -v go-licenses >/dev/null 2>&1; then
     echo "ERROR: go-licenses is not installed." >&2
-    echo "Install it with 'make tools-setup' or 'go install github.com/google/go-licenses@\$(yq -r .linting.go_licenses .settings.yaml)'." >&2
+    echo "Install it with 'make tools-setup' or 'go install github.com/google/go-licenses/v2@\$(yq -r .linting.go_licenses .settings.yaml)'." >&2
     exit 1
 fi
 
@@ -36,11 +53,17 @@ if ! command -v go >/dev/null 2>&1; then
     exit 1
 fi
 
+if ! command -v yq >/dev/null 2>&1; then
+    echo "ERROR: yq is not installed (needed to verify the release-target matrix)." >&2
+    echo "Install it with 'make tools-setup'." >&2
+    exit 1
+fi
+
 mkdir -p "$(dirname "${OUTPUT}")"
 
 # Guard against an unsafe LICENSES_DIR override before 'rm -rf' touches it.
-# go-licenses requires the destination to not exist, so we must remove it,
-# but a hostile or buggy override (empty, '/', '.', '..') would be catastrophic.
+# The merged tree is rebuilt from scratch each run, so we remove any stale copy
+# first; a hostile or buggy override (empty, '/', '.', '..') would be catastrophic.
 case "${LICENSES_DIR}" in
     ""|"/"|"."|"..")
         echo "ERROR: refusing to 'rm -rf' unsafe LICENSES_DIR='${LICENSES_DIR}'." >&2
@@ -49,48 +72,115 @@ case "${LICENSES_DIR}" in
 esac
 rm -rf "${LICENSES_DIR}"
 
-# Exclude standard library packages from the notices file. Same approach as
-# the existing 'license-check' target in the Makefile.
-STDLIB_IGNORE=$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -)
-
-# Exclude the local module itself: this is a *third-party* notices file.
+# Exclude the local module itself: this is a *third-party* notices file. The
+# module path does not vary by target platform, so compute it once.
 LOCAL_MODULE=$(go list -m 2>/dev/null || true)
 if [[ -z "${LOCAL_MODULE}" ]]; then
     echo "ERROR: could not determine local module path via 'go list -m'." >&2
     exit 1
 fi
 
-# go-licenses --ignore takes a comma-separated list of package paths.
-IGNORE="${STDLIB_IGNORE},${LOCAL_MODULE}"
-
 export GOFLAGS="-mod=vendor"
+# CGO is disabled for every released binary (see .goreleaser.yaml). Disabling it
+# here lets go-licenses cross-list each target platform without a C toolchain.
+export CGO_ENABLED=0
 
-echo "Saving license files for distributed binaries..." >&2
-# 'go-licenses save' writes each dependency's license file to
-# ${LICENSES_DIR}/<import-path>/<original-filename>. We do not pass any
-# package-level --ignore for vendored deps here: the notices file MUST
-# include every distributed dependency, including MPL-2.0 deps (e.g.
-# hashicorp/*) that the license-check target excludes from policy
-# enforcement.
-go-licenses save "${PACKAGES[@]}" \
-    --save_path="${LICENSES_DIR}" \
-    --force \
-    --ignore="${IGNORE}"
+# The released binaries ship for multiple OS/arch targets (see .goreleaser.yaml:
+# aicr → darwin+linux × amd64+arm64, aicrd → linux × amd64+arm64). go-licenses
+# resolves the dependency graph for the HOST platform by default, so a macOS
+# developer and a Linux CI runner would otherwise produce DIFFERENT notices
+# files — build-tagged sources (e.g. *_linux.go vs *_darwin.go) pull in
+# different transitive deps. Generate the UNION across every released target so
+# the output is complete and byte-for-byte reproducible on any host. This matrix
+# MUST match the goos/goarch blocks in .goreleaser.yaml; the guard below fails
+# the run if it drifts (a new release target must not silently produce an
+# incomplete notices file). The matrix is kept explicit rather than derived so
+# it stays readable and greppable — the guard enforces the coupling.
+PLATFORMS=(
+    "linux/amd64"
+    "linux/arm64"
+    "darwin/amd64"
+    "darwin/arm64"
+)
+
+# Assert the matrix covers exactly the released targets. The expected set is the
+# cross product of every build's goos × goarch in .goreleaser.yaml.
+GORELEASER_CONFIG="${GORELEASER_CONFIG:-.goreleaser.yaml}"
+if [[ ! -f "${GORELEASER_CONFIG}" ]]; then
+    echo "ERROR: ${GORELEASER_CONFIG} not found — run 'make notices' from the repo root." >&2
+    exit 1
+fi
+# shellcheck disable=SC2016  # $o/$a are yq expression variables, not shell.
+expected_platforms=$(yq eval \
+    '.builds[] | .goos[] as $o | .goarch[] as $a | $o + "/" + $a' \
+    "${GORELEASER_CONFIG}" 2>/dev/null | LC_ALL=C sort -u)
+if [[ -z "${expected_platforms}" ]]; then
+    echo "ERROR: could not read any build targets from ${GORELEASER_CONFIG}." >&2
+    exit 1
+fi
+actual_platforms=$(printf '%s\n' "${PLATFORMS[@]}" | LC_ALL=C sort -u)
+if [[ "${expected_platforms}" != "${actual_platforms}" ]]; then
+    echo "ERROR: the PLATFORMS matrix is out of sync with ${GORELEASER_CONFIG}." >&2
+    echo "Update the PLATFORMS array in tools/generate-notices to match the released targets." >&2
+    echo "  matrix (PLATFORMS): $(echo "${actual_platforms}" | paste -sd ' ' -)" >&2
+    echo "  goreleaser targets: $(echo "${expected_platforms}" | paste -sd ' ' -)" >&2
+    exit 1
+fi
+
+# Per-platform license trees are saved under a scratch root and merged into
+# ${LICENSES_DIR}; the combined CSV accumulates every platform's entries.
+SAVE_ROOT="$(mktemp -d)"
+COMBINED_CSV="$(mktemp)"
+INDEX_FILE="$(mktemp)"
+trap 'rm -rf "${SAVE_ROOT}"; rm -f "${COMBINED_CSV}" "${INDEX_FILE}"' EXIT
+
+mkdir -p "${LICENSES_DIR}"
+
+for platform in "${PLATFORMS[@]}"; do
+    goos="${platform%/*}"
+    goarch="${platform#*/}"
+    echo "Collecting licenses for ${goos}/${goarch}..." >&2
+
+    # 'go list std' is GOOS-dependent (e.g. syscall/js exists only for wasm),
+    # so recompute the stdlib ignore set per target platform. Standard-library
+    # packages are excluded from the notices file (covered by Go's own license).
+    stdlib_ignore=$(GOOS="${goos}" GOARCH="${goarch}" go list std 2>/dev/null \
+        | cut -d'/' -f1 | LC_ALL=C sort -u | paste -sd ',' -)
+    # go-licenses --ignore takes a comma-separated list of package paths.
+    ignore="${stdlib_ignore},${LOCAL_MODULE}"
+
+    # 'go-licenses save' writes each dependency's license file to
+    # <save_path>/<import-path>/<original-filename>. We do NOT pass a
+    # package-level --ignore for vendored deps beyond stdlib + the local
+    # module: the notices file MUST include every distributed dependency,
+    # including MPL-2.0 deps (e.g. hashicorp/*) that the license-check target
+    # excludes from policy enforcement.
+    platform_save="${SAVE_ROOT}/${goos}_${goarch}"
+    GOOS="${goos}" GOARCH="${goarch}" go-licenses save "${PACKAGES[@]}" \
+        --save_path="${platform_save}" \
+        --force \
+        --ignore="${ignore}"
+
+    # Merge into the shared tree. A module's license text is identical across
+    # platforms, so overwriting is a no-op; modules present on only one platform
+    # are preserved (union). 'cp -R src/.' copies directory contents in place.
+    cp -R "${platform_save}/." "${LICENSES_DIR}/"
+
+    GOOS="${goos}" GOARCH="${goarch}" go-licenses csv "${PACKAGES[@]}" \
+        --ignore="${ignore}" \
+        >> "${COMBINED_CSV}"
+done
 
 echo "Generating dependency index..." >&2
-INDEX_FILE="$(mktemp)"
-trap 'rm -f "${INDEX_FILE}"' EXIT
-go-licenses csv "${PACKAGES[@]}" \
-    --ignore="${IGNORE}" \
-    | sort -t, -k1,1 -u \
-    > "${INDEX_FILE}"
+# Deduplicate by package (first CSV field) and sort deterministically. LC_ALL=C
+# pins byte-ordering so macOS (BSD sort) and Linux (GNU sort) agree — locale
+# collation is the classic source of cross-platform diff noise.
+LC_ALL=C sort -t, -k1,1 -u "${COMBINED_CSV}" > "${INDEX_FILE}"
 
 if [[ ! -s "${INDEX_FILE}" ]]; then
     echo "ERROR: go-licenses produced no entries — refusing to write empty notices file." >&2
     exit 1
 fi
-
-VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo "unreleased")"
 
 echo "Composing ${OUTPUT}..." >&2
 {

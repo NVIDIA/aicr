@@ -55,6 +55,7 @@ jobs:
       renovate: ${{ steps.changes.outputs.renovate }}
       bom: ${{ steps.changes.outputs.bom }}
       tuning: ${{ steps.changes.outputs.tuning }}
+      notices: ${{ steps.changes.outputs.notices }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -106,6 +107,31 @@ jobs:
               - 'recipes/components/nodewright-customizations/**'
               - 'pkg/tuning/**'
               - 'tools/tuning/**'
+            notices:
+              # Inputs to the committed THIRD_PARTY_NOTICES.md freshness check.
+              # The file is the union of every vendored dependency's license
+              # across the released OS/arch matrix, so any dependency-graph
+              # change can alter it. Watch the dependency manifests, the vendor
+              # tree, and the generator itself (plus the committed file, so a
+              # hand edit is re-verified). .goreleaser.yaml is included because
+              # the generator asserts its PLATFORMS matrix matches the release
+              # targets defined there — a new goos/goarch must re-run this check.
+              # Makefile is included because the `notices`/`notices-check`
+              # recipes are the generation/check contract — a change to them
+              # must not be able to skip its own gate. .settings.yaml is included
+              # because the generator's output depends on its pins: a
+              # linting.go_licenses bump can change license classification/URL
+              # derivation, and a languages.go bump changes the `go list std`
+              # ignore set. This is a standalone job — the full `tests` suite
+              # does NOT regenerate the file.
+              - 'Makefile'
+              - '.settings.yaml'
+              - '.goreleaser.yaml'
+              - 'go.mod'
+              - 'go.sum'
+              - 'vendor/**'
+              - 'tools/generate-notices'
+              - 'THIRD_PARTY_NOTICES.md'
 
       # code = true iff at least one changed file is NOT docs/markdown/LICENSE.
       #
@@ -436,6 +462,48 @@ jobs:
       - run: echo "No tuning-status inputs changed — freshness check not required"
 
   # ---------------------------------------------------------------------------
+  # Third-party notices freshness — ensures the committed THIRD_PARTY_NOTICES.md
+  # matches the vendored dependency graph across every released OS/arch target,
+  # on PRs touching its inputs (go.mod/go.sum/vendor + the generator).
+  # ---------------------------------------------------------------------------
+
+  notices-freshness:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.notices == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses/v2@${{ steps.versions.outputs.go_licenses }}
+      - name: Verify committed THIRD_PARTY_NOTICES.md is up to date
+        env:
+          GOFLAGS: -mod=vendor
+        # `make notices-check` regenerates the notices file (union across the
+        # release OS/arch matrix, so it is host-independent) and fails if the
+        # working tree differs — a stale committed file fails closed here.
+        run: make notices-check
+
+  notices-freshness-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.notices != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No dependency/generator changes — notices freshness check not required"
+
+  # ---------------------------------------------------------------------------
   # Aggregate gate — the single required status check
   # ---------------------------------------------------------------------------
 
@@ -459,6 +527,8 @@ jobs:
       - bom-freshness-skip
       - tuning-freshness
       - tuning-freshness-skip
+      - notices-freshness
+      - notices-freshness-skip
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:

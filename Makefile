@@ -75,11 +75,12 @@ generate-validator: ## Generate scaffolding for a new check or constraint valida
 # =============================================================================
 
 .PHONY: tidy
-tidy: ## Formats code and updates Go module dependencies
+tidy: ## Formats code, updates Go module dependencies, and regenerates third-party notices
 	@set -e; \
 	go fmt ./...; \
 	go mod tidy; \
-	go mod vendor
+	go mod vendor; \
+	$(MAKE) notices
 
 .PHONY: vendor
 vendor: ## Vendors Go module dependencies (run after changing go.mod/go.sum)
@@ -577,6 +578,17 @@ validate-local: image-validators ## Builds validator images and runs validation 
 notices: ## Generates THIRD_PARTY_NOTICES.md aggregating every dependency's license
 	@bash tools/generate-notices
 
+.PHONY: notices-check
+notices-check: ## Verifies THIRD_PARTY_NOTICES.md is up to date (run by the merge-gate on dependency changes)
+	@set -e; \
+	$(MAKE) notices; \
+	if ! git diff --quiet -- THIRD_PARTY_NOTICES.md; then \
+	   echo "ERROR: THIRD_PARTY_NOTICES.md is stale. Run 'make notices' and commit the change." >&2; \
+	   git --no-pager diff --stat -- THIRD_PARTY_NOTICES.md >&2; \
+	   exit 1; \
+	fi; \
+	echo "THIRD_PARTY_NOTICES.md is up to date"
+
 .PHONY: release
 release: ## Runs the full release process with goreleaser
 	@set -e; \
@@ -993,6 +1005,7 @@ help-full: ## Displays commands grouped by category
 	@echo "  make build          Build binaries for current OS/arch"
 	@echo "  make image          Build and push container image"
 	@echo "  make notices        Generate THIRD_PARTY_NOTICES.md from Go deps"
+	@echo "  make notices-check  Verify THIRD_PARTY_NOTICES.md is up to date"
 	@echo "  make release        Full release with goreleaser"
 	@echo "  make bump-rc        Tag RC pre-release (v1.2.3 -> v1.3.0-rc1)"
 	@echo "  make bump-promote   Promote RC to stable (TAG=v1.2.4-rc1)"
