@@ -169,24 +169,40 @@ func getLogSnippet(logs string, maxLines int) string {
 }
 
 func verifyNvidiaSMILogs(podLogs string, pod *v1.Pod) error {
-	requiredStrings := []string{
-		"NVIDIA-SMI",
-		"Driver Version:",
-		"CUDA Version:",
-		gpuCheckSuccessMsg,
+	requiredMarkerGroups := [][]string{
+		{"NVIDIA-SMI"},
+		{"Driver Version:", "KMD Version:"},
+		{"CUDA Version:", "CUDA UMD Version:"},
+		{gpuCheckSuccessMsg},
 	}
 
+	// Match case-insensitively: the renamed banner fields are only documented
+	// via `nvidia-smi --version` deprecation text, which spells them lowercase
+	// ("KMD version"), and no captured plain-`nvidia-smi` banner pins the
+	// exact casing of the table header (issue #1667). Case-insensitivity
+	// accepts either spelling — and future casing tweaks — without false
+	// positives: the verified log is only nvidia-smi output plus the success
+	// echo. The diagnostic below keeps the canonical casing for readability.
+	logsLower := strings.ToLower(podLogs)
+
 	var missing []string
-	for _, required := range requiredStrings {
-		if !strings.Contains(podLogs, required) {
-			missing = append(missing, required)
+	for _, markerGroup := range requiredMarkerGroups {
+		found := false
+		for _, marker := range markerGroup {
+			if strings.Contains(logsLower, strings.ToLower(marker)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, strings.Join(markerGroup, " or "))
 		}
 	}
 
 	if len(missing) > 0 {
 		return errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("log verification failed for pod %s/%s: missing %v",
-				pod.Namespace, pod.Name, missing))
+			fmt.Sprintf("log verification failed for pod %s/%s: missing [%s]",
+				pod.Namespace, pod.Name, strings.Join(missing, "; ")))
 	}
 
 	return nil
