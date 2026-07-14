@@ -3,12 +3,12 @@
 Bundle attestation provides cryptographic proof of **who** created a deployment
 bundle and **which AICR CLI** built it. When `aicr bundle --attest` runs, the
 CLI signs the bundle's `checksums.txt` (which inventories the deployment
-payload; `recipe.yaml` is currently excluded, #1549, and the attestation files
-are verified separately) using [Sigstore](https://www.sigstore.dev/) and
+payload, including `recipe.yaml`; the attestation files are verified separately)
+using [Sigstore](https://www.sigstore.dev/) and
 generates SLSA Build Provenance v1 metadata. Anyone can later verify the
 bundle with `aicr verify` to confirm:
 
-* The files listed in `checksums.txt` haven't been tampered with (recipe.yaml is excluded, #1549).
+* The generated payload files listed in `checksums.txt`, including `recipe.yaml`, haven't been tampered with.
 * It was created by a trusted identity.
 * It was built by an attested NVIDIA-CI-released AICR CLI.
 
@@ -88,7 +88,7 @@ permissions.
 
 ```text
 my-bundle/
-├── checksums.txt                          # SHA256 of every listed file (excludes recipe.yaml, #1549)
+├── checksums.txt                          # SHA256 of every generated payload file
 ├── recipe.yaml                            # canonical post-resolution recipe
 ├── deploy.sh                              # automation script
 ├── README.md                              # deployment guide
@@ -105,10 +105,9 @@ The two attestations together form the chain that makes `verified` reachable:
 
 * **`bundle-attestation.sigstore.json`** — Sigstore Bundle (DSSE + Fulcio cert
   + Rekor inclusion proof). Its in-toto subject is the SHA256 of
-  `checksums.txt`, so signing this one file transitively pins every content
-  file that `checksums.txt` lists. The signer identity is the creator's OIDC
-  identity. (Caveat: `recipe.yaml` is currently written *after* `checksums.txt`
-  and is not yet covered — tracked in #1549.)
+  `checksums.txt`, so signing this one file transitively pins every generated
+  payload file that `checksums.txt` lists, including `recipe.yaml`. The signer
+  identity is the creator's OIDC identity.
 * **`aicr-attestation.sigstore.json`** — the SLSA Build Provenance attestation
   *of the AICR CLI binary that produced the bundle*, copied in at bundle time.
   Its signer identity is NVIDIA CI (`https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@...`).
@@ -143,7 +142,7 @@ Bundle verification: PASSED
 
 Five gates run, top to bottom:
 
-1. **Checksums** — every file listed in `checksums.txt` is hashed and compared (recipe.yaml is not yet listed — #1549).
+1. **Checksums** — every generated payload file listed in `checksums.txt`, including `recipe.yaml`, is hashed and compared.
 2. **Bundle signature** — the Sigstore Bundle is verified against the trusted root.
 3. **Bundle predicate** — the in-toto subject is checked against the actual `checksums.txt` digest.
 4. **Binary attestation chain** — `aicr-attestation.sigstore.json` is verified and its subject is checked against the CLI binary digest claimed in the bundle predicate.

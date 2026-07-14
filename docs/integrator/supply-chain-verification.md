@@ -305,8 +305,8 @@ release.
 ### Bundle attestation
 
 When `aicr bundle` runs with `--attest`, it signs the bundle using Sigstore
-keyless OIDC, binding the bundle creator's identity to the files listed in `checksums.txt`
-(recipe.yaml is currently excluded, #1549) and the binary that produced it (via
+keyless OIDC, binding the bundle creator's identity to the generated payload
+files listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, and the binary that produced it (via
 `resolvedDependencies`). Attestation is opt-in; bundles are unsigned by
 default. The bundle output includes `bundle-attestation.sigstore.json`
 (SLSA Build Provenance v1 for the bundle) and a copy of the binary's

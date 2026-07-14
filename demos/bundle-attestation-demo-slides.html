@@ -191,7 +191,7 @@
     </table>
     <div class="grid2">
       <div class="mini"><h4>Without attestation</h4><p>Bundle is just files. <code class="inl">checksums.txt</code> catches accidental corruption, nothing else.</p></div>
-      <div class="mini"><h4>With <code class="inl">--attest</code></h4><p>The files listed in <code class="inl">checksums.txt</code> are cryptographically bound to the creator <em>and</em> the binary that produced it (recipe.yaml excluded, #1549). Recursive provenance.</p></div>
+      <div class="mini"><h4>With <code class="inl">--attest</code></h4><p>The generated payload files listed in <code class="inl">checksums.txt</code>, including <code class="inl">recipe.yaml</code>, are cryptographically bound to the creator <em>and</em> the binary that produced it. Recursive provenance.</p></div>
     </div>
   </div>
 </section>
@@ -233,7 +233,7 @@
           <text x="46" y="214">recipe.yaml &#183; deploy.sh &#183; README.md</text>
           <text x="46" y="234">&lt;component&gt;/values.yaml &#183; ...</text>
           <text x="46" y="266" fill="#9aa7b4">checksums.txt</text>
-          <text x="46" y="282" fill="#6b7785" font-size="11">(SHA256 of the listed files; recipe.yaml excluded — #1549)</text>
+          <text x="46" y="282" fill="#6b7785" font-size="11">(SHA256 of every generated payload file)</text>
         </g>
         <rect class="node-g" x="432" y="170" width="398" height="186" rx="9"/>
         <text class="ttl-g nlabel" x="448" y="194">attestation/</text>

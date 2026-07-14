@@ -70,8 +70,13 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 	return data, nil
 }
 
-// digestAlgoSHA256 is the algorithm key used in attestation digest maps.
-const digestAlgoSHA256 = "sha256"
+const (
+	// digestAlgoSHA256 is the algorithm key used in attestation digest maps.
+	digestAlgoSHA256 = "sha256"
+
+	// recipeFileName is the resolved recipe copied into Helm bundles.
+	recipeFileName = "recipe.yaml"
+)
 
 // errCtxKeyComponent is the structured-error context key carrying the
 // component name in bundle value-override failures.
@@ -470,6 +475,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentValues:        componentValues,
 			Version:                b.Config.Version(),
 			IncludeChecksums:       b.Config.IncludeChecksums(),
+			RecipeFile:             recipeFileName,
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
@@ -567,6 +573,15 @@ func (b *DefaultBundler) argoDeployerOptions() (*config.ArgoDeployerOptions, err
 // runDeployer executes a deployer and builds the result output.
 // dataFiles is the list of external data file paths already copied by Make().
 func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, start time.Time) (*result.Output, error) {
+	// Helm bundles include the resolved recipe. Write it before generation so
+	// the Helm deployer can include it in checksums.txt and the resulting
+	// attestation chain.
+	if b.Config.Deployer() == config.DeployerHelm {
+		if _, writeErr := b.writeRecipeFile(recipeResult, dir); writeErr != nil {
+			return nil, errors.PropagateOrWrap(writeErr, errors.ErrCodeInternal, "failed to write recipe file")
+		}
+	}
+
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
@@ -577,16 +592,6 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 
 	totalFiles := len(output.Files)
 	totalSize := output.TotalSize
-
-	// Write recipe file (helm-only, preserves original behavior)
-	if b.Config.Deployer() == config.DeployerHelm {
-		recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
-		if writeErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
-		}
-		totalFiles++
-		totalSize += recipeSize
-	}
 
 	// Attest bundle (skips internally when not configured)
 	attestFiles, err := b.attestBundle(ctx, dir, dataFiles, recipeResult)
@@ -1872,7 +1877,7 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 		return 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to serialize recipe")
 	}
 
-	recipePath, joinErr := deployer.SafeJoin(dir, "recipe.yaml")
+	recipePath, joinErr := deployer.SafeJoin(dir, recipeFileName)
 	if joinErr != nil {
 		return 0, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
 	}

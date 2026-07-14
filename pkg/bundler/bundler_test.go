@@ -30,9 +30,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
+	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -279,6 +281,65 @@ func TestMake_Success(t *testing.T) {
 	// Verify output summary (3 root + 2 components × multiple files >= 7)
 	if output.TotalFiles < 7 {
 		t.Errorf("expected at least 7 files, got %d", output.TotalFiles)
+	}
+}
+
+// TestMake_RecipeCoveredByChecksums verifies the resolved recipe participates
+// in the generated bundle's integrity chain. A recipe written after checksum
+// generation can be tampered with while Verify still reports success.
+func TestMake_RecipeCoveredByChecksums(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.run/v1alpha2",
+		Kind:       "Recipe",
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "gb200",
+			Intent:      "training",
+			OS:          "ubuntu",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Version: "v25.3.3",
+				Type:    "helm",
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+
+	bundleDir := t.TempDir()
+	if _, err = bundler.Make(context.Background(), recipeResult, bundleDir); err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+
+	checksums, err := os.ReadFile(filepath.Join(bundleDir, checksum.ChecksumFileName))
+	if err != nil {
+		t.Fatalf("read %s: %v", checksum.ChecksumFileName, err)
+	}
+	if !strings.Contains(string(checksums), "  "+recipeFileName+"\n") {
+		t.Fatalf("%s does not cover %s:\n%s", checksum.ChecksumFileName, recipeFileName, checksums)
+	}
+
+	recipePath := filepath.Join(bundleDir, recipeFileName)
+	if err = os.WriteFile(recipePath, []byte("tampered: true\n"), 0600); err != nil {
+		t.Fatalf("tamper %s: %v", recipeFileName, err)
+	}
+
+	verifyResult, err := verifier.Verify(context.Background(), bundleDir, nil)
+	if err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if verifyResult.ChecksumsPassed {
+		t.Fatalf("Verify() passed after %s was tampered with", recipeFileName)
+	}
+	if !strings.Contains(strings.Join(verifyResult.Errors, "\n"), recipeFileName) {
+		t.Errorf("Verify() errors do not identify %s: %v", recipeFileName, verifyResult.Errors)
 	}
 }
 

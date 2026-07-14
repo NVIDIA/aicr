@@ -53,7 +53,7 @@ aicr verify ./my-bundle
 
 Under the hood this runs three checks:
 
-1. **Checksums**: every file listed in `checksums.txt` is hashed and matched (recipe.yaml is not yet listed — #1549).
+1. **Checksums**: every generated payload file listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, is hashed and matched.
 2. **Bundle attestation**: the bundle's signature is verified against the Sigstore trusted root.
 3. **Binary attestation**: the provenance chain is verified with identity pinned to NVIDIA CI.
 

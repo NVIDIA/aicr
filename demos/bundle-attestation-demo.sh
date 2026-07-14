@@ -233,7 +233,7 @@ run bash -c "set -o pipefail; '$AICR' verify '$BUNDLE' --format json | jq '{ tru
 # --- tamper -------------------------------------------------------------------
 
 banner "Tamper-evident: mutate a content file, verify fails"
-note "The signature's subject is the digest of checksums.txt, which pins every file it lists (recipe.yaml is not yet covered, #1549)."
+note "The signature's subject is the digest of checksums.txt, which pins every generated payload file, including recipe.yaml."
 note "Mutating any file listed in checksums.txt breaks its checksum; mutating checksums.txt breaks the signature."
 # Pick a file the bundle is guaranteed to contain. README.md is always present.
 TAMPER_TARGET="$BUNDLE/README.md"

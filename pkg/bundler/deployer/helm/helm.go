@@ -77,6 +77,10 @@ type Generator struct {
 	// IncludeChecksums indicates whether to generate a checksums.txt file.
 	IncludeChecksums bool
 
+	// RecipeFile is the resolved recipe path relative to the output directory.
+	// When set, the file is included in the generated output and checksums.
+	RecipeFile string
+
 	// ComponentPreManifests maps component name → manifest path → content
 	// for manifests that apply BEFORE each component's primary chart.
 	// Forwarded to localformat.Options.ComponentPreManifests. Populated
@@ -208,6 +212,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 	output.Files = append(output.Files, deployPath)
 	output.TotalSize += deploySize
+
+	// Include the resolved recipe written by the bundler before generation so
+	// checksums.txt covers the configuration used to produce this bundle.
+	if g.RecipeFile != "" {
+		if err := output.AddDataFiles(outputDir, []string{g.RecipeFile}); err != nil {
+			return nil, err
+		}
+	}
 
 	// Include external data files in the file list (for checksums)
 	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {

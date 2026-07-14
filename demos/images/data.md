@@ -42,8 +42,7 @@ Visual: File system tree structure showing multiple component folders
 bundle/
 ├── deploy.sh                     # root automation script (executable)
 ├── README.md                     # root deployment guide
-├── checksums.txt                 # SHA256 of the listed bundle files (recipe.yaml is written
-│                                 # afterward and is not yet covered — see issue #1549)
+├── checksums.txt                 # SHA256 of every generated payload file
 ├── recipe.yaml                   # canonical post-resolution recipe
 ├── NNN-cert-manager/             # each folder is prefixed with its NNN deployment-order
 │   ├── install.sh                # index (computed from the dependency graph — e.g. cert-manager

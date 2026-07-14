@@ -75,6 +75,10 @@ func TestGenerate_ContextCancellation(t *testing.T) {
 func TestGenerate_WithChecksums(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
+	recipeFile := "recipe.yaml"
+	if err := os.WriteFile(filepath.Join(outputDir, recipeFile), []byte("apiVersion: aicr.run/v1alpha2\nkind: Recipe\n"), 0600); err != nil {
+		t.Fatalf("write %s: %v", recipeFile, err)
+	}
 
 	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
@@ -84,6 +88,7 @@ func TestGenerate_WithChecksums(t *testing.T) {
 		},
 		Version:          "v1.0.0",
 		IncludeChecksums: true,
+		RecipeFile:       recipeFile,
 	}
 
 	output, err := g.Generate(ctx, outputDir)
@@ -105,6 +110,7 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	for _, want := range []string{
 		"README.md",
 		"deploy.sh",
+		recipeFile,
 		filepath.Join("001-cert-manager", "values.yaml"),
 	} {
 		if !strings.Contains(str, want) {
@@ -128,6 +134,26 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	lastFile := output.Files[len(output.Files)-1]
 	if !strings.HasSuffix(lastFile, "checksums.txt") {
 		t.Errorf("expected last file to be checksums.txt, got %s", lastFile)
+	}
+}
+
+func TestGenerate_MissingRecipeFile(t *testing.T) {
+	g := &Generator{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version:    "v1.0.0",
+		RecipeFile: "recipe.yaml",
+	}
+
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("Generate() with missing recipe file expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to stat data file") {
+		t.Errorf("Generate() error = %v, want missing file context", err)
 	}
 }
 

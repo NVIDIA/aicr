@@ -37,8 +37,8 @@
   │  recipe.yaml ──▶ bundle/                                               │
   │    ├── deploy.sh        (root automation script)                       │
   │    ├── README.md        (root deployment guide)                        │
-  │    ├── checksums.txt    (SHA256 of listed files; excludes recipe.yaml) │
-  │    ├── recipe.yaml      (resolved recipe; not yet in checksums, #1549) │
+  │    ├── checksums.txt    (SHA256 of all generated payload files)        │
+  │    ├── recipe.yaml      (resolved recipe; covered by checksums)        │
   │    ├── 001-agentgateway-crds/              (agentgateway.dev CRDs)     │
   │    ├── 002-agentgateway-crds-post/         (Gateway API + Inf-Ext CRDs)│
   │    ├── 003-aws-ebs-csi-driver/             (EBS storage)               │

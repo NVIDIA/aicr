@@ -1747,7 +1747,7 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 | Cluster-specific value (varies per deployment) | `--dynamic` | `--dynamic alloy:clusterName` |
 | Static override (same for all deployments of this bundle) | `--set` | `--set gpuoperator:driver.version=580.105.08` |
 
-> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the files listed in `checksums.txt` (recipe.yaml excluded, #1549), not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
+> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the generated payload files listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
 
 ```shell
 --dynamic component:path.to.field
@@ -2169,7 +2169,7 @@ When `--attest` is passed, the bundle command performs five steps:
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
 2. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
 3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
-4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the files listed in `checksums.txt` (recipe.yaml is currently excluded, #1549) and the binary that produced it.
+4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated payload files listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a cloud KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
@@ -2296,7 +2296,7 @@ HashiCorp Vault (`hashivault://`) is not supported: its client libraries are MPL
 
 ##### Attestation Scope
 
-Attestation binds the files listed in `checksums.txt` (recipe.yaml is currently excluded, #1549; the attestation files are verified separately) — defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
+Attestation binds the generated payload files listed in `checksums.txt` — including `recipe.yaml` in Helm bundles, defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. The attestation files are verified separately. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
 
 If you need to enforce specific install-time values (e.g., pinning `driver.version`), that is a **policy concern**, not an attestation one. Use admission control (Kyverno, Gatekeeper) or Argo sync hooks to reject deployments that violate the policy. `aicr verify` checks bundle integrity and provenance; it does not evaluate install-time value constraints.
 

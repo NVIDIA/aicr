@@ -385,8 +385,8 @@ RecipeResult
                                    CR, for components that ship one)
          - go:embed templates  -> per-component install.sh, and the root
                                    README.md + deploy.sh
+  -> write canonical recipe.yaml
   -> compute root checksums.txt over every emitted file
-     (recipe.yaml is written afterward and is not covered, #1549)
 ```
 
 `pkg/bundler/registry` exists but is **not** used by the production path: the
@@ -507,7 +507,8 @@ The `deploymentOrder` field in recipes specifies component deployment sequence. 
 bundle-output/
 ├── README.md                    # Root deployment guide with ordered steps
 ├── deploy.sh                    # Automation script (0755)
-├── checksums.txt                # SHA256 of all listed files (recipe.yaml excluded, #1549)
+├── recipe.yaml                  # Canonical post-resolution recipe
+├── checksums.txt                # SHA256 of all generated payload files
 ├── 001-cert-manager/
 │   ├── install.sh               # Per-folder install script (0755)
 │   ├── values.yaml              # Static Helm values
@@ -584,7 +585,7 @@ spec:
 │ Complete Bundle + Deploy Flow                                │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
-│  aicr bundle -r recipe.yaml --deployer argocd \            │
+│  aicr bundle -r recipe.yaml --deployer argocd \              │
 │    --repo https://github.com/my-org/my-repo.git -o ./out     │
 │                                                              │
 │  1. Parse recipe                                             │
@@ -599,13 +600,13 @@ spec:
 │     └─ network-operator → values.yaml, manifests/            │
 │                                                              │
 │  4. Run deployer (argocd) → numbered NNN-<name>/ folders     │
-│     ├─ 001-cert-manager/application.yaml (wave: 0)          │
-│     ├─ 002-gpu-operator/application.yaml (wave: 1)          │
-│     └─ 003-network-operator/application.yaml (wave: 2)      │
+│     ├─ 001-cert-manager/application.yaml (wave: 0)           │
+│     ├─ 002-gpu-operator/application.yaml (wave: 1)           │
+│     └─ 003-network-operator/application.yaml (wave: 2)       │
 │     └─ app-of-apps.yaml (bundle root, uses --repo URL)       │
 │                                                              │
 │  5. Generate checksums                                       │
-│     └─ checksums.txt (root; all listed files, no recipe.yaml)│
+│     └─ checksums.txt (root; all emitted Argo CD files)       │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
