@@ -60,12 +60,6 @@ OLM advances the CSV to `Succeeded` only once the operator's install strategy
 (its Deployment) reports available, so the CSV phase is the single signal the
 gate waits on before CRs are applied.
 
-> **Known issue ([#1532](https://github.com/NVIDIA/aicr/issues/1532)).** The
-> generated gate `Role` does not yet grant `operators.coreos.com` access, so
-> the CSV assertion currently fails with an RBAC-forbidden error on OCP until
-> that Role is extended. Track #1532 before relying on `--readiness-hooks` for
-> OLM components.
-
 When `--readiness-hooks` is enabled, the bundler emits a `-readiness` folder between the OLM and CR folders for each operator. The readiness Job runs with `helm install --wait --timeout`, blocking the deployment pipeline until the operator is fully ready.
 
 ### Naming Convention

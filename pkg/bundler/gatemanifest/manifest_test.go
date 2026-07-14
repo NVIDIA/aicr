@@ -43,6 +43,9 @@ func TestRender(t *testing.T) {
 		"backoffLimit: 6",
 		"customresourcedefinitions",
 		`resources: ["*"]`,
+		`  - apiGroups: ["operators.coreos.com"]
+    resources: ["clusterserviceversions"]
+    verbs: ["get", "list", "watch"]`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("manifest missing %q", want)
