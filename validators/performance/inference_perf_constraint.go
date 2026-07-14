@@ -172,6 +172,19 @@ const (
 	// knob it is bounded by the parent check deadline (AICR_CHECK_TIMEOUT, from
 	// the catalog entry's `timeout`), which must be raised in tandem.
 	envHealthTimeout = "AICR_INFERENCE_PERF_HEALTH_TIMEOUT"
+	// envRouterMode overrides the Dynamo frontend routing strategy
+	// (DYN_ROUTER_MODE) the benchmark workload runs with, for characterizing
+	// alternative strategies without rebuilding the validator image (issue
+	// #1374). Default dynRouterModeDefault (least-loaded, see issue #1197);
+	// validated against the Dynamo frontend enum by resolveRouterMode, failing
+	// closed with ErrCodeInvalidRequest on a typo. Only CONSUMED on the
+	// `dynamo-router` routing path — in `gateway-epp` mode the EPP performs
+	// endpoint selection and the worker frontend sidecars run in direct mode.
+	// A set value is still VALIDATED in either mode (validatePerfTuningEnvs):
+	// the routing mode comes from the recipe, not from whoever set this env,
+	// so mode-gated validation would let the same typo pass silently under one
+	// recipe and abort under another. Set-but-invalid always fails closed.
+	envRouterMode = "AICR_INFERENCE_PERF_ROUTER_MODE"
 
 	// perfConstraintModel / perfConstraintConcurrency / perfConstraintRoutingMode
 	// name recipe performance.constraints entries that configure the benchmark
@@ -264,6 +277,40 @@ const (
 	inferenceRoutingModeGatewayEPP   inferenceRoutingMode = "gateway-epp"
 )
 
+// dynRouterModeDefault is the Dynamo frontend routing strategy interpolated
+// into the deployment template as ${ROUTER_MODE}. Least-loaded balances by
+// each worker's active in-flight load rather than KV-overlap, so a
+// transiently-slow worker stops receiving its full share — mitigating the
+// stochastic EKS H100 worker-stall at the saturation knee (issue #1197).
+// Override via AICR_INFERENCE_PERF_ROUTER_MODE (issue #1374).
+const dynRouterModeDefault = "least-loaded"
+
+// dynRouterModes is the curated subset of the upstream DYN_ROUTER_MODE
+// choices (Dynamo v1.2.1 router_args.py) that the benchmark supports; the
+// order here is the order shown in the resolveRouterMode error message.
+// Upstream's `direct` mode is deliberately excluded: it requires an
+// externally supplied worker ID per request, and AICR's AIPerf invocation
+// sends no routing hints — the workload would deploy and then fail opaquely
+// mid-run. resolveRouterMode fails closed on anything outside this list so a
+// catalog/env typo surfaces up front instead of minutes into the run.
+var dynRouterModes = []string{
+	"kv",
+	"round-robin",
+	"random",
+	"power-of-two",
+	"least-loaded",
+	"device-aware-weighted",
+}
+
+// dynRouterModeSet is the lookup form of dynRouterModes.
+var dynRouterModeSet = func() map[string]bool {
+	s := make(map[string]bool, len(dynRouterModes))
+	for _, m := range dynRouterModes {
+		s[m] = true
+	}
+	return s
+}()
+
 // GVRs for Dynamo, KAI Scheduler, and Gateway API resources.
 var (
 	dynamoDeploymentGVR = schema.GroupVersionResource{
@@ -337,6 +384,7 @@ type inferenceWorkloadConfig struct {
 	modelCacheSize         string // PVC size (e.g. "100Gi") enabling the model-weights cache; empty = disabled
 	modelCacheStorageClass string // StorageClass for the cache PVC; empty = cluster default
 	routingMode            inferenceRoutingMode
+	routerMode             string // Dynamo frontend DYN_ROUTER_MODE (dynamo-router path only); env > default (see resolveRouterMode)
 
 	// gpuAllocMode is the cluster's detected GPU allocation capability
 	// (allocmode.Detect), probed once per run. Carried for evidence output
@@ -683,6 +731,11 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 		return nil, err
 	}
 
+	routerMode, err := resolveRouterMode()
+	if err != nil {
+		return nil, err
+	}
+
 	runID := deriveRunID()
 	config := &inferenceWorkloadConfig{
 		runID:                  runID,
@@ -695,6 +748,7 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 		modelCacheSize:         cacheSize,
 		modelCacheStorageClass: strings.TrimSpace(os.Getenv(envModelCacheStorageClass)),
 		routingMode:            routingMode,
+		routerMode:             routerMode,
 		gpuAllocMode:           mode,
 		draWorkerWiring:        draWiring,
 	}
@@ -1570,6 +1624,7 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 	templateData := map[string]string{
 		"NAMESPACE":           config.namespace,
 		"MODEL":               config.model,
+		"ROUTER_MODE":         config.routerMode,
 		"GPU_COUNT":           strconv.Itoa(config.gpuCount),
 		"DEPLOYMENT_NAME":     inferenceDeploymentName,
 		"QUEUE_NAME":          inferenceQueueName,
@@ -1607,7 +1662,8 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		return errors.Wrap(errors.ErrCodeInternal, "failed to apply DynamoGraphDeployment", err)
 	}
 	slog.Info("Applied DynamoGraphDeployment",
-		"name", inferenceDeploymentName, "gpuWorkers", config.gpuCount)
+		"name", inferenceDeploymentName, "gpuWorkers", config.gpuCount,
+		"routingMode", config.routingMode, "routerMode", config.routerMode)
 
 	// Wait for the deployment to become ready.
 	if err := waitForDynamoDeploymentReady(ctx, config); err != nil {
@@ -2618,6 +2674,29 @@ func getOwnPullSecrets(ctx *validators.Context) []v1.LocalObjectReference {
 	return out
 }
 
+// resolveRouterMode returns the Dynamo frontend routing strategy
+// (DYN_ROUTER_MODE) for the benchmark workload: AICR_INFERENCE_PERF_ROUTER_MODE
+// when set (trimmed), else dynRouterModeDefault. The value is validated
+// against the Dynamo frontend enum (dynRouterModes) and fails closed with
+// ErrCodeInvalidRequest on anything else — an unknown mode would otherwise
+// surface as an opaque frontend failure minutes into the run. The value is
+// CONSUMED only on the dynamo-router path — the gateway-epp template carries
+// no ${ROUTER_MODE} placeholder (worker sidecars run in direct mode there) —
+// but this resolver also runs in upfront validation (validatePerfTuningEnvs)
+// in either mode, so a set-but-invalid value fails closed even under
+// gateway-epp (see envRouterMode for why validation is not mode-gated).
+func resolveRouterMode() (string, error) {
+	raw := strings.TrimSpace(os.Getenv(envRouterMode))
+	if raw == "" {
+		return dynRouterModeDefault, nil
+	}
+	if !dynRouterModeSet[raw] {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s %q: must be one of %s", envRouterMode, raw, strings.Join(dynRouterModes, ", ")))
+	}
+	return raw, nil
+}
+
 // resolveInferenceModel returns the Hugging Face model ID used for the
 // benchmark. Override via AICR_INFERENCE_PERF_MODEL to characterize a larger
 // model (e.g., Qwen/Qwen3-32B) without rebuilding the validator image; unset or
@@ -2664,9 +2743,10 @@ func resolveModel(ctx *validators.Context) string {
 
 // resolveRoutingMode returns where routing decisions are made for the
 // benchmark workload. The default `dynamo-router` mode keeps routing in the
-// Dynamo frontend, which uses load-aware least-loaded routing
-// (DYN_ROUTER_MODE=least-loaded) — see the deployment template and issue
-// #1197. `gateway-epp` switches to Gateway API Inference Extension: EPP
+// Dynamo frontend, whose strategy defaults to load-aware least-loaded routing
+// (DYN_ROUTER_MODE, overridable via AICR_INFERENCE_PERF_ROUTER_MODE — see
+// resolveRouterMode, the deployment template, and issues #1197/#1374).
+// `gateway-epp` switches to Gateway API Inference Extension: EPP
 // performs KV-aware endpoint selection and worker frontend sidecars run in
 // direct mode so they honor EPP's routing headers. The sidecars do not relay
 // local vLLM ZMQ KV events onto NATS; that relay is handled by the worker
@@ -2772,6 +2852,9 @@ func validatePerfTuningEnvs() error {
 		return err
 	}
 	if _, _, err := parseModelCacheSize(os.Getenv(envModelCacheSize)); err != nil {
+		return err
+	}
+	if _, err := resolveRouterMode(); err != nil {
 		return err
 	}
 	return nil

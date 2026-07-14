@@ -52,15 +52,18 @@ spec:
                   # boolean-like name that passes validateModelID) parses as a
                   # string, not int/bool/null, after ${MODEL} substitution.
                   value: "${MODEL}"
-                # Least-loaded routing balances by each worker's active
-                # in-flight load rather than KV-overlap, so a transiently-slow
-                # worker stops receiving its full share. This mitigates the
-                # stochastic EKS H100 worker-stall / throughput degradation at
-                # the saturation knee (see issue #1197): capacity-blind and
-                # KV-overlap routing both let a backed-up worker accumulate
-                # requests, spiking TTFT p99 to 4-77s.
+                # Routing strategy for the Dynamo frontend, substituted from
+                # AICR_INFERENCE_PERF_ROUTER_MODE (default least-loaded, enum
+                # validated by resolveRouterMode; issue #1374). Least-loaded
+                # balances by each worker's active in-flight load rather than
+                # KV-overlap, so a transiently-slow worker stops receiving its
+                # full share. This mitigates the stochastic EKS H100
+                # worker-stall / throughput degradation at the saturation knee
+                # (see issue #1197): capacity-blind and KV-overlap routing both
+                # let a backed-up worker accumulate requests, spiking TTFT p99
+                # to 4-77s.
                 - name: DYN_ROUTER_MODE
-                  value: least-loaded
+                  value: ${ROUTER_MODE}
                 - name: HF_TOKEN
                   valueFrom:
                     secretKeyRef:
