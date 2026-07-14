@@ -1,4 +1,4 @@
-# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+﻿# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -80,9 +80,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      tier1: ${{ steps.classify.outputs.tier1 }}
-      tier2: ${{ steps.classify.outputs.tier2 }}
-      tier3: ${{ steps.classify.outputs.tier3 }}
       tier3_batches: ${{ steps.classify.outputs.tier3_batches }}
       tier1_pairs: ${{ steps.classify.outputs.tier1_pairs }}
       tier2_pairs: ${{ steps.classify.outputs.tier2_pairs }}
@@ -102,9 +99,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Deployer list — single source of truth, consumed by all tiers and by
-          # the workflow_dispatch early-exit below. To add or remove a deployer,
-          # change this one line; Tier 1, Tier 2, and Tier 3 all derive from it.
+          # Deployer list — single source of truth for Tier 1, Tier 3, and
+          # manual dispatch. Tier 2 is intentionally helm-only (see ADR-003
+          # §"Tier 2 deployer coverage"). To add or remove a deployer for
+          # Tier 1 and Tier 3, change this one line.
           readonly DEPLOYERS='["helm","argocd-oci","argocd-helm-oci","argocd-git","flux-oci","flux-git"]'
 
           # --- workflow_dispatch: test exactly the requested recipe ---
@@ -303,9 +301,6 @@ jobs:
             ')
 
           # --- Output ---
-          echo "tier1=${tier1}"                 >> "$GITHUB_OUTPUT"
-          echo "tier2=${tier2}"                 >> "$GITHUB_OUTPUT"
-          echo "tier3=${tier3}"                 >> "$GITHUB_OUTPUT"
           echo "tier3_batches=${tier3_batches}" >> "$GITHUB_OUTPUT"
           echo "tier1_pairs=${tier1_pairs}"     >> "$GITHUB_OUTPUT"
           echo "tier2_pairs=${tier2_pairs}"     >> "$GITHUB_OUTPUT"
