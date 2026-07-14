@@ -17,11 +17,22 @@
 # Validates that slinky-topograph and its sub-charts (node-observer,
 # node-data-broker) are running and healthy, and that the topology generation
 # pipeline has produced a result. Specifically:
-#   1. All three Deployments are available (topograph API, node-observer, node-data-broker).
-#   2. No pods in the topograph namespace are in a failed/stuck state.
-#   3. The topology ConfigMap written by topograph exists in the slurm namespace
-#      and contains a non-empty topology.conf key, confirming end-to-end pipeline
-#      success — not just process readiness.
+#   1. Both Deployments are available (topograph API, node-observer).
+#   2. The node-data-broker DaemonSet (enabled by default in the shared
+#      component values) has completed rollout.
+#   3. No pods in the topograph namespace are in a failed/stuck state.
+#   4. The topology ConfigMap (slinky-slurm-config-extra) in the slurm
+#      namespace has a topology.conf key whose value contains a SwitchName
+#      line, i.e. Topograph has completed a real sync. slinky-slurm's chart
+#      seeds this key with an 'aicr-preseed'-marked placeholder, and the
+#      check requires SwitchName content without that marker, so it fails
+#      closed — the 5m assert retry times out — until Topograph patches in
+#      real topology/tree output. The Kind leaf's inline healthCheckAsserts
+#      variant asserts the exact fixture content.
+# This file is read-only (assert/error operations only); overlays that
+# disable node-data-broker or need exact-content assertions (e.g. the
+# deterministic Kind test provider) carry their own inline
+# healthCheckAsserts on the componentRef instead of a conditional script.
 # Deployment names are stabilized via fullnameOverride in
 # components/slinky-topograph/values.yaml.
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -55,18 +66,26 @@ spec:
               status:
                 (availableReplicas > `0`): true
     - name: validate-node-data-broker-daemonset
-      # node-data-broker is enabled by default. When an overlay sets
-      # node-data-broker.enabled: false the DaemonSet is not deployed and this
-      # step must be skipped rather than retried until timeout. A script step
-      # handles the conditional: if the DaemonSet is absent, exit 0 (skip);
-      # if present, wait for a full rollout before declaring success.
+      # node-data-broker is enabled by default in the shared component values.
+      # This registry-level check asserts the default-enabled shape (full
+      # rollout). The h100-kind-training-slurm overlay disables the DaemonSet
+      # and therefore carries its own inline healthCheckAsserts on the
+      # componentRef (which omits this step) — the read-only allowlist for
+      # registry checks permits only assert/error operations, so a conditional
+      # script skip is not an option here.
       try:
-        - script:
-            content: |
-              kubectl get daemonset -n topograph slinky-topograph-node-data-broker \
-                >/dev/null 2>&1 || exit 0
-              kubectl rollout status daemonset/slinky-topograph-node-data-broker \
-                -n topograph --timeout=5m
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: slinky-topograph-node-data-broker
+                namespace: topograph
+              status:
+                # Non-omitempty fields only: NumberUnavailable is omitempty and
+                # absent when healthy. desired > 0 guards the vacuous pass.
+                (desiredNumberScheduled > `0`): true
+                (numberReady == desiredNumberScheduled): true
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases (Pending / Failed /
@@ -125,25 +144,28 @@ spec:
               status:
                 ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
     - name: validate-topology-configmap
-      # End-to-end pipeline gate: topograph writes this ConfigMap only after a
-      # successful cloud-provider topology query. The exact content asserts the
-      # full tree from small-tree.yaml (S1→S2/S3, 3 nodes each) was rendered —
-      # not just that the key is non-empty.
-      # ConfigMap name and namespace are set by global.engine.params in
-      # components/slinky-topograph/values.yaml.
-      # Node names (I21, I22, I25, I34-I36) are the instance IDs from the model;
-      # cluset compacts them to I[21-22,25] and I[34-36]. Switch order (S2 before
-      # S3) is deterministic because toTreeTopology does a sorted BFS.
+      # Sync-success gate, provider-agnostic: the chart-owned
+      # slinky-slurm-config-extra ConfigMap is mounted into slurmctld via
+      # configFileRefs, and Topograph patches its topology.conf key after
+      # each successful sync. The chart seeds that key with a syntactically
+      # valid one-switch placeholder marked 'aicr-preseed' (a comment-only
+      # zero-switch seed would fatal slurmctld on reconfigure/restart once
+      # nodes register — see the overlay seed comment). Real topology/tree
+      # output contains SwitchName lines and never the marker. Asserting the
+      # value contains 'SwitchName' therefore fails closed until Topograph
+      # completes a real sync: an unconfigured provider (e.g. GKE without
+      # Workload Identity) never patches the key, so the 5m assert retry
+      # times out instead of passing vacuously on the seed. contains(null,
+      # ...) on a missing key also fails closed. The Kind leaf's inline
+      # healthCheckAsserts adds the exact-content assertion for the
+      # deterministic test provider.
       try:
         - assert:
             resource:
               apiVersion: v1
               kind: ConfigMap
               metadata:
-                name: slinky-slurm-config-topo
+                name: slinky-slurm-config-extra
                 namespace: slurm
               data:
-                topology.conf: |
-                  SwitchName=S1 Switches=S[2-3]
-                  SwitchName=S2 Nodes=I[21-22,25]
-                  SwitchName=S3 Nodes=I[34-36]
+                (contains("topology.conf", 'SwitchName') && !contains("topology.conf", 'aicr-preseed')): true

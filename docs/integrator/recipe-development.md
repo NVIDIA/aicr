@@ -125,57 +125,6 @@ For example, `--platform slurm` leaves inline three `componentRefs`:
 
 This is the same shape `dynamo-platform` uses across the `*-inference-dynamo` leaves. See `recipes/overlays/h100-eks-ubuntu-training-slurm.yaml` for the full example.
 
-### Slinky Slurm Inline Components
-
-Leaves that need topology-aware scheduling can optionally add `slinky-topograph` as a fourth `componentRef`. It must be placed between `slinky-slurm-operator` and `slinky-slurm`, with `slinky-slurm` declaring it as a `dependencyRef`. The `overrides` block supplies the provider and engine that are specific to each leaf:
-
-```yaml
-- name: slinky-topograph
-  type: Helm
-  valuesFile: components/slinky-topograph/values.yaml
-  dependencyRefs:
-    - slinky-slurm-operator
-    - slinky-slurm-operator-crds
-  overrides:
-    global:
-      provider:
-        name: gcp      # cloud provider: gcp | aws | oci | nebius | …
-      engine:
-        name: slinky   # scheduler consumer: slinky | slurm | k8s | graph
-
-- name: slinky-slurm
-  type: Helm
-  valuesFile: components/slinky-slurm/values.yaml
-  dependencyRefs:
-    - slinky-slurm-operator
-    - slinky-slurm-operator-crds
-    - slinky-topograph   # ensures topograph is ready before Slurm starts
-  overrides:
-    # ... GPU GRES and other leaf-specific tuning ...
-```
-
-For cloud providers (gcp, aws, oci, nebius, …), `slinky-topograph` requires IAM access to call the cloud's topology API. For GKE, bind a GCP service account that has `roles/compute.viewer` on the project via Workload Identity:
-
-```yaml
-overrides:
-  global:
-    provider:
-      name: gcp
-  serviceAccount:
-    annotations:
-      iam.gke.io/gcp-service-account: <sa-name>@<project-id>.iam.gserviceaccount.com
-```
-
-If you prefer not to bake the GCP service account into the recipe, supply it at bundle time instead:
-
-```bash
-aicr bundle --recipe recipe.yaml \
-  --set-json 'slinkytopograph:serviceAccount.annotations={"iam.gke.io/gcp-service-account":"<sa-name>@<project-id>.iam.gserviceaccount.com"}' \
-  -o ./bundle
-```
-
-For `provider.name: dra` (Kubernetes Dynamic Resource Allocation, GA in K8s 1.34), topology is sourced from the DRA API — no cloud provider IAM or ServiceAccount annotations are needed. Use `dra` for local or non-cloud environments such as Kind-based CI clusters.
-
 When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-talos` mixin to your overlay's `spec.mixins` list (e.g. `spec.mixins: [os-talos]`, or `[platform-kubeflow, os-talos]` if you already mix in a non-OS fragment). OS-scoped mixins are mutually exclusive — combining `os-ubuntu` and `os-talos` in one overlay is a recipe authoring error, not a supported composition. The mixin overrides namespaces for affected components and supplies PSA-privileged Namespace manifests via `componentRefs[].preManifestFiles`, which are applied before each chart — see [Talos integration](talos-integration.md) for the component list and labels.
 
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
@@ -209,6 +158,71 @@ Only use this pattern when the content is truly uniform across the wildcard dime
 - `validation.<phase>` blocks merge per-field: `checks` and `constraints` union and deduplicate when non-empty (`constraints` by name, overlay wins on same-name); an explicit empty list (`checks: []` / `constraints: []`) **clears** the inherited list, while an omitted/null field **inherits** it; `nodeSelection` replaced wholesale when set; `timeout`/`infrastructure` overlay-wins-if-non-empty
 - Criteria: not inherited (each recipe defines its own)
 - Mixin constraints/components must not conflict with the inheritance chain or other mixins
+
+### Slinky Slurm Inline Components
+
+Leaves that need topology-aware scheduling can optionally add `slinky-topograph` as a fourth `componentRef`. Its `dependencyRefs` include `slinky-slurm`, so it deploys **after** the Slurm cluster chart: `slinky-slurm` renders and owns the `slinky-slurm-config-extra` ConfigMap (from its `configFiles`, mounted into slurmctld via the Controller CR's `configFileRefs`), and Topograph patches only that ConfigMap's `topology.conf` key on each sync, preserving the chart-owned `cgroup.conf`/`gres.conf` keys — Helm has to own the ConfigMap first, or a later `helm upgrade` on `slinky-slurm` would fight Topograph for ownership. The `overrides` block supplies the provider and engine that are specific to each leaf:
+
+```yaml
+- name: slinky-topograph
+  type: Helm
+  valuesFile: components/slinky-topograph/values.yaml
+  dependencyRefs:
+    - slinky-slurm-operator
+    - slinky-slurm-operator-crds
+    - slinky-slurm   # deploy after Slurm so Helm already owns config-extra
+  overrides:
+    global:
+      provider:
+        name: gcp      # cloud provider: gcp | aws | oci | nebius | …
+      engine:
+        name: slinky   # scheduler consumer: slinky | slurm | k8s | graph
+
+- name: slinky-slurm
+  type: Helm
+  valuesFile: components/slinky-slurm/values.yaml
+  dependencyRefs:
+    - slinky-slurm-operator
+    - slinky-slurm-operator-crds
+  overrides:
+    configFiles:
+      # Seed so topology.conf exists in slinky-slurm-config-extra from first
+      # boot; Topograph overwrites this key after each successful sync.
+      # NOTE: helm upgrade resets the key to this seed until the next
+      # Topograph sync.
+      topology.conf: |
+        # Managed by NVIDIA Topograph (engine: slinky). Pre-sync placeholder.
+        SwitchName=aicr-preseed Nodes=aicr-preseed-node
+    controller:
+      extraConfMap:
+        TopologyPlugin: "topology/tree"
+      # Reload path: the reconfigure sidecar loads Topograph's topology.conf
+      # updates into the running slurmctld (rollout hash excludes configFileRefs).
+      inplaceReconfigure: true
+    # ... GPU GRES and other leaf-specific tuning ...
+```
+
+For cloud providers (gcp, aws, oci, nebius, …), `slinky-topograph` requires IAM access to call the cloud's topology API. For GKE, bind a GCP service account that has `roles/compute.viewer` on the project via Workload Identity:
+
+```yaml
+overrides:
+  global:
+    provider:
+      name: gcp
+  serviceAccount:
+    annotations:
+      iam.gke.io/gcp-service-account: <sa-name>@<project-id>.iam.gserviceaccount.com
+```
+
+If you prefer not to bake the GCP service account into the recipe, supply it at bundle time instead:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set-json 'slinkytopograph:serviceAccount.annotations={"iam.gke.io/gcp-service-account":"<sa-name>@<project-id>.iam.gserviceaccount.com"}' \
+  -o ./bundle
+```
+
+For `provider.name: dra` (Kubernetes Dynamic Resource Allocation, GA in K8s 1.34), topology is sourced from the DRA API — no cloud provider IAM or ServiceAccount annotations are needed. Use `dra` for clusters actually running DRA drivers with GPU resource claims. Kind-based CI clusters should use the `test` provider with a model fixture instead (as this repo's `h100-kind-training-slurm` overlay does) — a CPU-only Kind cluster has no DRA resources for the `dra` provider to read.
 
 ### Inference performance constraints
 

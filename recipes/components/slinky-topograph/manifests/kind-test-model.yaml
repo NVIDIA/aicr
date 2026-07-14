@@ -1,0 +1,43 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Pre-manifest for the h100-kind-training-slurm leaf (preManifestFiles):
+# applied BEFORE the topograph chart so the Deployment's test-model volume
+# can mount. The model's topology references the real slurmd node
+# (slinky-0, the leaf's one-replica NodeSet), so the Kind leaf validates
+# EFFECTIVE topology end-to-end instead of the embedded small-tree.yaml
+# fixture whose nodes (I21-I25/I34-I36) never exist.
+# Deliberately NO Namespace object here: shipping one makes the bundler
+# omit --create-namespace on the pre folder (kindNamespaceRE,
+# localformat/local_helm.go), and Helm 4 then fails validating the
+# ConfigMap against the not-yet-existing namespace. ConfigMap-only keeps
+# --create-namespace on 016-slinky-topograph-pre, which creates the
+# topograph namespace out-of-band; the main chart tolerates it existing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slinky-topograph-test-model
+  namespace: topograph
+data:
+  kind-slinky.yaml: |
+    switches:
+      SW1:
+        nodes:
+        - slinky-0
+    nodes:
+      slinky-0:
+        capacity_block: CB1
+    capacity_blocks:
+      CB1:
+        nodes: ["slinky-0"]

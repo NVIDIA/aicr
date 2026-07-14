@@ -17,20 +17,26 @@
 # generates Slurm topology.conf by querying cloud provider topology APIs
 # (GCP, AWS, OCI …). Feeds topology data to the Slinky-managed Slurm
 # scheduler so it can make topology-aware placement decisions.
-# Not valuable standalone — deployed via dependencyRefs in Slurm leaf
-# overlays, after Slinky CRDs/operator and before the Slurm cluster instance.
+# Not valuable standalone — scheduled by a componentRef on the consuming
+# Slurm leaf overlay (dependencyRefs only orders it relative to its peers);
+# it deploys after slinky-slurm so that chart owns the config-extra
+# ConfigMap before Topograph patches it.
 #
-# global.provider.name and global.engine.name are REQUIRED per-overlay overrides.
-# Set them in the consuming overlay's overrides: block.
-#   Valid providers: gcp, aws, oci, nebius, nscale, netq, infiniband-k8s, dra, test
-#   Valid engines:   slinky, slurm, k8s, graph
+# global.provider.name is the REQUIRED per-overlay override — set it in the
+# consuming overlay's overrides: block. global.engine.name is pinned to
+# slinky below: the chart schema requires global.engine, but this shared
+# values file already satisfies it, so overlays do not need to repeat it
+# (the slurm leaves still set it explicitly, which is harmless).
+#   Valid providers (chart values.schema.json @ v0.5.0): aws, aws-sim, cw,
+#   dra, dsx-sim, gcp, gcp-sim, infiniband-bm, infiniband-k8s, lambdai,
+#   lambdai-sim, nebius, nebius-sim, netq, nscale, nscale-sim, oci,
+#   oci-imds, oci-sim, test
+#   Valid engines: graph, k8s, slinky, slurm
 # Example (GKE + Slinky):
 #   overrides:
 #     global:
 #       provider:
 #         name: gcp
-#       engine:
-#         name: slinky
 
 # Stabilize the Deployment name to "slinky-topograph"; health-check assertions
 # and dependencyRef consumers rely on it.
@@ -47,7 +53,11 @@ global:
       podSelector:
         matchLabels:
           app.kubernetes.io/name: slurmd
-      topologyConfigmapName: slinky-slurm-config-topo
+      # Chart-owned ConfigMap rendered by the slurm chart from .Values.configFiles
+      # (<fullname>-config-extra) and mounted into slurmctld via the Controller
+      # CR's configFileRefs. Topograph patches ONLY the topology.conf key
+      # (create-or-update with key-level merge), preserving cgroup.conf/gres.conf.
+      topologyConfigmapName: slinky-slurm-config-extra
       topologyConfigPath: topology.conf
       namespace: slurm
 

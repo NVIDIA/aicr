@@ -26,7 +26,7 @@ Slurm leaves are built from criteria flags (`--service`, `--platform slurm`, …
 
 ## Generate Recipe (Query Mode)
 
-Pick the row that matches your cluster. Each resolves to a slurm leaf with at least three inline Slinky components: `slinky-slurm-operator-crds`, `slinky-slurm-operator`, and `slinky-slurm`. The Kind leaf also includes `slinky-topograph` (topology-aware scheduling, test provider); cloud leaves can opt in to `slinky-topograph` with a real cloud provider.
+Pick the row that matches your cluster. Each resolves to a slurm leaf with at least three inline Slinky components: `slinky-slurm-operator-crds`, `slinky-slurm-operator`, and `slinky-slurm`. The GKE and Kind leaves also include `slinky-topograph` (topology-aware scheduling) — GKE with the `gcp` provider, Kind with the `test` provider and a fixed topology fixture. The EKS leaf does not include it today; see [Slinky Slurm Inline Components](../docs/integrator/recipe-development.md#slinky-slurm-inline-components) to add it to another leaf.
 
 
 | Cloud    | Command                                                                                                      | Leaf overlay                                               |
@@ -135,7 +135,7 @@ Set `--storage-class` to a StorageClass that exists (`kubectl get storageclass`)
 cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 ```
 
-Deploy order: `cert-manager` → `slinky-slurm-operator-crds` → `slinky-slurm-operator` → `slinky-slurm`.
+Deploy order: `cert-manager` → `slinky-slurm-operator-crds` → `slinky-slurm-operator` → `slinky-slurm` (→ `slinky-topograph` on the GKE and Kind leaves, after `slinky-slurm` so the slurm chart owns the ConfigMap Topograph patches).
 
 ```shell
 kubectl rollout status -n slinky deploy/slurm-operator
@@ -269,8 +269,8 @@ kubectl delete ns slurm slinky --ignore-not-found
 Full Slurm stack with topograph:
 
 ```shell
-helm uninstall slinky-slurm -n slurm
 helm uninstall slinky-topograph -n topograph
+helm uninstall slinky-slurm -n slurm
 helm uninstall slinky-slurm-operator -n slinky
 helm uninstall slinky-slurm-operator-crds -n slinky
 kubectl delete ns slurm topograph slinky --ignore-not-found
