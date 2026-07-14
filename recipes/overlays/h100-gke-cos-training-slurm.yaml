@@ -73,6 +73,20 @@ spec:
         - cert-manager
         - slinky-slurm-operator-crds
 
+    - name: slinky-topograph
+      type: Helm
+      valuesFile: components/slinky-topograph/values.yaml
+      dependencyRefs:
+        - slinky-slurm-operator
+        - slinky-slurm-operator-crds
+        - slinky-slurm
+      overrides:
+        global:
+          provider:
+            name: gcp
+          engine:
+            name: slinky
+
     - name: slinky-slurm
       type: Helm
       valuesFile: components/slinky-slurm/values.yaml
@@ -88,6 +102,34 @@ spec:
               resources:
                 limits:
                   nvidia.com/gpu: 8
+        configFiles:
+          # Seed so topology.conf exists in slinky-slurm-config-extra (and is
+          # mounted at /etc/slurm) from first boot. Topograph overwrites this
+          # key after each successful topology sync. NOTE: helm upgrade resets
+          # the key to this seed until the next Topograph sync.
+          # The seed is a syntactically VALID one-switch placeholder, not
+          # comment-only: with controller.inplaceReconfigure below, slurmctld
+          # re-reads /etc/slurm on every projected change, and Slurm's
+          # topology/tree plugin fatals on a zero-switch config once node
+          # records exist (slurm-26.05 switch_record.c) — reachable via a
+          # helm-upgrade seed restore or a controller restart. Unknown node
+          # names only warn (node_conf.c), so the placeholder is safe in every
+          # reachable state. Fail-closed now lives in the health check: it
+          # requires SwitchName content WITHOUT the aicr-preseed marker, so an
+          # unconfigured provider still cannot pass vacuously.
+          topology.conf: |
+            # Managed by NVIDIA Topograph (engine: slinky). Pre-sync placeholder.
+            SwitchName=aicr-preseed Nodes=aicr-preseed-node
+        controller:
+          extraConfMap:
+            TopologyPlugin: "topology/tree"
+          # Reload path (review: PR #1737): the reconfigure sidecar (slurm
+          # chart v1.2.0, controller.inplaceReconfigure) runs scontrol
+          # reconfigure when any file under /etc/slurm changes. Without it the
+          # controller rollout hash excludes configFileRefs ConfigMaps, so
+          # Topograph's topology.conf updates never reach the running
+          # slurmctld and topology-aware placement stays inactive.
+          inplaceReconfigure: true
 
   # K8s-native nccl-all-reduce-bw is dropped on Slinky leaves: that
   # check launches a Pod against the cluster scheduler, so on a

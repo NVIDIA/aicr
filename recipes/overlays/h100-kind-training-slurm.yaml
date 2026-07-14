@@ -58,12 +58,179 @@ spec:
         - cert-manager
         - slinky-slurm-operator-crds
 
+    - name: slinky-topograph
+      type: Helm
+      valuesFile: components/slinky-topograph/values.yaml
+      dependencyRefs:
+        - slinky-slurm-operator
+        - slinky-slurm-operator-crds
+        - slinky-slurm
+      preManifestFiles:
+        - components/slinky-topograph/manifests/kind-test-model.yaml
+      overrides:
+        global:
+          provider:
+            name: test
+            params:
+              modelFileName: /etc/topograph/models/kind-slinky.yaml
+          engine:
+            name: slinky
+        # Disable the node-data-broker in the kind environment.
+        node-data-broker:
+          enabled: false
+        node-observer:
+          topograph:
+            nodeDataBroker:
+              enabled: false
+        volumes:
+          - name: test-model
+            configMap:
+              name: slinky-topograph-test-model
+        volumeMounts:
+          - name: test-model
+            mountPath: /etc/topograph/models
+            readOnly: true
+      # Inline override of the registry assertFile (checks/slinky-topograph/
+      # health-check.yaml): this leaf disables node-data-broker, so the
+      # DaemonSet step must not run, and the test provider's mounted
+      # kind-slinky.yaml model (references the real slinky-0 node) makes
+      # the exact topology.conf content assertable.
+      healthCheckAsserts: |
+        apiVersion: chainsaw.kyverno.io/v1alpha1
+        kind: Test
+        metadata:
+          name: slinky-topograph-health-check-kind
+        spec:
+          timeouts:
+            assert: 5m
+          steps:
+            - name: validate-topograph-deployment
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: slinky-topograph
+                        namespace: topograph
+                      status:
+                        (availableReplicas > `0`): true
+            - name: validate-node-observer-deployment
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: slinky-topograph-node-observer
+                        namespace: topograph
+                      status:
+                        (availableReplicas > `0`): true
+            - name: validate-all-pods-healthy
+              try:
+                # Assert no pods are in unhealthy phases (Pending / Failed /
+                # Unknown) or stuck in Running phase with a known-bad
+                # container-waiting reason (CrashLoopBackOff,
+                # ImagePullBackOff, ErrImagePull, CreateContainerConfigError).
+                # Phase-only filtering misses CrashLoopBackOff because such
+                # pods typically remain in Running phase with an unhealthy
+                # container.
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: topograph
+                      status:
+                        phase: Pending
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: topograph
+                      status:
+                        phase: Failed
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: topograph
+                      status:
+                        phase: Unknown
+                # JMESPath projection (not single-element match): kyverno-json's
+                # sliceNode.Assert gates on exact slice length before per-element
+                # comparison, so a `containerStatuses: - state: ...` shape only
+                # matches single-container pods and silently passes sidecars. Use
+                # `containerStatuses[?...] | length(@) > 0` to fire on any
+                # container at any index. Parallel initContainerStatuses block
+                # below catches init-container failures (invisible to
+                # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: topograph
+                      status:
+                        ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: topograph
+                      status:
+                        ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+            - name: validate-topology-configmap
+              try:
+                - assert:
+                    resource:
+                      apiVersion: v1
+                      kind: ConfigMap
+                      metadata:
+                        name: slinky-slurm-config-extra
+                        namespace: slurm
+                      data:
+                        topology.conf: |
+                          SwitchName=SW1 Nodes=slinky-0
+
     - name: slinky-slurm
       type: Helm
       valuesFile: components/slinky-slurm/values.yaml
       dependencyRefs:
         - slinky-slurm-operator
         - slinky-slurm-operator-crds
+      overrides:
+        configFiles:
+          # Seed so topology.conf exists in slinky-slurm-config-extra (and is
+          # mounted at /etc/slurm) from first boot. Topograph overwrites this
+          # key after each successful topology sync. NOTE: helm upgrade resets
+          # the key to this seed until the next Topograph sync.
+          # The seed is a syntactically VALID one-switch placeholder, not
+          # comment-only: with controller.inplaceReconfigure below, slurmctld
+          # re-reads /etc/slurm on every projected change, and Slurm's
+          # topology/tree plugin fatals on a zero-switch config once node
+          # records exist (slurm-26.05 switch_record.c) — reachable via a
+          # helm-upgrade seed restore or a controller restart. Unknown node
+          # names only warn (node_conf.c), so the placeholder is safe in every
+          # reachable state. Fail-closed now lives in the health check: it
+          # requires SwitchName content WITHOUT the aicr-preseed marker, so an
+          # unconfigured provider still cannot pass vacuously.
+          topology.conf: |
+            # Managed by NVIDIA Topograph (engine: slinky). Pre-sync placeholder.
+            SwitchName=aicr-preseed Nodes=aicr-preseed-node
+        controller:
+          extraConfMap:
+            TopologyPlugin: "topology/tree"
+          # Reload path (review: PR #1737): the reconfigure sidecar (slurm
+          # chart v1.2.0, controller.inplaceReconfigure) runs scontrol
+          # reconfigure when any file under /etc/slurm changes. Without it the
+          # controller rollout hash excludes configFileRefs ConfigMaps, so
+          # Topograph's topology.conf updates never reach the running
+          # slurmctld and topology-aware placement stays inactive.
+          inplaceReconfigure: true
 
   validation:
     conformance:

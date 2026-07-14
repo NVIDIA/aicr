@@ -90,6 +90,8 @@ AICR_NAMESPACES=(
     privileged-nvsentinel
     privileged-nvidia-dra-driver-gpu
     privileged-nodewright-operator
+    slurm
+    topograph
 )
 
 # CRD API-group suffixes owned by AICR components. Matched as substrings

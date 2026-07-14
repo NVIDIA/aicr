@@ -236,12 +236,20 @@ func TestDeploymentOrderGuards(t *testing.T) {
 			requiredDeps: map[string][]string{
 				"slinky-slurm-operator": {"cert-manager", "slinky-slurm-operator-crds"},
 				"slinky-slurm":          {"slinky-slurm-operator", "slinky-slurm-operator-crds"},
+				"slinky-topograph":      {"slinky-slurm-operator", "slinky-slurm-operator-crds", "slinky-slurm"},
 			},
 			requiredOrdering: [][2]string{
 				{"cert-manager", "slinky-slurm-operator"},
 				{"slinky-slurm-operator-crds", "slinky-slurm-operator"},
 				{"slinky-slurm-operator", "slinky-slurm"},
 				{"slinky-slurm-operator-crds", "slinky-slurm"},
+				// slinky-topograph deploys AFTER slinky-slurm: topograph's slinky
+				// engine create-or-updates the ConfigMap named by
+				// topologyConfigmapName (slinky-slurm-config-extra). The slurm
+				// chart must create that CM first or Helm install fails on
+				// ownership metadata. Topograph then patches only the
+				// topology.conf key (maps.Copy), preserving chart-owned keys.
+				{"slinky-slurm", "slinky-topograph"},
 				{"gpu-operator", "nvsentinel"},
 			},
 		},
@@ -258,12 +266,20 @@ func TestDeploymentOrderGuards(t *testing.T) {
 			requiredDeps: map[string][]string{
 				"slinky-slurm-operator": {"cert-manager", "slinky-slurm-operator-crds"},
 				"slinky-slurm":          {"slinky-slurm-operator", "slinky-slurm-operator-crds"},
+				"slinky-topograph":      {"slinky-slurm-operator", "slinky-slurm-operator-crds", "slinky-slurm"},
 			},
 			requiredOrdering: [][2]string{
 				{"cert-manager", "slinky-slurm-operator"},
 				{"slinky-slurm-operator-crds", "slinky-slurm-operator"},
 				{"slinky-slurm-operator", "slinky-slurm"},
 				{"slinky-slurm-operator-crds", "slinky-slurm"},
+				// slinky-topograph deploys AFTER slinky-slurm: topograph's slinky
+				// engine create-or-updates the ConfigMap named by
+				// topologyConfigmapName (slinky-slurm-config-extra). The slurm
+				// chart must create that CM first or Helm install fails on
+				// ownership metadata. Topograph then patches only the
+				// topology.conf key (maps.Copy), preserving chart-owned keys.
+				{"slinky-slurm", "slinky-topograph"},
 			},
 		},
 	}

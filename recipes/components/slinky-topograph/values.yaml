@@ -1,0 +1,90 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# slinky-topograph Helm values
+# Slinky/Slurm-scoped instance of Topograph — the topology utility that
+# generates Slurm topology.conf by querying cloud provider topology APIs
+# (GCP, AWS, OCI …). Feeds topology data to the Slinky-managed Slurm
+# scheduler so it can make topology-aware placement decisions.
+# Not valuable standalone — scheduled by a componentRef on the consuming
+# Slurm leaf overlay (dependencyRefs only orders it relative to its peers);
+# it deploys after slinky-slurm so that chart owns the config-extra
+# ConfigMap before Topograph patches it.
+#
+# global.provider.name is the REQUIRED per-overlay override — set it in the
+# consuming overlay's overrides: block. global.engine.name is pinned to
+# slinky below: the chart schema requires global.engine, but this shared
+# values file already satisfies it, so overlays do not need to repeat it
+# (the slurm leaves still set it explicitly, which is harmless).
+#   Valid providers (chart values.schema.json @ v0.5.0): aws, aws-sim, cw,
+#   dra, dsx-sim, gcp, gcp-sim, infiniband-bm, infiniband-k8s, lambdai,
+#   lambdai-sim, nebius, nebius-sim, netq, nscale, nscale-sim, oci,
+#   oci-imds, oci-sim, test
+#   Valid engines: graph, k8s, slinky, slurm
+# Example (GKE + Slinky):
+#   overrides:
+#     global:
+#       provider:
+#         name: gcp
+
+# Stabilize the Deployment name to "slinky-topograph"; health-check assertions
+# and dependencyRef consumers rely on it.
+fullnameOverride: slinky-topograph
+
+global:
+  service:
+    type: ClusterIP
+    port: 49021
+  engine:
+    name: slinky
+    params:
+      plugin: topology/tree
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: slurmd
+      # Chart-owned ConfigMap rendered by the slurm chart from .Values.configFiles
+      # (<fullname>-config-extra) and mounted into slurmctld via the Controller
+      # CR's configFileRefs. Topograph patches ONLY the topology.conf key
+      # (create-or-update with key-level merge), preserving cgroup.conf/gres.conf.
+      topologyConfigmapName: slinky-slurm-config-extra
+      topologyConfigPath: topology.conf
+      namespace: slurm
+
+# Topology request batching delay. Topograph waits this long after the first
+# request before querying the provider API, collecting parallel requests into
+# a single batch. 15 s is sufficient for typical cluster sizes; reduce for
+# latency-sensitive deployments.
+config:
+  requestAggregationDelay: 15s
+
+serviceAccount:
+  create: true
+  name: slinky-topograph
+
+# node-observer sub-chart — watches the Topograph API pod and triggers
+# topology regeneration on API restarts or selected node/pod changes.
+# Bundled as a local chart dependency; always deployed alongside topograph.
+node-observer:
+  # Stabilize the Deployment name for health-check assertions.
+  fullnameOverride: slinky-topograph-node-observer
+  topograph:
+    trigger:
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: slurmd
+
+# node-data-broker sub-chart
+# Bundled as a local chart dependency.
+node-data-broker:
+  fullnameOverride: slinky-topograph-node-data-broker
