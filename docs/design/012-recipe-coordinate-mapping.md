@@ -217,6 +217,33 @@ ADR-009 specifies. The coordinate board addresses the same recipes by the same
 name, and the coordinate itself is derived from the *resolved criteria* of that
 same leaf — so the two surfaces line up on identity without sharing computation.
 
+## GP ⇄ TG — interim and live, sharing one foundation
+
+GP (#1400) is the interim, static GitHub Pages surface for this evidence; TG
+(#1263) is the live stack — upstream TestGrid workers, an AICR-native API, a
+greenfield UI, and an always-on GKE host cluster. Both are built in parallel;
+this ADR's mapping function, taxonomy, and column-metadata schema are shared,
+not duplicated, by both.
+
+- **Same foundation.** GP and TG read the same GCS bucket, the same verified,
+  source-keyed evidence tree, and the same `pkg/recipe.CoordinateFor` mapping
+  (§Mapping rules above). Neither forks the taxonomy.
+- **Forward-compatible, not throwaway.** GP4's (#1404) coordinate-keyed JSON
+  contract (`index.json` + `series/*.json`) is a forward-compatible input to
+  TG's workers/API/UI — a future migration consumes GP's already-coordinate-keyed
+  data rather than re-deriving it.
+- **No deferral.** GP shipping first does not defer any TG child — TG1–TG7
+  remain Ready / in progress. Build-both-vs-defer is a separate strategic
+  decision, not implied by sequencing, and is not made by this ADR.
+
+One concrete overlap is intentionally left for GP3 (#1403) and TG1 (#1266) to
+deconflict directly, outside this ADR: whether the write-only publish SA and
+bucket are shared between the two surfaces or stood up twice on purpose.
+
+Operator-facing detail for each surface lives in
+[docs/user/testgrid.md](../user/testgrid.md) (TG) and
+[docs/user/evidence-dashboard.md](../user/evidence-dashboard.md) (GP).
+
 ## #1224 cross-link contract
 
 recipe-health's **Evidence** column will **link** into this coordinate URL — it

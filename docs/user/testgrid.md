@@ -74,6 +74,38 @@ Trust in a column comes from its provenance metadata. Each build column carries 
 
 `signer_identity` and `signer_issuer` together are what let you distinguish **community-submitted** results from **NVIDIA UAT** runs, and they key the latest-per-signer default scope. `evidence_digest` is the verifiable anchor: every cell traces back to a signed [conformance evidence](../design/007-recipe-evidence.md) artifact you can verify independently with [artifact verification](./artifact-verification.md).
 
+## Interim evidence dashboard
+
+The [Evidence Corroboration Dashboard](./evidence-dashboard.md) is the
+**interim static GitHub Pages surface** for the same evidence. It reads from
+the same GCS bucket and the same verified, source-keyed evidence tree, and
+derives recipe coordinates using the same shared mapping function
+(`pkg/recipe.CoordinateFor`, [ADR-012](../design/012-recipe-coordinate-mapping.md)).
+It is published at [`https://validation.aicr.run`](https://validation.aicr.run)
+and rebuilt on every merge to `main` by a deterministic Go generator —
+no live workers, no GKE cluster.
+
+The TestGrid (this page) is the **live stack**: live upstream TestGrid
+workers, an AICR-native read-only API, a greenfield SPA, and an always-on
+GKE host cluster. Both surfaces are built in parallel; neither defers the
+other.
+
+The two surfaces share the same foundation:
+
+- Same GCS bucket and verified source-keyed evidence tree.
+- Same recipe→coordinate mapping (`pkg/recipe.CoordinateFor`) — the
+  anti-drift guarantee that both surfaces place every recipe in the same
+  `<group>/<dashboard>/<tab>`.
+- The GP dashboard's JSON contract (`data/index.json` + `data/series/<recipe>.json`)
+  uses coordinate-keyed layouts that are forward-compatible with the
+  TestGrid workers, API, and UI. It is not a throwaway interim format.
+
+When [RQ1 (#1283)](../design/012-recipe-coordinate-mapping.md)
+lands, the Recipe Health Evidence column will deep-link to a recipe's
+`<group>/<dashboard>/<tab>` coordinate. Either surface can serve as that
+link target; the URL is stable across Kubernetes upgrades because the
+Kubernetes version lives in the column, not the path.
+
 ## How it relates to recipe health
 
 The TestGrid and the [Recipe Health](./recipe-health.md) matrix are **two surfaces that coexist; neither is a richer rendering of the other**:
