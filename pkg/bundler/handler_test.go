@@ -173,6 +173,44 @@ func TestParseBundleConfig_Bundlers(t *testing.T) {
 	}
 }
 
+func TestParseBundleConfig_Serial(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		target  string
+		want    bool
+		wantErr bool
+	}{
+		{"absent defaults to false", "/v1/bundle", false, false},
+		{"serial=true", "/v1/bundle?serial=true", true, false},
+		{"serial=false", "/v1/bundle?serial=false", false, false},
+		{"non-boolean rejected", "/v1/bundle?serial=maybe", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := ParseBundleConfig(httptest.NewRequest("POST", tt.target, nil))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ParseBundleConfig() expected error, got nil")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseBundleConfig() error = %v", err)
+			}
+			if got := cfg.Serial(); got != tt.want {
+				t.Errorf("Serial() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStreamZipResponseContext_VerifiedInventory(t *testing.T) {
 	dir, inventory := writeVerifiedZipBundle(t, true)
 	output := &result.Output{
