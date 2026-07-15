@@ -115,11 +115,11 @@ jobs:
       - name: Create bundle
         run: aicr bundle --recipe recipe.yaml --output ./bundles
 
-      # 4. Deploy: verify checksums, then run the generated script.
+      # 4. Deploy: verify the closed-world inventory, then run the generated script.
       - name: Deploy
         run: |
           cd bundles
-          sha256sum -c checksums.txt
+          aicr verify .
           chmod +x deploy.sh
           ./deploy.sh
 ```
@@ -134,7 +134,7 @@ syntax and artifact passing differ — the `aicr` commands are identical.
 | Snapshot | `script:` step running `aicr snapshot`, declare `artifacts: paths: [snapshot.yaml]` (or write to a ConfigMap to skip artifacts) | `run:` step; `persist_to_workspace` to pass output downstream | `null_resource` + `local-exec` provisioner running `aicr snapshot` |
 | Recipe | `script:` step running `aicr recipe`, `dependencies:` on the snapshot job | `run:` step after `attach_workspace` | `null_resource` + `local-exec`, `depends_on` the snapshot resource |
 | Bundle | `script:` step running `aicr bundle`, publish `bundles/` as artifacts | `run:` step, `persist_to_workspace` | `null_resource` + `local-exec` running `aicr bundle` |
-| Deploy | `script:` step with `when: manual` for approval gating | `run:` step inside a held workflow | `local-exec` running `deploy.sh`, gated by `terraform apply` approval |
+| Deploy | `script:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, with `when: manual` for approval gating | `run:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh` inside a held workflow | `local-exec` running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, gated by `terraform apply` approval |
 
 Use a container image with the CLI preinstalled (`ghcr.io/nvidia/aicr:latest`)
 for the recipe/bundle stages, and a `kubectl`-capable image for snapshot/deploy.

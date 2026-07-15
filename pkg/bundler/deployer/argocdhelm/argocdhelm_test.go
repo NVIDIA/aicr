@@ -259,6 +259,123 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+func TestGenerate_ChartVersion(t *testing.T) {
+	tests := []struct {
+		name               string
+		recipeVersion      string
+		bundleChartVersion string
+		want               string
+	}{
+		{
+			name:          "empty override uses normalized recipe version",
+			recipeVersion: "v2.5.0",
+			want:          "2.5.0",
+		},
+		{
+			name:               "semantic build metadata is preserved exactly",
+			recipeVersion:      "v9.9.9",
+			bundleChartVersion: "1.2.3+build.5",
+			want:               "1.2.3+build.5",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			g := &Generator{
+				RecipeResult:       newRecipeResult(tt.recipeVersion, nil),
+				Version:            "test",
+				BundleChartVersion: tt.bundleChartVersion,
+			}
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			chartYAML, err := os.ReadFile(filepath.Join(outputDir, "Chart.yaml"))
+			if err != nil {
+				t.Fatalf("ReadFile(Chart.yaml) error = %v", err)
+			}
+			if !strings.Contains(string(chartYAML), `version: "`+tt.want+`"`) {
+				t.Errorf("Chart.yaml =\n%s\nwant exact quoted version %q", chartYAML, tt.want)
+			}
+		})
+	}
+}
+
+func TestGeneratorTargetRevision(t *testing.T) {
+	tests := []struct {
+		name               string
+		recipeVersion      string
+		bundleChartVersion string
+		targetRevision     string
+		want               string
+	}{
+		{
+			name:               "bundle chart version is the default",
+			recipeVersion:      "v9.9.9",
+			bundleChartVersion: "1.2.3+build.5",
+			want:               "1.2.3+build.5",
+		},
+		{
+			name:          "recipe version is the fallback",
+			recipeVersion: "v2.5.0",
+			want:          "2.5.0",
+		},
+		{
+			name:               "explicit target revision wins",
+			recipeVersion:      "v9.9.9",
+			bundleChartVersion: "1.2.3",
+			targetRevision:     "release-candidate",
+			want:               "release-candidate",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &Generator{
+				RecipeResult:       newRecipeResult(tt.recipeVersion, nil),
+				BundleChartVersion: tt.bundleChartVersion,
+				TargetRevision:     tt.targetRevision,
+			}
+			if got := g.targetRevision(); got != tt.want {
+				t.Errorf("targetRevision() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGenerate_RejectsInvalidBundleChartVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+	}{
+		{name: "non semantic version", version: "latest"},
+		{name: "leading v", version: "v1.2.3"},
+		{name: "missing patch", version: "1.2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			g := &Generator{
+				RecipeResult:       newRecipeResult("v9.9.9", nil),
+				Version:            "test",
+				BundleChartVersion: tt.version,
+			}
+
+			_, err := g.Generate(context.Background(), outputDir)
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("Generate() error = %v, want ErrCodeInvalidRequest", err)
+			}
+			entries, readErr := os.ReadDir(outputDir)
+			if readErr != nil {
+				t.Fatalf("ReadDir() error = %v", readErr)
+			}
+			if len(entries) != 0 {
+				t.Errorf("Generate() wrote %d entries before rejecting BundleChartVersion", len(entries))
+			}
+		})
+	}
+}
+
 // TestGenerate_PreManifestParentResolution exercises the synthetic
 // `-pre` folder path that recipes with ComponentPreManifests emit
 // (e.g. the gke-cos OS overlay, which injects a Talos-style driver

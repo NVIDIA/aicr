@@ -27,6 +27,8 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
@@ -39,31 +41,88 @@ import (
 	"github.com/NVIDIA/aicr/pkg/trust"
 )
 
-// readBoundedFile streams a file through io.LimitReader against maxBytes.
-// Used in place of os.ReadFile on attacker-influenced verifier inputs so
-// the process cannot be forced to allocate an unbounded buffer.
-func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // verifier paths are bundle-local
+// readBoundedFile applies a bounded compatibility context to verifier inputs.
+func readBoundedFile(path string) ([]byte, error) {
+	return readBoundedFileContext(context.Background(), path)
+}
+
+// readBoundedFileContext opens verifier inputs without following links or
+// blocking on special files, validates the opened descriptor, streams at most
+// MaxSigstoreBundleSize bytes, and honors caller cancellation.
+func readBoundedFileContext(ctx context.Context, path string) ([]byte, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "verifier file read canceled", ctxErr)
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
+	defer cancel()
+
+	f, err := os.OpenFile( //nolint:gosec // verifier paths are bundle-local
+		path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		// Wrap with a code while preserving the cause chain: callers propagate
-		// this error as-is, and the os.ErrNotExist sentinel stays reachable via
-		// errors.Is (StructuredError.Unwrap returns the cause).
+		if stderrors.Is(err, syscall.ELOOP) {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "refusing to follow file symlink "+path, err)
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open file "+path, err)
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+
+	opened, err := f.Stat()
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read file "+path, err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to inspect opened file "+path, err)
 	}
-	if int64(len(data)) > maxBytes {
+	if !opened.Mode().IsRegular() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "file is not regular: "+path)
+	}
+	if opened.Size() > defaults.MaxSigstoreBundleSize {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("file %s exceeds maximum size (%d bytes)", path, maxBytes))
+			fmt.Sprintf("file %s exceeds maximum size (%d bytes)", path, defaults.MaxSigstoreBundleSize))
+	}
+	linked, err := os.Lstat(path)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "file changed while opening: "+path, err)
+	}
+	if !linked.Mode().IsRegular() || !os.SameFile(opened, linked) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "file changed while opening: "+path)
+	}
+
+	data := make([]byte, 0, opened.Size())
+	buffer := make([]byte, verifierFileReadBufferSize)
+	for {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "verifier file read canceled", ctxErr)
+		}
+		read, readErr := f.Read(buffer)
+		if read > 0 {
+			if int64(len(data))+int64(read) > defaults.MaxSigstoreBundleSize {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("file %s exceeds maximum size (%d bytes)", path, defaults.MaxSigstoreBundleSize))
+			}
+			data = append(data, buffer[:read]...)
+		}
+		if readErr != nil {
+			if stderrors.Is(readErr, io.EOF) {
+				break
+			}
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read file "+path, readErr)
+		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "verifier file read canceled", ctxErr)
+	}
+	after, err := os.Lstat(path)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "file changed while reading: "+path, err)
+	}
+	if !after.Mode().IsRegular() || !os.SameFile(opened, after) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "file changed while reading: "+path)
 	}
 	return data, nil
 }
 
 // Identity pinning constants for NVIDIA CI.
 const (
+	verifierFileReadBufferSize = 32 * 1024
+
 	TrustedOIDCIssuer        = "https://token.actions.githubusercontent.com"
 	TrustedRepositoryPattern = `^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*`
 
@@ -147,9 +206,62 @@ func ValidateIdentityPattern(pattern string) error {
 	return nil
 }
 
+type verifierDependencies struct {
+	stageVerifiedBundle func(
+		context.Context,
+		string,
+		checksum.InventoryOptions,
+	) (string, *checksum.Inventory, func() error, error)
+	afterSnapshot func() error
+	warn          func(string, ...any)
+}
+
+func defaultVerifierDependencies() verifierDependencies {
+	return verifierDependencies{
+		stageVerifiedBundle: checksum.StageVerifiedBundle,
+		afterSnapshot:       func() error { return nil },
+		warn:                slog.Warn,
+	}
+}
+
+func normalizeVerifierDependencies(deps verifierDependencies) verifierDependencies {
+	defaults := defaultVerifierDependencies()
+	if deps.stageVerifiedBundle == nil {
+		deps.stageVerifiedBundle = defaults.stageVerifiedBundle
+	}
+	if deps.afterSnapshot == nil {
+		deps.afterSnapshot = defaults.afterSnapshot
+	}
+	if deps.warn == nil {
+		deps.warn = defaults.warn
+	}
+	return deps
+}
+
 // Verify performs full verification of a bundle directory.
 // Returns a VerifyResult describing the trust level and verification details.
-func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*VerifyResult, error) {
+// Any returned staged-snapshot cleanup failure clears an otherwise successful
+// result and is reported as an internal error.
+func Verify(
+	ctx context.Context,
+	bundleDir string,
+	opts *VerifyOptions,
+) (result *VerifyResult, err error) {
+
+	return verifyWithDependencies(ctx, bundleDir, opts, defaultVerifierDependencies())
+}
+
+func verifyWithDependencies(
+	ctx context.Context,
+	bundleDir string,
+	opts *VerifyOptions,
+	deps verifierDependencies,
+) (result *VerifyResult, retErr error) {
+
+	deps = normalizeVerifierDependencies(deps)
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled before verification", err)
+	}
 	if _, err := os.Stat(bundleDir); err != nil {
 		if os.IsNotExist(err) {
 			return nil, errors.New(errors.ErrCodeNotFound, "bundle directory not found: "+bundleDir)
@@ -178,18 +290,56 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 		return nil, srcErr
 	}
 
-	result := &VerifyResult{}
+	result = &VerifyResult{}
 
-	// Step 1: Read and verify checksums (single read to prevent TOCTOU)
-	checksumData, done := verifyChecksumStep(bundleDir, result)
+	// Step 1: verify the caller-controlled bundle, then carry only a private
+	// staged snapshot through every subsequent trust decision.
+	snapshot, done, checksumErr := verifyChecksumStepWithDependencies(ctx, bundleDir, result, deps)
+	if snapshot != nil {
+		defer func() {
+			cleanupErr := snapshot.cleanup()
+			if cleanupErr == nil {
+				return
+			}
+			if retErr != nil {
+				deps.warn("failed to clean verification snapshot after verification failure",
+					"error", cleanupErr, "primaryError", retErr)
+				return
+			}
+			result = nil
+			retErr = errors.Wrap(
+				errors.ErrCodeInternal, "failed to clean verification snapshot", cleanupErr)
+		}()
+		if err := deps.afterSnapshot(); err != nil {
+			return nil, err
+		}
+	}
+	if checksumErr != nil {
+		return nil, checksumErr
+	}
 	if done {
 		return result, nil
 	}
+	return verifyStagedSnapshot(
+		ctx, snapshot, result, opts, bundleSource, identityPattern)
+}
+
+func verifyStagedSnapshot(
+	ctx context.Context,
+	snapshot *verificationSnapshot,
+	result *VerifyResult,
+	opts *VerifyOptions,
+	bundleSource attestation.TrustedRootSource,
+	identityPattern string,
+) (*VerifyResult, error) {
+
+	verifiedDir := snapshot.stagedDir
+	checksumDigest := snapshot.checksumDigest[:]
 
 	slog.Debug("checksums verified", "files", result.ChecksumFiles)
 
 	// Step 2: Check for bundle attestation
-	bundleAttestPath, joinErr := deployer.SafeJoin(bundleDir, attestation.BundleAttestationFile)
+	bundleAttestPath, joinErr := deployer.SafeJoin(verifiedDir, attestation.BundleAttestationFile)
 	if joinErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe bundle attestation path", joinErr)
 	}
@@ -199,14 +349,11 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 		return result, nil
 	}
 
-	// Step 3: Verify bundle attestation with sigstore-go, binding to checksums.txt content
-	// Uses the same checksumData bytes read in Step 1 — no second read.
+	// Step 3: Verify bundle attestation with sigstore-go, binding to the
+	// checksums.txt digest from the staged inventory.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled during verification", ctxErr)
 	}
-
-	checksumHash := sha256.Sum256(checksumData)
-	checksumDigest := checksumHash[:]
 
 	var (
 		bundleCreator string
@@ -218,18 +365,25 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 		bundleCreator, err = verifySigstoreBundle(ctx, bundleAttestPath, checksumDigest, bundleSource)
 	}
 	if err != nil {
+		if stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			return nil, err
+		}
 		result.Errors = append(result.Errors, fmt.Sprintf("bundle attestation verification failed: %v", err))
 		result.setTrust(TrustUnknown, "bundle attestation verification failed")
 		return result, nil
 	}
 	result.BundleAttested = true
 	result.BundleCreator = bundleCreator
-	result.ToolVersion = extractToolVersion(bundleAttestPath)
+	toolVersion, toolVersionErr := extractToolVersionContext(ctx, bundleAttestPath)
+	if toolVersionErr != nil {
+		return nil, toolVersionErr
+	}
+	result.ToolVersion = toolVersion
 
 	slog.Debug("bundle attestation verified", "creator", bundleCreator, "toolVersion", result.ToolVersion)
 
 	// Steps 4-5: Check for and verify the binary attestation.
-	done, stepErr := verifyBinaryStep(ctx, bundleDir, bundleAttestPath, identityPattern, result)
+	done, stepErr := verifyBinaryStep(ctx, verifiedDir, bundleAttestPath, identityPattern, result)
 	if stepErr != nil {
 		return nil, stepErr
 	}
@@ -238,7 +392,7 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	}
 
 	// Full chain verified — check if external data caps trust at attested
-	dataDir, joinErr := deployer.SafeJoin(bundleDir, "data")
+	dataDir, joinErr := deployer.SafeJoin(verifiedDir, "data")
 	if joinErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe data directory path", joinErr)
 	}
@@ -280,8 +434,11 @@ func verifyBinaryStep(ctx context.Context, bundleDir, bundleAttestPath, identity
 	// digest from the bundle attestation's resolvedDependencies rather than
 	// hashing the running binary — the verifying binary may be a different
 	// version than the one that created the bundle.
-	binaryDigest, err := extractBinaryDigest(bundleAttestPath)
+	binaryDigest, err := extractBinaryDigestContext(ctx, bundleAttestPath)
 	if err != nil {
+		if stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			return false, err
+		}
 		result.Errors = append(result.Errors, fmt.Sprintf("could not extract binary digest from bundle attestation: %v", err))
 		result.setTrust(TrustUnknown, "binary attestation present but binary digest could not be extracted from bundle attestation")
 		return true, nil
@@ -289,6 +446,9 @@ func verifyBinaryStep(ctx context.Context, bundleDir, bundleAttestPath, identity
 
 	binaryBuilder, err := VerifyBinaryAttestation(ctx, binaryAttestPath, identityPattern, binaryDigest)
 	if err != nil {
+		if stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			return false, err
+		}
 		result.Errors = append(result.Errors, fmt.Sprintf("binary attestation verification failed: %v", err))
 		result.setTrust(TrustUnknown, "binary attestation present but failed verification")
 		return true, nil
@@ -301,37 +461,89 @@ func verifyBinaryStep(ctx context.Context, bundleDir, bundleAttestPath, identity
 	return false, nil
 }
 
-// verifyChecksumStep reads and verifies checksums.txt in a single read (TOCTOU-safe).
-// Returns the raw checksum data and whether Verify should return early (done=true
-// means result is populated with either an error or TrustUnknown).
-func verifyChecksumStep(bundleDir string, result *VerifyResult) ([]byte, bool) {
-	checksumPath, joinErr := deployer.SafeJoin(bundleDir, checksum.ChecksumFileName)
-	if joinErr != nil {
-		result.setTrust(TrustUnknown, "unsafe checksum path")
-		result.Errors = append(result.Errors, fmt.Sprintf("unsafe checksum path: %v", joinErr))
-		return nil, true
-	}
-	checksumData, err := readBoundedFile(checksumPath, defaults.MaxChecksumFileBytes)
-	if err != nil {
-		if stderrors.Is(err, os.ErrNotExist) {
-			result.setTrust(TrustUnknown, "checksums.txt not found")
-			result.Errors = append(result.Errors, "checksums.txt not found")
-			return nil, true
-		}
-		result.setTrust(TrustUnknown, "failed to read checksums.txt")
-		result.Errors = append(result.Errors, fmt.Sprintf("failed to read checksums.txt: %v", err))
-		return nil, true
-	}
+type verificationSnapshot struct {
+	stagedDir      string
+	checksumDigest [sha256.Size]byte
+	remove         func() error
+	cleanupOnce    sync.Once
+	cleanupErr     error
+}
 
-	checksumErrors := checksum.VerifyChecksumsFromData(bundleDir, checksumData)
-	if len(checksumErrors) > 0 {
-		result.Errors = append(result.Errors, checksumErrors...)
-		result.setTrust(TrustUnknown, "checksum verification failed")
-		return nil, true
+func (s *verificationSnapshot) cleanup() error {
+	if s == nil {
+		return nil
+	}
+	s.cleanupOnce.Do(func() {
+		if s.remove != nil {
+			s.cleanupErr = s.remove()
+		}
+	})
+	return s.cleanupErr
+}
+
+// verifyChecksumStep verifies the caller-controlled bundle into a fresh,
+// private stage and reuses the manifest metadata from that final staged-tree
+// verification. All later trust evaluation must use only the returned snapshot.
+func verifyChecksumStep(ctx context.Context, bundleDir string, result *VerifyResult) (*verificationSnapshot, bool, error) {
+	return verifyChecksumStepWithDependencies(
+		ctx, bundleDir, result, defaultVerifierDependencies())
+}
+
+func verifyChecksumStepWithDependencies(
+	ctx context.Context,
+	bundleDir string,
+	result *VerifyResult,
+	deps verifierDependencies,
+) (*verificationSnapshot, bool, error) {
+
+	deps = normalizeVerifierDependencies(deps)
+	verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+	stagedDir, staged, cleanup, err := deps.stageVerifiedBundle(ctx, bundleDir, verifyOpts)
+	if err != nil {
+		return checksumStepFailure(err, result)
+	}
+	if cleanup == nil {
+		return nil, false, errors.New(
+			errors.ErrCodeInternal, "verified bundle stage returned no cleanup owner")
+	}
+	if staged == nil {
+		primaryErr := errors.New(
+			errors.ErrCodeInternal, "verified bundle stage returned no inventory")
+		cleanupErr := cleanup()
+		if cleanupErr != nil {
+			deps.warn("failed to clean verification snapshot after checksum failure",
+				"error", cleanupErr, "primaryError", primaryErr)
+		}
+		return nil, false, primaryErr
+	}
+	snapshot := &verificationSnapshot{
+		stagedDir:      stagedDir,
+		checksumDigest: staged.ChecksumDigest(),
+		remove:         cleanup,
 	}
 	result.ChecksumsPassed = true
-	result.ChecksumFiles = checksum.CountEntries(bundleDir)
-	return checksumData, false
+	result.ChecksumFiles = staged.ManifestLen()
+	return snapshot, false, nil
+}
+
+func checksumStepFailure(err error, result *VerifyResult) (*verificationSnapshot, bool, error) {
+	if stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		return nil, false, err
+	}
+	if stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		return nil, false, err
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		return nil, false, err
+	}
+	if stderrors.Is(err, checksum.ErrChecksumManifestMissing) {
+		result.setTrust(TrustUnknown, "checksums.txt not found")
+		result.Errors = append(result.Errors, "checksums.txt not found")
+		return nil, true, nil
+	}
+	result.Errors = append(result.Errors, err.Error())
+	result.setTrust(TrustUnknown, "checksum inventory verification failed")
+	return nil, true, nil
 }
 
 // resolveExecutablePath returns the best path for reading the running binary.
@@ -352,9 +564,13 @@ func resolveExecutablePath() string {
 // parseDSSEPayload extracts and decodes the base64 DSSE payload from a
 // sigstore bundle JSON file. Returns the decoded in-toto statement JSON.
 func parseDSSEPayload(bundlePath string) ([]byte, error) {
-	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
+	return parseDSSEPayloadContext(context.Background(), bundlePath)
+}
+
+func parseDSSEPayloadContext(ctx context.Context, bundlePath string) ([]byte, error) {
+	data, err := readBoundedFileContext(ctx, bundlePath)
 	if err != nil {
-		return nil, err // already coded by readBoundedFile
+		return nil, err // already coded by readBoundedFileContext
 	}
 
 	var raw map[string]json.RawMessage
@@ -385,9 +601,17 @@ func parseDSSEPayload(bundlePath string) ([]byte, error) {
 // from the SLSA predicate's internalParameters.toolVersion field.
 // Returns empty string if extraction fails (best-effort, non-fatal).
 func extractToolVersion(bundlePath string) string {
-	stmtJSON, err := parseDSSEPayload(bundlePath)
+	version, _ := extractToolVersionContext(context.Background(), bundlePath)
+	return version
+}
+
+func extractToolVersionContext(ctx context.Context, bundlePath string) (string, error) {
+	stmtJSON, err := parseDSSEPayloadContext(ctx, bundlePath)
 	if err != nil {
-		return ""
+		if stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			return "", err
+		}
+		return "", nil
 	}
 
 	var stmt struct {
@@ -400,19 +624,24 @@ func extractToolVersion(bundlePath string) string {
 		} `json:"predicate"`
 	}
 	if err := json.Unmarshal(stmtJSON, &stmt); err != nil {
-		return ""
+		return "", nil
 	}
 
-	return stmt.Predicate.BuildDefinition.InternalParameters.ToolVersion
+	return stmt.Predicate.BuildDefinition.InternalParameters.ToolVersion, nil
 }
 
 // extractBinaryDigest reads the bundle attestation and returns the binary
 // digest from resolvedDependencies. This is the digest of the binary that
 // created the bundle, not the currently running binary.
 func extractBinaryDigest(bundlePath string) ([]byte, error) {
-	stmtJSON, err := parseDSSEPayload(bundlePath)
+	return extractBinaryDigestContext(context.Background(), bundlePath)
+}
+
+func extractBinaryDigestContext(ctx context.Context, bundlePath string) ([]byte, error) {
+	stmtJSON, err := parseDSSEPayloadContext(ctx, bundlePath)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse bundle attestation payload", err)
+		return nil, errors.PropagateOrWrap(
+			err, errors.ErrCodeInternal, "failed to parse bundle attestation payload")
 	}
 
 	var stmt struct {
@@ -452,9 +681,9 @@ func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest
 		return "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled before bundle attestation verification", err)
 	}
 
-	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
+	data, err := readBoundedFileContext(ctx, bundlePath)
 	if err != nil {
-		return "", err // already coded by readBoundedFile (oversize -> ErrCodeInvalidRequest)
+		return "", err // already coded by readBoundedFileContext
 	}
 
 	// Require any valid OIDC-issued certificate — confirms a real identity signed this
@@ -477,9 +706,9 @@ func verifyKeySignedBundle(ctx context.Context, bundlePath string, artifactDiges
 	if err != nil {
 		return "", err // already classified (ErrCodeInvalidRequest / ErrCodeUnavailable)
 	}
-	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
+	data, err := readBoundedFileContext(ctx, bundlePath)
 	if err != nil {
-		return "", err // already coded by readBoundedFile (oversize -> ErrCodeInvalidRequest)
+		return "", err // already coded by readBoundedFileContext
 	}
 	signer, err := attestation.VerifyStatementWith(ctx, data, id, attestation.NewRequireTLogPolicy(), artifactDigest)
 	if err != nil {
@@ -502,9 +731,9 @@ func VerifyBinaryAttestation(ctx context.Context, bundlePath string, identityPat
 		return "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled before binary attestation verification", err)
 	}
 
-	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
+	data, err := readBoundedFileContext(ctx, bundlePath)
 	if err != nil {
-		return "", err // already coded by readBoundedFile (oversize -> ErrCodeInvalidRequest)
+		return "", err // already coded by readBoundedFileContext
 	}
 
 	// Pin identity to NVIDIA CI using the provided pattern

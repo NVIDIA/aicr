@@ -15,13 +15,24 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
+
+var testBundleZipHeaders = []string{
+	"Content-Disposition",
+	"X-Bundle-Files",
+	"X-Bundle-Size",
+	"X-Bundle-Duration",
+}
 
 func newTestBundleHandler(t *testing.T) *bundleHandler {
 	t.Helper()
@@ -86,5 +97,98 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 	h.HandleBundles(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestBundleHandler_StreamZipFailureBeforeCommit(t *testing.T) {
+	tests := []struct {
+		name       string
+		streamErr  error
+		wantStatus int
+		wantCode   aicrerrors.ErrorCode
+	}{
+		{
+			name:       "integrity failure becomes internal",
+			streamErr:  aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "private bundle path is unmanaged"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   aicrerrors.ErrCodeInternal,
+		},
+		{
+			name:       "internal failure remains internal",
+			streamErr:  aicrerrors.New(aicrerrors.ErrCodeInternal, "private archive implementation failure"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   aicrerrors.ErrCodeInternal,
+		},
+		{
+			name:       "timeout remains timeout",
+			streamErr:  aicrerrors.New(aicrerrors.ErrCodeTimeout, "private archive deadline detail"),
+			wantStatus: http.StatusGatewayTimeout,
+			wantCode:   aicrerrors.ErrCodeTimeout,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &bundleHandler{
+				streamZip: func(_ context.Context, w http.ResponseWriter, _ string, _ *result.Output) error {
+					w.Header().Set("Content-Type", "application/zip")
+					w.Header().Set("Content-Disposition", "attachment; filename=private.zip")
+					w.Header().Set("X-Bundle-Files", "99")
+					w.Header().Set("X-Bundle-Size", "999")
+					w.Header().Set("X-Bundle-Duration", "private-duration")
+					return tt.streamErr
+				},
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/bundle", nil)
+			recorder := httptest.NewRecorder()
+			h.writeZipResponse(req.Context(), recorder, req, "unused", &result.Output{})
+
+			if recorder.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+			if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
+				t.Errorf("Content-Type = %q, want application/json", contentType)
+			}
+			for _, header := range testBundleZipHeaders {
+				if value := recorder.Header().Get(header); value != "" {
+					t.Errorf("header %s = %q, want empty", header, value)
+				}
+			}
+			if strings.Contains(recorder.Body.String(), "private") {
+				t.Fatalf("response leaked private archive error: %s", recorder.Body.String())
+			}
+			var response errorResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			if response.Code != string(tt.wantCode) {
+				t.Errorf("error code = %q, want %q", response.Code, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestBundleHandler_StreamZipFailureAfterCommit(t *testing.T) {
+	h := &bundleHandler{
+		streamZip: func(_ context.Context, w http.ResponseWriter, _ string, _ *result.Output) error {
+			w.Header().Set("Content-Type", "application/zip")
+			if _, err := w.Write([]byte("partial zip")); err != nil {
+				return err
+			}
+			return aicrerrors.New(aicrerrors.ErrCodeInternal, "private archive failure")
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", nil)
+	recorder := httptest.NewRecorder()
+	h.writeZipResponse(req.Context(), recorder, req, "unused", &result.Output{})
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if got, want := recorder.Body.String(), "partial zip"; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/zip" {
+		t.Errorf("Content-Type = %q, want application/zip", contentType)
 	}
 }

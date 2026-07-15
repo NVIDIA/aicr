@@ -16,20 +16,30 @@ package bundler
 
 import (
 	"archive/zip"
+	"context"
+	stderrors "errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
+
+const zipCopyBufferSize = 32 * 1024
+
+var canonicalZipModifiedTime = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 // ParseBundleConfig parses the /v1/bundle query parameters from r and
 // returns the bundler *config.Config they describe. It is the exported
@@ -68,79 +78,199 @@ func bundleConfigFromParams(params *bundleParams) *config.Config {
 	)
 }
 
-// StreamZipResponse creates a zip archive from the output directory and
-// streams it to the response. Exported so the aicr.Client-backed REST
-// handler (pkg/server) emits a consistent zip stream — same headers, same
-// entry layout, same compression.
-func StreamZipResponse(w http.ResponseWriter, dir string, output *result.Output) (retErr error) {
-	// Set response headers before writing body
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", "attachment; filename=\"bundles.zip\"")
-	w.Header().Set("X-Bundle-Files", strconv.Itoa(output.TotalFiles))
-	w.Header().Set("X-Bundle-Size", strconv.FormatInt(output.TotalSize, 10))
-	w.Header().Set("X-Bundle-Duration", output.TotalDuration.String())
+type streamZipDependencies struct {
+	stageVerifiedBundle func(
+		context.Context,
+		string,
+		checksum.InventoryOptions,
+	) (string, *checksum.Inventory, func() error, error)
+	warn func(string, ...any)
+}
 
-	// Create zip writer directly to response
-	zw := zip.NewWriter(w)
-	defer func() {
-		closeErr := zw.Close()
-		if retErr == nil {
-			retErr = closeErr
-		}
-	}()
+func defaultStreamZipDependencies() streamZipDependencies {
+	return streamZipDependencies{
+		stageVerifiedBundle: checksum.StageVerifiedBundle,
+		warn:                slog.Warn,
+	}
+}
 
-	// Walk the directory and add all files to zip
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "walk error", err)
-		}
+// StreamZipResponseContext verifies and privately stages the complete bundle,
+// then streams only the staged inventory to the response. It checks stage
+// cleanup before reporting success.
+func StreamZipResponseContext(
+	ctx context.Context,
+	w http.ResponseWriter,
+	dir string,
+	output *result.Output,
+) (err error) {
 
-		// Skip the root directory itself
-		if path == dir {
+	return streamZipResponseContextWithDependencies(
+		ctx, w, dir, output, defaultStreamZipDependencies())
+}
+
+func streamZipResponseContextWithDependencies(
+	ctx context.Context,
+	w http.ResponseWriter,
+	dir string,
+	output *result.Output,
+	deps streamZipDependencies,
+) (retErr error) {
+
+	if output == nil {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "bundle output is required")
+	}
+	defaults := defaultStreamZipDependencies()
+	if deps.stageVerifiedBundle == nil {
+		deps.stageVerifiedBundle = defaults.stageVerifiedBundle
+	}
+	if deps.warn == nil {
+		deps.warn = defaults.warn
+	}
+	options := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+	_, inventory, cleanup, err := deps.stageVerifiedBundle(ctx, dir, options)
+	if err != nil {
+		return aicrerrors.PropagateOrWrap(
+			err, aicrerrors.ErrCodeInternal, "failed to stage verified bundle for archive")
+	}
+	if cleanup == nil {
+		return aicrerrors.New(
+			aicrerrors.ErrCodeInternal, "verified bundle stage returned no cleanup owner")
+	}
+	cleanupPending := true
+	cleanupStage := func() error {
+		if !cleanupPending {
 			return nil
 		}
+		cleanupPending = false
+		return cleanup()
+	}
+	defer func() {
+		cleanupErr := cleanupStage()
+		if cleanupErr == nil {
+			return
+		}
+		if retErr != nil {
+			deps.warn("failed to clean verified bundle stage after archive failure",
+				"error", cleanupErr, "primaryError", retErr)
+			return
+		}
+		retErr = aicrerrors.Wrap(
+			aicrerrors.ErrCodeInternal, "failed to clean verified bundle stage", cleanupErr)
+	}()
+	if inventory == nil {
+		return aicrerrors.New(
+			aicrerrors.ErrCodeInternal, "verified bundle stage returned no inventory")
+	}
 
-		// Get relative path for zip entry
-		relPath, err := filepath.Rel(dir, path)
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"bundles.zip\"")
+	w.Header().Set("X-Bundle-Files", strconv.Itoa(len(inventory.RelativeFiles())))
+	w.Header().Set("X-Bundle-Size", strconv.FormatInt(inventory.TotalSize(), 10))
+	w.Header().Set("X-Bundle-Duration", output.TotalDuration.String())
+
+	zw := zip.NewWriter(w)
+	for _, rel := range inventory.RelativeDirectories() {
+		if err := zipContextError(ctx, "bundle archive canceled while writing directories"); err != nil {
+			return err
+		}
+		header := &zip.FileHeader{
+			Name:     rel + "/",
+			Modified: canonicalZipModifiedTime,
+		}
+		header.SetMode(os.ModeDir | 0755)
+		if _, err := zw.CreateHeader(header); err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ZIP directory entry", err)
+		}
+	}
+
+	for _, rel := range inventory.RelativeFiles() {
+		if err := zipContextError(ctx, "bundle archive canceled while writing files"); err != nil {
+			return err
+		}
+		file, err := inventory.Open(ctx, rel)
 		if err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to get relative path", err)
+			return aicrerrors.PropagateOrWrap(
+				err, aicrerrors.ErrCodeInternal, "failed to open verified bundle file for archive")
 		}
-
-		// Create zip file header
-		header, err := zip.FileInfoHeader(info)
-		if err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create file header", err)
+		info, statErr := file.Stat()
+		if statErr != nil {
+			_ = file.Close()
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to inspect verified bundle file", statErr)
 		}
-		header.Name = relPath
-
-		// Preserve directory structure
-		if info.IsDir() {
-			header.Name += "/"
-			_, headerErr := zw.CreateHeader(header)
-			return headerErr
+		header := &zip.FileHeader{
+			Name:     rel,
+			Method:   zip.Deflate,
+			Modified: canonicalZipModifiedTime,
 		}
-
-		// Use deflate compression
-		header.Method = zip.Deflate
-
-		writer, err := zw.CreateHeader(header)
-		if err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create zip entry", err)
+		header.SetMode(info.Mode())
+		entryWriter, createErr := zw.CreateHeader(header)
+		if createErr != nil {
+			_ = file.Close()
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ZIP file entry", createErr)
 		}
-
-		// Open and copy file content
-		file, err := os.Open(filepath.Clean(path)) //nolint:gosec // G122: path from internal os.MkdirTemp, not user input
-		if err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to open file", err)
-		}
-		_, copyErr := io.Copy(writer, file)
-		file.Close()
+		copyErr := copyZipEntryContext(ctx, entryWriter, file)
+		closeErr := file.Close()
 		if copyErr != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to copy file content", copyErr)
+			return aicrerrors.PropagateOrWrap(
+				copyErr, aicrerrors.ErrCodeInternal, "failed to copy verified bundle file into archive")
 		}
+		if closeErr != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to close verified bundle file", closeErr)
+		}
+	}
 
-		return nil
-	})
+	if cleanupErr := cleanupStage(); cleanupErr != nil {
+		return aicrerrors.Wrap(
+			aicrerrors.ErrCodeInternal, "failed to clean verified bundle stage", cleanupErr)
+	}
+	if err := zw.Close(); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to finalize ZIP archive", err)
+	}
+	return nil
+}
+
+// StreamZipResponse creates a bounded context for compatibility callers and
+// delegates to StreamZipResponseContext.
+func StreamZipResponse(w http.ResponseWriter, dir string, output *result.Output) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.BundleHandlerTimeout)
+	defer cancel()
+	return StreamZipResponseContext(ctx, w, dir, output)
+}
+
+func copyZipEntryContext(ctx context.Context, destination io.Writer, source io.Reader) error {
+	buffer := make([]byte, zipCopyBufferSize)
+	for {
+		if err := zipContextError(ctx, "bundle archive copy canceled"); err != nil {
+			return err
+		}
+		read, readErr := source.Read(buffer)
+		if read > 0 {
+			written, writeErr := destination.Write(buffer[:read])
+			if writeErr != nil {
+				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to write ZIP entry", writeErr)
+			}
+			if written != read {
+				return aicrerrors.Wrap(
+					aicrerrors.ErrCodeInternal, "failed to write complete ZIP entry", io.ErrShortWrite)
+			}
+			if err := zipContextError(ctx, "bundle archive copy canceled"); err != nil {
+				return err
+			}
+		}
+		if readErr != nil {
+			if stderrors.Is(readErr, io.EOF) {
+				return nil
+			}
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read verified bundle file", readErr)
+		}
+	}
+}
+
+func zipContextError(ctx context.Context, message string) error {
+	if err := ctx.Err(); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, message, err)
+	}
+	return nil
 }
 
 // bundleParams holds parsed query parameters for bundle generation

@@ -16,20 +16,26 @@ package verifier
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	stderrors "errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
+	"golang.org/x/sys/unix"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -95,6 +101,12 @@ func TestVerify_MissingChecksums(t *testing.T) {
 
 	if result.TrustLevel != TrustUnknown {
 		t.Errorf("TrustLevel = %s, want unknown", result.TrustLevel)
+	}
+	if result.TrustReason != "checksums.txt not found" {
+		t.Errorf("TrustReason = %q, want checksums.txt not found", result.TrustReason)
+	}
+	if len(result.Errors) != 1 || result.Errors[0] != "checksums.txt not found" {
+		t.Errorf("Errors = %v, want [checksums.txt not found]", result.Errors)
 	}
 }
 
@@ -247,6 +259,21 @@ func TestExtractToolVersion(t *testing.T) {
 	})
 }
 
+func TestExtractToolVersionContext_CancellationPropagates(t *testing.T) {
+	path := writeBundleWithStatement(t,
+		`{"predicate":{"buildDefinition":{"internalParameters":{"toolVersion":"v1.2.3"}}}}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	version, err := extractToolVersionContext(ctx, path)
+	if version != "" {
+		t.Errorf("extractToolVersionContext() version = %q, want empty", version)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Fatalf("extractToolVersionContext() error = %v, want ErrCodeTimeout", err)
+	}
+}
+
 // writeBundleWithStatement writes a sigstore bundle JSON with the given in-toto
 // statement as the DSSE payload. Returns the file path.
 func writeBundleWithStatement(t *testing.T, statement string) string {
@@ -354,7 +381,7 @@ func TestParseDSSEPayload(t *testing.T) {
 }
 
 func TestReadBoundedFile_MissingFile(t *testing.T) {
-	_, err := readBoundedFile("/nonexistent/path", defaults.MaxSigstoreBundleSize)
+	_, err := readBoundedFile("/nonexistent/path")
 	if err == nil {
 		t.Error("readBoundedFile() with missing file should return error")
 	}
@@ -374,9 +401,11 @@ func TestReadBoundedFile_OversizedFile(t *testing.T) {
 			t.Fatal(writeErr)
 		}
 	}
-	f.Close()
+	if closeErr := f.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
 
-	_, err = readBoundedFile(path, defaults.MaxSigstoreBundleSize)
+	_, err = readBoundedFile(path)
 	if err == nil {
 		t.Error("readBoundedFile() with oversized file should return error")
 	}
@@ -385,16 +414,119 @@ func TestReadBoundedFile_OversizedFile(t *testing.T) {
 	}
 }
 
+func TestReadBoundedFile_RejectsFIFOWithoutBlocking(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "bundle.sigstore.json")
+	if err := unix.Mkfifo(fifo, 0600); err != nil {
+		t.Skipf("FIFO unsupported: %v", err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := readBoundedFile(fifo)
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("readBoundedFile(FIFO) error = %v, want ErrCodeInvalidRequest", err)
+		}
+	case <-time.After(time.Second):
+		t.Error("readBoundedFile(FIFO) blocked instead of rejecting a special file")
+		unblockVerifierFIFO(fifo)
+		select {
+		case <-result:
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func TestReadBoundedFile_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.sigstore.json")
+	if err := os.WriteFile(target, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "bundle.sigstore.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := readBoundedFile(link)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("readBoundedFile(symlink) error = %v, want ErrCodeInvalidRequest", err)
+	}
+}
+
+func TestVerifyBinaryAttestation_ReadCancellationIsBounded(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "binary-attestation.sigstore.json")
+	if err := unix.Mkfifo(fifo, 0600); err != nil {
+		t.Skipf("FIFO unsupported: %v", err)
+	}
+	ctx := &cancelAfterVerifierErrContext{Context: context.Background(), cancelAfter: 1}
+	result := make(chan error, 1)
+	go func() {
+		_, err := VerifyBinaryAttestation(ctx, fifo, TrustedRepositoryPattern, make([]byte, 32))
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			t.Errorf("VerifyBinaryAttestation() error = %v, want ErrCodeTimeout", err)
+		}
+	case <-time.After(time.Second):
+		t.Error("VerifyBinaryAttestation() remained blocked after read cancellation")
+		unblockVerifierFIFO(fifo)
+		select {
+		case <-result:
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+type cancelAfterVerifierErrContext struct {
+	context.Context
+	cancelAfter int64
+	calls       atomic.Int64
+}
+
+func (c *cancelAfterVerifierErrContext) Err() error {
+	if c.calls.Add(1) > c.cancelAfter {
+		return context.Canceled
+	}
+	return nil
+}
+
+func unblockVerifierFIFO(path string) {
+	go func() {
+		writer, err := os.OpenFile(path, os.O_WRONLY, 0)
+		if err == nil {
+			_ = writer.Close()
+		}
+	}()
+}
+
 func TestVerifyChecksumStep_Valid(t *testing.T) {
 	dir := createTestBundle(t)
 	result := &VerifyResult{}
 
-	data, done := verifyChecksumStep(dir, result)
+	snapshot, done, err := verifyChecksumStep(context.Background(), dir, result)
+	if err != nil {
+		t.Fatalf("verifyChecksumStep() error: %v", err)
+	}
+	t.Cleanup(func() {
+		if cleanupErr := snapshot.cleanup(); cleanupErr != nil {
+			t.Errorf("snapshot cleanup error = %v", cleanupErr)
+		}
+	})
 	if done {
 		t.Fatalf("verifyChecksumStep() returned done=true, errors: %v", result.Errors)
 	}
-	if len(data) == 0 {
-		t.Error("verifyChecksumStep() returned empty data")
+	if snapshot.checksumDigest == ([sha256.Size]byte{}) {
+		t.Error("verifyChecksumStep() returned empty checksum digest")
+	}
+	if snapshot.stagedDir == dir {
+		t.Error("verifyChecksumStep() reused the caller-controlled source directory")
 	}
 	if !result.ChecksumsPassed {
 		t.Error("ChecksumsPassed = false, want true")
@@ -408,15 +540,91 @@ func TestVerifyChecksumStep_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	result := &VerifyResult{}
 
-	data, done := verifyChecksumStep(dir, result)
+	snapshot, done, err := verifyChecksumStep(context.Background(), dir, result)
+	if err != nil {
+		t.Fatalf("verifyChecksumStep() error: %v", err)
+	}
 	if !done {
 		t.Error("verifyChecksumStep() should return done=true for missing checksums")
 	}
-	if data != nil {
+	if snapshot != nil {
 		t.Error("verifyChecksumStep() should return nil data for missing checksums")
 	}
 	if result.TrustLevel != TrustUnknown {
 		t.Errorf("TrustLevel = %s, want unknown", result.TrustLevel)
+	}
+}
+
+func TestChecksumStepFailure_MissingManifestUsesSentinel(t *testing.T) {
+	dir := t.TempDir()
+	manifest, inventory, data, missingErr := checksum.ReadAndVerifyBundle(
+		context.Background(), dir, checksum.InventoryOptions{})
+	if missingErr == nil {
+		t.Fatal("ReadAndVerifyBundle() error = nil, want missing-manifest failure")
+	}
+	if manifest != nil || inventory != nil || data != nil {
+		t.Errorf("ReadAndVerifyBundle() = (%#v, %#v, %v), want nil outputs", manifest, inventory, data)
+	}
+	reworded := errors.Wrap(
+		errors.ErrCodeInvalidRequest, "human-readable wording changed", missingErr)
+	result := &VerifyResult{}
+
+	snapshot, done, err := checksumStepFailure(reworded, result)
+	if err != nil {
+		t.Fatalf("checksumStepFailure() error = %v", err)
+	}
+	if snapshot != nil || !done {
+		t.Errorf("checksumStepFailure() = (%#v, %v), want nil, true", snapshot, done)
+	}
+	if result.TrustReason != "checksums.txt not found" {
+		t.Errorf("TrustReason = %q, want checksums.txt not found", result.TrustReason)
+	}
+}
+
+func TestVerifyChecksumStep_UsesStagedInventoryMetadata(t *testing.T) {
+	dir := createTestBundle(t)
+	deps := defaultVerifierDependencies()
+	stage := deps.stageVerifiedBundle
+	deps.stageVerifiedBundle = func(
+		ctx context.Context,
+		bundleDir string,
+		opts checksum.InventoryOptions,
+	) (string, *checksum.Inventory, func() error, error) {
+
+		stagedDir, inventory, cleanup, err := stage(ctx, bundleDir, opts)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		checksumPath := filepath.Join(stagedDir, checksum.ChecksumFileName)
+		movedPath := checksumPath + ".moved"
+		if err := os.Rename(checksumPath, movedPath); err != nil {
+			_ = cleanup()
+			return "", nil, nil, err
+		}
+		return stagedDir, inventory, func() error {
+			renameErr := os.Rename(movedPath, checksumPath)
+			cleanupErr := cleanup()
+			return stderrors.Join(renameErr, cleanupErr)
+		}, nil
+	}
+	result := &VerifyResult{}
+
+	snapshot, done, err := verifyChecksumStepWithDependencies(
+		context.Background(), dir, result, deps)
+	if err != nil {
+		t.Fatalf("verifyChecksumStepWithDependencies() error = %v", err)
+	}
+	if done || snapshot == nil {
+		t.Fatalf("verifyChecksumStepWithDependencies() = (%#v, %v), want snapshot, false", snapshot, done)
+	}
+	if result.ChecksumFiles == 0 {
+		t.Error("ChecksumFiles = 0, want staged manifest count")
+	}
+	if snapshot.checksumDigest == ([sha256.Size]byte{}) {
+		t.Error("checksumDigest is empty")
+	}
+	if cleanupErr := snapshot.cleanup(); cleanupErr != nil {
+		t.Fatalf("snapshot cleanup error = %v", cleanupErr)
 	}
 }
 
@@ -429,7 +637,10 @@ func TestVerifyChecksumStep_TamperedFile(t *testing.T) {
 	}
 
 	result := &VerifyResult{}
-	_, done := verifyChecksumStep(dir, result)
+	_, done, err := verifyChecksumStep(context.Background(), dir, result)
+	if err != nil {
+		t.Fatalf("verifyChecksumStep() error: %v", err)
+	}
 	if !done {
 		t.Error("verifyChecksumStep() should return done=true for tampered files")
 	}
@@ -438,6 +649,391 @@ func TestVerifyChecksumStep_TamperedFile(t *testing.T) {
 	}
 	if len(result.Errors) == 0 {
 		t.Error("expected errors for tampered file")
+	}
+}
+
+func TestVerifyChecksumStep_AllowsAttestationMetadata(t *testing.T) {
+	for _, rel := range attestation.BundleMetadataPaths() {
+		t.Run(rel, func(t *testing.T) {
+			dir := createTestBundle(t)
+			metadataPath := filepath.Join(dir, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(metadataPath, []byte("{}"), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			result := &VerifyResult{}
+			snapshot, done, err := verifyChecksumStep(context.Background(), dir, result)
+			if err != nil {
+				t.Fatalf("verifyChecksumStep() error: %v", err)
+			}
+			if snapshot == nil {
+				t.Fatal("verifyChecksumStep() returned nil snapshot")
+			}
+			t.Cleanup(func() {
+				if cleanupErr := snapshot.cleanup(); cleanupErr != nil {
+					t.Errorf("snapshot cleanup error = %v", cleanupErr)
+				}
+			})
+			if done {
+				t.Fatalf("verifyChecksumStep() rejected allowed metadata %q: %v", rel, result.Errors)
+			}
+			if !result.ChecksumsPassed {
+				t.Errorf("ChecksumsPassed = false for allowed metadata %q", rel)
+			}
+		})
+	}
+}
+
+func TestVerifyChecksumStep_ContextCancelled(t *testing.T) {
+	dir := createTestBundle(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := &VerifyResult{}
+	snapshot, done, err := verifyChecksumStep(ctx, dir, result)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Fatalf("verifyChecksumStep() error = %v, want ErrCodeTimeout", err)
+	}
+	if snapshot != nil {
+		t.Error("verifyChecksumStep() returned data after cancellation")
+	}
+	if done {
+		t.Error("verifyChecksumStep() done = true, want false for propagated timeout")
+	}
+}
+
+func TestVerifyChecksumStep_PropagatesStagingFailure(t *testing.T) {
+	const helperBundleEnv = "AICR_TEST_STAGING_FAILURE_BUNDLE"
+	if dir := os.Getenv(helperBundleEnv); dir != "" {
+		result := &VerifyResult{}
+		snapshot, done, err := verifyChecksumStep(context.Background(), dir, result)
+		tempRoot := os.Getenv("TMPDIR")
+		if removeErr := os.Remove(tempRoot); removeErr != nil {
+			t.Fatalf("remove non-directory TMPDIR fixture: %v", removeErr)
+		}
+		if mkdirErr := os.Mkdir(tempRoot, 0700); mkdirErr != nil {
+			t.Fatalf("restore TMPDIR for coverage flush: %v", mkdirErr)
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+			t.Fatalf("verifyChecksumStep() error = %v, want ErrCodeInternal", err)
+		}
+		if snapshot != nil {
+			if cleanupErr := snapshot.cleanup(); cleanupErr != nil {
+				t.Errorf("unexpected snapshot cleanup error = %v", cleanupErr)
+			}
+			t.Error("verifyChecksumStep() returned a snapshot after staging failure")
+		}
+		if done {
+			t.Error("verifyChecksumStep() done = true, want false for propagated staging failure")
+		}
+		if result.TrustLevel != "" {
+			t.Errorf("TrustLevel = %s, want unset for operational staging failure", result.TrustLevel)
+		}
+		return
+	}
+
+	dir := createTestBundle(t)
+	nonDirectoryTempRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(nonDirectoryTempRoot, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestVerifyChecksumStep_PropagatesStagingFailure$")
+	cmd.Env = append(os.Environ(), helperBundleEnv+"="+dir, "TMPDIR="+nonDirectoryTempRoot)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("staging-failure helper failed: %v\n%s", err, output)
+	}
+}
+
+func TestVerifyChecksumStep_SourceMutationCannotChangeSnapshot(t *testing.T) {
+	const originalDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const replacementDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	originalStatement := fmt.Sprintf(
+		`{"predicate":{"buildDefinition":{"internalParameters":{"toolVersion":"v1.2.3"},"resolvedDependencies":[{"digest":{"sha256":"%s"}}]}}}`,
+		originalDigest,
+	)
+	replacementStatement := fmt.Sprintf(
+		`{"predicate":{"buildDefinition":{"internalParameters":{"toolVersion":"v9.9.9"},"resolvedDependencies":[{"digest":{"sha256":"%s"}}]}}}`,
+		replacementDigest,
+	)
+
+	dir := createTestBundle(t)
+	sourceAttestation := filepath.Join(dir, filepath.FromSlash(attestation.BundleAttestationFile))
+	if err := os.MkdirAll(filepath.Dir(sourceAttestation), 0755); err != nil {
+		t.Fatal(err)
+	}
+	originalBytes, err := os.ReadFile(writeBundleWithStatement(t, originalStatement))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writeErr := os.WriteFile(sourceAttestation, originalBytes, 0600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	result := &VerifyResult{}
+	snapshot, done, err := verifyChecksumStep(context.Background(), dir, result)
+	if err != nil {
+		t.Fatalf("verifyChecksumStep() error: %v", err)
+	}
+	if done {
+		t.Fatalf("verifyChecksumStep() done = true, errors: %v", result.Errors)
+	}
+	t.Cleanup(func() {
+		if cleanupErr := snapshot.cleanup(); cleanupErr != nil {
+			t.Errorf("snapshot cleanup error = %v", cleanupErr)
+		}
+	})
+
+	stagedAttestation := filepath.Join(snapshot.stagedDir, filepath.FromSlash(attestation.BundleAttestationFile))
+	digest, err := extractBinaryDigest(stagedAttestation)
+	if err != nil {
+		t.Fatalf("extractBinaryDigest() before source mutation: %v", err)
+	}
+	_, signatureErrBefore := verifySigstoreBundle(
+		context.Background(), stagedAttestation, make([]byte, 32), attestation.PublicGoodTrustedRoot)
+	if signatureErrBefore == nil {
+		t.Fatal("incomplete test attestation unexpectedly passed signature verification")
+	}
+
+	replacementBytes, err := os.ReadFile(writeBundleWithStatement(t, replacementStatement))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writeErr := os.WriteFile(sourceAttestation, replacementBytes, 0600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	if got := extractToolVersion(stagedAttestation); got != "v1.2.3" {
+		t.Errorf("staged tool version = %q, want v1.2.3", got)
+	}
+	if got := hex.EncodeToString(digest); got != originalDigest {
+		t.Errorf("staged binary digest = %q, want %q", got, originalDigest)
+	}
+	digestAfter, err := extractBinaryDigest(stagedAttestation)
+	if err != nil {
+		t.Fatalf("extractBinaryDigest() after source mutation: %v", err)
+	}
+	if got := hex.EncodeToString(digestAfter); got != originalDigest {
+		t.Errorf("staged binary digest after source mutation = %q, want %q", got, originalDigest)
+	}
+	_, signatureErrAfter := verifySigstoreBundle(
+		context.Background(), stagedAttestation, make([]byte, 32), attestation.PublicGoodTrustedRoot)
+	if signatureErrAfter == nil || signatureErrAfter.Error() != signatureErrBefore.Error() {
+		t.Errorf("staged signature result changed after source mutation: before=%v after=%v",
+			signatureErrBefore, signatureErrAfter)
+	}
+}
+
+func TestVerificationSnapshot_Cleanup(t *testing.T) {
+	removeFailure := stderrors.New("injected snapshot removal failure")
+	var removeCalls atomic.Int64
+	snapshot := &verificationSnapshot{
+		remove: func() error {
+			removeCalls.Add(1)
+			return removeFailure
+		},
+	}
+
+	const callers = 16
+	errs := make([]error, callers)
+	var wg sync.WaitGroup
+	for index := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[index] = snapshot.cleanup()
+		}()
+	}
+	wg.Wait()
+	for index, cleanupErr := range errs {
+		if !stderrors.Is(cleanupErr, removeFailure) {
+			t.Errorf("cleanup[%d] error = %v, want removal failure", index, cleanupErr)
+		}
+		if !stderrors.Is(cleanupErr, errs[0]) || !sameErrorInstance(cleanupErr, errs[0]) {
+			t.Errorf("cleanup[%d] returned a different cached error instance", index)
+		}
+	}
+	if got := removeCalls.Load(); got != 1 {
+		t.Errorf("snapshot removal calls = %d, want 1", got)
+	}
+}
+
+func TestVerify_CleanupFailure(t *testing.T) {
+	dir := createTestBundle(t)
+	cleanupFailure := stderrors.New("injected verifier cleanup failure")
+	deps := defaultVerifierDependencies()
+	stage := deps.stageVerifiedBundle
+	var cleanupCalls atomic.Int64
+	deps.stageVerifiedBundle = func(
+		ctx context.Context,
+		bundleDir string,
+		opts checksum.InventoryOptions,
+	) (string, *checksum.Inventory, func() error, error) {
+
+		stagedDir, inventory, cleanup, err := stage(ctx, bundleDir, opts)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		return stagedDir, inventory, func() error {
+			cleanupCalls.Add(1)
+			return stderrors.Join(cleanup(), cleanupFailure)
+		}, nil
+	}
+	warnCalls := 0
+	deps.warn = func(string, ...any) { warnCalls++ }
+
+	result, err := verifyWithDependencies(context.Background(), dir, nil, deps)
+	if result != nil {
+		t.Errorf("Verify() result = %#v, want nil after cleanup failure", result)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Fatalf("Verify() error = %v, want ErrCodeInternal", err)
+	}
+	if !stderrors.Is(err, cleanupFailure) {
+		t.Errorf("Verify() error = %v, want injected cleanup cause", err)
+	}
+	if got := cleanupCalls.Load(); got != 1 {
+		t.Errorf("stage cleanup calls = %d, want 1", got)
+	}
+	if warnCalls != 0 {
+		t.Errorf("warning calls = %d, want 0 without a primary error", warnCalls)
+	}
+}
+
+func TestVerifyChecksumStep_MissingInventoryCleanupFailure(t *testing.T) {
+	dir := createTestBundle(t)
+	cleanupFailure := stderrors.New("injected missing-inventory cleanup failure")
+	deps := defaultVerifierDependencies()
+	stage := deps.stageVerifiedBundle
+	var cleanupCalls atomic.Int64
+	deps.stageVerifiedBundle = func(
+		ctx context.Context,
+		bundleDir string,
+		opts checksum.InventoryOptions,
+	) (string, *checksum.Inventory, func() error, error) {
+
+		stagedDir, _, cleanup, err := stage(ctx, bundleDir, opts)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		return stagedDir, nil, func() error {
+			cleanupCalls.Add(1)
+			return stderrors.Join(cleanup(), cleanupFailure)
+		}, nil
+	}
+	warnCalls := 0
+	deps.warn = func(string, ...any) { warnCalls++ }
+
+	result := &VerifyResult{}
+	snapshot, done, err := verifyChecksumStepWithDependencies(
+		context.Background(), dir, result, deps)
+	if snapshot != nil || done {
+		t.Errorf("verifyChecksumStep() = (%#v, %v), want nil, false", snapshot, done)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Fatalf("verifyChecksumStep() error = %v, want ErrCodeInternal", err)
+	}
+	if stderrors.Is(err, cleanupFailure) {
+		t.Errorf("verifyChecksumStep() error joined cleanup failure: %v", err)
+	}
+	if got := cleanupCalls.Load(); got != 1 {
+		t.Errorf("stage cleanup calls = %d, want 1", got)
+	}
+	if warnCalls != 1 {
+		t.Errorf("warning calls = %d, want 1 with an outward primary error", warnCalls)
+	}
+}
+
+func TestVerifyChecksumStep_JoinedStagingCleanupFailureIsHardError(t *testing.T) {
+	stagingFailure := errors.New(
+		errors.ErrCodeInvalidRequest, "injected staging verification failure")
+	cleanupFailure := errors.New(
+		errors.ErrCodeInternal, "injected staging cleanup failure")
+	joined := stderrors.Join(stagingFailure, cleanupFailure)
+	deps := defaultVerifierDependencies()
+	deps.stageVerifiedBundle = func(
+		context.Context,
+		string,
+		checksum.InventoryOptions,
+	) (string, *checksum.Inventory, func() error, error) {
+
+		return "", nil, nil, joined
+	}
+	result := &VerifyResult{}
+
+	snapshot, done, err := verifyChecksumStepWithDependencies(
+		context.Background(), t.TempDir(), result, deps)
+	if snapshot != nil || done {
+		t.Errorf("verifyChecksumStepWithDependencies() = (%#v, %v), want nil, false", snapshot, done)
+	}
+	if !stderrors.Is(err, stagingFailure) {
+		t.Errorf("verifyChecksumStepWithDependencies() error = %v, want staging failure", err)
+	}
+	if !stderrors.Is(err, cleanupFailure) {
+		t.Errorf("verifyChecksumStepWithDependencies() error = %v, want cleanup failure", err)
+	}
+	if result.TrustLevel != "" || len(result.Errors) != 0 {
+		t.Errorf("verification result = %#v, want no normalized trust result", result)
+	}
+}
+
+func TestVerify_PostSnapshotPrimaryErrorCleanupFailure(t *testing.T) {
+	dir := createTestBundle(t)
+	primary := errors.New(errors.ErrCodeTimeout, "injected post-snapshot verification failure")
+	cleanupFailure := stderrors.New("injected post-snapshot cleanup failure")
+	deps := defaultVerifierDependencies()
+	stage := deps.stageVerifiedBundle
+	var cleanupCalls atomic.Int64
+	deps.stageVerifiedBundle = func(
+		ctx context.Context,
+		bundleDir string,
+		opts checksum.InventoryOptions,
+	) (string, *checksum.Inventory, func() error, error) {
+
+		stagedDir, inventory, cleanup, err := stage(ctx, bundleDir, opts)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		return stagedDir, inventory, func() error {
+			cleanupCalls.Add(1)
+			return stderrors.Join(cleanup(), cleanupFailure)
+		}, nil
+	}
+	deps.afterSnapshot = func() error { return primary }
+	warnCalls := 0
+	deps.warn = func(string, ...any) { warnCalls++ }
+
+	result, err := verifyWithDependencies(context.Background(), dir, nil, deps)
+	if result != nil {
+		t.Errorf("Verify() result = %#v, want nil", result)
+	}
+	if !stderrors.Is(err, primary) || !sameErrorInstance(err, primary) {
+		t.Errorf("Verify() error = %v, want exact primary %v", err, primary)
+	}
+	if stderrors.Is(err, cleanupFailure) {
+		t.Errorf("Verify() primary error joined cleanup failure: %v", err)
+	}
+	if got := cleanupCalls.Load(); got != 1 {
+		t.Errorf("stage cleanup calls = %d, want 1", got)
+	}
+	if warnCalls != 1 {
+		t.Errorf("warning calls = %d, want 1", warnCalls)
+	}
+}
+
+func sameErrorInstance(got, want error) bool {
+	return reflect.ValueOf(got).Pointer() == reflect.ValueOf(want).Pointer()
+}
+
+func TestVerifySigstoreBundle_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := verifySigstoreBundle(ctx, "unused", make([]byte, 32), attestation.PublicGoodTrustedRoot)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Fatalf("verifySigstoreBundle() error = %v, want ErrCodeTimeout", err)
 	}
 }
 
@@ -459,13 +1055,14 @@ func TestVerify_ContextCancelled(t *testing.T) {
 
 	_, err := Verify(ctx, dir, nil)
 	if err == nil {
-		t.Error("Verify() with cancelled context should return error")
+		t.Fatal("Verify() with cancelled context should return error")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("Verify() error = %v, want ErrCodeTimeout", err)
 	}
 }
 
 func TestVerify_WithDataDir(t *testing.T) {
-	// Bundle with checksums + data dir → trust level capped at attested (but
-	// without real attestation, we test the checksum + no-attestation path)
 	dir := createTestBundle(t)
 
 	// Create data directory
@@ -481,9 +1078,180 @@ func TestVerify_WithDataDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
-	// No attestation files → unverified, regardless of data dir
-	if result.TrustLevel != TrustUnverified {
-		t.Errorf("TrustLevel = %s, want unverified", result.TrustLevel)
+	if result.ChecksumsPassed {
+		t.Error("ChecksumsPassed = true, want false for unchecksummed data file")
+	}
+	if result.TrustLevel != TrustUnknown {
+		t.Errorf("TrustLevel = %s, want unknown", result.TrustLevel)
+	}
+	if !strings.Contains(strings.Join(result.Errors, "\n"), "unexpected") {
+		t.Errorf("Errors = %v, want unmanaged-path error", result.Errors)
+	}
+}
+
+func TestVerify_RejectsUnmanaged(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, dir string)
+		wantMessage string
+	}{
+		{
+			name: "injected root file",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, "injected.txt"), []byte("unexpected"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "unexpected file",
+		},
+		{
+			name: "injected nested file",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				extraDir := filepath.Join(dir, "999-extra")
+				if err := os.MkdirAll(extraDir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(extraDir, "install.sh"), []byte("#!/bin/sh\n"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "unexpected directory",
+		},
+		{
+			name: "empty extra directory",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Mkdir(filepath.Join(dir, "empty-extra"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "unexpected directory",
+		},
+		{
+			name: "symlink",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Symlink(filepath.Join(dir, "recipe.yaml"), filepath.Join(dir, "recipe-link")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "symlink",
+		},
+		{
+			name: "fifo",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := unix.Mkfifo(filepath.Join(dir, "extra.pipe"), 0600); err != nil {
+					t.Skipf("FIFO unsupported: %v", err)
+				}
+			},
+			wantMessage: "special object",
+		},
+		{
+			name: "malformed manifest",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, checksum.ChecksumFileName), []byte("not a checksum manifest\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "separator",
+		},
+		{
+			name: "duplicate manifest entry",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				checksumPath := filepath.Join(dir, checksum.ChecksumFileName)
+				data, err := os.ReadFile(checksumPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				first, _, ok := strings.Cut(string(data), "\n")
+				if !ok {
+					t.Fatal("checksums.txt has no complete entry")
+				}
+				if err := os.WriteFile(checksumPath, append(data, []byte(first+"\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "duplicate path",
+		},
+		{
+			name: "reserved metadata entry",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				checksumPath := filepath.Join(dir, checksum.ChecksumFileName)
+				file, err := os.OpenFile(checksumPath, os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, writeErr := fmt.Fprintf(file, "%064d  %s\n", 0, attestation.BundleAttestationFile)
+				closeErr := file.Close()
+				if writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				if closeErr != nil {
+					t.Fatal(closeErr)
+				}
+			},
+			wantMessage: "reserved metadata namespace",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := createTestBundle(t)
+			tt.setup(t, dir)
+
+			result, err := Verify(context.Background(), dir, nil)
+			if err != nil {
+				t.Fatalf("Verify() error: %v", err)
+			}
+			if result.ChecksumsPassed {
+				t.Error("ChecksumsPassed = true, want false")
+			}
+			if result.TrustLevel != TrustUnknown {
+				t.Errorf("TrustLevel = %s, want unknown", result.TrustLevel)
+			}
+			if !strings.Contains(strings.Join(result.Errors, "\n"), tt.wantMessage) {
+				t.Errorf("Errors = %v, want message containing %q", result.Errors, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestVerify_RejectsLegacyUnlistedRecipe(t *testing.T) {
+	dir := createTestBundle(t)
+	checksumPath := filepath.Join(dir, checksum.ChecksumFileName)
+	data, err := os.ReadFile(checksumPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(data), "\n")
+	filtered := lines[:0]
+	for _, line := range lines {
+		if line != "" && !strings.HasSuffix(line, "  recipe.yaml") {
+			filtered = append(filtered, line)
+		}
+	}
+	if writeErr := os.WriteFile(checksumPath, []byte(strings.Join(filtered, "\n")+"\n"), 0600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	result, err := Verify(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+	if result.ChecksumsPassed {
+		t.Error("ChecksumsPassed = true, want false")
+	}
+	if result.TrustLevel != TrustUnknown {
+		t.Errorf("TrustLevel = %s, want unknown", result.TrustLevel)
+	}
+	if !strings.Contains(strings.Join(result.Errors, "\n"), "unexpected file: \"recipe.yaml\"") {
+		t.Errorf("Errors = %v, want omitted recipe.yaml to be rejected", result.Errors)
 	}
 }
 
@@ -771,5 +1539,26 @@ func TestVerifyBinaryStep_FailedVerifyMaxStaysVerified(t *testing.T) {
 	}
 	if failure == "" {
 		t.Error("CheckPolicy(max) passed; a failed binary attestation must fail --min-trust-level max")
+	}
+}
+
+func TestVerifyBinaryStep_PropagatesTimeout(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeBinaryAttestation(t, dir)
+	bundleAttestPath := writeBundleWithStatement(t,
+		`{"predicate":{"buildDefinition":{"resolvedDependencies":[{"digest":{"sha256":"afa80429badccee47ca11075328a0d337af1786223bdae6e32076d042dc26996"}}]}}}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := &VerifyResult{ChecksumsPassed: true, BundleAttested: true}
+	done, err := verifyBinaryStep(ctx, dir, bundleAttestPath, TrustedRepositoryPattern, result)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Fatalf("verifyBinaryStep() error = %v, want ErrCodeTimeout", err)
+	}
+	if done {
+		t.Error("verifyBinaryStep() done = true, want false for propagated timeout")
+	}
+	if result.TrustLevel != "" {
+		t.Errorf("TrustLevel = %s, want unset for propagated timeout", result.TrustLevel)
 	}
 }

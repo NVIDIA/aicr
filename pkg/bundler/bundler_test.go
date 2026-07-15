@@ -25,20 +25,99 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+type closedWorldTestDeployer struct {
+	writeUnmanaged bool
+}
+
+type closedWorldTestAttester struct {
+	called        int
+	writeMetadata bool
+	attestErr     error
+}
+
+func (a *closedWorldTestAttester) Attest(_ context.Context, subject attestation.AttestSubject) ([]byte, error) {
+	a.called++
+	if a.attestErr != nil {
+		return nil, a.attestErr
+	}
+	if !a.writeMetadata {
+		return nil, nil
+	}
+	for _, rel := range attestation.BundleMetadataPaths() {
+		metadataPath := filepath.Join(subject.Metadata.OutputDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create test metadata directory", err)
+		}
+		if err := os.WriteFile(metadataPath, []byte("{}"), 0600); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write test metadata", err)
+		}
+	}
+	return nil, nil
+}
+
+func (a *closedWorldTestAttester) Identity() string { return "test" }
+
+func (a *closedWorldTestAttester) HasRekorEntry() bool { return false }
+
+func (d closedWorldTestDeployer) Generate(_ context.Context, outputDir string) (*deployer.Output, error) {
+	payloadPath := filepath.Join(outputDir, "payload.txt")
+	payload := []byte("payload")
+	if err := os.WriteFile(payloadPath, payload, 0600); err != nil {
+		return nil, err
+	}
+	if d.writeUnmanaged {
+		extraDir := filepath.Join(outputDir, "999-unmanaged")
+		if err := os.MkdirAll(extraDir, 0755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(extraDir, "install.sh"), []byte("#!/bin/sh\n"), 0700); err != nil {
+			return nil, err
+		}
+	}
+	return &deployer.Output{
+		Files:     []string{payloadPath},
+		TotalSize: int64(len(payload)),
+	}, nil
+}
+
+func closedWorldRecipeResult() *recipe.RecipeResult {
+	return &recipe.RecipeResult{
+		APIVersion: "aicr.run/v1alpha2",
+		Kind:       "Recipe",
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceEKS,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Intent:      recipe.CriteriaIntentTraining,
+			OS:          recipe.CriteriaOSUbuntu,
+		},
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:    "gpu-operator",
+			Version: "v25.3.3",
+			Type:    "helm",
+			Source:  "https://helm.ngc.nvidia.com/nvidia",
+		}},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+}
 
 func TestNew(t *testing.T) {
 	t.Run("default bundler", func(t *testing.T) {
@@ -77,6 +156,341 @@ func TestNew(t *testing.T) {
 			t.Fatal("Config should not be nil after passing nil")
 		}
 	})
+}
+
+func TestRunDeployer_ClosedWorld(t *testing.T) {
+	newBundler := func(t *testing.T) *DefaultBundler {
+		t.Helper()
+		b, err := New(WithConfig(config.NewConfig(
+			config.WithDeployer(config.DeployerHelm),
+			config.WithIncludeChecksums(true),
+		)))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		return b
+	}
+
+	t.Run("final inventory includes and binds recipe", func(t *testing.T) {
+		dir := t.TempDir()
+		output, err := newBundler(t).runDeployer(
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, time.Now())
+		if err != nil {
+			t.Fatalf("runDeployer() error = %v", err)
+		}
+		opts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+		manifest, inventory, _, err := checksum.ReadAndVerifyBundle(context.Background(), dir, opts)
+		if err != nil {
+			t.Fatalf("ReadAndVerifyBundle() error = %v", err)
+		}
+		foundRecipe := false
+		for _, entry := range manifest.Entries() {
+			foundRecipe = foundRecipe || entry.Path == "recipe.yaml"
+		}
+		if !foundRecipe {
+			t.Errorf("manifest entries = %v, want recipe.yaml", manifest.Entries())
+		}
+		if output.TotalFiles != len(inventory.RelativeFiles()) {
+			t.Errorf("TotalFiles = %d, want %d", output.TotalFiles, len(inventory.RelativeFiles()))
+		}
+		if output.TotalSize != inventory.TotalSize() {
+			t.Errorf("TotalSize = %d, want %d", output.TotalSize, inventory.TotalSize())
+		}
+		if len(output.Results) != 1 || !slices.Equal(output.Results[0].Files, inventory.AbsoluteFiles()) {
+			t.Errorf("result files = %v, want %v", output.Results, inventory.AbsoluteFiles())
+		}
+		if len(output.Results) != 1 || output.Results[0].Size != inventory.TotalSize() {
+			t.Errorf("result size = %v, want %d", output.Results, inventory.TotalSize())
+		}
+
+		if err := os.WriteFile(filepath.Join(dir, "recipe.yaml"), []byte("tampered"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, verifyErr := checksum.ReadAndVerifyBundle(context.Background(), dir, opts); verifyErr == nil {
+			t.Error("tampered recipe.yaml passed verification")
+		}
+	})
+
+	t.Run("unmanaged file fails before attestation", func(t *testing.T) {
+		cfg := config.NewConfig(
+			config.WithDeployer(config.DeployerHelm),
+			config.WithIncludeChecksums(true),
+			config.WithAttest(true),
+		)
+		attester := &closedWorldTestAttester{}
+		b := &DefaultBundler{Config: cfg, Attester: attester}
+		_, err := b.runDeployer(
+			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
+			closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
+		}
+		if attester.called != 0 {
+			t.Errorf("Attest() calls = %d, want 0 before checksum finalization succeeds", attester.called)
+		}
+	})
+
+	t.Run("final accounting includes exact metadata", func(t *testing.T) {
+		cfg := config.NewConfig(
+			config.WithDeployer(config.DeployerHelm),
+			config.WithIncludeChecksums(true),
+			config.WithAttest(true),
+		)
+		attester := &closedWorldTestAttester{writeMetadata: true}
+		b := &DefaultBundler{Config: cfg, Attester: attester}
+		dir := t.TempDir()
+		output, err := b.runDeployer(
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, time.Now())
+		if err != nil {
+			t.Fatalf("runDeployer() error = %v", err)
+		}
+		_, inventory, _, err := checksum.ReadAndVerifyBundle(context.Background(), dir,
+			checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()})
+		if err != nil {
+			t.Fatalf("ReadAndVerifyBundle() error = %v", err)
+		}
+		for _, rel := range attestation.BundleMetadataPaths() {
+			if !slices.Contains(inventory.RelativeFiles(), rel) {
+				t.Errorf("final inventory missing metadata %q: %v", rel, inventory.RelativeFiles())
+			}
+		}
+		if attester.called != 1 {
+			t.Errorf("Attest() calls = %d, want 1", attester.called)
+		}
+		if output.TotalSize != inventory.TotalSize() || len(output.Results) != 1 ||
+			output.Results[0].Size != inventory.TotalSize() {
+
+			t.Errorf("output sizes = total %d results %v, want %d",
+				output.TotalSize, output.Results, inventory.TotalSize())
+		}
+		if output.TotalFiles != len(inventory.RelativeFiles()) ||
+			!slices.Equal(output.Results[0].Files, inventory.AbsoluteFiles()) {
+
+			t.Errorf("output files = total %d results %v, want %v",
+				output.TotalFiles, output.Results, inventory.AbsoluteFiles())
+		}
+	})
+
+	t.Run("unmanaged executable is rejected", func(t *testing.T) {
+		_, err := newBundler(t).runDeployer(
+			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
+			closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+
+	t.Run("canceled context cannot finalize", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := newBundler(t).runDeployer(
+			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
+		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
+		}
+	})
+}
+
+func TestAttestBundle_PropagatesCancellation(t *testing.T) {
+	dir := t.TempDir()
+	payloadPath := filepath.Join(dir, "payload.txt")
+	if err := os.WriteFile(payloadPath, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checksum.GenerateChecksums(context.Background(), dir, []string{payloadPath}); err != nil {
+		t.Fatal(err)
+	}
+
+	newBundler := func(attester attestation.Attester) *DefaultBundler {
+		return &DefaultBundler{
+			Config: config.NewConfig(
+				config.WithIncludeChecksums(true),
+				config.WithAttest(true),
+			),
+			Attester: attester,
+		}
+	}
+
+	t.Run("checksum digest cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		attester := &closedWorldTestAttester{}
+		files, err := newBundler(attester).attestBundle(ctx, dir, nil, closedWorldRecipeResult())
+		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
+		}
+		if len(files) != 0 {
+			t.Errorf("attestBundle() files = %v, want none", files)
+		}
+		if attester.called != 0 {
+			t.Errorf("Attest() calls = %d, want 0", attester.called)
+		}
+	})
+
+	t.Run("attester timeout", func(t *testing.T) {
+		attester := &closedWorldTestAttester{
+			attestErr: errors.New(errors.ErrCodeTimeout, "signing timed out"),
+		}
+		files, err := newBundler(attester).attestBundle(
+			context.Background(), dir, nil, closedWorldRecipeResult())
+		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
+		}
+		if len(files) != 0 {
+			t.Errorf("attestBundle() files = %v, want none", files)
+		}
+	})
+}
+
+func TestAttestBundle_RequiresChecksums(t *testing.T) {
+	attester := &closedWorldTestAttester{}
+	b := &DefaultBundler{
+		Config: config.NewConfig(
+			config.WithAttest(true),
+			config.WithIncludeChecksums(false),
+		),
+		Attester: attester,
+	}
+
+	files, err := b.attestBundle(
+		context.Background(), t.TempDir(), nil, closedWorldRecipeResult())
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("attestBundle() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("attestBundle() files = %v, want none", files)
+	}
+	if attester.called != 0 {
+		t.Errorf("Attest() calls = %d, want 0", attester.called)
+	}
+}
+
+func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+	}{
+		{
+			name: "nested symlink",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Symlink(t.TempDir(), filepath.Join(dir, "linked")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "fifo",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := unix.Mkfifo(filepath.Join(dir, "pipe"), 0600); err != nil {
+					t.Skipf("FIFO unsupported: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(t, dir)
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, "README.md")); !stderrors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("deployer wrote README.md before prewrite rejection: %v", statErr)
+			}
+		})
+	}
+
+	t.Run("ordinary stale file reaches exact finalization", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "stale.txt"), []byte("stale"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		b, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, "README.md")); statErr != nil {
+			t.Errorf("deployer did not run before stale-file finalization failure: %v", statErr)
+		}
+	})
+}
+
+func TestMake_ClosedWorldAllDeployers(t *testing.T) {
+	tests := []struct {
+		name     string
+		deployer config.DeployerType
+		repoURL  string
+	}{
+		{name: "helm", deployer: config.DeployerHelm},
+		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
+		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
+		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
+		{name: "helmfile", deployer: config.DeployerHelmfile},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithDeployer(tt.deployer),
+				config.WithRepoURL(tt.repoURL),
+				config.WithIncludeChecksums(true),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			dir := t.TempDir()
+			output, err := b.Make(context.Background(), closedWorldRecipeResult(), dir)
+			if err != nil {
+				t.Fatalf("Make() error = %v", err)
+			}
+			opts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+			_, inventory, _, err := checksum.ReadAndVerifyBundle(context.Background(), dir, opts)
+			if err != nil {
+				t.Fatalf("ReadAndVerifyBundle() error = %v", err)
+			}
+			if output.TotalFiles != len(inventory.RelativeFiles()) {
+				t.Errorf("TotalFiles = %d, want %d", output.TotalFiles, len(inventory.RelativeFiles()))
+			}
+		})
+	}
+}
+
+func TestMake_HelmBundlePassesVerifierChecksums(t *testing.T) {
+	b, err := New(WithConfig(config.NewConfig(
+		config.WithDeployer(config.DeployerHelm),
+		config.WithIncludeChecksums(true),
+	)))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	dir := t.TempDir()
+	if _, makeErr := b.Make(context.Background(), closedWorldRecipeResult(), dir); makeErr != nil {
+		t.Fatalf("Make() error = %v", makeErr)
+	}
+
+	verification, err := bundleverifier.Verify(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("verifier.Verify() error = %v", err)
+	}
+	if !verification.ChecksumsPassed {
+		t.Errorf("ChecksumsPassed = false, errors: %v", verification.Errors)
+	}
+	if verification.TrustLevel != bundleverifier.TrustUnverified {
+		t.Errorf("TrustLevel = %s, want %s", verification.TrustLevel, bundleverifier.TrustUnverified)
+	}
 }
 
 func TestNew_AttestWithoutBinaryAttestation(t *testing.T) {
@@ -331,7 +745,7 @@ func TestMake_RecipeCoveredByChecksums(t *testing.T) {
 		t.Fatalf("tamper %s: %v", recipeFileName, err)
 	}
 
-	verifyResult, err := verifier.Verify(context.Background(), bundleDir, nil)
+	verifyResult, err := bundleverifier.Verify(context.Background(), bundleDir, nil)
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
@@ -3523,4 +3937,27 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 			t.Errorf("expected zero-value options, got %+v", g)
 		}
 	})
+}
+
+func TestBuildDeployer_BundleChartVersion(t *testing.T) {
+	rr := &recipe.RecipeResult{}
+	rr.Metadata.Version = "v9.9.9"
+	b, err := New(WithConfig(config.NewConfig(
+		config.WithDeployer(config.DeployerArgoCDHelm),
+		config.WithBundleChartVersion("1.2.3+build.5"),
+	)))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("buildDeployer() error = %v", err)
+	}
+	g, ok := d.(*argocdhelm.Generator)
+	if !ok {
+		t.Fatalf("buildDeployer() = %T, want *argocdhelm.Generator", d)
+	}
+	if got := g.BundleChartVersion; got != "1.2.3+build.5" {
+		t.Errorf("Generator.BundleChartVersion = %q, want %q", got, "1.2.3+build.5")
+	}
 }

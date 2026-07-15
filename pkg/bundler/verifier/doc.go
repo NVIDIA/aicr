@@ -19,24 +19,27 @@
 //
 // Verification produces one of four trust levels (highest to lowest):
 //
-//   - verified: Checksums valid, bundle attestation verified, binary attestation
-//     verified and identity-pinned to NVIDIA CI, no external data.
+//   - verified: The exact bundle inventory and checksums are valid, the bundle
+//     attestation is verified, the binary attestation is verified and
+//     identity-pinned to NVIDIA CI, and there is no external data.
 //   - attested: Full chain verified but external data (--data) was used, capping
 //     trust because the data's own provenance is unknown.
-//   - unverified: Checksums valid but no attestation files (--attest not used).
-//   - unknown: Missing or invalid checksums, or attestation verification failed.
+//   - unverified: The exact bundle inventory and checksums are valid but no
+//     attestation files are present (--attest not used).
+//   - unknown: Missing, malformed, incomplete, or unmanaged bundle inventory;
+//     invalid checksums; or failed attestation verification.
 //
 // # Verification Chain
 //
 // Verify performs a five-step offline verification:
 //
-//  1. Read and verify checksums.txt (single read to prevent TOCTOU)
+//  1. Read checksums.txt once and verify the exact closed-world bundle inventory
 //  2. Check for bundle attestation file
 //  3. Verify bundle attestation against trusted root, binding to checksums.txt
 //     digest and requiring a valid OIDC-issued certificate
 //  4. Check for binary attestation file
 //  5. Verify binary attestation with identity pinning to NVIDIA CI and binding
-//     to the running binary's digest
+//     to the binary digest recorded in the verified bundle attestation
 //
 // All verification is fully offline using the locally cached or embedded
 // Sigstore trusted root. No network calls are made during verification.
