@@ -1184,6 +1184,16 @@ aicr diff --baseline <path|cm://...> --target <path|cm://...> [flags]
 - Changes are emitted in deterministic order (sorted by `Path`) so the diff is reproducible across runs and machines.
 - The `Result` envelope includes `baselineSource` and `targetSource` (the supplied paths), a `changes` array, and a `summary` with `added`, `removed`, `modified`, and `total` counts.
 
+| Field | Stable path |
+|-------|-------------|
+| Existing subtype Data | `<type>.<subtype>.<key>` |
+| Subtype Context | `<type>.<subtype>.context.<key>` |
+| Item cardinality | `<type>.<subtype>.items.length` |
+| Item Context | `<type>.<subtype>.items[<zero-based-index>].context.<key>` |
+| Item Data | `<type>.<subtype>.items[<zero-based-index>].data.<key>` |
+
+Items are ordered and compared by zero-based position. Reordering distinct records is drift. A list-length change emits `items.length` and field-level additions or removals. Ordinary existing Data paths remain unchanged for compatibility. Data keys equal to `context` or `items`, or beginning with `context.`, `items.`, or `items[`, use JSON-style bracket quoting so they cannot collide with structured paths; for example, subtype Data key `context.node` is emitted as `<type>.<subtype>["context.node"]`, and the same key in Item Data is emitted as `<type>.<subtype>.items[<index>].data["context.node"]`.
+
 **Examples:**
 
 ```shell

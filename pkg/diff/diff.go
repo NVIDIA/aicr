@@ -18,7 +18,11 @@
 package diff
 
 import (
+	"fmt"
+	"reflect"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -164,6 +168,15 @@ func safeReadingString(r measurement.Reading) string {
 	if r == nil {
 		return "<nil>"
 	}
+
+	value := reflect.ValueOf(r)
+	kind := value.Kind()
+	nilCapable := kind == reflect.Chan || kind == reflect.Func || kind == reflect.Interface ||
+		kind == reflect.Map || kind == reflect.Pointer || kind == reflect.Slice
+	if nilCapable && value.IsNil() {
+		return "<nil>"
+	}
+
 	return r.String()
 }
 
@@ -203,6 +216,8 @@ func compareMeasurements(base, target *measurement.Measurement) []Change {
 		}
 
 		changes = append(changes, compareReadings(prefix, baseSt.Data, targetSt.Data)...)
+		changes = append(changes, compareStrings(prefix+".context", baseSt.Context, targetSt.Context)...)
+		changes = append(changes, compareItems(prefix, baseSt.Items, targetSt.Items)...)
 	}
 
 	return changes
@@ -215,7 +230,7 @@ func compareReadings(prefix string, base, target map[string]measurement.Reading)
 	sort.Strings(allKeys)
 
 	for _, key := range allKeys {
-		path := prefix + "." + key
+		path := dataPath(prefix, key)
 		baseReading, baseExists := base[key]
 		targetReading, targetExists := target[key]
 
@@ -238,6 +253,133 @@ func compareReadings(prefix string, base, target map[string]measurement.Reading)
 	return changes
 }
 
+func dataPath(prefix, key string) string {
+	if key == "context" || strings.HasPrefix(key, "context.") ||
+		key == "items" || strings.HasPrefix(key, "items.") || strings.HasPrefix(key, "items[") {
+
+		return prefix + "[" + strconv.Quote(key) + "]"
+	}
+	return prefix + "." + key
+}
+
+func addedReadings(prefix string, values map[string]measurement.Reading) []Change {
+	return compareReadings(prefix, nil, values)
+}
+
+func removedReadings(prefix string, values map[string]measurement.Reading) []Change {
+	return compareReadings(prefix, values, nil)
+}
+
+func compareStrings(prefix string, base, target map[string]string) []Change {
+	changes := make([]Change, 0)
+	keys := mergeKeys(base, target)
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		path := prefix + "." + key
+		baseValue, baseExists := base[key]
+		targetValue, targetExists := target[key]
+
+		switch {
+		case !baseExists:
+			changes = append(changes, Change{Kind: Added, Severity: SeverityInfo, Path: path, Target: strPtr(targetValue)})
+		case !targetExists:
+			changes = append(changes, Change{Kind: Removed, Severity: SeverityInfo, Path: path, Baseline: strPtr(baseValue)})
+		case baseValue != targetValue:
+			changes = append(changes, Change{Kind: Modified, Severity: SeverityInfo, Path: path, Baseline: strPtr(baseValue), Target: strPtr(targetValue)})
+		}
+	}
+
+	return changes
+}
+
+func addedStrings(prefix string, values map[string]string) []Change {
+	return compareStrings(prefix, nil, values)
+}
+
+func removedStrings(prefix string, values map[string]string) []Change {
+	return compareStrings(prefix, values, nil)
+}
+
+func itemPrefix(prefix string, index int) string {
+	return fmt.Sprintf("%s.items[%d]", prefix, index)
+}
+
+func lengthChange(prefix string, kind ChangeKind, baseline, target *string) Change {
+	return Change{
+		Kind:     kind,
+		Severity: SeverityInfo,
+		Path:     prefix + ".items.length",
+		Baseline: baseline,
+		Target:   target,
+	}
+}
+
+func compareItems(prefix string, base, target []measurement.ItemEntry) []Change {
+	changes := make([]Change, 0)
+	if len(base) != len(target) {
+		changes = append(changes, lengthChange(
+			prefix,
+			Modified,
+			strPtr(strconv.Itoa(len(base))),
+			strPtr(strconv.Itoa(len(target))),
+		))
+	}
+
+	shared := min(len(base), len(target))
+	for i := 0; i < shared; i++ {
+		path := itemPrefix(prefix, i)
+		changes = append(changes, compareStrings(path+".context", base[i].Context, target[i].Context)...)
+		changes = append(changes, compareReadings(path+".data", base[i].Data, target[i].Data)...)
+	}
+	for i := shared; i < len(target); i++ {
+		changes = append(changes, addedItem(itemPrefix(prefix, i), &target[i])...)
+	}
+	for i := shared; i < len(base); i++ {
+		changes = append(changes, removedItem(itemPrefix(prefix, i), &base[i])...)
+	}
+
+	return changes
+}
+
+func addedItem(prefix string, item *measurement.ItemEntry) []Change {
+	changes := addedStrings(prefix+".context", item.Context)
+	return append(changes, addedReadings(prefix+".data", item.Data)...)
+}
+
+func removedItem(prefix string, item *measurement.ItemEntry) []Change {
+	changes := removedStrings(prefix+".context", item.Context)
+	return append(changes, removedReadings(prefix+".data", item.Data)...)
+}
+
+func addedItems(prefix string, items []measurement.ItemEntry) []Change {
+	if len(items) == 0 {
+		return nil
+	}
+
+	changes := []Change{
+		lengthChange(prefix, Added, nil, strPtr(strconv.Itoa(len(items)))),
+	}
+	for i := range items {
+		changes = append(changes, addedItem(itemPrefix(prefix, i), &items[i])...)
+	}
+	return changes
+}
+
+func removedItems(prefix string, items []measurement.ItemEntry) []Change {
+	if len(items) == 0 {
+		return nil
+	}
+
+	changes := []Change{
+		lengthChange(prefix, Removed, strPtr(strconv.Itoa(len(items))), nil),
+	}
+	for i := range items {
+		changes = append(changes, removedItem(itemPrefix(prefix, i), &items[i])...)
+	}
+	return changes
+}
+
 func addedMeasurement(m *measurement.Measurement) []Change {
 	changes := make([]Change, 0, len(m.Subtypes))
 	for i := range m.Subtypes {
@@ -255,18 +397,16 @@ func removedMeasurement(m *measurement.Measurement) []Change {
 }
 
 func addedSubtype(prefix string, st *measurement.Subtype) []Change {
-	changes := make([]Change, 0, len(st.Data))
-	for key, reading := range st.Data {
-		changes = append(changes, Change{Kind: Added, Severity: SeverityInfo, Path: prefix + "." + key, Target: strPtr(safeReadingString(reading))})
-	}
+	changes := addedReadings(prefix, st.Data)
+	changes = append(changes, addedStrings(prefix+".context", st.Context)...)
+	changes = append(changes, addedItems(prefix, st.Items)...)
 	return changes
 }
 
 func removedSubtype(prefix string, st *measurement.Subtype) []Change {
-	changes := make([]Change, 0, len(st.Data))
-	for key, reading := range st.Data {
-		changes = append(changes, Change{Kind: Removed, Severity: SeverityInfo, Path: prefix + "." + key, Baseline: strPtr(safeReadingString(reading))})
-	}
+	changes := removedReadings(prefix, st.Data)
+	changes = append(changes, removedStrings(prefix+".context", st.Context)...)
+	changes = append(changes, removedItems(prefix, st.Items)...)
 	return changes
 }
 
