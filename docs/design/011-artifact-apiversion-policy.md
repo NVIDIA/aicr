@@ -1,5 +1,12 @@
 # ADR-011: Artifact apiVersion Policy and Compatibility Gate
 
+> **Amended by [ADR-015](015-recipe-configuration-profiles.md).** ADR-015
+> introduces kind-scoped version evolution: `RecipeMetadata` and
+> `RecipeResult` accept `aicr.run/v1alpha3` for profile-bearing artifacts
+> (dual-accepted alongside the legacy version), while snapshots, configs,
+> and `RecipeCriteria` stay on `aicr.run/v1alpha2`. The single-version
+> posture below is otherwise unchanged.
+
 > **Amended by [ADR-013](013-aicr-run-domain-migration.md).** This ADR
 > established the single-sourced, enforced `apiVersion` contract while the
 > domain was `aicr.nvidia.com` and the version was `v1alpha1`. ADR-013 later
