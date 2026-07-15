@@ -41,6 +41,18 @@ cd <out> && python3 -m http.server 8000   # then open http://localhost:8000/
 
 On GitHub Pages the files are served over HTTP and work directly.
 
+### All versions vs. a specific version
+
+By default the dashboard shows the **all versions** view: each source's single
+latest run, folded into one grid, so every source that has ever attested a recipe
+is visible even when their latest runs are at different AICR releases. Corroboration
+here counts agreement *across* versions.
+
+Selecting a specific release in **FILTER EVIDENCE → AICR VERSION** switches to that
+version's **strict** grid, where consensus counts agreement only among runs at the
+*same* version (cross-version agreement is not a reproduction). Both grids are baked
+in Go (`Tab.Combined` and `Tab.Versions`), so the renderer only chooses which to show.
+
 ## Reading from GCS
 
 There is no embedded cloud client. Sync the bucket to a directory first, then point
