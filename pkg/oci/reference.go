@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/distribution/reference"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -198,6 +198,11 @@ type OutputConfig struct {
 	SourceDir string
 	// OutputDir is where temporary OCI artifacts will be created.
 	OutputDir string
+	// SourceFiles is the complete file set to package. Nil requests recursive
+	// discovery; a non-nil empty slice is invalid.
+	SourceFiles []string
+	// SubDir limits recursive discovery while preserving the path prefix.
+	SubDir string
 	// Reference contains the parsed OCI registry reference.
 	Reference *Reference
 	// Version is used for OCI annotations (org.opencontainers.image.version).
@@ -229,6 +234,30 @@ type PackageAndPushResult struct {
 // PackageAndPush packages a directory as an OCI artifact and pushes it to a registry.
 // This is a convenience function that combines Package and PushFromStore operations.
 func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaults.OCIBundlePublishTimeout)
+	defer cancel()
+	return packageAndPushWithDependencies(ctx, cfg, defaultPackageAndPushDependencies())
+}
+
+type packageAndPushDependencies struct {
+	packageOperation func(context.Context, PackageOptions) (*packageOperation, error)
+	pushOperation    func(context.Context, *packageOperation, PushOptions) (*PushResult, error)
+	beforePush       func(*packageOperation) error
+}
+
+func defaultPackageAndPushDependencies() packageAndPushDependencies {
+	return packageAndPushDependencies{
+		packageOperation: packageGenericOperation,
+		pushOperation:    pushPackageOperation,
+	}
+}
+
+func packageAndPushWithDependencies(
+	ctx context.Context,
+	cfg OutputConfig,
+	deps packageAndPushDependencies,
+) (retResult *PackageAndPushResult, retErr error) {
+
 	if cfg.Reference == nil || !cfg.Reference.IsOCI {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "OCI reference is required for PackageAndPush")
 	}
@@ -236,15 +265,8 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 	if cfg.Reference.Tag == "" {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required for OCI packaging")
 	}
-
-	absSourceDir, err := filepath.Abs(cfg.SourceDir)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to resolve source directory", err)
-	}
-
-	absOutputDir, err := filepath.Abs(cfg.OutputDir)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to resolve output directory", err)
+	if err := validateDistributionTag(cfg.Reference.Tag); err != nil {
+		return nil, err
 	}
 
 	slog.Info("packaging and pushing bundle as OCI artifact",
@@ -267,9 +289,11 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 	// Package locally first. Package returns properly coded errors
 	// (ErrCodeInvalidRequest, ErrCodeInternal, ErrCodeUnavailable); preserve
 	// the inner code rather than re-wrapping with ErrCodeInternal.
-	packageResult, err := Package(ctx, PackageOptions{
-		SourceDir:   absSourceDir,
-		OutputDir:   absOutputDir,
+	op, err := deps.packageOperation(ctx, PackageOptions{
+		SourceDir:   cfg.SourceDir,
+		OutputDir:   cfg.OutputDir,
+		SourceFiles: cfg.SourceFiles,
+		SubDir:      cfg.SubDir,
 		Registry:    cfg.Reference.Registry,
 		Repository:  cfg.Reference.Repository,
 		Tag:         cfg.Reference.Tag,
@@ -278,11 +302,25 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 	if err != nil {
 		return nil, err
 	}
+	released := false
+	defer func() {
+		if released {
+			return
+		}
+		if closeErr := op.Close(); closeErr != nil {
+			if retErr == nil {
+				retResult = nil
+				retErr = closeErr
+			} else {
+				slog.Warn("failed to clean OCI package operation after primary error", "error", closeErr)
+			}
+		}
+	}()
 
 	slog.Info("OCI artifact packaged locally",
-		"reference", packageResult.Reference,
-		"digest", packageResult.Digest,
-		"store_path", packageResult.StorePath,
+		"reference", op.result.Reference,
+		"digest", op.result.Digest,
+		"store_path", op.layout.Path(),
 	)
 
 	// Push to remote registry
@@ -294,7 +332,16 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 
 	// PushFromStore returns properly coded errors (ErrCodeUnavailable for
 	// transient/canceled, ErrCodeInternal otherwise); preserve the code.
-	pushResult, pushErr := PushFromStore(ctx, packageResult.StorePath, PushOptions{
+	if deps.beforePush != nil {
+		if beforePushErr := deps.beforePush(op); beforePushErr != nil {
+			return nil, apperrors.PropagateOrWrap(beforePushErr, apperrors.ErrCodeInternal,
+				"OCI package-to-push check failed")
+		}
+	}
+	if validateErr := op.layout.validate(); validateErr != nil {
+		return nil, validateErr
+	}
+	pushResult, pushErr := deps.pushOperation(ctx, op, PushOptions{
 		Registry:    cfg.Reference.Registry,
 		Repository:  cfg.Reference.Repository,
 		Tag:         cfg.Reference.Tag,
@@ -304,6 +351,14 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 	if pushErr != nil {
 		return nil, pushErr
 	}
+	if pushResult == nil {
+		return nil, apperrors.New(apperrors.ErrCodeInternal, "OCI push returned no result")
+	}
+	packageResult, err := op.release()
+	if err != nil {
+		return nil, err
+	}
+	released = true
 
 	slog.Info("OCI artifact pushed successfully",
 		"reference", pushResult.Reference,

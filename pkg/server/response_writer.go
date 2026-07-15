@@ -16,6 +16,12 @@ package server
 
 import "net/http"
 
+const (
+	defaultResponseContentType = "application/octet-stream"
+	contentTypeOptionsHeader   = "X-Content-Type-Options"
+	contentTypeOptionsNoSniff  = "nosniff"
+)
+
 // responseWriter wraps http.ResponseWriter to track response status and prevent
 // writing headers after the body has been written. This ensures proper HTTP semantics
 // and helps catch middleware bugs where headers are set too late.
@@ -40,8 +46,14 @@ func (rw *responseWriter) WriteHeader(statusCode int) {
 	if rw.written {
 		return // Prevent duplicate writes
 	}
+	underlying := rw.ResponseWriter
+	header := underlying.Header()
+	if header.Get("Content-Type") == "" {
+		header.Set("Content-Type", defaultResponseContentType)
+	}
+	header.Set(contentTypeOptionsHeader, contentTypeOptionsNoSniff)
 	rw.statusCode = statusCode
-	rw.ResponseWriter.WriteHeader(statusCode)
+	underlying.WriteHeader(statusCode)
 	rw.written = true
 }
 

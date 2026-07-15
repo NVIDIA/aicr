@@ -262,6 +262,9 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 				"failed to create output directory", err)
 		}
 	}
+	if err := checksum.ValidateOutputRoot(ctx, dir); err != nil {
+		return nil, err
+	}
 
 	// Bundle-time override policy for GPU allocation-policy keys (#1327):
 	// reject --dynamic declarations, warn on static overrides. Runs after
@@ -395,7 +398,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			Version:                b.Config.Version(),
 			RepoURL:                b.Config.RepoURL(),
 			TargetRevision:         b.Config.TargetRevision(),
-			IncludeChecksums:       b.Config.IncludeChecksums(),
+			IncludeChecksums:       false,
 			DynamicValues:          dynamicValues,
 			DataFiles:              dataFiles,
 			ComponentPreManifests:  componentPreManifests,
@@ -403,6 +406,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
 			ChartName:              b.Config.BundleChartName(),
+			BundleChartVersion:     b.Config.BundleChartVersion(),
 			AppName:                b.Config.AppName(),
 			OCIParentNamespace:     b.Config.OCIParentNamespace(),
 			NamePrefix:             argoOpts.NamePrefix,
@@ -437,7 +441,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			Version:                b.Config.Version(),
 			RepoURL:                b.Config.RepoURL(),
 			TargetRevision:         b.Config.TargetRevision(),
-			IncludeChecksums:       b.Config.IncludeChecksums(),
+			IncludeChecksums:       false,
 			DataFiles:              dataFiles,
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
@@ -474,8 +478,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
 			Version:                b.Config.Version(),
-			IncludeChecksums:       b.Config.IncludeChecksums(),
-			RecipeFile:             recipeFileName,
+			IncludeChecksums:       false,
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
@@ -501,7 +504,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			Version:               b.Config.Version(),
 			RepoURL:               b.Config.RepoURL(),
 			TargetRevision:        b.Config.TargetRevision(),
-			IncludeChecksums:      b.Config.IncludeChecksums(),
+			IncludeChecksums:      false,
 			DataFiles:             dataFiles,
 			ComponentPreManifests: componentPreManifests,
 			ComponentManifests:    componentManifests,
@@ -526,7 +529,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
 			Version:                b.Config.Version(),
-			IncludeChecksums:       b.Config.IncludeChecksums(),
+			IncludeChecksums:       false,
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
 			DataFiles:              dataFiles,
@@ -573,15 +576,6 @@ func (b *DefaultBundler) argoDeployerOptions() (*config.ArgoDeployerOptions, err
 // runDeployer executes a deployer and builds the result output.
 // dataFiles is the list of external data file paths already copied by Make().
 func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, start time.Time) (*result.Output, error) {
-	// Helm bundles include the resolved recipe. Write it before generation so
-	// the Helm deployer can include it in checksums.txt and the resulting
-	// attestation chain.
-	if b.Config.Deployer() == config.DeployerHelm {
-		if _, writeErr := b.writeRecipeFile(recipeResult, dir); writeErr != nil {
-			return nil, errors.PropagateOrWrap(writeErr, errors.ErrCodeInternal, "failed to write recipe file")
-		}
-	}
-
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
@@ -589,16 +583,42 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
 	}
+	// Write recipe file (helm-only, preserves original behavior)
+	if b.Config.Deployer() == config.DeployerHelm {
+		recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
+		if writeErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
+		}
+		output.Files = append(output.Files, filepath.Join(dir, recipeFileName))
+		output.TotalSize += recipeSize
+	}
 
-	totalFiles := len(output.Files)
-	totalSize := output.TotalSize
+	if b.Config.IncludeChecksums() {
+		if checksumErr := checksum.WriteChecksums(ctx, dir, output); checksumErr != nil {
+			return nil, errors.PropagateOrWrap(
+				checksumErr, errors.ErrCodeInternal, "failed to finalize bundle checksums")
+		}
+	}
 
 	// Attest bundle (skips internally when not configured)
 	attestFiles, err := b.attestBundle(ctx, dir, dataFiles, recipeResult)
 	if err != nil {
 		return nil, err
 	}
-	totalFiles += len(attestFiles)
+	if b.Config.IncludeChecksums() {
+		verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+		_, inventory, _, verifyErr := checksum.ReadAndVerifyBundle(ctx, dir, verifyOpts)
+		if verifyErr != nil {
+			return nil, errors.PropagateOrWrap(
+				verifyErr, errors.ErrCodeInternal, "failed final bundle inventory verification")
+		}
+		output.Files = inventory.AbsoluteFiles()
+		output.TotalSize = inventory.TotalSize()
+	} else {
+		for _, rel := range attestFiles {
+			output.Files = append(output.Files, filepath.Join(dir, filepath.FromSlash(rel)))
+		}
+	}
 
 	// Map deployer type to result and deployment names
 	resultType, deploymentType := deployerResultNames(b.Config.Deployer())
@@ -608,15 +628,15 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		Results:       make([]*result.Result, 0),
 		Errors:        make([]result.BundleError, 0),
 		TotalDuration: time.Since(start),
-		TotalSize:     totalSize,
-		TotalFiles:    totalFiles,
+		TotalSize:     output.TotalSize,
+		TotalFiles:    len(output.Files),
 		OutputDir:     dir,
 	}
 
 	bundleResult := &result.Result{
 		Type:     resultType,
 		Success:  true,
-		Files:    append(output.Files, attestFiles...),
+		Files:    append([]string(nil), output.Files...),
 		Size:     output.TotalSize,
 		Duration: output.Duration,
 	}
@@ -1692,17 +1712,20 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	if b.Attester == nil || b.Config == nil || !b.Config.Attest() {
 		return nil, nil
 	}
+	if !b.Config.IncludeChecksums() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"bundle attestation requires checksums to be enabled")
+	}
 
 	// Read checksums.txt and compute its digest
 	checksumPath, joinErr := deployer.SafeJoin(dir, checksum.ChecksumFileName)
 	if joinErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe checksum path", joinErr)
 	}
-	digest, err := attestation.ComputeFileDigest(checksumPath)
+	digest, err := attestation.ComputeFileDigestContext(ctx, checksumPath)
 	if err != nil {
-		// If checksums don't exist (IncludeChecksums=false), attestation is not possible
-		slog.Debug("attestation not possible: checksums not available", "error", err)
-		return nil, nil
+		return nil, errors.PropagateOrWrap(
+			err, errors.ErrCodeInternal, "failed to compute bundle checksum digest")
 	}
 
 	// Build attestation subject with full SLSA metadata
@@ -1738,13 +1761,15 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	// Find and add binary attestation as a resolved dependency
 	binaryPath, err := os.Executable()
 	if err == nil {
-		binaryDigest, digestErr := attestation.ComputeFileDigest(binaryPath)
-		if digestErr == nil {
-			subject.ResolvedDependencies = append(subject.ResolvedDependencies, attestation.Dependency{
-				URI:    fmt.Sprintf("file://%s", binaryPath),
-				Digest: map[string]string{digestAlgoSHA256: binaryDigest},
-			})
+		binaryDigest, digestErr := attestation.ComputeFileDigestContext(ctx, binaryPath)
+		if digestErr != nil {
+			return nil, errors.PropagateOrWrap(
+				digestErr, errors.ErrCodeInternal, "failed to compute binary dependency digest")
 		}
+		subject.ResolvedDependencies = append(subject.ResolvedDependencies, attestation.Dependency{
+			URI:    fmt.Sprintf("file://%s", binaryPath),
+			Digest: map[string]string{digestAlgoSHA256: binaryDigest},
+		})
 	}
 
 	// Add data files as resolved dependencies
@@ -1753,19 +1778,21 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 		if pathErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe data file path in attestation", pathErr)
 		}
-		dataDigest, digestErr := attestation.ComputeFileDigest(dataPath)
-		if digestErr == nil {
-			subject.ResolvedDependencies = append(subject.ResolvedDependencies, attestation.Dependency{
-				URI:    fmt.Sprintf("file://%s", dataFile),
-				Digest: map[string]string{digestAlgoSHA256: dataDigest},
-			})
+		dataDigest, digestErr := attestation.ComputeFileDigestContext(ctx, dataPath)
+		if digestErr != nil {
+			return nil, errors.PropagateOrWrap(
+				digestErr, errors.ErrCodeInternal, "failed to compute external data dependency digest")
 		}
+		subject.ResolvedDependencies = append(subject.ResolvedDependencies, attestation.Dependency{
+			URI:    fmt.Sprintf("file://%s", dataFile),
+			Digest: map[string]string{digestAlgoSHA256: dataDigest},
+		})
 	}
 
 	// Sign
 	bundleJSON, err := b.Attester.Attest(ctx, subject)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "bundle attestation failed", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "bundle attestation failed")
 	}
 
 	// If attester returned nil (NoOp), nothing to write
@@ -1823,10 +1850,10 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 	// REQ-6: Cryptographically verify binary attestation before attesting bundles.
 	// Confirms the binary was built by NVIDIA CI (identity-pinned) and the
 	// attestation binds to this specific binary's content.
-	binaryDigest, digestErr := checksum.SHA256Raw(binaryPath)
+	binaryDigest, digestErr := checksum.SHA256RawContext(ctx, binaryPath)
 	if digestErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to compute binary digest for provenance verification", digestErr)
+		return errors.PropagateOrWrap(
+			digestErr, errors.ErrCodeInternal, "failed to compute binary digest for provenance verification")
 	}
 
 	identityPattern := verifier.TrustedRepositoryPattern
@@ -1842,6 +1869,9 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 
 	binaryBuilder, verifyErr := verifier.VerifyBinaryAttestation(ctx, binaryAttestPath, identityPattern, binaryDigest)
 	if verifyErr != nil {
+		if stderrors.Is(verifyErr, errors.New(errors.ErrCodeTimeout, "")) {
+			return verifyErr
+		}
 		return errors.Wrap(errors.ErrCodeUnauthorized,
 			"binary attestation verification failed; only NVIDIA-built binaries can attest bundles — "+
 				"remove --attest to skip", verifyErr)

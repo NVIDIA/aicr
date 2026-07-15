@@ -1231,7 +1231,7 @@ aicr bundle [flags]
 |---------------------------------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path to recipe file (required, or via `spec.bundle.input.recipe` in `--config`) |
 | `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Bundle Config File Mode](#bundle-config-file-mode). |
-| `--output` | `-o` | string | Output directory (default: current dir) |
+| `--output` | `-o` | string | Local output directory or `oci://` registry URI (default: current directory) |
 | `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `--repo` | | string | Git/OCI repository URL baked into Argo CD Application sources. Used with `--deployer argocd`. Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
 | `--set` | | string[] | Override **scalar** values in bundle files (repeatable, format: `component:path=value`). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`). Scalar-only — for list/object values use `--set-json` / `--set-file`. |
@@ -1255,7 +1255,7 @@ aicr bundle [flags]
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
-| `--image-refs` | | string | Path to image references file for OCI registry |
+| `--image-refs` | | string | External file to receive the published OCI digest. Valid only with OCI `--output`; local output is rejected. The parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. |
 | `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication, or a KMS key via `--signing-key` for environments without OIDC. See [Bundle Attestation](#bundle-attestation). |
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 | `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
@@ -1265,6 +1265,25 @@ aicr bundle [flags]
 | `--signing-config` | | string | Sign the `--attest` bundle with a custom Sigstore signing config JSON instead of the default Rekor v2 config (advanced — e.g. an edited config or a private v2 instance). Also reads `AICR_SIGNING_CONFIG`. Mutually exclusive with `--rekor-url`. |
 | `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a KMS URI; supported schemes are `awskms://`, `gcpkms://`, `azurekms://`, and `hashivault://`. Like keyless signing, KMS signs to Rekor v2 by default; opt out with `--rekor-url` (v1) or `--signing-config` (custom). Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. See [KMS-Backed Signing](#kms-backed-signing). |
 | `--yes` | `--assume-yes` | bool | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
+
+`--image-refs` writes the published digest through a mode-`0600` temporary
+file and an anchored same-directory rename. Its target may be absent or an
+existing retained regular file; directories, symlinks, other non-regular
+files, and aliases of the bundle tree are rejected. The final validation and
+rename are ordered but are not one atomic identity-conditioned filesystem
+operation, so no other process should mutate the target directory while the
+command runs.
+
+For every CLI OCI publication, AICR revalidates a private bundle snapshot and
+publishes only its closed-world inventory; it never packages the mutable
+caller tree directly.
+
+For Argo CD Helm OCI output, AICR keeps the raw Distribution tag in the
+registry reference and derives a strict Helm semantic version for chart
+metadata and consumers. For example, registry tag `1.2.3_build.5` remains
+unchanged, while `Chart.yaml`, Argo CD `targetRevision`, and Helm's
+`--version` use `1.2.3+build.5`. The OCI repository basename must equal the
+generated chart name.
 
 #### Bundle Config File Mode
 
@@ -1281,6 +1300,7 @@ spec:
       recipe: ./recipe.yaml
     output:
       target: oci://ghcr.io/example/bundle:v1.0.0
+      imageRefs: ./publish/bundle.digest  # ./publish must already be a real directory
     deployment:
       deployer: argocd
       repo: https://example.git/charts
@@ -1747,7 +1767,12 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 | Cluster-specific value (varies per deployment) | `--dynamic` | `--dynamic alloy:clusterName` |
 | Static override (same for all deployments of this bundle) | `--set` | `--set gpuoperator:driver.version=580.105.08` |
 
-> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the generated payload files listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
+> **Attestation scope:** Dynamic values are supplied at install time and are
+> **not covered by `--attest`**. Attestation binds the generated closed-world
+> inventory, including `recipe.yaml` when present, not operator-provided
+> overrides. If you need to constrain dynamic values at deploy time, use
+> admission control or Argo sync hooks — see
+> [Attestation Scope](#attestation-scope).
 
 ```shell
 --dynamic component:path.to.field
@@ -2169,7 +2194,7 @@ When `--attest` is passed, the bundle command performs five steps:
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
 2. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
 3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
-4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated payload files listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, and the binary that produced it.
+4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated closed-world inventory, including `recipe.yaml` when present, and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
@@ -2202,7 +2227,9 @@ order:
 
 Both interactive flows time out after 5 minutes.
 
-Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`, `flux`). External `--data` files are included in `checksums.txt` and listed as resolved dependencies in the attestation.
+Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`, `flux`,
+`helmfile`). External `--data` files copied into the bundle are included in
+`checksums.txt` and listed as resolved dependencies in the attestation.
 
 ##### Privacy: identity in keyless signatures
 
@@ -2297,7 +2324,23 @@ The `hashivault://<transit-key-name>` scheme signs through HashiCorp Vault's Tra
 
 ##### Attestation Scope
 
-Attestation binds the generated payload files listed in `checksums.txt` — including `recipe.yaml` in Helm bundles, defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. The attestation files are verified separately. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
+Attestation binds a closed-world bundle inventory. `checksums.txt` contains one
+SHA256 entry for every regular payload file — including `recipe.yaml` when
+present, defaults, dynamic-value stubs, and external `--data` files copied into
+the bundle. Verification derives the required directories and rejects every
+additional file or directory, symlink, and other non-regular object. Only
+`checksums.txt`, `attestation/bundle-attestation.sigstore.json`, and
+`attestation/aicr-attestation.sigstore.json` may exist outside the manifest;
+they remain part of the verified inventory and the attestation files are
+verified separately. Manifest parsing is order-independent and AICR generates
+entries sorted by canonical slash-relative path, but reordering an already
+signed `checksums.txt` changes the signed bytes and invalidates its existing
+attestation.
+
+The attestation does **not** bind install-time values supplied via `helm
+--set`, a user-provided `-f extra.yaml`, or Argo
+`Application.spec.source.helm.parameters`. That boundary is intentional:
+dynamic values are the operator's domain by design.
 
 If you need to enforce specific install-time values (e.g., pinning `driver.version`), that is a **policy concern**, not an attestation one. Use admission control (Kyverno, Gatekeeper) or Argo sync hooks to reject deployments that violate the policy. `aicr verify` checks bundle integrity and provenance; it does not evaluate install-time value constraints.
 
@@ -2311,8 +2354,8 @@ cd bundles
 cat README.md
 cat 001-gpu-operator/values.yaml
 
-# Verify integrity
-sha256sum -c checksums.txt
+# Verify the complete closed-world inventory and any available attestations
+aicr verify .
 
 # Deploy to cluster
 chmod +x deploy.sh && ./deploy.sh
@@ -2556,7 +2599,13 @@ aicr mirror list --recipe recipe.yaml --set gpuoperator:driver.enabled=false
 
 ### aicr verify
 
-Verify the integrity and attestation chain of a bundle. By default verification is offline and makes no network calls. The one exception is `--key` with a KMS URI, which reaches the KMS provider to fetch the public key (see the `--key` network behavior note below).
+Verify the complete closed-world inventory and attestation chain of a bundle.
+`aicr verify .` is the full verification command when run from the bundle
+root. It rejects any additional file or directory, symlink, or other
+non-regular filesystem object, except the three exact inventory metadata
+paths. By default verification is offline and makes no network calls. The one
+exception is `--key` with a KMS URI, which reaches the KMS provider to fetch
+the public key (see the `--key` network behavior note below).
 
 **Synopsis:**
 ```shell
@@ -2578,21 +2627,28 @@ aicr verify <bundle-dir> [flags]
 
 | Level | Name | Criteria |
 |-------|------|----------|
-| 4 | `verified` | Full chain: checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
-| 3 | `attested` | Bundle attestation verified; binary attestation missing, or external data (`--data`) used |
-| 2 | `unverified` | Checksums valid, `--attest` was not used when creating the bundle |
-| 1 | `unknown` | Missing/invalid checksums, or an attestation (bundle or binary) present but failing verification |
+| 4 | `verified` | Full chain: closed-world inventory + bundle attestation + binary attestation pinned to NVIDIA CI |
+| 3 | `attested` | Closed-world inventory and bundle attestation valid; binary attestation missing, or external data (`--data`) used |
+| 2 | `unverified` | Closed-world inventory valid; `--attest` was not used when creating the bundle |
+| 1 | `unknown` | Missing, incomplete, or invalid inventory; or an attestation (bundle or binary) present but failing verification |
 
 #### Verification steps
 
-1. **Checksums** — verifies all files listed in `checksums.txt` match
+1. **Closed-world inventory** — verifies every regular payload file is listed in `checksums.txt`, all listed digests match, required directories are present, and no additional filesystem entries exist beyond the three allowed metadata paths
 2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
 3. **Binary attestation** — provenance chain verified with identity pinned to NVIDIA CI (`on-tag.yaml` workflow)
 
+Inventory validation accepts valid manifest entries in any order, while AICR
+generates canonical slash-relative entries in sorted order. Reordering a
+signed `checksums.txt` invalidates its existing attestation. Legacy bundles
+with incomplete manifests report `unknown` trust and must be regenerated.
+
 **Examples:**
+
 ```shell
-# Auto-detect maximum trust level
-aicr verify ./my-bundle
+# From a bundle root, perform full closed-world verification
+cd ./my-bundle
+aicr verify .
 
 # Enforce a minimum trust level
 aicr verify ./my-bundle --min-trust-level verified

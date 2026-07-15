@@ -11,7 +11,7 @@ offline deployment shapes. For the exhaustive per-flag reference, see the
 
 | Artifact | Produced by | Verified by |
 |----------|-------------|-------------|
-| Deployment bundle | `aicr bundle --attest` | [`aicr verify`](cli-reference.md#aicr-verify) |
+| Deployment bundle | `aicr bundle` | [`aicr verify`](cli-reference.md#aicr-verify) |
 | Recipe-evidence bundle | `aicr validate --emit-attestation` | [`aicr evidence verify`](cli-reference.md#aicr-evidence-verify) |
 | Embedded recipe catalog | shipped in the `aicr` binary | [`aicr recipe verify-catalog`](cli-reference.md#aicr-recipe-verify-catalog) |
 
@@ -19,8 +19,10 @@ This guide focuses on the first two. Catalog verification is a single
 self-contained command; see its [CLI reference entry](cli-reference.md#aicr-recipe-verify-catalog).
 
 Bundles are unsigned by default; attestation is opt-in via `aicr bundle
---attest`. An unsigned bundle can still be checksum-verified, but it cannot
-reach the higher trust levels described below.
+--attest`. An unsigned bundle can still have its closed-world inventory
+verified, but it cannot reach the higher trust levels described below.
+
+AICR treats a deployment bundle as a closed-world inventory. `checksums.txt` contains one SHA256 entry for every regular payload file, including `recipe.yaml` when present. Verification derives the required directories from those paths and rejects every additional file or directory, symlink, and other non-regular filesystem object. Only `checksums.txt`, `attestation/bundle-attestation.sigstore.json`, and `attestation/aicr-attestation.sigstore.json` may exist outside the manifest; they remain part of the verified inventory. Inventory validation accepts valid manifest entries in any order, while AICR generates them sorted by canonical slash-relative path. AICR ZIP and CLI OCI publication revalidate a private snapshot and publish only that inventory. Legacy bundles with incomplete manifests report `unknown` trust and must be regenerated.
 
 ## Trust Levels
 
@@ -29,10 +31,10 @@ each one subsumes the guarantees of the levels beneath it.
 
 | Level | Name | What it guarantees |
 |-------|------|--------------------|
-| 4 | `verified` | Checksums valid, bundle attestation verified, binary attestation verified with identity pinned to NVIDIA CI, and no external data |
-| 3 | `attested` | Bundle attestation cryptographically verified, but the chain is incomplete — the binary attestation is missing or external `--data` was used |
-| 2 | `unverified` | Checksums valid, but no attestation files exist (the bundle was created without `--attest`) |
-| 1 | `unknown` | Checksums are missing/invalid, or an attestation (bundle or binary) is present but *fails* verification — a present binary attestation that does not verify is a hard failure, not a degraded `attested` |
+| 4 | `verified` | Closed-world inventory valid, bundle attestation verified, binary attestation verified with identity pinned to NVIDIA CI, and no external data |
+| 3 | `attested` | Closed-world inventory and bundle attestation valid, but the chain is incomplete — the binary attestation is missing or external `--data` was used |
+| 2 | `unverified` | Closed-world inventory valid, but no attestation files exist (the bundle was created without `--attest`) |
+| 1 | `unknown` | Inventory is missing, incomplete, or invalid; or an attestation (bundle or binary) is present but *fails* verification — a present binary attestation that does not verify is a hard failure, not a degraded `attested` |
 
 The ordering matters for enforcement: `verified` > `attested` > `unverified` >
 `unknown`. A bundle that uses external data can never exceed `attested`, and a
@@ -53,9 +55,14 @@ aicr verify ./my-bundle
 
 Under the hood this runs three checks:
 
-1. **Checksums**: every generated payload file listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, is hashed and matched.
+1. **Closed-world inventory**: every regular payload file, including `recipe.yaml` when present, must have a matching entry in `checksums.txt`; every additional filesystem entry is rejected except the three allowed inventory metadata files.
 2. **Bundle attestation**: the bundle's signature is verified against the Sigstore trusted root.
 3. **Binary attestation**: the provenance chain is verified with identity pinned to NVIDIA CI.
+
+Manifest entry order does not affect inventory validation. AICR nevertheless
+generates `checksums.txt` in canonical slash-relative path order. Reordering an
+already signed manifest changes its bytes and invalidates the existing bundle
+attestation.
 
 You can also pin the bundle's creator identity or the CLI version that produced it:
 
@@ -83,6 +90,8 @@ aicr verify ./my-bundle --min-trust-level attested
 
 Valid values are `verified`, `attested`, `unverified`, `unknown`, and `max`.
 A bundle whose computed level is below the requested floor exits non-zero.
+An incomplete legacy manifest cannot establish a closed-world inventory, so it
+reports `unknown` and the bundle must be regenerated.
 
 ## KMS-Key Verification
 
@@ -361,7 +370,9 @@ references because tags are registry-rewritable. Pass the committed pointer file
 **Trust level lower than expected.** A bundle created without `--attest` caps at
 `unverified`; a bundle built with external `--data` caps at `attested`. If you
 require a stricter level, re-create the bundle with attestation and without
-external data, then verify with `--min-trust-level verified`.
+external data, then verify with `--min-trust-level verified`. If an older
+bundle has an incomplete `checksums.txt`, regenerate it; listed-digest checks
+cannot establish closed-world trust.
 
 **Private-Sigstore-signed bundle won't verify.** A bundle signed against a
 private Fulcio/Rekor needs that infrastructure's trusted root. Pass it with

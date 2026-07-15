@@ -176,9 +176,9 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		}
 	}
 
-	manifest, err := BuildManifest(summaryDir, ManifestFilename, StatementFilename, AttestationFilename)
+	manifest, err := BuildManifestContext(ctx, summaryDir, ManifestFilename, StatementFilename, AttestationFilename)
 	if err != nil {
-		return nil, err
+		return nil, normalizeManifestBuildError(ctx, err)
 	}
 	manifestDigest, err := WriteManifest(summaryDir, manifest)
 	if err != nil {
@@ -242,6 +242,16 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		Predicate:     pred,
 		StatementJSON: stmt,
 	}, nil
+}
+
+func normalizeManifestBuildError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.Wrap(errors.ErrCodeUnavailable, "build canceled", ctxErr)
+	}
+	return err
 }
 
 func validateOpts(opts BuildOptions) error {

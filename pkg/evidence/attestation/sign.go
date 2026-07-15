@@ -123,11 +123,12 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 	attachCtx, attachCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
 	defer attachCancel()
 	referrer, attachErr := AttachSigstoreBundleAsReferrer(attachCtx, AttachReferrerOptions{
-		Reference:    reference,
-		BundleJSON:   signRes.BundleJSON,
-		MainArtifact: opts.Artifact,
-		PlainHTTP:    opts.PlainHTTP,
-		InsecureTLS:  opts.InsecureTLS,
+		Reference:     reference,
+		BundleJSON:    signRes.BundleJSON,
+		MainArtifact:  opts.Artifact,
+		ExcludedRoots: []string{bundle.SummaryDir},
+		PlainHTTP:     opts.PlainHTTP,
+		InsecureTLS:   opts.InsecureTLS,
 	})
 	if attachErr != nil {
 		return attachErr

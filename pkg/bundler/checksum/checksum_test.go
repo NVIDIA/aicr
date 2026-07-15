@@ -20,7 +20,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -45,8 +49,8 @@ func TestGenerateChecksums(t *testing.T) {
 			t.Fatalf("failed to create file2: %v", err)
 		}
 
-		// Generate checksums
-		err := GenerateChecksums(context.Background(), tmpDir, []string{file1, file2})
+		// Supply reverse order; the serialized manifest must be deterministic.
+		err := GenerateChecksums(context.Background(), tmpDir, []string{file2, file1})
 		if err != nil {
 			t.Fatalf("GenerateChecksums() error = %v", err)
 		}
@@ -82,6 +86,9 @@ func TestGenerateChecksums(t *testing.T) {
 				t.Errorf("expected 64 character hash, got %d: %s", len(parts[0]), parts[0])
 			}
 		}
+		if !strings.HasSuffix(lines[0], "  file1.txt") || !strings.HasSuffix(lines[1], "  file2.txt") {
+			t.Errorf("checksum paths are not sorted: %#v", lines)
+		}
 	})
 
 	t.Run("returns error on context cancellation", func(t *testing.T) {
@@ -108,26 +115,15 @@ func TestGenerateChecksums(t *testing.T) {
 		}
 	})
 
-	t.Run("handles empty file list", func(t *testing.T) {
+	t.Run("rejects empty file list", func(t *testing.T) {
 		t.Parallel()
 
 		tmpDir := t.TempDir()
 
 		err := GenerateChecksums(context.Background(), tmpDir, []string{})
-		if err != nil {
-			t.Fatalf("GenerateChecksums() error = %v", err)
-		}
-
-		// Verify checksums.txt was created (even if empty)
-		checksumPath := GetChecksumFilePath(tmpDir)
-		data, err := os.ReadFile(checksumPath)
-		if err != nil {
-			t.Fatalf("failed to read checksums.txt: %v", err)
-		}
-
-		// Should just have a newline
-		if string(data) != "\n" {
-			t.Errorf("expected empty checksums to have just newline, got %q", string(data))
+		requireInventoryErrorCode(t, err, errors.ErrCodeInvalidRequest)
+		if _, statErr := os.Stat(GetChecksumFilePath(tmpDir)); !os.IsNotExist(statErr) {
+			t.Errorf("empty generation wrote checksums.txt: %v", statErr)
 		}
 	})
 
@@ -161,7 +157,284 @@ func TestGenerateChecksums(t *testing.T) {
 		if !strings.Contains(string(data), "subdir/nested.txt") {
 			t.Errorf("expected relative path subdir/nested.txt, got %s", string(data))
 		}
+		if strings.Contains(string(data), "\\") {
+			t.Errorf("checksums.txt path was not slash normalized: %q", data)
+		}
 	})
+
+	invalidTests := []struct {
+		name  string
+		setup func(t *testing.T, dir string) []string
+	}{
+		{
+			name: "untracked file beside listed file",
+			setup: func(t *testing.T, dir string) []string {
+				tracked := filepath.Join(dir, "tracked.txt")
+				if err := os.WriteFile(tracked, []byte("tracked"), 0600); err != nil {
+					t.Fatalf("WriteFile() tracked error = %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra"), 0600); err != nil {
+					t.Fatalf("WriteFile() extra error = %v", err)
+				}
+				return []string{tracked}
+			},
+		},
+		{
+			name: "file outside bundle directory",
+			setup: func(t *testing.T, _ string) []string {
+				outside := filepath.Join(t.TempDir(), "outside.txt")
+				if err := os.WriteFile(outside, []byte("outside"), 0600); err != nil {
+					t.Fatalf("WriteFile() outside error = %v", err)
+				}
+				return []string{outside}
+			},
+		},
+		{
+			name: "duplicate file argument",
+			setup: func(t *testing.T, dir string) []string {
+				file := filepath.Join(dir, "payload.txt")
+				if err := os.WriteFile(file, []byte("payload"), 0600); err != nil {
+					t.Fatalf("WriteFile() error = %v", err)
+				}
+				return []string{file, file}
+			},
+		},
+		{
+			name: "symlink argument",
+			setup: func(t *testing.T, dir string) []string {
+				target := filepath.Join(dir, "target.txt")
+				if err := os.WriteFile(target, []byte("target"), 0600); err != nil {
+					t.Fatalf("WriteFile() target error = %v", err)
+				}
+				link := filepath.Join(dir, "payload.txt")
+				if err := os.Symlink(target, link); err != nil {
+					t.Fatalf("Symlink() error = %v", err)
+				}
+				return []string{link}
+			},
+		},
+		{
+			name: "pre-existing unexpected directory",
+			setup: func(t *testing.T, dir string) []string {
+				file := filepath.Join(dir, "payload.txt")
+				if err := os.WriteFile(file, []byte("payload"), 0600); err != nil {
+					t.Fatalf("WriteFile() error = %v", err)
+				}
+				if err := os.Mkdir(filepath.Join(dir, "empty"), 0755); err != nil {
+					t.Fatalf("Mkdir() error = %v", err)
+				}
+				return []string{file}
+			},
+		},
+	}
+
+	for _, tt := range invalidTests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			err := GenerateChecksums(context.Background(), dir, tt.setup(t, dir))
+			requireInventoryErrorCode(t, err, errors.ErrCodeInvalidRequest)
+		})
+	}
+
+	t.Run("regenerates an existing root checksum file", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		payload := filepath.Join(dir, "payload.txt")
+		if err := os.WriteFile(payload, []byte("payload"), 0600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := GenerateChecksums(context.Background(), dir, []string{payload}); err != nil {
+			t.Fatalf("first GenerateChecksums() error = %v", err)
+		}
+		first, err := os.ReadFile(GetChecksumFilePath(dir))
+		if err != nil {
+			t.Fatalf("ReadFile() first error = %v", err)
+		}
+		if secondErr := GenerateChecksums(context.Background(), dir, []string{payload}); secondErr != nil {
+			t.Fatalf("second GenerateChecksums() error = %v", secondErr)
+		}
+		second, err := os.ReadFile(GetChecksumFilePath(dir))
+		if err != nil {
+			t.Fatalf("ReadFile() second error = %v", err)
+		}
+		if string(second) != string(first) {
+			t.Errorf("regenerated checksums = %q, want %q", second, first)
+		}
+	})
+}
+
+func TestGenerateChecksums_PostPublishVerificationFailureRollsBack(t *testing.T) {
+	tests := []struct {
+		name          string
+		priorManifest []byte
+	}{
+		{name: "removes newly published manifest"},
+		{name: "restores prior manifest", priorManifest: []byte("prior manifest bytes\n")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			payload := filepath.Join(dir, "payload.txt")
+			if err := os.WriteFile(payload, []byte("payload"), 0600); err != nil {
+				t.Fatalf("WriteFile(payload) error = %v", err)
+			}
+			checksumPath := GetChecksumFilePath(dir)
+			if tt.priorManifest != nil {
+				if err := os.WriteFile(checksumPath, tt.priorManifest, 0600); err != nil {
+					t.Fatalf("WriteFile(prior checksums) error = %v", err)
+				}
+			}
+
+			ctx := &cancelOnChecksumPublicationContext{
+				Context:      context.Background(),
+				checksumPath: checksumPath,
+				prior:        tt.priorManifest,
+			}
+			err := GenerateChecksums(ctx, dir, []string{payload})
+			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				t.Fatalf("GenerateChecksums() error = %v, want ErrCodeTimeout", err)
+			}
+
+			got, readErr := os.ReadFile(checksumPath)
+			if tt.priorManifest == nil {
+				if !os.IsNotExist(readErr) {
+					t.Errorf("ReadFile(checksums) error = %v, want not exist", readErr)
+				}
+				return
+			}
+			if readErr != nil {
+				t.Fatalf("ReadFile(restored checksums) error = %v", readErr)
+			}
+			if string(got) != string(tt.priorManifest) {
+				t.Errorf("restored checksums = %q, want %q", got, tt.priorManifest)
+			}
+		})
+	}
+}
+
+func TestGenerateChecksums_RootSwapBeforePublicationDoesNotMutateReplacement(t *testing.T) {
+	parent := t.TempDir()
+	bundleDir := filepath.Join(parent, "bundle")
+	if err := os.Mkdir(bundleDir, 0700); err != nil {
+		t.Fatalf("Mkdir(bundle) error = %v", err)
+	}
+	payload := filepath.Join(bundleDir, "payload.txt")
+	if err := os.WriteFile(payload, []byte("payload"), 0600); err != nil {
+		t.Fatalf("WriteFile(payload) error = %v", err)
+	}
+
+	originalDir := filepath.Join(parent, "original")
+	replacementMarker := filepath.Join(bundleDir, "replacement-marker")
+	deps := defaultChecksumGenerationDependencies()
+	deps.afterValidation = func() error {
+		if err := os.Rename(bundleDir, originalDir); err != nil {
+			return err
+		}
+		if err := os.Mkdir(bundleDir, 0700); err != nil {
+			return err
+		}
+		return os.WriteFile(replacementMarker, []byte("replacement"), 0600)
+	}
+
+	err := generateChecksumsWithDependencies(
+		context.Background(), bundleDir, []string{payload}, deps)
+	requireInventoryErrorCode(t, err, errors.ErrCodeInvalidRequest)
+	if _, statErr := os.Lstat(filepath.Join(originalDir, ChecksumFileName)); !os.IsNotExist(statErr) {
+		t.Errorf("original checksums.txt error = %v, want not exist", statErr)
+	}
+	assertReplacementFileContents(t, replacementMarker)
+	if _, statErr := os.Lstat(filepath.Join(bundleDir, ChecksumFileName)); !os.IsNotExist(statErr) {
+		t.Errorf("replacement checksums.txt error = %v, want not exist", statErr)
+	}
+}
+
+func TestGenerateChecksums_RootSwapBeforeVerificationRollsBackAnchoredOriginal(t *testing.T) {
+	tests := []struct {
+		name          string
+		priorManifest []byte
+	}{
+		{name: "removes newly published manifest"},
+		{name: "restores prior manifest", priorManifest: []byte("prior manifest bytes\n")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parent := t.TempDir()
+			bundleDir := filepath.Join(parent, "bundle")
+			if err := os.Mkdir(bundleDir, 0700); err != nil {
+				t.Fatalf("Mkdir(bundle) error = %v", err)
+			}
+			payload := filepath.Join(bundleDir, "payload.txt")
+			if err := os.WriteFile(payload, []byte("payload"), 0600); err != nil {
+				t.Fatalf("WriteFile(payload) error = %v", err)
+			}
+			if tt.priorManifest != nil {
+				if err := os.WriteFile(
+					filepath.Join(bundleDir, ChecksumFileName), tt.priorManifest, 0640); err != nil {
+					t.Fatalf("WriteFile(prior checksums) error = %v", err)
+				}
+			}
+
+			originalDir := filepath.Join(parent, "original")
+			replacementMarker := filepath.Join(bundleDir, "replacement-marker")
+			deps := defaultChecksumGenerationDependencies()
+			deps.beforeVerification = func() error {
+				if err := os.Rename(bundleDir, originalDir); err != nil {
+					return err
+				}
+				if err := os.Mkdir(bundleDir, 0700); err != nil {
+					return err
+				}
+				return os.WriteFile(replacementMarker, []byte("replacement"), 0600)
+			}
+
+			err := generateChecksumsWithDependencies(
+				context.Background(), bundleDir, []string{payload}, deps)
+			requireInventoryErrorCode(t, err, errors.ErrCodeInvalidRequest)
+			got, readErr := os.ReadFile(filepath.Join(originalDir, ChecksumFileName))
+			if tt.priorManifest == nil {
+				if !os.IsNotExist(readErr) {
+					t.Errorf("original checksums.txt error = %v, want not exist", readErr)
+				}
+			} else {
+				if readErr != nil {
+					t.Fatalf("ReadFile(restored checksums) error = %v", readErr)
+				}
+				if string(got) != string(tt.priorManifest) {
+					t.Errorf("restored checksums = %q, want %q", got, tt.priorManifest)
+				}
+			}
+			assertReplacementFileContents(t, replacementMarker)
+			if _, statErr := os.Lstat(filepath.Join(bundleDir, ChecksumFileName)); !os.IsNotExist(statErr) {
+				t.Errorf("replacement checksums.txt error = %v, want not exist", statErr)
+			}
+		})
+	}
+}
+
+type cancelOnChecksumPublicationContext struct {
+	context.Context
+	checksumPath string
+	prior        []byte
+	canceled     atomic.Bool
+}
+
+func (c *cancelOnChecksumPublicationContext) Err() error {
+	if c.canceled.Load() {
+		return context.Canceled
+	}
+	data, err := os.ReadFile(c.checksumPath)
+	published := c.prior == nil && err == nil ||
+		c.prior != nil && err == nil && string(data) != string(c.prior)
+	if published {
+		c.canceled.Store(true)
+		return context.Canceled
+	}
+	return nil
 }
 
 func TestVerifyChecksums(t *testing.T) {
@@ -240,16 +513,18 @@ func TestVerifyChecksums(t *testing.T) {
 		if len(errs) == 0 {
 			t.Fatal("VerifyChecksums() should reject path traversal")
 		}
+	})
 
-		found := false
-		for _, e := range errs {
-			if strings.Contains(e, "path traversal") {
-				found = true
-				break
-			}
+	t.Run("malformed data returns an error description", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, ChecksumFileName), []byte("malformed\n"), 0600); err != nil {
+			t.Fatal(err)
 		}
-		if !found {
-			t.Errorf("expected path traversal error, got: %v", errs)
+		errs := VerifyChecksumsFromData(dir, []byte("malformed\n"))
+		if len(errs) == 0 {
+			t.Fatal("VerifyChecksumsFromData() expected an error description")
 		}
 	})
 }
@@ -273,6 +548,118 @@ func TestCountEntries(t *testing.T) {
 	count := CountEntries(dir)
 	if count != 2 {
 		t.Errorf("CountEntries() = %d, want 2", count)
+	}
+}
+
+func TestSHA256RawContext(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "payload.txt")
+	if err := os.WriteFile(path, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("legacy wrapper matches context API", func(t *testing.T) {
+		t.Parallel()
+
+		legacy, err := SHA256Raw(path)
+		if err != nil {
+			t.Fatalf("SHA256Raw() error = %v", err)
+		}
+		withContext, err := SHA256RawContext(context.Background(), path)
+		if err != nil {
+			t.Fatalf("SHA256RawContext() error = %v", err)
+		}
+		if string(withContext) != string(legacy) {
+			t.Errorf("SHA256RawContext() = %x, want %x", withContext, legacy)
+		}
+	})
+
+	t.Run("caller cancellation propagates", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := SHA256RawContext(ctx, path)
+		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			t.Errorf("SHA256RawContext() error = %v, want ErrCodeTimeout", err)
+		}
+	})
+
+	t.Run("rejects FIFO without blocking past cancellation", func(t *testing.T) {
+		fifo := filepath.Join(t.TempDir(), "payload.pipe")
+		if err := unix.Mkfifo(fifo, 0600); err != nil {
+			t.Skipf("FIFO unsupported: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		result := make(chan error, 1)
+		go func() {
+			_, err := SHA256RawContext(ctx, fifo)
+			result <- err
+		}()
+
+		select {
+		case err := <-result:
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("SHA256RawContext(FIFO) error = %v, want ErrCodeInvalidRequest", err)
+			}
+		case <-time.After(time.Second):
+			t.Error("SHA256RawContext(FIFO) remained blocked after context cancellation")
+			go func() {
+				writer, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+				if err == nil {
+					_ = writer.Close()
+				}
+			}()
+			select {
+			case <-result:
+			case <-time.After(time.Second):
+			}
+		}
+	})
+}
+
+func TestSHA256RawContext_RejectsFIFOReplacementBeforeOpen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "payload.txt")
+	if err := os.WriteFile(path, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(dir, "payload.original")
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := sha256RawContextWithOpener(
+			context.Background(), path,
+			func(name string, flag int, perm os.FileMode) (*os.File, error) {
+				if err := os.Rename(name, original); err != nil {
+					return nil, err
+				}
+				if err := unix.Mkfifo(name, 0600); err != nil {
+					return nil, err
+				}
+				return os.OpenFile(name, flag, perm)
+			},
+		)
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		requireInventoryErrorCode(t, err, errors.ErrCodeInvalidRequest)
+	case <-time.After(time.Second):
+		t.Error("SHA256RawContext blocked after a regular file was replaced by a FIFO")
+		go func() {
+			writer, err := os.OpenFile(path, os.O_WRONLY, 0)
+			if err == nil {
+				_ = writer.Close()
+			}
+		}()
+		select {
+		case <-result:
+		case <-time.After(time.Second):
+		}
 	}
 }
 
@@ -346,8 +733,8 @@ func TestWriteChecksums(t *testing.T) {
 				}
 			},
 			wantErr:  true,
-			wantCode: errors.ErrCodeInternal,
-			wantMsg:  "failed to compute checksum",
+			wantCode: errors.ErrCodeInvalidRequest,
+			wantMsg:  "missing",
 		},
 		{
 			name:     "rejects nil output",

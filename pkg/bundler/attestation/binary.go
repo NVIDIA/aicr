@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -39,6 +40,12 @@ const BundleAttestationFile = AttestationDir + "/bundle-attestation.sigstore.jso
 
 // BinaryAttestationFile is the path for the binary attestation copied into the bundle.
 const BinaryAttestationFile = AttestationDir + "/aicr-attestation.sigstore.json"
+
+// BundleMetadataPaths returns the exact attestation files stored outside the
+// checksums.txt payload inventory and verified separately by bundle callers.
+func BundleMetadataPaths() []string {
+	return []string{BundleAttestationFile, BinaryAttestationFile}
+}
 
 // FindBinaryAttestation locates the attestation file for a binary at the
 // conventional path: <binary-path>-attestation.sigstore.json.
@@ -77,7 +84,13 @@ func ValidateSigstoreBundleData(data []byte) error {
 
 // ComputeFileDigest reads a file and returns its SHA256 hex digest.
 func ComputeFileDigest(path string) (string, error) {
-	raw, err := checksum.SHA256Raw(path)
+	return ComputeFileDigestContext(context.Background(), path)
+}
+
+// ComputeFileDigestContext reads a file and returns its SHA256 hex digest,
+// honoring caller cancellation and the checksum package's bounded timeout.
+func ComputeFileDigestContext(ctx context.Context, path string) (string, error) {
+	raw, err := checksum.SHA256RawContext(ctx, path)
 	if err != nil {
 		return "", err
 	}

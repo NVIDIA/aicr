@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -33,6 +34,15 @@ import (
 // unsigned files to the signed predicate via Predicate.Manifest.Digest.
 // Paths in excludePaths are skipped (e.g., the manifest itself).
 func BuildManifest(bundleDir string, excludePaths ...string) (*Manifest, error) {
+	return BuildManifestContext(context.Background(), bundleDir, excludePaths...)
+}
+
+// BuildManifestContext walks bundleDir and computes a deterministic manifest
+// while honoring caller cancellation during traversal and file hashing.
+func BuildManifestContext(ctx context.Context, bundleDir string, excludePaths ...string) (*Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "manifest build canceled", err)
+	}
 	exclude := make(map[string]struct{}, len(excludePaths))
 	for _, p := range excludePaths {
 		exclude[filepath.ToSlash(p)] = struct{}{}
@@ -42,6 +52,9 @@ func BuildManifest(bundleDir string, excludePaths ...string) (*Manifest, error) 
 	walkErr := filepath.WalkDir(bundleDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "manifest build canceled", ctxErr)
 		}
 		if d.IsDir() {
 			return nil
@@ -60,7 +73,7 @@ func BuildManifest(bundleDir string, excludePaths ...string) (*Manifest, error) 
 			return errors.Wrap(errors.ErrCodeInternal, "failed to stat manifest entry", infoErr)
 		}
 
-		digest, hashErr := HashFileSHA256(path)
+		digest, hashErr := HashFileSHA256Context(ctx, path)
 		if hashErr != nil {
 			return hashErr
 		}
@@ -74,7 +87,7 @@ func BuildManifest(bundleDir string, excludePaths ...string) (*Manifest, error) 
 		return nil
 	})
 	if walkErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to walk bundle directory", walkErr)
+		return nil, errors.PropagateOrWrap(walkErr, errors.ErrCodeInternal, "failed to walk bundle directory")
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -120,7 +133,13 @@ func WriteManifest(bundleDir string, m *Manifest) (string, error) {
 // HashFileSHA256 returns the lowercase hex sha256 of a file's contents,
 // streaming the file rather than reading it whole.
 func HashFileSHA256(path string) (string, error) {
-	raw, err := checksum.SHA256Raw(path)
+	return HashFileSHA256Context(context.Background(), path)
+}
+
+// HashFileSHA256Context returns the lowercase hex sha256 of a file's contents,
+// honoring caller cancellation and the checksum package's bounded timeout.
+func HashFileSHA256Context(ctx context.Context, path string) (string, error) {
+	raw, err := checksum.SHA256RawContext(ctx, path)
 	if err != nil {
 		return "", err
 	}

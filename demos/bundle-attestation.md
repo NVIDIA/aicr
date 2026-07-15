@@ -2,13 +2,14 @@
 
 Bundle attestation provides cryptographic proof of **who** created a deployment
 bundle and **which AICR CLI** built it. When `aicr bundle --attest` runs, the
-CLI signs the bundle's `checksums.txt` (which inventories the deployment
-payload, including `recipe.yaml`; the attestation files are verified separately)
-using [Sigstore](https://www.sigstore.dev/) and
-generates SLSA Build Provenance v1 metadata. Anyone can later verify the
-bundle with `aicr verify` to confirm:
+CLI signs the bundle's `checksums.txt` using
+[Sigstore](https://www.sigstore.dev/) and generates SLSA Build Provenance v1
+metadata. The manifest is a closed-world inventory of the deployment payload,
+including `recipe.yaml`; the attestation files are verified separately as part
+of the same inventory. Anyone can later verify the bundle with `aicr verify` to
+confirm:
 
-* The generated payload files listed in `checksums.txt`, including `recipe.yaml`, haven't been tampered with.
+* Every required payload file is present and unchanged, and no additional filesystem entry is present.
 * It was created by a trusted identity.
 * It was built by an attested NVIDIA-CI-released AICR CLI.
 
@@ -88,8 +89,8 @@ permissions.
 
 ```text
 my-bundle/
-├── checksums.txt                          # SHA256 of every generated payload file
-├── recipe.yaml                            # canonical post-resolution recipe
+├── checksums.txt                          # closed-world SHA256 payload inventory
+├── recipe.yaml                            # canonical recipe; covered by checksums.txt
 ├── deploy.sh                              # automation script
 ├── README.md                              # deployment guide
 ├── 001-<component>/                       # per-component folder (NNN-prefixed)
@@ -101,13 +102,19 @@ my-bundle/
     └── aicr-attestation.sigstore.json     # binary SLSA attestation (copied in)
 ```
 
+`checksums.txt` covers every regular payload file shown above; the two
+attestation files are separately verified metadata outside the manifest. Any
+other unlisted file, directory, symlink, or special object fails verification.
+See [Artifact Verification](../docs/user/artifact-verification.md#what-can-be-verified)
+for the complete inventory contract and manifest-order rules.
+
 The two attestations together form the chain that makes `verified` reachable:
 
 * **`bundle-attestation.sigstore.json`** — Sigstore Bundle (DSSE + Fulcio cert
   + Rekor inclusion proof). Its in-toto subject is the SHA256 of
-  `checksums.txt`, so signing this one file transitively pins every generated
-  payload file that `checksums.txt` lists, including `recipe.yaml`. The signer
-  identity is the creator's OIDC identity.
+  `checksums.txt`, so signing this one file transitively pins the complete
+  closed-world payload inventory, including `recipe.yaml`. The signer identity
+  is the creator's OIDC identity.
 * **`aicr-attestation.sigstore.json`** — the SLSA Build Provenance attestation
   *of the AICR CLI binary that produced the bundle*, copied in at bundle time.
   Its signer identity is NVIDIA CI (`https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@...`).
@@ -142,13 +149,15 @@ Bundle verification: PASSED
 
 Five gates run, top to bottom:
 
-1. **Checksums** — every generated payload file listed in `checksums.txt`, including `recipe.yaml`, is hashed and compared.
+1. **Closed-world inventory** — every regular payload file, including `recipe.yaml`, is hashed and compared; additional files, directories, symlinks, and other non-regular objects are rejected.
 2. **Bundle signature** — the Sigstore Bundle is verified against the trusted root.
 3. **Bundle predicate** — the in-toto subject is checked against the actual `checksums.txt` digest.
 4. **Binary attestation chain** — `aicr-attestation.sigstore.json` is verified and its subject is checked against the CLI binary digest claimed in the bundle predicate.
 5. **Identity pin** — the binary attestation's signer is pinned to NVIDIA CI workflows.
 
-Any gate failing short-circuits to a lower trust level (see table below).
+An invalid inventory or failed attestation reports `unknown` trust. An absent
+attestation can still reach `unverified` when the closed-world inventory is
+valid (see the table below).
 
 ## 6. Policy enforcement
 
@@ -161,10 +170,13 @@ aicr verify ./my-bundle --min-trust-level attested
 
 | Level | Name | Criteria |
 |-------|------|----------|
-| **4** | `verified` | Checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
-| **3** | `attested` | Bundle attestation verified; binary attestation missing/unverified, or external data used. A *failed* binary attestation also reports attested but exits nonzero (#1550) |
-| **2** | `unverified` | Checksums valid, `--attest` was not used |
-| **1** | `unknown` | Missing/invalid `checksums.txt`, or bundle attestation fails verification |
+| **4** | `verified` | Closed-world inventory + bundle attestation + binary attestation pinned to NVIDIA CI |
+| **3** | `attested` | Closed-world inventory + bundle attestation verified; binary attestation missing, or external data used |
+| **2** | `unverified` | Closed-world checksum inventory valid; `--attest` was not used |
+| **1** | `unknown` | Missing, invalid, or incomplete `checksums.txt`; unexpected filesystem entries; or bundle/binary attestation verification failure |
+
+Legacy bundles with incomplete manifests report `unknown` trust and must be
+regenerated before deployment.
 
 Pick the floor per environment. Production bundles must be `verified`; an
 emergency hotfix bundle built off-CI might only be required to reach
@@ -207,8 +219,8 @@ aicr verify ./my-bundle --format json | jq '{ trustLevel, bundleCreator, toolVer
 Branching in a pipeline:
 
 ```shell
-# Capture the JSON and the verify exit code separately: a binary-attestation
-# that *fails* verification still reports trustLevel=attested but exits nonzero.
+# Capture the JSON and the verify exit code separately: failed integrity or
+# attestation reports trustLevel=unknown and exits nonzero.
 if out=$(aicr verify ./my-bundle --format json); then rc=0; else rc=$?; fi
 trust=$(printf '%s' "$out" | jq -r .trustLevel)
 if [ "$rc" -ne 0 ]; then echo "fail — verify exited $rc" ; exit 1 ; fi
@@ -221,8 +233,8 @@ esac
 
 ## 8. Tamper demo
 
-The signed manifest hash pins every file listed in `checksums.txt`. Mutating
-a listed file breaks verification:
+The signed manifest hash pins every regular payload file in the closed-world
+inventory. Mutating a listed file breaks verification:
 
 ```shell
 # Component dirs are numbered NNN-<component>/; tamper the first one's values
@@ -240,6 +252,10 @@ aicr verify ./my-bundle
 Editing `checksums.txt` to match the new hash defeats the checksum gate but
 breaks the bundle signature gate — the signed subject is the digest of
 `checksums.txt` itself, which now doesn't match the signed value.
+
+Adding an unlisted file, directory, symlink, or other non-regular object also
+fails `aicr verify`: exact-tree validation rejects entries outside the verified
+inventory before any deployment gate can pass.
 
 ## Troubleshooting
 

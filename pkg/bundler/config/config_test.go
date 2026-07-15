@@ -808,6 +808,26 @@ func TestWithBundleChartName(t *testing.T) {
 	}
 }
 
+func TestWithBundleChartVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{name: "default is empty", want: ""},
+		{name: "explicit semantic version", opts: []Option{WithBundleChartVersion("1.2.3+build.5")}, want: "1.2.3+build.5"},
+		{name: "later option wins", opts: []Option{WithBundleChartVersion("1.0.0"), WithBundleChartVersion("2.0.0")}, want: "2.0.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig(tt.opts...)
+			if got := cfg.BundleChartVersion(); got != tt.want {
+				t.Errorf("BundleChartVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseDynamicValues(t *testing.T) {
 	tests := []struct {
 		name    string

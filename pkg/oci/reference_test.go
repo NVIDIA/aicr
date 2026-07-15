@@ -15,7 +15,12 @@
 package oci
 
 import (
+	"context"
+	stderrors "errors"
+	"reflect"
 	"testing"
+
+	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestParseOutputTarget(t *testing.T) {
@@ -401,5 +406,171 @@ func TestURIScheme_Constant(t *testing.T) {
 	}
 	if uriScheme != URIScheme {
 		t.Errorf("legacy uriScheme alias drifted from URIScheme: %q vs %q", uriScheme, URIScheme)
+	}
+}
+
+func TestOutputConfigSourceFilesThreeStateHandoff(t *testing.T) {
+	tests := []struct {
+		name        string
+		sourceFiles []string
+		subDir      string
+	}{
+		{name: "nil without subdir"},
+		{name: "nil with subdir", subDir: "nested"},
+		{name: "non-nil empty", sourceFiles: []string{}},
+		{name: "non-empty exact list", sourceFiles: []string{"z.txt", "a.txt"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sentinel := stderrors.New("stop after package option capture")
+			deps := defaultPackageAndPushDependencies()
+			called := false
+			deps.packageOperation = func(
+				_ context.Context,
+				got PackageOptions,
+			) (*packageOperation, error) {
+
+				called = true
+				if (got.SourceFiles == nil) != (tt.sourceFiles == nil) {
+					t.Fatalf("PackageOptions.SourceFiles nil = %v, want %v",
+						got.SourceFiles == nil, tt.sourceFiles == nil)
+				}
+				if !reflect.DeepEqual(got.SourceFiles, tt.sourceFiles) {
+					t.Fatalf("PackageOptions.SourceFiles = %#v, want %#v",
+						got.SourceFiles, tt.sourceFiles)
+				}
+				if got.SubDir != tt.subDir {
+					t.Fatalf("PackageOptions.SubDir = %q, want %q", got.SubDir, tt.subDir)
+				}
+				return nil, sentinel
+			}
+
+			cfg := OutputConfig{
+				SourceDir:   t.TempDir(),
+				OutputDir:   t.TempDir(),
+				SourceFiles: tt.sourceFiles,
+				SubDir:      tt.subDir,
+				Reference: &Reference{
+					IsOCI:      true,
+					Registry:   "ghcr.io",
+					Repository: "test/bundle",
+					Tag:        "v1",
+				},
+			}
+			result, err := packageAndPushWithDependencies(context.Background(), cfg, deps)
+			if !stderrors.Is(err, sentinel) {
+				t.Fatalf("packageAndPushWithDependencies() error = %v, want %v", err, sentinel)
+			}
+			if result != nil {
+				t.Fatalf("packageAndPushWithDependencies() result = %+v on capture stop", result)
+			}
+			if !called {
+				t.Fatal("package operation helper was not called")
+			}
+			if (cfg.SourceFiles == nil) != (tt.sourceFiles == nil) ||
+				!reflect.DeepEqual(cfg.SourceFiles, tt.sourceFiles) {
+
+				t.Fatalf("caller SourceFiles changed to %#v", cfg.SourceFiles)
+			}
+		})
+	}
+}
+
+func TestPackageAndPushRejectsDirectInvalidTagBeforePackaging(t *testing.T) {
+	sentinel := apperrors.New(apperrors.ErrCodeInternal, "package operation must not run")
+	deps := defaultPackageAndPushDependencies()
+	called := false
+	deps.packageOperation = func(context.Context, PackageOptions) (*packageOperation, error) {
+		called = true
+		return nil, sentinel
+	}
+
+	result, err := packageAndPushWithDependencies(context.Background(), OutputConfig{
+		SourceDir: t.TempDir(),
+		OutputDir: t.TempDir(),
+		Reference: &Reference{
+			IsOCI:      true,
+			Registry:   "ghcr.io",
+			Repository: "test/bundle",
+			Tag:        "bad/tag",
+		},
+	}, deps)
+	if result != nil {
+		t.Fatalf("packageAndPushWithDependencies() result = %+v for invalid tag", result)
+	}
+	if called {
+		t.Fatal("package operation ran before direct Reference tag validation")
+	}
+	assertErrorCode(t, err, apperrors.ErrCodeInvalidRequest)
+	if stderrors.Is(err, sentinel) {
+		t.Fatalf("packageAndPushWithDependencies() error = %v, want tag validation failure", err)
+	}
+}
+
+func TestHelmChartOptionsSourceFilesThreeStateHandoff(t *testing.T) {
+	tests := []struct {
+		name        string
+		sourceFiles []string
+		wantCalled  bool
+	}{
+		{name: "nil", wantCalled: true},
+		{name: "non-nil empty", sourceFiles: []string{}},
+		{name: "non-empty exact list", sourceFiles: []string{"values.yaml", "Chart.yaml"}, wantCalled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sentinel := stderrors.New("stop after Helm source option capture")
+			deps := defaultHelmChartDependencies()
+			called := false
+			deps.packageOperation = func(
+				_ context.Context,
+				got HelmChartOptions,
+			) (*packageOperation, error) {
+
+				called = true
+				if (got.SourceFiles == nil) != (tt.sourceFiles == nil) {
+					t.Fatalf("prepareSource SourceFiles nil = %v, want %v",
+						got.SourceFiles == nil, tt.sourceFiles == nil)
+				}
+				if !reflect.DeepEqual(got.SourceFiles, tt.sourceFiles) {
+					t.Fatalf("prepareSource SourceFiles = %#v, want %#v", got.SourceFiles, tt.sourceFiles)
+				}
+				return nil, sentinel
+			}
+
+			opts := HelmChartOptions{
+				SourceDir:   t.TempDir(),
+				OutputDir:   t.TempDir(),
+				SourceFiles: tt.sourceFiles,
+				Reference: &Reference{
+					IsOCI:      true,
+					Registry:   "ghcr.io",
+					Repository: "test/chart",
+					Tag:        "1.2.3",
+				},
+			}
+			result, err := packageAndPushHelmChartWithDependencies(
+				context.Background(), opts, deps)
+			if tt.wantCalled {
+				if !stderrors.Is(err, sentinel) {
+					t.Fatalf("packageAndPushHelmChartWithDependencies() error = %v, want %v", err, sentinel)
+				}
+			} else {
+				assertErrorCode(t, err, apperrors.ErrCodeInvalidRequest)
+			}
+			if result != nil {
+				t.Fatalf("packageAndPushHelmChartWithDependencies() result = %+v on capture stop", result)
+			}
+			if called != tt.wantCalled {
+				t.Fatalf("Helm package helper called = %v, want %v", called, tt.wantCalled)
+			}
+			if (opts.SourceFiles == nil) != (tt.sourceFiles == nil) ||
+				!reflect.DeepEqual(opts.SourceFiles, tt.sourceFiles) {
+
+				t.Fatalf("caller Helm SourceFiles changed to %#v", opts.SourceFiles)
+			}
+		})
 	}
 }

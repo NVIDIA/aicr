@@ -23,11 +23,22 @@ import (
 	"os"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+var bundleZipResponseHeaders = []string{
+	"Content-Type",
+	"Content-Disposition",
+	"X-Bundle-Files",
+	"X-Bundle-Size",
+	"X-Bundle-Duration",
+}
+
+type streamZipFunc func(context.Context, http.ResponseWriter, string, *result.Output) error
 
 // bundleHandler backs the /v1/bundle endpoint with an aicr.Client. It
 // reproduces pkg/bundler.(*DefaultBundler).HandleBundles exactly — same
@@ -36,7 +47,8 @@ import (
 // (AdoptRecipe + MakeBundle). The body, headers, and status codes are
 // byte-identical to the legacy handler.
 type bundleHandler struct {
-	client *aicr.Client
+	client    *aicr.Client
+	streamZip streamZipFunc
 	// allowLists is held for exact error-message parity on rejection: the
 	// handler runs an explicit pre-check (matching the legacy handler's
 	// "Recipe criteria value not allowed" message) before bundling. The
@@ -47,7 +59,11 @@ type bundleHandler struct {
 // newBundleHandler constructs a bundleHandler bound to the given client and
 // allowlists.
 func newBundleHandler(client *aicr.Client, allowLists *aicr.AllowLists) *bundleHandler {
-	return &bundleHandler{client: client, allowLists: allowLists}
+	return &bundleHandler{
+		client:     client,
+		allowLists: allowLists,
+		streamZip:  bundler.StreamZipResponseContext,
+	}
 }
 
 // HandleBundles processes bundle generation requests. It accepts a POST
@@ -178,11 +194,35 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stream zip response using the same exported helper the legacy handler
-	// uses, so headers + entry layout are byte-identical.
-	if err := bundler.StreamZipResponse(w, tempDir, output); err != nil {
-		// Can't write error response if we've already started writing.
-		logger.Error("failed to stream zip response", "error", err)
-		return
+	h.writeZipResponse(ctx, w, r, tempDir, output)
+}
+
+func (h *bundleHandler) writeZipResponse(
+	ctx context.Context,
+	w http.ResponseWriter,
+	r *http.Request,
+	dir string,
+	output *result.Output,
+) {
+
+	response := newResponseWriter(w)
+	if err := h.streamZip(ctx, response, dir, output); err != nil {
+		slog.ErrorContext(ctx, "failed to stream zip response",
+			"requestID", RequestIDFromContext(ctx),
+			"error", err,
+		)
+		if response.written {
+			return
+		}
+		for _, header := range bundleZipResponseHeaders {
+			w.Header().Del(header)
+		}
+
+		publicErr := aicrerrors.New(
+			aicrerrors.ErrCodeInternal, "Failed to archive generated bundle")
+		if stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeTimeout, "")) {
+			publicErr = aicrerrors.New(aicrerrors.ErrCodeTimeout, "Bundle archive timed out")
+		}
+		WriteErrorFromErr(w, r, publicErr, "Failed to archive generated bundle", nil)
 	}
 }

@@ -119,7 +119,7 @@ spec:
       recipe: recipe.yaml            # must match recipe.output.path when both set
     output:
       target: ./bundles              # local dir or oci:// URI
-      imageRefs: ""                  # image-refs output path
+      imageRefs: ""                  # external digest file; OCI output only
     deployment:
       deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux | ...
       repo: ""
@@ -224,7 +224,7 @@ Inputs to `aicr bundle`.
 |-------|------|-------|
 | `input.recipe` | string | Recipe to bundle |
 | `output.target` | string | Local directory or `oci://` URI |
-| `output.imageRefs` | string | Image-refs output path |
+| `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. |
 | `deployment.deployer` | string | Deployer choice (same values as `--deployer`) |
 | `deployment.repo` | string | GitOps repo for repo-shaped deployers |
 | `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value` |
@@ -236,6 +236,14 @@ Inputs to `aicr bundle`.
 | `attestation.oidcDeviceFlow` | bool | Device-code flow for headless signing |
 | `attestation.fulcioURL` / `.rekorURL` | string | Private Sigstore endpoints; empty = public-good defaults |
 | `registry.insecureTLS` / `.plainHTTP` | bool | OCI transport options for push |
+
+When `output.imageRefs` is set, AICR writes the published OCI digest through a
+mode-`0600` temporary file and an anchored same-directory rename. The target
+may be absent or an existing retained regular file; directories, symlinks,
+other non-regular files, and bundle aliases are rejected. The final validation
+and rename are ordered but are not one atomic identity-conditioned filesystem
+operation, so no other process should mutate the target directory while the
+bundle command runs.
 
 ### spec.validate
 

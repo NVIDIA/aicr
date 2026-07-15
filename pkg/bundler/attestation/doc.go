@@ -50,9 +50,12 @@
 //   - Sigstore bundle (.sigstore.json) packaging the signed envelope,
 //     certificate, and Rekor inclusion proof
 //
-// The attestation subject is checksums.txt (covering all bundle content files).
-// The SLSA predicate records build metadata including the tool version, recipe,
-// components, and resolvedDependencies (binary provenance + external data files).
+// The attestation subject is checksums.txt, which covers every bundle payload
+// file. BundleAttestationFile and BinaryAttestationFile are excluded from the checksum payload:
+// callers inventory those two exact paths as separately verified metadata to
+// avoid a self-referential manifest. The SLSA predicate records build metadata
+// including the tool version, recipe, components, and resolvedDependencies
+// (binary provenance + external data files).
 //
 // # Retry Contract
 //

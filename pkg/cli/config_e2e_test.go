@@ -205,7 +205,7 @@ spec:
     input:
       recipe: %s
     output:
-      target: %s
+      target: oci://registry.example.com/team/aicr-bundle:dev
       imageRefs: %s/refs.txt
     deployment:
       deployer: argocd
@@ -237,12 +237,16 @@ spec:
     registry:
       insecureTLS: true
       plainHTTP: true
-`, recipePath, tmp, tmp)
+`, recipePath, tmp)
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	opts := captureBundleOpts(t, []string{"--config", cfgPath})
+	outputTarget := ""
+	if opts.ociRef != nil {
+		outputTarget = opts.ociRef.String()
+	}
 
 	checks := []struct {
 		name string
@@ -250,6 +254,7 @@ spec:
 		want any
 	}{
 		{"recipeFilePath", opts.recipeFilePath, recipePath},
+		{"outputTarget", outputTarget, "oci://registry.example.com/team/aicr-bundle:dev"},
 		{"repoURL", opts.repoURL, "https://example.git/charts"},
 		{"deployer", opts.deployer, config.DeployerArgoCD},
 		{"valueOverrides count", len(opts.valueOverrides), 2},
