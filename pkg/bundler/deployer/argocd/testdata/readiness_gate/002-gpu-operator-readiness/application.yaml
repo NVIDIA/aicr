@@ -4,7 +4,7 @@ metadata:
   name: "gpu-operator-readiness"
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   project: "default"
   source:

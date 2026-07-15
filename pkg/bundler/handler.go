@@ -73,6 +73,7 @@ func bundleConfigFromParams(params *bundleParams) *config.Config {
 		config.WithDeployer(params.deployer),
 		config.WithRepoURL(params.repoURL),
 		config.WithVendorCharts(params.vendorCharts),
+		config.WithSerial(params.serial),
 		config.WithAppName(params.appName),
 		config.WithBundlers(params.bundlers),
 	)
@@ -287,6 +288,7 @@ type bundleParams struct {
 	deployer                   config.DeployerType
 	repoURL                    string
 	vendorCharts               bool
+	serial                     bool
 	appName                    string
 	bundlers                   []string
 }
@@ -380,6 +382,17 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 				"vendor-charts must be a boolean (true/false)", parseErr)
 		}
 		params.vendorCharts = b
+	}
+
+	// Parse serial (deploy components one at a time instead of parallelizing
+	// independent ones; the API counterpart of the --serial CLI flag).
+	if v := query.Get("serial"); v != "" {
+		b, parseErr := strconv.ParseBool(v)
+		if parseErr != nil {
+			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+				"serial must be a boolean (true/false)", parseErr)
+		}
+		params.serial = b
 	}
 
 	// Parse app-name (parent Argo Application name for argocd / argocd-helm).

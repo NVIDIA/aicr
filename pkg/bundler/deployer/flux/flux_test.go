@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -423,20 +424,22 @@ func TestGenerate_DependsOnOrdering(t *testing.T) {
 			Source:    "https://charts.jetstack.io",
 		},
 		{
-			Name:      "gpu-operator",
-			Namespace: "gpu-operator",
-			Chart:     "gpu-operator",
-			Version:   "v25.3.3",
-			Type:      recipe.ComponentTypeHelm,
-			Source:    "https://helm.ngc.nvidia.com/nvidia",
+			Name:           "gpu-operator",
+			Namespace:      "gpu-operator",
+			Chart:          "gpu-operator",
+			Version:        "v25.3.3",
+			Type:           recipe.ComponentTypeHelm,
+			Source:         "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager"},
 		},
 		{
-			Name:      "network-operator",
-			Namespace: "network-operator",
-			Chart:     "network-operator",
-			Version:   "v25.3.0",
-			Type:      recipe.ComponentTypeHelm,
-			Source:    "https://helm.ngc.nvidia.com/nvidia",
+			Name:           "network-operator",
+			Namespace:      "network-operator",
+			Chart:          "network-operator",
+			Version:        "v25.3.0",
+			Type:           recipe.ComponentTypeHelm,
+			Source:         "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"gpu-operator"},
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator", "network-operator"}
@@ -1004,53 +1007,163 @@ func TestSanitizeSourceName(t *testing.T) {
 	}
 }
 
-func TestBuildPrimaryDependsOn(t *testing.T) {
-	// Mixed component (cert-manager has source + post-manifests) → its
-	// terminal release is cert-manager-post. Manifest-only components
-	// (manifest-only has post-manifests but no source/chart) fold
-	// manifests into the primary, so terminal is the component name.
+func TestDeclaredDependsOn(t *testing.T) {
+	// Flux projects the recipe's declared dependencyRefs straight onto its
+	// native dependsOn DAG, one edge per declared dependency. cert-manager is
+	// mixed (chart + post-manifests) so its terminal release is
+	// cert-manager-post; nfd is chart-only (terminal nfd). gpu-operator declares
+	// both, so it gates on both terminals. network-operator declares ONLY nfd, so
+	// it gates on nfd alone — no phantom edge to cert-manager, unlike the
+	// tier-based argocd/helmfile deployers which would over-constrain it.
 	refs := []recipe.ComponentRef{
 		{Name: "cert-manager", Namespace: "cert-manager", Type: recipe.ComponentTypeHelm,
 			Chart: "cert-manager", Source: "https://charts.jetstack.io"},
-		{Name: "manifest-only", Namespace: "default", Type: recipe.ComponentTypeHelm},
+		{Name: "nfd", Namespace: "node-feature-discovery", Type: recipe.ComponentTypeHelm,
+			Chart: "node-feature-discovery", Source: "https://kubernetes-sigs.github.io/node-feature-discovery/charts"},
 		{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm,
-			Chart: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia"},
+			Chart: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager", "nfd"}},
 		{Name: "network-operator", Namespace: "network-operator", Type: recipe.ComponentTypeHelm,
-			Chart: "network-operator", Source: "https://helm.ngc.nvidia.com/nvidia"},
+			Chart: "network-operator", Source: "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"nfd"}},
+		// Declares a dependency on a component that is not in the ref set
+		// (disabled / externally provided): the edge is dropped, not rendered.
+		{Name: "kai-scheduler", Namespace: "kai-scheduler", Type: recipe.ComponentTypeHelm,
+			Chart: "kai-scheduler", Source: "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"gpu-operator", "absent-external-dep"}},
 	}
-	g := &Generator{
-		ComponentManifests: map[string]map[string][]byte{
-			// cert-manager is mixed (chart + post-manifests) → terminal is cert-manager-post.
-			"cert-manager": {"crds.yaml": []byte("---")},
-			// manifest-only has post-manifests but no chart/source → manifests fold
-			// into the primary; terminal stays "manifest-only".
-			"manifest-only": {"cm.yaml": []byte("---")},
-			// gpu-operator is chart-only here → no -post → terminal is "gpu-operator".
-		},
+	postManifests := map[string]map[string][]byte{
+		// cert-manager mixed (chart + post-manifests) → terminal cert-manager-post.
+		"cert-manager": {"crds.yaml": []byte("---")},
 	}
+
+	deps := declaredDependsOn(refs, postManifests)
 
 	tests := []struct {
-		name    string
-		index   int
-		wantLen int
-		wantDep string
+		name string
+		comp string
+		want []string
 	}{
-		{"first has no deps", 0, 0, ""},
-		{"second depends on cert-manager-post (prev is mixed)", 1, 1, "cert-manager-post"},
-		{"third depends on manifest-only (prev folds into primary)", 2, 1, "manifest-only"},
-		{"fourth depends on gpu-operator (prev is chart-only, no -post)", 3, 1, "gpu-operator"},
+		{"root cert-manager has no deps", "cert-manager", nil},
+		{"root nfd has no deps", "nfd", nil},
+		{"gpu-operator gates on both declared deps (mixed dep uses -post terminal)", "gpu-operator", []string{"cert-manager-post", "nfd"}},
+		{"network-operator gates ONLY on its declared dep, no phantom edge", "network-operator", []string{"nfd"}},
+		{"absent/disabled dependency is dropped, not rendered", "kai-scheduler", []string{"gpu-operator"}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := g.buildPrimaryDependsOn(refs, tt.index)
-			if len(got) != tt.wantLen {
-				t.Errorf("buildPrimaryDependsOn() returned %d deps, want %d", len(got), tt.wantLen)
+			if got := deps[tt.comp]; !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("declaredDependsOn[%q] = %v, want %v", tt.comp, got, tt.want)
 			}
-			if tt.wantLen > 0 && got[0].Name != tt.wantDep {
-				t.Errorf("buildPrimaryDependsOn() dep name = %q, want %q", got[0].Name, tt.wantDep)
+			// buildPrimaryDependsOn converts the target list to DependsOnRefs.
+			refsOut := buildPrimaryDependsOn(deps, tt.comp)
+			if len(refsOut) != len(tt.want) {
+				t.Fatalf("buildPrimaryDependsOn(%q) returned %d deps, want %d", tt.comp, len(refsOut), len(tt.want))
+			}
+			for i, r := range refsOut {
+				if r.Name != tt.want[i] {
+					t.Errorf("buildPrimaryDependsOn(%q)[%d] = %q, want %q", tt.comp, i, r.Name, tt.want[i])
+				}
 			}
 		})
+	}
+}
+
+func TestSerialDependsOn(t *testing.T) {
+	// --serial ignores the declared dependency graph and chains each component
+	// to the PREVIOUS one in deployment order, so releases reconcile strictly
+	// one at a time. nfd and cert-manager are independent, but serial mode still
+	// makes nfd wait on cert-manager (the linear chain). cert-manager is mixed
+	// (post-manifests) so its terminal is cert-manager-post.
+	refs := []recipe.ComponentRef{
+		{Name: "cert-manager", Namespace: "cert-manager", Type: recipe.ComponentTypeHelm,
+			Chart: "cert-manager", Source: "https://charts.jetstack.io"},
+		{Name: "nfd", Namespace: "node-feature-discovery", Type: recipe.ComponentTypeHelm,
+			Chart: "node-feature-discovery", Source: "https://kubernetes-sigs.github.io/node-feature-discovery/charts"},
+		{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm,
+			Chart: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager"}},
+	}
+	postManifests := map[string]map[string][]byte{
+		"cert-manager": {"crds.yaml": []byte("---")},
+	}
+
+	deps := serialDependsOn(refs, postManifests)
+
+	tests := []struct {
+		name string
+		comp string
+		want []string
+	}{
+		{"head of chain has no predecessor", "cert-manager", nil},
+		{"independent nfd still chained to previous (cert-manager-post)", "nfd", []string{"cert-manager-post"}},
+		{"gpu-operator chained to previous (nfd), not its declared dep", "gpu-operator", []string{"nfd"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deps[tt.comp]; !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("serialDependsOn[%q] = %v, want %v", tt.comp, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGenerate_RejectsCyclicGraph guards the fail-closed invariant: Generate is
+// exported, so a hand-built cyclic RecipeResult must be rejected before it is
+// projected into a cyclic Flux dependsOn DAG (which would stall reconciliation)
+// — in both default and --serial mode.
+func TestGenerate_RejectsCyclicGraph(t *testing.T) {
+	for _, serial := range []bool{false, true} {
+		t.Run(map[bool]string{false: "default", true: "serial"}[serial], func(t *testing.T) {
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = []recipe.ComponentRef{
+				{Name: "a", Namespace: "a", Chart: "a", Version: "v1", Type: recipe.ComponentTypeHelm,
+					Source: "https://example.com", DependencyRefs: []string{"b"}},
+				{Name: "b", Namespace: "b", Chart: "b", Version: "v1", Type: recipe.ComponentTypeHelm,
+					Source: "https://example.com", DependencyRefs: []string{"a"}}, // a <-> b cycle
+			}
+			recipeResult.DeploymentOrder = []string{"a", "b"}
+
+			g := &Generator{
+				RecipeResult:    recipeResult,
+				ComponentValues: map[string]map[string]any{"a": {}, "b": {}},
+				Version:         testVersion,
+				Serial:          serial,
+			}
+			if _, err := g.Generate(context.Background(), t.TempDir()); err == nil {
+				t.Fatal("expected Generate to reject a cyclic dependency graph, got nil error")
+			}
+		})
+	}
+}
+
+// TestGenerate_DisabledDependencyNotACycle guards that graph validation runs on
+// the unfiltered ComponentRefs, not the enabled-filtered set: an enabled
+// component whose declared dependency is disabled (provided externally) must
+// NOT be mistaken for an undeclared dependency and rejected as a false cycle.
+func TestGenerate_DisabledDependencyNotACycle(t *testing.T) {
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator", Version: "v25.3.3",
+			Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager"}},
+		// cert-manager is provided externally (e.g. CSP-managed): declared but
+		// disabled. gpu-operator's edge to it must be treated as satisfied.
+		{Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager", Version: "v1.14.0",
+			Type: recipe.ComponentTypeHelm, Source: "https://charts.jetstack.io",
+			Overrides: map[string]any{"enabled": false}},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         testVersion,
+	}
+	if _, err := g.Generate(context.Background(), t.TempDir()); err != nil {
+		t.Fatalf("Generate() with an externally-provided (disabled) dependency should succeed, got: %v", err)
 	}
 }
 
@@ -1087,6 +1200,7 @@ func TestHelmReleaseNamespaceArchitecture(t *testing.T) {
 			Name: "kube-prometheus-stack", Namespace: "monitoring",
 			Chart: "kube-prometheus-stack", Version: "84.4.0",
 			Type: recipe.ComponentTypeHelm, Source: "https://prometheus-community.github.io/helm-charts",
+			DependencyRefs: []string{"cert-manager"},
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "kube-prometheus-stack"}
@@ -1206,12 +1320,13 @@ func TestBundleGolden_HelmComponents(t *testing.T) {
 			Source:    "https://charts.jetstack.io",
 		},
 		{
-			Name:      "gpu-operator",
-			Namespace: "gpu-operator",
-			Chart:     "gpu-operator",
-			Version:   "v25.3.3",
-			Type:      recipe.ComponentTypeHelm,
-			Source:    "https://helm.ngc.nvidia.com/nvidia",
+			Name:           "gpu-operator",
+			Namespace:      "gpu-operator",
+			Chart:          "gpu-operator",
+			Version:        "v25.3.3",
+			Type:           recipe.ComponentTypeHelm,
+			Source:         "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager"},
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
@@ -1697,12 +1812,13 @@ func TestGenerate_WithPreManifests(t *testing.T) {
 			Source:    "https://charts.jetstack.io",
 		},
 		{
-			Name:      "gpu-operator",
-			Namespace: "gpu-operator",
-			Chart:     "gpu-operator",
-			Version:   "v25.3.3",
-			Type:      recipe.ComponentTypeHelm,
-			Source:    "https://helm.ngc.nvidia.com/nvidia",
+			Name:           "gpu-operator",
+			Namespace:      "gpu-operator",
+			Chart:          "gpu-operator",
+			Version:        "v25.3.3",
+			Type:           recipe.ComponentTypeHelm,
+			Source:         "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager"},
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
@@ -1786,12 +1902,13 @@ func TestGenerate_PreAndPostManifests(t *testing.T) {
 			Source:    "https://helm.ngc.nvidia.com/nvidia",
 		},
 		{
-			Name:      "gke-nccl-tcpxo",
-			Namespace: "kube-system",
-			Chart:     "gke-nccl-tcpxo",
-			Version:   "v1.0.0",
-			Type:      recipe.ComponentTypeHelm,
-			Source:    "https://helm.ngc.nvidia.com/nvidia",
+			Name:           "gke-nccl-tcpxo",
+			Namespace:      "kube-system",
+			Chart:          "gke-nccl-tcpxo",
+			Version:        "v1.0.0",
+			Type:           recipe.ComponentTypeHelm,
+			Source:         "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"gpu-operator"},
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"gpu-operator", "gke-nccl-tcpxo"}

@@ -266,6 +266,76 @@ func TestGenerate_IndependentComponentsCollapse(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 	assertLevelSubHelmfilesAbsent(t, outputDir, "independent-components bundle")
+
+	// Default (parallel): mutually independent components carry NO
+	// cross-component needs:, so helmfile applies them concurrently.
+	for _, r := range readHelmfileReleases(t, outputDir) {
+		if len(r.Needs) != 0 {
+			t.Errorf("release %q has needs %v; independent components must not chain in default (parallel) mode", r.Name, r.Needs)
+		}
+	}
+}
+
+// TestGenerate_SerialChainsIndependentComponents is the --serial counterpart:
+// the same two independent components are chained into a single linear apply
+// order (cert-manager -> gpu-operator) so they deploy one at a time.
+func TestGenerate_SerialChainsIndependentComponents(t *testing.T) {
+	g := &Generator{
+		RecipeResult: recipeWith(
+			ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
+			ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia"),
+		),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {"driver": map[string]any{"enabled": true}},
+		},
+		Version: testBundlerVersion,
+		Serial:  true,
+	}
+	outputDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), testGenerateTimeout)
+	defer cancel()
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	releases := readHelmfileReleases(t, outputDir)
+	byName := make(map[string]Release, len(releases))
+	for _, r := range releases {
+		byName[r.Name] = r
+	}
+	if got := byName["cert-manager"].Needs; len(got) != 0 {
+		t.Errorf("cert-manager (chain head) needs = %v, want none", got)
+	}
+	// Different namespaces => the needs entry is namespace-qualified.
+	if got := byName["gpu-operator"].Needs; len(got) != 1 || got[0] != "cert-manager/cert-manager" {
+		t.Errorf("gpu-operator needs = %v, want [cert-manager/cert-manager] under --serial", got)
+	}
+}
+
+// readHelmfileReleases parses the leaf helmfile.yaml in outputDir and returns
+// its releases. Fails the test if the file is missing or is a top-level
+// helmfiles: orchestration document — otherwise a stratified bundle would
+// deserialize to an empty Releases slice (yaml.v3 ignores the unknown
+// helmfiles: key) and make callers pass vacuously.
+func readHelmfileReleases(t *testing.T, outputDir string) []Release {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(outputDir, fileHelmfile))
+	if err != nil {
+		t.Fatalf("read helmfile.yaml: %v", err)
+	}
+	var top TopHelmfile
+	if err := yaml.Unmarshal(data, &top); err != nil {
+		t.Fatalf("parse helmfile.yaml: %v", err)
+	}
+	if len(top.Helmfiles) > 0 {
+		t.Fatalf("readHelmfileReleases expects a leaf helmfile.yaml, got a top-level helmfiles: doc with %d entries", len(top.Helmfiles))
+	}
+	var doc Helmfile
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse helmfile.yaml: %v", err)
+	}
+	return doc.Releases
 }
 
 // assertLevelSubHelmfilesAbsent fails the test if any level-*.yaml is

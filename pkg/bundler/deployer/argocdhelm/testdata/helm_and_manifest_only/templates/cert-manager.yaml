@@ -5,7 +5,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
     annotations:
-        argocd.argoproj.io/sync-wave: "0"
+        argocd.argoproj.io/sync-wave: "1"
     name: '{{ (.Values.deployer | default dict).namePrefix | default "" }}cert-manager'
     namespace: argocd
 spec:

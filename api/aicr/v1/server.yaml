@@ -928,6 +928,22 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: serial
+          in: query
+          required: false
+          description: >
+            Sequence components strictly one at a time in deployment order,
+            disabling the parallel rollout of independent components. Affects
+            the `argocd`, `argocd-helm`, `flux`, and `helmfile` deployers
+            (`helm` is already serial): argocd falls back to a linear
+            sync-wave per folder, flux chains each HelmRelease `dependsOn` to
+            the previous component, and helmfile chains every release via
+            `needs:` into one linear apply order. An escape hatch for
+            reproducing the pre-parallelism ordering or bisecting a
+            misbehaving rollout.
+          schema:
+            type: boolean
+            default: false
         - name: app-name
           in: query
           required: false

@@ -254,6 +254,13 @@ type Generator struct {
 	// bundle time so the resulting artifact is air-gap deployable.
 	// Forwarded to the delegated argocd.Generator. Off by default.
 	VendorCharts bool
+
+	// Serial forces the delegated argocd.Generator to assign linear
+	// per-folder sync-waves (one component at a time) instead of the
+	// dependency-depth bands. Forwarded verbatim; the sync-wave annotation
+	// survives the application.yaml -> chart template transform. Off by
+	// default. Wired from --serial. See argocd.Generator.Serial.
+	Serial bool
 }
 
 // Generate creates a Helm chart app-of-apps by:
@@ -328,6 +335,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// parent chart level via writeStaticValuesAndBuildStubs.
 		AllowDynamicValueSplit: true,
 		VendorCharts:           g.VendorCharts,
+		Serial:                 g.Serial,
 		// Forward the effective parent name so the inner generator's
 		// parent-collision check tests against THIS deployer's parent
 		// ("aicr-stack" or --app-name), not argocd's own "nvidia-stack"

@@ -1259,6 +1259,7 @@ aicr bundle [flags]
 | `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
 | `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
 | `--readiness-hooks` | | bool | Emit a per-component readiness gate (`NNN-<name>-readiness/`) for each component that ships a `recipes/components/<name>/readiness.yaml` Chainsaw test. The gate runs as a post-component Job so the deploy blocks on component-specific readiness signals (e.g. `ClusterPolicy` state). Supported with `--deployer helm`, `argocd`, and `argocd-helm`. Off by default. See [Readiness Gates](#readiness-gates). |
+| `--serial` | | bool | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `--deployer argocd`, `argocd-helm`, `flux`, and `helmfile` (helm is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply chain. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. Off by default. |
 | `--flux-oci-source-name` | | string | Name of the OCIRepository CR that Flux uses to pull the bundle (default: `aicr-bundle`). Used with `--deployer flux` and OCI output. Must match the OCIRepository deployed in the target cluster. See [Flux OCI Mode](#flux-oci-mode). |
 | `--flux-namespace` | | string | Kubernetes namespace where Flux CRs (HelmRelease, sources, ArtifactGenerator) are deployed (default: `flux-system`). Must match the namespace of the Flux installation in the target cluster. |
 | `--app-name` | | string | Parent Argo Application name (default: `aicr-stack` for `--deployer argocd-helm`, `nvidia-stack` for `--deployer argocd`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `--deployer argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected on other deployers (`helm`, `flux`, `helmfile`). |
@@ -1431,12 +1432,14 @@ The `--deployer` flag controls how deployment artifacts are generated:
 
 **Deployment Order:**
 
-All deployers respect the `deploymentOrder` field from the recipe, ensuring components are installed in the correct sequence:
+Ordering follows each component's declared dependencies (`dependencyRefs`), not its position in the bundle. Components with no dependency between them deploy **in parallel**; a component with a real dependency waits for that dependency to become healthy. The `NNN-<name>/` folder numbers reflect a valid serialization for readability only.
 
-- **Helm**: Components listed in README in deployment order
-- **Argo CD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
-- **Flux**: Uses `dependsOn` references in HelmRelease CRs (each component depends on the previous component's terminal release — its `<prev>-post` release when post-manifests are present, otherwise `<prev>`). Components with pre-manifests insert a `<name>-pre` release that the primary HelmRelease depends on, so the chain becomes `previous → <name>-pre → <name> → <name>-post → next`. The bundle's root `kustomization.yaml` is a plain Kustomize file (not a Flux Kustomization CR).
-- **Helmfile**: Uses `needs:` references in each release (each component depends on its predecessor)
+- **Helm**: `deploy.sh` installs one component at a time in deployment order (intentionally serial).
+- **Argo CD** / **Argo CD (Helm)**: `argocd.argoproj.io/sync-wave` annotation assigned by dependency depth. Independent components share a wave and sync together; a dependent lands in a later wave band that Argo starts only after the prior tier (including any readiness gate) is healthy.
+- **Flux**: `dependsOn` references in each `HelmRelease` mirror the component's declared `dependencyRefs` directly (a component with no dependencies has no `dependsOn` and reconciles in parallel). Pre/post manifests preserve the per-component chain `<name>-pre → <name> → <name>-post`. The bundle's root `kustomization.yaml` is a plain Kustomize file (not a Flux Kustomization CR).
+- **Helmfile**: emits one `level-N.yaml` sub-helmfile per dependency tier, processed in sequence (so each tier's CRDs register before the next tier renders). Within a tier, `needs:` chains only a component's own `-pre → primary → -post` releases; independent components carry no edge, so helmfile applies them concurrently.
+
+Pass `--serial` to force every deployer to install strictly one component at a time in deployment order (reverts argocd/argocd-helm/flux/helmfile to a linear chain; helm is already serial). For the full model and per-deployer rationale, see [Deployment ordering](../contributor/component.md#deployment-ordering).
 
 #### Value Overrides
 
@@ -2050,7 +2053,7 @@ bundles/
 ├── app-of-apps.yaml               # Parent Application (recurses *.application.yaml)
 ├── 001-cert-manager/              # KindUpstreamHelm — no Chart.yaml
 │   ├── values.yaml                # Static Helm values (consumed via multi-source)
-│   └── application.yaml           # Multi-source Application (sync-wave 0)
+│   └── application.yaml           # Multi-source Application (sync-wave 1, tier 0)
 ├── 002-gpu-operator/              # KindUpstreamHelm — primary of mixed
 │   ├── values.yaml
 │   └── application.yaml
