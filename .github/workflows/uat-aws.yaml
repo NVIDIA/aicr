@@ -33,7 +33,7 @@ on:
         type: string
         default: ''
       intent:
-        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml).'
+        description: 'Recipe intent — selects the per-intent test config (<accelerator>-<intent>-config.yaml).'
         type: string
         default: training
       lifecycle:
@@ -48,6 +48,10 @@ on:
         description: 'Directory holding the AICRConfig test files (from infra/uat/reservations.yaml).'
         type: string
         required: true
+      accelerator:
+        description: 'GPU accelerator family (from the reservation); selects the test config <accelerator>-<intent>-config.yaml.'
+        type: string
+        default: h100
       skip_delete:
         description: 'Skip cluster teardown (manual runs only; the nightly batch always deletes).'
         type: boolean
@@ -90,7 +94,15 @@ jobs:
       # the ingest-evidence job below. Empty when no bundle was produced.
       bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
     env:
-      AWS_ACCOUNT_ID: "615299774277"
+      # AWS_ACCOUNT_ID (the tenancy the OIDC role is assumed into, and where the
+      # cluster + Terraform state live) is NOT set here and is NOT a caller
+      # input: it is the single-source-of-truth `.deployment.tenancy` from the
+      # cluster-config, exported to $GITHUB_ENV by the "Validate inputs" step
+      # below. Deriving it — rather than passing it in — makes it impossible to
+      # assume role in one account while provisioning/state land in another
+      # (which a separate `account` input could silently do). A cross-account
+      # reservation (e.g. a GB200 Capacity Block in a separate tenancy) is
+      # selected purely by its cluster-config's tenancy field.
       AWS_REGION: "us-east-1"
       GITHUB_ACTIONS_ROLE_NAME: "github-actions-role-aicr"
       # Cluster name (EKS actuator derives it from .deployment.id). The nightly
@@ -104,9 +116,10 @@ jobs:
         && format('aicr-uat-day-{0}', inputs.reservation)
         || format('aicr-uat-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
-      # DC2 selects the AICRConfig by intent; both intents drive the same
+      # The AICRConfig is selected by accelerator + intent
+      # (<accelerator>-<intent>-config.yaml); both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
-      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/${{ inputs.accelerator }}-${{ inputs.intent }}-config.yaml
       # v0.4.27 — required for node-group taints in the cluster-config schema
       # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
       # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
@@ -155,7 +168,20 @@ jobs:
           if [[ ! -f "${TEST_CONFIG}" ]]; then
             echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
           fi
-          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID}"
+          # The account the OIDC role is assumed into (AWS_ACCOUNT_ID) is the
+          # cluster-config's .deployment.tenancy — the single source of truth
+          # for which tenancy this run provisions + keeps state in. Deriving it
+          # here (rather than accepting it as an input) means the role can never
+          # be assumed into a different account than the one being provisioned.
+          # A cross-account reservation (e.g. a GB200 Capacity Block in a
+          # separate tenancy) is selected purely by its cluster-config. Uses the
+          # runner-preinstalled yq (Install tools runs later).
+          TENANCY=$(yq eval '.deployment.tenancy' "${CLUSTER_CONFIG}")
+          if [[ -z "${TENANCY}" || "${TENANCY}" == "null" ]]; then
+            echo "::error::${CLUSTER_CONFIG} has no .deployment.tenancy"; exit 1
+          fi
+          echo "AWS_ACCOUNT_ID=${TENANCY}" >> "${GITHUB_ENV}"
+          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID} account=${TENANCY}"
 
       # Versions
       - name: Load versions

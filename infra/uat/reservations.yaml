@@ -109,3 +109,28 @@ reservations:
     # rows run both, so add it here rather than removing the key (a bare
     # `nightly-intents:` decodes as absent and defaults to [training]).
     nightly-intents: [training]
+  - name: aws-gb200
+    cloud: aws
+    # CROSS-ACCOUNT: the GB200 Capacity Block lives in a SEPARATE tenancy
+    # (dgx-cloud-runai-prod-22, account 897722687756), not the standard UAT
+    # account. The account is NOT a field here: the AWS pipeline derives the
+    # tenancy it assumes the OIDC role into from the target cluster-config's
+    # .deployment.tenancy (cluster-config-gb200.yaml sets it to 897722687756),
+    # the single source of truth. Prereq: apply infra/uat-aws-account in
+    # 897722687756 (GitHub OIDC provider + github-actions-role-aicr).
+    # GB200 reservations are time-bounded Capacity Blocks (not standing
+    # on-demand CRs like the h100 rows) — a run must fall inside the block's
+    # active window, else actuator apply fails to acquire capacity.
+    reservation-id: cr-0e2f3833a602809a6
+    accelerator: gb200
+    # 4 Blackwell GPUs per p6e-gb200.36xlarge node; the cluster-config runs 2
+    # nodes (activates the multi-node NCCL East-West fabric check).
+    gpu-count: 4
+    cluster-config-path: tests/uat/aws/cluster-config-gb200.yaml
+    test-config-dir: tests/uat/aws/tests
+    # Opted OUT of the nightly batch during bring-up (explicit empty list, NOT
+    # a bare `nightly-intents:` which would default to [training] and provision
+    # real GB200 capacity nightly). Stays manually dispatchable via uat-run.yaml.
+    # Enroll ([training]) after a green manual acceptance run and once the
+    # Capacity-Block scheduling window is wired into the nightly broker.
+    nightly-intents: []
