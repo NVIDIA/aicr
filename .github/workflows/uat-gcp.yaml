@@ -606,10 +606,15 @@ jobs:
           # clutter. aiperf-bench is included so the tag pushed by the build
           # step above (#1636) does not leak.
           for phase in deployment performance conformance aiperf-bench agent; do
+            # gh api prints the raw error body to stdout on a 404 (a phase whose
+            # package was never pushed — e.g. agent, which the build loop above
+            # does not build) and skips --jq, so VERSION_ID can capture a JSON
+            # blob with control chars. Require a numeric id before deleting so
+            # the 404 body, the empty case, and multi-line output all fail closed.
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
-            if [[ -n "${VERSION_ID}" ]]; then
+            if [[ "${VERSION_ID}" =~ ^[0-9]+$ ]]; then
               gh api --method DELETE \
                 "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
             fi
