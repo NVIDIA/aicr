@@ -143,10 +143,9 @@ The bundler emits three numbered folders per operator — OLM, readiness gate, a
 ```text
 ocp-bundle/
 ├── deploy.sh                               # Deploys all components in order
-├── undeploy.sh                             # Cleanup script
 ├── README.md                               # Bundle documentation
 ├── recipe.yaml                             # Recipe used to generate bundle
-├── checksums.txt                           # SHA256 of all generated payload files, including recipe.yaml
+├── checksums.txt                           # SHA256 of every regular payload file, including recipe.yaml
 │
 │   # ── Per-operator three-folder cycle ──
 │
@@ -171,6 +170,13 @@ ocp-bundle/
 │
 │   # ... repeated for each operator in the recipe
 ```
+
+This tree is a closed-world inventory. Run `aicr verify .` from
+`ocp-bundle/` before deployment: every regular payload file must have a
+matching entry in `checksums.txt`, and verification rejects any additional
+file or directory, symlink, or other non-regular object outside the exact
+allowed inventory metadata paths. An incomplete legacy manifest reports
+`unknown` trust and the bundle must be regenerated.
 
 Each numbered folder is a standard local Helm chart. The `deploy.sh` script installs them sequentially. Readiness folders (`*-readiness`) use `helm install --wait --timeout` to block until the gate passes.
 

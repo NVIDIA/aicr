@@ -37,7 +37,7 @@
   │  recipe.yaml ──▶ bundle/                                               │
   │    ├── deploy.sh        (root automation script)                       │
   │    ├── README.md        (root deployment guide)                        │
-  │    ├── checksums.txt    (SHA256 of all generated payload files)        │
+  │    ├── checksums.txt    (closed-world SHA256 payload inventory)        │
   │    ├── recipe.yaml      (resolved recipe; covered by checksums)        │
   │    ├── 001-agentgateway-crds/              (agentgateway.dev CRDs)     │
   │    ├── 002-agentgateway-crds-post/         (Gateway API + Inf-Ext CRDs)│
@@ -65,7 +65,7 @@
   ┌────────────────────────────────────────────────────────────────────────┐
   │ 3. DEPLOY — Install to cluster                                         │
   │                                                                        │
-  │  $ cd bundle && ./deploy.sh                                            │
+  │  $ cd bundle && aicr verify . && ./deploy.sh                           │
   │                                                                        │
   │  selected components in deployment order (post-folders &               │
   │  some steps omitted): agentgateway-crds ──▶ ... ──▶ cert-manager       │
@@ -97,6 +97,16 @@
   │  └──────────────────────────────────────────────────────────────┘      │
   └────────────────────────────────────────────────────────────────────────┘
 ```
+
+`checksums.txt` covers every regular payload file, including `recipe.yaml`.
+`aicr verify .` derives the required directories from the manifest and rejects
+every additional file or directory, symlink, and other non-regular filesystem
+object. Only `checksums.txt`,
+`attestation/bundle-attestation.sigstore.json`, and
+`attestation/aicr-attestation.sigstore.json` may exist outside the manifest;
+they remain part of the verified inventory. Legacy bundles with incomplete
+manifests report `unknown` trust and must be regenerated. ZIP and CLI OCI
+publication revalidate a private snapshot and publish only that inventory.
 
 
 ## Recipe Overlay Chains — Training vs Inference

@@ -89,6 +89,9 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
 
 # Extract the bundles
 unzip bundles.zip -d ./bundles
+
+# Verify the complete extracted inventory before deployment
+(cd ./bundles && aicr verify .)
 ```
 
 ## Endpoints
@@ -498,17 +501,23 @@ curl -X POST "http://localhost:8080/v1/bundle" \
 |--------|-------------|---------|
 | `Content-Type` | Always `application/zip` | `application/zip` |
 | `Content-Disposition` | Download filename | `attachment; filename="bundles.zip"` |
-| `X-Bundle-Files` | Total files in archive | `10` |
-| `X-Bundle-Size` | Uncompressed size (bytes) | `45678` |
+| `X-Bundle-Files` | Number of verified regular files streamed into the archive | `10` |
+| `X-Bundle-Size` | Aggregate uncompressed bytes of those verified regular files | `45678` |
 | `X-Bundle-Duration` | Generation time | `1.234s` |
+
+Before writing the response, the server stages a private, revalidated
+closed-world inventory. The ZIP contains only the inventory-derived
+directories and regular files, including `recipe.yaml` when present;
+unverified entries are rejected rather than archived. `X-Bundle-Files` and
+`X-Bundle-Size` are derived from that same frozen inventory.
 
 #### Bundle Structure
 
-```
+```text
 bundles.zip
 ├── deploy.sh                    # root automation script (executable)
 ├── README.md                    # root deployment guide
-├── checksums.txt                # SHA256 checksums (always set for /v1/bundle)
+├── checksums.txt                # SHA256 for every regular payload file in the archive
 ├── recipe.yaml                  # canonical post-resolution recipe (helm deployer)
 ├── 001-<component>/             # per-component folder (NNN-prefixed)
 │   ├── install.sh               # component install script
@@ -523,7 +532,10 @@ bundles.zip
 
 Checksums are root-level only; component folders carry `install.sh` at their
 root (no `scripts/` subdirectory), and no `uninstall.sh`/`undeploy.sh` is
-generated.
+generated. After extraction, `aicr verify .` performs full closed-world
+verification: every manifest digest must match and every additional file or
+directory, symlink, or other non-regular object is rejected, except the exact
+allowed inventory metadata paths.
 
 ---
 
@@ -613,10 +625,10 @@ curl -s -X POST "http://localhost:8080/v1/bundle" \
 echo "Extracting bundles..."
 unzip -q bundles.zip -d ./deployment
 
-# Verify checksums (checksums.txt is at the bundle root, not per-component)
-echo "Verifying checksums..."
+# Verify the complete inventory (checksums.txt is at the bundle root)
+echo "Verifying bundle inventory..."
 cd deployment
-sha256sum -c checksums.txt
+aicr verify .
 
 # Step 4: Deploy (example)
 echo "Bundle ready for deployment:"

@@ -15,11 +15,15 @@
 package attestation
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestBuildManifest_DeterministicOrder(t *testing.T) {
@@ -74,6 +78,18 @@ func TestBuildManifest_ExcludePathSkipsManifest(t *testing.T) {
 		if f.Path == ManifestFilename {
 			t.Errorf("excluded file %q should not appear in manifest", ManifestFilename)
 		}
+	}
+}
+
+func TestBuildManifestContext_Cancelled(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "payload.txt"), []byte("payload"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := BuildManifestContext(ctx, dir)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("BuildManifestContext() error = %v, want ErrCodeTimeout", err)
 	}
 }
 
@@ -139,6 +155,20 @@ func TestHashFileSHA256_ReturnsHex(t *testing.T) {
 	want := hex.EncodeToString(sha256ToBytes(body))
 	if got != want {
 		t.Errorf("digest mismatch: %q vs %q", got, want)
+	}
+}
+
+func TestHashFileSHA256Context_Cancelled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "payload.txt")
+	if err := os.WriteFile(path, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := HashFileSHA256Context(ctx, path)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("HashFileSHA256Context() error = %v, want ErrCodeTimeout", err)
 	}
 }
 

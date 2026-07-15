@@ -190,8 +190,8 @@
       </tbody>
     </table>
     <div class="grid2">
-      <div class="mini"><h4>Without attestation</h4><p>Bundle is just files. <code class="inl">checksums.txt</code> catches accidental corruption, nothing else.</p></div>
-      <div class="mini"><h4>With <code class="inl">--attest</code></h4><p>The generated payload files listed in <code class="inl">checksums.txt</code>, including <code class="inl">recipe.yaml</code>, are cryptographically bound to the creator <em>and</em> the binary that produced it. Recursive provenance.</p></div>
+      <div class="mini"><h4>Without attestation</h4><p><code class="inl">checksums.txt</code> detects accidental payload or tree changes, but provides no signed creator identity or provenance.</p></div>
+      <div class="mini"><h4>With <code class="inl">--attest</code></h4><p>The complete closed-world payload inventory, including <code class="inl">recipe.yaml</code>, is cryptographically bound to the creator <em>and</em> the binary that produced it. Recursive provenance.</p></div>
     </div>
   </div>
 </section>
@@ -202,7 +202,7 @@
     <div class="label">02 · Produce</div>
     <h2><code class="inl">aicr bundle --attest</code></h2>
     <figure class="fig">
-      <svg class="diagram" viewBox="0 0 860 380" role="img" aria-label="Recipe flows through aicr bundle --attest, producing a bundle directory with attestation/ subdirectory containing two signed Sigstore bundles">
+      <svg class="diagram" viewBox="0 0 860 380" role="img" aria-label="Recipe flows through aicr bundle --attest, producing a closed-world bundle inventory with checksums.txt and the two permitted attestation files">
         <defs>
           <marker id="bD1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#46525f"/></marker>
           <marker id="bD1g" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#76b900"/></marker>
@@ -233,7 +233,8 @@
           <text x="46" y="214">recipe.yaml &#183; deploy.sh &#183; README.md</text>
           <text x="46" y="234">&lt;component&gt;/values.yaml &#183; ...</text>
           <text x="46" y="266" fill="#9aa7b4">checksums.txt</text>
-          <text x="46" y="282" fill="#6b7785" font-size="11">(SHA256 of every generated payload file)</text>
+          <text x="46" y="282" fill="#6b7785" font-size="11">closed-world SHA256 inventory; covers recipe.yaml</text>
+          <text x="46" y="300" fill="#6b7785" font-size="11">additional filesystem entries are rejected</text>
         </g>
         <rect class="node-g" x="432" y="170" width="398" height="186" rx="9"/>
         <text class="ttl-g nlabel" x="448" y="194">attestation/</text>
@@ -300,7 +301,9 @@
       <span class="t info">Why both halves matter</span>
       The bundle signature alone proves a creator made a bundle. The chain to the binary
       attestation proves the bundle was built by an attested NVIDIA-CI-released AICR CLI —
-      not by a fork, an alpha build, or a tampered binary.
+      not by a fork, an alpha build, or a tampered binary. AICR generates manifest entries
+      sorted, but validates valid entries in any order; reordering a signed manifest changes its
+      signed bytes and invalidates this chain.
     </div>
   </div>
 </section>
@@ -322,8 +325,9 @@
 
 <span class="g">Bundle verification: PASSED</span></pre>
     </div>
-    <p>Five gates ran: file integrity, bundle signature, bundle predicate, binary attestation
-      chain, identity pin. Any failure short-circuits to a lower trust level.</p>
+    <p>Five gates ran: closed-world inventory, bundle signature, bundle predicate, binary
+      attestation chain, identity pin. Additional files or directories, symlinks, other
+      non-regular objects, and failed attestations report <code class="inl">unknown</code>.</p>
   </div>
 </section>
 
@@ -336,16 +340,17 @@
       <thead><tr><th>Level</th><th>Name</th><th>Criteria</th></tr></thead>
       <tbody>
         <tr><td class="ok">4</td><td><code>verified</code></td><td>Checksums &nbsp;+ &nbsp;bundle attestation &nbsp;+ &nbsp;binary attestation pinned to NVIDIA CI</td></tr>
-        <tr><td class="ok">3</td><td><code>attested</code></td><td>Bundle attestation verified; binary attestation missing or external data used (a <em>failed</em> binary attestation reports attested but exits nonzero)</td></tr>
-        <tr><td class="warn">2</td><td><code>unverified</code></td><td>Checksums valid, no <code class="inl">--attest</code> was passed</td></tr>
-        <tr><td class="bad">1</td><td><code>unknown</code></td><td>Missing/invalid <code class="inl">checksums.txt</code>, or bundle attestation fails verification</td></tr>
+        <tr><td class="ok">3</td><td><code>attested</code></td><td>Bundle attestation verified; binary attestation missing, or external data used</td></tr>
+        <tr><td class="warn">2</td><td><code>unverified</code></td><td>Closed-world checksum inventory valid, no <code class="inl">--attest</code> was passed</td></tr>
+        <tr><td class="bad">1</td><td><code>unknown</code></td><td>Missing, invalid, or incomplete manifest; unexpected filesystem entry; or failed attestation</td></tr>
       </tbody>
     </table>
     <div class="note">
       <span class="t info">Why levels, not pass/fail</span>
       Different bundles live under different threats. CI-built production bundles must be
       <code class="inl">verified</code>; an on-call engineer&rsquo;s emergency hotfix bundle might only
-      reach <code class="inl">attested</code>. Operators pick the floor per environment.
+      reach <code class="inl">attested</code>. Legacy bundles with incomplete manifests remain
+      <code class="inl">unknown</code> and must be regenerated. Operators pick the floor per environment.
     </div>
   </div>
 </section>
@@ -366,7 +371,7 @@
 <span class="c"># Constrain the CLI version that produced the bundle.</span>
 <span class="p">$</span> aicr verify ./my-bundle --cli-version-constraint ">= 1.0.0"
 
-<span class="c"># CI: keep the verify exit code (a failed binary attestation reports attested but exits nonzero)</span>
+<span class="c"># CI: keep the verify exit code; failed integrity or attestation reports unknown</span>
 <span class="p">$</span> set -o pipefail; aicr verify ./my-bundle --format json | jq '.trustLevel, .trustReason'</pre>
     </div>
     <div class="grid2">
@@ -394,9 +399,10 @@
 <span class="r">Bundle verification: FAILED (non-zero exit)</span></pre>
     </div>
     <p>The signature&rsquo;s subject is the digest of <code class="inl">checksums.txt</code>, and
-      <code class="inl">checksums.txt</code> pins every file it lists. Mutating a listed file
-      breaks the checksum; mutating <code class="inl">checksums.txt</code> to match breaks the
-      signature.</p>
+      <code class="inl">checksums.txt</code> pins every regular payload file. Mutating a listed
+      file breaks the checksum; mutating or reordering <code class="inl">checksums.txt</code>
+      breaks the signature. Adding any unlisted file, directory, symlink, or other
+      non-regular object fails exact-tree verification.</p>
   </div>
 </section>
 

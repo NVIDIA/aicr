@@ -16,11 +16,14 @@ package verifier
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
@@ -318,6 +321,80 @@ func TestCheckInventory_RespectsCancellation(t *testing.T) {
 	_, err := CheckInventory(ctx, mat, readManifestDigest(t, summary))
 	if err == nil {
 		t.Errorf("CheckInventory(canceled ctx) = nil, want error")
+	}
+}
+
+func TestNormalizeInventoryHashError(t *testing.T) {
+	helperTimeout := apperrors.New(apperrors.ErrCodeTimeout, "hash helper timed out")
+	tests := []struct {
+		name      string
+		ctx       func(t *testing.T) context.Context
+		wantCode  apperrors.ErrorCode
+		wantCause error
+		wantSame  bool
+	}{
+		{
+			name:     "live caller preserves helper timeout",
+			ctx:      func(*testing.T) context.Context { return context.Background() },
+			wantCode: apperrors.ErrCodeTimeout,
+			wantSame: true,
+		},
+		{
+			name: "caller cancellation becomes unavailable",
+			ctx: func(*testing.T) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			wantCode:  apperrors.ErrCodeUnavailable,
+			wantCause: context.Canceled,
+		},
+		{
+			name: "caller deadline becomes unavailable",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+				t.Cleanup(cancel)
+				return ctx
+			},
+			wantCode:  apperrors.ErrCodeUnavailable,
+			wantCause: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeInventoryHashError(tt.ctx(t), helperTimeout)
+			if !stderrors.Is(got, apperrors.New(tt.wantCode, "")) {
+				t.Fatalf("normalizeInventoryHashError() = %v, want code %s", got, tt.wantCode)
+			}
+			if tt.wantSame && got.Error() != helperTimeout.Error() {
+				t.Fatalf("normalizeInventoryHashError() = %v, want original %v", got, helperTimeout)
+			}
+			if tt.wantCause != nil && !stderrors.Is(got, tt.wantCause) {
+				t.Errorf("normalizeInventoryHashError() = %v, want cause %v", got, tt.wantCause)
+			}
+		})
+	}
+}
+
+func TestIsInventoryAbortError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil},
+		{name: "timeout", err: apperrors.New(apperrors.ErrCodeTimeout, "timed out"), want: true},
+		{name: "unavailable", err: apperrors.New(apperrors.ErrCodeUnavailable, "canceled"), want: true},
+		{name: "internal", err: apperrors.New(apperrors.ErrCodeInternal, "walk failed")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isInventoryAbortError(tt.err); got != tt.want {
+				t.Errorf("isInventoryAbortError() = %t, want %t", got, tt.want)
+			}
+		})
 	}
 }
 

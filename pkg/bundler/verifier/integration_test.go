@@ -81,7 +81,31 @@ func TestIntegration_VerifyTamperedBundle(t *testing.T) {
 	}
 }
 
-// TestIntegration_VerifyWithDataDir tests that a data/ directory caps trust at attested.
+// TestIntegration_VerifyRejectsUnmanagedFile verifies that a valid manifest
+// cannot raise trust above unknown when the filesystem contains extra content.
+func TestIntegration_VerifyRejectsUnmanagedFile(t *testing.T) {
+	dir := createTestBundle(t)
+	if err := os.WriteFile(filepath.Join(dir, "unmanaged.txt"), []byte("unmanaged"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Verify(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+	if result.ChecksumsPassed {
+		t.Error("ChecksumsPassed should be false with an unmanaged file")
+	}
+	if result.TrustLevel != TrustUnknown {
+		t.Errorf("TrustLevel = %s, want unknown", result.TrustLevel)
+	}
+	if len(result.Errors) == 0 {
+		t.Error("expected an unmanaged-file error")
+	}
+}
+
+// TestIntegration_VerifyWithDataDir tests that checksummed external data is a
+// valid inventory. The trust cap applies only after the attestation chain passes.
 func TestIntegration_VerifyWithDataDir(t *testing.T) {
 	dir := createTestBundle(t)
 

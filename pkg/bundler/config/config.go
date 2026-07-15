@@ -243,6 +243,11 @@ type Config struct {
 	// targetRevision` triple resolves against the real artifact. See #1019.
 	bundleChartName string
 
+	// bundleChartVersion overrides only the semantic Helm chart version written
+	// into the argocd-helm bundle's Chart.yaml. Empty keeps the normalized recipe
+	// version. OCI callers set this to the SemVer form decoded from the raw tag.
+	bundleChartVersion string
+
 	// ociParentNamespace is the OCI registry + repository path with the chart-name
 	// segment stripped (e.g. "oci://ghcr.io/nvidia" for "oci://ghcr.io/nvidia/my-bundle:v1").
 	// Baked into the argocd-helm bundle's root values.yaml as the default repoURL.
@@ -475,6 +480,12 @@ func (c *Config) OCISourceName() string {
 // deployer. Empty means "use the deployer's default". See #1019.
 func (c *Config) BundleChartName() string {
 	return c.bundleChartName
+}
+
+// BundleChartVersion returns the semantic Chart.yaml version override for the
+// argocd-helm deployer. Empty means "use the normalized recipe version".
+func (c *Config) BundleChartVersion() string {
+	return c.bundleChartVersion
 }
 
 // OCIParentNamespace returns the OCI parent namespace baked into the
@@ -759,6 +770,15 @@ func WithFluxNamespace(ns string) Option {
 func WithBundleChartName(name string) Option {
 	return func(c *Config) {
 		c.bundleChartName = name
+	}
+}
+
+// WithBundleChartVersion sets the semantic Helm version written into the
+// argocd-helm bundle's Chart.yaml. It does not accept or normalize a raw OCI
+// Distribution tag; callers must pass the already-decoded SemVer form.
+func WithBundleChartVersion(version string) Option {
+	return func(c *Config) {
+		c.bundleChartVersion = version
 	}
 }
 

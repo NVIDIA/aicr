@@ -305,20 +305,31 @@ release.
 ### Bundle attestation
 
 When `aicr bundle` runs with `--attest`, it signs the bundle using Sigstore
-keyless OIDC, binding the bundle creator's identity to the generated payload
-files listed in `checksums.txt`, including `recipe.yaml` in Helm bundles, and the binary that produced it (via
+keyless OIDC, binding the bundle creator's identity to the generated
+closed-world inventory and the binary that produced it (via
 `resolvedDependencies`). Attestation is opt-in; bundles are unsigned by
-default. The bundle output includes `bundle-attestation.sigstore.json`
-(SLSA Build Provenance v1 for the bundle) and a copy of the binary's
-`aicr-attestation.sigstore.json` (provenance chain).
+default. The bundle output includes
+`attestation/bundle-attestation.sigstore.json` (SLSA Build Provenance v1 for
+the bundle) and `attestation/aicr-attestation.sigstore.json` (the binary
+provenance chain).
+
+Bundle verification is closed-world: `checksums.txt` defines the regular
+payload, and any unlisted or non-regular entry fails verification. See
+[Artifact Verification](../user/artifact-verification.md#what-can-be-verified)
+for the exact metadata exceptions, ordering rules, publication guarantees, and
+legacy-bundle behavior.
 
 ```shell
 aicr verify ./my-bundle
 ```
 
-This verifies checksums against `checksums.txt`, the bundle attestation
-against the Sigstore trusted root, and the binary attestation provenance
-chain (identity pinned to NVIDIA CI). Enforce a minimum trust level:
+This performs full closed-world verification: it validates every manifest
+digest and rejects any additional filesystem entry, then verifies the bundle
+attestation against the Sigstore trusted root and the binary attestation
+provenance chain (identity pinned to NVIDIA CI). Manifest parsing is
+order-independent, but reordering an already signed `checksums.txt` changes
+the signed bytes and invalidates its existing attestation. Enforce a minimum
+trust level:
 
 ```shell
 aicr verify ./my-bundle --min-trust-level verified

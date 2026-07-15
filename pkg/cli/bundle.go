@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -26,11 +27,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -128,6 +131,10 @@ type bundleCmdOptions struct {
 	// deployer's "aicr-bundle" default is used when this is empty. See #1019.
 	bundleChartName string
 
+	// bundleChartVersion is the strict semantic Helm Chart.yaml version.
+	// The corresponding OCI reference retains its raw Distribution tag.
+	bundleChartVersion string
+
 	// ociParentNamespace is the OCI registry + repository path with the
 	// chart segment stripped; used as the default repoURL baked into the
 	// argocd-helm bundle's values.yaml. Derived from ociRef when --output
@@ -138,6 +145,17 @@ type bundleCmdOptions struct {
 	// means each deployer applies its own default ("aicr-stack" for
 	// argocd-helm, "nvidia-stack" for argocd). See #1011.
 	appName string
+
+	// verifiedBundleSource is the private immutable snapshot captured before
+	// the generated bundle is published into the caller-visible output path.
+	// It is runtime state, not a parsed command option, and remains owned by
+	// runBundleCmdWithDependencies until OCI publication finishes.
+	verifiedBundleSource *verifiedBundleSource
+}
+
+type verifiedBundleSource struct {
+	path      string
+	inventory *checksum.Inventory
 }
 
 // parseBundleCmdOptions parses and validates command options. The wire
@@ -225,8 +243,14 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		} else {
 			opts.ociRef = ref
 		}
-		// For OCI output, use current directory for bundle generation
-		opts.outputDir = "./bundle"
+		// For OCI output, retain one absolute planned path from preflight
+		// through generation and publication.
+		opts.outputDir, err = filepath.Abs("./bundle")
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to resolve OCI bundle output path", err)
+		}
+		opts.outputDir = filepath.Clean(opts.outputDir)
 		// Derive the Helm chart name from the OCI artifact path so the
 		// argocd-helm bundle's Chart.yaml and parent Application
 		// `source.chart` match what `helm push` actually publishes. Without
@@ -234,10 +258,21 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		// resolves against an artifact that doesn't exist in the registry
 		// when the user picks a non-default name. See #1019.
 		opts.bundleChartName = opts.ociRef.ChartName()
+		if opts.deployer == config.DeployerArgoCDHelm {
+			opts.bundleChartVersion, err = oci.HelmChartVersionFromTag(opts.ociRef.Tag)
+			if err != nil {
+				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+					"invalid Helm OCI tag")
+			}
+		}
 		// Derive the parent namespace (strip chart segment) so the argocd-helm
 		// deployer can bake it into values.yaml as the default repoURL. See #1342.
 		opts.ociParentNamespace = opts.ociRef.ParentNamespace()
 	} else {
+		if opts.imageRefsPath != "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--image-refs is only valid with OCI output")
+		}
 		// Resolve local output path to absolute to ensure consistent behavior
 		// regardless of how the binary is invoked.
 		absOut, absErr := filepath.Abs(ref.LocalPath)
@@ -306,6 +341,9 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	// Derive target revision: use OCI tag when available
 	if opts.ociRef != nil && opts.ociRef.Tag != "" {
 		opts.targetRevision = opts.ociRef.Tag
+		if opts.deployer == config.DeployerArgoCDHelm {
+			opts.targetRevision = opts.bundleChartVersion
+		}
 	}
 
 	if opts.valueOverrides, err = resolveComponentPaths(cmd, "set", resolved.ValueOverrides, config.ParseValueOverrides); err != nil {
@@ -809,8 +847,112 @@ Package with explicit tag (overrides CLI version):
 	}
 }
 
+type bundleCommandDependencies struct {
+	makeBundle func(
+		context.Context,
+		*aicr.Client,
+		*aicr.RecipeResult,
+		aicr.BundleOptions,
+	) (aicr.BundleArtifact, error)
+	prepareBundleOutput    func(context.Context, string) (*bundleOutputTarget, error)
+	prepareImageRefsTarget func(
+		context.Context,
+		*bundleOutputTarget,
+		string,
+	) (*imageRefsTarget, error)
+	newGenerationWorkspace func(context.Context, string, ...string) (*oci.Workspace, error)
+	pushOCIBundle          func(
+		context.Context,
+		*bundleCmdOptions,
+		*result.Output,
+		*bundleOutputTarget,
+		*imageRefsTarget,
+	) error
+}
+
+func defaultBundleCommandDependencies() bundleCommandDependencies {
+	return bundleCommandDependencies{
+		makeBundle: func(
+			ctx context.Context,
+			client *aicr.Client,
+			recipe *aicr.RecipeResult,
+			opts aicr.BundleOptions,
+		) (aicr.BundleArtifact, error) {
+
+			return client.MakeBundle(ctx, recipe, opts)
+		},
+		prepareBundleOutput:    prepareBundleOutputTarget,
+		prepareImageRefsTarget: prepareImageRefsTarget,
+		newGenerationWorkspace: oci.NewPrivateWorkspace,
+		pushOCIBundle:          pushOCIBundle,
+	}
+}
+
+func normalizeBundleCommandDependencies(deps bundleCommandDependencies) bundleCommandDependencies {
+	defaults := defaultBundleCommandDependencies()
+	if deps.makeBundle == nil {
+		deps.makeBundle = defaults.makeBundle
+	}
+	if deps.prepareBundleOutput == nil {
+		deps.prepareBundleOutput = defaults.prepareBundleOutput
+	}
+	if deps.prepareImageRefsTarget == nil {
+		deps.prepareImageRefsTarget = defaults.prepareImageRefsTarget
+	}
+	if deps.newGenerationWorkspace == nil {
+		deps.newGenerationWorkspace = defaults.newGenerationWorkspace
+	}
+	if deps.pushOCIBundle == nil {
+		deps.pushOCIBundle = defaults.pushOCIBundle
+	}
+	return deps
+}
+
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
+	return runBundleCmdWithDependencies(ctx, cmd, defaultBundleCommandDependencies())
+}
+
+func prepareBundlePublicationTargets(
+	ctx context.Context,
+	opts *bundleCmdOptions,
+	deps bundleCommandDependencies,
+) (*bundleOutputTarget, *imageRefsTarget, error) {
+
+	if opts.ociRef == nil {
+		return nil, nil, nil
+	}
+	preflightCtx, preflightCancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
+	bundleTarget, err := deps.prepareBundleOutput(preflightCtx, opts.outputDir)
+	err = authoritativeFilesystemContextError(preflightCtx, "bundle output preflight canceled", err)
+	var imageRefs *imageRefsTarget
+	if err == nil && opts.imageRefsPath != "" {
+		imageRefs, err = deps.prepareImageRefsTarget(preflightCtx, bundleTarget, opts.imageRefsPath)
+		err = authoritativeFilesystemContextError(preflightCtx,
+			"image-reference target preflight canceled", err)
+	}
+	preflightCancel()
+	if err == nil {
+		return bundleTarget, imageRefs, nil
+	}
+	if closeErr := imageRefs.close(); closeErr != nil {
+		slog.Warn("failed to close image-reference target after preflight failure", "error", closeErr)
+	}
+	if closeErr := bundleTarget.close(); closeErr != nil {
+		slog.Warn("failed to close bundle output target after preflight failure", "error", closeErr)
+	}
+	return nil, nil, err
+}
+
+//nolint:funlen // command orchestration keeps ownership and cleanup order explicit
+func runBundleCmdWithDependencies(
+	ctx context.Context,
+	cmd *cli.Command,
+	deps bundleCommandDependencies,
+) (retErr error) {
+
+	deps = normalizeBundleCommandDependencies(deps)
+
 	// Validate single-value flags are not duplicated
 	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name", flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
 		return err
@@ -836,6 +978,17 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	opts, err := parseBundleCmdOptions(cmd, cfg)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid bundle command options")
+	}
+
+	bundleTarget, imageRefs, err := prepareBundlePublicationTargets(ctx, opts, deps)
+	if err != nil {
+		return err
+	}
+	if bundleTarget != nil {
+		defer func() {
+			retErr = preservePrimaryCloseError(retErr, imageRefs.close(), "image-reference target")
+			retErr = preservePrimaryCloseError(retErr, bundleTarget.close(), "bundle output target")
+		}()
 	}
 
 	outputType := "Helm per-component bundle"
@@ -897,6 +1050,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
 		config.WithBundleChartName(opts.bundleChartName),
+		config.WithBundleChartVersion(opts.bundleChartVersion),
 		config.WithOCIParentNamespace(opts.ociParentNamespace),
 		config.WithAppName(opts.appName),
 	)
@@ -918,16 +1072,101 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	// OCI generation runs in a private workspace outside the caller-controlled
+	// output path. The verified tree is copied through the retained output Root
+	// and published into the caller-visible path only after generation succeeds.
+	generationDir := opts.outputDir
+	var generationWorkspace *oci.Workspace
+	if bundleTarget != nil {
+		stageCtx, stageCancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
+		var excludedRoots []string
+		if bundleTarget.generated != nil {
+			excludedRoots = append(excludedRoots, bundleTarget.path)
+		}
+		generationWorkspace, err = deps.newGenerationWorkspace(
+			stageCtx, "aicr-bundle-generation-", excludedRoots...)
+		err = authoritativeFilesystemContextError(
+			stageCtx, "bundle generation workspace allocation canceled", err)
+		stageCancel()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			retErr = joinInternalCleanup(
+				retErr, generationWorkspace.Close(), "bundle generation workspace")
+		}()
+		generationDir = generationWorkspace.Path()
+	}
+
 	// Generate bundle through the Client facade. MakeBundle constructs the
 	// bundler (with config + attester), bundles from the Client-owned
 	// recipe, and writes the same artifact bundler.Make produced directly.
-	out, err := client.MakeBundle(ctx, rec, aicr.BundleOptions{
+	out, err := deps.makeBundle(ctx, client, rec, aicr.BundleOptions{
 		Config:    bcfg,
 		Attester:  attester,
-		OutputDir: opts.outputDir,
+		OutputDir: generationDir,
 	})
 	if err != nil {
 		return err
+	}
+	if out == nil {
+		return errors.New(errors.ErrCodeInternal, "bundle generation returned no output")
+	}
+	if generationWorkspace != nil {
+		captureCtx, captureCancel := context.WithTimeout(ctx, defaults.OCISourceStageTimeout)
+		captureErr := validateGeneratedStageOutput(generationDir, out.OutputDir)
+		if captureErr == nil {
+			captureErr = bundleTarget.deps.beforeGeneratedOpen(bundleTarget)
+		}
+		captureErr = authoritativeFilesystemContextError(
+			captureCtx, "generated bundle output capture canceled", captureErr)
+		inventoryOpts := checksum.InventoryOptions{
+			AllowedMetadataPaths: attestation.BundleMetadataPaths(),
+		}
+		var verifiedDir string
+		var verifiedCleanup func() error
+		var inventory *checksum.Inventory
+		if captureErr == nil {
+			verifiedDir, inventory, verifiedCleanup, captureErr = checksum.StageVerifiedBundle(
+				captureCtx, generationDir, inventoryOpts)
+		}
+		if verifiedCleanup != nil {
+			defer func() {
+				retErr = joinInternalCleanup(
+					retErr, verifiedCleanup(), "verified generated bundle")
+			}()
+		}
+		var generationStage *bundleGenerationStage
+		if captureErr == nil {
+			generationStage, captureErr = bundleTarget.newGenerationStage(captureCtx)
+		}
+		if generationStage != nil {
+			defer func() {
+				retErr = joinInternalCleanup(
+					retErr, generationStage.close(), "bundle generation stage")
+			}()
+		}
+		if captureErr == nil {
+			captureErr = generationStage.copyInventory(captureCtx, inventory)
+		}
+		if captureErr == nil {
+			_, _, _, captureErr = checksum.ReadAndVerifyBundle(
+				captureCtx, generationStage.path, inventoryOpts)
+		}
+		captureErr = authoritativeFilesystemContextError(captureCtx,
+			"generated bundle output capture canceled", captureErr)
+		if captureErr == nil {
+			captureErr = generationStage.publish(captureCtx)
+		}
+		captureCancel()
+		if captureErr != nil {
+			return captureErr
+		}
+		opts.verifiedBundleSource = &verifiedBundleSource{
+			path:      verifiedDir,
+			inventory: inventory,
+		}
+		relocateGeneratedBundleOutput(out, generationDir, bundleTarget.path)
 	}
 
 	slog.Info("bundle generated",
@@ -945,7 +1184,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 
 	// Package and push as OCI artifact when output is oci://
 	if opts.ociRef != nil {
-		if err := pushOCIBundle(ctx, opts, out); err != nil {
+		if err := deps.pushOCIBundle(ctx, opts, out, bundleTarget, imageRefs); err != nil {
 			return err
 		}
 		// argocd-helm is the only deployer that publishes a Helm chart
@@ -960,6 +1199,42 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	return nil
+}
+
+func validateGeneratedStageOutput(stagePath, outputPath string) error {
+	stageAbs, stageErr := filepath.Abs(stagePath)
+	outputAbs, outputErr := filepath.Abs(outputPath)
+	if stageErr != nil || outputErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"generated bundle output differs from private stage",
+			stderrors.Join(stageErr, outputErr))
+	}
+	if filepath.Clean(stageAbs) != filepath.Clean(outputAbs) {
+		return errors.New(errors.ErrCodeInternal,
+			"generated bundle output differs from private stage")
+	}
+	return nil
+}
+
+func relocateGeneratedBundleOutput(out *result.Output, fromDir, toDir string) {
+	out.OutputDir = toDir
+	for _, bundleResult := range out.Results {
+		if bundleResult == nil {
+			continue
+		}
+		for index, file := range bundleResult.Files {
+			rel, err := filepath.Rel(fromDir, file)
+			if err == nil && filepath.IsLocal(rel) {
+				bundleResult.Files[index] = filepath.Join(toDir, rel)
+			}
+		}
+	}
+	if out.Deployment == nil {
+		return
+	}
+	for index, step := range out.Deployment.Steps {
+		out.Deployment.Steps[index] = strings.ReplaceAll(step, fromDir, toDir)
+	}
 }
 
 // selectAttester wires CLI flags and runtime environment into the
@@ -1015,51 +1290,248 @@ func bundleOIDCResolveOptions(opts *bundleCmdOptions) attestation.ResolveOptions
 // (helm.config.v1+json config + helm.chart.content.v1.tar+gzip layer)
 // so `helm pull oci://…` discovers the chart at pull time; every other
 // deployer uses AICR's generic OCI artifactType. See #961.
-func pushOCIBundle(ctx context.Context, opts *bundleCmdOptions, out *result.Output) error {
-	var (
-		pushResult *oci.PackageAndPushResult
-		err        error
+type bundlePublishDependencies struct {
+	stageVerifiedBundle func(
+		context.Context,
+		string,
+		checksum.InventoryOptions,
+	) (string, *checksum.Inventory, func() error, error)
+	newWorkspace       func(context.Context, string, ...string) (*oci.Workspace, error)
+	packageAndPush     func(context.Context, oci.OutputConfig) (*oci.PackageAndPushResult, error)
+	packageAndPushHelm func(context.Context, oci.HelmChartOptions) (*oci.PackageAndPushResult, error)
+	writeImageRefs     func(context.Context, *imageRefsTarget, []byte) error
+}
+
+func defaultBundlePublishDependencies() bundlePublishDependencies {
+	return bundlePublishDependencies{
+		stageVerifiedBundle: checksum.StageVerifiedBundle,
+		newWorkspace:        oci.NewPrivateWorkspace,
+		packageAndPush:      oci.PackageAndPush,
+		packageAndPushHelm:  oci.PackageAndPushHelmChart,
+		writeImageRefs: func(ctx context.Context, target *imageRefsTarget, data []byte) error {
+			return target.writeAtomic(ctx, data)
+		},
+	}
+}
+
+func normalizeBundlePublishDependencies(deps bundlePublishDependencies) bundlePublishDependencies {
+	defaults := defaultBundlePublishDependencies()
+	if deps.stageVerifiedBundle == nil {
+		deps.stageVerifiedBundle = defaults.stageVerifiedBundle
+	}
+	if deps.newWorkspace == nil {
+		deps.newWorkspace = defaults.newWorkspace
+	}
+	if deps.packageAndPush == nil {
+		deps.packageAndPush = defaults.packageAndPush
+	}
+	if deps.packageAndPushHelm == nil {
+		deps.packageAndPushHelm = defaults.packageAndPushHelm
+	}
+	if deps.writeImageRefs == nil {
+		deps.writeImageRefs = defaults.writeImageRefs
+	}
+	return deps
+}
+
+func pushOCIBundle(
+	ctx context.Context,
+	opts *bundleCmdOptions,
+	out *result.Output,
+	bundle *bundleOutputTarget,
+	imageRefs *imageRefsTarget,
+) error {
+
+	return pushOCIBundleWithDependencies(
+		ctx, opts, out, bundle, imageRefs, defaultBundlePublishDependencies())
+}
+
+// pushOCIBundleWithDependencies publishes only a retained, closed-world bundle
+// snapshot. Callers must not concurrently mutate the planned bundle or the
+// image-reference directory from preflight through publication. Portable Go
+// has no identity-conditional rename; rename atomicity is not guaranteed on
+// non-Unix platforms, and no fsync means visibility is not crash durability.
+// SameFile, case-folding, and Unicode-normalization guarantees depend on the
+// filesystem. Local syscalls are cooperatively checked between calls but may
+// not be forcibly interruptible, and os.Root's complete retained-root behavior
+// is unavailable on its excluded platforms. Registry push and final local
+// image-reference publication are intentionally non-transactional.
+//
+//nolint:funlen // publication ownership and cleanup order is intentionally linear
+func pushOCIBundleWithDependencies(
+	ctx context.Context,
+	opts *bundleCmdOptions,
+	out *result.Output,
+	bundle *bundleOutputTarget,
+	imageRefs *imageRefsTarget,
+	deps bundlePublishDependencies,
+) (retErr error) {
+
+	deps = normalizeBundlePublishDependencies(deps)
+	if opts == nil || opts.ociRef == nil || !opts.ociRef.IsOCI {
+		return errors.New(errors.ErrCodeInvalidRequest, "OCI bundle options are required")
+	}
+	if out == nil || bundle == nil {
+		return errors.New(errors.ErrCodeInternal, "generated bundle output is required")
+	}
+	absOut, absErr := filepath.Abs(out.OutputDir)
+	if absErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"generated bundle output differs from retained target", absErr)
+	}
+	if filepath.Clean(absOut) != bundle.path {
+		return errors.New(errors.ErrCodeInternal,
+			"generated bundle output differs from retained target")
+	}
+	if (opts.imageRefsPath == "") != (imageRefs == nil) {
+		return errors.New(errors.ErrCodeInternal,
+			"image-reference target does not match resolved command options")
+	}
+
+	publishCtx, publishCancel := context.WithTimeout(ctx, defaults.OCIBundlePublishTimeout)
+	defer publishCancel()
+	if err := cliFilesystemContextError(publishCtx, "OCI bundle publication canceled"); err != nil {
+		return err
+	}
+	if err := bundle.validate(publishCtx); err != nil {
+		return err
+	}
+	if imageRefs != nil {
+		if err := imageRefs.validateParent(publishCtx); err != nil {
+			return err
+		}
+		if err := imageRefs.validateTarget(publishCtx); err != nil {
+			return err
+		}
+		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+			return err
+		}
+	}
+
+	var stagedDir string
+	var inventory *checksum.Inventory
+	if opts.verifiedBundleSource != nil {
+		stagedDir = opts.verifiedBundleSource.path
+		inventory = opts.verifiedBundleSource.inventory
+	} else {
+		stageCtx, stageCancel := context.WithTimeout(publishCtx, defaults.OCISourceStageTimeout)
+		var cleanup func() error
+		var stageErr error
+		stagedDir, inventory, cleanup, stageErr = deps.stageVerifiedBundle(
+			stageCtx,
+			out.OutputDir,
+			checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()},
+		)
+		stageErr = authoritativeFilesystemContextError(
+			stageCtx, "verified bundle staging canceled", stageErr)
+		stageCancel()
+		if cleanup != nil {
+			defer func() {
+				retErr = preservePrimaryCloseError(retErr, cleanup(), "verified bundle stage")
+			}()
+		}
+		if stageErr != nil {
+			return stageErr
+		}
+		if cleanup == nil {
+			return errors.New(
+				errors.ErrCodeInternal, "verified bundle staging returned incomplete ownership")
+		}
+	}
+	if inventory == nil || stagedDir == "" {
+		return errors.New(errors.ErrCodeInternal, "verified bundle staging returned incomplete ownership")
+	}
+
+	if err := bundle.validate(publishCtx); err != nil {
+		return err
+	}
+	if imageRefs != nil {
+		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+			return err
+		}
+	}
+	workspace, workspaceErr := deps.newWorkspace(
+		publishCtx,
+		"aicr-oci-layout-",
+		out.OutputDir,
+		stagedDir,
 	)
+	workspaceErr = authoritativeFilesystemContextError(publishCtx,
+		"OCI layout workspace creation canceled", workspaceErr)
+	if workspace != nil {
+		defer func() {
+			retErr = preservePrimaryCloseError(retErr, workspace.Close(), "OCI layout workspace")
+		}()
+	}
+	if workspaceErr != nil {
+		return workspaceErr
+	}
+	if workspace == nil || workspace.Path() == "" {
+		return errors.New(errors.ErrCodeInternal, "OCI layout workspace ownership is incomplete")
+	}
+
+	sourceFiles := inventory.RelativeFiles()
+	if len(sourceFiles) == 0 {
+		return errors.New(errors.ErrCodeInternal, "verified bundle inventory is empty")
+	}
+	var pushResult *oci.PackageAndPushResult
+	var publishErr error
 	if opts.deployer == config.DeployerArgoCDHelm {
-		pushResult, err = oci.PackageAndPushHelmChart(ctx, oci.HelmChartOptions{
-			SourceDir:   opts.outputDir,
-			OutputDir:   opts.outputDir,
+		pushResult, publishErr = deps.packageAndPushHelm(publishCtx, oci.HelmChartOptions{
+			SourceDir:   stagedDir,
+			OutputDir:   workspace.Path(),
+			SourceFiles: sourceFiles,
 			Reference:   opts.ociRef,
 			Version:     version,
 			PlainHTTP:   opts.plainHTTP,
 			InsecureTLS: opts.insecureTLS,
 		})
 	} else {
-		pushResult, err = oci.PackageAndPush(ctx, oci.OutputConfig{
-			SourceDir:   opts.outputDir,
-			OutputDir:   opts.outputDir,
+		pushResult, publishErr = deps.packageAndPush(publishCtx, oci.OutputConfig{
+			SourceDir:   stagedDir,
+			OutputDir:   workspace.Path(),
+			SourceFiles: sourceFiles,
 			Reference:   opts.ociRef,
 			Version:     version,
 			PlainHTTP:   opts.plainHTTP,
 			InsecureTLS: opts.insecureTLS,
 		})
 	}
-	if err != nil {
+	publishErr = authoritativeFilesystemContextError(publishCtx,
+		"OCI bundle publication canceled", publishErr)
+	if publishErr != nil {
+		return publishErr
+	}
+	if pushResult == nil || pushResult.Digest == "" || pushResult.Reference == "" {
+		return errors.New(errors.ErrCodeInternal, "OCI publication returned an incomplete result")
+	}
+	if err := bundle.validate(publishCtx); err != nil {
 		return err
 	}
+	if imageRefs != nil {
+		if err := imageRefs.validateBundleAliases(publishCtx); err != nil {
+			return err
+		}
+	}
 
-	// Update results with OCI metadata
 	for i := range out.Results {
 		if out.Results[i].Success {
 			out.Results[i].SetOCIMetadata(pushResult.Digest, pushResult.Reference, true)
 		}
 	}
 
-	// Write image reference to file if --image-refs specified
-	if opts.imageRefsPath != "" {
-		if err := os.WriteFile(opts.imageRefsPath, []byte(pushResult.Digest+"\n"), 0600); err != nil {
-			slog.Error("failed to write image refs file", "error", err, "path", opts.imageRefsPath)
-			return errors.Wrap(errors.ErrCodeInternal, "failed to write image refs", err)
+	if imageRefs != nil {
+		writeCtx, writeCancel := context.WithTimeout(publishCtx, defaults.OCIImageRefsWriteTimeout)
+		writeErr := deps.writeImageRefs(writeCtx, imageRefs, []byte(pushResult.Digest+"\n"))
+		writeErr = authoritativeFilesystemContextError(writeCtx,
+			"image-reference publication canceled", writeErr)
+		writeCancel()
+		if writeErr != nil {
+			return writeErr
 		}
 		slog.Info("wrote image reference", "path", opts.imageRefsPath, "ref", pushResult.Digest)
 	}
-
-	return nil
+	return cliFilesystemContextError(publishCtx, "OCI bundle publication canceled")
 }
 
 // printDeploymentInstructions writes user-friendly deployment instructions to w.
@@ -1086,8 +1558,8 @@ func printDeploymentInstructions(w io.Writer, out *result.Output) {
 // printArgoCDHelmOCIInstructions emits the canonical `helm install` line
 // for an argocd-helm bundle pushed to OCI. The post-#1051 contract is:
 //
-//   - `helm install` targets the full OCI artifact reference
-//     (oci://<registry>/<repo>:<tag>, including the chart name).
+//   - `helm install` targets the untagged OCI repository and supplies the
+//     strict semantic chart version through `--version`.
 //   - `--set repoURL` carries the PARENT namespace only — the chart's
 //     parent App template appends .Chart.Name itself to assemble the
 //     final reference, so the chart name must NOT be included in
@@ -1101,14 +1573,20 @@ func printArgoCDHelmOCIInstructions(w io.Writer, ref *oci.Reference) {
 		return
 	}
 
-	chartRef := fmt.Sprintf("%s%s/%s:%s", oci.URIScheme, ref.Registry, ref.Repository, ref.Tag)
+	chartRepository := fmt.Sprintf("%s%s/%s", oci.URIScheme, ref.Registry, ref.Repository)
+	chartVersion, err := oci.HelmChartVersionFromTag(ref.Tag)
+	if err != nil {
+		slog.Warn("cannot print Helm install instructions for an invalid OCI tag", "error", err)
+		return
+	}
 
 	// Delegate to canonical derivation so baked repoURL and printed hint always match. See #1342.
 	repoURL := ref.ParentNamespace()
 
-	fmt.Fprintf(w, "\nargocd-helm bundle pushed: %s\n", chartRef)
+	fmt.Fprintf(w, "\nargocd-helm bundle pushed: %s:%s\n", chartRepository, ref.Tag)
 	fmt.Fprintln(w, "\nTo install:")
-	fmt.Fprintf(w, "  helm install <release> %s \\\n", chartRef)
-	fmt.Fprintln(w, "    --namespace argocd")
+	fmt.Fprintf(w, "  helm install <release> %s \\\n", chartRepository)
+	fmt.Fprintln(w, "    --namespace argocd \\")
+	fmt.Fprintf(w, "    --version %s\n", chartVersion)
 	fmt.Fprintf(w, "    # repoURL defaults to %s (override with --set repoURL=oci://mirror if mirroring)\n", repoURL)
 }

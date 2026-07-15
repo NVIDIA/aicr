@@ -90,8 +90,12 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManife
 			return mismatches, errors.Wrap(errors.ErrCodeUnavailable,
 				"inventory check canceled", ctxErr)
 		}
-		got, hashErr := hashFile(mat.BundleDir, e.Path, e.Size)
+		got, hashErr := hashFile(ctx, mat.BundleDir, e.Path, e.Size)
 		if hashErr != nil {
+			hashErr = normalizeInventoryHashError(ctx, hashErr)
+			if isInventoryAbortError(hashErr) {
+				return mismatches, hashErr
+			}
 			mismatches = append(mismatches, KV{Key: e.Path, Value: hashErr.Error()})
 			continue
 		}
@@ -106,6 +110,9 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManife
 
 	extras, walkErr := findExtras(ctx, mat.BundleDir, manifest.Files)
 	if walkErr != nil {
+		if isInventoryAbortError(walkErr) {
+			return mismatches, walkErr
+		}
 		mismatches = append(mismatches, KV{Key: "walk", Value: walkErr.Error()})
 	}
 	for _, p := range extras {
@@ -117,6 +124,21 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManife
 			"manifest inventory check failed for "+strconv.Itoa(len(mismatches))+" file(s)")
 	}
 	return nil, nil
+}
+
+func normalizeInventoryHashError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.Wrap(errors.ErrCodeUnavailable, "inventory check canceled", ctxErr)
+	}
+	return err
+}
+
+func isInventoryAbortError(err error) bool {
+	return stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) ||
+		stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
 }
 
 // CheckPhaseDigests verifies that each phase summary's CTRFDigest recorded in
@@ -180,7 +202,7 @@ func CheckPhaseDigests(mat *MaterializedBundle, pred *attestation.Predicate) ([]
 	return nil, nil
 }
 
-func hashFile(bundleDir, rel string, expectedSize int64) (string, error) {
+func hashFile(ctx context.Context, bundleDir, rel string, expectedSize int64) (string, error) {
 	// Reject non-local manifest paths before touching the filesystem.
 	// A hostile manifest with rel="../../../etc/passwd" would otherwise
 	// let the verifier stat and hash files outside bundleDir.
@@ -203,7 +225,7 @@ func hashFile(bundleDir, rel string, expectedSize int64) (string, error) {
 				" (got "+strconv.FormatInt(info.Size(), 10)+
 				", want "+strconv.FormatInt(expectedSize, 10)+")")
 	}
-	got, hashErr := attestation.HashFileSHA256(full)
+	got, hashErr := attestation.HashFileSHA256Context(ctx, full)
 	if hashErr != nil {
 		return "", errors.PropagateOrWrap(hashErr, errors.ErrCodeInternal,
 			"failed to hash bundle file: "+rel)

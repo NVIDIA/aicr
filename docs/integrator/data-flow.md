@@ -385,8 +385,8 @@ RecipeResult
                                    CR, for components that ship one)
          - go:embed templates  -> per-component install.sh, and the root
                                    README.md + deploy.sh
-  -> write canonical recipe.yaml
-  -> compute root checksums.txt over every emitted file
+  -> write canonical recipe.yaml (Helm deployer only)
+  -> finalize root checksums.txt over every regular payload file
 ```
 
 `pkg/bundler/registry` exists but is **not** used by the production path: the
@@ -396,6 +396,10 @@ component in one `DefaultBundler` invocation, builds one deployer
 `cluster-values.yaml`. Every component is handled in that single invocation, not by separate
 per-component bundlers. The per-component file layout above is the **Helm**
 deployer's; argocd/argocd-helm/flux/helmfile emit their own layouts.
+Finalization treats each deployer output as a closed-world inventory:
+`checksums.txt` lists every regular payload file, including `recipe.yaml` when
+present, and verification rejects additional files, directories, symlinks, or
+other non-regular objects outside the exact allowed metadata paths.
 
 ### Configuration Extraction
 
@@ -455,7 +459,7 @@ Bundle artifacts + recipe (deploymentOrder, componentRefs)
       argocd-helm    — Helm-chart app-of-apps (values overridable at install)
       flux           — Flux HelmRelease manifests
       helmfile       — helmfile.yaml release graph
-  → numbered NNN-<component>/ output + root checksums.txt
+  → numbered NNN-<component>/ output + closed-world root checksums.txt
 
 Each component folder holds install.sh, values.yaml, and cluster-values.yaml
 (there is no scripts/ subdirectory).
@@ -508,7 +512,7 @@ bundle-output/
 ├── README.md                    # Root deployment guide with ordered steps
 ├── deploy.sh                    # Automation script (0755)
 ├── recipe.yaml                  # Canonical post-resolution recipe
-├── checksums.txt                # SHA256 of all generated payload files
+├── checksums.txt                # SHA256 of every regular payload file
 ├── 001-cert-manager/
 │   ├── install.sh               # Per-folder install script (0755)
 │   ├── values.yaml              # Static Helm values
@@ -534,6 +538,7 @@ deployment order). Local-chart components instead ship `Chart.yaml` +
 ```
 bundle-output/
 ├── app-of-apps.yaml          # Parent Application (bundle root)
+├── checksums.txt              # SHA256 of every regular payload file
 ├── 001-cert-manager/
 │   ├── values.yaml
 │   └── application.yaml      # With sync-wave annotation
@@ -605,8 +610,8 @@ spec:
 │     └─ 003-network-operator/application.yaml (wave: 2)       │
 │     └─ app-of-apps.yaml (bundle root, uses --repo URL)       │
 │                                                              │
-│  5. Generate checksums                                       │
-│     └─ checksums.txt (root; all emitted Argo CD files)       │
+│  5. Finalize closed-world inventory                          │
+│     └─ checksums.txt (root; every regular payload file)      │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -674,12 +679,25 @@ HTTP Request → Middleware Chain → Handler → Response
 5. Rate Limit (100 req/s)
 6. Logging (structured logs)
 7. Handler:
-   ├─ Parse query parameters
-   ├─ Build Query
-   ├─ recipe.Builder.Build(ctx, query)
-   ├─ Serialize response
-   └─ Return JSON
+   ├─ Recipe/query routes
+   │  ├─ Parse query parameters
+   │  ├─ Build Query
+   │  ├─ recipe.Builder.Build(ctx, query)
+   │  ├─ Serialize response
+   │  └─ Return JSON
+   └─ POST /v1/bundle
+      ├─ Decode a fully hydrated RecipeResult
+      ├─ Generate and finalize the bundle inventory
+      ├─ Stage one private revalidated inventory snapshot
+      ├─ Stream only its required directories and regular files to ZIP
+      └─ Derive X-Bundle-Files and X-Bundle-Size from that inventory
 ```
+
+The bundle response includes `recipe.yaml` when the deployer emits it and
+excludes every unverified entry. `X-Bundle-Files` is the number of verified
+regular files, and `X-Bundle-Size` is their aggregate uncompressed byte size.
+The server rejects an additional file or directory, symlink, or other
+non-regular object before the ZIP response is published.
 
 ### Response Headers
 

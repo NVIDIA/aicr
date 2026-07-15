@@ -292,6 +292,40 @@ func TestBundleVerifyCmd_KeyFlagDefinition(t *testing.T) {
 	t.Fatal("--key flag not found")
 }
 
+func TestBundleVerifyCmd_RejectsUnmanagedFile(t *testing.T) {
+	dir := t.TempDir()
+	valuesPath := filepath.Join(dir, "values.yaml")
+	if err := os.WriteFile(valuesPath, []byte("replicas: 1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checksum.GenerateChecksums(context.Background(), dir, []string{valuesPath}); err != nil {
+		t.Fatalf("GenerateChecksums: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "unmanaged.txt"), []byte("unexpected"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := bundleVerifyCmd()
+	var buf bytes.Buffer
+	cmd.Writer = &buf
+	err := cmd.Run(context.Background(), []string{
+		"verify", dir, "--format", "json", "--min-trust-level", "unknown",
+	})
+	if err == nil {
+		t.Fatal("verify command accepted an unmanaged file")
+	}
+	output := buf.String()
+	if !strings.Contains(output, `"checksumsPassed": false`) {
+		t.Errorf("output does not report failed checksums:\n%s", output)
+	}
+	if !strings.Contains(output, `"trustLevel": "unknown"`) {
+		t.Errorf("output does not report unknown trust:\n%s", output)
+	}
+	if !strings.Contains(output, "unexpected file") {
+		t.Errorf("output does not identify unmanaged content:\n%s", output)
+	}
+}
+
 func TestOutputText_Verdict(t *testing.T) {
 	tests := []struct {
 		name          string

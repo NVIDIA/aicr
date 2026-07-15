@@ -16,7 +16,7 @@ package attestation
 
 import (
 	"context"
-	"os"
+	"log/slog"
 	"strings"
 
 	digestpkg "github.com/opencontainers/go-digest"
@@ -74,6 +74,27 @@ type PushResult struct {
 
 // Push packages a bundle directory as an OCI artifact and pushes it.
 func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
+	return pushWithDependencies(ctx, opts, defaultEvidencePushDependencies())
+}
+
+type evidencePushDependencies struct {
+	newWorkspace   func(context.Context, string, ...string) (*oci.Workspace, error)
+	packageAndPush func(context.Context, oci.OutputConfig) (*oci.PackageAndPushResult, error)
+}
+
+func defaultEvidencePushDependencies() evidencePushDependencies {
+	return evidencePushDependencies{
+		newWorkspace:   oci.NewPrivateWorkspace,
+		packageAndPush: oci.PackageAndPush,
+	}
+}
+
+func pushWithDependencies(
+	ctx context.Context,
+	opts PushOptions,
+	deps evidencePushDependencies,
+) (retResult *PushResult, retErr error) {
+
 	if opts.SourceDir == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "SourceDir is required")
 	}
@@ -96,15 +117,27 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 			"evidence reference must include a tag")
 	}
 
-	tmpOut, err := os.MkdirTemp("", "aicr-evidence-oci-")
+	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
+	defer pushCancel()
+	workspace, err := deps.newWorkspace(pushCtx, "aicr-evidence-oci-", opts.SourceDir)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create temp OCI store dir", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to create evidence OCI workspace")
 	}
-	defer func() { _ = os.RemoveAll(tmpOut) }()
+	defer func() {
+		if closeErr := workspace.Close(); closeErr != nil {
+			if retErr == nil {
+				retResult = nil
+				retErr = closeErr
+			} else {
+				slog.Warn("failed to close evidence OCI workspace after primary error", "error", closeErr)
+			}
+		}
+	}()
 
 	cfg := oci.OutputConfig{
 		SourceDir:   opts.SourceDir,
-		OutputDir:   tmpOut,
+		OutputDir:   workspace.Path(),
+		SourceFiles: nil,
 		Reference:   ref,
 		Version:     opts.AICRVersion,
 		PlainHTTP:   opts.PlainHTTP,
@@ -118,14 +151,7 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 		},
 	}
 
-	// Encode the network-bound contract on the public function itself
-	// (rather than trusting every caller to bound). EvidenceBundlePushTimeout
-	// matches the cap the current call site already imposes, so existing
-	// behavior is unchanged — but future callers that pass a longer-lived
-	// ctx still get an opinionated upper bound on the registry round-trip.
-	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
-	defer pushCancel()
-	res, err := oci.PackageAndPush(pushCtx, cfg)
+	res, err := deps.packageAndPush(pushCtx, cfg)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "package and push failed")
 	}
@@ -219,6 +245,24 @@ func manifestFingerprint(bundle *Bundle) string {
 // discovery finds it. Referrers are addressed by digest, not by tag, so
 // the tag in opts.Reference is ignored.
 func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOptions) (*PushResult, error) {
+	return attachSigstoreBundleAsReferrerWithDependencies(
+		ctx, opts, defaultAttachReferrerDependencies())
+}
+
+type attachReferrerDependencies struct {
+	pushReferrer func(context.Context, oci.ReferrerOptions) (*oci.PushResult, error)
+}
+
+func defaultAttachReferrerDependencies() attachReferrerDependencies {
+	return attachReferrerDependencies{pushReferrer: oci.PushReferrer}
+}
+
+func attachSigstoreBundleAsReferrerWithDependencies(
+	ctx context.Context,
+	opts AttachReferrerOptions,
+	deps attachReferrerDependencies,
+) (*PushResult, error) {
+
 	if opts.Reference == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "Reference is required")
 	}
@@ -233,6 +277,9 @@ func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOpti
 	}
 	if opts.MainArtifact.Size <= 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "MainArtifact.Size is required")
+	}
+	if len(opts.ExcludedRoots) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "ExcludedRoots is required")
 	}
 
 	ref, err := oci.ParseOutputTarget(oci.EnsureScheme(opts.Reference))
@@ -253,14 +300,15 @@ func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOpti
 	// on the public function instead of trusting callers.
 	attachCtx, attachCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
 	defer attachCancel()
-	res, err := oci.PushReferrer(attachCtx, oci.ReferrerOptions{
-		Registry:     ref.Registry,
-		Repository:   ref.Repository,
-		PlainHTTP:    opts.PlainHTTP,
-		InsecureTLS:  opts.InsecureTLS,
-		ArtifactType: SigstoreBundleMediaType,
-		LayerContent: opts.BundleJSON,
-		Subject:      subjectDesc,
+	res, err := deps.pushReferrer(attachCtx, oci.ReferrerOptions{
+		Registry:      ref.Registry,
+		Repository:    ref.Repository,
+		PlainHTTP:     opts.PlainHTTP,
+		InsecureTLS:   opts.InsecureTLS,
+		ExcludedRoots: append([]string(nil), opts.ExcludedRoots...),
+		ArtifactType:  SigstoreBundleMediaType,
+		LayerContent:  opts.BundleJSON,
+		Subject:       subjectDesc,
 		Annotations: map[string]string{
 			"org.opencontainers.image.vendor": "NVIDIA",
 		},
@@ -291,6 +339,11 @@ type AttachReferrerOptions struct {
 	// registry validates MediaType, and the size completes the
 	// subject descriptor per the OCI 1.1 spec.
 	MainArtifact MainArtifactDescriptor
+
+	// ExcludedRoots are required existing real directories that referrer
+	// staging must remain outside in both lexical and resolved filesystem
+	// topology.
+	ExcludedRoots []string
 
 	// PlainHTTP forces HTTP (local registry tests only).
 	PlainHTTP bool

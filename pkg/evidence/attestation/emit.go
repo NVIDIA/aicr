@@ -367,6 +367,9 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 	referrer, attachErr := AttachSigstoreBundleAsReferrer(attachCtx, AttachReferrerOptions{
 		Reference:  pushRef,
 		BundleJSON: signRes.BundleJSON,
+		ExcludedRoots: []string{
+			bundle.SummaryDir,
+		},
 		MainArtifact: MainArtifactDescriptor{
 			Digest:    summary.Digest,
 			MediaType: summary.MediaType,
