@@ -141,12 +141,12 @@ func TestObserve(t *testing.T) {
 			wantAdvTo: 150,
 		},
 		{
-			name:      "identity finding returns error but still advances",
+			name:      "identity finding returns error and does NOT advance",
 			seedPrev:  100,
 			fake:      fakeMonitor{watch: true, cur: testCheckpoint(150), found: []identity.MonitoredIdentity{{}}},
 			wantErr:   true,
 			wantScan:  true,
-			wantAdvTo: 150,
+			wantAdvTo: 100, // must not advance past a finding (sticky until triaged)
 		},
 		{
 			name:      "consistency break does not advance",

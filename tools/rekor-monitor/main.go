@@ -92,6 +92,7 @@ func run(ctx context.Context, opts options, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	defer mon.cleanup() // remove the temp Fulcio CA files
 
 	return observe(ctx, mon, store, w)
 }
@@ -140,16 +141,19 @@ func observe(ctx context.Context, mon monitorChecks, store checkpointStore, w io
 		}
 	}
 
-	// Advance the cursor after a completed consistency proof and scan. On a
-	// finding we still advance (the alert is surfaced below) so we do not
-	// re-alert every hour; the workflow deduplicates the alert issue by title.
-	if err := store.write(prev, cur); err != nil {
-		return err
-	}
-
 	out.report(w)
 	if out.hasFindings() {
+		// Do NOT advance the cursor on a finding: it must be re-detected every
+		// run (keeping the alert issue open) until a maintainer triages it.
+		// Advancing would sweep past a possible compromise and let a later clean
+		// window auto-close the alert without acknowledgement.
 		return out.findingError()
+	}
+
+	// Clean pass: advance the cursor so the next run scans only newly-added
+	// entries (consistency proof done, identity window clear).
+	if err := store.write(prev, cur); err != nil {
+		return err
 	}
 	return nil
 }

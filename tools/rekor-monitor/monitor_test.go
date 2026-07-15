@@ -161,9 +161,16 @@ func TestOutcomeReport(t *testing.T) {
 			want: []string{"consistency verified: 100 -> 150", "identity scan [99, 149]: no matching entries"},
 		},
 		{
-			name: "finding",
-			out:  outcome{prev: cp(100), cur: cp(150), scanned: true, from: 99, to: 149, found: []identity.MonitoredIdentity{{}}},
-			want: []string{"ALERT", "MATCH:"},
+			name: "finding with match and failed entry",
+			out: outcome{prev: cp(100), cur: cp(150), scanned: true, from: 100, to: 149,
+				found: []identity.MonitoredIdentity{{}}, failed: []identity.FailedLogEntry{{}}},
+			want: []string{"ALERT", "MATCH:", "FAILED:"},
+		},
+		{
+			name: "shard rotation",
+			out: outcome{prev: &tlog.Checkpoint{Origin: "log2025-1", Size: 100},
+				cur: &tlog.Checkpoint{Origin: "log2026-1", Size: 5}, rotated: true},
+			want: []string{"shard rotation detected", "log2025-1", "log2026-1"},
 		},
 	}
 	for _, tt := range tests {

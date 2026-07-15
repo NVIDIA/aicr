@@ -111,35 +111,33 @@ jobs:
         # leaves checkpoint.zip absent so the monitor baselines. The monitor
         # reads the zip natively (--restore-zip); no unzip here.
         #
-        # SECURITY: the repo-wide `artifacts?name=` list would also return
-        # same-named artifacts uploaded by *any* run, including a fork
-        # pull_request run whose GITHUB_TOKEN can upload under any name. A
-        # poisoned checkpoint (a genuine one copied from the live log head) passes
-        # the consistency proof while collapsing the identity-scan window to
-        # empty, silently skipping entries. So we trust only artifacts produced by
-        # THIS workflow's runs on `main` (forks cannot run on main).
+        # SECURITY: the repo-wide `artifacts?name=` list also returns same-named
+        # artifacts uploaded by *any* run, including a fork pull_request run whose
+        # GITHUB_TOKEN can upload under any name. A poisoned checkpoint (a genuine
+        # one copied from the live log head) would pass the consistency proof
+        # while collapsing the identity-scan window to empty, silently skipping
+        # entries. We therefore accept only artifacts whose producing run was in
+        # THIS repository on `main`:
+        #   - head_repository_id == repository_id rejects every fork run (a fork's
+        #     head repo differs), even one whose branch is named "main";
+        #   - head_branch == "main" limits to the scheduled/dispatched main runs.
+        # The whole artifact history is paginated (not just recent runs) so an
+        # older valid cursor survives a long stretch of artifact-less runs
+        # (startup failures, outages); a failed API call aborts the step (set -e /
+        # pipefail on the assignment) rather than falling through to a re-baseline.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Capture the run list in a standalone assignment so a failed API call
-          # aborts the step (set -e). A failing command substitution in a `for`
-          # word-list is NOT caught by set -e, so the loop would just not run and
-          # fall through to a silent re-baseline: the exact identity-scan gap this
-          # step exists to prevent.
-          runs="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/rekor-monitor.yaml/runs?branch=main&per_page=30" \
-            --jq '.workflow_runs | sort_by(.created_at) | reverse | .[].id')"
-          id=""
-          while IFS= read -r run; do
-            [ -n "${run}" ] || continue
-            id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run}/artifacts" \
-              | jq -r --arg n "${ARTIFACT_NAME}" \
-                  '[.artifacts[] | select(.name == $n and .expired == false)] | .[0].id // empty')"
-            [ -n "${id}" ] && break
-          done <<< "${runs}"
+          id="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${ARTIFACT_NAME}&per_page=100" \
+            | jq -rs '[.[].artifacts[]
+                | select(.expired == false)
+                | select(.workflow_run.head_branch == "main")
+                | select(.workflow_run.head_repository_id == .workflow_run.repository_id)]
+              | sort_by(.created_at) | last | .id // empty')"
           if [ -z "${id}" ]; then
-            echo "No prior checkpoint artifact from this workflow on main; treating this as the first run."
+            echo "No prior checkpoint artifact from this repository on main; treating this as the first run."
             exit 0
           fi
           gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > checkpoint.zip

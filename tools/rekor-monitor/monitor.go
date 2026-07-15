@@ -22,6 +22,7 @@ import (
 	"github.com/sigstore/rekor-monitor/pkg/identity"
 	rekorv2 "github.com/sigstore/rekor-monitor/pkg/rekor/v2"
 	"github.com/sigstore/rekor-monitor/pkg/tiles"
+	rmutil "github.com/sigstore/rekor-monitor/pkg/util"
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/tuf"
 	tlog "github.com/transparency-dev/formats/log"
@@ -45,6 +46,13 @@ type monitor struct {
 	shards      map[string]rekorv2.ShardInfo
 	shardOrigin string
 	identities  identity.MonitoredValues
+	// Fulcio CA root/intermediate PEM files materialized from the trusted root.
+	// Without them the vendored IdentitySearch skips certificate-chain
+	// validation, so a self-signed cert bearing the monitored SAN/issuer would
+	// register as a (false) match.
+	caRoots         string
+	caIntermediates string
+	cleanup         func() // removes the temp CA files; safe to call once
 }
 
 // newMonitor resolves everything a pass needs: AICR's v2 signing config (the
@@ -78,7 +86,21 @@ func newMonitor(ctx context.Context, opts options) (*monitor, error) {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, "failed to resolve Rekor v2 shards", err)
 	}
 
-	return &monitor{shards: shards, shardOrigin: shardOrigin, identities: identities}, nil
+	// Materialize the Fulcio CA roots so IdentitySearch actually validates the
+	// certificate chain (empty paths make it skip chain validation).
+	caRoots, caIntermediates, cleanup, err := rmutil.ConfigureTrustedCAs("", "", trustedRoot)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to materialize Fulcio CA roots", err)
+	}
+
+	return &monitor{
+		shards:          shards,
+		shardOrigin:     shardOrigin,
+		identities:      identities,
+		caRoots:         caRoots,
+		caIntermediates: caIntermediates,
+		cleanup:         cleanup,
+	}, nil
 }
 
 // watchesIdentity reports whether an identity scan is configured (vs
@@ -99,7 +121,9 @@ func (m *monitor) checkConsistency(ctx context.Context, prev *tlog.Checkpoint) (
 // scanIdentity searches the [start, end] entry-index window for the monitored
 // identity, returning matching entries and entries that failed to parse.
 func (m *monitor) scanIdentity(ctx context.Context, start, end int64) ([]identity.MonitoredIdentity, []identity.FailedLogEntry, error) {
-	found, failed, err := rekorv2.IdentitySearch(ctx, m.shards, m.shardOrigin, m.identities, start, end)
+	found, failed, err := rekorv2.IdentitySearch(ctx, m.shards, m.shardOrigin, m.identities, start, end,
+		identity.WithCARootsFile(m.caRoots),
+		identity.WithCAIntermediatesFile(m.caIntermediates))
 	if err != nil {
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "identity search failed", err)
 	}
