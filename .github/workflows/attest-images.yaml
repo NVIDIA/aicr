@@ -32,27 +32,88 @@ name: Attest Images (reusable)
 on:
   workflow_call:
     inputs:
-      tag:
-        description: 'Image tag to resolve and attest (e.g. v1.2.3)'
+      candidate_tag:
+        description: 'Validated run-unique candidate tag'
+        required: true
+        type: string
+      digest_map:
+        description: 'Canonical seven-image candidate digest map'
         required: true
         type: string
 
-env:
-  # Keep in sync with on-tag.yaml. The validator phase images live under
-  # aicr-validators/<phase>; the readiness gate under its own repo path.
-  VALIDATOR_IMAGE_PREFIX: ghcr.io/nvidia/aicr-validators
-  GATE_IMAGE: ghcr.io/nvidia/aicr-gate
-
 jobs:
+  validate-inputs:
+    name: Validate Attestation Inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      candidate_tag: ${{ steps.validate.outputs.candidate_tag }}
+      digest_map: ${{ steps.validate.outputs.digest_map }}
+    steps:
+      - name: Validate inputs
+        id: validate
+        env:
+          INPUT_CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          INPUT_DIGEST_MAP: ${{ inputs.digest_map }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${INPUT_CANDIDATE_TAG}" || \
+            "${INPUT_CANDIDATE_TAG}" == *$'\n'* || \
+            "${INPUT_CANDIDATE_TAG}" == *$'\r'* || \
+            ! "${INPUT_CANDIDATE_TAG}" =~ ^candidate-[0-9]+-[0-9]+$ ]]; then
+            echo "::error::candidate_tag is invalid"
+            exit 1
+          fi
+          canonical="$(jq -cS -e '
+            if (
+              type == "object" and
+              keys == ["aicr", "aicrd", "aiperf-bench", "conformance", "deployment", "gate", "performance"] and
+              all(.[]; type == "string" and length == 71 and test("^sha256:[0-9a-f]{64}$"))
+            ) then .
+            else error("invalid digest map")
+            end
+          ' <<<"${INPUT_DIGEST_MAP}")" || {
+            echo "::error::digest_map must contain exactly the seven fixed digests"
+            exit 1
+          }
+          if [[ "${INPUT_DIGEST_MAP}" != "${canonical}" ]]; then
+            echo "::error::digest_map must be compact canonical JSON"
+            exit 1
+          fi
+          {
+            echo "candidate_tag=${INPUT_CANDIDATE_TAG}"
+            echo "digest_map=${canonical}"
+          } >> "$GITHUB_OUTPUT"
+
   attest:
     name: Attest Images
     runs-on: ubuntu-latest
+    needs: [validate-inputs]
     timeout-minutes: 10
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: aicr
+            image: ghcr.io/nvidia/aicr
+          - key: aicrd
+            image: ghcr.io/nvidia/aicrd
+          - key: deployment
+            image: ghcr.io/nvidia/aicr-validators/deployment
+          - key: performance
+            image: ghcr.io/nvidia/aicr-validators/performance
+          - key: conformance
+            image: ghcr.io/nvidia/aicr-validators/conformance
+          - key: aiperf-bench
+            image: ghcr.io/nvidia/aicr-validators/aiperf-bench
+          - key: gate
+            image: ghcr.io/nvidia/aicr-gate
     steps:
       - name: Checkout Code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -63,51 +124,10 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
 
-      - name: Attest aicr image
+      - name: Attest ${{ matrix.key }} image
         uses: ./.github/actions/attest-image-from-tag
         with:
-          image_name: ghcr.io/nvidia/aicr
-          tag: ${{ inputs.tag }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest aicrd image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ghcr.io/nvidia/aicrd
-          tag: ${{ inputs.tag }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest deployment validator image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/deployment
-          tag: ${{ inputs.tag }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest performance validator image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/performance
-          tag: ${{ inputs.tag }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest conformance validator image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/conformance
-          tag: ${{ inputs.tag }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest aiperf-bench image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/aiperf-bench
-          tag: ${{ inputs.tag }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest gate image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.GATE_IMAGE }}
-          tag: ${{ inputs.tag }}
+          image_name: ${{ matrix.image }}
+          candidate_tag: ${{ needs.validate-inputs.outputs.candidate_tag }}
+          expected_digest: ${{ fromJSON(needs.validate-inputs.outputs.digest_map)[matrix.key] }}
           crane_version: ${{ steps.versions.outputs.crane }}

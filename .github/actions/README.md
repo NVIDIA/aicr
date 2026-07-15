@@ -92,16 +92,25 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ```
 
 #### `go-build-release/`
-**Purpose**: Complete build and release pipeline (tools + auth + make release)
+**Purpose**: Validate the exact-tag release target, then run the complete build
+and release pipeline (tools + auth + make release)
 **When to use**: Release workflows that build and publish artifacts
 **Inputs**:
 - `registry` (optional): Container registry (default: "ghcr.io")
+- `ko_version` (optional): Ko version (default: "v0.18.0")
 - `goreleaser_version` (required): GoReleaser version from `load-versions`
+- `go_licenses_version` (required): go-licenses version from `load-versions`
+- `candidate_tag` (required): Validated `candidate-<run-id>-<run-attempt>` image tag
 
 **Outputs**:
 - `release_outcome`: Release step outcome (success/failure)
 
-**Note**: Image repository paths are fully specified in `.goreleaser.yaml` under `kos.repositories`.
+**Note**: A partial draft is reused only when its name and tag both equal the
+release tag, its pre-release state matches, and its existing assets are a safe
+subset of the fixed release asset set. Unexpected draft assets and
+already-public releases are rejected before GoReleaser runs, and reused draft
+notes are replaced with notes generated from the current tag. Image repository
+paths are fully specified in `.goreleaser.yaml` under `kos.repositories`.
 
 **Example**:
 ```yaml
@@ -110,7 +119,10 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 - uses: ./.github/actions/go-build-release
   id: release
   with:
+    ko_version: ${{ steps.versions.outputs.ko }}
     goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
+    go_licenses_version: ${{ steps.versions.outputs.go_licenses }}
+    candidate_tag: ${{ needs.detect.outputs.candidate_tag }}
 - if: steps.release.outputs.release_outcome == 'success'
   run: echo "Release succeeded"
 ```
@@ -130,11 +142,13 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ```
 
 #### `attest-image-from-tag/`
-**Purpose**: Resolve digest from tag and generate SBOM + provenance  
-**When to use**: Attesting images by tag (typical release workflow)  
+**Purpose**: Bind a fixed AICR candidate image to an authoritative digest and
+generate SBOM + provenance
+**When to use**: Attesting candidate images in the AICR release workflow
 **Inputs**:
-- `image_name` (required): Full image name without tag (e.g., "ghcr.io/org/image")
-- `tag` (required): Image tag (e.g., "v1.2.3")
+- `image_name` (required): One of the seven fixed AICR release image names
+- `candidate_tag` (required): Validated `candidate-<run-id>-<run-attempt>` tag
+- `expected_digest` (required): Authoritative `sha256:<64 lowercase hex>` digest
 - `crane_version` (optional): crane version (default: "v0.20.6")
 
 **Outputs**:
@@ -144,23 +158,26 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ```yaml
 - uses: ./.github/actions/attest-image-from-tag
   with:
-    image_name: ghcr.io/${{ github.repository_owner }}/my-app
-    tag: ${{ github.ref_name }}
+    image_name: ghcr.io/nvidia/aicrd
+    candidate_tag: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+    expected_digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 ```
 
 #### `sbom-and-attest/`
+
 **Purpose**: Generate SBOM and attestations for image with known digest  
 **When to use**: When you already have the digest (e.g., from build output)  
 **Inputs**:
-- `image_name` (required): Full image name
+- `image_name` (required): One of the seven fixed AICR release image names
 - `image_digest` (required): sha256 digest
 
 **Example**:
+
 ```yaml
 - uses: ./.github/actions/sbom-and-attest
   with:
-    image_name: ghcr.io/org/image
-    image_digest: sha256:abc123...
+    image_name: ghcr.io/nvidia/aicrd
+    image_digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 ```
 
 ### KWOK Testing Actions
@@ -236,12 +253,17 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **Trigger**: Semantic version tags (v*.*.*)
 **Purpose**: Build, release, attest, deploy
 **Jobs**:
-1. **Unit Tests** (parallel): Go CI + security scan
-2. **Integration Tests** (parallel): CLI integration tests
-3. **E2E Tests** (parallel): Full end-to-end tests
-4. **Build and Release** (after tests): GoReleaser builds binaries and images to GHCR
-5. **Attest Images** (after build): SBOM and provenance for aicr and aicrd images
-6. **Deploy Demo API Server** (after attest): Copy image to Artifact Registry and deploy demo to Cloud Run (example deployment)
+1. **Qualification**: Reusable test, lint, E2E, and source-security gates
+2. **Candidate Builds**: Draft release artifacts and all seven images under one
+   run-unique candidate tag
+3. **Digest Resolution**: One authoritative seven-image digest map
+4. **Image Security**: Both platforms of every resolved digest are scanned
+5. **Attestation**: Platform SBOMs and reusable-workflow provenance for the same digests
+6. **Promotion**: Read-only preflight, all version aliases, then stable `latest`
+   aliases only after every version alias is verified
+7. **Publication**: Require the exact release asset set, then publish the
+   validated numeric GitHub release ID
+8. **Stable Distribution**: Publish Homebrew and deploy the demo after publication
 
 ### `test-deploy.yaml`
 **Trigger**: Manual (workflow_dispatch)
@@ -336,11 +358,15 @@ jobs:
       - uses: ./.github/actions/go-build-release
         id: release
         with:
+          ko_version: ${{ steps.versions.outputs.ko }}
           goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
+          go_licenses_version: ${{ steps.versions.outputs.go_licenses }}
+          candidate_tag: candidate-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: ./.github/actions/attest-image-from-tag
         with:
           image_name: ghcr.io/nvidia/aicrd
-          tag: ${{ github.ref_name }}
+          candidate_tag: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          expected_digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
           crane_version: ${{ steps.versions.outputs.crane }}
 ```
 

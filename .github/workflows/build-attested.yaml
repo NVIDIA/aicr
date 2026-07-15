@@ -80,11 +80,7 @@ jobs:
       - name: Build and attest
         env:
           GOFLAGS: -mod=vendor
-          # The brews pipe templates {{ .Env.HOMEBREW_DEPLOY_KEY }}; goreleaser
-          # errors on a missing env key. Provide it empty so skip_upload evaluates
-          # true and the Homebrew tap publish is skipped. on-tag.yaml supplies the
-          # real secret for production releases.
-          HOMEBREW_DEPLOY_KEY: ""
+          AICR_CANDIDATE_TAG: candidate-attested-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           goreleaser release --snapshot --clean --skip=publish,ko,sbom --timeout 20m

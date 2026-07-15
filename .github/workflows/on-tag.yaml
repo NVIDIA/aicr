@@ -52,6 +52,7 @@ jobs:
       contents: read
     outputs:
       is_prerelease: ${{ steps.check.outputs.is_prerelease }}
+      candidate_tag: ${{ steps.check.outputs.candidate_tag }}
     steps:
       - name: Check tag for pre-release suffix
         id: check
@@ -59,6 +60,17 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          SEMVER_TAG_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
+          if [[ ! "${TAG}" =~ ${SEMVER_TAG_PATTERN} ]]; then
+            echo "::error::release tag is not valid SemVer: ${TAG}"
+            exit 1
+          fi
+          CANDIDATE_TAG="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ ! "${CANDIDATE_TAG}" =~ ^candidate-[0-9]+-[0-9]+$ ]]; then
+            echo "::error::generated candidate tag is invalid"
+            exit 1
+          fi
+          echo "candidate_tag=${CANDIDATE_TAG}" >> "$GITHUB_OUTPUT"
           if [[ "${TAG}" == *-* ]]; then
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
             echo "Pre-release detected: ${TAG}"
@@ -86,14 +98,15 @@ jobs:
   build-ko:
     name: Build and Release (Draft)
     runs-on: ubuntu-latest
-    needs: [tests]
+    needs: [detect, tests]
     timeout-minutes: 30
+    outputs:
+      homebrew_artifact_name: ${{ steps.homebrew-artifact.outputs.name }}
     permissions:
       actions: read
       contents: write
       packages: write
       id-token: write
-      attestations: write
       security-events: write
     steps:
       - name: Checkout Code
@@ -132,7 +145,7 @@ jobs:
           ko_version: ${{ steps.versions.outputs.ko }}
           goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
           go_licenses_version: ${{ steps.versions.outputs.go_licenses }}
-          homebrew_deploy_key: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
+          candidate_tag: ${{ needs.detect.outputs.candidate_tag }}
 
       - name: Malware Scan Release Binaries
         if: steps.release.outcome == 'success'
@@ -141,6 +154,58 @@ jobs:
           scan_path: dist/
           category: 'clamav-release-binaries'
 
+      # Inline by design: these single-use steps bridge GoReleaser's local
+      # formula into a rerun-safe artifact for the post-publication job.
+      - name: Name Homebrew artifact
+        id: homebrew-artifact
+        if: steps.release.outcome == 'success' && needs.detect.outputs.is_prerelease == 'false'
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ needs.detect.outputs.candidate_tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${CANDIDATE_TAG}" =~ ^candidate-[0-9]+-[0-9]+$ || \
+            ! "${GITHUB_RUN_ATTEMPT}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::invalid Homebrew artifact identity"
+            exit 1
+          fi
+          echo "name=aicr-homebrew-formula-${CANDIDATE_TAG}-attempt-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage Homebrew formula
+        if: steps.release.outcome == 'success' && needs.detect.outputs.is_prerelease == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          formula="$(jq -er \
+            '[.[] | select(.type == "Homebrew Formula")] |
+             if length == 1 then .[0].path else error("expected exactly one Homebrew Formula artifact") end' \
+            dist/artifacts.json)"
+          if [[ "${formula}" == *$'\n'* || "${formula}" == *$'\r'* || ! -f "${formula}" || -L "${formula}" ]]; then
+            echo "::error::Homebrew formula artifact path is malformed"
+            exit 1
+          fi
+          formula_path="$(realpath -e -- "${formula}")"
+          dist_path="$(realpath -e -- dist)"
+          case "${formula_path}" in
+            "${dist_path}"/*) ;;
+            *)
+              echo "::error::refusing Homebrew formula outside dist"
+              exit 1
+              ;;
+          esac
+          install -m 0600 "${formula_path}" /tmp/aicr.rb
+
+      - name: Upload Homebrew formula
+        if: steps.release.outcome == 'success' && needs.detect.outputs.is_prerelease == 'false'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: ${{ steps.homebrew-artifact.outputs.name }}
+          path: /tmp/aicr.rb
+          if-no-files-found: error
+          # GitHub permits rerunning a workflow for 30 days. Keep the only
+          # generated formula available for that full recovery window.
+          retention-days: 30
+
   # =============================================================================
   # Docker Jobs: Native per-arch validator builds (parallel with GoReleaser)
   # =============================================================================
@@ -148,7 +213,7 @@ jobs:
   build-docker:
     name: Docker Validator (${{ matrix.phase }}/${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    needs: [tests]
+    needs: [detect, tests]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -205,7 +270,7 @@ jobs:
           # because the gate CLI image embeds chainsaw for its own use.)
           build-args: |
             GO_VERSION=${{ steps.go.outputs.version }}
-          tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ github.ref_name }}-${{ matrix.arch }}
+          tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ needs.detect.outputs.candidate_tag }}-${{ matrix.arch }}
           provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -223,7 +288,7 @@ jobs:
   build-gate:
     name: Docker Gate (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    needs: [tests]
+    needs: [detect, tests]
     timeout-minutes: 15
     # contents: read to checkout the source for the docker build; packages:
     # write to push the per-arch aicr-gate image to GHCR (ghcr.io/nvidia/aicr-gate).
@@ -271,7 +336,7 @@ jobs:
             GO_VERSION=${{ steps.versions.outputs.go }}
             CHAINSAW_VERSION=${{ steps.versions.outputs.chainsaw }}
             VERSION=${{ github.ref_name }}
-          tags: ${{ env.GATE_IMAGE }}:${{ github.ref_name }}-${{ matrix.arch }}
+          tags: ${{ env.GATE_IMAGE }}:${{ needs.detect.outputs.candidate_tag }}-${{ matrix.arch }}
           provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -306,9 +371,12 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
 
-      - name: Create version-tagged manifests
+      # Inline by design: this job creates only run-unique candidate manifests.
+      # The shared docker-manifest action also writes public aliases, which must
+      # remain behind the scan and attestation gates.
+      - name: Create candidate manifests
         env:
-          TAG: ${{ github.ref_name }}
+          CANDIDATE_TAG: ${{ needs.detect.outputs.candidate_tag }}
         run: |
           set -euo pipefail
           IMAGES=()
@@ -316,69 +384,100 @@ jobs:
           IMAGES+=("${GATE_IMAGE}")
           for IMAGE in "${IMAGES[@]}"; do
             docker buildx imagetools create \
-              -t "${IMAGE}:${TAG}" \
-              "${IMAGE}:${TAG}-amd64" \
-              "${IMAGE}:${TAG}-arm64"
-          done
-
-      - name: Create latest-tagged manifests
-        if: needs.detect.outputs.is_prerelease == 'false'
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          IMAGES=()
-          for phase in ${VALIDATOR_PHASES}; do IMAGES+=("${VALIDATOR_IMAGE_PREFIX}/${phase}"); done
-          IMAGES+=("${GATE_IMAGE}")
-          for IMAGE in "${IMAGES[@]}"; do
-            docker buildx imagetools create \
-              -t "${IMAGE}:latest" \
-              "${IMAGE}:${TAG}-amd64" \
-              "${IMAGE}:${TAG}-arm64"
+              -t "${IMAGE}:${CANDIDATE_TAG}" \
+              "${IMAGE}:${CANDIDATE_TAG}-amd64" \
+              "${IMAGE}:${CANDIDATE_TAG}-arm64"
           done
 
       - name: Verify multi-arch manifests
         env:
-          TAG: ${{ github.ref_name }}
-          IS_PRERELEASE: ${{ needs.detect.outputs.is_prerelease }}
+          CANDIDATE_TAG: ${{ needs.detect.outputs.candidate_tag }}
         run: |
           set -euo pipefail
-          ALIASES=("${TAG}")
-          if [[ "${IS_PRERELEASE}" == "false" ]]; then
-            ALIASES+=("latest")
-          fi
           IMAGES=()
           for phase in ${VALIDATOR_PHASES}; do IMAGES+=("${VALIDATOR_IMAGE_PREFIX}/${phase}"); done
           IMAGES+=("${GATE_IMAGE}")
           for IMAGE in "${IMAGES[@]}"; do
-            for alias in "${ALIASES[@]}"; do
-              MANIFEST=$(docker buildx imagetools inspect --raw "${IMAGE}:${alias}")
+            MANIFEST=$(docker buildx imagetools inspect --raw "${IMAGE}:${CANDIDATE_TAG}")
 
-              PLATFORMS=$(echo "${MANIFEST}" | jq -r \
-                '[.manifests[] | select(.platform.os != "unknown") | "\(.platform.os)/\(.platform.architecture)"] | sort | .[]')
+            PLATFORMS=$(echo "${MANIFEST}" | jq -r \
+              '[.manifests[] | select(.platform.os != "unknown") | "\(.platform.os)/\(.platform.architecture)"] | sort | .[]')
 
-              for expected in ${EXPECTED_PLATFORMS}; do
-                if ! echo "${PLATFORMS}" | grep -qx "${expected}"; then
-                  echo "::error::${IMAGE}:${alias} missing platform ${expected}"
-                  exit 1
-                fi
-              done
-
-              if echo "${MANIFEST}" | jq -e '.manifests[] | select(.platform.os == "unknown")' >/dev/null 2>&1; then
-                echo "::error::${IMAGE}:${alias} contains unknown/unknown descriptor"
+            for expected in ${EXPECTED_PLATFORMS}; do
+              if ! echo "${PLATFORMS}" | grep -qx "${expected}"; then
+                echo "::error::${IMAGE}:${CANDIDATE_TAG} missing platform ${expected}"
                 exit 1
               fi
             done
+
+            if echo "${MANIFEST}" | jq -e '.manifests[] | select(.platform.os == "unknown")' >/dev/null 2>&1; then
+              echo "::error::${IMAGE}:${CANDIDATE_TAG} contains unknown/unknown descriptor"
+              exit 1
+            fi
           done
+
+  # =============================================================================
+  # Resolve Candidates: one authoritative digest map for every downstream gate
+  # =============================================================================
+
+  resolve-candidates:
+    name: Resolve Candidate Digests
+    runs-on: ubuntu-latest
+    needs: [detect, build-ko, docker-manifest]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      digest_map: ${{ steps.resolve.outputs.digest_map }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Setup crane
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_crane: 'true'
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Resolve and validate candidates
+        id: resolve
+        env:
+          CANDIDATE_TAG: ${{ needs.detect.outputs.candidate_tag }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          AICR_NETWORK_TIMEOUT_SECONDS: '120'
+        run: |
+          set -euo pipefail
+          .github/scripts/release-images.sh resolve candidate-digests.json
+          digest_map="$(jq -cS . candidate-digests.json)"
+          echo "digest_map=${digest_map}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload candidate digest map
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: release-candidate-digests-${{ needs.detect.outputs.candidate_tag }}-attempt-${{ github.run_attempt }}
+          path: candidate-digests.json
+          if-no-files-found: error
+          retention-days: 14
 
   # =============================================================================
   # Container Image Vulnerability Scan (runs after all images are built)
   # =============================================================================
 
   image-vuln-scan:
-    name: Image Vuln Scan (${{ matrix.image }})
+    name: Image Vuln Scan (${{ matrix.image.key }}/${{ matrix.platform.arch }})
     runs-on: ubuntu-latest
-    needs: [build-ko, docker-manifest]
+    needs: [resolve-candidates]
     timeout-minutes: 15
     permissions:
       actions: read
@@ -389,13 +488,25 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - ghcr.io/nvidia/aicr
-          - ghcr.io/nvidia/aicrd
-          - ghcr.io/nvidia/aicr-validators/deployment
-          - ghcr.io/nvidia/aicr-validators/performance
-          - ghcr.io/nvidia/aicr-validators/conformance
-          - ghcr.io/nvidia/aicr-validators/aiperf-bench
-          - ghcr.io/nvidia/aicr-gate
+          - key: aicr
+            ref: ghcr.io/nvidia/aicr
+          - key: aicrd
+            ref: ghcr.io/nvidia/aicrd
+          - key: deployment
+            ref: ghcr.io/nvidia/aicr-validators/deployment
+          - key: performance
+            ref: ghcr.io/nvidia/aicr-validators/performance
+          - key: conformance
+            ref: ghcr.io/nvidia/aicr-validators/conformance
+          - key: aiperf-bench
+            ref: ghcr.io/nvidia/aicr-validators/aiperf-bench
+          - key: gate
+            ref: ghcr.io/nvidia/aicr-gate
+        platform:
+          - name: linux/amd64
+            arch: amd64
+          - name: linux/arm64
+            arch: arm64
     steps:
       - name: Checkout Code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -408,8 +519,10 @@ jobs:
       - name: Scan container image
         id: scan
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
+        env:
+          GRYPE_PLATFORM: ${{ matrix.platform.name }}
         with:
-          image: '${{ matrix.image }}:${{ github.ref_name }}'
+          image: '${{ matrix.image.ref }}@${{ fromJSON(needs.resolve-candidates.outputs.digest_map)[matrix.image.key] }}'
           severity-cutoff: 'high'
           output-format: sarif
           only-fixed: true
@@ -429,14 +542,14 @@ jobs:
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9  # v4.37.0
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
-          category: 'anchore-image-${{ matrix.image }}'
+          category: 'anchore-image-${{ matrix.image.key }}-${{ matrix.platform.arch }}'
         continue-on-error: true
 
       - name: Fail on vulnerabilities
         if: steps.scan.outcome == 'failure'
         shell: bash
         env:
-          IMAGE_REF: '${{ matrix.image }}:${{ github.ref_name }}'
+          IMAGE_REF: '${{ matrix.image.ref }}@${{ fromJSON(needs.resolve-candidates.outputs.digest_map)[matrix.image.key] }}'
         run: |
           set -euo pipefail
           echo "::error::Vulnerability scan found issues in ${IMAGE_REF}"
@@ -454,7 +567,7 @@ jobs:
   # See #1536.
   attest:
     name: Attest Images
-    needs: [image-vuln-scan]
+    needs: [detect, image-vuln-scan, resolve-candidates]
     permissions:
       contents: read
       packages: write
@@ -462,39 +575,100 @@ jobs:
       attestations: write
     uses: ./.github/workflows/attest-images.yaml
     with:
-      tag: ${{ github.ref_name }}
+      candidate_tag: ${{ needs.detect.outputs.candidate_tag }}
+      digest_map: ${{ needs.resolve-candidates.outputs.digest_map }}
 
 
   # =============================================================================
-  # Cleanup: Warn if attestation failed (images exist without attestation)
+  # Integrity: require resolution, scan, and attestation to all succeed
   # =============================================================================
 
   release-check:
     name: Release Integrity Check
     runs-on: ubuntu-latest
-    needs: [attest]
+    needs: [resolve-candidates, image-vuln-scan, attest]
     if: always()
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - name: Check attestation status
+      - name: Check release security gates
         env:
+          RESOLVE_RESULT: ${{ needs.resolve-candidates.result }}
+          SCAN_RESULT: ${{ needs.image-vuln-scan.result }}
           ATTEST_RESULT: ${{ needs.attest.result }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ "${ATTEST_RESULT}" != "success" ]]; then
-            echo "::error::Attestation failed or was skipped. Images exist on GHCR without attestation."
-            echo "::error::Manual action required: verify attestation for ${TAG} or delete the draft release."
-            echo ""
-            echo "Recovery steps:"
-            echo "  1. Re-run the 'Attest Images' job from the Actions tab"
-            echo "  2. Or delete the draft release and re-tag"
+          if [[ "${RESOLVE_RESULT}" != "success" || \
+            "${SCAN_RESULT}" != "success" || \
+            "${ATTEST_RESULT}" != "success" ]]; then
+            echo "::error::Release security gates did not all succeed for ${TAG}."
+            echo "::error::Candidate aliases remain non-public; repair the failure and rerun this tag."
             exit 1
           fi
 
           echo "Release integrity check passed."
+
+  # =============================================================================
+  # Promote: preflight all public aliases, then converge them to exact digests
+  # =============================================================================
+
+  promote-images:
+    name: Promote Image Aliases
+    runs-on: ubuntu-latest
+    needs: [detect, resolve-candidates, release-check]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      attestations: read
+    concurrency:
+      group: aicr-release-image-alias-promotion
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Setup crane
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_crane: 'true'
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Preflight image promotion
+        env:
+          CANDIDATE_TAG: ${{ needs.detect.outputs.candidate_tag }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          IS_PRERELEASE: ${{ needs.detect.outputs.is_prerelease }}
+          GITHUB_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          DIGEST_MAP: ${{ needs.resolve-candidates.outputs.digest_map }}
+          AICR_NETWORK_TIMEOUT_SECONDS: '120'
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${DIGEST_MAP}" > candidate-digests.json
+          .github/scripts/release-images.sh preflight \
+            candidate-digests.json validated-digests.json
+
+      - name: Promote image aliases
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          IS_PRERELEASE: ${{ needs.detect.outputs.is_prerelease }}
+          GH_TOKEN: ${{ github.token }}
+          AICR_NETWORK_TIMEOUT_SECONDS: '120'
+        run: |
+          set -euo pipefail
+          .github/scripts/release-images.sh promote validated-digests.json
 
   # =============================================================================
   # Deploy Job (runs after release is published)
@@ -518,21 +692,122 @@ jobs:
   publish:
     name: Publish Release
     runs-on: ubuntu-latest
-    needs: [release-check]
+    needs: [detect, promote-images]
     timeout-minutes: 5
     permissions:
       contents: write
     steps:
-      - name: Publish GitHub release
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Publish validated GitHub release
         env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          IS_PRERELEASE: ${{ needs.detect.outputs.is_prerelease }}
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          REPO: ${{ github.repository }}
+          AICR_NETWORK_TIMEOUT_SECONDS: '120'
         run: |
           set -euo pipefail
-          gh release edit "${TAG}" \
-            --repo "${REPO}" \
-            --draft=false
+          .github/scripts/release-images.sh publish-release
+
+  # =============================================================================
+  # Homebrew: publish only after the stable GitHub release is public
+  # =============================================================================
+
+  publish-homebrew:
+    name: Publish Homebrew Formula
+    runs-on: ubuntu-latest
+    needs: [detect, build-ko, publish]
+    if: needs.detect.outputs.is_prerelease == 'false'
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    concurrency:
+      group: aicr-homebrew-publication
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download Homebrew formula
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: ${{ needs.build-ko.outputs.homebrew_artifact_name }}
+          path: /tmp/aicr-homebrew-formula
+
+      # Inline by design: this is the only post-publication consumer and the
+      # only job that receives the deploy key; formula validation and mutation
+      # live in the independently tested publish-homebrew.sh script.
+      - name: Validate Homebrew artifact content
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find /tmp/aicr-homebrew-formula -mindepth 1 -maxdepth 1 -type f -print0)
+          if [[ "${#files[@]}" -ne 1 || "$(basename -- "${files[0]}")" != "aicr.rb" ]]; then
+            echo "::error::Homebrew artifact must contain exactly aicr.rb"
+            exit 1
+          fi
+          if find /tmp/aicr-homebrew-formula -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+            echo "::error::Homebrew artifact contains an unexpected entry"
+            exit 1
+          fi
+
+      - name: Validate and publish Homebrew formula
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          AICR_NETWORK_TIMEOUT_SECONDS: '120'
+        run: |
+          set -euo pipefail
+          umask 077
+          work_dir="$(mktemp -d)"
+          key_file="${work_dir}/deploy-key"
+          known_hosts="${work_dir}/known-hosts"
+          tap_dir="${work_dir}/tap"
+          cleanup() {
+            rm -rf -- "${work_dir}"
+          }
+          trap cleanup EXIT
+          if [[ -z "${DEPLOY_KEY}" || "${DEPLOY_KEY}" == *$'\r'* ]]; then
+            echo "::error::Homebrew deploy key is missing or malformed"
+            exit 1
+          fi
+          printf '%s\n' "${DEPLOY_KEY}" > "${key_file}"
+          chmod 0600 "${key_file}"
+          timeout 30s ssh-keyscan -t rsa github.com > "${known_hosts}"
+          fingerprints="$(ssh-keygen -lf "${known_hosts}" -E sha256 | awk '{print $2}' | sort -u)"
+          if [[ "${fingerprints}" != "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s" ]]; then
+            echo "::error::GitHub RSA host-key fingerprint mismatch"
+            exit 1
+          fi
+          export GIT_SSH_COMMAND="ssh -i ${key_file} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${known_hosts}"
+          timeout 2m git clone --depth 1 git@github.com:NVIDIA/homebrew-aicr.git "${tap_dir}"
+          result="$(.github/scripts/publish-homebrew.sh /tmp/aicr-homebrew-formula/aicr.rb "${tap_dir}")"
+          case "${result}" in
+            changed=false)
+              exit 0
+              ;;
+            changed=true)
+              ;;
+            *)
+              echo "::error::unexpected Homebrew publication result"
+              exit 1
+              ;;
+          esac
+          git -C "${tap_dir}" config user.name github-actions
+          git -C "${tap_dir}" config user.email github-actions@github.com
+          git -C "${tap_dir}" add Formula/aicr.rb
+          if [[ "$(git -C "${tap_dir}" diff --cached --name-only)" != "Formula/aicr.rb" ]]; then
+            echo "::error::Homebrew update changed files outside Formula/aicr.rb"
+            exit 1
+          fi
+          git -C "${tap_dir}" commit -m "Brew formula update for aicr version ${RELEASE_TAG}"
+          timeout 2m git -C "${tap_dir}" push origin HEAD:main
 
   # =============================================================================
   # Notify: Post release announcement to Slack
@@ -572,7 +847,7 @@ jobs:
   summary:
     name: Release Summary
     runs-on: ubuntu-latest
-    needs: [detect, tests, build-ko, build-docker, build-gate, docker-manifest, image-vuln-scan, attest, release-check, publish, deploy, notify]
+    needs: [detect, tests, build-ko, build-docker, build-gate, docker-manifest, resolve-candidates, image-vuln-scan, attest, release-check, promote-images, publish, publish-homebrew, deploy, notify]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -585,11 +860,14 @@ jobs:
           BUILD_DOCKER: ${{ needs.build-docker.result }}
           BUILD_GATE: ${{ needs.build-gate.result }}
           MANIFEST: ${{ needs.docker-manifest.result }}
+          RESOLVE: ${{ needs.resolve-candidates.result }}
           VULN_SCAN: ${{ needs.image-vuln-scan.result }}
           ATTEST: ${{ needs.attest.result }}
           RELEASE_CHECK: ${{ needs.release-check.result }}
-          DEPLOY: ${{ needs.deploy.result }}
+          PROMOTE: ${{ needs.promote-images.result }}
           PUBLISH: ${{ needs.publish.result }}
+          HOMEBREW: ${{ needs.publish-homebrew.result }}
+          DEPLOY: ${{ needs.deploy.result }}
           NOTIFY: ${{ needs.notify.result }}
           TAG: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
@@ -609,10 +887,13 @@ jobs:
             echo "| Build (Docker) | ${BUILD_DOCKER} |"
             echo "| Build (Gate) | ${BUILD_GATE} |"
             echo "| Docker Manifest | ${MANIFEST} |"
+            echo "| Resolve Candidate Digests | ${RESOLVE} |"
             echo "| Vulnerability Scan | ${VULN_SCAN} |"
             echo "| Attestation | ${ATTEST} |"
             echo "| Release Check | ${RELEASE_CHECK} |"
-            echo "| Deploy | ${DEPLOY} |"
+            echo "| Image Promotion | ${PROMOTE} |"
             echo "| Publish | ${PUBLISH} |"
+            echo "| Homebrew | ${HOMEBREW} |"
+            echo "| Deploy | ${DEPLOY} |"
             echo "| Slack Notification | ${NOTIFY} |"
           } >> "$GITHUB_STEP_SUMMARY"
