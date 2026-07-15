@@ -107,7 +107,10 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:latest"
+      # v0.5.16. Keep the release tag for update visibility and the digest for
+      # execution identity. Review the upstream release and verify its signature
+      # before rotating both values; never use a tag-only actuator reference.
+      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.16@sha256:f586ffa14dccb867c81fb8a12484f6e31d3adad93242292b7c9cc00c93af2367"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
@@ -366,8 +369,8 @@ jobs:
         id: infra
         if: inputs.lifecycle != 'daytime-down'
         run: |
-          set -euox pipefail
-          docker run \
+          set -euo pipefail
+          /usr/bin/docker run \
             -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
             -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
@@ -648,13 +651,13 @@ jobs:
           )
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
           destroyed=false
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
-            if docker run \
+            if /usr/bin/docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
               -e KEY_CONTENT="$(base64 < ${{ steps.auth_teardown.outputs.credentials_file_path }})" \
