@@ -1138,6 +1138,35 @@ func TestGenerate_RejectsCyclicGraph(t *testing.T) {
 	}
 }
 
+// TestGenerate_DisabledDependencyNotACycle guards that graph validation runs on
+// the unfiltered ComponentRefs, not the enabled-filtered set: an enabled
+// component whose declared dependency is disabled (provided externally) must
+// NOT be mistaken for an undeclared dependency and rejected as a false cycle.
+func TestGenerate_DisabledDependencyNotACycle(t *testing.T) {
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator", Version: "v25.3.3",
+			Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager"}},
+		// cert-manager is provided externally (e.g. CSP-managed): declared but
+		// disabled. gpu-operator's edge to it must be treated as satisfied.
+		{Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager", Version: "v1.14.0",
+			Type: recipe.ComponentTypeHelm, Source: "https://charts.jetstack.io",
+			Overrides: map[string]any{"enabled": false}},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         testVersion,
+	}
+	if _, err := g.Generate(context.Background(), t.TempDir()); err != nil {
+		t.Fatalf("Generate() with an externally-provided (disabled) dependency should succeed, got: %v", err)
+	}
+}
+
 // TestHelmReleaseNamespaceArchitecture locks the design assumption that
 // makes flux's bare-name dependsOn references safe: every HelmRelease CR
 // is emitted into the flux-system namespace, with targetNamespace pointing

@@ -304,10 +304,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Fail closed on a bad dependency graph before projecting it onto Flux's
 	// dependsOn: Generate is exported, so a direct caller could hand-build a
 	// cyclic or dangling RecipeResult that would otherwise become a cyclic
-	// Flux DAG and stall reconciliation. Reuse the same acyclicity /
-	// missing-dependency check argocd and helmfile run; the levels themselves
-	// are discarded because flux renders the exact DAG, not tiers.
-	if _, levelErr := recipe.ComponentRefsTopologicalLevels(sortedRefs); levelErr != nil {
+	// Flux DAG and stall reconciliation. Validate the UNFILTERED ComponentRefs
+	// (not the enabled-filtered sortedRefs) so the graph builder's own
+	// enabled-filtering can treat an edge to a declared-but-disabled component
+	// as satisfied externally rather than mistaking it for an undeclared
+	// dependency; argocd and helmfile validate the unfiltered refs for the same
+	// reason. The levels themselves are discarded — flux renders the exact DAG.
+	if _, levelErr := recipe.ComponentRefsTopologicalLevels(g.RecipeResult.ComponentRefs); levelErr != nil {
 		return nil, errors.PropagateOrWrap(levelErr, errors.ErrCodeInternal,
 			"failed to validate dependency graph")
 	}
