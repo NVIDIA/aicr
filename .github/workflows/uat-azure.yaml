@@ -413,11 +413,11 @@ jobs:
           AZ_MOUNT=$(mktemp -d)
           cp -a "$HOME/.azure/." "$AZ_MOUNT/"
           chmod -R a+rwX "$AZ_MOUNT"
-          docker run \
+          /usr/bin/docker run \
             -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
             -v "$AZ_MOUNT:/home/builder/.azure" \
-            "${AKS_ACTUATOR_IMAGE}" apply
+            ${{ env.AKS_ACTUATOR_IMAGE }} apply
 
       # Fresh federated login before grant + connect. azure/login stores the
       # GitHub OIDC token as the session's client assertion, and that
@@ -832,11 +832,11 @@ jobs:
             AZ_MOUNT=$(mktemp -d)
             cp -a "$HOME/.azure/." "$AZ_MOUNT/"
             chmod -R a+rwX "$AZ_MOUNT"
-            if docker run \
+            if /usr/bin/docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
               -v "$AZ_MOUNT:/home/builder/.azure" \
-              "${AKS_ACTUATOR_IMAGE}" apply; then
+              ${{ env.AKS_ACTUATOR_IMAGE }} apply; then
               echo "Cluster destroyed successfully"
               destroyed=true
               break

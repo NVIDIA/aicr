@@ -423,14 +423,14 @@ jobs:
         id: infra
         if: inputs.lifecycle != 'daytime-down'
         run: |
-          set -euox pipefail
-          docker run \
+          set -euo pipefail
+          /usr/bin/docker run \
             -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
             -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
             -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
             -e AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
-            "${EKS_IMAGE}" apply
+            ${{ env.EKS_IMAGE }} apply
 
       # Connect
       - name: Connect to Cluster
@@ -784,20 +784,20 @@ jobs:
           )
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
           destroyed=false
           attempts=3
-          for attempt in $(seq 1 "${attempts}"); do
+          for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
-            if docker run \
+            if /usr/bin/docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
               -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
               -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
               -e AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
-              "${EKS_IMAGE}" apply; then
+              ${{ env.EKS_IMAGE }} apply; then
               echo "Cluster destroyed successfully"
               destroyed=true
               break
