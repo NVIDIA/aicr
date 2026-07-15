@@ -218,7 +218,7 @@ _No images extracted._
 
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.5.0@sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad`
-- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.1@sha256:6dedbbb8627dec88acdfd68867f60a3ddca88e5f4c62beddfb704a8e0cfe51d1`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.2@sha256:a8bdca40dbe36de9d7a13e6afada49870714784fd9a3b9ce08717d675978c2b6`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 
