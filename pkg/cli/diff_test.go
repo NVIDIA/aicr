@@ -237,6 +237,79 @@ func TestDiffCmd_FailOnDriftReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestDiffCmd_FailOnDriftStructuredFields(t *testing.T) {
+	tests := []struct {
+		name           string
+		baselineNode   string
+		targetNode     string
+		baselinePFName string
+		targetPFName   string
+	}{
+		{"context only", "n1", "n2", "pf0", "pf0"},
+		{"items only", "n1", "n1", "pf0", "pf1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			baselinePath := filepath.Join(tmpDir, "baseline.yaml")
+			targetPath := filepath.Join(tmpDir, "target.yaml")
+
+			writeStructuredSnapshot(t, baselinePath, tt.baselineNode, tt.baselinePFName)
+			writeStructuredSnapshot(t, targetPath, tt.targetNode, tt.targetPFName)
+
+			cmd := diffCmd()
+			app := &cli.Command{Name: "aicr", Commands: []*cli.Command{cmd}}
+			err := app.Run(t.Context(), []string{
+				"aicr", "diff",
+				"--baseline", baselinePath,
+				"--target", targetPath,
+				"--format", "json",
+				"--fail-on-drift",
+			})
+			if err == nil {
+				t.Fatal("expected non-nil error from --fail-on-drift on structured field changes")
+			}
+			if !strings.Contains(err.Error(), "drift detected") {
+				t.Errorf("expected error mentioning 'drift detected', got: %v", err)
+			}
+
+			cmdWithoutGate := diffCmd()
+			appWithoutGate := &cli.Command{Name: "aicr", Commands: []*cli.Command{cmdWithoutGate}}
+			if err := appWithoutGate.Run(t.Context(), []string{
+				"aicr", "diff",
+				"--baseline", baselinePath,
+				"--target", targetPath,
+				"--format", "json",
+			}); err != nil {
+				t.Errorf("--fail-on-drift unset should not error on structured drift, got: %v", err)
+			}
+		})
+	}
+}
+
+func writeStructuredSnapshot(t *testing.T, path, nodeName, pfName string) {
+	t.Helper()
+	content := `kind: Snapshot
+apiVersion: aicr.run/v1alpha2
+metadata: {}
+measurements:
+  - type: Network
+    subtypes:
+      - subtype: PF
+        context:
+          node: ` + nodeName + `
+        items:
+          - context:
+              name: ` + pfName + `
+            data:
+              mtu: 1500
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write structured snapshot: %v", err)
+	}
+}
+
 // writeSnapshotWithVersion writes a minimal snapshot with a single K8s.server.version
 // reading. Used by drift-gating tests that need two distinguishable snapshots.
 func writeSnapshotWithVersion(t *testing.T, path, version string) {
