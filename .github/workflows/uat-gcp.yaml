@@ -76,9 +76,10 @@ jobs:
     # each = up to ~40m). Only one of train/serve runs per intent, so the budget
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
     # timeout cancels pending always() steps, so an undersized cap would skip
-    # teardown and leak the GPU node. 190 UAT + ~30 setup + ~40 teardown = ~260,
-    # so 270 leaves the teardown headroom even on a worst-case phase run.
-    timeout-minutes: 270
+    # teardown and leak the GPU node. 190 UAT + ~30 setup + ~8 failure-path debug
+    # collection (Collect cluster debug bundle) + ~40 teardown = ~268, so 280
+    # leaves the teardown headroom even on a worst-case phase run.
+    timeout-minutes: 280
     permissions:
       contents: read
       actions: read
@@ -540,6 +541,34 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # Refresh the GCP session before collecting (mirrors the AWS rationale): a
+      # long tuning-race failure can outlast the WIF token minted at setup, which
+      # would leave every kubectl in the collector failing auth and the bundle
+      # silently empty. The gke-gcloud-auth-plugin reads ADC live, so re-auth alone
+      # refreshes kubectl — no get-credentials re-run needed.
+      - name: Re-authenticate to GCP for debug collection
+        if: failure() && steps.prep.outcome != 'skipped'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
+
+      # Snapshot live cluster state on failure BEFORE teardown, while the
+      # cluster is still up. The runner-local artifacts above say WHAT check
+      # failed; this captures WHY — node conditions/taints, cluster events
+      # (reboots, pod evictions), the operator CRs (incl. Skyhook status.status
+      # the readiness gate keys off of), and operator/check-Job pod logs.
+      # Best-effort (the collector guards every kubectl call) and bounded so it
+      # never eats the teardown budget or leaks the GPU node.
+      - name: Collect cluster debug bundle
+        if: failure() && steps.prep.outcome != 'skipped'
+        timeout-minutes: 8
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/gcp/run debug "${TEST_CONFIG}" || true
+
       - name: Upload failure debug
         if: failure() && steps.prep.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -554,6 +583,7 @@ jobs:
             evidence/pointer.yaml
             train-logs/**
             serve-logs/**
+            cluster-debug/**
           retention-days: 30
           if-no-files-found: ignore
 
