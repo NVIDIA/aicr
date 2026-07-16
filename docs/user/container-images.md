@@ -252,9 +252,9 @@ _No images extracted._
 ### slinky-slurm
 
 - `docker.io/library/alpine:3.23.3`
-- `ghcr.io/slinkyproject/login:26.05-ubuntu26.04`
+- `ghcr.io/slinkyproject/login-pyxis@sha256:9e782d1a645aff1dedc498d7a3256733cde55a152659f44716e8a5f0dca02028`
 - `ghcr.io/slinkyproject/slurmctld:26.05-ubuntu26.04`
-- `ghcr.io/slinkyproject/slurmd:26.05-ubuntu26.04`
+- `ghcr.io/slinkyproject/slurmd-pyxis@sha256:0c03f87d5b5725df2d11392702fb647922b3060c076e9ce4b4f13c9a67c904b3`
 - `ghcr.io/slinkyproject/slurmrestd:26.05-ubuntu26.04`
 
 ### slinky-slurm-operator
