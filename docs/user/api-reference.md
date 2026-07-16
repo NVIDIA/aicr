@@ -336,6 +336,10 @@ All GET /v1/recipe parameters are supported, plus:
 - **Scalar values** (string, number, bool) are returned as plain JSON values
 - **Complex values** (maps, lists) are returned as JSON objects/arrays
 
+**Error Responses:**
+
+`GET /v1/query` and `POST /v1/query` resolve a recipe through the same engine as `/v1/recipe`, so a stated criteria dimension not honored by any applicable overlay fails the same way: `400 Bad Request` with the `details.uncovered` array described in the [POST /v1/recipe error responses](#post-v1recipe) above.
+
 **Examples:**
 
 ```shell
