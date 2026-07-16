@@ -143,7 +143,14 @@ func defaultHelmDefaults() HelmDefaults {
 // flags maps ComponentRef.Name → registry-marked behavioral flags
 // (currently just HasSelfRefCRDs) and drives per-release
 // DisableValidation. A nil map disables those features.
-func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string]string, dynamicValues map[string][]string, flags map[string]componentFlags) (Helmfile, error) {
+//
+// serial selects the needs: edge policy. When false (default), releases are
+// chained only within a component (its -pre -> primary -> -post folders), so
+// independent components in the same sub-helmfile carry no edge and helmfile
+// applies them concurrently. When true (--serial), every release also needs:
+// its immediate predecessor, forming one linear chain that helmfile applies
+// strictly one at a time.
+func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string]string, dynamicValues map[string][]string, flags map[string]componentFlags, serial bool) (Helmfile, error) {
 	releases := make([]Release, 0, len(folders))
 	repoSet := make(map[string]Repository) // keyed by URL for dedupe
 
@@ -152,7 +159,14 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 	// bare "<name>" only within the dependent release's own namespace, so a
 	// release in cert-manager/ pointing at agentgateway-crds-post (which
 	// lives in agentgateway-system/) silently fails to resolve.
+	// prevName/prevNamespace track the immediately-preceding release for the
+	// --serial linear chain. lastByParent tracks the last release emitted per
+	// component, so the mandatory intra-component edge (-pre -> primary ->
+	// -post) is keyed on the component rather than on folder adjacency —
+	// correct even if folder ordering ever interleaved another component's
+	// folder between a primary and its -post.
 	var prevName, prevNamespace string
+	lastByParent := make(map[string]struct{ name, ns string }, len(folders))
 	for _, f := range folders {
 		ns := namespaceByComponent[f.Parent]
 		rel := Release{
@@ -160,8 +174,22 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 			Namespace: ns,
 			Values:    valuesFilesForFolder(f, dynamicValues[f.Parent]),
 		}
-		if prevName != "" {
-			rel.Needs = []string{needsRef(ns, prevNamespace, prevName)}
+		// A needs: edge orders apply. Within a component the -pre -> primary ->
+		// -post order is mandatory, so chain to the component's previous
+		// release. Across independent components that share a sub-helmfile,
+		// chain them only in --serial mode; by default they carry no edge and
+		// helmfile applies them concurrently. Cross-tier ordering does not rely
+		// on needs at all — the stratified layout runs level-N's sub-helmfile
+		// only after level-(N-1) has fully applied (see writeHelmfileLayout).
+		switch {
+		case serial:
+			if prevName != "" {
+				rel.Needs = []string{needsRef(ns, prevNamespace, prevName)}
+			}
+		default:
+			if last, ok := lastByParent[f.Parent]; ok {
+				rel.Needs = []string{needsRef(ns, last.ns, last.name)}
+			}
 		}
 
 		switch f.Kind {
@@ -244,6 +272,7 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 		releases = append(releases, rel)
 		prevName = rel.Name
 		prevNamespace = ns
+		lastByParent[f.Parent] = struct{ name, ns string }{rel.Name, ns}
 	}
 
 	// Stable repository ordering: by alias name.

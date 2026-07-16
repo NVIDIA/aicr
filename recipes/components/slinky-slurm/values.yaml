@@ -26,7 +26,6 @@
 # dcgm-exporter on workers. Both opt in via valuesFile / --set.
 
 # Cgroup isolation + NVIDIA GPU autodetect (no-op without GPUs).
-# plugstack.conf loads pyxis from the *-pyxis images.
 configFiles:
   cgroup.conf: |
     CgroupPlugin=autodetect
@@ -40,8 +39,6 @@ configFiles:
     AllowedSwapSpace=100.0
   gres.conf: |
     AutoDetect=nvidia
-  plugstack.conf: |
-    include /usr/share/pyxis/*
 
 # File-based local users (no LDAP/AD provider bundled).
 sssd:
@@ -132,13 +129,6 @@ loginsets:
   slinky:
     enabled: true
     replicas: 1
-    # Use Slinky's login-pyxis image (enroot + pyxis SPANK + hooks baked
-    # in) instead of the chart's vanilla login default.
-    login:
-      image:
-        repository: ghcr.io/slinkyproject/login-pyxis
-        tag: 26.05-ubuntu26.04
-        digest: sha256:9e782d1a645aff1dedc498d7a3256733cde55a152659f44716e8a5f0dca02028
     # Pin the initconf sidecar to an immutable Alpine tag (chart default
     # is :latest).
     initconf:
@@ -168,14 +158,6 @@ nodesets:
     enabled: true
     scalingMode: StatefulSet
     replicas: 1
-    # Use Slinky's slurmd-pyxis image (enroot + pyxis SPANK + hooks baked
-    # in, including 50-slurm-pmi.sh) instead of the chart's vanilla slurmd
-    # default. Enables srun --container-image=...
-    slurmd:
-      image:
-        repository: ghcr.io/slinkyproject/slurmd-pyxis
-        tag: 26.05-ubuntu26.04
-        digest: sha256:0c03f87d5b5725df2d11392702fb647922b3060c076e9ce4b4f13c9a67c904b3
     # Pin the logfile sidecar to an immutable Alpine tag (chart default
     # is :latest).
     logfile:

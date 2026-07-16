@@ -293,6 +293,75 @@ AICR ships five output adapters in
 `HelmRelease`s). **Components do not need to be deployer-aware** —
 the bundler renders per-deployer from one component definition.
 
+### Deployment ordering
+
+**One model, three projections.** Every deployer derives ordering from
+the same source: each component's declared `dependencyRefs`. What
+differs is how faithfully a deployer's native mechanism can express
+that dependency graph. For the concurrent deployers, components with no
+path between them are independent and roll out **concurrently**, while a
+real dependency **gates** (the dependent waits for its dependency to be
+healthy). The `NNN-<name>/` folder numbers reflect `DeploymentOrder`
+(a topological serialization) for readability, and drive the two
+deliberately linear paths — the helm `deploy.sh` and `--serial` mode —
+which install strictly in that order regardless of tiers.
+
+`pkg/recipe` exposes the graph two ways, and deployers pick whichever
+fits their mechanism:
+
+- `TopologicalSort` → a flat `DeploymentOrder` (one valid serialization).
+- `ComponentRefsTopologicalLevels` → dependency-depth **tiers**, where a
+  tier holds exactly the components whose dependencies are all satisfied
+  by earlier tiers (so a tier's members are mutually independent).
+
+**flux — the exact DAG.** Flux's `dependsOn` is a native dependency
+graph, so the flux deployer projects each component's declared
+`dependencyRefs` directly onto it: a `HelmRelease`'s `dependsOn` names
+exactly its dependencies' terminal releases, nothing more. This is the
+most faithful and most parallel rendering — a component waits only for
+what it actually needs — and it reads naturally to flux users because
+`dependsOn` mirrors `dependencyRefs` one-for-one. See `declaredDependsOn`.
+
+**argocd / argocd-helm — tiers as sync-wave bands.** Argo CD's
+`sync-wave` is a single integer per Application. Applications sharing a
+wave sync together, and Argo advances to a higher wave only once the
+current one is healthy — ordered *bands*, a partial order rather than a
+total one. Because a component gets one integer, it cannot express "wait
+for A but not B" when A and B sit at the same depth, so the DAG is
+**approximated** by tiers: `wave = tier*4 + phase`, where the
+per-component phase orders `-pre` → primary → `-post` → `-readiness`.
+The stride-4 band width keeps consecutive tiers disjoint, so a tier's
+readiness gate still blocks the next tier. The cost of the coarser
+banding is mild over-constraint (a component waits for its whole prior
+tier, not just its own dependencies). See `waveForFolder`.
+
+**helmfile — tiers as sequential sub-helmfiles.** Emits one
+`level-N.yaml` sub-helmfile per tier, processed in sequence so each
+tier's CRDs land in the cluster's REST mapper before the next tier's
+plan is rendered (issue #914). Within a sub-helmfile, `needs:` edges
+chain only a component's own `-pre` → primary → `-post` releases;
+independent components in the tier carry no edge, so helmfile applies
+them concurrently. Cross-tier ordering is the sub-helmfile sequence, not
+per-release `needs:` — the same tier approximation as argocd. See
+`buildHelmfile`.
+
+**helm — deliberately serial.** The `deploy.sh` installs one component
+at a time in `DeploymentOrder`, trading parallelism for the simplest
+possible shell. The readiness gates already sequence it correctly.
+
+#### Disabling parallelism (`--serial`)
+
+`aicr bundle --serial` forces every deployer to install components
+strictly one at a time in `DeploymentOrder`, an escape hatch for
+reproducing the pre-parallelism ordering or bisecting a misbehaving
+rollout. It affects the four concurrent deployers: argocd and
+argocd-helm fall back to a linear sync-wave per folder, flux chains each
+`HelmRelease` `dependsOn` to the previous component instead of
+projecting the DAG, and helmfile chains every release to its predecessor
+via `needs:` (one linear apply chain) instead of only within a
+component. The helm `deploy.sh` is already serial, so the flag is a
+no-op for it. Off by default.
+
 See [index.md](index.md#community-standard-deployment-targets) for
 the deployer matrix.
 

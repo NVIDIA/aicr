@@ -34,8 +34,8 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **44**
-- Pass: **44** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **43**
+- Pass: **43** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -51,8 +51,7 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 | monitoring-hpa | — | — | — | — | — | pass | R:0 D:0 P:0 C:0 | pending |
 | a100-aks-ubuntu-training-kubeflow | aks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | h100-aks-ubuntu-inference-dynamo | aks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| h100-aks-ubuntu-training-kubeflow | aks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
-| h100-aks-ubuntu-training-slurm | aks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
+| h100-aks-ubuntu-training-kubeflow | aks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
 | h100-bcm-ubuntu-training | bcm | h100 | ubuntu | training | — | pass | R:0 D:4 P:0 C:5 | pending |
 | a100-eks-ubuntu-training-kubeflow | eks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |

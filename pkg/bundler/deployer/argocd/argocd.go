@@ -158,6 +158,16 @@ const HelmReleaseNameMaxLen = 53
 // https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/
 const ResourcesFinalizer = "resources-finalizer.argocd.argoproj.io"
 
+// syncWaveStride is the number of Argo CD sync-wave slots reserved per
+// dependency level. Each component contributes up to four ordered folders
+// within its level's band (-pre, primary, -post, -readiness), so reserving a
+// fixed stride of that width keeps every level's band disjoint: level N+1's
+// first wave is strictly greater than level N's last (its readiness gate).
+// Components that share a level share a band and therefore deploy in
+// parallel, while dependents in a later level still wait for the whole prior
+// level — including its gate Jobs — to go Healthy. See waveForFolder.
+const syncWaveStride = 4
+
 // ReadmeData contains data for rendering the README.
 type ReadmeData struct {
 	RecipeVersion  string
@@ -250,6 +260,13 @@ type Generator struct {
 	// longer required. See pkg/bundler/deployer/localformat for the
 	// vendoring shape.
 	VendorCharts bool
+
+	// Serial assigns each folder a strictly increasing sync-wave equal to its
+	// linear position instead of the dependency-depth band (waveForFolder),
+	// so components deploy one at a time in deployment order. Off by default
+	// (parallel). Operator escape hatch wired from --serial; see
+	// config.Serial. argocdhelm forwards its own Serial here.
+	Serial bool
 
 	// AppName overrides the parent App-of-Apps `metadata.name`. Empty
 	// falls back to DefaultAppName ("nvidia-stack"). The value is baked
@@ -525,6 +542,33 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
+	// Group components into dependency-depth levels so independent components
+	// share a sync-wave band and roll out in parallel. This mirrors the
+	// helmfile deployer, which consumes the same function to emit its
+	// per-level sub-helmfiles — keeping ordering semantics identical across
+	// deployers. levelOf maps each component to its level index; waveForFolder
+	// turns (level, folder phase) into the concrete sync-wave.
+	//
+	// Computed unconditionally so cycle / undeclared-dependency validation
+	// runs on both paths — Generate is exported, and a direct caller could
+	// otherwise hand-build a RecipeResult with a bad graph and skip the check
+	// in --serial mode. levelOf is only populated for the parallel path; in
+	// --serial mode it stays empty and the folder loop uses each folder's
+	// linear index as the sync-wave (one component at a time).
+	levels, levelErr := recipe.ComponentRefsTopologicalLevels(components)
+	if levelErr != nil {
+		return nil, errors.PropagateOrWrap(levelErr, errors.ErrCodeInternal,
+			"failed to compute dependency levels")
+	}
+	levelOf := make(map[string]int, len(components))
+	if !g.Serial {
+		for lvl, names := range levels {
+			for _, name := range names {
+				levelOf[name] = lvl
+			}
+		}
+	}
+
 	// Build ApplicationData per folder and write application.yaml inside the
 	// NNN-<name>/ directory. Branching on FolderKind selects the Application
 	// shape (path-based single-source vs multi-source upstream-helm).
@@ -548,7 +592,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			inlineValues = g.ComponentValues[comp.Name]
 		}
 
-		appData, err := buildApplicationData(*comp, f, i, repoURL, targetRevision, inlineValues, g.InlineUpstreamValues)
+		wave := i
+		if !g.Serial {
+			wave = waveForFolder(f, levelOf[comp.Name])
+		}
+		appData, err := buildApplicationData(*comp, f, wave, repoURL, targetRevision, inlineValues, g.InlineUpstreamValues)
 		if err != nil {
 			return nil, err
 		}
@@ -708,6 +756,45 @@ func findComponentRef(refs []recipe.ComponentRef, parent string) *recipe.Compone
 		}
 	}
 	return nil
+}
+
+// waveForFolder computes the Argo CD sync-wave for a localformat folder under
+// level-based scheduling. Components sharing a dependency level share a wave
+// band [level*syncWaveStride, level*syncWaveStride+3], so mutually independent
+// components (e.g. cert-manager, nfd, nodewright-operator) deploy in parallel
+// instead of one wave at a time. The per-phase offset within the band
+// preserves the strict intra-component ordering the old linear scheme got for
+// free from consecutive folder indices:
+//
+//	-pre        base + 0   (namespaces / PSS prereqs, before the chart)
+//	primary     base + 1   (the component's chart or manifests)
+//	-post       base + 2   (raw manifests applied after the chart's CRDs)
+//	-readiness  base + 3   (gate Job; its wave blocks the next level)
+//
+// where base = level*syncWaveStride. Because the band width equals the phase
+// count, level N+1's first wave ((level+1)*syncWaveStride) is strictly greater
+// than level N's readiness wave, so Argo CD holds the next tier until every
+// resource in the prior level — the gate Job included — is Healthy. That is
+// the same barrier the linear scheme provided, now applied per dependency
+// level rather than per component.
+//
+// The phase is derived from the folder name relative to its parent component
+// (a primary folder has Name == Parent). A component literally named
+// "<x>-pre"/"-post"/"-readiness" would collide, but localformat rejects those
+// suffixes when a sibling injects the matching auxiliary folder and reserves
+// "-readiness" outright, so the primary (Name == Parent) fallthrough is safe.
+func waveForFolder(f localformat.Folder, level int) int {
+	base := level * syncWaveStride
+	switch f.Name {
+	case f.Parent + "-pre":
+		return base
+	case f.Parent + "-post":
+		return base + 2
+	case f.Parent + "-readiness":
+		return base + 3
+	default: // primary: Name == Parent
+		return base + 1
+	}
 }
 
 // buildApplicationData constructs ApplicationData for a single folder. The

@@ -77,8 +77,9 @@ jobs:
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
     # timeout cancels pending always() steps, so an undersized cap would skip
     # teardown and leak the GPU node / capacity reservation. 190 UAT + ~30 setup +
-    # ~40 teardown = ~260, so 270 leaves the teardown headroom on a worst-case run.
-    timeout-minutes: 270
+    # ~8 failure-path debug collection (Collect cluster debug bundle) + ~40
+    # teardown = ~268, so 280 leaves the teardown headroom on a worst-case run.
+    timeout-minutes: 280
     permissions:
       contents: read
       actions: read
@@ -624,6 +625,35 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # Refresh the AWS session before collecting: a long tuning-race failure
+      # (exactly what this bundle targets) can outlast the 1h session minted before
+      # validate, which would leave every kubectl in the collector failing EKS
+      # exec-auth and the bundle silently empty. id-token: write is job-wide, so
+      # configure-aws-credentials can re-assume here.
+      - name: Refresh AWS credentials before debug collection
+        if: failure() && steps.prep.outcome != 'skipped'
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Debug
+
+      # Snapshot live cluster state on failure BEFORE teardown, while the
+      # cluster is still up. The runner-local artifacts above (report.json et al.)
+      # say WHAT check failed; this captures WHY — node conditions/taints, cluster
+      # events (reboots, pod evictions), the operator CRs (incl. Skyhook
+      # status.status the readiness gate keys off of), and operator/check-Job pod
+      # logs. Best-effort (the collector guards every kubectl call) and bounded so
+      # it never eats the teardown budget or leaks the GPU node.
+      - name: Collect cluster debug bundle
+        if: failure() && steps.prep.outcome != 'skipped'
+        timeout-minutes: 8
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/aws/run debug "${TEST_CONFIG}" || true
+
       - name: Upload failure debug
         if: failure() && steps.prep.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -638,6 +668,7 @@ jobs:
             evidence/pointer.yaml
             train-logs/**
             serve-logs/**
+            cluster-debug/**
           retention-days: 30
           if-no-files-found: ignore
 

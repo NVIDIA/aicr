@@ -31,7 +31,6 @@ Pick the row that matches your cluster. Each resolves to a slurm leaf with at le
 
 | Cloud    | Command                                                                                                      | Leaf overlay                                               |
 | -------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| **AKS**  | `aicr recipe --service aks --accelerator h100 --intent training --os ubuntu --platform slurm -o recipe.yaml` | `h100-aks-ubuntu-training-slurm`                           |
 | **EKS**  | `aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --platform slurm -o recipe.yaml` | `h100-eks-ubuntu-training-slurm`                           |
 | **GKE**  | `aicr recipe --service gke --accelerator h100 --intent training --os cos --platform slurm -o recipe.yaml`    | `h100-gke-cos-training-slurm`                              |
 | **Kind** | `aicr recipe --service kind --accelerator h100 --intent training --platform slurm -o recipe.yaml`            | `h100-kind-training-slurm` (CPU-only NodeSet; no GPU GRES) |
@@ -112,27 +111,6 @@ aicr bundle \
 GKE system nodes should **not** carry custom taints (konnectivity and other managed pods break). No `--system-node-toleration` on GKE when system/cpu pools are untainted.
 
 Optional: `--accelerated-node-toleration nvidia.com/gpu=present:NoSchedule` (harmless if that taint is absent).
-
-### AKS (system + cpu + gpu pools; CriticalAddonsOnly + GPU taint)
-
-Example layout: 3× `system` (`CriticalAddonsOnly=true:NoSchedule`), 1× `cpuworker1` (untainted), 2× `gpuworker1` (`nvidia.com/gpu=present:NoSchedule`). Operator on **system**; controller / login / restapi on **cpuworker1**; slurmd on **gpuworker1**.
-
-```shell
-aicr bundle \
-  --recipe recipe.yaml \
-  --deployer helm \
-  --system-node-selector agentpool=system \
-  --system-node-toleration CriticalAddonsOnly=true:NoSchedule \
-  --accelerated-node-selector agentpool=gpuworker1 \
-  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
-  --set slinkyslurm:nodesets.slinky.replicas=2 \
-  --set-json 'slinkyslurm:controller.podSpec={"nodeSelector":{"agentpool":"cpuworker1"}}' \
-  --set-json 'slinkyslurm:restapi.podSpec={"nodeSelector":{"agentpool":"cpuworker1"}}' \
-  --set-json 'slinkyslurm:loginsets.slinky.podSpec={"nodeSelector":{"agentpool":"cpuworker1"}}' \
-  --output bundle
-```
-
-AKS ships `managed-csi` as the default StorageClass; omit `--storage-class` unless you need a non-default class.
 
 ### Kind (CPU-only smoke / CI)
 

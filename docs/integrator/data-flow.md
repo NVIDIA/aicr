@@ -467,7 +467,7 @@ Each component folder holds install.sh, values.yaml, and cluster-values.yaml
 
 ### Deployment Order Flow
 
-The `deploymentOrder` field in recipes specifies component deployment sequence. Each deployer implements ordering differently:
+Ordering follows each component's declared `dependencyRefs`, not its linear position. The flat `deploymentOrder` (one topological serialization) numbers the `NNN-<name>/` folders and drives the serial helm `deploy.sh`. The concurrent deployers derive ordering from the dependency graph so independent components roll out together, but differ in how faithfully: **argocd**, **argocd-helm**, and **helmfile** approximate it as depth **tiers** (a component waits for its whole prior tier), while **flux** projects the exact `dependencyRefs` DAG onto `dependsOn` (a component waits for only its actual dependencies). Each deployer expresses this differently:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -496,13 +496,15 @@ The `deploymentOrder` field in recipes specifies component deployment sequence. 
 │  └──────┬─────┘                    └──────┬─────┘       │
 │         │                                 │             │
 │         ▼                                 ▼             │
-│  Per-component dirs                sync-wave:           │
-│  + deploy.sh script                - cert-manager:0     │
-│                                    - gpu-operator:1     │
-│                                    - network-op:2       │
+│  Per-component dirs                sync-wave (by level):│
+│  + deploy.sh script                - cert-manager:1     │
+│                                    - gpu-operator:5     │
+│                                    - network-op:9       │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
+
+The `orderComponentsByDeployment()` sort shown above produces the flat order used for folder numbering and the helm `deploy.sh`. The Argo CD sync-waves are **not** taken from that linear order: they are assigned by dependency tier (`wave = tier*4 + phase`), so components that share a tier share a wave and sync together. The `1, 5, 9` values above reflect the specific `cert-manager → gpu-operator → network-operator` dependency chain (one component per tier); a recipe with independent components would place them at the same wave. See [Deployment ordering](../contributor/component.md#deployment-ordering) for the full model.
 
 ### Deployer-Specific Output
 
@@ -563,7 +565,7 @@ kind: Application
 metadata:
   name: gpu-operator
   annotations:
-    argocd.argoproj.io/sync-wave: "1"  # After cert-manager (0)
+    argocd.argoproj.io/sync-wave: "5"  # tier 1 (depends on cert-manager in tier 0)
 spec:
   sources:
     # Helm chart from upstream
@@ -605,9 +607,9 @@ spec:
 │     └─ network-operator → values.yaml, manifests/            │
 │                                                              │
 │  4. Run deployer (argocd) → numbered NNN-<name>/ folders     │
-│     ├─ 001-cert-manager/application.yaml (wave: 0)           │
-│     ├─ 002-gpu-operator/application.yaml (wave: 1)           │
-│     └─ 003-network-operator/application.yaml (wave: 2)       │
+│     ├─ 001-cert-manager/application.yaml (wave: 1)          │
+│     ├─ 002-gpu-operator/application.yaml (wave: 5)          │
+│     └─ 003-network-operator/application.yaml (wave: 9)      │
 │     └─ app-of-apps.yaml (bundle root, uses --repo URL)       │
 │                                                              │
 │  5. Finalize closed-world inventory                          │

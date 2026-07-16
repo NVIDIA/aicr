@@ -16,8 +16,6 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
-	"os"
 	"strings"
 	"testing"
 
@@ -27,7 +25,6 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -191,7 +188,7 @@ func TestCheckSlinkySlurmHealthExecOutcomes(t *testing.T) {
 	}
 }
 
-func TestCheckSlinkySlurmHealthSkipsGPUContainerSmokeForKind(t *testing.T) {
+func TestCheckSlinkySlurmHealthRunsAllHealthCommands(t *testing.T) {
 	var gotCommands []string
 	var gotOptions []podExecOptions
 	restore := replaceSlinkyExecForTest(func(
@@ -208,33 +205,9 @@ func TestCheckSlinkySlurmHealthSkipsGPUContainerSmokeForKind(t *testing.T) {
 	})
 	defer restore()
 
-	ctx := slurmReadyTestContext(t, false)
-	ctx.ValidationInput.Criteria = recipe.Criteria{
-		Service:     recipe.CriteriaServiceKind,
-		Accelerator: recipe.CriteriaAcceleratorH100,
-	}
-	nodeSetPod, err := ctx.Clientset.CoreV1().Pods(slinkySlurmNamespace).Get(
-		ctx.Ctx, "slinky-nodeset-0", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get NodeSet pod: %v", err)
-	}
-	nodeSetPod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{
-		corev1.ResourceName(resourceNVIDIAGPU): resource.MustParse("1"),
-	}
-	if _, err = ctx.Clientset.CoreV1().Pods(slinkySlurmNamespace).Update(
-		ctx.Ctx, nodeSetPod, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("update NodeSet pod: %v", err)
-	}
-
-	out := captureStdout(t, func() { err = CheckSlinkySlurmHealth(ctx) })
+	err := CheckSlinkySlurmHealth(slurmReadyTestContext(t, false))
 	if err != nil {
 		t.Fatalf("error = %v, want nil", err)
-	}
-	if !strings.Contains(out, "--- Slinky Slurm GPU container check ---") ||
-		!strings.Contains(out, "Included: false") ||
-		!strings.Contains(out, "recipe service is kind") {
-
-		t.Fatalf("output = %q, want explicit Kind GPU-check skip artifact", out)
 	}
 
 	wantCommands := []string{
@@ -249,222 +222,6 @@ func TestCheckSlinkySlurmHealthSkipsGPUContainerSmokeForKind(t *testing.T) {
 		if got.DefaultContainerAnnotation != defaultContainerAnnotation || got.PreferredContainerName != slinkyLoginPodContainerName {
 			t.Fatalf("pod exec options = %+v, want Slinky login pod options", got)
 		}
-	}
-}
-
-func TestCheckSlinkySlurmHealthFailsWhenGPURecipeLosesNodeSetResources(t *testing.T) {
-	ctx := slurmReadyTestContext(t, false)
-	ctx.ValidationInput.Criteria = recipe.Criteria{
-		Service:     recipe.CriteriaServiceAKS,
-		Accelerator: recipe.CriteriaAcceleratorH100,
-	}
-
-	var execCount int
-	restore := replaceSlinkyExecForTest(func(
-		_ context.Context,
-		_ *validators.Context,
-		_, _ string,
-		_ []string,
-		_ podExecOptions,
-	) (podExecResult, error) {
-
-		execCount++
-		return podExecResult{Stdout: "unexpected\n"}, nil
-	})
-	defer restore()
-
-	var err error
-	out := captureStdout(t, func() { err = CheckSlinkySlurmHealth(ctx) })
-	if err == nil || !strings.Contains(err.Error(), "no NodeSet pod has a positive nvidia.com/gpu request or limit") {
-		t.Fatalf("error = %v, want missing NodeSet GPU resource failure", err)
-	}
-	if execCount != 0 {
-		t.Fatalf("exec count = %d, want 0 after fail-closed GPU decision", execCount)
-	}
-	if !strings.Contains(out, "--- Slinky Slurm GPU container check ---") ||
-		!strings.Contains(out, "Included: false") ||
-		!strings.Contains(out, "service=aks accelerator=h100") {
-
-		t.Fatalf("output = %q, want missing-resource decision artifact", out)
-	}
-}
-
-func TestNodeSetPodsRequestNVIDIAGPUs(t *testing.T) {
-	resourceName := corev1.ResourceName(resourceNVIDIAGPU)
-	tests := []struct {
-		name      string
-		resources corev1.ResourceRequirements
-		want      bool
-	}{
-		{
-			name: "no GPU resource",
-		},
-		{
-			name: "zero GPU limit",
-			resources: corev1.ResourceRequirements{
-				Limits: corev1.ResourceList{resourceName: resource.MustParse("0")},
-			},
-		},
-		{
-			name: "positive GPU limit",
-			resources: corev1.ResourceRequirements{
-				Limits: corev1.ResourceList{resourceName: resource.MustParse("1")},
-			},
-			want: true,
-		},
-		{
-			name: "positive GPU request",
-			resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{resourceName: resource.MustParse("1")},
-			},
-			want: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pods := []corev1.Pod{{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{Resources: tt.resources}},
-				},
-			}}
-			if got := nodeSetPodsRequestNVIDIAGPUs(pods); got != tt.want {
-				t.Fatalf("nodeSetPodsRequestNVIDIAGPUs() = %t, want %t", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestResolveSlinkySlurmGPUContainerImage(t *testing.T) {
-	tests := []struct {
-		name     string
-		registry string
-		want     string
-	}{
-		{
-			name: "Docker Hub default",
-			want: "docker.io/library/alpine:3.23.3",
-		},
-		{
-			name:     "private registry override",
-			registry: "registry.example.com/aicr",
-			want:     "registry.example.com/aicr/library/alpine:3.23.3",
-		},
-		{
-			name:     "trailing slash is normalized",
-			registry: "localhost:5001/",
-			want:     "localhost:5001/library/alpine:3.23.3",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(validatorImageRegistryEnv, tt.registry)
-			if got := resolveSlinkySlurmGPUContainerImage(); got != tt.want {
-				t.Fatalf("resolveSlinkySlurmGPUContainerImage() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestSlinkySlurmGPUContainerImageTagMatchesChartSidecars guards the
-// slinkySlurmGPUContainerImage constant against drifting from the Alpine tag
-// the slinky-slurm chart's initconf/logfile sidecars pin in the component
-// values. The health check's srun-launched pull only stays covered by
-// `aicr mirror list` (which extracts images from rendered charts) while both
-// reference the same Alpine tag, so a Renovate bump of one without the other
-// must fail loudly here rather than silently break air-gap mirroring.
-func TestSlinkySlurmGPUContainerImageTagMatchesChartSidecars(t *testing.T) {
-	const valuesPath = "../../recipes/components/slinky-slurm/values.yaml"
-
-	idx := strings.LastIndex(slinkySlurmGPUContainerImage, ":")
-	if idx < 0 {
-		t.Fatalf("slinkySlurmGPUContainerImage %q has no tag", slinkySlurmGPUContainerImage)
-	}
-	tag := slinkySlurmGPUContainerImage[idx+1:]
-
-	data, err := os.ReadFile(valuesPath)
-	if err != nil {
-		t.Fatalf("read component values: %v", err)
-	}
-	if !strings.Contains(string(data), `tag: "`+tag+`"`) {
-		t.Errorf("Alpine tag %q from slinkySlurmGPUContainerImage not pinned in %s; "+
-			"the sidecar tags and the health-check image constant have drifted — "+
-			"the srun pull is no longer covered by `aicr mirror list`. Bump both to match.",
-			tag, valuesPath)
-	}
-}
-
-func TestCheckSlinkySlurmHealthRunsGPUContainerSmokeForGPUNodeSet(t *testing.T) {
-	tests := []struct {
-		name     string
-		registry string
-		wantRef  string
-	}{
-		{
-			name:    "Docker Hub default",
-			wantRef: "docker.io/library/alpine:3.23.3",
-		},
-		{
-			name:     "AICR_VALIDATOR_IMAGE_REGISTRY rewrite",
-			registry: "registry.example.com/aicr",
-			wantRef:  "registry.example.com/aicr/library/alpine:3.23.3",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(validatorImageRegistryEnv, tt.registry)
-			ctx := slurmReadyTestContext(t, false)
-			nodeSetPod, err := ctx.Clientset.CoreV1().Pods(slinkySlurmNamespace).Get(
-				ctx.Ctx, "slinky-nodeset-0", metav1.GetOptions{})
-			if err != nil {
-				t.Fatalf("get NodeSet pod: %v", err)
-			}
-			nodeSetPod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{
-				corev1.ResourceName(resourceNVIDIAGPU): resource.MustParse("1"),
-			}
-			if _, err = ctx.Clientset.CoreV1().Pods(slinkySlurmNamespace).Update(
-				ctx.Ctx, nodeSetPod, metav1.UpdateOptions{}); err != nil {
-				t.Fatalf("update NodeSet pod: %v", err)
-			}
-
-			var gotCommands []string
-			restore := replaceSlinkyExecForTest(func(
-				_ context.Context,
-				_ *validators.Context,
-				_, _ string,
-				command []string,
-				_ podExecOptions,
-			) (podExecResult, error) {
-
-				gotCommands = append(gotCommands, strings.Join(command, " "))
-				return podExecResult{Stdout: "ok\n"}, nil
-			})
-			defer restore()
-
-			out := captureStdout(t, func() { err = CheckSlinkySlurmHealth(ctx) })
-			if err != nil {
-				t.Fatalf("error = %v, want nil", err)
-			}
-			wantImage := "docker://" + tt.wantRef
-			if !strings.Contains(out, "--- Slinky Slurm GPU container check ---") ||
-				!strings.Contains(out, "Included: true") ||
-				!strings.Contains(out, wantImage) {
-
-				t.Fatalf("output = %q, want included GPU-check decision artifact with %s", out, wantImage)
-			}
-
-			wantGPUCommand := "srun --immediate=30 --time=1:00 --nodes=1 --ntasks=1 " +
-				"--cpus-per-task=1 --mem=128M --gpus=1 " +
-				"--container-image=" + wantImage + " cat /etc/os-release"
-			if len(gotCommands) != len(slinkySlurmHealthCommands)+1 {
-				t.Fatalf("commands = %v, want %d commands", gotCommands, len(slinkySlurmHealthCommands)+1)
-			}
-			if gotCommands[len(gotCommands)-1] != wantGPUCommand {
-				t.Fatalf("GPU command = %q, want %q", gotCommands[len(gotCommands)-1], wantGPUCommand)
-			}
-		})
 	}
 }
 
@@ -781,74 +538,6 @@ func TestCheckSlinkySlurmHealthDoesNotSkipWhenNodeSetPodIsUnbound(t *testing.T) 
 	}
 	if !execRan {
 		t.Fatal("exec did not run; unbound NodeSet pod must prevent KWOK skip")
-	}
-}
-
-func TestRunnableSlinkyNodeSetPodsPreservesCancellation(t *testing.T) {
-	tests := []struct {
-		name               string
-		cancelBeforeLookup bool
-		unboundPod         bool
-		wantNodeGets       int
-	}{
-		{
-			name:               "canceled before Node lookup",
-			cancelBeforeLookup: true,
-			wantNodeGets:       0,
-		},
-		{
-			name:               "canceled before unbound pod iteration",
-			cancelBeforeLookup: true,
-			unboundPod:         true,
-			wantNodeGets:       0,
-		},
-		{
-			name:         "canceled during Node lookup",
-			wantNodeGets: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := slurmReadyTestContext(t, false)
-			runCtx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			ctx.Ctx = runCtx
-
-			clientset := ctx.Clientset.(*k8sfake.Clientset)
-			if tt.unboundPod {
-				pod, err := clientset.CoreV1().Pods(slinkySlurmNamespace).Get(
-					context.Background(), "slinky-nodeset-0", metav1.GetOptions{})
-				if err != nil {
-					t.Fatalf("get NodeSet pod: %v", err)
-				}
-				pod.Spec.NodeName = ""
-				if _, err := clientset.CoreV1().Pods(slinkySlurmNamespace).Update(
-					context.Background(), pod, metav1.UpdateOptions{}); err != nil {
-					t.Fatalf("update NodeSet pod: %v", err)
-				}
-			}
-			var nodeGets int
-			clientset.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
-				nodeGets++
-				cancel()
-				return true, nil, context.Canceled
-			})
-			if tt.cancelBeforeLookup {
-				cancel()
-			}
-
-			_, err := runnableSlinkyNodeSetPods(ctx, slinkySlurmNamespace)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
-				t.Fatalf("error = %v, want timeout error", err)
-			}
-			if err == nil || !strings.Contains(err.Error(), "canceled while resolving NodeSet pod nodes") {
-				t.Fatalf("error = %v, want NodeSet cancellation context", err)
-			}
-			if nodeGets != tt.wantNodeGets {
-				t.Fatalf("Node Get calls = %d, want %d", nodeGets, tt.wantNodeGets)
-			}
-		})
 	}
 }
 

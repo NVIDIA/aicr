@@ -5,7 +5,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
     annotations:
-        argocd.argoproj.io/sync-wave: "1"
+        argocd.argoproj.io/sync-wave: "3"
     name: '{{ (.Values.deployer | default dict).namePrefix | default "" }}gpu-operator-readiness'
     namespace: argocd
 spec:
