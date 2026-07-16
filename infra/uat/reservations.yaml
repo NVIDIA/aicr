@@ -105,10 +105,18 @@ reservations:
     test-config-dir: tests/uat/azure/tests
     # Enrolled with [training] after the green manual acceptance run
     # (29125390442: full provision → CUJ → evidence → teardown). Inference
-    # joins after a green manual intent=inference dispatch — the AWS/GCP
-    # rows run both, so add it here rather than removing the key (a bare
-    # `nightly-intents:` decodes as absent and defaults to [training]).
-    nightly-intents: [training]
+    # joined after a green manual intent=inference dispatch, matching the
+    # AWS/GCP rows which run both.
+    nightly-intents: [training, inference]
+    # The AKS ND H100 v5 inference perf fix (nvidia-tuned 0.3.2, #1767) is on
+    # main but not in any release tag yet — v0.17.0 and older pin 0.3.1 and
+    # fail inference-perf. Gate release inference cells to the first release
+    # that will carry the fix, so today only `main` runs Azure inference
+    # nightly (green); older releases are skipped instead of running red, and
+    # the gated release enrolls automatically once it ships. Bump this when the
+    # actual first-fixed tag differs.
+    nightly-intent-min-versions:
+      inference: v0.18.0
   - name: aws-gb200
     cloud: aws
     # CROSS-ACCOUNT: the GB200 Capacity Block lives in a SEPARATE tenancy

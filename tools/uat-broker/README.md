@@ -66,20 +66,26 @@ reservation. Candidate tags are read from stdin; pre-release and
 non-semver tags are dropped. Cells are ordered newest-first so the nightly
 controller drops the oldest releases first when its time-box closes.
 
+Each cell carries `intents` — the nightly intents eligible at that cell's
+version. The main cell carries every intent the reservation runs; a release
+cell drops any intent gated off by the row's `nightly-intent-min-versions`
+(a release older than an intent's minimum version). The controller dispatches
+one run per entry, so a fully-gated release cell dispatches nothing.
+
 ```sh
 git tag -l 'v*' | uat-broker schedule --previous-n 2
 # {
-#   "aws-h100": [
-#     { "reservation": "aws-h100", "aicr_version": "",       "is_main": true  },
-#     { "reservation": "aws-h100", "aicr_version": "v2.0.0",  "is_main": false },
-#     { "reservation": "aws-h100", "aicr_version": "v1.10.0", "is_main": false }
-#   ],
-#   "gcp-h100": [ ... ]
+#   "azure-h100": [
+#     { "reservation": "azure-h100", "aicr_version": "",       "is_main": true,  "intents": ["training","inference"] },
+#     { "reservation": "azure-h100", "aicr_version": "v2.0.0",  "is_main": false, "intents": ["training","inference"] },
+#     { "reservation": "azure-h100", "aicr_version": "v0.17.0", "is_main": false, "intents": ["training"] }
+#   ]
 # }
 ```
 
-Flags: `--file` (registry path, default `infra/uat/reservations.yaml`),
-`--reservations a,b` (override the registry's reservation set),
+Flags: `--file` (registry path, default `infra/uat/reservations.yaml`; always
+loaded, since each cell's eligible intents come from the row),
+`--reservations a,b` (schedule a subset — each name must exist in `--file`),
 `--previous-n N` (default 2), `--include-main` (default true).
 
 ## Exit codes

@@ -215,8 +215,8 @@ func runSchedule(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		previousN   int
 		includeMain bool
 	)
-	fs.StringVar(&file, "file", defaultRegistryPath, "registry path (used to resolve reservations when --reservations is empty)")
-	fs.StringVar(&reservCSV, "reservations", "", "comma-separated reservation names (default: every row in --file)")
+	fs.StringVar(&file, "file", defaultRegistryPath, "registry path (always loaded — supplies each cell's eligible nightly intents)")
+	fs.StringVar(&reservCSV, "reservations", "", "comma-separated reservation names to schedule, each of which must exist in --file (default: every row)")
 	fs.IntVar(&previousN, "previous-n", 2, "number of previous stable releases below main to include")
 	fs.BoolVar(&includeMain, "include-main", true, "include the tip-of-main cell first")
 	if err := fs.Parse(args); err != nil {
@@ -259,31 +259,41 @@ func runSchedule(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	return nil
 }
 
-// resolveReservations returns the reservation names to schedule: the
-// --reservations list when given, otherwise every name in the registry.
-func resolveReservations(file, csv string) ([]string, error) {
-	if strings.TrimSpace(csv) != "" {
-		names := splitCSV(csv)
-		if len(names) == 0 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, "schedule: --reservations is empty after trimming")
-		}
-		// Reject duplicates so the input fails loudly rather than silently
-		// collapsing via the schedule's reservation-keyed output map — mirrors
-		// the registry's own name-uniqueness invariant.
-		seen := make(map[string]bool, len(names))
-		for _, n := range names {
-			if seen[n] {
-				return nil, errors.New(errors.ErrCodeInvalidRequest, "schedule: duplicate reservation name "+n+" in --reservations")
-			}
-			seen[n] = true
-		}
-		return names, nil
-	}
+// resolveReservations returns the reservation ROWS to schedule: the
+// --reservations subset when given, otherwise every row in the registry. The
+// registry is always loaded — the schedule attaches each cell's eligible
+// nightly intents (nightly-intents gated by nightly-intent-min-versions),
+// which only the registry row carries; a --reservations name absent from the
+// registry therefore fails loudly rather than scheduling an intent-less row.
+func resolveReservations(file, csv string) ([]uatbroker.Reservation, error) {
 	reg, err := uatbroker.LoadRegistryFile(file)
 	if err != nil {
 		return nil, err
 	}
-	return reg.Names(), nil
+	if strings.TrimSpace(csv) == "" {
+		return reg.Reservations, nil
+	}
+	names := splitCSV(csv)
+	if len(names) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "schedule: --reservations is empty after trimming")
+	}
+	// Reject duplicates so the input fails loudly rather than silently
+	// collapsing via the schedule's reservation-keyed output map — mirrors
+	// the registry's own name-uniqueness invariant.
+	seen := make(map[string]bool, len(names))
+	out := make([]uatbroker.Reservation, 0, len(names))
+	for _, n := range names {
+		if seen[n] {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, "schedule: duplicate reservation name "+n+" in --reservations")
+		}
+		seen[n] = true
+		res, lookupErr := reg.Lookup(n)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		out = append(out, *res)
+	}
+	return out, nil
 }
 
 // readTags reads the newline-separated candidate tag list from stdin,
