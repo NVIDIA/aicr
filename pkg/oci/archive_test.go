@@ -29,6 +29,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/content/file"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -85,6 +86,43 @@ func TestPackage_SourceFilesArchiveContainsOnlyFrozenSortedSelection(t *testing.
 	}
 	if _, ok := files["other.txt"]; ok {
 		t.Fatal("archive included an unselected file")
+	}
+}
+
+// TestBuildDeterministicTarGzipSetsFileStoreUnpackTitle locks the two layer
+// annotations an ORAS file store needs to MATERIALIZE the layer to disk on
+// pull. oras.Copy into a file.New(dir) store unpacks a layer into the path
+// named by org.opencontainers.image.title (here ".", the store root) when
+// io.deis.oras.content.unpack is "true"; WITHOUT the title annotation the
+// store treats the layer as an unnamed blob and writes NOTHING to disk, so a
+// downstream file-store pull (e.g. the evidence verifier's materialize step)
+// sees an empty directory. Regression guard for the generic archive path —
+// dropping the title annotation broke every `main` UAT verify (issue #1793).
+func TestBuildDeterministicTarGzipSetsFileStoreUnpackTitle(t *testing.T) {
+	sourceDir := t.TempDir()
+	outputDir := t.TempDir()
+	writeSourceFixture(t, sourceDir)
+	safeOCITempRoot(t)
+	prepared, err := preparePackageSource(context.Background(), sourceDir, outputDir, "", nil)
+	if err != nil {
+		t.Fatalf("preparePackageSource() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := prepared.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	})
+	layout := newTestOwnedLayout(t, outputDir)
+	_, desc, err := buildDeterministicTarGzip(context.Background(), prepared, layout, archiveOptions{})
+	if err != nil {
+		t.Fatalf("buildDeterministicTarGzip() error = %v", err)
+	}
+	if got := desc.Annotations[ociv1.AnnotationTitle]; got != "." {
+		t.Errorf("layer %q annotation = %q, want %q — an ORAS file store unpacks into this path; "+
+			"empty means the layer is never written to disk on pull", ociv1.AnnotationTitle, got, ".")
+	}
+	if got := desc.Annotations[file.AnnotationUnpack]; got != "true" {
+		t.Errorf("layer %q annotation = %q, want \"true\"", file.AnnotationUnpack, got)
 	}
 }
 

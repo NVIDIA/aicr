@@ -24,9 +24,10 @@ COPY recipes/ recipes/
 
 RUN CGO_ENABLED=0 go build -o /out/conformance ./validators/conformance
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
 
 COPY --from=builder /out/conformance /conformance
 
-USER nonroot
+# nvs (UID 1000) is the sole nonroot user in the NVIDIA distroless static base.
+USER nvs
 ENTRYPOINT ["/conformance"]

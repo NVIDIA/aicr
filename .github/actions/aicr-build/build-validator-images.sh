@@ -45,11 +45,11 @@ for phase in ${PHASES//,/ }; do
     exit 1
   fi
   docker build -t "ko.local/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
 COPY dist/validator/${phase} /${phase}
 COPY validators/${phase}/testdata /app/testdata
 WORKDIR /app
-USER nonroot
+USER nvs
 ENTRYPOINT ["/${phase}"]
 DOCKERFILE
   timeout 600 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" || {

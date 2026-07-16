@@ -46,7 +46,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags="-s -w -extldflags '-static' -X main.version=${VERSION}" \
     -o /out/gate ./cmd/gate
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
 
 COPY --from=builder /out/gate /gate
 COPY --from=chainsaw /ko-app/chainsaw /usr/local/bin/chainsaw
@@ -56,5 +56,7 @@ COPY --from=chainsaw /ko-app/chainsaw /usr/local/bin/chainsaw
 # points here; see cmd/gate/main.go (defaultChainsawConfig).
 COPY cmd/gate/chainsaw-config.yaml /etc/chainsaw/config.yaml
 
-USER nonroot
+# nvs (UID 1000) is the sole nonroot user shipped in the NVIDIA distroless
+# static base; it has no "nonroot"/65532 user like the previous distroless bases.
+USER nvs
 ENTRYPOINT ["/gate"]
