@@ -65,6 +65,10 @@ Require a minimum CLI version (bare version defaults to >= semantics):
 Verify a privately-signed bundle against an org trusted root:
   aicr verify ./my-bundle --trust-root ./trusted_root.json
 
+Verify an offline/air-gapped bundle (no transparency-log network calls; use a
+local PEM key for fully offline operation, since a KMS URI still resolves remotely):
+  aicr verify ./bundle --key ./bundle-signer.pub --insecure-ignore-tlog
+
 Output as JSON:
   aicr verify ./my-bundle --format json
 `,
@@ -98,6 +102,10 @@ Output as JSON:
 			&cli.StringFlag{
 				Name:  "trust-root",
 				Usage: "Verify the bundle attestation against a private Sigstore trusted root (a trusted_root.json from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with --key and --certificate-identity-regexp. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`.",
+			},
+			&cli.BoolFlag{
+				Name:  "insecure-ignore-tlog",
+				Usage: "Skip transparency-log verification for an offline/air-gapped bundle signed with `bundle --signing-key ... --tlog-upload=false`. Verifies the signature against --key with no transparency-log network calls. Requires --key (the air-gapped path is key-based); a local PEM key is fully offline, while a KMS URI still makes a live GetPublicKey call to resolve the key. \"insecure\" because, with no transparency log, there is no trusted timestamp proving when the signature was made.",
 			},
 			withCompletions(&cli.StringFlag{
 				Name:  flagFormat,
@@ -139,6 +147,14 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 	verifyOpts.Key = cmd.String("key")
 	verifyOpts.TrustRoot = cmd.String("trust-root")
+	verifyOpts.IgnoreTLog = cmd.Bool("insecure-ignore-tlog")
+
+	// Offline/air-gapped verification is key-based only: reject the flag combo up
+	// front so the user gets a clear message instead of a downstream failure.
+	if verifyOpts.IgnoreTLog && verifyOpts.Key == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--insecure-ignore-tlog requires --key: offline verification is key-based (verify a bundle signed with `bundle --signing-key ... --tlog-upload=false`)")
+	}
 
 	// Run verification
 	result, err := verifier.Verify(ctx, absDir, verifyOpts)

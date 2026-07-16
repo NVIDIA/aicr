@@ -2634,6 +2634,7 @@ aicr verify <bundle-dir> [flags]
 | `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 | `--key` | string | | Verify a key-signed bundle attestation against a KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`) or a local PEM public-key file. This is the counterpart to `bundle --signing-key`. It coexists with `--certificate-identity-regexp`, which pins the binary attestation; the two verify different attestations. |
 | `--trust-root` | string | | Verify the bundle attestation against a private Sigstore trusted root (a `trusted_root.json` from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with `--key` and `--certificate-identity-regexp`. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`. |
+| `--insecure-ignore-tlog` | bool | `false` | Offline/air-gapped verification: skip the transparency-log (and observer-timestamp) requirement so a bundle signed with `bundle --signing-key ... --tlog-upload=false` verifies against `--key` with no transparency-log network calls. A local PEM `--key` is then fully offline; a KMS `--key` URI still makes a live `GetPublicKey` call to resolve the key (export a PEM with `cosign public-key` for a truly offline verify). Requires `--key`; the air-gapped path is key-based, not keyless. Named "insecure" because, with no transparency log, there is no trusted timestamp proving when the signature was made. Does not affect the binary attestation, which always requires a transparency log. |
 | `--format` | string | `text` | Output format: `text` or `json`. |
 
 #### Trust Levels
@@ -2684,11 +2685,18 @@ aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
 
 # Verify a privately-signed bundle against an org trusted root
 aicr verify ./my-bundle --trust-root ./trusted_root.json
+
+# Verify an offline/air-gapped bundle: no transparency log, no network calls.
+# Sign on a connected host (signing needs KMS access), then export the public key once:
+aicr bundle -r recipe.yaml --attest --signing-key awskms://alias/my-key --tlog-upload=false -o ./bundles
+cosign public-key --key awskms://alias/my-key > bundle-signer.pub
+# Verify anywhere offline against the exported PEM (a KMS --key URI would make a live GetPublicKey call):
+aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub --insecure-ignore-tlog
 ```
 
 > **`--key` network behavior:** Resolving a **KMS URI** (`awskms://`, `gcpkms://`, `azurekms://`, `hashivault://`) makes network calls to the KMS provider to fetch the public key, so credentials for that provider must be available in the environment. A **local PEM** public-key file is read from disk with no provider calls; export it once with `cosign public-key --key <kms-uri>` (or your provider's console) and verify anywhere.
 >
-> Resolving the key is only part of verification: by default the bundle's Rekor transparency-log entry is also checked. Its inclusion proof is embedded in the bundle, so no live Rekor call is made, but the check needs the Sigstore trusted root. That root is loaded from the local cache and falls back to the embedded trusted root on a cache miss, so no network fetch happens on the verify path and `aicr trust update` is not required for offline use. Verification that drops the transparency-log requirement entirely, for true air-gapped use, is tracked in [#1154](https://github.com/NVIDIA/aicr/issues/1154).
+> Resolving the key is only part of verification: by default the bundle's Rekor transparency-log entry is also checked. Its inclusion proof is embedded in the bundle, so no live Rekor call is made, but the check needs the Sigstore trusted root. That root is loaded from the local cache and falls back to the embedded trusted root on a cache miss, so no network fetch happens on the verify path and `aicr trust update` is not required for offline use. For a bundle signed without a transparency-log entry at all (`bundle --signing-key ... --tlog-upload=false`), pass `--insecure-ignore-tlog` alongside `--key` to drop the transparency-log requirement entirely; verification then runs with no network calls and no trusted timestamp, so use it only for true air-gapped bundles you signed yourself.
 >
 > **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
 

@@ -154,6 +154,19 @@ type VerifyOptions struct {
 	// Composable with Key. Does NOT affect the binary attestation, which is
 	// always NVIDIA-public-CI-signed and stays pinned to the public-good root.
 	TrustRoot string
+
+	// IgnoreTLog enables offline/air-gapped verification of the key-signed
+	// bundle attestation: it skips the transparency-log (and observer-timestamp)
+	// requirement so a bundle produced by `bundle --signing-key ... --tlog-upload=false`
+	// (#409) verifies with no transparency-log network calls. Full offline
+	// operation additionally requires a local PEM Key: a KMS Key URI still makes a
+	// live GetPublicKey call via NewKeyVerificationIdentity to resolve the key.
+	// ONLY valid with Key set (the air-gapped path is key-based, not keyless);
+	// Verify rejects it otherwise. INSECURE relative to the default: without a
+	// tlog/timestamp there is no trusted proof of when the signature was made.
+	// Does NOT affect the keyless or binary-attestation paths, which always
+	// require a transparency log.
+	IgnoreTLog bool
 }
 
 // resolveBundleTrustRoot returns the TrustedRootSource for the bundle
@@ -262,6 +275,23 @@ func verifyWithDependencies(
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled before verification", err)
 	}
+
+	// Resolve and validate options before touching the filesystem so a malformed
+	// request (e.g. IgnoreTLog without Key) fails with InvalidRequest regardless
+	// of whether the bundle directory exists, rather than being masked by a
+	// NotFound from the os.Stat below.
+	if opts == nil {
+		opts = &VerifyOptions{}
+	}
+	// Offline/air-gapped verification is key-based only: rejecting the transparency
+	// log without a public key would leave the keyless path with no trusted
+	// timestamp and nothing to bind the signature to. Fail closed here (not just
+	// in the CLI) so library callers get the same guarantee.
+	if opts.IgnoreTLog && opts.Key == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"IgnoreTLog (offline verification) requires Key: the air-gapped path is key-based")
+	}
+
 	if _, err := os.Stat(bundleDir); err != nil {
 		if os.IsNotExist(err) {
 			return nil, errors.New(errors.ErrCodeNotFound, "bundle directory not found: "+bundleDir)
@@ -269,10 +299,6 @@ func verifyWithDependencies(
 		return nil, errors.Wrap(errors.ErrCodeInternal, "cannot access bundle directory", err)
 	}
 
-	// Resolve options
-	if opts == nil {
-		opts = &VerifyOptions{}
-	}
 	identityPattern := opts.CertificateIdentityRegexp
 	if identityPattern == "" {
 		identityPattern = TrustedRepositoryPattern
@@ -360,7 +386,7 @@ func verifyStagedSnapshot(
 		err           error
 	)
 	if opts.Key != "" {
-		bundleCreator, err = verifyKeySignedBundle(ctx, bundleAttestPath, checksumDigest, opts.Key, bundleSource)
+		bundleCreator, err = verifyKeySignedBundle(ctx, bundleAttestPath, checksumDigest, opts.Key, bundleSource, opts.IgnoreTLog)
 	} else {
 		bundleCreator, err = verifySigstoreBundle(ctx, bundleAttestPath, checksumDigest, bundleSource)
 	}
@@ -700,8 +726,12 @@ func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest
 // verifyKeySignedBundle verifies a public-key-signed bundle attestation (#407
 // KMS signing or a local PEM) against the key named by keyRef, binding it to
 // artifactDigest. Returns the key identity (KMS URI or pem:<fp>) as the bundle
-// creator, since a key-signed bundle has no certificate SAN.
-func verifyKeySignedBundle(ctx context.Context, bundlePath string, artifactDigest []byte, keyRef string, src attestation.TrustedRootSource) (string, error) {
+// creator, since a key-signed bundle has no certificate SAN. When ignoreTLog is
+// true (offline/air-gapped, #1154), the transparency-log requirement is relaxed
+// so a bundle signed with `bundle --signing-key ... --tlog-upload=false` (#409)
+// verifies with no transparency-log network calls (a local PEM keyRef is then
+// fully offline; a KMS URI keyRef still resolves the key remotely).
+func verifyKeySignedBundle(ctx context.Context, bundlePath string, artifactDigest []byte, keyRef string, src attestation.TrustedRootSource, ignoreTLog bool) (string, error) {
 	id, err := attestation.NewKeyVerificationIdentity(ctx, keyRef, src)
 	if err != nil {
 		return "", err // already classified (ErrCodeInvalidRequest / ErrCodeUnavailable)
@@ -710,7 +740,11 @@ func verifyKeySignedBundle(ctx context.Context, bundlePath string, artifactDiges
 	if err != nil {
 		return "", err // already coded by readBoundedFileContext
 	}
-	signer, err := attestation.VerifyStatementWith(ctx, data, id, attestation.NewRequireTLogPolicy(), artifactDigest)
+	tlogPolicy := attestation.NewRequireTLogPolicy()
+	if ignoreTLog {
+		tlogPolicy = attestation.NewNoTLogVerifyPolicy()
+	}
+	signer, err := attestation.VerifyStatementWith(ctx, data, id, tlogPolicy, artifactDigest)
 	if err != nil {
 		return "", err
 	}
