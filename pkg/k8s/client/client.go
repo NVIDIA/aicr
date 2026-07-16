@@ -151,7 +151,11 @@ func GetKubeClient() (Interface, *rest.Config, error) {
 // Returns:
 //   - *kubernetes.Clientset: The Kubernetes client
 //   - *rest.Config: The rest configuration used to create the client
-//   - error: Any error encountered during client creation
+//   - error: ErrCodeInvalidRequest when a file-derived kubeconfig (the explicit
+//     path, KUBECONFIG, or auto-discovered ~/.kube/config) cannot be loaded or
+//     used to construct a client. These caller-input failures are deterministic
+//     and non-retryable. ErrCodeInternal is returned when in-cluster config
+//     discovery or in-cluster client construction fails.
 //
 // Example with custom kubeconfig:
 //
@@ -175,7 +179,7 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 	} else {
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
-			return nil, nil, errors.WrapWithContext(errors.ErrCodeInternal, "failed to build kube config", err, map[string]interface{}{
+			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "failed to build kube config", err, map[string]interface{}{
 				"kubeconfig": kubeconfig,
 			})
 		}
@@ -183,6 +187,11 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
+		if kubeconfig != "" {
+			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				"failed to create kubernetes client from kubeconfig", err,
+				map[string]interface{}{"kubeconfig": kubeconfig})
+		}
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
 	}
 

@@ -15,8 +15,12 @@
 package serializer
 
 import (
+	stderrors "errors"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 )
 
@@ -189,5 +193,38 @@ func TestNewConfigMapWriter_PreservesFormatCoercion(t *testing.T) {
 	}
 	if writer.kubeconfig != "" {
 		t.Errorf("kubeconfig = %q, want empty (default discovery)", writer.kubeconfig)
+	}
+}
+
+func TestConfigMapWriterSerializePreservesKubeconfigErrorCode(t *testing.T) {
+	kubeconfig := writeInvalidKubeconfig(t)
+	writer := NewConfigMapWriterWithKubeconfig("default", "test", kubeconfig, FormatYAML)
+
+	err := writer.Serialize(t.Context(), map[string]string{"key": "value"})
+	assertOutermostErrorCode(t, err, errors.ErrCodeInvalidRequest)
+}
+
+func writeInvalidKubeconfig(t *testing.T) string {
+	t.Helper()
+
+	kubeconfig := filepath.Join(t.TempDir(), "invalid-kubeconfig")
+	if err := os.WriteFile(kubeconfig, []byte("invalid yaml content"), 0o600); err != nil {
+		t.Fatalf("failed to write invalid kubeconfig: %v", err)
+	}
+	return kubeconfig
+}
+
+func assertOutermostErrorCode(t *testing.T, err error, want errors.ErrorCode) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("error = nil, want code %s", want)
+	}
+
+	var structuredErr *errors.StructuredError
+	if !stderrors.As(err, &structuredErr) {
+		t.Fatalf("error = %v, want *errors.StructuredError", err)
+	}
+	if structuredErr.Code != want {
+		t.Errorf("error code = %s, want %s", structuredErr.Code, want)
 	}
 }

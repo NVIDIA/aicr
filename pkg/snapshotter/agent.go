@@ -296,7 +296,7 @@ func getKubeClient(kubeconfig string) (k8sclient.Interface, error) {
 		clientset, _, err = k8sclient.GetKubeClient()
 	}
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create Kubernetes client", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to create Kubernetes client")
 	}
 	return clientset, nil
 }
