@@ -2298,7 +2298,6 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-aks-ubuntu-training", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"h100-aks-ubuntu-inference", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
 		{"h100-aks-ubuntu-training-kubeflow", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
-		{"h100-aks-ubuntu-training-slurm", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-aks-ubuntu-inference-dynamo", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// H100 GKE COS platform variants (GKE uses COS, no Ubuntu variant)
 		{"h100-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},

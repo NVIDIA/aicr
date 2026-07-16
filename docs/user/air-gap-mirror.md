@@ -273,13 +273,3 @@ generate the deployment-specific manifest for a specific deployment.
 > tool-specific manifest as authoritative only after confirming the YAML/JSON
 > run reported no warnings — otherwise the mirrored set may be silently
 > incomplete.
-
-> **Runtime validation image:** `slinky-slurm-health` launches
-> `docker.io/library/alpine:3.23.3` dynamically through `srun` on GPU-backed
-> NodeSets. This image is already covered by `aicr mirror list`: it is the same
-> Alpine tag the slinky-slurm chart's initconf/logfile sidecars pin, so chart
-> rendering surfaces it for every Slurm recipe. Mirroring alone, however, does
-> not redirect the `srun` pull — set `AICR_VALIDATOR_IMAGE_REGISTRY` to your
-> destination registry so the runtime pull resolves there; the validator
-> preserves the `library/alpine:3.23.3` repository and tag. Without a registry
-> override, Slurm workers need Docker Hub egress for this check.

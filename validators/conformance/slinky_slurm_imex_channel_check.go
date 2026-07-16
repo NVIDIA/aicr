@@ -100,7 +100,7 @@ func CheckSlinkySlurmIMEXChannel(ctx *validators.Context) error {
 	if err := discoverSlinkySetAPIs(ctx); err != nil {
 		return err
 	}
-	if _, err := runnableSlinkyNodeSetPods(ctx, namespace); err != nil {
+	if err := skipIfAllNodeSetPodsAreKWOK(ctx, namespace); err != nil {
 		return err
 	}
 	if err := requireSlinkySlurmIMEXResources(ctx, namespace); err != nil {

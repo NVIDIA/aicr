@@ -102,6 +102,13 @@ type Generator struct {
 	// charts/<chart>-<version>.tgz adjacent to a wrapper Chart.yaml).
 	VendorCharts bool
 
+	// Serial chains every release to its immediate predecessor via needs:,
+	// forming one linear apply chain instead of the default per-component
+	// chaining (which lets independent components in a sub-helmfile apply
+	// concurrently). Off by default. Operator escape hatch wired from
+	// --serial; see config.Serial and buildHelmfile.
+	Serial bool
+
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so provenance.yaml can be written after component
 	// generation without re-threading the slice through every helper.
@@ -273,7 +280,7 @@ func (g *Generator) writeHelmfileLayout(
 	// PropagateOrWrap so those codes survive rather than being
 	// overwritten with ErrCodeInternal.
 	writeDoc := func(folders []localformat.Folder, name string) error {
-		doc, buildErr := buildHelmfile(folders, namespaceByComponent, g.DynamicValues, flags)
+		doc, buildErr := buildHelmfile(folders, namespaceByComponent, g.DynamicValues, flags, g.Serial)
 		if buildErr != nil {
 			return errors.PropagateOrWrap(buildErr, errors.ErrCodeInternal,
 				fmt.Sprintf("failed to build %s", name))

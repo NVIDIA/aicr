@@ -133,21 +133,35 @@ spec:
             check:
               ($error == null): true
 
-    - name: needs-ordering
+    - name: serial-helmfile-bundle
       description: >
-        First release in each helmfile leaf has no needs entry; every
-        subsequent release in the same leaf lists exactly its immediate
-        predecessor — verifies the linear deployment chain. In the
-        stratified layout (issue #914) the chain restarts per
-        sub-helmfile because helmfile processes sub-helmfiles
-        sequentially and cross-level dependency edges dissolve.
+        --serial chains every release via needs: into one linear apply
+        order, instead of the default per-component chaining.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/serial" \
+                --deployer helmfile --serial
+              test -f "${WORK}/serial/helmfile.yaml"
+            check:
+              ($error == null): true
+
+    - name: needs-serial-chain
+      description: >
+        With --serial, the first release in each helmfile leaf has no needs
+        entry and every subsequent release lists exactly its immediate
+        predecessor — the linear deployment chain. In the stratified layout
+        (issue #914) the chain restarts per sub-helmfile because helmfile
+        processes sub-helmfiles sequentially.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
-              TOP="${WORK}/basic/helmfile.yaml"
+              TOP="${WORK}/serial/helmfile.yaml"
               if grep -q "^helmfiles:" "${TOP}"; then
-                LEAVES=$(ls "${WORK}"/basic/level-*.yaml 2>/dev/null | sort)
+                LEAVES=$(ls "${WORK}"/serial/level-*.yaml 2>/dev/null | sort)
               else
                 LEAVES="${TOP}"
               fi
@@ -221,6 +235,62 @@ spec:
               [ "$missing_needs_count" -eq 0 ] \
                 || { echo "${HF}: $missing_needs_count releases missing needs:" >&2; exit 1; }
               echo "${HF}: needs: chain valid across $count releases"
+              done
+            check:
+              ($error == null): true
+
+    - name: needs-intra-component
+      description: >
+        The default (parallel) helmfile bundle chains needs: only within a
+        component (its -pre -> primary -> -post releases); independent
+        components in the same leaf carry no needs edge, so helmfile applies
+        them concurrently. Each leaf must have at least one root release.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              TOP="${WORK}/basic/helmfile.yaml"
+              if grep -q "^helmfiles:" "${TOP}"; then
+                LEAVES=$(ls "${WORK}"/basic/level-*.yaml 2>/dev/null | sort)
+              else
+                LEAVES="${TOP}"
+              fi
+              for HF in ${LEAVES}; do
+                names=$(awk '
+                  /^releases:/ {in_releases=1; next}
+                  in_releases && /^  - name: / {print $3}
+                ' "${HF}")
+                [ -n "$names" ] || { echo "${HF}: no releases parsed" >&2; exit 1; }
+                roots=0
+                while IFS= read -r name; do
+                  [ -z "$name" ] && continue
+                  # Extract this release's needs: target (bare or <ns>/<name>).
+                  dep=$(awk -v target="$name" '
+                    /^releases:/ {in_releases=1; next}
+                    in_releases && $0 ~ "^  - name: " target "$" {in_block=1; next}
+                    in_block && /^  - name:/ {in_block=0}
+                    in_block && /^    needs:/ {in_needs=1; next}
+                    in_needs && /^      - / {print substr($0, 9); exit}
+                    in_needs && /^    [a-z]/ {in_needs=0}
+                  ' "${HF}")
+                  if [ -z "$dep" ]; then
+                    roots=$((roots + 1))
+                    continue
+                  fi
+                  # Strip <ns>/ prefix and -pre/-post suffix to get the parent
+                  # component on both ends; a needs edge must stay within one
+                  # component in default (parallel) mode.
+                  dep_bare="${dep##*/}"
+                  pn=$(printf '%s' "$name" | sed -E 's/-(pre|post)$//')
+                  pd=$(printf '%s' "$dep_bare" | sed -E 's/-(pre|post)$//')
+                  [ "$pn" = "$pd" ] \
+                    || { echo "${HF}: release $name needs '$dep' in a different component ($pd != $pn); default mode must chain only within a component" >&2; exit 1; }
+                done <<EOF
+              $names
+              EOF
+                [ "$roots" -ge 1 ] \
+                  || { echo "${HF}: no root release (every release has needs:); independent components must be roots" >&2; exit 1; }
+                echo "${HF}: intra-component needs only, $roots root(s)"
               done
             check:
               ($error == null): true

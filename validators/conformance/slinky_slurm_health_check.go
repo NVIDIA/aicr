@@ -16,11 +16,9 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,13 +29,11 @@ import (
 )
 
 const (
-	slinkySlurmComponent         = "slinky-slurm"
-	slinkySlurmNamespace         = "slurm"
-	kwokNodeAnnotation           = "kwok.x-k8s.io/node"
-	defaultContainerAnnotation   = "kubectl.kubernetes.io/default-container"
-	slinkyLoginPodContainerName  = "login"
-	slinkySlurmGPUContainerImage = "docker.io/library/alpine:3.23.3"
-	validatorImageRegistryEnv    = "AICR_VALIDATOR_IMAGE_REGISTRY"
+	slinkySlurmComponent        = "slinky-slurm"
+	slinkySlurmNamespace        = "slurm"
+	kwokNodeAnnotation          = "kwok.x-k8s.io/node"
+	defaultContainerAnnotation  = "kubectl.kubernetes.io/default-container"
+	slinkyLoginPodContainerName = "login"
 )
 
 var (
@@ -90,8 +86,7 @@ var slinkyLoginPodExecOptions = podExecOptions{
 
 // CheckSlinkySlurmHealth validates that a Slinky-managed Slurm cluster is
 // reachable from the login pod, has idle or mixed worker nodes, and can
-// schedule a minimal job without queueing indefinitely. GPU-backed NodeSets
-// also run a bounded containerized GPU job to verify Pyxis integration.
+// schedule a minimal job without queueing indefinitely.
 func CheckSlinkySlurmHealth(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
@@ -110,8 +105,7 @@ func CheckSlinkySlurmHealth(ctx *validators.Context) error {
 	if err := discoverSlinkySetAPIs(ctx); err != nil {
 		return err
 	}
-	nodeSetPods, err := runnableSlinkyNodeSetPods(ctx, namespace)
-	if err != nil {
+	if err := skipIfAllNodeSetPodsAreKWOK(ctx, namespace); err != nil {
 		return err
 	}
 
@@ -119,13 +113,9 @@ func CheckSlinkySlurmHealth(ctx *validators.Context) error {
 	if err != nil {
 		return err
 	}
-	recordSlinkyInventories(ctx, namespace, loginPod, nodeSetPods)
+	recordSlinkyInventories(ctx, namespace, loginPod)
 
-	commands, err := slinkySlurmHealthCommandsForNodeSetPods(ctx, nodeSetPods)
-	if err != nil {
-		return err
-	}
-	failures := runSlinkySlurmHealthCommands(ctx, namespace, loginPod.Name, commands)
+	failures := runSlinkySlurmHealthCommands(ctx, namespace, loginPod.Name)
 	if len(failures) > 0 {
 		return errors.New(errors.ErrCodeInternal,
 			"Slinky Slurm health commands failed:\n"+strings.Join(failures, "\n"))
@@ -146,118 +136,9 @@ func resolveSlinkySlurmNamespace(ctx *validators.Context) string {
 	return slinkySlurmNamespace
 }
 
-func slinkySlurmHealthCommandsForNodeSetPods(
-	ctx *validators.Context,
-	pods []corev1.Pod,
-) ([]slinkySlurmHealthCommand, error) {
-
-	commands := append([]slinkySlurmHealthCommand(nil), slinkySlurmHealthCommands...)
-	criteria := ctx.ValidationInput.Criteria
-	if criteria.Service == recipe.CriteriaServiceKind {
-		recordSlinkySlurmGPUContainerDecision(ctx, false,
-			"recipe service is kind; CPU-only Slinky health execution is expected", "")
-		return commands, nil
-	}
-
-	if nodeSetPodsRequestNVIDIAGPUs(pods) {
-		command := slinkySlurmGPUContainerHealthCommand()
-		recordSlinkySlurmGPUContainerDecision(ctx, true,
-			"a NodeSet pod has a positive nvidia.com/gpu request or limit",
-			"docker://"+resolveSlinkySlurmGPUContainerImage())
-		return append(commands, command), nil
-	}
-
-	concreteService := criteria.Service != "" && criteria.Service != recipe.CriteriaServiceAny
-	concreteAccelerator := criteria.Accelerator != "" && criteria.Accelerator != recipe.CriteriaAcceleratorAny
-	if concreteService && concreteAccelerator {
-		reason := fmt.Sprintf(
-			"recipe criteria require service=%s accelerator=%s, but no NodeSet pod has a positive nvidia.com/gpu request or limit",
-			criteria.Service, criteria.Accelerator)
-		recordSlinkySlurmGPUContainerDecision(ctx, false, reason, "")
-		return nil, errors.New(errors.ErrCodeUnavailable, reason)
-	}
-
-	recordSlinkySlurmGPUContainerDecision(ctx, false,
-		"recipe criteria are incomplete; retaining capability-based CPU-only execution", "")
-	return commands, nil
-}
-
-func slinkySlurmGPUContainerHealthCommand() slinkySlurmHealthCommand {
-	return slinkySlurmHealthCommand{
-		label: "srun GPU container",
-		command: []string{
-			"srun",
-			"--immediate=30",
-			"--time=1:00",
-			"--nodes=1",
-			"--ntasks=1",
-			"--cpus-per-task=1",
-			"--mem=128M",
-			"--gpus=1",
-			"--container-image=docker://" + resolveSlinkySlurmGPUContainerImage(),
-			"cat",
-			"/etc/os-release",
-		},
-		requireStdout: true,
-	}
-}
-
-// resolveSlinkySlurmGPUContainerImage applies only the validator registry
-// override. catalog.ResolveImage is intentionally not used because its tag
-// override would replace this component-aligned Alpine pin.
-func resolveSlinkySlurmGPUContainerImage() string {
-	registry := strings.TrimSuffix(strings.TrimSpace(os.Getenv(validatorImageRegistryEnv)), "/")
-	if registry == "" {
-		return slinkySlurmGPUContainerImage
-	}
-	_, repository, found := strings.Cut(slinkySlurmGPUContainerImage, "/")
-	if !found {
-		return slinkySlurmGPUContainerImage
-	}
-	return registry + "/" + repository
-}
-
-func recordSlinkySlurmGPUContainerDecision(
-	ctx *validators.Context,
-	included bool,
-	reason string,
-	image string,
-) {
-
-	criteria := ctx.ValidationInput.Criteria
-	if image == "" {
-		image = "not applicable"
-	}
-	recordRawTextArtifact(ctx, "Slinky Slurm GPU container check", "",
-		fmt.Sprintf("Included: %t\nCriteria: service=%s accelerator=%s\nImage: %s\nReason: %s",
-			included, valueOrUnknown(string(criteria.Service)), valueOrUnknown(string(criteria.Accelerator)), image, reason))
-}
-
-func nodeSetPodsRequestNVIDIAGPUs(pods []corev1.Pod) bool {
-	resourceName := corev1.ResourceName(resourceNVIDIAGPU)
-	for i := range pods {
-		for _, container := range pods[i].Spec.Containers {
-			resources := container.Resources
-			if quantity, ok := resources.Limits[resourceName]; ok && quantity.Sign() > 0 {
-				return true
-			}
-			if quantity, ok := resources.Requests[resourceName]; ok && quantity.Sign() > 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func runSlinkySlurmHealthCommands(
-	ctx *validators.Context,
-	namespace string,
-	loginPodName string,
-	commands []slinkySlurmHealthCommand,
-) []string {
-
+func runSlinkySlurmHealthCommands(ctx *validators.Context, namespace, loginPodName string) []string {
 	var failures []string
-	for _, check := range commands {
+	for _, check := range slinkySlurmHealthCommands {
 		select {
 		case <-ctx.Ctx.Done():
 			failures = append(failures, fmt.Sprintf("context canceled: %v", ctx.Ctx.Err()))
@@ -305,33 +186,23 @@ func discoverSlinkySetAPIs(ctx *validators.Context) error {
 	return nil
 }
 
-func runnableSlinkyNodeSetPods(ctx *validators.Context, namespace string) ([]corev1.Pod, error) {
+func skipIfAllNodeSetPodsAreKWOK(ctx *validators.Context, namespace string) error {
 	pods, err := listSlinkyNodeSetPods(ctx, namespace)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(pods) == 0 {
-		return nil, errors.New(errors.ErrCodeNotFound, "slinky-slurm selected but no NodeSet pods were found")
+		return errors.New(errors.ErrCodeNotFound, "slinky-slurm selected but no NodeSet pods were found")
 	}
 
 	var resolved, kwok int
 	for _, pod := range pods {
-		select {
-		case <-ctx.Ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout,
-				"canceled while resolving NodeSet pod nodes", ctx.Ctx.Err())
-		default:
-		}
 		if pod.Spec.NodeName == "" {
 			continue
 		}
 		node, getErr := ctx.Clientset.CoreV1().Nodes().Get(ctx.Ctx, pod.Spec.NodeName, metav1.GetOptions{})
 		if getErr != nil {
-			if ctxErr := ctx.Ctx.Err(); ctxErr != nil {
-				return nil, errors.Wrap(errors.ErrCodeTimeout,
-					"canceled while resolving NodeSet pod nodes", ctxErr)
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
+			return errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to get node %s for NodeSet pod %s", pod.Spec.NodeName, pod.Name), getErr)
 		}
 		resolved++
@@ -340,9 +211,9 @@ func runnableSlinkyNodeSetPods(ctx *validators.Context, namespace string) ([]cor
 		}
 	}
 	if resolved == len(pods) && kwok == resolved {
-		return nil, validators.Skip("Slinky NodeSet pods are on KWOK nodes; skipping Slurm health validation")
+		return validators.Skip("Slinky NodeSet pods are on KWOK nodes; skipping Slurm health validation")
 	}
-	return pods, nil
+	return nil
 }
 
 func listSlinkyNodeSetPods(ctx *validators.Context, namespace string) ([]corev1.Pod, error) {
@@ -489,13 +360,7 @@ func podIsReady(pod *corev1.Pod) bool {
 	return false
 }
 
-func recordSlinkyInventories(
-	ctx *validators.Context,
-	namespace string,
-	loginPod *corev1.Pod,
-	nodeSetPods []corev1.Pod,
-) {
-
+func recordSlinkyInventories(ctx *validators.Context, namespace string, loginPod *corev1.Pod) {
 	slurmPods, slurmPodsErr := ctx.Clientset.CoreV1().Pods(namespace).List(ctx.Ctx, metav1.ListOptions{})
 	if slurmPodsErr != nil {
 		recordRawTextArtifact(ctx, "Slinky Slurm pods", fmt.Sprintf("kubectl get pods -n %s -o wide", namespace),
@@ -509,14 +374,20 @@ func recordSlinkyInventories(
 		recordRawTextArtifact(ctx, "Slinky Slurm pods", fmt.Sprintf("kubectl get pods -n %s -o wide", namespace), podSummary.String())
 	}
 
-	var nodeSetSummary strings.Builder
-	for _, pod := range nodeSetPods {
-		fmt.Fprintf(&nodeSetSummary, "%-48s ready=%s phase=%s node=%s\n",
-			pod.Name, podReadyCount(pod), pod.Status.Phase, valueOrUnknown(pod.Spec.NodeName))
+	nodeSetPods, nodeSetErr := listSlinkyNodeSetPods(ctx, namespace)
+	if nodeSetErr != nil {
+		recordRawTextArtifact(ctx, "Slinky Slurm NodeSet pods", fmt.Sprintf("kubectl get pods -n %s", namespace),
+			fmt.Sprintf("failed to list NodeSet pods: %v", nodeSetErr))
+	} else {
+		var nodeSetSummary strings.Builder
+		for _, pod := range nodeSetPods {
+			fmt.Fprintf(&nodeSetSummary, "%-48s ready=%s phase=%s node=%s\n",
+				pod.Name, podReadyCount(pod), pod.Status.Phase, valueOrUnknown(pod.Spec.NodeName))
+		}
+		recordRawTextArtifact(ctx, "Slinky Slurm NodeSet pods",
+			fmt.Sprintf("kubectl -n %s get nodesets -o json | jq -r '.items[] | select(.apiVersion == \"slinky.slurm.net/v1beta1\") | .status.selector'", namespace),
+			nodeSetSummary.String())
 	}
-	recordRawTextArtifact(ctx, "Slinky Slurm NodeSet pods",
-		fmt.Sprintf("kubectl -n %s get nodesets -o json | jq -r '.items[] | select(.apiVersion == \"slinky.slurm.net/v1beta1\") | .status.selector'", namespace),
-		nodeSetSummary.String())
 
 	recordRawTextArtifact(ctx, "Selected Slinky Slurm login pod", "",
 		fmt.Sprintf("Name:      %s/%s\nReady:     %t\nNode:      %s",

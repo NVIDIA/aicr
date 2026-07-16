@@ -119,6 +119,25 @@ func TestConfigReadinessHooks(t *testing.T) {
 	}
 }
 
+func TestConfigSerial(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want bool
+	}{
+		{"default false", NewConfig(), false},
+		{"enabled true", NewConfig(WithSerial(true)), true},
+		{"explicit false", NewConfig(WithSerial(false)), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.Serial(); got != tt.want {
+				t.Errorf("Serial() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -633,7 +633,6 @@ func TestSlurmLeavesClearInheritedPerformancePhase(t *testing.T) {
 
 	for _, name := range []string{
 		"gb200-eks-ubuntu-training-slurm",
-		"h100-aks-ubuntu-training-slurm",
 		"h100-eks-ubuntu-training-slurm",
 		"h100-gke-cos-training-slurm",
 	} {
@@ -656,79 +655,6 @@ func TestSlurmLeavesClearInheritedPerformancePhase(t *testing.T) {
 				t.Errorf("performance.constraints = %v, want empty — Slurm leaf must drop inherited K8s-native constraints", got)
 			}
 		})
-	}
-}
-
-func TestGPUSlurmLeavesConfigureGRESAndTaskCgroup(t *testing.T) {
-	ctx := context.Background()
-	store, err := loadMetadataStore(ctx)
-	if err != nil {
-		t.Fatalf("failed to load metadata store: %v", err)
-	}
-
-	tests := []struct {
-		name     string
-		wantGres string
-		wantGPUs int
-	}{
-		{name: "gb200-eks-ubuntu-training-slurm", wantGres: "gpu:gb200:4", wantGPUs: 4},
-		{name: "h100-aks-ubuntu-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
-		{name: "h100-eks-ubuntu-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
-		{name: "h100-gke-cos-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			leaf, ok := store.GetRecipeByName(tt.name)
-			if !ok {
-				t.Fatalf("overlay %q not found in store", tt.name)
-			}
-			result, err := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
-			if err != nil {
-				t.Fatalf("BuildRecipeResult failed: %v", err)
-			}
-			values, err := result.GetValuesForComponentWithContext(ctx, "slinky-slurm")
-			if err != nil {
-				t.Fatalf("GetValuesForComponentWithContext(slinky-slurm) failed: %v", err)
-			}
-			if got := valueAtPath[string](t, values, "controller", "extraConfMap", "GresTypes"); got != "gpu" {
-				t.Errorf("controller.extraConfMap.GresTypes = %q, want gpu", got)
-			}
-			if got := valueAtPath[string](t, values, "controller", "extraConfMap", "TaskPlugin"); got != "task/cgroup,task/affinity" {
-				t.Errorf("controller.extraConfMap.TaskPlugin = %q, want task/cgroup,task/affinity", got)
-			}
-			if got := valueAtPath[string](t, values, "nodesets", "slinky", "extraConfMap", "Gres"); got != tt.wantGres {
-				t.Errorf("nodesets.slinky.extraConfMap.Gres = %q, want %q", got, tt.wantGres)
-			}
-			if got := valueAtPath[int](t, values, "nodesets", "slinky", "slurmd", "resources", "limits", "nvidia.com/gpu"); got != tt.wantGPUs {
-				t.Errorf("nodesets.slinky.slurmd.resources.limits.nvidia.com/gpu = %d, want %d", got, tt.wantGPUs)
-			}
-		})
-	}
-}
-
-func TestKindSlurmLeafOmitsTaskPlugin(t *testing.T) {
-	ctx := context.Background()
-	store, err := loadMetadataStore(ctx)
-	if err != nil {
-		t.Fatalf("failed to load metadata store: %v", err)
-	}
-
-	leaf, ok := store.GetRecipeByName("h100-kind-training-slurm")
-	if !ok {
-		t.Fatal("overlay h100-kind-training-slurm not found in store")
-	}
-	result, err := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
-	if err != nil {
-		t.Fatalf("BuildRecipeResult failed: %v", err)
-	}
-	values, err := result.GetValuesForComponentWithContext(ctx, "slinky-slurm")
-	if err != nil {
-		t.Fatalf("GetValuesForComponentWithContext(slinky-slurm) failed: %v", err)
-	}
-	extraConfMap := valueAtPath[map[string]any](t, values, "controller", "extraConfMap")
-	if got, exists := extraConfMap["TaskPlugin"]; exists {
-		t.Errorf("controller.extraConfMap.TaskPlugin = %v, want omitted for Kind", got)
 	}
 }
 
@@ -782,7 +708,6 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		want []string
 	}{
 		{name: "gb200-eks-ubuntu-training-slurm", want: gb200ConformanceChecks},
-		{name: "h100-aks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-eks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-gke-cos-training-slurm", want: conformanceChecks},
 		{name: "h100-kind-training-slurm", want: kindConformanceChecks},
@@ -875,21 +800,6 @@ func TestGB200EKSSlurmWiresIMEXComputeDomain(t *testing.T) {
 	slurmd := valueAtPath[map[string]any](t, values, "nodesets", "slinky", "slurmd")
 	if got, ok := slurmd["securityContext"]; ok {
 		t.Errorf("nodesets.slinky.slurmd.securityContext = %v, want omitted to use chart default", got)
-	}
-	// Pyxis images are pinned in components/slinky-slurm/values.yaml and must
-	// survive leaf slurmd.resources overrides (deep merge, not replace).
-	if got := valueAtPath[string](t, values, "nodesets", "slinky", "slurmd", "image", "repository"); got != "ghcr.io/slinkyproject/slurmd-pyxis" {
-		t.Errorf("nodesets.slinky.slurmd.image.repository = %q, want ghcr.io/slinkyproject/slurmd-pyxis", got)
-	}
-	if got := valueAtPath[string](t, values, "loginsets", "slinky", "login", "image", "repository"); got != "ghcr.io/slinkyproject/login-pyxis" {
-		t.Errorf("loginsets.slinky.login.image.repository = %q, want ghcr.io/slinkyproject/login-pyxis", got)
-	}
-	// Operator-managed /etc/slurm hides the image plugstack.conf.d symlink;
-	// configFiles.plugstack.conf is what actually loads spank_pyxis.so.
-	// Under configless, login/workers pick it up in /run/slurm/conf/ after
-	// pod start (default relative PlugStackConfig); no absolute pin needed.
-	if got := valueAtPath[string](t, values, "configFiles", "plugstack.conf"); !strings.Contains(got, "include /usr/share/pyxis/*") {
-		t.Errorf("configFiles.plugstack.conf = %q, want include /usr/share/pyxis/*", got)
 	}
 
 	content, err := GetManifestContentWithContext(ctx, result.DataProvider(), manifestPath)
@@ -2316,60 +2226,6 @@ func TestGB200OKEFloorNotClobbered(t *testing.T) {
 				Accelerator: CriteriaAcceleratorGB200,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
-			},
-			wantK8sFloor: ">= 1.34",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := store.BuildRecipeResult(ctx, tt.criteria)
-			if err != nil {
-				t.Fatalf("BuildRecipeResult failed: %v", err)
-			}
-			var k8sFloor string
-			for _, c := range result.Constraints {
-				if c.Name == testK8sVersionConstant {
-					k8sFloor = c.Value
-					break
-				}
-			}
-			if k8sFloor != tt.wantK8sFloor {
-				t.Errorf("K8s.server.version floor = %q, want %q (possible floor clobber regression)",
-					k8sFloor, tt.wantK8sFloor)
-			}
-		})
-	}
-}
-
-// TestH100AKSUbuntuTrainingSlurmFloorNotClobbered is a regression test for the
-// H100 AKS Slurm K8s floor. The leaf sets >= 1.34 (DRA GA in Kubernetes 1.34,
-// per the aks.yaml rationale), but resolves under last-writer-wins merge with
-// lower-valued ancestors (aks-training >= 1.30, h100-aks-ubuntu-training
-// >= 1.32.4). A future constraint edit on an ancestor could silently regress
-// the leaf floor — the same shape TestGB200OKEFloorNotClobbered guards against.
-// This locks the resolved floor and gives the AKS-family follow-up a place to
-// add sibling leaves as they are bumped.
-func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
-	ctx := context.Background()
-	store, err := loadMetadataStore(ctx)
-	if err != nil {
-		t.Fatalf("failed to load metadata store: %v", err)
-	}
-
-	tests := []struct {
-		name         string
-		criteria     *Criteria
-		wantK8sFloor string
-	}{
-		{
-			name: "h100 aks ubuntu slurm training preserves >= 1.34 floor",
-			criteria: &Criteria{
-				Service:     CriteriaServiceAKS,
-				Accelerator: CriteriaAcceleratorH100,
-				Intent:      CriteriaIntentTraining,
-				OS:          CriteriaOSUbuntu,
-				Platform:    CriteriaPlatformSlurm,
 			},
 			wantK8sFloor: ">= 1.34",
 		},

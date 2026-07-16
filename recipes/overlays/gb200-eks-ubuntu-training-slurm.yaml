@@ -19,9 +19,9 @@ metadata:
 
 spec:
   # GB200 + EKS + Ubuntu + training with the Slinky operator and a
-  # Slinky-managed Slurm cluster. GB200 GPU GRES and task isolation are
-  # declared inline below; remaining EKS-specific tuning (gp3 storage,
-  # DCGM job-mapping) is layered at install time
+  # Slinky-managed Slurm cluster. GB200 GPU GRES is declared inline below
+  # (pod-side limit + slurmd-side Gres= line); remaining EKS-specific
+  # tuning (gp3 storage, DCGM job-mapping) is layered at install time
   # via `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
   base: gb200-eks-ubuntu-training
 
@@ -48,17 +48,13 @@ spec:
   # guard in mixinComponentRefSafeForMerge (pkg/recipe/metadata_store.go),
   # and keeps base.yaml free of platform-specific components.
   #
-  # GPU GRES and device isolation on slinky-slurm must be declared in four
-  # places because the chart does not derive GRES config in slurm.conf from
-  # pod resource limits
+  # GPU GRES on slinky-slurm must be declared in two places because the
+  # chart does not derive Gres= in slurm.conf from pod resource limits
   # (see comment in components/slinky-slurm/values.yaml):
-  #   1. controller.extraConfMap.GresTypes — enables the `gpu` GRES type.
-  #   2. controller.extraConfMap.TaskPlugin — activates task/cgroup so
-  #      cgroup.conf's ConstrainDevices setting enforces GPU allocations.
-  #   3. nodesets.slinky.extraConfMap.Gres — adds `Gres=gpu:gb200:4` to
+  #   1. nodesets.slinky.extraConfMap.Gres — adds `Gres=gpu:gb200:4` to
   #      slurmd's --conf so slurmctld knows it has GPUs to allocate via
   #      `srun --gres=gpu:N`.
-  #   4. nodesets.slinky.slurmd.resources.limits.nvidia.com/gpu — reserves
+  #   2. nodesets.slinky.slurmd.resources.limits.nvidia.com/gpu — reserves
   #      4 GB200s on the slurmd pod so the NVIDIA device plugin injects
   #      /dev/nvidia* into the container. Without this `gres.conf`'s
   #      AutoDetect=nvidia finds nothing. `requests` is omitted: Kubernetes
@@ -94,8 +90,6 @@ spec:
       overrides:
         controller:
           extraConfMap:
-            GresTypes: "gpu"
-            TaskPlugin: "task/cgroup,task/affinity"
             SwitchType: "switch/nvidia_imex"
         nodesets:
           slinky:

@@ -121,7 +121,7 @@ For example, `--platform slurm` leaves inline three `componentRefs`:
 
 - `slinky-slurm-operator-crds` — SchedMD Slinky CRDs
 - `slinky-slurm-operator` — the operator and admission webhook
-- `slinky-slurm` — the Slinky-managed Slurm cluster instance (Controller / LoginSet / NodeSet / RestApi), with leaf-specific `overrides` (e.g. GPU GRES wiring on `nodesets.slinky` and `controller.extraConfMap`)
+- `slinky-slurm` — the Slinky-managed Slurm cluster instance (Controller / LoginSet / NodeSet / RestApi), with leaf-specific `overrides` (e.g. H100 GRES wiring on the `nodesets.slinky` map)
 
 This is the same shape `dynamo-platform` uses across the `*-inference-dynamo` leaves. See `recipes/overlays/h100-eks-ubuntu-training-slurm.yaml` for the full example.
 

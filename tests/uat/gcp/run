@@ -32,6 +32,9 @@
 #                OpenAI-compatible endpoint, assert a completion, capture logs
 #                (intent=inference CUJ — the DC3 counterpart of `train`)
 #   verify       aicr evidence verify against the signed bundle
+#   debug        snapshot live cluster state into cluster-debug/ (nodes, taints,
+#                events, operator CRs incl. Skyhook status, operator/check-Job
+#                logs) — best-effort, run on failure BEFORE teardown
 #   all          run every phase in order (for local reproduction); the CUJ
 #                phase is chosen by the config's recipe intent — `train` for
 #                training, `serve` for inference
@@ -46,12 +49,17 @@
 
 set -euo pipefail
 
+# Shared, cloud-agnostic cluster debug-bundle collector (collect_cluster_debug),
+# invoked by the `debug` phase on failure before teardown.
+# shellcheck source=../lib/collect-debug.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/collect-debug.sh"
+
 phase="${1:-}"
 config="${2:-}"
 
 if [[ -z "${phase}" || -z "${config}" ]]; then
   echo "Usage: $0 <phase> <test-config.yaml>" >&2
-  echo "Phases: prep | install | conformance | train | serve | verify | all" >&2
+  echo "Phases: prep | install | conformance | train | serve | verify | debug | all" >&2
   exit 2
 fi
 
@@ -302,8 +310,15 @@ phase_install() {
   gate_config="$(mktemp)"
   gate_log="$(mktemp)"
   yq 'del(.spec.validate.evidence)' "${config}" > "${gate_config}"
+  # Persist each attempt's validate output (timestamped) to the bundle so the
+  # status.status progression across the tuning-settling window survives into the
+  # failure artifact — capturing the complete→in_progress flips as they happen
+  # (see CLUSTER_DEBUG_GATE_LOG in tests/uat/lib/collect-debug.sh). The mktemp
+  # gate_log is still used for the immediate on-screen failure diagnostic.
+  mkdir -p "${CLUSTER_DEBUG_DIR}"
+  : > "${CLUSTER_DEBUG_GATE_LOG}" || true
   local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
-  local attempt=1 streak=0 ready=false remaining
+  local attempt=1 streak=0 ready=false remaining attempt_result
   echo "::group::Readiness gate: validate --phase deployment x${READINESS_CONSECUTIVE_PASSES} consecutive (timeout ${READINESS_TIMEOUT_SECONDS}s)"
   # Check the deadline BEFORE each attempt so no validation run is launched once
   # the budget is spent (a single run can itself take minutes). The last
@@ -319,21 +334,30 @@ phase_install() {
     remaining=$(( ready_deadline - SECONDS ))
     (( remaining < 1 )) && remaining=1
     if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null > "${gate_log}" 2>&1; then
+      attempt_result=pass
       streak=$(( streak + 1 ))
       echo "deployment phase passed (attempt ${attempt}, streak ${streak}/${READINESS_CONSECUTIVE_PASSES})"
       if (( streak >= READINESS_CONSECUTIVE_PASSES )); then
         ready=true
-        break
       fi
     else
       # A regression (e.g. nodewright flipped back to in_progress on a reboot)
       # invalidates the streak -- start over.
+      attempt_result=fail
       if (( streak > 0 )); then
         echo "deployment phase regressed after ${streak} consecutive pass(es); resetting streak"
       fi
       streak=0
       echo "deployment phase not ready (attempt ${attempt})"
     fi
+    # Append this attempt (timestamped) to the persistent gate series. This is the
+    # status.status time-series that lets a reviewer see the tuning flips directly.
+    {
+      echo "===== attempt ${attempt} @ $(date -u +%Y-%m-%dT%H:%M:%SZ) result=${attempt_result} streak=${streak}/${READINESS_CONSECUTIVE_PASSES} ====="
+      cat "${gate_log}"
+      echo
+    } >> "${CLUSTER_DEBUG_GATE_LOG}" 2>/dev/null || true
+    [[ "${ready}" == true ]] && break
     attempt=$(( attempt + 1 ))
     sleep 15
   done
@@ -368,11 +392,21 @@ phase_conformance() {
   # Evidence is rendered/attested from the merged multi-phase report, so the
   # signed bundle covers all phases.
   echo "::group::Validate (all phases) + emit signed evidence"
+  # Capture the exit code rather than letting `set -e` abort: on a validate
+  # failure we snapshot the skyhook CR + node reboot fingerprint INLINE — seconds
+  # after the failing check gave up, while status.status is most likely still
+  # in_progress — before propagating the failure. The teardown-time collector runs
+  # minutes later, by when the CR may have re-converged and hidden the flip.
+  local vrc=0
   "${AICR_BIN}" validate \
     --config "${config}" \
     --phase all \
-    --output report.json
+    --output report.json || vrc=$?
   echo "::endgroup::"
+  if (( vrc != 0 )); then
+    capture_skyhook_snapshot conformance-validate
+    return "${vrc}"
+  fi
 
   if [[ ! -f ./evidence/pointer.yaml ]]; then
     echo "evidence pointer not emitted at ./evidence/pointer.yaml" >&2
@@ -725,6 +759,7 @@ case "${phase}" in
   train)       phase_train ;;
   serve)       phase_serve ;;
   verify)      phase_verify ;;
+  debug)       collect_cluster_debug ;;
   all)
     # The CUJ phase is chosen by the config's recipe intent so `run all`
     # reproduces the right end-to-end flow: serve for inference, train
@@ -739,7 +774,7 @@ case "${phase}" in
     ;;
   *)
     echo "unknown phase: ${phase}" >&2
-    echo "Phases: prep | install | conformance | train | serve | verify | all" >&2
+    echo "Phases: prep | install | conformance | train | serve | verify | debug | all" >&2
     exit 2
     ;;
 esac
