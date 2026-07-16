@@ -15,18 +15,18 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: h100-eks-ubuntu-training-slurm
+  name: h100-aks-ubuntu-training-slurm
 
 spec:
-  # H100 + EKS + Ubuntu + training with the Slinky operator and a
+  # H100 + AKS + Ubuntu + training with the Slinky operator and a
   # Slinky-managed Slurm cluster. H100 GPU GRES and task isolation are
-  # declared inline below; remaining EKS-specific tuning (gp3 storage,
-  # DCGM job-mapping) is layered at install time
-  # via `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
-  base: h100-eks-ubuntu-training
+  # declared inline below; remaining AKS-specific tuning (managed-csi
+  # storage, DCGM job-mapping) is layered at install
+  # time via `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
+  base: h100-aks-ubuntu-training
 
   criteria:
-    service: eks
+    service: aks
     accelerator: h100
     os: ubuntu
     intent: training
@@ -37,7 +37,7 @@ spec:
 
   constraints:
     - name: K8s.server.version
-      value: ">= 1.32.4"
+      value: ">= 1.34"
 
   # The Slinky operator (CRDs + operator + cluster instance) is declared
   # inline per slurm leaf, mirroring the dynamo-platform pattern in
@@ -100,9 +100,10 @@ spec:
   # Slinky-managed cluster it bypasses slurmd entirely and measures the
   # wrong path. The equivalent signal here is a slurm-launched
   # `srun nccl-tests/all_reduce_perf` that goes through slurmd + the
-  # EFA libfabric stack already present on the parent EKS leaf.
-  # Deployment checks are inherited unchanged. Conformance keeps the
-  # inherited parent checks and appends the Slurm-specific health check below.
+  # InfiniBand path already present on the parent AKS leaf via
+  # network-operator. Deployment checks are inherited unchanged.
+  # Conformance keeps the inherited parent checks and appends the
+  # Slurm-specific health check below.
   validation:
     conformance:
       checks:
