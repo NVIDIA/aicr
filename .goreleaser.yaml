@@ -166,10 +166,11 @@ kos:
     build: aicr
     repositories:
       - ghcr.io/nvidia/aicr
-    # No base_image: ko uses its default static, distroless base
-    # (cgr.dev/chainguard/static). The aicr CLI/agent is pure Go and discovers
-    # the GPU SKU driver-free via NFD/PCI, so it no longer needs nvidia-smi or
-    # the CUDA base image (and its CVE surface).
+    # NVIDIA's static distroless base (replaces ko's chainguard default). The
+    # aicr CLI/agent is pure Go and discovers the GPU SKU driver-free via
+    # NFD/PCI, so it no longer needs nvidia-smi or the CUDA base image (and its
+    # CVE surface).
+    base_image: nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
     platforms:
       - linux/amd64
       - linux/arm64
@@ -185,10 +186,11 @@ kos:
     build: aicrd
     repositories:
       - ghcr.io/nvidia/aicrd
-    # No base_image: aicrd intentionally uses ko's default static, distroless
-    # base (cgr.dev/chainguard/static), same as aicr above. It runs as the
-    # nonroot user 65532 by default, preserving the security posture of the
-    # previous gcr.io/distroless/static:nonroot base (also UID 65532).
+    # NVIDIA's static distroless base, same as aicr above. ko stamps its default
+    # nonroot user (UID 65532) numerically, preserving the unprivileged security
+    # posture of the previous gcr.io/distroless/static:nonroot base (also UID
+    # 65532); the base image's own nvs (UID 1000) account is unused here.
+    base_image: nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
     platforms:
       - linux/amd64
       - linux/arm64

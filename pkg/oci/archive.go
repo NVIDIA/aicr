@@ -161,6 +161,17 @@ func buildDeterministicTarGzipWithDependencies(
 		Annotations: map[string]string{
 			file.AnnotationDigest: tarDigester.Digest().String(),
 			file.AnnotationUnpack: "true",
+			// AnnotationTitle names the on-disk destination an ORAS file
+			// store (oras.Copy into file.New(dir)) unpacks this layer to.
+			// The generic archive packs the source tree at the tar root,
+			// so the store must unpack it into its own root (".") — without
+			// this the store treats the layer as an unnamed blob and writes
+			// NOTHING to disk, and a downstream file-store pull (e.g. the
+			// evidence verifier's materialize step) sees an empty directory
+			// and fails "does not contain a recognizable summary bundle".
+			// The Helm path sets its own title (the chart dir); only this
+			// generic path regressed when the annotation was dropped.
+			ociv1.AnnotationTitle: ".",
 		},
 	}
 	if err := verifyArchiveDescriptor(ctx, layout.child, name, descriptor, deps); err != nil {
