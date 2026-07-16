@@ -667,6 +667,81 @@ func TestParseBundleCmdOptions_SigningKey(t *testing.T) {
 	}
 }
 
+// TestParseBundleCmdOptions_TLogUpload verifies the --tlog-upload flag wiring:
+// it defaults to true when absent, is rejected when set false without
+// --signing-key (air-gapped signing is KMS-only), and is accepted false with
+// --signing-key. See #409.
+func TestParseBundleCmdOptions_TLogUpload(t *testing.T) {
+	const key = "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k"
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	out := filepath.Join(tmp, "out")
+
+	tests := []struct {
+		name          string
+		args          []string
+		wantErr       bool
+		wantTLogValue bool // only checked when wantErr is false
+	}{
+		{
+			name:          "default (flag absent) is true",
+			args:          []string{"--recipe", recipePath, "--output", out, "--attest"},
+			wantTLogValue: true,
+		},
+		{
+			name:    "tlog-upload=false without signing-key is rejected",
+			args:    []string{"--recipe", recipePath, "--output", out, "--attest", "--tlog-upload=false"},
+			wantErr: true,
+		},
+		{
+			name:          "tlog-upload=false with signing-key is accepted",
+			args:          []string{"--recipe", recipePath, "--output", out, "--attest", "--signing-key", key, "--tlog-upload=false"},
+			wantTLogValue: false,
+		},
+		{
+			name:    "tlog-upload=false with rekor-url is rejected (contradictory targets)",
+			args:    []string{"--recipe", recipePath, "--output", out, "--attest", "--signing-key", key, "--tlog-upload=false", "--rekor-url", "https://rekor.example.com"},
+			wantErr: true,
+		},
+		{
+			name:    "tlog-upload=false with signing-config is rejected (contradictory targets)",
+			args:    []string{"--recipe", recipePath, "--output", out, "--attest", "--signing-key", key, "--tlog-upload=false", "--signing-config", filepath.Join(tmp, "sc.json")},
+			wantErr: true,
+		},
+		{
+			name:          "tlog-upload=true with signing-key is accepted",
+			args:          []string{"--recipe", recipePath, "--output", out, "--attest", "--signing-key", key, "--tlog-upload=true"},
+			wantTLogValue: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, err := tryCaptureBundleOpts(t, tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if opts.tlogUpload != tt.wantTLogValue {
+				t.Errorf("tlogUpload = %v, want %v", opts.tlogUpload, tt.wantTLogValue)
+			}
+			// DisableTLogUpload on the resolve options is the negation.
+			ro := bundleOIDCResolveOptions(opts)
+			if ro.DisableTLogUpload == tt.wantTLogValue {
+				t.Errorf("DisableTLogUpload = %v, want %v", ro.DisableTLogUpload, !tt.wantTLogValue)
+			}
+		})
+	}
+}
+
 func TestResolveBundleOCIChartVersion(t *testing.T) {
 	tmp := t.TempDir()
 	recipePath := filepath.Join(tmp, "recipe.yaml")

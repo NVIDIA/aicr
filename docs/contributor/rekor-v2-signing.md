@@ -114,6 +114,16 @@ TUF v2 config (default), then a Rekor v1 URL.
   `KMSAttester` builds its transparency policy through the same
   `transparencyForOptions` path as keyless signing, so both stay in lockstep. A
   KMS v2 entry carries public-key verification material (no Fulcio certificate).
+- `--tlog-upload=false` (KMS only) skips the Rekor upload entirely for fully
+  offline / air-gapped signing (#409). It sets `ResolveOptions.DisableTLogUpload`,
+  which wires `NewKMSAttester(..., WithoutTransparencyLog())`; the attester's
+  `HasRekorEntry()` then reports false and `Attest` attaches no transparency log.
+  The flag is rejected on the keyless path, because keyless OIDC signing needs
+  Fulcio and Rekor network access, and is mutually exclusive with `--rekor-url`
+  and `--signing-config`: those select a transparency-log target, which cannot be
+  reconciled with writing no entry (the no-tlog policy would silently override
+  them, so it fails closed instead). Verify such a bundle with
+  `aicr verify --key <uri> --insecure-ignore-tlog`.
 
 `--rekor-url` and `--signing-config` are mutually exclusive, so an operator's
 private Rekor is never silently overridden by the v2 default.

@@ -1275,6 +1275,7 @@ aicr bundle [flags]
 | `--rekor-url` | | string | Sign the `--attest` bundle to **Rekor v1** at this URL instead of the **Rekor v2 default** (a private Sigstore instance, or the public-good v1 URL). Must be an absolute `https://` URL with no embedded credentials. Also reads `AICR_REKOR_URL`. Independent of `--fulcio-url`. Mutually exclusive with `--signing-config`. |
 | `--signing-config` | | string | Sign the `--attest` bundle with a custom Sigstore signing config JSON instead of the default Rekor v2 config (advanced — e.g. an edited config or a private v2 instance). Also reads `AICR_SIGNING_CONFIG`. Mutually exclusive with `--rekor-url`. |
 | `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a KMS URI; supported schemes are `awskms://`, `gcpkms://`, `azurekms://`, and `hashivault://`. Like keyless signing, KMS signs to Rekor v2 by default; opt out with `--rekor-url` (v1) or `--signing-config` (custom). Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. See [KMS-Backed Signing](#kms-backed-signing). |
+| `--tlog-upload` | | bool | Upload the signature to the Rekor transparency log (default: `true`). Set `--tlog-upload=false` to skip the Rekor upload for fully offline / air-gapped signing; this requires `--signing-key` (KMS), because keyless OIDC signing needs Fulcio and Rekor network access to mint a verifiable certificate. Mutually exclusive with `--rekor-url` and `--signing-config` (both select where the transparency-log entry goes, which contradicts writing none). Verify the resulting bundle offline with `aicr verify --key <public-key.pem> --insecure-ignore-tlog`; use a local PEM public key for a fully offline verify, since a KMS `--key` URI still makes a live `GetPublicKey` call. See [KMS-Backed Signing](#kms-backed-signing). |
 | `--yes` | `--assume-yes` | bool | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 
 `--image-refs` writes the published digest through a mode-`0600` temporary
@@ -2337,6 +2338,25 @@ Like keyless signing, KMS signs to **Rekor v2** by default. Opt out with
 `--rekor-url` to log to a Rekor v1 instance (private or public-good), or
 `--signing-config` to use a custom signing config; the two opt-outs are mutually
 exclusive with each other but both compose with `--signing-key`.
+
+For a fully offline / air-gapped signing host that cannot reach any Rekor
+instance, add `--tlog-upload=false`. KMS signing then skips the transparency-log
+upload entirely and the bundle carries no Rekor entry:
+
+```shell
+aicr bundle --recipe recipe.yaml --attest \
+  --signing-key awskms://arn:aws:kms:us-east-1:123456789012:key/abcd-1234 \
+  --tlog-upload=false \
+  --output ./bundles
+```
+
+`--tlog-upload=false` requires `--signing-key`; it is rejected on the keyless
+path, because keyless OIDC signing needs Fulcio and Rekor network access to mint
+a verifiable certificate. Verify an air-gapped bundle offline with
+`aicr verify --key <public-key.pem> --insecure-ignore-tlog`, which skips the
+transparency-log lookup that would otherwise require network access. Use a local
+PEM public key (exported once with `cosign public-key --key <kms-uri>`) for a
+fully offline verify: a KMS `--key` URI still makes a live `GetPublicKey` call.
 
 The resulting bundle uses the same Sigstore bundle format as keyless signing,
 but its verification material is the signing key's public key rather than a
