@@ -764,9 +764,11 @@ func (s *MetadataStore) evaluateMixinConstraints(
 		}
 		result := evaluator(constraint)
 		if result.Error != nil && !isNotFoundEvalError(result.Error) {
-			// Fail closed on non-NotFound evaluation errors (design 5.2);
-			// the error already carries its structured code.
-			return mixinEvalResult{}, result.Error
+			// Fail closed on non-NotFound evaluation errors (design 5.2).
+			// ConstraintEvaluatorFunc returns a plain error; propagate it
+			// as-is when it already carries a structured code, otherwise
+			// wrap so it doesn't reach the server layer as an uncoded 500.
+			return mixinEvalResult{}, aicrerrors.PropagateOrWrap(result.Error, aicrerrors.ErrCodeInternal, "constraint evaluation failed")
 		}
 		if !result.Passed {
 			affectedCandidates := constraintCandidates[constraint.Name]
@@ -1187,8 +1189,10 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 		case result.Error != nil && !isNotFoundEvalError(result.Error):
 			// Fail closed: a malformed constraint or internal evaluation
 			// failure must not silently degrade the recipe (issue #1542,
-			// design 5.2). Propagate with the evaluator's own code.
-			return false, nil, result.Error
+			// design 5.2). ConstraintEvaluatorFunc returns a plain error;
+			// propagate as-is when it already carries a structured code,
+			// otherwise wrap so it doesn't reach the server layer uncoded.
+			return false, nil, aicrerrors.PropagateOrWrap(result.Error, aicrerrors.ErrCodeInternal, "constraint evaluation failed")
 		case result.Error != nil:
 			// NotFound: the snapshot does not exhibit this measurement —
 			// the designed graceful-degradation signal. Exclude with warning.

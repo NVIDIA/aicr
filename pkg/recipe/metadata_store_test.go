@@ -352,6 +352,33 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 	}
 }
 
+// TestMetadataStore_EvaluateOverlayConstraints_WrapsUnstructuredError covers
+// CodeRabbit's finding: ConstraintEvaluatorFunc accepts a plain error, so a
+// non-StructuredError evaluator failure must be wrapped with a code (rather
+// than propagated bare) or it reaches the server layer as an uncoded 500.
+func TestMetadataStore_EvaluateOverlayConstraints_WrapsUnstructuredError(t *testing.T) {
+	overlay := &RecipeMetadata{}
+	overlay.Metadata.Name = "test-overlay"
+	overlay.Spec.Constraints = []Constraint{
+		{Name: "k8s", Value: ">= 1.30"},
+	}
+
+	store := &MetadataStore{}
+	_, _, err := store.evaluateOverlayConstraints(overlay, func(_ Constraint) ConstraintEvalResult {
+		return ConstraintEvalResult{Passed: false, Error: errors.New("boom")}
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		t.Fatalf("expected ErrCodeInternal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected cause %q preserved in error chain, got %v", "boom", err)
+	}
+}
+
 func TestMetadataStore_FindMatchingOverlays(t *testing.T) {
 	baseMeta := &RecipeMetadata{}
 	baseMeta.Metadata.Name = testRecipeBase
@@ -1946,6 +1973,73 @@ func TestMixinConstraintFailClosedOnInternalEvaluatorError(t *testing.T) {
 	}
 	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
 		t.Fatalf("expected ErrCodeInternal preserved from mixin evaluator error, got %v", err)
+	}
+}
+
+// TestMixinConstraintFailClosedOnUnstructuredEvaluatorError covers
+// CodeRabbit's finding: a ConstraintEvaluatorFunc returning a plain
+// (non-StructuredError) error on the mixin-constraint path must still be
+// coded before it reaches the caller, not propagated bare.
+func TestMixinConstraintFailClosedOnUnstructuredEvaluatorError(t *testing.T) {
+	ctx := context.Background()
+
+	baseMeta := &RecipeMetadata{}
+	baseMeta.Metadata.Name = testRecipeBase
+
+	overlay := &RecipeMetadata{}
+	overlay.Metadata.Name = testOverlayEKSTraning
+	overlay.Spec.Criteria = &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+	overlay.Spec.Constraints = []Constraint{
+		{Name: testK8sVersionConstant, Value: ">= 1.28"},
+	}
+	overlay.Spec.Mixins = []string{"os-gate"}
+
+	store := &MetadataStore{
+		Base: baseMeta,
+		Overlays: map[string]*RecipeMetadata{
+			testOverlayEKSTraning: overlay,
+		},
+		Mixins: map[string]*RecipeMixin{
+			"os-gate": {
+				Kind:       RecipeMixinKind,
+				APIVersion: RecipeAPIVersion,
+				Metadata: struct {
+					Name string `json:"name" yaml:"name"`
+				}{Name: "os-gate"},
+				Spec: struct {
+					Constraints   []Constraint   `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+					ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
+				}{
+					Constraints: []Constraint{{Name: "OS.kernel.version", Value: ">= 6.8"}},
+				},
+			},
+		},
+	}
+
+	criteria := &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+
+	evaluator := func(c Constraint) ConstraintEvalResult {
+		if c.Name == "OS.kernel.version" {
+			return ConstraintEvalResult{Passed: false, Error: errors.New("boom")}
+		}
+		return ConstraintEvalResult{Passed: true, Actual: "ok"}
+	}
+
+	_, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+	if err == nil {
+		t.Fatal("expected fail-closed error from mixin constraint evaluation")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		t.Fatalf("expected unstructured mixin evaluator error wrapped as ErrCodeInternal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected cause %q preserved in error chain, got %v", "boom", err)
 	}
 }
 
