@@ -256,20 +256,49 @@ func relaxSnapshotDerivedCoverage(err error, criteria *recipe.Criteria, touched 
 }
 
 // uncoveredCoverageDimensions extracts the uncovered dimension names from a
-// recipe-resolution error, or nil when err is not the criteria-coverage
-// post-condition failure (pkg/recipe/coverage.go's verifyCriteriaCoverage
-// builds this exact shape: ErrCodeInvalidRequest with a Context["uncovered"]
-// []map[string]any, each entry keyed by "dimension").
+// recipe-resolution error, or nil when err does not carry the
+// criteria-coverage post-condition failure (pkg/recipe/coverage.go's
+// verifyCriteriaCoverage builds ErrCodeInvalidRequest with a
+// Context["uncovered"] []map[string]any, each entry keyed by "dimension").
+//
+// Every StructuredError in the wrap chain is inspected rather than only the
+// outermost one, so an intermediate wrap added between the builder and this
+// caller cannot silently disable snapshot relaxation. The coverage error is
+// identified by its own node's code and context, regardless of outer
+// decoration.
 func uncoveredCoverageDimensions(err error) []string {
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
-		return nil
+	for cur := err; cur != nil; {
+		var se *errors.StructuredError
+		if !stderrors.As(cur, &se) {
+			return nil
+		}
+		if se.Code == errors.ErrCodeInvalidRequest {
+			if names := uncoveredDimensionNames(se.Context["uncovered"]); len(names) > 0 {
+				return names
+			}
+		}
+		cur = se.Unwrap()
 	}
-	var se *errors.StructuredError
-	if !stderrors.As(err, &se) {
-		return nil
-	}
-	entries, ok := se.Context["uncovered"].([]map[string]any)
-	if !ok || len(entries) == 0 {
+	return nil
+}
+
+// uncoveredDimensionNames pulls the "dimension" names out of a coverage
+// error's uncovered payload. It accepts both the in-process shape built by
+// verifyCriteriaCoverage ([]map[string]any) and the decoded-JSON shape
+// ([]any of map[string]any) so a marshaling boundary cannot silently
+// disable relaxation.
+func uncoveredDimensionNames(raw any) []string {
+	var entries []map[string]any
+	switch v := raw.(type) {
+	case []map[string]any:
+		entries = v
+	case []any:
+		for _, e := range v {
+			if m, ok := e.(map[string]any); ok {
+				entries = append(entries, m)
+			}
+		}
+	default:
 		return nil
 	}
 	names := make([]string, 0, len(entries))
