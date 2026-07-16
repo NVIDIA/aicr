@@ -350,7 +350,7 @@ func TestBuildHelmfile_NilUpstream(t *testing.T) {
 	folders := []localformat.Folder{
 		{Index: 1, Dir: "001-x", Kind: localformat.KindUpstreamHelm, Name: "x", Parent: "x", Upstream: nil},
 	}
-	_, err := buildHelmfile(folders, map[string]string{"x": "ns"}, nil, nil, false)
+	_, err := buildHelmfile(folders, map[string]string{"x": "ns"}, nil, nil)
 	if err == nil {
 		t.Fatalf("buildHelmfile with nil Upstream expected error, got nil")
 	}
@@ -369,7 +369,7 @@ func TestBuildHelmfile_UnsupportedKind(t *testing.T) {
 	folders := []localformat.Folder{
 		{Index: 1, Dir: "001-x", Kind: localformat.FolderKind(99), Name: "x", Parent: "x"},
 	}
-	_, err := buildHelmfile(folders, map[string]string{"x": "ns"}, nil, nil, false)
+	_, err := buildHelmfile(folders, map[string]string{"x": "ns"}, nil, nil)
 	if err == nil {
 		t.Fatalf("buildHelmfile with unsupported kind expected error, got nil")
 	}
@@ -426,10 +426,7 @@ func TestBuildHelmfile_CrossNamespaceNeeds(t *testing.T) {
 		"cert-manager":          "cert-manager",
 		"kube-prometheus-stack": "monitoring",
 	}
-	// Cross-namespace needs edges arise only under --serial: the default
-	// chains within a component (same namespace), so two different components
-	// only carry a needs edge when the linear serial chain is requested.
-	doc, err := buildHelmfile(folders, ns, nil, nil, true)
+	doc, err := buildHelmfile(folders, ns, nil, nil)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
@@ -455,7 +452,7 @@ func TestBuildHelmfile_SameNamespaceNeedsBare(t *testing.T) {
 		{Index: 2, Dir: "002-gpu-operator-post", Kind: localformat.KindLocalHelm, Name: "gpu-operator-post", Parent: "gpu-operator"},
 	}
 	ns := map[string]string{"gpu-operator": "gpu-operator"}
-	doc, err := buildHelmfile(folders, ns, nil, nil, false)
+	doc, err := buildHelmfile(folders, ns, nil, nil)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
@@ -485,7 +482,7 @@ func TestBuildHelmfile_CreateNamespaceFromFolder(t *testing.T) {
 			Upstream: &localformat.Upstream{Chart: "gpu-operator", Repo: "https://helm.ngc.nvidia.com/nvidia", Version: "v25.3.3"}},
 	}
 	ns := map[string]string{"gpu-operator": "privileged-gpu-operator"}
-	doc, err := buildHelmfile(folders, ns, nil, nil, false)
+	doc, err := buildHelmfile(folders, ns, nil, nil)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
@@ -524,7 +521,7 @@ func TestBuildHelmfile_DisableValidationPrimaryOnly(t *testing.T) {
 	}
 	ns := map[string]string{"gpu-operator": "gpu-operator"}
 	flags := map[string]componentFlags{"gpu-operator": {HasSelfRefCRDs: true}}
-	doc, err := buildHelmfile(folders, ns, nil, flags, false)
+	doc, err := buildHelmfile(folders, ns, nil, flags)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
@@ -571,7 +568,7 @@ func TestBuildHelmfile_DisableValidationPostManifests(t *testing.T) {
 	}
 	ns := map[string]string{"network-operator": "nvidia-network-operator"}
 	flags := map[string]componentFlags{"network-operator": {ManifestsUseChartCRDs: true}}
-	doc, err := buildHelmfile(folders, ns, nil, flags, false)
+	doc, err := buildHelmfile(folders, ns, nil, flags)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
@@ -610,7 +607,7 @@ func TestBuildHelmfile_DisableValidationVendoredMixed(t *testing.T) {
 	}
 	ns := map[string]string{"network-operator": "nvidia-network-operator", "nfd": "node-feature-discovery"}
 	flags := map[string]componentFlags{"network-operator": {ManifestsUseChartCRDs: true}}
-	doc, err := buildHelmfile(folders, ns, nil, flags, false)
+	doc, err := buildHelmfile(folders, ns, nil, flags)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
@@ -644,7 +641,7 @@ func TestBuildHelmfile_DisableValidationBothFlags(t *testing.T) {
 	}
 	ns := map[string]string{"kubeflow-trainer": "kubeflow-system"}
 	flags := map[string]componentFlags{"kubeflow-trainer": {HasSelfRefCRDs: true, ManifestsUseChartCRDs: true}}
-	doc, err := buildHelmfile(folders, ns, nil, flags, false)
+	doc, err := buildHelmfile(folders, ns, nil, flags)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}

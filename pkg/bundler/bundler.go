@@ -405,7 +405,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
-			Serial:                 b.Config.Serial(),
 			ChartName:              b.Config.BundleChartName(),
 			BundleChartVersion:     b.Config.BundleChartVersion(),
 			AppName:                b.Config.AppName(),
@@ -448,7 +447,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
-			Serial:                 b.Config.Serial(),
 			AppName:                b.Config.AppName(),
 			NamePrefix:             argoOpts.NamePrefix,
 			DestinationServer:      argoOpts.DestinationServer,
@@ -514,7 +512,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			Namespace:             b.Config.FluxNamespace(),
 			OCISourceName:         b.Config.OCISourceName(),
 			VendorCharts:          b.Config.VendorCharts(),
-			Serial:                b.Config.Serial(),
 		}, nil
 
 	case config.DeployerHelmfile:
@@ -538,7 +535,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DataFiles:              dataFiles,
 			DynamicValues:          dynamicValues,
 			VendorCharts:           b.Config.VendorCharts(),
-			Serial:                 b.Config.Serial(),
 		}, nil
 
 	default:

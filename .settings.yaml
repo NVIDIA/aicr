@@ -105,7 +105,7 @@ testing_tools:
   # provider drives it over plain HTTP in dev mode (no TLS needed). Pinned (never
   # :latest) for reproducibility.
   # renovate: datasource=docker depName=openbao/openbao depType=testing_tools
-  openbao_image: 'openbao/openbao:2.4.1'
+  openbao_image: 'openbao/openbao:2.5.5'
   # mkcert issues a trusted localhost cert for MiniStack's TLS and installs its CA
   # into the system trust store, so the Go AWS SDK accepts the awskms:// endpoint.
   # renovate: datasource=github-releases depName=FiloSottile/mkcert depType=testing_tools

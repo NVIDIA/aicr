@@ -15,12 +15,31 @@
 package client
 
 import (
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
+
+func assertKubeconfigErrorContext(t *testing.T, err error, wantKubeconfig string) {
+	t.Helper()
+
+	var structuredErr *errors.StructuredError
+	if !stderrors.As(err, &structuredErr) {
+		t.Fatalf("error = %v, want *errors.StructuredError", err)
+	}
+	gotKubeconfig, ok := structuredErr.Context["kubeconfig"].(string)
+	if !ok {
+		t.Fatalf("error context kubeconfig = %v, want string", structuredErr.Context["kubeconfig"])
+	}
+	if gotKubeconfig != wantKubeconfig {
+		t.Errorf("error context kubeconfig = %q, want %q", gotKubeconfig, wantKubeconfig)
+	}
+}
 
 // TestBuildKubeClient_PathResolution tests the kubeconfig path resolution logic
 // without attempting to connect to a cluster.
@@ -30,24 +49,30 @@ func TestBuildKubeClient_PathResolution(t *testing.T) {
 	t.Setenv("KUBECONFIG", os.Getenv("KUBECONFIG"))
 
 	tests := []struct {
-		name          string
-		kubeconfigArg string
-		kubeconfigEnv string
-		wantErr       bool
-		errorContains string
+		name           string
+		kubeconfigArg  string
+		kubeconfigEnv  string
+		wantErr        bool
+		errorContains  string
+		wantCode       errors.ErrorCode
+		wantKubeconfig string
 	}{
 		{
-			name:          "explicit invalid path",
-			kubeconfigArg: "/nonexistent/path/to/kubeconfig",
-			wantErr:       true,
-			errorContains: "failed to build kube config",
+			name:           "explicit invalid path",
+			kubeconfigArg:  "  /nonexistent/path/to/kubeconfig  ",
+			wantErr:        true,
+			errorContains:  "failed to build kube config",
+			wantCode:       errors.ErrCodeInvalidRequest,
+			wantKubeconfig: "/nonexistent/path/to/kubeconfig",
 		},
 		{
-			name:          "env var with invalid path",
-			kubeconfigArg: "",
-			kubeconfigEnv: "/nonexistent/env/kubeconfig",
-			wantErr:       true,
-			errorContains: "failed to build kube config",
+			name:           "env var with invalid path",
+			kubeconfigArg:  "",
+			kubeconfigEnv:  "/nonexistent/env/kubeconfig",
+			wantErr:        true,
+			errorContains:  "failed to build kube config",
+			wantCode:       errors.ErrCodeInvalidRequest,
+			wantKubeconfig: "/nonexistent/env/kubeconfig",
 		},
 	}
 
@@ -71,6 +96,12 @@ func TestBuildKubeClient_PathResolution(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.errorContains) {
 					t.Errorf("BuildKubeClient() error = %v, want error containing %q", err, tt.errorContains)
 				}
+			}
+			if err != nil && tt.wantCode != "" && !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				t.Errorf("BuildKubeClient() error = %v, want code %s", err, tt.wantCode)
+			}
+			if err != nil && tt.wantKubeconfig != "" {
+				assertKubeconfigErrorContext(t, err, tt.wantKubeconfig)
 			}
 		})
 	}
@@ -117,6 +148,50 @@ func TestBuildKubeClient_ExplicitPath(t *testing.T) {
 	if !strings.Contains(err.Error(), "failed to build kube config") {
 		t.Errorf("BuildKubeClient() error = %v, want error containing 'failed to build kube config'", err)
 	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("BuildKubeClient() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	assertKubeconfigErrorContext(t, err, invalidConfig)
+}
+
+// TestBuildKubeClient_InvalidClientConfigReturnsInvalidRequest verifies that a
+// kubeconfig which parses successfully but cannot initialize a Kubernetes
+// client is still classified as caller input rather than an internal failure.
+func TestBuildKubeClient_InvalidClientConfigReturnsInvalidRequest(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "invalid-client-config")
+	content := `apiVersion: v1
+kind: Config
+clusters:
+  - name: test
+    cluster:
+      server: https://127.0.0.1
+      certificate-authority-data: bm90IGEgcGVtIGNlcnRpZmljYXRl
+contexts:
+  - name: test
+    context:
+      cluster: test
+      user: test
+current-context: test
+users:
+  - name: test
+    user:
+      token: test
+`
+	if err := os.WriteFile(kubeconfig, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write test kubeconfig: %v", err)
+	}
+
+	_, _, err := BuildKubeClient(kubeconfig)
+	if err == nil {
+		t.Fatal("BuildKubeClient() error = nil, want invalid request")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("BuildKubeClient() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "failed to create kubernetes client from kubeconfig") {
+		t.Errorf("BuildKubeClient() error = %v, want client construction failure", err)
+	}
+	assertKubeconfigErrorContext(t, err, kubeconfig)
 }
 
 // TestGetKubeClient_Singleton tests that GetKubeClient returns the same instance.
