@@ -14,36 +14,41 @@
 
 # Transparency-log monitoring for AICR's release supply chain, on Rekor v2.
 #
-# Hourly, this calls the upstream sigstore/rekor-monitor reusable workflow to do
-# both checks in a single job (see internal/cmd MonitorLoop upstream):
+# Hourly, this runs our own monitor (tools/rekor-monitor) to do both checks in a
+# single job:
 #   - Consistency: prove the Rekor v2 log stays append-only between runs (Merkle
 #     consistency from the last checkpoint to the current tree head). O(log n),
-#     always finishes in seconds. Checkpoint persisted as the `checkpoint`
-#     artifact.
+#     finishes in seconds. The checkpoint (cursor) is persisted as the
+#     `rekor-v2-checkpoint` artifact between runs.
 #   - Identity: scan entries added since the last checkpoint for AICR's release
 #     signing identity. An entry under that identity that a release did not
 #     produce signals OIDC/key compromise.
-# On any failure (consistency break or matched identity), it files an issue
-# (`file_issue: true`).
+# On any failure (consistency break, scan error, or matched identity) the monitor
+# exits non-zero and this workflow both opens a tracking issue (mentioning the
+# maintainers group) and posts a Slack alert (via the SLACK_SERVICE webhook); a
+# later clean run closes the issue. Note: a workflow that fails to *start*
+# (startup_failure) cannot alert on itself, so an external liveness check
+# (dead-man's-switch) is tracked as a follow-up.
 #
-# Why v2 (NVIDIA/aicr#1623). Identity monitoring is a linear scan of every entry
-# added since the last checkpoint (Rekor's index cannot be queried by
-# certificate SAN, and our keyless release identity has no email or fixed key).
-# On the Rekor **v1** firehose that scan runs ~50x slower than the log grows, so
-# it can never keep up in a bounded CI job: the earlier v1 config timed out
-# every run and never completed a single scan. Rekor **v2** is tile-based: bulk
-# 256-entry reads make a single-worker scan outpace the log, so identity
-# monitoring becomes one cheap job. This rides on release signing having moved to
-# v2 in NVIDIA/aicr#1650 (only entries actually in v2 can be watched there).
+# Why our own tool, not upstream sigstore/rekor-monitor (NVIDIA/aicr#1623).
+# Identity monitoring is a linear scan of every entry added since the last
+# checkpoint (Rekor's index cannot be queried by certificate SAN, and our keyless
+# release identity has no email or fixed key). On the Rekor **v1** firehose that
+# scan runs ~50x slower than the log grows, so it can never keep up in a bounded
+# CI job. Rekor **v2** is tile-based: bulk 256-entry reads make a single-worker
+# scan outpace the log, so the whole thing is one cheap job. This rides on
+# release signing having moved to v2 in NVIDIA/aicr#1650.
 #
-# Selecting v2. The monitor picks its Rekor API version by matching its `url`
-# against the services in the TUF-distributed Sigstore SigningConfig; a match on
-# a v2 service switches it to v2. The resolve-v2-shard job computes that URL at
-# run time from the same signing config release signing uses (via `aicr trust
-# update --emit-signing-config`), so we never hardcode a shard and yearly shard
-# rotation (log2025-1 -> log2026-1 -> ...) needs no change here. Once v2 is
-# selected the *full* shard set is auto-discovered from the SigningConfig and
-# refreshed each run.
+# The catch: the upstream reusable workflow selects its Rekor version and shards
+# from Sigstore's *default* signing config (`signing_config.v0.2.json`), which is
+# v1-only and stays that way "for the foreseeable future". AICR opted into v2
+# early via the separate `signing_config_rekor_v2.v0.2.json` TUF target, which
+# upstream never reads and cannot be pointed at. So we run tools/rekor-monitor:
+# it reads the v2 signing config AICR actually signs against (pkg/trust) and
+# reuses the upstream rekor-monitor *library* packages for the verification. When
+# Sigstore makes v2 the ecosystem default, upstream can monitor v2 directly and
+# this tool can be retired. See docs/contributor/maintaining.md and the tool's
+# package doc for the full rationale.
 #
 # The monitored identity is AICR's release signer (see .goreleaser.yaml and
 # .github/workflows/on-tag.yaml): the GitHub Actions OIDC SAN for on-tag.yaml,
@@ -53,12 +58,8 @@
 #   - Identity hit: cross-check the entry's log index and timestamp against known
 #     release runs. If unrecognized, treat as potential OIDC/key compromise and
 #     begin incident response.
-#   - Consistency failure: verify the checkpoint artifact chain before escalating
-#     to Sigstore; a retention gap (see artifact_retention_days) can also break
-#     the chain.
-#
-# The reusable workflow has no upstream tags/releases, so it is pinned to a
-# main commit SHA rather than a version tag.
+#   - Consistency failure: re-run to rule out a transient network/log error; a
+#     persistent break is a tamper signal: escalate to Sigstore.
 
 name: Rekor Monitor
 
@@ -73,56 +74,178 @@ concurrency:
   group: rekor-monitor
   cancel-in-progress: false
 
+env:
+  CHECKPOINT_FILE: checkpoint_v2.txt
+  # Cross-run cursor. A fresh name (not the old v1 `checkpoint`) means the stale
+  # v1 checkpoint is simply ignored; no migration needed.
+  ARTIFACT_NAME: rekor-v2-checkpoint
+  ALERT_TITLE: "Rekor v2 monitor: release identity / log consistency alert"
+  # Maintainers group notified on an alert (GitHub team; issues cannot be
+  # assigned to a team, so it is @-mentioned in the issue body instead).
+  MAINTAINERS_TEAM: "@nvidia/aicr-maintainer"
+  # AICR release signer identity (see .goreleaser.yaml and on-tag.yaml). Kept in
+  # the workflow so it is the auditable source of truth for what is monitored.
+  CERT_SUBJECT: '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*$'
+  CERT_ISSUER: '^https://token\.actions\.githubusercontent\.com$'
+
 jobs:
-  # Resolve the current Rekor v2 shard from the Sigstore signing config, so the
-  # monitor always selects v2 against a live shard without a hardcoded URL. We
-  # read the same TUF-distributed signing config that release signing resolves
-  # (`aicr trust update --emit-signing-config`, see pkg/trust), so the monitor
-  # provably watches where releases actually write, and yearly shard rotation
-  # (log2025-1 -> log2026-1 -> ...) needs no change here.
-  resolve-v2-shard:
-    name: Resolve current Rekor v2 shard
+  monitor:
+    name: AICR release identity + log consistency (Rekor v2)
     runs-on: ubuntu-latest
+    # Backstop the per-pass context timeout in the tool: the job is killed if a
+    # network stall somehow outlives it.
+    timeout-minutes: 20
     permissions:
-      contents: read  # checkout to build the aicr CLI
-    outputs:
-      url: ${{ steps.resolve.outputs.url }}
+      contents: read  # checkout to build tools/rekor-monitor
+      actions: read   # read the prior checkpoint artifact via the Actions API
+      issues: write   # open/close the alert issue
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
-      - id: resolve
-        name: Resolve v2 shard URL from the signing config
+
+      - name: Fetch previous checkpoint artifact
+        # Cross-run artifact fetch via the API (download-artifact only sees the
+        # current run). A missing artifact is the expected first-run state, and
+        # leaves checkpoint.zip absent so the monitor baselines. The monitor
+        # reads the zip natively (--restore-zip); no unzip here.
+        #
+        # SECURITY: the repo-wide `artifacts?name=` list also returns same-named
+        # artifacts uploaded by *any* run, including a fork pull_request run whose
+        # GITHUB_TOKEN can upload under any name. A poisoned checkpoint (a genuine
+        # one copied from the live log head) would pass the consistency proof
+        # while collapsing the identity-scan window to empty, silently skipping
+        # entries. We therefore accept only artifacts whose producing run was in
+        # THIS repository on `main`:
+        #   - head_repository_id == repository_id rejects every fork run (a fork's
+        #     head repo differs), even one whose branch is named "main";
+        #   - head_branch == "main" limits to the scheduled/dispatched main runs.
+        # The whole artifact history is paginated (not just recent runs) so an
+        # older valid cursor survives a long stretch of artifact-less runs
+        # (startup failures, outages); a failed API call aborts the step (set -e /
+        # pipefail on the assignment) rather than falling through to a re-baseline.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          go run ./cmd/aicr trust update --emit-signing-config signing-config.json
-          # Newest currently-listed v2 shard (majorApiVersion 2). Any live v2
-          # shard selects v2; the monitor then discovers the full set from TUF.
-          url="$(jq -er '[.rekorTlogUrls[] | select(.majorApiVersion == 2)] | sort_by(.validFor.start) | last | .url' signing-config.json)"
-          echo "Resolved Rekor v2 shard: $url"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          id="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${ARTIFACT_NAME}&per_page=100" \
+            | jq -rs '[.[].artifacts[]
+                | select(.expired == false)
+                | select(.workflow_run.head_branch == "main")
+                | select(.workflow_run.head_repository_id == .workflow_run.repository_id)]
+              | sort_by(.created_at) | last | .id // empty')"
+          if [ -z "${id}" ]; then
+            echo "No prior checkpoint artifact from this repository on main; treating this as the first run."
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > checkpoint.zip
+          echo "Fetched checkpoint artifact ${id}."
 
-  monitor:
-    name: AICR release identity + log consistency (Rekor v2)
-    needs: resolve-v2-shard
-    permissions:
-      contents: read  # checkout performed by the reusable workflow
-      issues: write   # file an issue on monitoring failure
-      id-token: write  # detect the calling repository and ref
-    uses: sigstore/rekor-monitor/.github/workflows/reusable_monitoring.yml@170374c6119eabdba290f6c8be1612b570b2d0f9  # main @ 2026-06-22 (no upstream releases/tags)
-    with:
-      file_issue: true
-      # Must exceed the hourly cron so the consistency checkpoint never expires
-      # between runs; wide enough to survive a brief scheduling pause.
-      artifact_retention_days: 30
-      # Rekor v2 shard resolved at run time from the signing config (see the
-      # resolve-v2-shard job). Selecting a v2 service switches the monitor to v2;
-      # it then auto-discovers the full shard set from TUF.
-      url: ${{ needs.resolve-v2-shard.outputs.url }}
-      config: |
-        monitoredValues:
-          certIdentities:
-            - certSubject: ^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*$
-              issuers:
-                - ^https://token\.actions\.githubusercontent\.com$
+      - name: Monitor Rekor v2 (consistency + identity)
+        run: |
+          set -euo pipefail
+          GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+            --file "${CHECKPOINT_FILE}" \
+            --restore-zip checkpoint.zip \
+            --cert-subject "${CERT_SUBJECT}" \
+            --cert-issuer "${CERT_ISSUER}"
+
+      - name: Persist checkpoint
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.CHECKPOINT_FILE }}
+          # Must exceed the hourly cadence so the cursor never expires between
+          # runs; wide enough to survive a brief scheduling pause.
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Open alert issue on failure
+        id: alert_issue
+        if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Reuse an already-open alert issue (dedup) and surface its URL so the
+          # Slack step can link to it. GitHub title search is phrase-based, so
+          # filter to an exact title match before picking one.
+          existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open \
+            --search "in:title \"${ALERT_TITLE}\"" --json title,url \
+            | jq -r --arg t "${ALERT_TITLE}" '[.[] | select(.title == $t)] | .[0].url // empty')"
+          if [ -n "${existing}" ]; then
+            echo "Alert issue already open: ${existing}"
+            echo "url=${existing}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "${MAINTAINERS_TEAM}: the Rekor v2 monitor failed on [run ${GITHUB_RUN_ID}](${run_url})."
+            echo
+            echo "This means a consistency break, a scan error, or an entry under"
+            echo "AICR's release signing identity that no release produced. Triage"
+            echo "the matched entry's log index and timestamp against known release"
+            echo "runs; an unrecognized entry should be treated as potential"
+            echo "OIDC/key compromise. See the run logs and the triage notes in the"
+            echo "workflow header (\`.github/workflows/rekor-monitor.yaml\`)."
+            echo
+            echo "This issue auto-closes on the next clean run; a persistent"
+            echo "failure is worth investigating."
+          } > alert-body.md
+          url="$(gh issue create --repo "${GITHUB_REPOSITORY}" \
+            --title "${ALERT_TITLE}" \
+            --label "area/security,theme/supply-chain" \
+            --body-file alert-body.md)"
+          echo "Opened alert issue: ${url}"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Post Slack alert on failure
+        if: ${{ failure() }}
+        env:
+          # Slack incoming-webhook path suffix; same secret the release and
+          # vuln-scan workflows use. Unset in forks, so this no-ops there.
+          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+          ISSUE_URL: ${{ steps.alert_issue.outputs.url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_SERVICE:-}" ]; then
+            echo "::warning::SLACK_SERVICE not set; skipping Slack notification"
+            exit 0
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # To ping a Slack usergroup, prepend "<!subteam^GROUP_ID> " below.
+          text=":rotating_light: *Rekor v2 monitor alert*: a consistency break, scan error,"
+          text="${text} or an entry under the AICR release identity that no release produced."
+          text="${text} Needs maintainer triage. <${run_url}|View run>"
+          if [ -n "${ISSUE_URL:-}" ]; then
+            text="${text} · <${ISSUE_URL}|tracking issue>"
+          fi
+          jq -n --arg t "${text}" '{text: $t}' > slack-payload.json
+          curl -sSf -X POST -H 'Content-type: application/json' \
+            --data @slack-payload.json \
+            "https://hooks.slack.com/services/${SLACK_SERVICE}"
+          echo "Posted Slack alert."
+
+      - name: Close alert issue on success
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Exact-title filter: title search is phrase-based, so never close an
+          # issue whose title merely contains the alert text.
+          gh issue list --repo "${GITHUB_REPOSITORY}" --state open \
+            --search "in:title \"${ALERT_TITLE}\"" --json number,title \
+            | jq -r --arg t "${ALERT_TITLE}" '.[] | select(.title == $t) | .number' \
+            | while read -r n; do
+                [ -n "$n" ] || continue
+                # Tolerate a per-issue close failure (transient API error, rate
+                # limit, already-closed race): it must not abort the loop or fail
+                # this step and flip a clean monitor run to "failed".
+                gh issue close "$n" --repo "${GITHUB_REPOSITORY}" \
+                  --comment "Rekor v2 monitor completed cleanly on run ${GITHUB_RUN_ID}; auto-closing." \
+                  || echo "::warning::failed to close alert issue #${n}"
+              done
