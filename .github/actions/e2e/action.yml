@@ -87,12 +87,12 @@ runs:
           done
           for phase in deployment performance conformance; do
             docker build -t "localhost:5001/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
-        FROM gcr.io/distroless/static-debian12:nonroot
+        FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
         COPY dist/validator/${phase} /${phase}
         COPY validators/${phase}/testdata /app/testdata
         COPY dist/validator/chainsaw /usr/local/bin/chainsaw
         WORKDIR /app
-        USER nonroot
+        USER nvs
         ENTRYPOINT ["/${phase}"]
         DOCKERFILE
             docker push "localhost:5001/aicr-validators/${phase}:latest"
