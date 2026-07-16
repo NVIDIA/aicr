@@ -511,14 +511,15 @@ func TestDaytimeAssignmentsNone(t *testing.T) {
 }
 
 // TestCommittedRegistryValid guards the actual checked-in registry: it must
-// parse, validate, and carry the two launch reservations. A bad data edit
-// fails here before it can break the broker workflows.
+// parse, validate, and carry the launch reservations plus the aws-gb200
+// bring-up row. A bad data edit fails here before it can break the broker
+// workflows.
 func TestCommittedRegistryValid(t *testing.T) {
 	reg, err := LoadRegistryFile(filepath.Join("..", "..", "infra", "uat", "reservations.yaml"))
 	if err != nil {
 		t.Fatalf("committed reservations.yaml invalid: %v", err)
 	}
-	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure}
+	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure, "aws-gb200": CloudAWS}
 	for name, cloud := range want {
 		res, err := reg.Lookup(name)
 		if err != nil {
@@ -569,6 +570,11 @@ func TestCommittedRegistryValid(t *testing.T) {
 		// acceptance run (29125390442); inference joins after a green
 		// manual intent=inference dispatch.
 		"azure-h100": {IntentTraining},
+		// aws-gb200 is OPTED OUT of the nightly batch during bring-up (explicit
+		// empty list). Locked here so an accidental edit to a bare
+		// `nightly-intents:` (which defaults to [training]) — provisioning real
+		// GB200 Capacity-Block capacity nightly — fails this guard instead.
+		"aws-gb200": {},
 	}
 	for name, want := range wantNightly {
 		res, lookupErr := reg.Lookup(name)
