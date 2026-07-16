@@ -92,7 +92,8 @@ jobs:
         env:
           GOFLAGS: -mod=vendor
           KO_DOCKER_REPO: ghcr.io/nvidia/aicrd
-          KO_DEFAULTBASEIMAGE: gcr.io/distroless/static:nonroot
+          # Base image inherited from .ko.yaml (nvcr.io/nvidia/distroless/static),
+          # same as the aicr build above.
         run: |
           set -euo pipefail
           ko build ./cmd/aicrd \

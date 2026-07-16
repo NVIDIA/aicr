@@ -172,16 +172,16 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/`):
 
 | Image | Base | Description |
 |-------|------|-------------|
-| `aicr` | `nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04` | CLI with CUDA runtime |
-| `aicrd` | `gcr.io/distroless/static:nonroot` | Minimal API server |
+| `aicr` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Pure-Go CLI/agent (driver-free GPU discovery) |
+| `aicrd` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Minimal API server |
 
 Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
 
 | Image | Base | Description |
 |-------|------|-------------|
-| `deployment` | `gcr.io/distroless/static-debian12:nonroot` | Deployment validator |
-| `performance` | `gcr.io/distroless/static-debian12:nonroot` | Performance validator |
-| `conformance` | `gcr.io/distroless/static-debian12:nonroot` | Conformance validator |
+| `deployment` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Deployment validator |
+| `performance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Performance validator |
+| `conformance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Conformance validator |
 | `aiperf-bench` | `python:3.12-slim` | AIPerf benchmark runner |
 
 Stable releases promote `vX.Y.Z` and `latest`; prereleases promote their

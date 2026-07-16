@@ -173,8 +173,9 @@ testing:
   gpu_operator_chart_version: 'v25.10.1'
   # Base image for the CI smoke-test snapshot-agent image. The agent binary is
   # static Go and detects GPUs driver-free via NFD/PCI, so it no longer needs a
-  # CUDA base / nvidia-smi. Matches ko's default static base for the aicr image.
-  snapshot_agent_base_image: 'cgr.dev/chainguard/static:latest'
+  # CUDA base / nvidia-smi. Matches the NVIDIA static distroless base used for
+  # the aicr image (see .ko.yaml).
+  snapshot_agent_base_image: 'nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69'
 
   # Component test harness configuration
   # Used by tools/component-test/ scripts to validate individual components
