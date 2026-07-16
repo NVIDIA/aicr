@@ -646,10 +646,6 @@ criteria(service=aks, accelerator=, intent=, os=, platform=kubeflow):
     outcome: error
     uncovered:
         - platform
-criteria(service=aks, accelerator=, intent=, os=, platform=slurm):
-    outcome: error
-    uncovered:
-        - platform
 criteria(service=aks, accelerator=, intent=, os=ubuntu, platform=):
     outcome: error
     uncovered:
@@ -660,11 +656,6 @@ criteria(service=aks, accelerator=, intent=, os=ubuntu, platform=dynamo):
         - os
         - platform
 criteria(service=aks, accelerator=, intent=, os=ubuntu, platform=kubeflow):
-    outcome: error
-    uncovered:
-        - os
-        - platform
-criteria(service=aks, accelerator=, intent=, os=ubuntu, platform=slurm):
     outcome: error
     uncovered:
         - os
@@ -690,20 +681,11 @@ criteria(service=aks, accelerator=, intent=training, os=, platform=kubeflow):
     outcome: error
     uncovered:
         - platform
-criteria(service=aks, accelerator=, intent=training, os=, platform=slurm):
-    outcome: error
-    uncovered:
-        - platform
 criteria(service=aks, accelerator=, intent=training, os=ubuntu, platform=):
     outcome: error
     uncovered:
         - os
 criteria(service=aks, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
-    outcome: error
-    uncovered:
-        - os
-        - platform
-criteria(service=aks, accelerator=, intent=training, os=ubuntu, platform=slurm):
     outcome: error
     uncovered:
         - os
@@ -743,10 +725,6 @@ criteria(service=aks, accelerator=h100, intent=, os=, platform=kubeflow):
     outcome: error
     uncovered:
         - platform
-criteria(service=aks, accelerator=h100, intent=, os=, platform=slurm):
-    outcome: error
-    uncovered:
-        - platform
 criteria(service=aks, accelerator=h100, intent=, os=ubuntu, platform=):
     outcome: error
     uncovered:
@@ -757,11 +735,6 @@ criteria(service=aks, accelerator=h100, intent=, os=ubuntu, platform=dynamo):
         - os
         - platform
 criteria(service=aks, accelerator=h100, intent=, os=ubuntu, platform=kubeflow):
-    outcome: error
-    uncovered:
-        - os
-        - platform
-criteria(service=aks, accelerator=h100, intent=, os=ubuntu, platform=slurm):
     outcome: error
     uncovered:
         - os
@@ -782,15 +755,9 @@ criteria(service=aks, accelerator=h100, intent=training, os=, platform=kubeflow)
     outcome: error
     uncovered:
         - platform
-criteria(service=aks, accelerator=h100, intent=training, os=, platform=slurm):
-    outcome: error
-    uncovered:
-        - platform
 criteria(service=aks, accelerator=h100, intent=training, os=ubuntu, platform=):
     outcome: success
 criteria(service=aks, accelerator=h100, intent=training, os=ubuntu, platform=kubeflow):
-    outcome: success
-criteria(service=aks, accelerator=h100, intent=training, os=ubuntu, platform=slurm):
     outcome: success
 criteria(service=bcm, accelerator=, intent=, os=, platform=):
     outcome: success
