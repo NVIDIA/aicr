@@ -487,10 +487,10 @@ test_recipe_from_snapshot() {
   # Test: Recipe from ConfigMap snapshot
   msg "--- Test: Recipe from snapshot (cm://...) ---"
   local snapshot_recipe="${recipe_dir}/from-snapshot.yaml"
-  echo -e "${DIM}  \$ aicr recipe --snapshot cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM} --intent training -o from-snapshot.yaml${NC}"
+  echo -e "${DIM}  \$ aicr recipe --snapshot cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM} --intent inference -o from-snapshot.yaml${NC}"
   if "${AICR_BIN}" recipe \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-    --intent training \
+    --intent inference \
     --output "$snapshot_recipe" 2>&1; then
     if [ -f "$snapshot_recipe" ] && grep -q "kind: RecipeResult" "$snapshot_recipe"; then
       # Show detected criteria
@@ -542,7 +542,7 @@ test_validate() {
   local recipe_file="${validate_dir}/recipe.yaml"
   "${AICR_BIN}" recipe \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-    --intent training \
+    --intent inference \
     --output "$recipe_file" 2>&1 || true
 
   if [ ! -f "$recipe_file" ]; then
