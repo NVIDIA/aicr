@@ -41,6 +41,20 @@ const (
 // criteriaAny is the wildcard value for any criteria dimension.
 const criteriaAny = "any"
 
+// Coverage dimension names, matching pkg/recipe's coverageDimensions (see
+// pkg/recipe/coverage.go) name-for-name. Used to track which of the 5
+// dimensions subject to the criteria-coverage post-condition (issue #1542)
+// were explicitly user-stated (config or CLI flag) vs snapshot-derived, so a
+// coverage failure limited to snapshot-derived dimensions can be relaxed and
+// retried once (see relaxSnapshotDerivedCoverage in query.go).
+const (
+	coverageDimService     = "service"
+	coverageDimAccelerator = "accelerator"
+	coverageDimIntent      = "intent"
+	coverageDimOS          = "os"
+	coverageDimPlatform    = "platform"
+)
+
 // Keyless-signing / OCI-push flag names shared by `validate`, `bundle`,
 // and `evidence publish`. Extracted so the same literal is declared once
 // (goconst flags a string repeated ≥3 times across the package) and the
