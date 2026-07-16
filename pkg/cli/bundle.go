@@ -187,7 +187,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		serial:                    cmd.Bool("serial"),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
-		signingKey:                cmd.String(flagSigningKey),
+		signingKey:                stringFlagOrConfig(cmd, flagSigningKey, resolved.SigningKey),
 		oidcDeviceFlow:            boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
 		assumeYes:                 cmd.Bool(flagAssumeYes),
 		fulcioURL:                 stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
@@ -435,14 +435,27 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 // and config) rather than cmd.IsSet alone, so a config-sourced keyless option
 // cannot bypass the check and then be silently ignored by the KMS path.
 func validateSigningKeyExclusivity(cmd *cli.Command, opts *bundleCmdOptions) error {
-	// A set-but-empty --signing-key would otherwise fall through to keyless
-	// resolution silently; reject it so the misconfiguration fails fast.
-	if cmd.IsSet(flagSigningKey) && strings.TrimSpace(opts.signingKey) == "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "--"+flagSigningKey+" must not be empty")
-	}
-	if opts.signingKey == "" {
+	// A signing key that is present but blank must not reach the KMS resolver:
+	// it selects the KMS path (non-empty opts.signingKey) yet fails late at
+	// sign time with an opaque key-URI error. Reject it up front, naming the
+	// source the caller actually used. An explicit blank --signing-key flag is
+	// caught via cmd.IsSet; a whitespace-only config value (cmd.IsSet is false)
+	// is caught by the non-empty-but-blank check.
+	trimmed := strings.TrimSpace(opts.signingKey)
+	if trimmed == "" {
+		if cmd.IsSet(flagSigningKey) {
+			return errors.New(errors.ErrCodeInvalidRequest, "--"+flagSigningKey+" must not be empty")
+		}
+		if opts.signingKey != "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"spec.bundle.attestation.signingKey must not be blank")
+		}
 		return nil // keyless mode; no exclusivity to enforce
 	}
+	// Normalize the confirmed-non-blank key so surrounding whitespace (e.g. from
+	// a YAML block-scalar config value) does not reach the KMS URI parser and
+	// fail late at sign time.
+	opts.signingKey = trimmed
 	conflicts := []struct {
 		name   string
 		active bool

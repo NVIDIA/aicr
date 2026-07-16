@@ -210,6 +210,15 @@ type AttestationSpec struct {
 	// log. Empty leaves the public defaults in place. See issue #408.
 	FulcioURL string `yaml:"fulcioURL,omitempty" json:"fulcioURL,omitempty"`
 	RekorURL  string `yaml:"rekorURL,omitempty" json:"rekorURL,omitempty"`
+
+	// SigningKey selects KMS-backed (key-based) signing instead of keyless
+	// OIDC. A non-empty value is a durable, non-secret KMS key reference
+	// (awskms:// | gcpkms:// | azurekms:// | hashivault://) — analogous to
+	// FulcioURL/RekorURL, it belongs in version-controlled config. Mutually
+	// exclusive with the keyless-only inputs (IdentityToken, OIDCDeviceFlow,
+	// FulcioURL). Mirrors the --signing-key CLI flag; the flag wins when both
+	// are set. See issue #407.
+	SigningKey string `yaml:"signingKey,omitempty" json:"signingKey,omitempty"`
 }
 
 // RegistrySpec captures OCI-registry transport options for bundle push.
