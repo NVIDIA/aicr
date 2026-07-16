@@ -785,11 +785,19 @@ github.com/sigstore/rekor/pkg/types/intoto
 github.com/sigstore/rekor/pkg/types/intoto/v0.0.2
 github.com/sigstore/rekor/pkg/util
 github.com/sigstore/rekor/pkg/verify
+# github.com/sigstore/rekor-monitor v0.0.0-20260622135518-170374c6119e
+## explicit; go 1.25.8
+github.com/sigstore/rekor-monitor/pkg/identity
+github.com/sigstore/rekor-monitor/pkg/rekor/v2
+github.com/sigstore/rekor-monitor/pkg/tiles
+github.com/sigstore/rekor-monitor/pkg/util
+github.com/sigstore/rekor-monitor/pkg/util/file
 # github.com/sigstore/rekor-tiles/v2 v2.3.0
 ## explicit; go 1.25.8
 github.com/sigstore/rekor-tiles/v2/internal/algorithmregistry
 github.com/sigstore/rekor-tiles/v2/internal/safeint
 github.com/sigstore/rekor-tiles/v2/pkg/client
+github.com/sigstore/rekor-tiles/v2/pkg/client/read
 github.com/sigstore/rekor-tiles/v2/pkg/client/write
 github.com/sigstore/rekor-tiles/v2/pkg/generated/protobuf
 github.com/sigstore/rekor-tiles/v2/pkg/note
@@ -881,6 +889,13 @@ github.com/transparency-dev/merkle
 github.com/transparency-dev/merkle/compact
 github.com/transparency-dev/merkle/proof
 github.com/transparency-dev/merkle/rfc6962
+# github.com/transparency-dev/tessera v1.0.2
+## explicit; go 1.24.0
+github.com/transparency-dev/tessera/api
+github.com/transparency-dev/tessera/api/layout
+github.com/transparency-dev/tessera/client
+github.com/transparency-dev/tessera/internal/fetcher
+github.com/transparency-dev/tessera/internal/otel
 # github.com/urfave/cli/v3 v3.10.1
 ## explicit; go 1.22
 github.com/urfave/cli/v3
