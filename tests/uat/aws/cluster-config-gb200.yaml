@@ -18,9 +18,11 @@
 # all forced by GB200 hardware and its Capacity Block:
 #   1. CROSS-ACCOUNT — the Capacity Block is held in tenancy 897722687756
 #      (dgx-cloud-runai-prod-22), not the standard UAT account. The AWS
-#      pipeline assumes the OIDC role in .deployment.tenancy below (which must
-#      match reservations.yaml `account`). Prereq: apply infra/uat-aws-account
-#      in 897722687756 first (GitHub OIDC provider + github-actions-role-aicr).
+#      pipeline assumes the OIDC role in .deployment.tenancy below — this field
+#      is the single source of truth for the account (the reservation carries no
+#      account field; the pipeline derives AWS_ACCOUNT_ID from here). Prereq:
+#      apply infra/uat-aws-account in 897722687756 first (GitHub OIDC provider
+#      + github-actions-role-aicr).
 #   2. LOCAL ZONE — p6e-gb200 capacity lives in us-east-1-dfw-2a (parent AZ
 #      us-east-1d). The EKS control plane cannot live in a Local Zone, so the
 #      GPU worker + pod subnets are in the Local Zone while control-plane /
