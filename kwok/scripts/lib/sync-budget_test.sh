@@ -92,7 +92,7 @@ job_timeout_sync() {
 # reusable workflow (#1172), which owns the only "test" job / job_timeout_minutes
 # wiring left to check.
 test_run_out=$(job_timeout_sync "${REPO_ROOT}/.github/workflows/kwok-test-run.yaml")
-check "kwok-test-run-job-timeout-in-sync" 0 "test:jtm=18,tm=18" \
+check "kwok-test-run-job-timeout-in-sync" 0 "test:jtm=20,tm=20" \
     0 "$(echo "${test_run_out}" | grep '^test:')"
 
 # 10-11. Margin-floor guard in the "Derive sync-gate deadline" step
