@@ -15,9 +15,12 @@
 package snapshotter
 
 import (
+	stderrors "errors"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -62,6 +65,26 @@ func TestAgentConfig_Defaults(t *testing.T) {
 	}
 	if cfg.Timeout != 0 {
 		t.Errorf("AgentConfig.Timeout should default to 0, got %v", cfg.Timeout)
+	}
+}
+
+func TestGetKubeClientPreservesKubeconfigErrorCode(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "invalid-kubeconfig")
+	if err := os.WriteFile(kubeconfig, []byte("invalid yaml content"), 0o600); err != nil {
+		t.Fatalf("failed to write invalid kubeconfig: %v", err)
+	}
+
+	_, err := getKubeClient(kubeconfig)
+	if err == nil {
+		t.Fatal("getKubeClient() error = nil, want ErrCodeInvalidRequest")
+	}
+
+	var structuredErr *errors.StructuredError
+	if !stderrors.As(err, &structuredErr) {
+		t.Fatalf("getKubeClient() error = %v, want *errors.StructuredError", err)
+	}
+	if structuredErr.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("getKubeClient() error code = %s, want %s", structuredErr.Code, errors.ErrCodeInvalidRequest)
 	}
 }
 
