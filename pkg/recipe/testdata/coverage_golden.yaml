@@ -1,0 +1,1545 @@
+criteria(service=, accelerator=, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=, intent=, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=, intent=, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=, intent=, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=, intent=, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=, intent=, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=, intent=, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=, intent=, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=, intent=inference, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=, intent=inference, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=, intent=inference, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=, intent=inference, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=, intent=training, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=, intent=training, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=, intent=training, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=, intent=training, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=, intent=training, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=a100, intent=, os=, platform=):
+    outcome: success
+criteria(service=, accelerator=a100, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=a100, intent=, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=a100, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=a100, intent=, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=a100, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=a100, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=a100, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=a100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=a100, intent=training, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=a100, intent=training, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=a100, intent=training, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=a100, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=a100, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=b200, intent=, os=, platform=):
+    outcome: success
+criteria(service=, accelerator=b200, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=b200, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=b200, intent=, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=b200, intent=, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=b200, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=b200, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=b200, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=b200, intent=inference, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=b200, intent=inference, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=b200, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=b200, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=b200, intent=training, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=b200, intent=training, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=gb200, intent=, os=, platform=):
+    outcome: success
+criteria(service=, accelerator=gb200, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=gb200, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=gb200, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=gb200, intent=, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=gb200, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=gb200, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=gb200, intent=inference, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=gb200, intent=inference, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=gb200, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=gb200, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=gb200, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=gb200, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=gb200, intent=training, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=gb200, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=gb200, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=gb200, intent=training, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=, os=, platform=):
+    outcome: success
+criteria(service=, accelerator=h100, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=h100, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=h100, intent=, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=h100, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=h100, intent=, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=h100, intent=, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=h100, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=h100, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=h100, intent=inference, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=h100, intent=inference, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=h100, intent=inference, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=inference, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=h100, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=inference, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=h100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=h100, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=h100, intent=training, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=h100, intent=training, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=training, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=h100, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=h100, intent=training, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=h200, intent=, os=, platform=):
+    outcome: success
+criteria(service=, accelerator=h200, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=h200, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=l40s, intent=, os=, platform=):
+    outcome: success
+criteria(service=, accelerator=l40s, intent=, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=l40s, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=l40s, intent=inference, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=l40s, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=l40s, intent=training, os=ol, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=rtx-pro-6000, intent=, os=, platform=):
+    outcome: success
+criteria(service=, accelerator=rtx-pro-6000, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=rtx-pro-6000, intent=, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+criteria(service=, accelerator=rtx-pro-6000, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=, accelerator=rtx-pro-6000, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+criteria(service=aks, accelerator=, intent=, os=, platform=):
+    outcome: success
+criteria(service=aks, accelerator=, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=aks, accelerator=, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=, intent=, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=aks, accelerator=, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=, intent=inference, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=aks, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=, intent=training, os=, platform=):
+    outcome: success
+criteria(service=aks, accelerator=, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=aks, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=, intent=training, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=a100, intent=, os=, platform=):
+    outcome: success
+criteria(service=aks, accelerator=a100, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=a100, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=aks, accelerator=a100, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=a100, intent=training, os=, platform=):
+    outcome: success
+criteria(service=aks, accelerator=a100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=a100, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=aks, accelerator=a100, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: success
+criteria(service=aks, accelerator=h100, intent=, os=, platform=):
+    outcome: success
+criteria(service=aks, accelerator=h100, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=h100, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=h100, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=h100, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=aks, accelerator=h100, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=h100, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=h100, intent=, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=aks, accelerator=h100, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=aks, accelerator=h100, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=h100, intent=inference, os=ubuntu, platform=):
+    outcome: success
+criteria(service=aks, accelerator=h100, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: success
+criteria(service=aks, accelerator=h100, intent=training, os=, platform=):
+    outcome: success
+criteria(service=aks, accelerator=h100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=h100, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=aks, accelerator=h100, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=aks, accelerator=h100, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: success
+criteria(service=aks, accelerator=h100, intent=training, os=ubuntu, platform=slurm):
+    outcome: success
+criteria(service=bcm, accelerator=, intent=, os=, platform=):
+    outcome: success
+criteria(service=bcm, accelerator=, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=bcm, accelerator=, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=bcm, accelerator=, intent=training, os=, platform=):
+    outcome: success
+criteria(service=bcm, accelerator=, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=bcm, accelerator=h100, intent=, os=, platform=):
+    outcome: success
+criteria(service=bcm, accelerator=h100, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=bcm, accelerator=h100, intent=training, os=, platform=):
+    outcome: success
+criteria(service=bcm, accelerator=h100, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=eks, accelerator=, intent=, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=, intent=, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=, intent=inference, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=, intent=inference, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=eks, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=, intent=inference, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=, intent=training, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=eks, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=, intent=training, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=a100, intent=, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=a100, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=a100, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=eks, accelerator=a100, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=a100, intent=training, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=a100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=a100, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=eks, accelerator=a100, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: success
+criteria(service=eks, accelerator=gb200, intent=, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=gb200, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=gb200, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=gb200, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=gb200, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=eks, accelerator=gb200, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=gb200, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=gb200, intent=, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=gb200, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=gb200, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=gb200, intent=inference, os=ubuntu, platform=):
+    outcome: success
+criteria(service=eks, accelerator=gb200, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: success
+criteria(service=eks, accelerator=gb200, intent=training, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=gb200, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=gb200, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=gb200, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=eks, accelerator=gb200, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: success
+criteria(service=eks, accelerator=gb200, intent=training, os=ubuntu, platform=slurm):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=h100, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=h100, intent=, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=h100, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=h100, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=eks, accelerator=h100, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=h100, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=h100, intent=, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=h100, intent=, os=ubuntu, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=h100, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=h100, intent=inference, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=h100, intent=inference, os=ubuntu, platform=):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=inference, os=ubuntu, platform=nim):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=training, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=h100, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=h100, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=training, os=ubuntu, platform=slurm):
+    outcome: success
+criteria(service=eks, accelerator=h200, intent=, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=h200, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=h200, intent=training, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=nim):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=, platform=nim):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=):
+    outcome: success
+criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: success
+criteria(service=eks, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=nim):
+    outcome: success
+criteria(service=gke, accelerator=, intent=, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=, os=, platform=slurm):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=, intent=, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=, intent=, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=, intent=inference, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=inference, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=inference, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=, intent=inference, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=, intent=training, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=training, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=training, os=, platform=slurm):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=, intent=training, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=, intent=training, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=, intent=training, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=a100, intent=, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=a100, intent=, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=a100, intent=, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=a100, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=a100, intent=training, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=a100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=a100, intent=training, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=a100, intent=training, os=cos, platform=kubeflow):
+    outcome: success
+criteria(service=gke, accelerator=b200, intent=, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=b200, intent=, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=b200, intent=, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=b200, intent=, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=b200, intent=, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=b200, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=b200, intent=inference, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=b200, intent=inference, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=b200, intent=inference, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=b200, intent=inference, os=cos, platform=dynamo):
+    outcome: success
+criteria(service=gke, accelerator=b200, intent=training, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=b200, intent=training, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=b200, intent=training, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=b200, intent=training, os=cos, platform=kubeflow):
+    outcome: success
+criteria(service=gke, accelerator=h100, intent=, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=, os=, platform=slurm):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=h100, intent=, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=h100, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=h100, intent=, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=gke, accelerator=h100, intent=inference, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=inference, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=inference, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=h100, intent=inference, os=cos, platform=dynamo):
+    outcome: success
+criteria(service=gke, accelerator=h100, intent=training, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=training, os=, platform=slurm):
+    outcome: error
+    requiresOS: true
+criteria(service=gke, accelerator=h100, intent=training, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=h100, intent=training, os=cos, platform=kubeflow):
+    outcome: success
+criteria(service=gke, accelerator=h100, intent=training, os=cos, platform=slurm):
+    outcome: success
+criteria(service=kind, accelerator=, intent=, os=, platform=):
+    outcome: success
+criteria(service=kind, accelerator=, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=kind, accelerator=, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=kind, accelerator=, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=kind, accelerator=, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=kind, accelerator=, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=kind, accelerator=, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+criteria(service=kind, accelerator=, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=kind, accelerator=, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+criteria(service=kind, accelerator=h100, intent=, os=, platform=):
+    outcome: success
+criteria(service=kind, accelerator=h100, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=kind, accelerator=h100, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=kind, accelerator=h100, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+criteria(service=kind, accelerator=h100, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=kind, accelerator=h100, intent=inference, os=, platform=dynamo):
+    outcome: success
+criteria(service=kind, accelerator=h100, intent=training, os=, platform=):
+    outcome: success
+criteria(service=kind, accelerator=h100, intent=training, os=, platform=kubeflow):
+    outcome: success
+criteria(service=kind, accelerator=h100, intent=training, os=, platform=slurm):
+    outcome: success
+criteria(service=lke, accelerator=, intent=, os=, platform=):
+    outcome: success
+criteria(service=lke, accelerator=, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=lke, accelerator=, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=lke, accelerator=, intent=inference, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=lke, accelerator=, intent=training, os=, platform=):
+    outcome: success
+criteria(service=lke, accelerator=, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=lke, accelerator=rtx-pro-6000, intent=, os=, platform=):
+    outcome: success
+criteria(service=lke, accelerator=rtx-pro-6000, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+criteria(service=lke, accelerator=rtx-pro-6000, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=lke, accelerator=rtx-pro-6000, intent=inference, os=ubuntu, platform=):
+    outcome: success
+criteria(service=lke, accelerator=rtx-pro-6000, intent=training, os=, platform=):
+    outcome: success
+criteria(service=lke, accelerator=rtx-pro-6000, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=ocp, accelerator=, intent=, os=, platform=):
+    outcome: success
+criteria(service=ocp, accelerator=, intent=inference, os=, platform=):
+    outcome: success
+criteria(service=ocp, accelerator=, intent=training, os=, platform=):
+    outcome: success
+criteria(service=oke, accelerator=, intent=, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=, intent=, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=, intent=, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=, intent=, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - service
+        - os
+criteria(service=oke, accelerator=, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - service
+        - os
+        - platform
+criteria(service=oke, accelerator=, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - service
+        - os
+        - platform
+criteria(service=oke, accelerator=, intent=inference, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=, intent=inference, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=, intent=inference, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=, intent=inference, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+        - os
+criteria(service=oke, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+        - os
+        - platform
+criteria(service=oke, accelerator=, intent=training, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=, intent=training, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=, intent=training, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+        - os
+criteria(service=oke, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+        - os
+        - platform
+criteria(service=oke, accelerator=a100, intent=, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=a100, intent=, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=a100, intent=, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=a100, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - service
+        - os
+criteria(service=oke, accelerator=a100, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - service
+        - os
+        - platform
+criteria(service=oke, accelerator=a100, intent=training, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=a100, intent=training, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=a100, intent=training, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=a100, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=oke, accelerator=a100, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: success
+criteria(service=oke, accelerator=gb200, intent=, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=gb200, intent=, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=gb200, intent=, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=gb200, intent=, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=gb200, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - service
+        - os
+criteria(service=oke, accelerator=gb200, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - service
+        - os
+        - platform
+criteria(service=oke, accelerator=gb200, intent=, os=ubuntu, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - service
+        - os
+        - platform
+criteria(service=oke, accelerator=gb200, intent=inference, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=gb200, intent=inference, os=, platform=dynamo):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=gb200, intent=inference, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=gb200, intent=inference, os=ubuntu, platform=):
+    outcome: success
+criteria(service=oke, accelerator=gb200, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: success
+criteria(service=oke, accelerator=gb200, intent=training, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=gb200, intent=training, os=, platform=kubeflow):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=gb200, intent=training, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=gb200, intent=training, os=ubuntu, platform=):
+    outcome: success
+criteria(service=oke, accelerator=gb200, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: success
+criteria(service=oke, accelerator=l40s, intent=, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=l40s, intent=, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=l40s, intent=inference, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=l40s, intent=inference, os=ol, platform=):
+    outcome: success
+criteria(service=oke, accelerator=l40s, intent=training, os=, platform=):
+    outcome: error
+    requiresOS: true
+criteria(service=oke, accelerator=l40s, intent=training, os=ol, platform=):
+    outcome: success

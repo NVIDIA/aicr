@@ -129,8 +129,12 @@ func TestRecipeCmd_ConfigFlag_FlagOverride(t *testing.T) {
 	cfgPath := writeYAML(t, "config.yaml", testRecipeConfig)
 	root := newRootCmd()
 
+	// aks (like eks) is covered by accelerator=h100/intent=training/os=ubuntu;
+	// gke instead requires os=cos, so overriding to gke here would trip the
+	// criteria-coverage post-condition on an incoherent os/service pairing
+	// rather than exercise the flag-override behavior this test targets.
 	err := root.Run(context.Background(), []string{
-		name, "recipe", "--config", cfgPath, "--service", "gke", "-o", "-",
+		name, "recipe", "--config", cfgPath, "--service", "aks", "-o", "-",
 	})
 	if err != nil {
 		t.Fatalf("recipe with --config + flag override failed: %v", err)
