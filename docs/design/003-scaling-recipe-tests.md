@@ -162,7 +162,7 @@ and a summary. All three tiers call the single shared **`kwok-test-run.yaml`**
 reusable workflow. Tier 3 additionally fans across batches to stay under
 GitHub's 256-configuration cap:
 
-```
+```text
 discover
 ├── tier1_pairs: [{recipe,deployer}]                 # generic overlays × all deployers
 ├── tier2_pairs: [{recipe, deployer:"helm"}]         # diff-affected overlays, helm-only

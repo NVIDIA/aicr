@@ -13,13 +13,17 @@
 # limitations under the License.
 
 # Reusable KWOK test runner shared by all three tiers (kwok-recipes.yaml).
-# Takes a JSON array of {recipe, deployer} pairs and runs each as a matrix job.
+# Owns the single copy of the checkout -> load-versions -> kwok-test step
+# block; the deployer list itself lives once in the discover job's bash and
+# arrives here already expanded into {recipe, deployer} pairs (#1172).
 #
-# Tier 1 passes a flat pairs list (well under 256 — no batching needed).
-# Tier 2 passes a flat pairs list (helm-only for diff-affected recipes).
-# Tier 3 passes one batch at a time from the discover job's tier3_batches output;
-#   the caller (test-tier3 in kwok-recipes.yaml) shards across batches to keep
-#   every shard's matrix under GitHub's 256-configuration cap.
+# Tier 1 passes a flat pairs list (generic overlays x full deployer set,
+#   well under 256 -- no batching needed).
+# Tier 2 passes a flat pairs list (helm-only, by deliberate policy -- see
+#   ADR-003 "Tier 2 deployer coverage").
+# Tier 3 passes one batch at a time from the discover job's tier3_batches
+#   output; the caller (test-tier3 in kwok-recipes.yaml) shards across
+#   batches to keep every shard's matrix under GitHub's 256-configuration cap.
 name: KWOK Test Run
 
 on:
@@ -68,3 +72,4 @@ jobs:
           chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
           chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
           kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
+          job_timeout_minutes: '20'
