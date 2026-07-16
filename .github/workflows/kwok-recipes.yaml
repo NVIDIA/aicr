@@ -291,15 +291,16 @@ jobs:
           echo "tier2_pairs=${tier2_pairs}"     >> "$GITHUB_OUTPUT"
           echo "tier3_batches=${tier3_batches}" >> "$GITHUB_OUTPUT"
 
-          tier1_count=$(echo "$tier1_pairs" | jq 'length')
+                   tier1_count=$(echo "$tier1_pairs" | jq 'length')
+          if (( tier1_count > 200 )); then
+            echo "::warning::Tier 1 contains ${tier1_count} pairs and is approaching GitHub's 256-configuration matrix limit"
+          fi
           tier2_count=$(echo "$tier2_pairs" | jq 'length')
           tier3_pairs=$(echo "$tier3_batches" | jq '[.[].pairs[]] | length')
           tier3_batch_count=$(echo "$tier3_batches" | jq 'length')
           echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s) × $(echo "$deployers" | jq 'length') deployer(s) = ${tier1_count} pair(s)"
           echo "Tier 2 (diff-aware):   $(echo "$tier2" | jq 'length') recipe(s) × 1 deployer (helm) = ${tier2_count} pair(s)"
           echo "Tier 3 (full matrix):  $(echo "$tier3" | jq 'length') recipe(s) × $(echo "$deployers" | jq 'length') deployer(s) = ${tier3_pairs} pair(s) in ${tier3_batch_count} batch(es)"
-
-  # ── Tier 1: PR gate — generic overlays (PR + push, skip on schedule) ──
   # Thin caller of the shared kwok-test-run.yaml reusable workflow (#1172).
   # tier1_pairs is well under 256 entries, so it's passed in a single call —
   # no batching needed.
