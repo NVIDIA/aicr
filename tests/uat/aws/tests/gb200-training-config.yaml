@@ -1,0 +1,118 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AICRConfig consumed by `aicr {snapshot,recipe,bundle,validate} --config`.
+#
+# Drives the EKS GB200 training UAT against the cluster provisioned by
+# `../cluster-config-gb200.yaml` (reservation aws-gb200). Mirrors the H100
+# training config; the taint/label scheme is identical (the actuator applies
+# the same dedicated=worker-workload / dedicated=system-workload taints), so
+# only the accelerator and the evidence repo differ.
+#
+# CRITICAL — `spec.recipe.criteria.platform: kubeflow` is load-bearing for the
+# performance phase. The NCCL bandwidth validators launch via Kubeflow Trainer;
+# WITHOUT the kubeflow platform the recipe never deploys a (tolerated) trainer,
+# so the validator falls back to self-installing the UPSTREAM trainer manifests
+# — which carry no tolerations and cannot schedule on this all-tainted cluster
+# (the actuator taints BOTH the system and GPU nodegroups) — and both NCCL
+# variants fail with "controller not ready" / "no endpoints available". The
+# platform trainer is deployed with tolerate-all, so keep this set.
+#
+# `spec.validate.evidence.attestation.push` carries the stable per-recipe repo
+# only; `../run` appends a `:run-${RUN_ID}` tag at runtime so each UAT
+# execution publishes a uniquely traceable, digest-addressed point under one
+# stable repo. Consumers pin immutably via `@sha256:…`.
+kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: eks-gb200-training-uat
+
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      nodeSelector:
+        nodeGroup: gpu-worker
+      tolerations:
+        - dedicated=worker-workload:NoSchedule
+        - dedicated=worker-workload:NoExecute
+        - nvidia.com/gpu=present:NoSchedule
+        # The GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule
+        # (cluster-config-gb200.yaml) until NodeWright finishes tuning + reboot.
+        # The snapshot runs pre-deployment, so this taint is still present and
+        # the agent — pinned to the GPU pool above — must tolerate it to schedule.
+        - skyhook.nvidia.com=runtime-required:NoSchedule
+
+  recipe:
+    criteria:
+      service: eks
+      accelerator: gb200
+      os: ubuntu
+      intent: training
+      platform: kubeflow
+    output:
+      path: recipe.yaml
+
+  bundle:
+    input:
+      recipe: recipe.yaml
+    output:
+      target: ./bundle
+    deployment:
+      deployer: helmfile
+    scheduling:
+      acceleratedNodeSelector:
+        nodeGroup: gpu-worker
+      acceleratedNodeTolerations:
+        - dedicated=worker-workload:NoSchedule
+        - dedicated=worker-workload:NoExecute
+        - nvidia.com/gpu=present:NoSchedule
+      systemNodeSelector:
+        nodeGroup: system-worker
+      systemNodeTolerations:
+        - dedicated=system-workload:NoSchedule
+        - dedicated=system-workload:NoExecute
+      # Consume the cluster's default StorageClass rather than hardcoding a
+      # name. The aws-ebs-csi-driver component provisions a gp3-backed default
+      # named "ebs-csi-default-sc" (annotated is-default-class=true), so an
+      # empty value binds PVCs to it automatically.
+      storageClass: ""
+
+  validate:
+    execution:
+      # The deployment phase is the readiness barrier (gpu-operator ClusterPolicy
+      # reaches state=ready, the DRA kubelet-plugin DaemonSet rolls out, nodewright
+      # node tuning completes). failFast stops the run if that phase fails, so the
+      # conformance/performance phases are not evaluated against a not-yet-converged
+      # cluster. The `../run` readiness gate gives the operator-driven stack time to
+      # converge before validate, so on a healthy cluster all phases still run.
+      failFast: true
+    input:
+      recipe: recipe.yaml
+      snapshot: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      tolerations:
+        - dedicated=worker-workload:NoSchedule
+        - dedicated=worker-workload:NoExecute
+        - nvidia.com/gpu=present:NoSchedule
+    evidence:
+      attestation:
+        # Setting `out` enables emit. The push target below is the stable
+        # per-recipe repo; ../run appends a `:run-${RUN_ID}` tag for per-run
+        # isolation. Consumers pin immutably via the artifact digest.
+        out: ./evidence
+        push: ghcr.io/nvidia/aicr-evidence/gb200-eks-ubuntu-training-kubeflow

@@ -33,7 +33,7 @@ on:
         type: string
         default: ''
       intent:
-        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml).'
+        description: 'Recipe intent — selects the per-intent test config (<accelerator>-<intent>-config.yaml).'
         type: string
         default: training
       lifecycle:
@@ -48,6 +48,10 @@ on:
         description: 'Directory holding the AICRConfig test files (from infra/uat/reservations.yaml).'
         type: string
         required: true
+      accelerator:
+        description: 'GPU accelerator family (from the reservation); selects the test config <accelerator>-<intent>-config.yaml.'
+        type: string
+        default: h100
       skip_delete:
         description: 'Skip cluster teardown (manual runs only; the nightly batch always deletes).'
         type: boolean
@@ -90,7 +94,15 @@ jobs:
       # the ingest-evidence job below. Empty when no bundle was produced.
       bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
     env:
-      AWS_ACCOUNT_ID: "615299774277"
+      # AWS_ACCOUNT_ID (the tenancy the OIDC role is assumed into, and where the
+      # cluster + Terraform state live) is NOT set here and is NOT a caller
+      # input: it is the single-source-of-truth `.deployment.tenancy` from the
+      # cluster-config, exported to $GITHUB_ENV by the "Validate inputs" step
+      # below. Deriving it — rather than passing it in — makes it impossible to
+      # assume role in one account while provisioning/state land in another
+      # (which a separate `account` input could silently do). A cross-account
+      # reservation (e.g. a GB200 Capacity Block in a separate tenancy) is
+      # selected purely by its cluster-config's tenancy field.
       AWS_REGION: "us-east-1"
       GITHUB_ACTIONS_ROLE_NAME: "github-actions-role-aicr"
       # Cluster name (EKS actuator derives it from .deployment.id). The nightly
@@ -104,9 +116,10 @@ jobs:
         && format('aicr-uat-day-{0}', inputs.reservation)
         || format('aicr-uat-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
-      # DC2 selects the AICRConfig by intent; both intents drive the same
+      # The AICRConfig is selected by accelerator + intent
+      # (<accelerator>-<intent>-config.yaml); both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
-      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/${{ inputs.accelerator }}-${{ inputs.intent }}-config.yaml
       # v0.4.27 — required for node-group taints in the cluster-config schema
       # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
       # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
@@ -115,6 +128,16 @@ jobs:
       EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
+      # Target platform(s) for the main-cell image builds (snapshot-agent + the
+      # validators). h100 GPU workers (p5.48xlarge) are amd64; GB200 GPU workers
+      # (p6e-gb200.36xlarge) are Grace/arm64, and the agent + GPU-scheduled
+      # validators are pinned to that pool — so an amd64-only image cannot start
+      # there. GB200 therefore builds a multi-arch (amd64+arm64) manifest: amd64
+      # still covers the m7i system pool, arm64 covers the GPU pool. h100 stays
+      # single-arch so the common nightly path skips the slow QEMU arm64 cross
+      # build. Release cells are unaffected (they pull the already-multi-arch
+      # released images). Mirrors the release build's linux/amd64,linux/arm64.
+      BUILD_PLATFORMS: ${{ inputs.accelerator == 'gb200' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
       # Pin validator-image resolution for MAIN cells to this run's freshly
       # built+pushed validators (the `Build and push validator images` step
       # tags them `:uat-<run_id>`), mirroring how AICR_IMAGE pins the agent — so
@@ -152,10 +175,32 @@ jobs:
             nightly|daytime-up|daytime-down) ;;
             *) echo "::error::unknown lifecycle '${LIFECYCLE}' (want nightly|daytime-up|daytime-down)"; exit 1 ;;
           esac
-          if [[ ! -f "${TEST_CONFIG}" ]]; then
+          # Derive + export the account FIRST, before any lifecycle-specific
+          # gate below can exit. The account the OIDC role is assumed into
+          # (AWS_ACCOUNT_ID) is the cluster-config's .deployment.tenancy — the
+          # single source of truth for which tenancy this run provisions + keeps
+          # state in. Deriving it here (rather than accepting it as an input)
+          # means the role can never be assumed into a different account than
+          # the one being provisioned; a cross-account reservation (e.g. a GB200
+          # Capacity Block in a separate tenancy) is selected purely by its
+          # cluster-config. Exporting it up front is load-bearing for teardown:
+          # daytime-down re-authenticates and builds the role ARN from
+          # AWS_ACCOUNT_ID, so a later early-exit here must not skip this — else
+          # teardown cannot assume the role and the cluster + Capacity Block
+          # leak. Uses the runner-preinstalled yq (Install tools runs later).
+          TENANCY=$(yq eval '.deployment.tenancy' "${CLUSTER_CONFIG}")
+          if [[ -z "${TENANCY}" || "${TENANCY}" == "null" ]]; then
+            echo "::error::${CLUSTER_CONFIG} has no .deployment.tenancy"; exit 1
+          fi
+          echo "AWS_ACCOUNT_ID=${TENANCY}" >> "${GITHUB_ENV}"
+          # The test config only matters for the run phases (nightly / daytime-up
+          # provision+deploy). daytime-down just tears the held cluster down and
+          # never reads it, so skip the existence check there — a missing sibling
+          # config must not block teardown and strand the Capacity Block.
+          if [[ "${LIFECYCLE}" != "daytime-down" && ! -f "${TEST_CONFIG}" ]]; then
             echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
           fi
-          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID}"
+          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID} account=${TENANCY}"
 
       # Versions
       - name: Load versions
@@ -227,6 +272,18 @@ jobs:
       - name: Authenticate to GHCR
         uses: ./.github/actions/ghcr-login
 
+      # QEMU registers binfmt handlers so the amd64 runner can build the arm64
+      # layer of a GB200 multi-arch image. Only needed when BUILD_PLATFORMS
+      # includes arm64 (GB200); h100 builds native amd64 and skips it, so the
+      # common nightly path pays no emulation cost. buildx (below) is always set
+      # up because the multi-platform build path uses `buildx build --push`.
+      - name: Set up QEMU
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down' && contains(env.BUILD_PLATFORMS, 'arm64')
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392  # v3.6.0
+      - name: Set up Docker Buildx
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
       # Main cell only: release cells use the released validator images the
       # released binary self-resolves to (skipped when aicr_version is set).
       - name: Build and push validator images
@@ -245,20 +302,27 @@ jobs:
           # until the job timeout (#1636). It uses a different Dockerfile path
           # and takes no GO_VERSION build-arg. Keep the phase set in sync with
           # VALIDATOR_PHASES in on-push.yaml / on-tag.yaml.
+          #
+          # buildx build --push emits a multi-arch manifest for GB200
+          # (BUILD_PLATFORMS=linux/amd64,linux/arm64) and a single-arch image
+          # for h100 (linux/amd64) through one code path. Multi-platform builds
+          # cannot be loaded into the local daemon, so we push directly (the
+          # GHCR login above authenticates the push).
           for phase in deployment performance conformance aiperf-bench; do
             IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
             case "${phase}" in
               aiperf-bench)
-                docker build -f validators/performance/aiperf-bench.Dockerfile \
-                  -t "${IMAGE}" .
+                docker buildx build --platform="${BUILD_PLATFORMS}" \
+                  -f validators/performance/aiperf-bench.Dockerfile \
+                  -t "${IMAGE}" --push .
                 ;;
               *)
-                docker build -f "validators/${phase}/Dockerfile" \
+                docker buildx build --platform="${BUILD_PLATFORMS}" \
+                  -f "validators/${phase}/Dockerfile" \
                   --build-arg "GO_VERSION=${GO_VERSION}" \
-                  -t "${IMAGE}" .
+                  -t "${IMAGE}" --push .
                 ;;
             esac
-            docker push "${IMAGE}"
           done
 
       # Auth
@@ -392,9 +456,13 @@ jobs:
       # build — so any artifact-schema change in the PR under test (e.g. an
       # apiVersion bump) produces a snapshot the freshly-built binary rejects.
       # Build the agent from the PR source and point AICR_IMAGE at it so the
-      # snapshot is stamped by the code under test, not a stale release. Single
-      # arch: the GPU worker (p5.48xlarge) is amd64. Lives in the aicr-validators
-      # namespace (not the release ghcr.io/nvidia/aicr repo); cleaned up below.
+      # snapshot is stamped by the code under test, not a stale release. Built
+      # for BUILD_PLATFORMS: amd64 for h100 (p5.48xlarge), amd64+arm64 for GB200
+      # (the snapshot agent is pinned to the arm64 p6e-gb200 GPU pool). ko
+      # cross-compiles Go natively — no QEMU — and emits a manifest list at the
+      # single tag, so the kubelet pulls the node's arch. Lives in the
+      # aicr-validators namespace (not the release ghcr.io/nvidia/aicr repo);
+      # cleaned up below.
       - name: Build and push snapshot-agent image
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
@@ -404,7 +472,7 @@ jobs:
           set -euo pipefail
           ko build ./cmd/aicr \
             --bare \
-            --platform=linux/amd64 \
+            --platform="${BUILD_PLATFORMS}" \
             --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
             --tags="${VALIDATOR_TAG}"
 
