@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -235,8 +236,10 @@ func TestScheduleJSON(t *testing.T) {
 }
 
 func TestScheduleReservationsOverride(t *testing.T) {
-	// --reservations bypasses the registry entirely.
-	code, stdout, stderr := invoke("v1.0.0\n", "schedule", "--reservations", "aws-h100", "--previous-n", "1")
+	// --reservations selects a subset of the registry (still loaded, so each
+	// cell can carry its eligible nightly intents); a name must exist in --file.
+	reg := writeRegistry(t)
+	code, stdout, stderr := invoke("v1.0.0\n", "schedule", "--file", reg, "--reservations", "aws-h100", "--previous-n", "1")
 	if code != 0 {
 		t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
 	}
@@ -251,9 +254,61 @@ func TestScheduleReservationsOverride(t *testing.T) {
 
 func TestScheduleRejectsDuplicateReservations(t *testing.T) {
 	// Duplicate --reservations must fail loudly rather than silently collapse.
-	code, _, _ := invoke("v1.0.0\n", "schedule", "--reservations", "aws-h100,aws-h100")
+	reg := writeRegistry(t)
+	code, _, _ := invoke("v1.0.0\n", "schedule", "--file", reg, "--reservations", "aws-h100,aws-h100")
 	if code != errors.ExitInvalidInput {
 		t.Errorf("exit = %d, want %d for duplicate --reservations", code, errors.ExitInvalidInput)
+	}
+}
+
+func TestScheduleRejectsUnknownReservation(t *testing.T) {
+	// A --reservations name absent from the registry fails loudly (NOT_FOUND)
+	// rather than scheduling an intent-less row.
+	reg := writeRegistry(t)
+	code, _, _ := invoke("v1.0.0\n", "schedule", "--file", reg, "--reservations", "nope-h100")
+	if code != errors.ExitNotFound {
+		t.Errorf("exit = %d, want %d for unknown --reservations name", code, errors.ExitNotFound)
+	}
+}
+
+// TestScheduleEmitsPerCellIntents verifies the schedule attaches each cell's
+// eligible intents and applies the reservation's min-version gate: with a gate
+// on inference at a version newer than the release tag, main carries both
+// intents and the release carries only training.
+func TestScheduleEmitsPerCellIntents(t *testing.T) {
+	const gatedRegistry = `
+reservations:
+  - name: azure-h100
+    cloud: azure
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: tests/uat/azure/cluster-config.yaml
+    test-config-dir: tests/uat/azure/tests
+    nightly-intents: [training, inference]
+    nightly-intent-min-versions:
+      inference: v2.0.0
+`
+	p := filepath.Join(t.TempDir(), "reservations.yaml")
+	if err := os.WriteFile(p, []byte(gatedRegistry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := invoke("v1.0.0\n", "schedule", "--file", p, "--reservations", "azure-h100", "--previous-n", "1")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
+	}
+	var schedule map[string][]uatbroker.Cell
+	if err := json.Unmarshal([]byte(stdout), &schedule); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	cells := schedule["azure-h100"]
+	if len(cells) != 2 {
+		t.Fatalf("got %d cells, want 2 (main + v1.0.0)", len(cells))
+	}
+	if !cells[0].IsMain || !reflect.DeepEqual(cells[0].Intents, []string{uatbroker.IntentTraining, uatbroker.IntentInference}) {
+		t.Errorf("main cell intents = %v, want [training inference]", cells[0].Intents)
+	}
+	if cells[1].AICRVersion != "v1.0.0" || !reflect.DeepEqual(cells[1].Intents, []string{uatbroker.IntentTraining}) {
+		t.Errorf("v1.0.0 cell = %+v, want intents [training] (inference gated by v2.0.0)", cells[1])
 	}
 }
 
@@ -278,7 +333,8 @@ func TestReadTagsCanceledContext(t *testing.T) {
 
 func TestScheduleWarnsOnNoReleases(t *testing.T) {
 	// previous-n>0 with no usable tags must warn (but still succeed main-only).
-	code, _, stderr := invoke("not-a-tag\n", "schedule", "--reservations", "aws-h100", "--previous-n", "2")
+	reg := writeRegistry(t)
+	code, _, stderr := invoke("not-a-tag\n", "schedule", "--file", reg, "--reservations", "aws-h100", "--previous-n", "2")
 	if code != 0 {
 		t.Fatalf("exit code = %d", code)
 	}
@@ -290,7 +346,8 @@ func TestScheduleWarnsOnNoReleases(t *testing.T) {
 func TestScheduleEmptyWarning(t *testing.T) {
 	// --include-main=false with no usable tags yields an empty schedule, which
 	// must be reported as empty/nothing-to-run, NOT as "main-only".
-	code, _, stderr := invoke("not-a-tag\n", "schedule", "--reservations", "aws-h100", "--include-main=false", "--previous-n", "2")
+	reg := writeRegistry(t)
+	code, _, stderr := invoke("not-a-tag\n", "schedule", "--file", reg, "--reservations", "aws-h100", "--include-main=false", "--previous-n", "2")
 	if code != 0 {
 		t.Fatalf("exit code = %d", code)
 	}

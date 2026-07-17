@@ -30,6 +30,10 @@
 // drops the OLDEST releases first when its time-box closes — it simply stops
 // at the cursor. Release cells carry their tag in AICRVersion for DC5's
 // version-parameterized install; until DC5 lands they install from source.
+// Each cell also carries the nightly intents ELIGIBLE at its version: the
+// main cell runs every listed intent, while a release cell drops any intent
+// whose nightly-intent-min-versions floor is newer than the tag, so a release
+// that predates an intent's support never contributes a permanently-red cell.
 //
 // The package performs no network or git I/O and holds no credentials: the
 // CLI feeds it the registry bytes and the raw `git tag` list.

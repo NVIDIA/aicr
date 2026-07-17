@@ -30,4 +30,8 @@
 //
 // Secrets (notably the cosign identity token) are not part of the schema;
 // they must be supplied via environment variables or dedicated CLI flags.
+// Durable, non-secret references are in scope by contrast: the private
+// Sigstore endpoints (spec.bundle.attestation.fulcioURL / rekorURL) and the
+// KMS signing-key reference (spec.bundle.attestation.signingKey) all belong
+// in version-controlled config even though they configure signing.
 package config

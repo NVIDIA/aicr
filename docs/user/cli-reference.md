@@ -1331,6 +1331,13 @@ spec:
       # be absolute https:// URLs with no embedded credentials.
       fulcioURL: https://fulcio.internal.example.com
       rekorURL: https://rekor.internal.example.com
+      # Optional KMS-backed signing (awskms:// | gcpkms:// | azurekms:// |
+      # hashivault://): a durable, non-secret key reference that replaces
+      # keyless OIDC. Mirrors --signing-key (the flag wins when both are set).
+      # Mutually exclusive with the keyless-only inputs above (fulcioURL,
+      # oidcDeviceFlow) and the runtime-only --identity-token, so it is shown
+      # commented out here as the alternative to the keyless block.
+      # signingKey: awskms://alias/aicr-signing
     registry:
       insecureTLS: false
       plainHTTP: false
@@ -2312,6 +2319,14 @@ aicr bundle --recipe recipe.yaml --attest \
   --signing-key awskms://arn:aws:kms:us-east-1:123456789012:key/abcd-1234 \
   --output ./bundles
 ```
+
+Because a KMS key reference is durable and non-secret, it can live in a
+version-controlled `--config` file as `spec.bundle.attestation.signingKey`
+instead of on the command line (the `--signing-key` flag wins when both are
+set). As with the flag, signing only runs when attestation is enabled, so a
+config-only KMS workflow must also set `spec.bundle.attestation.enabled: true`
+(the config equivalent of `--attest`); `signingKey` alone with `enabled: false`
+produces no attestation. See [Bundle Config File Mode](#bundle-config-file-mode).
 
 `--signing-key` is mutually exclusive with the keyless-only flags
 `--identity-token`, `--oidc-device-flow`, and `--fulcio-url`. Passing

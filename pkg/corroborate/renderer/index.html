@@ -818,7 +818,7 @@
     <div class="zone-head"><span class="zone-title"><b>filter evidence</b></span><span class="zone-help">narrow which runs are shown</span></div>
     <div class="zone-controls">
       <div class="crit"><label for="f-k8s">k8s version</label><select id="f-k8s"><option value="">all</option></select></div>
-      <div class="crit"><label for="f-aicr">aicr version</label><select id="f-aicr"><option value="">all</option></select></div>
+      <div class="crit"><label for="f-aicr">aicr version</label><select id="f-aicr" title="all versions = each source's latest run combined across versions (default). Pick a version for strict same-version corroboration."><option value="">all versions</option></select></div>
       <button class="btn" id="f-reset" title="reset evidence filters">reset</button>
     </div>
   </div>
@@ -1165,13 +1165,13 @@ function tabStatusEl(recipe){
 // filters on it. Evidence facets are version-only now.
 const facets = { k8s:"", aicr:"" };
 
-// AICR VERSION is a version *lens*, not a dimming filter: it selects which baked
-// consensus grid the matrix/catalog/landing summarize (see activeVer / versionView),
-// so it never dims. Only the k8s facet dims *within* the selected version — and it
-// must resolve each source's k8s from the run actually ON SCREEN (test._runMeta,
-// which is baked per version), NOT the newest-only SRC_META. Otherwise, under a
-// non-newest lens, the dimming would disagree with the per-cell tooltip and a
-// source that only ran under the selected older version would always look dimmed.
+// AICR VERSION is a consensus *lens*, not a dimming filter: it selects which baked
+// grid the matrix/catalog/landing summarize (see activeVer / versionView) — the
+// cross-version combine by default, or one version's strict grid — so it never
+// dims. Only the k8s facet dims *within* the active grid — and it must resolve each
+// source's k8s from the run actually ON SCREEN (test._runMeta, baked per grid), NOT
+// the newest-only SRC_META. Otherwise the dimming would disagree with the per-cell
+// tooltip and a source whose on-screen run is an older version would always look dimmed.
 function cellK8sMatches(test, src){
   if (!facets.k8s) return true;
   const rm = test._runMeta && test._runMeta[src];
@@ -1666,18 +1666,29 @@ function sortTests(tests){
 /* ============================================================
    RENDER: PER-RECIPE MATRIX (tests × sources, solid tiles)
    ============================================================ */
-// The corroboration matrix shows one AICR-version grid at a time. The version is
-// driven by the single FILTER EVIDENCE → AICR VERSION control (facets.aicr) —
-// there is no separate matrix version picker. Pick the matching version if the
-// recipe has one, otherwise the newest (Versions[0]).
+// Which consensus grid the dashboard shows, driven by the single FILTER EVIDENCE
+// → AICR VERSION control (facets.aicr). The default ("all", facets.aicr empty) is
+// the cross-version COMBINED grid — each source's single latest run, so every
+// source that has attested the recipe is visible. Selecting a specific version
+// narrows to that version's STRICT same-version grid.
+//
+// When a specific version is selected and the recipe has NO runs at it, we return
+// an EMPTY (UNTESTED) projection — never the Combined grid. Every aggregate view
+// (landing tally, sidebar tree, catalog cells) consumes this through versionView,
+// which drops the marker fields; substituting Combined there would leak
+// cross-version CONFIRMED into a version-scoped summary for a recipe that has zero
+// runs at the selected version. Empty projects to UNTESTED, which is the truthful
+// version-scoped state. _empty flags it so the grid header can say so plainly.
 function activeVer(recipe){
   const vs = recipe.versions || [];
-  if (!vs.length) return { aicrVer: "", tests: recipe.tests || [], _phaseRollup: recipe._phaseRollup || {} };
-  if (facets.aicr){
+  if (facets.aicr){                                   // strict: a specific AICR version
     const hit = vs.find(v => v.aicrVer === facets.aicr);
     if (hit) return hit;
+    return { aicrVer: facets.aicr, tests: [], _phaseRollup: {}, _empty: true };  // no runs at this version
   }
-  return vs[0];   // newest
+  // "all" (default): cross-version combined (legacy data w/o a combined grid
+  // degrades to the newest version).
+  return recipe.combined || vs[0] || { aicrVer: "", tests: recipe.tests || [], _phaseRollup: recipe._phaseRollup || {} };
 }
 // A recipe projected onto the AICR version currently in view, so that EVERY
 // consensus summary (landing tally, sidebar tree, catalog cells, matrix) reflects
@@ -1688,9 +1699,9 @@ function versionView(recipe){
   return { name: recipe.name, coord: recipe.coord, versions: recipe.versions,
            tests: v.tests, _phaseRollup: v._phaseRollup };
 }
-// Grid header: verdict badge + a passive indicator of which AICR version's
-// consensus is on screen. The version itself is chosen via FILTER EVIDENCE, not
-// here — this is a label, not a control.
+// Grid header: verdict badge + a passive indicator of which consensus grid is on
+// screen — the cross-version "all versions" combine (default) or a specific AICR
+// version (strict). The selection is made via FILTER EVIDENCE, not here.
 function refreshGridHeader(recipe){
   const ver = activeVer(recipe);
   const statusHost = document.getElementById("grid-status");
@@ -1700,14 +1711,24 @@ function refreshGridHeader(recipe){
   const vhost = document.getElementById("grid-version-host");
   if (!vhost) return;
   vhost.innerHTML = "";
-  if (!ver.aicrVer) return;
-  const fellBack = !!facets.aicr && ver.aicrVer !== facets.aicr;
   const note = document.createElement("span");
-  note.className = "grid-ver-note" + (fellBack ? " fellback" : "");
-  note.textContent = fellBack ? `AICR ${ver.aicrVer} · no ${facets.aicr} runs` : `AICR ${ver.aicrVer}`;
-  note.title = fellBack
-    ? `No ${facets.aicr} evidence for this recipe — showing consensus among AICR ${ver.aicrVer} runs. Switch via FILTER EVIDENCE → AICR VERSION.`
-    : `Consensus is computed among AICR ${ver.aicrVer} runs only — cross-version agreement is not reproduction. Switch via FILTER EVIDENCE → AICR VERSION.`;
+  if (ver._empty){
+    // Strict version selected, but this recipe has no runs at it. Say so plainly —
+    // do NOT imply cross-version consensus (there is none at the selected version).
+    note.className = "grid-ver-note fellback";
+    note.textContent = `AICR ${facets.aicr} · no runs`;
+    note.title = `This recipe has no runs at AICR ${facets.aicr}. Clear FILTER EVIDENCE → AICR VERSION for the all-versions view, or pick a version this recipe has.`;
+  } else if (ver._combined){
+    note.className = "grid-ver-note";
+    note.textContent = "all versions";
+    note.title = `Showing each source's latest run across all AICR versions combined. Select a specific AICR version (FILTER EVIDENCE → AICR VERSION) for strict same-version corroboration — cross-version agreement is not reproduction.`;
+  } else if (ver.aicrVer){
+    note.className = "grid-ver-note";
+    note.textContent = `AICR ${ver.aicrVer}`;
+    note.title = `Consensus is computed among AICR ${ver.aicrVer} runs only — cross-version agreement is not reproduction. Switch via FILTER EVIDENCE → AICR VERSION.`;
+  } else {
+    return;   // degenerate: no grid data
+  }
   vhost.appendChild(note);
 }
 function openGrid(idx){
@@ -1794,16 +1815,26 @@ function bindFitResize(){
 bindFitResize();
 
 function renderMatrix(recipe){
-  // Render the active AICR-version grid (activeVer, chosen via FILTER EVIDENCE →
-  // AICR VERSION). Other views (landing/catalog/tree) keep using recipe.tests =
-  // the newest version.
+  // Render the active grid (activeVer, chosen via FILTER EVIDENCE → AICR VERSION):
+  // the cross-version combine by default, or one version's strict grid. The other
+  // views (landing/catalog/tree) project through versionView → activeVer too, so
+  // the whole dashboard reflects the same selection.
   const ver = activeVer(recipe);
   const aTests = ver.tests || [];
   const aRollup = ver._phaseRollup || {};
-  const { cols, byClass } = sourceColumns({ tests: aTests });
 
   const host = document.getElementById("matrix-host");
   host.innerHTML = "";
+
+  // Strict version selected but this recipe has no runs at it: show a plain
+  // empty state rather than a header-only table implying cross-version data.
+  if (ver._empty){
+    host.innerHTML = `<div class="loading-note">No runs at <span class="mono">AICR ${esc(facets.aicr)}</span> for this recipe. ` +
+      `Clear <b>FILTER EVIDENCE → AICR VERSION</b> for the all-versions view, or pick a version this recipe has.</div>`;
+    return;
+  }
+
+  const { cols, byClass } = sourceColumns({ tests: aTests });
   const table = document.createElement("table");
   table.className = "matrix";
 
@@ -2628,9 +2659,10 @@ function buildModelFromIndex(index){
   index.groups.forEach(g => {
     g.dashboards.forEach(d => {
       d.tabs.forEach(tab => {
-        // Consensus is baked per AICR version (newest-first). Map each version's
-        // grid; the recipe's default view (tests/_phaseRollup) is the NEWEST
-        // version, which is what the overview/landing/tree summarize.
+        // Consensus is baked per AICR version (newest-first) plus a cross-version
+        // combine. Map each grid; the recipe's default view (tests/_phaseRollup) is
+        // the COMBINED "all versions" grid, which is what the overview/landing/tree
+        // summarize until a specific AICR version is selected.
         const mapTests = rows => (rows || []).map(t => {
           const sig = t.signers || [];
           const runs = sig.map(r => [r.src, r.result]);
@@ -2641,13 +2673,20 @@ function buildModelFromIndex(index){
         const versions = (tab.versions || []).map(v => ({
           aicrVer: v.aicrVer, tests: mapTests(v.tests), _phaseRollup: v.phaseRollup || {},
         }));
-        const newest = versions[0] || { aicrVer: "", tests: [], _phaseRollup: {} };
+        // The cross-version "all versions" grid (Go-baked Tab.Combined: each
+        // source's single latest run, version-blind) is the DEFAULT view. It is
+        // flagged _combined so the grid header can label it. Selecting a specific
+        // AICR VERSION narrows to that version's strict same-version grid. Older
+        // data without a combined grid degrades to the newest version.
+        const combined = tab.combined
+          ? { aicrVer: "", _combined: true, tests: mapTests(tab.combined.tests), _phaseRollup: tab.combined.phaseRollup || {} }
+          : (versions[0] || { aicrVer: "", tests: [], _phaseRollup: {} });
         const idx = DATA.recipes.length;
         // Tab consensus is computed and frozen in Go (single source of truth);
         // the page consumes it rather than re-deriving the state.
         DATA.recipes.push({
-          coord: tab.coord, name: tab.recipe, versions,
-          tests: newest.tests, _phaseRollup: newest._phaseRollup,   // newest-version default view
+          coord: tab.coord, name: tab.recipe, versions, combined,
+          tests: combined.tests, _phaseRollup: combined._phaseRollup,   // default view = combined (all versions)
         });
         RECIPE_BY_NAME[tab.recipe] = idx;
         tabOf[tab.recipe] = { service: g.service, ao: `${d.accelerator}-${d.os}` };

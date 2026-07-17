@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
@@ -132,6 +133,33 @@ func (r *Registry) Validate() error {
 					fmt.Sprintf("reservation %s lists duplicate nightly-intent %q", res.Name, intent))
 			}
 			seenIntent[intent] = true
+		}
+		// nightly-intent-min-versions gates RELEASE cells per intent. Each key
+		// must be an intent this reservation actually runs (a gate on an unrun
+		// intent — including any gate on an explicitly opted-out row — is dead
+		// config / a typo that would silently never apply) and each value must
+		// parse as semver (else the gate is inert and every release cell runs
+		// the intent, defeating the gate). Fail closed on both.
+		runsIntent := make(map[string]bool, len(res.NightlyIntents))
+		for _, intent := range res.NightlyIntentsOrDefault() {
+			runsIntent[intent] = true
+		}
+		for intent, minVer := range res.NightlyIntentMinVersions {
+			if !validIntents[intent] {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("reservation %s has a nightly-intent-min-version for unknown intent %q (want %s or %s)",
+						res.Name, intent, IntentTraining, IntentInference))
+			}
+			if !runsIntent[intent] {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("reservation %s gates intent %q via nightly-intent-min-versions but does not run it nightly (add %q to nightly-intents or drop the gate)",
+						res.Name, intent, intent))
+			}
+			if _, err := semver.NewVersion(minVer); err != nil {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("reservation %s has an invalid nightly-intent-min-version %q for intent %q (want a semver tag like v0.18.0)",
+						res.Name, minVer, intent))
+			}
 		}
 		// daytime-intent is optional (empty = not in the daytime rotation), but
 		// when set it must be a recognized intent — a typo would otherwise

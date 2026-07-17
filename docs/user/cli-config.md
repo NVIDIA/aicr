@@ -144,6 +144,7 @@ spec:
       oidcDeviceFlow: false
       fulcioURL: ""                  # private Sigstore overrides; empty = public good
       rekorURL: ""
+      signingKey: ""                 # KMS key ref (awskms:// | gcpkms:// | ...); empty = keyless OIDC
     registry:                        # OCI transport for oci:// push
       insecureTLS: false
       plainHTTP: false
@@ -231,10 +232,11 @@ Inputs to `aicr bundle`.
 | `deployment.vendorCharts` | bool | Vendor charts into the bundle |
 | `deployment.appName` | string | Argo CD parent `Application` name override (multi-bundle installs sharing a namespace) |
 | `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings |
-| `attestation.enabled` | bool | Keyless-sign the bundle |
+| `attestation.enabled` | bool | Enable bundle attestation (signing); keyless OIDC by default, KMS-backed when `signingKey` is set |
 | `attestation.certificateIdentityRegexp` | string | Expected signer identity |
 | `attestation.oidcDeviceFlow` | bool | Device-code flow for headless signing |
 | `attestation.fulcioURL` / `.rekorURL` | string | Private Sigstore endpoints; empty = public-good defaults |
+| `attestation.signingKey` | string | KMS key reference for key-based signing (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`); empty = keyless OIDC. Mutually exclusive with the keyless-only inputs (`oidcDeviceFlow`, `fulcioURL`, `--identity-token`) |
 | `registry.insecureTLS` / `.plainHTTP` | bool | OCI transport options for push |
 
 When `output.imageRefs` is set, AICR writes the published OCI digest through a
