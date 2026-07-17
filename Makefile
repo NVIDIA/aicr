@@ -216,8 +216,12 @@ license-check: ## Check license is approved
         --ignore=github.com/hashicorp/hcl \
         --ignore=$$STDLIB_IGNORE
 
+.PHONY: test-shell
+test-shell: ## Runs shell unit tests (tools/*_test.sh; hermetic, no cluster)
+	@set -e; for t in tools/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
+
 .PHONY: test
-test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
+test: test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \

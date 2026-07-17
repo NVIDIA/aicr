@@ -180,10 +180,17 @@ func CheckGangScheduling(ctx *validators.Context) error {
 	defer func() { //nolint:contextcheck // Fresh context: parent may be canceled during cleanup
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
-		cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
+		nsErr := cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
+		result := "Deleted gang test pods, PodGroup, and the gang-scheduling-test namespace."
+		if nsErr != nil {
+			// Report the real outcome: a failed namespace delete leaves residue,
+			// so don't record a false success (tools/cleanup is the backstop).
+			result = fmt.Sprintf(
+				"Deleted gang test pods and PodGroup; namespace deletion FAILED (residue may remain, rerun tools/cleanup): %v",
+				nsErr)
+		}
 		recordRawTextArtifact(ctx, "Delete test namespace",
-			"kubectl delete namespace gang-scheduling-test --ignore-not-found",
-			"Deleted gang test pods and PodGroup; namespace retained intentionally to keep cleanup bounded.")
+			"kubectl delete namespace gang-scheduling-test --ignore-not-found", result)
 	}()
 
 	recordRawTextArtifact(ctx, "Apply test manifest",
@@ -421,7 +428,12 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*
 
 // cleanupGangTestResources removes test resources. Best-effort: errors are ignored.
 // The namespace is intentionally NOT deleted — namespace deletion can hang on DRA finalizers.
-func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun) {
+// cleanupGangTestResources tears down the gang test pods, PodGroup, and
+// namespace best-effort. It returns the namespace deletion error (nil on
+// success) so the caller can record the true outcome instead of a false
+// success; pod/PodGroup deletes stay best-effort as the namespace delete
+// subsumes them.
+func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun) error {
 	// Delete pods first (releases claim reservations).
 	for i := range gangMinMembers {
 		_ = k8s.IgnoreNotFound(clientset.CoreV1().Pods(gangTestNamespace).Delete(
@@ -438,6 +450,21 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 	// Delete PodGroup.
 	_ = k8s.IgnoreNotFound(dynClient.Resource(podGroupGVR).Namespace(gangTestNamespace).Delete(
 		ctx, run.groupName, metav1.DeleteOptions{}))
+	// Delete the namespace so a cluster reset leaves no residue. Pods and the
+	// PodGroup are already gone, so this is a single bounded (background
+	// propagation) API call. tools/cleanup lists gang-scheduling-test as a
+	// backstop for interrupted runs; deleting it here is the primary path.
+	//
+	// Use a dedicated deadline rather than the shared cleanup ctx: a pod stuck
+	// on a finalizer can burn the whole budget in the waits above, and starving
+	// this delete is precisely the leak we are fixing.
+	nsCtx, nsCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+	defer nsCancel()
+	//nolint:contextcheck // fresh deadline so an earlier stuck wait cannot starve namespace teardown
+	if err := k8s.IgnoreNotFound(clientset.CoreV1().Namespaces().Delete(nsCtx, gangTestNamespace, metav1.DeleteOptions{})); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to delete gang test namespace", err)
+	}
+	return nil
 }
 
 // buildPodGroup returns the unstructured PodGroup for the gang scheduling test.
