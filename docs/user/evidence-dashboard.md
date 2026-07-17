@@ -271,12 +271,14 @@ the same resolved criteria by the same mapping function. They line up on
 identity without sharing computation.
 
 The Recipe Health **Evidence** column today reads `pending` for every recipe.
-When RQ1 (#1283) lands, it will replace each `pending` with a deep-link to
-that recipe's coordinate on this dashboard — see
+When RQ1 (#1283) lands, a recipe's `pending` becomes a deep-link only once
+that recipe has a published coordinate on this dashboard — see
 [Relationship to TestGrid](#relationship-to-testgrid) above for the exact URL
-form. The link is **stable** because Kubernetes version is kept out of the
-coordinate path (see [The coordinate and stable URLs](#the-coordinate-and-stable-urls)),
-so a cluster upgrade never breaks the link. The cross-link is advisory and
+form and the presence condition; a recipe with no dashboard coordinate yet
+stays `pending`. Once a link exists it is **stable**, because Kubernetes
+version is kept out of the coordinate path (see
+[The coordinate and stable URLs](#the-coordinate-and-stable-urls)), so a
+cluster upgrade never breaks it. The cross-link is advisory and
 never a merge gate; the Evidence column links, it never copies this
 dashboard's content.
 
