@@ -100,7 +100,8 @@ The two surfaces share the same foundation:
   uses coordinate-keyed layouts that are forward-compatible with the
   TestGrid workers, API, and UI. It is not a throwaway interim format.
 
-RQ1 (#1283) targets the evidence dashboard specifically: it is the link
+RQ1 (#1283) — the follow-on to #1224's `pending` Evidence column — targets
+the evidence dashboard specifically: it is the link
 target today because TG4a/TG4b's live API and UI have not shipped yet — not
 because TG work is deferred; the two surfaces are being built in parallel
 (see above). The Recipe Health Evidence column deep-links to the dashboard's

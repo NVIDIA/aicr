@@ -244,7 +244,7 @@ The difference is in the rendering stack:
 **RQ1 (#1283) targets this dashboard.** It is the link target today because
 TG4a/TG4b's live API and UI have not shipped yet — not because TG work is
 deferred; the two surfaces are being built in parallel (see above). The
-Recipe Health Evidence column deep-links here: `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` —
+Recipe Health Evidence column deep-links here:docs/user/testgrid.md `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` —
 this site's origin plus `#/` plus the recipe's `Coordinate.Path()` — built
 offline from resolved criteria via `pkg/recipe.CoordinateFor`, with no network
 call from the generator. Only recipes with an actual dashboard presence get a
@@ -256,8 +256,8 @@ isn't live yet — a sequencing option for RQ2, not a re-point of
 
 ### Relationship to Recipe Health
 
-The [Recipe Health](./recipe-health.md) matrix and this dashboard are
-**structural siblings that never duplicate each other**:
+The [Recipe Health](./recipe-health.md) matrix (#1224 / ADR-009) and this
+dashboard are **structural siblings that never duplicate each other**:
 
 - **Recipe Health** owns the **offline structural** signal — does the recipe
   resolve cleanly, are its charts pinned, are its constraints well-formed —
@@ -271,8 +271,9 @@ key. Both enumerate recipes by overlay name; the coordinate is derived from
 the same resolved criteria by the same mapping function. They line up on
 identity without sharing computation.
 
-The Recipe Health **Evidence** column today reads `pending` for every recipe.
-When RQ1 (#1283) lands, a recipe's `pending` becomes a deep-link only once
+#1224 shipped the Recipe Health **Evidence** column as a literal `pending`
+for every recipe; that's still true today. RQ1 (#1283), the follow-on issue
+that fills it in, turns a recipe's `pending` into a deep-link only once
 that recipe has a published coordinate on this dashboard — see
 [Relationship to TestGrid](#relationship-to-testgrid) above for the exact URL
 form and the presence condition; a recipe with no dashboard coordinate yet
