@@ -14,15 +14,6 @@
 
 package main
 
-// TestDocsStateNames is the GP6 drift-guard: it verifies that the
-// consensus-model explainer in docs/user/evidence-dashboard.md names every
-// corroboration State constant and every source Class constant exactly as the
-// Go code spells them, so the docs and the generator can never silently
-// diverge.
-//
-// If this test fails after a rename in pkg/corroborate, update
-// docs/user/evidence-dashboard.md to match.
-
 import (
 	"os"
 	"path/filepath"
@@ -39,6 +30,14 @@ const docsDir = "../../docs/user"
 // and Class constant.
 const evidenceDashboardDoc = "evidence-dashboard.md"
 
+// TestDocsStateNames is the GP6 drift-guard: it verifies that the
+// consensus-model explainer in docs/user/evidence-dashboard.md names every
+// corroboration State constant and every source Class constant exactly as the
+// Go code spells them, so the docs and the generator can never silently
+// diverge.
+//
+// If this test fails after a rename in pkg/corroborate, update
+// docs/user/evidence-dashboard.md to match.
 func TestDocsStateNames(t *testing.T) {
 	t.Parallel()
 

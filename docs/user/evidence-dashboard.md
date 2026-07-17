@@ -63,8 +63,16 @@ Every recipe cell has a stable canonical address `<group>/<dashboard>/<tab>`
 derived by `pkg/recipe.CoordinateFor` from the recipe's resolved criteria
 (see [ADR-012](../design/012-recipe-coordinate-mapping.md)). Kubernetes
 version is deliberately **not** part of the coordinate — it is a per-build
-column facet - so the URL `https://validation.aicr.run/eks/h100-ubuntu/training-kubeflow`
-remains valid across Kubernetes upgrades and is safe to bookmark or link.
+column facet — so a link such as
+`https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow` remains
+valid across Kubernetes upgrades and is safe to bookmark or link.
+
+The `#/` is a **client-side hash route**, not a server path: the dashboard is
+a single static `index.html` with no server-side routing, so navigation state
+lives entirely in the URL fragment (`#/<group>/<dashboard>/<tab>[/<signer>]`).
+The fragment is never sent to the server, so the same link resolves correctly
+on any static host — GitHub Pages included — with no rewrite rules needed. A
+path-based URL (without the `#/`) does **not** resolve.
 
 ## Consensus model
 
@@ -161,7 +169,7 @@ Specifically:
 
 This trust model is derived from [ADR-007](../design/007-recipe-evidence.md).
 The full allowlist posture and signer-class derivation are documented in
-[Artifact Verification — Evidence pointer layout](./artifact-verification.md).
+[Artifact Verification — Per-Source Pointer Layout and the Signer Allowlist](./artifact-verification.md#per-source-pointer-layout-and-the-signer-allowlist).
 
 ## Sybil resistance
 
@@ -233,11 +241,17 @@ The difference is in the rendering stack:
   cluster. TG is being built in parallel; its children (TG1–TG7) are Ready
   and in progress.
 
-Either site can serve as the link target for the Recipe Health Evidence column
-once RQ1 (#1283) lands. GP's `index.json` is also an available interim
-coordinate-presence source for the RQ2 link-integrity check while TG4a's
-coordinate-presence endpoint is not yet live — this is a sequencing option
-for RQ2, not a re-point of [ADR-012](../design/012-recipe-coordinate-mapping.md).
+**RQ1 (#1283) targets this dashboard.** Because TG4a/TG4b's live API and UI
+are deferred behind this interim surface, the Recipe Health Evidence column
+deep-links here: `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` —
+this site's origin plus `#/` plus the recipe's `Coordinate.Path()` — built
+offline from resolved criteria via `pkg/recipe.CoordinateFor`, with no network
+call from the generator. Only recipes with an actual dashboard presence get a
+link; the rest keep an honest `pending` until real-hardware coverage broadens.
+This `index.json` is also available as an interim coordinate-presence source
+for the RQ2 link-integrity check while TG4a's own coordinate-presence endpoint
+isn't live yet — a sequencing option for RQ2, not a re-point of
+[ADR-012](../design/012-recipe-coordinate-mapping.md).
 
 ### Relationship to Recipe Health
 
@@ -258,12 +272,13 @@ identity without sharing computation.
 
 The Recipe Health **Evidence** column today reads `pending` for every recipe.
 When RQ1 (#1283) lands, it will replace each `pending` with a deep-link to
-that recipe's coordinate URL on this dashboard — `<group>/<dashboard>/<tab>`,
-derived offline by `pkg/recipe.CoordinateFor`. The link is **stable** because
-Kubernetes version is kept out of the coordinate path (ADR-012 §k8s-in-column),
+that recipe's coordinate on this dashboard — see
+[Relationship to TestGrid](#relationship-to-testgrid) above for the exact URL
+form. The link is **stable** because Kubernetes version is kept out of the
+coordinate path (see [The coordinate and stable URLs](#the-coordinate-and-stable-urls)),
 so a cluster upgrade never breaks the link. The cross-link is advisory and
-never a merge gate; the Evidence column links, it never copies this dashboard's
-content.
+never a merge gate; the Evidence column links, it never copies this
+dashboard's content.
 
 ADR-009's verify-gated in-cell freshness state (AttestedAt age, unattested-vs-aged
 trust distinction) is a distinct, later refinement that ADR-009 tracks
