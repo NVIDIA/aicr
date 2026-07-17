@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	"log/slog"
 	"os"
 
 	"github.com/urfave/cli/v3"
@@ -80,6 +81,28 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
 		AssumeYes:   cmd.Bool(flagAssumeYes),
 	}
+}
+
+// evidenceConfigForRunMode suppresses CONFIG-DRIVEN recipe-evidence emission in
+// --no-cluster mode. (An explicit --emit-attestation/--push alongside
+// --no-cluster is rejected upstream with ErrCodeInvalidRequest — an explicit CLI
+// flag must not be warn-and-ignored; this path handles only
+// spec.validate.evidence.attestation resolved from config.) An offline dry-run
+// reports every check as "skipped", so an emitted attestation would attest to
+// nothing. Worse, when the config sets attestation.{out,push} (as the UAT test
+// configs do), a dry-run would sign and push a bundle to the same OCI repo the
+// authoritative live-cluster validate later pushes to — leaving two
+// independently-signed bundles whose digests differ, which breaks `aicr evidence
+// verify`: the signed subject no longer matches the pulled run-tagged artifact.
+// A dry-run must never emit signed evidence, so drop the config and log once.
+// Returns cfg unchanged for a live-cluster run (including cfg == nil).
+func evidenceConfigForRunMode(noCluster bool, cfg *recipeEvidenceConfig) *recipeEvidenceConfig {
+	if noCluster && cfg != nil {
+		slog.Warn("skipping evidence emission: --no-cluster is an offline dry-run and must not sign or push an attestation",
+			"emitAttestation", cfg.OutDir, "push", cfg.Push)
+		return nil
+	}
+	return cfg
 }
 
 // oidcResolveOptionsFromFlags builds the keyless-signing OIDC resolution

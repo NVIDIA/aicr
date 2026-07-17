@@ -170,11 +170,30 @@ phase_prep() {
   echo "::endgroup::"
 
   echo "::group::Validate (dry-run, --no-cluster)"
-  "${AICR_BIN}" validate \
-    --config "${config}" \
-    --phase deployment \
-    --no-cluster \
-    --output dry-run.json
+  # Validate against a copy of the config with spec.validate.evidence stripped so
+  # the offline dry-run cannot emit/sign/push an evidence bundle. --no-cluster
+  # reports every check as "skipped", so an attestation would attest to nothing;
+  # worse, with evidence.attestation.{out,push} set (as UAT configs are) the
+  # dry-run would sign and push a bundle to the same OCI repo the conformance
+  # phase's authoritative validate later pushes to, leaving two independently-
+  # signed bundles and breaking `evidence verify` (signed subject != pulled
+  # run-tagged digest). Mirrors the readiness-gate strip in phase_conformance.
+  # Belt-and-suspenders with the CLI's own --no-cluster guard: this keeps prep
+  # safe even against an older released aicr that lacks that guard.
+  # Run in a subshell with an EXIT trap so the temp config is removed on every
+  # exit path (normal return, set -e abort on validate failure, interrupt),
+  # mirroring the signing subshell below. A non-zero validate rc propagates out
+  # of the subshell and aborts prep under set -e, as before.
+  (
+    prep_config="$(mktemp)"
+    trap 'rm -f "${prep_config}"' EXIT
+    yq 'del(.spec.validate.evidence)' "${config}" > "${prep_config}"
+    "${AICR_BIN}" validate \
+      --config "${prep_config}" \
+      --phase deployment \
+      --no-cluster \
+      --output dry-run.json
+  )
   test -f dry-run.json
   echo "::endgroup::"
 
