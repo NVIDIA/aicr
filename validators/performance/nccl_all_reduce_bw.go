@@ -100,3 +100,17 @@ func findPerformanceConstraint(ctx *validators.Context, name string) (recipe.Con
 	}
 	return recipe.Constraint{}, false
 }
+
+// countPerformanceConstraint counts performance constraints with the given name.
+func countPerformanceConstraint(ctx *validators.Context, name string) int {
+	if ctx.ValidationInput == nil || ctx.ValidationInput.Config.Performance == nil {
+		return 0
+	}
+	n := 0
+	for _, c := range ctx.ValidationInput.Config.Performance.Constraints {
+		if c.Name == name {
+			n++
+		}
+	}
+	return n
+}

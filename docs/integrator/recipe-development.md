@@ -290,6 +290,22 @@ discovery, and preflights. See
 [Opting external recipes into a benchmark profile](../user/validation.md#opting-external-recipes-into-a-benchmark-profile)
 for the valid pairs and skip/fail semantics.
 
+When no embedded pair matches — a genuinely private service+accelerator with a
+fabric none of the shipped templates cover — supply the benchmark yourself:
+ship a Kubeflow `TrainingRuntime` in your `--data` tree at
+`validators/performance/testdata/{accelerator}/{service}/runtime.yaml` and
+reference it with the `nccl-benchmark-runtime-ref` constraint (a bare
+`{accelerator}/{service}` value). Run `aicr validate --data <dir> ...` so the
+referenced file is resolvable; it is read and rendered in place of a baked-in
+template, keyed on the recipe's own criteria with no compiled applicability
+entry. The runtime owns its fabric wiring (the validator skips service-specific
+fabric setup — discovery, preflights, and NVLS/IMEX provisioning — but still
+asserts transport for the `-net`/`-nvls` variants), must
+declare a `node` replicatedJob, and is mutually exclusive with
+`nccl-benchmark-profile`. Laying the file at the embedded testdata path makes it
+a drop-in for upstreaming. See
+[Supplying a benchmark runtime for a private service](../user/validation.md#supplying-a-benchmark-runtime-for-a-private-service).
+
 ### Component Types
 
 **Helm components** (most common):

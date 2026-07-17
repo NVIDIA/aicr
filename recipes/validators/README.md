@@ -52,9 +52,13 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 
 The NCCL checks derive applicability from the recipe's `criteria` by default;
 a recipe outside the embedded service + accelerator matrix (e.g. registered
-via `--data`) opts in with the `nccl-benchmark-profile` performance
-constraint — see
-[Opting external recipes into a benchmark profile](../../docs/user/validation.md#opting-external-recipes-into-a-benchmark-profile).
+via `--data`) opts in with the `nccl-benchmark-profile` performance constraint
+(borrow an embedded template — see
+[Opting external recipes into a benchmark profile](../../docs/user/validation.md#opting-external-recipes-into-a-benchmark-profile))
+or, when its fabric matches no embedded template, with the
+`nccl-benchmark-runtime-ref` constraint (ship a Kubeflow `TrainingRuntime` as a
+`--data` file and reference it — see
+[Supplying a benchmark runtime for a private service](../../docs/user/validation.md#supplying-a-benchmark-runtime-for-a-private-service)).
 
 ### Conformance Phase
 

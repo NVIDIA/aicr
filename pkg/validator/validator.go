@@ -177,6 +177,13 @@ func (v *Validator) ValidatePhases(
 
 	slog.Info("running validation phases", "runID", v.RunID, "phases", phases)
 
+	// Lower any nccl-benchmark-runtime-ref into its inline carrier by reading the
+	// referenced template from the --data tree. Fails fast on a bad ref before
+	// deploying any Jobs.
+	if err := v.resolveBenchmarkRuntimeRef(ctx, validationInput); err != nil {
+		return nil, err
+	}
+
 	// Pre-flight: evaluate top-level validation constraints against snapshot.
 	// Fails fast before deploying any Jobs if prerequisites aren't met.
 	if err := checkReadiness(validationInput, snap); err != nil {
@@ -259,6 +266,12 @@ func (v *Validator) ValidatePhase(
 	validationInput *v1.ValidationInput,
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
+
+	// Lower any nccl-benchmark-runtime-ref into its inline carrier before the
+	// phase runs (or is skipped), so a bad ref fails fast even offline.
+	if err := v.resolveBenchmarkRuntimeRef(ctx, validationInput); err != nil {
+		return nil, err
+	}
 
 	cat, err := catalog.LoadWithDataProvider(ctx, v.dataProvider, v.Version, v.Commit)
 	if err != nil {

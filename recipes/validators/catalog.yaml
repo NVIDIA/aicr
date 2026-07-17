@@ -70,10 +70,22 @@ validators:
   # The NCCL checks (nccl-all-reduce-bw and the -net/-nvls variants at the
   # bottom of this file) key applicability to the recipe's criteria against a
   # compiled service+accelerator matrix. A recipe outside that matrix (e.g. a
-  # service registered via --data) opts in PER RECIPE via the
-  # `nccl-benchmark-profile` performance constraint — a bare
-  # "{accelerator}/{service}" value such as gb200/eks, resolved recipe-only
-  # (no env tier). Thresholds stay in the same-named check constraints.
+  # service registered via --data) opts in PER RECIPE one of two ways, both
+  # resolved recipe-only (no env tier), with thresholds staying in the
+  # same-named check constraints:
+  #   * `nccl-benchmark-profile` — a bare "{accelerator}/{service}" value such
+  #     as gb200/eks, borrowing an EMBEDDED benchmark template whose fabric
+  #     matches the cluster.
+  #   * `nccl-benchmark-runtime-ref` — a bare "{accelerator}/{service}" naming a
+  #     Kubeflow TrainingRuntime the recipe ships in its --data tree at
+  #     validators/performance/testdata/{accelerator}/{service}/runtime.yaml, for
+  #     a private service+accelerator whose criteria pair has no embedded template
+  #     to borrow. The orchestrator reads the file and lowers it into the
+  #     nccl-benchmark-runtime carrier the pod renders; the supplied runtime owns
+  #     its fabric wiring, so the validator skips service-specific fabric setup
+  #     but still sizes it, evaluates the bandwidth threshold, and (for the
+  #     -net/-nvls variants) asserts the transport actually carried traffic.
+  #     Mutually exclusive with nccl-benchmark-profile.
   - name: nccl-all-reduce-bw
     phase: performance
     description: "Verify NCCL All Reduce Bus Bandwidth meets threshold"
