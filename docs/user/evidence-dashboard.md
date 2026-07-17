@@ -271,8 +271,8 @@ key. Both enumerate recipes by overlay name; the coordinate is derived from
 the same resolved criteria by the same mapping function. They line up on
 identity without sharing computation.
 
-#1224 shipped the Recipe Health **Evidence** column as a literal `pending`
-for every recipe; that's still true today. RQ1 (#1283), the follow-on issue
+Issue `#1224` shipped the Recipe Health **Evidence** column as a literal `pending`
+for every recipe; that's still true today. RQ1 (`#1283`), the follow-on issue
 that fills it in, turns a recipe's `pending` into a deep-link only once
 that recipe has a published coordinate on this dashboard — see
 [Relationship to TestGrid](#relationship-to-testgrid) above for the exact URL
