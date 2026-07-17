@@ -21,7 +21,14 @@ name: UAT Run
 # manual dispatch of the same reservation/version can never be mistaken for the
 # controller's run. A manual dispatch omits the key and the suffix is dropped.
 # Quoted so YAML does not treat the ` #` in the dispatch_key suffix as a comment.
-run-name: "UAT ${{ inputs.reservation }} @ ${{ inputs.aicr_version || 'main' }}${{ inputs.dispatch_key != '' && format(' #{0}', inputs.dispatch_key) || '' }}"
+#
+# The intent (training|inference) is rendered so nightly/daytime runs are
+# self-describing in the Actions list. It defaults to `training` on both the
+# dispatch and call paths, so it is always present. IMPORTANT: the nightly
+# (uat-nightly-batch.yaml) and daytime (uat-daytime.yaml) controllers rebuild
+# this exact title to resolve the run they dispatched — keep their `title=`
+# construction in lockstep with this format string.
+run-name: "UAT ${{ inputs.reservation }} ${{ inputs.intent }} @ ${{ inputs.aicr_version || 'main' }}${{ inputs.dispatch_key != '' && format(' #{0}', inputs.dispatch_key) || '' }}"
 
 # The shared UAT dispatch surface and reservation-lease owner (#1274, DC1).
 # A human (workflow_dispatch) or the nightly batch (workflow_call) requests a
@@ -177,7 +184,7 @@ jobs:
     # cannot exceed the caller's permissions).
     permissions:
       contents: read  # checkout inside the called pipeline
-      actions: read  # required by the nested uat-{aws,gcp} + evidence-ingest jobs
+      actions: write  # nested uat-{aws,gcp} watchers + evidence-ingest dashboard dispatch
       id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
       packages: write  # push validator + snapshot-agent images to GHCR
     uses: ./.github/workflows/uat-aws.yaml
@@ -199,7 +206,7 @@ jobs:
     # cannot exceed the caller's permissions).
     permissions:
       contents: read  # checkout inside the called pipeline
-      actions: read  # required by the nested uat-{aws,gcp} + evidence-ingest jobs
+      actions: write  # nested uat-{aws,gcp} watchers + evidence-ingest dashboard dispatch
       id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
       packages: write  # push validator + snapshot-agent images to GHCR
     uses: ./.github/workflows/uat-gcp.yaml
@@ -220,7 +227,7 @@ jobs:
     # cannot exceed the caller's permissions).
     permissions:
       contents: read  # checkout inside the called pipeline
-      actions: read  # required by the nested uat-* + evidence-ingest jobs
+      actions: write  # nested uat-* watchers + evidence-ingest dashboard dispatch
       id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
       packages: write  # push validator + snapshot-agent images to GHCR
     uses: ./.github/workflows/uat-azure.yaml

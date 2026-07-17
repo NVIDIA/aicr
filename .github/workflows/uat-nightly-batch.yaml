@@ -240,7 +240,8 @@ jobs:
               # cell index increments per (version × intent), so the two intents
               # of one version get distinct keys and distinct run titles.
               dispatch_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RESERVATION}-${cell}"
-              title="UAT ${RESERVATION} @ ${label} #${dispatch_key}"
+              # MUST match uat-run.yaml's run-name exactly (now includes intent).
+              title="UAT ${RESERVATION} ${intent} @ ${label} #${dispatch_key}"
               echo "::group::${title} [intent=${intent}]"
 
               gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" \

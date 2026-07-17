@@ -933,6 +933,7 @@ jobs:
       contents: read
       id-token: write  # WIF for the publish job
       packages: read   # GHCR pull for the verify job
+      actions: write   # dispatch the dashboard-publish refresh after publish
     uses: ./.github/workflows/evidence-ingest.yaml
     with:
       bundle_ref: ${{ needs.uat-aws.outputs.bundle_ref }}

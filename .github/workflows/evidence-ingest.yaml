@@ -229,3 +229,46 @@ jobs:
                 --delete-unmatched-destination-objects \
                 "${run_dir}" "gs://${BUCKET}/results/${rel}"
             done
+
+  # ---------------------------------------------------------------------
+  # Job 3: refresh the published dashboard. Every successful ingest lands
+  # new evidence in GCS, so the GP5 dashboard (evidence-dashboard-publish)
+  # must re-render to surface it — otherwise the site is stale until the
+  # next unrelated push to main. The push-to-main ingest path already
+  # re-triggers the dashboard via its own `push:` trigger, but the
+  # first-party UAT path is a NESTED workflow_call (up to four levels deep:
+  # uat-run -> uat-{aws,gcp,azure} -> evidence-ingest), which emits no
+  # top-level run event and cannot nest a fifth reusable workflow. A
+  # workflow_dispatch decouples cleanly: it starts a fresh top-level run
+  # regardless of how deep this ingest was invoked.
+  #
+  # Held in a SEPARATE job so the GCS-credentialed publish job never also
+  # carries actions:write. `needs: publish` inherits the produced gate — a
+  # skipped/failed publish skips this too, so the dashboard only re-renders
+  # after evidence is actually in the bucket. The dashboard's own
+  # concurrency group ("pages", cancel-in-progress:false) coalesces the
+  # flurry from a multi-cell nightly batch into a single queued rebuild
+  # that the newest dispatch supersedes.
+  # ---------------------------------------------------------------------
+  trigger-dashboard:
+    name: Trigger dashboard publish
+    needs: publish
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write  # dispatch evidence-dashboard-publish.yaml
+    steps:
+      - name: Dispatch dashboard publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Always target main: the dashboard deploys only from the default
+          # branch, and the evidence tree it renders is the canonical GCS
+          # bucket regardless of which ref this ingest ran on.
+          gh workflow run evidence-dashboard-publish.yaml \
+            --repo "$REPO" --ref main
+          echo "dispatched Evidence: Dashboard Publish on main"
