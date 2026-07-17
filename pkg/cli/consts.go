@@ -53,6 +53,7 @@ const (
 	flagSigningConfig     = "signing-config"
 	flagEmitSigningConfig = "emit-signing-config"
 	flagSigningKey        = "signing-key"
+	flagTLogUpload        = "tlog-upload"
 	flagInsecureTLS       = "insecure-tls"
 	flagPlainHTTP         = "plain-http"
 	flagPush              = "push"

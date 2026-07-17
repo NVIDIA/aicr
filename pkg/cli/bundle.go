@@ -99,6 +99,13 @@ type bundleCmdOptions struct {
 	// azurekms:// | hashivault://). Mutually exclusive with the keyless-only flags. See #407.
 	signingKey string
 
+	// tlogUpload controls the Rekor transparency-log upload for KMS signing.
+	// Default true (upload). Setting it false with --signing-key produces a
+	// fully offline / air-gapped signature (no Rekor entry); false without
+	// --signing-key is rejected because keyless OIDC signing requires Fulcio +
+	// Rekor network access. See #409.
+	tlogUpload bool
+
 	// oidcDeviceFlow opts in to the OAuth 2.0 Device Authorization Grant flow
 	// (RFC 8628) for headless hosts where a browser callback is unavailable.
 	oidcDeviceFlow bool
@@ -188,14 +195,18 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
 		signingKey:                stringFlagOrConfig(cmd, flagSigningKey, resolved.SigningKey),
-		oidcDeviceFlow:            boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
-		assumeYes:                 cmd.Bool(flagAssumeYes),
-		fulcioURL:                 stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
-		rekorURL:                  stringFlagOrConfig(cmd, flagRekorURL, resolved.RekorURL),
-		signingConfigPath:         cmd.String(flagSigningConfig),
-		insecureTLS:               boolFlagOrConfig(cmd, flagInsecureTLS, resolved.InsecureTLS),
-		plainHTTP:                 boolFlagOrConfig(cmd, flagPlainHTTP, resolved.PlainHTTP),
-		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
+		// tlogUpload reads the flag directly (not via boolFlagOrConfig): a config
+		// default of false would silently disable the transparency log for every
+		// bundle, the exact fail-open this flag exists to prevent. Keep it flag-only.
+		tlogUpload:        cmd.Bool(flagTLogUpload),
+		oidcDeviceFlow:    boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
+		assumeYes:         cmd.Bool(flagAssumeYes),
+		fulcioURL:         stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
+		rekorURL:          stringFlagOrConfig(cmd, flagRekorURL, resolved.RekorURL),
+		signingConfigPath: cmd.String(flagSigningConfig),
+		insecureTLS:       boolFlagOrConfig(cmd, flagInsecureTLS, resolved.InsecureTLS),
+		plainHTTP:         boolFlagOrConfig(cmd, flagPlainHTTP, resolved.PlainHTTP),
+		imageRefsPath:     stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
 	}
 
 	// Rekor v2 is the default for both keyless and KMS --attest signing: the
@@ -416,7 +427,50 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		return nil, err
 	}
 
+	// Reject --tlog-upload=false without --signing-key (air-gapped signing is a
+	// KMS-only capability) or combined with a Rekor/signing-config target.
+	if err := validateTLogUpload(opts); err != nil {
+		return nil, err
+	}
+
 	return opts, nil
+}
+
+// validateTLogUpload rejects --tlog-upload=false unless --signing-key (KMS) is
+// set, and rejects it when combined with a transparency-log target flag.
+//
+// Skipping the Rekor transparency-log upload is only meaningful for KMS-backed
+// signing; keyless OIDC signing requires Fulcio + Rekor network access to mint a
+// verifiable certificate, so an air-gapped keyless signature is not achievable
+// and the request is rejected rather than silently ignored.
+//
+// --tlog-upload=false is also mutually exclusive with --rekor-url and
+// --signing-config: those select WHERE the transparency-log entry goes, which
+// directly contradicts "do not write one". WithoutTransparencyLog overrides the
+// target policy that --rekor-url / --signing-config would otherwise build (see
+// KMSAttester.Attest), so accepting both would silently discard the operator's
+// chosen endpoint. Fail closed instead.
+func validateTLogUpload(opts *bundleCmdOptions) error {
+	if opts.tlogUpload {
+		return nil
+	}
+	if opts.signingKey == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--"+flagTLogUpload+"=false (air-gapped signing) applies only to KMS attestation and "+
+				"requires --attest with --"+flagSigningKey+"; keyless OIDC signing needs "+
+				"Fulcio/Rekor network access")
+	}
+	if opts.rekorURL != "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--"+flagTLogUpload+"=false is mutually exclusive with --"+flagRekorURL+
+				": one skips the transparency log, the other selects a Rekor endpoint")
+	}
+	if opts.signingConfigPath != "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--"+flagTLogUpload+"=false is mutually exclusive with --"+flagSigningConfig+
+				": one skips the transparency log, the other selects a signing config")
+	}
+	return nil
 }
 
 // validateSigningKeyExclusivity rejects --signing-key combined with any
@@ -828,6 +882,18 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringFlag{
 				Name:     flagSigningKey,
 				Usage:    "Sign --attest bundles with a KMS-backed key (awskms:// | gcpkms:// | azurekms:// | hashivault://) instead of keyless OIDC, for CI/CD without OIDC. Mutually exclusive with --identity-token, --oidc-device-flow, --fulcio-url. Like keyless, KMS signs to Rekor v2 by default; opt out with --rekor-url (v1) or --signing-config (custom). Verify the resulting bundle with `aicr verify --key <uri>`.",
+				Category: catDeployment,
+			},
+			&cli.BoolFlag{
+				Name:  flagTLogUpload,
+				Value: true,
+				Usage: "Upload the KMS signature to the Rekor transparency log (default: true). " +
+					"Set --tlog-upload=false to skip the Rekor upload for fully offline / air-gapped " +
+					"signing; this requires --signing-key (KMS) because keyless OIDC signing needs " +
+					"Fulcio + Rekor network access. Verify the resulting bundle offline with " +
+					"`aicr verify --key <public-key.pem> --insecure-ignore-tlog`; use a local PEM " +
+					"public key for a fully offline verify, since a KMS --key URI still makes a live " +
+					"GetPublicKey call to resolve the key.",
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{
@@ -1304,6 +1370,7 @@ func bundleOIDCResolveOptions(opts *bundleCmdOptions) attestation.ResolveOptions
 		Attest:              opts.attest,
 		IdentityToken:       opts.identityToken,
 		SigningKey:          opts.signingKey,
+		DisableTLogUpload:   !opts.tlogUpload,
 		AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
 		AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
 		DeviceFlow:          opts.oidcDeviceFlow,

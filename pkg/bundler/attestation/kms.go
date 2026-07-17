@@ -40,8 +40,19 @@ type KMSAttester struct {
 
 	// tlog, when non-nil, overrides the transparency policy that Attest would
 	// otherwise compute from target. Used to inject a no-tlog policy for offline
-	// testing, and reserved for a future --tlog-upload=false opt-out (#409).
+	// testing, and wired to the --tlog-upload=false opt-out via
+	// WithoutTransparencyLog for offline / air-gapped signing (#409).
 	tlog TransparencyPolicy
+}
+
+// KMSAttesterOption customizes a KMSAttester at construction time.
+type KMSAttesterOption func(*KMSAttester)
+
+// WithoutTransparencyLog makes the attester skip the Rekor upload (offline /
+// air-gapped signing, #409). The resulting attester's HasRekorEntry reports
+// false and Attest writes no transparency-log entry.
+func WithoutTransparencyLog() KMSAttesterOption {
+	return func(k *KMSAttester) { k.tlog = NewNoTLogPolicy() }
 }
 
 // NewKMSAttester returns a KMSAttester for keyURI. Like keyless signing, KMS
@@ -51,12 +62,20 @@ type KMSAttester struct {
 // SignOptionsFromResolve so the KMS path shares the keyless path's signing-target
 // mapping. The transparency-log entry carries public-key verification material
 // (no Fulcio certificate). See #1650.
-func NewKMSAttester(keyURI string, target SignOptions) *KMSAttester {
-	return &KMSAttester{
+//
+// opts customize the attester; WithoutTransparencyLog opts out of the Rekor
+// upload for offline / air-gapped signing (#409). With no options the Rekor
+// upload behavior is unchanged.
+func NewKMSAttester(keyURI string, target SignOptions, opts ...KMSAttesterOption) *KMSAttester {
+	k := &KMSAttester{
 		keyURI:   keyURI,
 		identity: NewKMSIdentity(keyURI),
 		target:   target,
 	}
+	for _, opt := range opts {
+		opt(k)
+	}
+	return k
 }
 
 // Attest creates a DSSE-signed in-toto SLSA provenance statement for the given
