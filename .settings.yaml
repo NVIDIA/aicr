@@ -170,7 +170,7 @@ testing:
 
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
-  gpu_operator_chart_version: 'v25.10.1'
+  gpu_operator_chart_version: 'v26.3.3'
   # Base image for the CI smoke-test snapshot-agent image. The agent binary is
   # static Go and detects GPUs driver-free via NFD/PCI, so it no longer needs a
   # CUDA base / nvidia-smi. Matches the NVIDIA static distroless base used for
