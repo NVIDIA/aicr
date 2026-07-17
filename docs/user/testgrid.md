@@ -100,9 +100,11 @@ The two surfaces share the same foundation:
   uses coordinate-keyed layouts that are forward-compatible with the
   TestGrid workers, API, and UI. It is not a throwaway interim format.
 
-RQ1 (#1283) targets the evidence dashboard specifically: because TG4a/TG4b's
-live API and UI are deferred behind this interim surface, the Recipe Health
-Evidence column deep-links to the dashboard's coordinate URL —
+RQ1 (#1283) targets the evidence dashboard specifically: it is the link
+target today because TG4a/TG4b's live API and UI have not shipped yet — not
+because TG work is deferred; the two surfaces are being built in parallel
+(see above). The Recipe Health Evidence column deep-links to the dashboard's
+coordinate URL —
 `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` — built offline
 from resolved criteria via `pkg/recipe.CoordinateFor`. The link is stable
 across Kubernetes upgrades because the Kubernetes version lives in the
@@ -119,4 +121,4 @@ The TestGrid and the [Recipe Health](./recipe-health.md) matrix are **two surfac
 
 AICR keeps these axes deliberately separate so a "resolves cleanly" verdict never gets fused with a "validated and performant" one. The two surfaces share exactly one thing: the recipe's `metadata.name`, the identity by which both address the same recipe.
 
-The Recipe Health **Evidence** column is the cross-link between them. Today it reads `pending` for every recipe. Once a recipe has a **published coordinate** on the [interim evidence dashboard](#interim-evidence-dashboard), that column will **link** into it — TG4a/TG4b's live board is deferred behind it, so this is the link target today — and the link is automatically checkable so it can never point at a coordinate that does not exist. A recipe with no dashboard coordinate yet stays `pending`. It links, it never copies either board's content.
+The Recipe Health **Evidence** column is the cross-link between them. Today it reads `pending` for every recipe. Once a recipe has a **published coordinate** on the [interim evidence dashboard](#interim-evidence-dashboard), that column will **link** into it — this is the link target today because TG4a/TG4b's live board hasn't shipped yet, not because TG work is deferred — and the link is automatically checkable so it can never point at a coordinate that does not exist. A recipe with no dashboard coordinate yet stays `pending`. It links, it never copies either board's content.

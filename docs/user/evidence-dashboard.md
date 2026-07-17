@@ -241,9 +241,10 @@ The difference is in the rendering stack:
   cluster. TG is being built in parallel; its children (TG1–TG7) are Ready
   and in progress.
 
-**RQ1 (#1283) targets this dashboard.** Because TG4a/TG4b's live API and UI
-are deferred behind this interim surface, the Recipe Health Evidence column
-deep-links here: `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` —
+**RQ1 (#1283) targets this dashboard.** It is the link target today because
+TG4a/TG4b's live API and UI have not shipped yet — not because TG work is
+deferred; the two surfaces are being built in parallel (see above). The
+Recipe Health Evidence column deep-links here: `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` —
 this site's origin plus `#/` plus the recipe's `Coordinate.Path()` — built
 offline from resolved criteria via `pkg/recipe.CoordinateFor`, with no network
 call from the generator. Only recipes with an actual dashboard presence get a
