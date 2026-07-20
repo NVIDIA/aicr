@@ -359,6 +359,74 @@ corrupt subsequent queries. The
 anti-patterns list calls this out — any new helper that touches
 overlay-derived maps must follow the same rule.
 
+## Criteria Coverage Post-Condition
+
+Resolution enforces a post-condition (issue #1542): every criteria dimension
+the caller explicitly states — `service`, `accelerator`, `intent`, `os`,
+`platform` — must be honored by at least one overlay in the final applied
+set (`appliedOverlays`), or resolution fails with `ErrCodeInvalidRequest`
+instead of silently returning a recipe that disregards a stated value.
+`verifyCriteriaCoverage` (`pkg/recipe/coverage.go`) runs last in both build
+paths, against the *final* applied set:
+
+- In `BuildRecipeResult`, after `mergeOverlayChains` and `mergeMixins` —
+  ancestor-supplied coverage counts, but mixins carry no `criteria` and
+  cannot contribute coverage.
+- In `BuildRecipeResultWithEvaluator`, after per-overlay constraint
+  exclusion *and* the mixin-constraint-failure rebuild — a dimension whose
+  only coverage came from a constraint-excluded overlay is still uncovered.
+  The error's context carries `excludedOverlays` / `constraintWarnings` when
+  constraint exclusion occurred during resolution, so the caller has that
+  context even though the exclusion is not always what caused this specific
+  dimension to go uncovered.
+
+The error's `uncovered` context entries (`dimension`, `requestedValue`,
+`validCompletions`) are computed from the maximal set of overlays that carry
+the requested value without conflicting with any other stated dimension —
+see `completionTuplesFor` / `minimalTuples`. `nodes` is deliberately excluded
+from `coverageDimensions`: no overlay gates on node count, so covering it
+would reject every `--nodes` query. It remains a matching dimension (present
+in `Criteria.Matches`) but carries no coverage guarantee — it is advisory.
+
+**Composition with the OS guard.** `requireOSIfNeeded` (the joint
+service+accelerator OS gate) is a separate, pre-existing check and runs
+*first*, before the merge. It is **not subsumed** by the coverage
+post-condition: coverage is satisfied when service and accelerator are each
+honored by *some* overlay independently, while the OS guard demands *one*
+overlay carry both service and accelerator together before it will consider
+the OS-agnostic tier served. Both checks apply; a request can trip either
+one independently.
+
+**Evaluator error classification is fail-closed.** During constraint
+evaluation on the snapshot-driven path, `ErrCodeNotFound` (the evaluator's
+designed signal for "measurement absent from snapshot") is the *only*
+error code that degrades gracefully into overlay exclusion. Every other
+error code returned by the evaluator propagates as a hard resolution
+failure (see `isNotFoundEvalError` in `pkg/recipe/coverage.go`, consumed at
+both call sites in `metadata_store.go`) — a malformed constraint expression
+or an evaluator bug must not be swallowed as a quiet exclusion.
+`ConstraintEvaluatorFunc` returns a plain `error`, so both fail-closed
+branches (`evaluateOverlayConstraints`, `evaluateMixinConstraints`) pass a
+non-`NotFound` error through `aicrerrors.PropagateOrWrap(..., ErrCodeInternal,
+...)` before returning it — an evaluator that hasn't adopted `pkg/errors`
+still surfaces a coded error instead of an uncoded 500 at the server layer.
+
+**The engine stays strict; the CLI's snapshot path relaxes derived-only
+failures.** Everything above describes `pkg/recipe`'s behavior, which never
+relaxes the post-condition — a coverage failure there is always terminal.
+The CLI's `--snapshot` flow (`pkg/cli/query.go`) layers a caller-side
+retry on top: `service`, `accelerator`, and `os` can be derived from the
+snapshot fingerprint rather than stated by the user (`intent` and
+`platform` are always user-stated — the fingerprint never derives them).
+If a coverage error's uncovered dimensions are *all* fingerprint-derived
+(none came from `--config` or a CLI flag), the CLI clears those dimensions
+to unstated and retries resolution once, logging a warning per relaxed
+dimension; if any uncovered dimension was user-stated, the error still
+propagates unchanged. This lets an overlay tree that is deliberately
+agnostic to a dimension (e.g. Kind's OS-agnostic overlays) tolerate a
+snapshot that still reports a concrete value for it, without weakening the
+post-condition for anyone who asked for that dimension explicitly.
+
 ## Determinism
 
 Recipe output is reproducible: same inputs → same bytes. The data

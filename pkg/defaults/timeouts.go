@@ -1053,14 +1053,23 @@ const (
 	HelmChartPullTimeout = 5 * time.Minute
 )
 
-// OCI registry push tuning. Bounds individual oras.Copy attempts and the
-// retry policy applied around them. Push attempts can take minutes for
-// large bundles over slow links, so the per-attempt timeout is generous.
+// OCI publication phase budgets. The whole-publish ceiling covers two source
+// stages (the CLI verification snapshot and the packageer's retained copy),
+// local archive/store construction, every registry attempt and maximum-jitter
+// backoff, and atomic image-reference output.
 const (
+	// OCISourceStageTimeout bounds one verified source-to-private-workspace
+	// copy. The CLI and the OCI packager each perform one such stage.
+	OCISourceStageTimeout = 2 * time.Minute
+
+	// OCILocalPackageTimeout bounds deterministic archive generation and
+	// insertion into the retained local OCI store.
+	OCILocalPackageTimeout = 4 * time.Minute
+
 	// RegistryPushTimeout is the per-attempt timeout for a single oras.Copy
 	// invocation against a remote registry. Each retry receives a fresh
 	// budget of this size.
-	RegistryPushTimeout = 10 * time.Minute
+	RegistryPushTimeout = 7 * time.Minute
 
 	// RegistryPushRetries is the maximum number of oras.Copy attempts
 	// (initial attempt plus retries) for transient registry failures.
@@ -1073,4 +1082,11 @@ const (
 	// OCIPushConcurrency is the maximum number of concurrent blob copy
 	// tasks within a single oras.Copy invocation.
 	OCIPushConcurrency = 3
+
+	// OCIImageRefsWriteTimeout bounds final atomic image-reference output.
+	OCIImageRefsWriteTimeout = 30 * time.Second
+
+	// OCIBundlePublishTimeout bounds the complete verify, stage, package,
+	// registry-push, and image-reference publication sequence.
+	OCIBundlePublishTimeout = 35 * time.Minute
 )

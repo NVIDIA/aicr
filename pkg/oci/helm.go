@@ -15,57 +15,33 @@
 package oci
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
-	"github.com/Masterminds/semver/v3"
-	"github.com/opencontainers/go-digest"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"gopkg.in/yaml.v3"
 	oras "oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/oci"
-	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/content"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// Helm OCI registry mediaTypes — pinned per the official Helm OCI spec
-// (https://helm.sh/docs/topics/registries/). `helm pull`/`helm install`
-// read the manifest config blob's mediaType to discover whether the
-// artifact is a Helm chart. When AICR pushes with our generic AICR
-// artifactType, helm v3 rejects the artifact during pull discovery and
-// reports `unable to locate any tags in provided repository` (see
-// #961). Pushing with these constants makes the argocd-helm bundle
-// indistinguishable from a chart pushed via `helm push`.
 const (
 	helmConfigMediaType = "application/vnd.cncf.helm.config.v1+json"
 	helmLayerMediaType  = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 )
 
-// chartYAML is intentionally the OCI **config blob** (registry-visible
-// metadata), NOT a full Chart.yaml model. Helm itself reads name +
-// version off the chart tarball's internal Chart.yaml — the full
-// Chart.yaml content ships in the tar layer, so any Helm chart key not
-// modeled here is not lost. The config blob mirrors only the fields
-// `helm pull` validates and that registries (Harbor, GCR, ghcr) render
-// in their artifact-metadata UI.
-//
-// Do NOT widen this struct to model additional Chart.yaml fields. The
-// fix for a missing chart property is to ensure it's in the in-source
-// Chart.yaml (which the bundler writes), not to plumb it through the
-// config blob.
+// chartYAML is the bounded registry-visible subset of Chart.yaml. The source
+// file itself is preserved byte-for-byte in the chart layer.
 type chartYAML struct {
 	APIVersion  string `yaml:"apiVersion" json:"apiVersion"`
 	Name        string `yaml:"name" json:"name"`
@@ -75,396 +51,440 @@ type chartYAML struct {
 	AppVersion  string `yaml:"appVersion,omitempty" json:"appVersion,omitempty"`
 }
 
-// HelmChartOptions configures the Helm OCI push flow.
+// HelmChartOptions configures immutable Helm OCI publication.
 type HelmChartOptions struct {
-	// SourceDir is the directory containing the Helm chart (Chart.yaml,
-	// values.yaml, templates/, etc.). Mirrors PackageOptions.SourceDir.
-	SourceDir string
-	// OutputDir is where the temporary OCI Image Layout is created;
-	// callers usually pass the bundle output directory so cleanup is
-	// scoped to one tree.
-	OutputDir string
-	// Reference is the OCI registry reference. The reference's Tag MUST
-	// match the chart version that helm install / helm pull will look
-	// for; the push flow rewrites the in-source Chart.yaml so this
-	// invariant holds even when the recipe metadata version differs
-	// from the user-supplied --output tag.
-	Reference *Reference
-	// PlainHTTP uses HTTP instead of HTTPS (local test registries).
-	PlainHTTP bool
-	// InsecureTLS skips TLS certificate verification.
+	SourceDir   string
+	OutputDir   string
+	SourceFiles []string
+	Reference   *Reference
+	PlainHTTP   bool
 	InsecureTLS bool
-	// Version threads the AICR CLI version into manifest annotations
-	// alongside the chart-derived ones. Pure metadata; not consulted
-	// by Helm at install time.
-	Version string
+	Version     string
 }
 
-// PackageAndPushHelmChart packages a Helm chart directory into a
-// Helm-OCI compatible artifact and pushes it to a registry. Closes the
-// gap described in #961: the standard AICR OCI flow uses
-// `application/vnd.nvidia.aicr.artifact` for the manifest's
-// artifactType and `application/vnd.oci.image.layer.v1.tar+gzip` for
-// the layer; helm v3 rejects those during pull discovery and the user
-// sees `unable to locate any tags in provided repository` — even
-// though the tag exists and `/v2/<name>/tags/list` returns it.
-//
-// SourceDir is NOT mutated. The Chart.yaml rewrite (so its version
-// matches Reference.Tag — see helm's chart-version invariant below)
-// happens on a copy inside OutputDir, leaving the caller's source
-// tree byte-identical. Earlier revisions of this function rewrote
-// SourceDir in place, which (a) leaked the OCI tag back into the
-// caller's working copy and (b) was non-atomic — a crash mid-write
-// left a corrupt Chart.yaml the next run would refuse to parse.
-//
-// Helm OCI tags ARE chart versions: `helm install … --version <tag>`
-// looks up `<repo>:<tag>` and verifies the chart manifest's version
-// against `<tag>`. Without the rewrite, a user who supplies `--output
-// oci://…/foo:5bc50950-helm` for a recipe whose metadata version is
-// `0.1.0` ends up with `Chart.yaml: 0.1.0` at the `:5bc50950-helm`
-// tag, and helm rejects the version mismatch.
+// PackageAndPushHelmChart creates a Helm-compatible OCI artifact without
+// modifying Chart.yaml or any other caller source byte.
 func PackageAndPushHelmChart(ctx context.Context, opts HelmChartOptions) (*PackageAndPushResult, error) {
-	if opts.Reference == nil || !opts.Reference.IsOCI {
-		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "OCI reference is required for PackageAndPushHelmChart")
+	ctx, cancel := context.WithTimeout(ctx, defaults.OCIBundlePublishTimeout)
+	defer cancel()
+	return packageAndPushHelmChartWithDependencies(ctx, opts, defaultHelmChartDependencies())
+}
+
+type helmChartDependencies struct {
+	packageOperation func(context.Context, HelmChartOptions) (*packageOperation, error)
+	pushOperation    func(context.Context, *packageOperation, PushOptions) (*PushResult, error)
+	beforePush       func(*packageOperation) error
+}
+
+func defaultHelmChartDependencies() helmChartDependencies {
+	return helmChartDependencies{
+		packageOperation: packageHelmOperation,
+		pushOperation:    pushPackageOperation,
 	}
-	if opts.Reference.Tag == "" {
-		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required for Helm OCI push")
-	}
-	if err := validateHelmTag(opts.Reference.Tag); err != nil {
+}
+
+func packageAndPushHelmChartWithDependencies(
+	ctx context.Context,
+	opts HelmChartOptions,
+	deps helmChartDependencies,
+) (retResult *PackageAndPushResult, retErr error) {
+
+	if err := validateHelmChartOptions(opts); err != nil {
 		return nil, err
 	}
-	if err := validateRegistryReference(opts.Reference.Registry, opts.Reference.Repository); err != nil {
+	if err := contextError(ctx, "Helm OCI publication canceled"); err != nil {
 		return nil, err
 	}
-
-	absSourceDir, err := filepath.Abs(opts.SourceDir)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to resolve source directory", err)
+	op, packageErr := deps.packageOperation(ctx, opts)
+	if packageErr != nil {
+		return nil, packageErr
 	}
-	absOutputDir, err := filepath.Abs(opts.OutputDir)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to resolve output directory", err)
+	released := false
+	defer func() {
+		if released {
+			return
+		}
+		if closeErr := op.Close(); closeErr != nil {
+			if retErr == nil {
+				retResult = nil
+				retErr = closeErr
+			} else {
+				slog.Warn("failed to clean Helm package operation after primary error",
+					"error", closeErr, "primary", retErr)
+			}
+		}
+	}()
+	if deps.beforePush != nil {
+		if err := deps.beforePush(op); err != nil {
+			return nil, apperrors.PropagateOrWrap(
+				err, apperrors.ErrCodeInternal, "Helm package-to-push check failed")
+		}
 	}
-
-	// Stage a working copy of SourceDir so the rewrite + tar steps never
-	// mutate the caller's tree. MUST be outside SourceDir: the CLI calls
-	// this function with SourceDir == OutputDir, and putting the work
-	// dir under either would cause copyDir's recursive walk to copy the
-	// freshly-created work dir back into itself (observed: ~250 nested
-	// `helm-chart-work/helm-chart-work/...` levels until ENAMETOOLONG).
-	// Use the OS temp area instead and clean up unconditionally.
-	workDir, mkdirErr := os.MkdirTemp("", "aicr-helm-chart-")
-	if mkdirErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create Helm staging dir", mkdirErr)
-	}
-	defer func() { _ = os.RemoveAll(workDir) }()
-	if copyErr := copyDir(ctx, absSourceDir, workDir); copyErr != nil {
-		return nil, apperrors.PropagateOrWrap(copyErr, apperrors.ErrCodeInternal,
-			"failed to stage Helm chart source for OCI push")
-	}
-
-	chartMeta, err := loadAndRewriteChartYAML(workDir, opts.Reference.Tag)
-	if err != nil {
+	if err := op.layout.validate(); err != nil {
 		return nil, err
 	}
-
-	slog.Info("packaging Helm chart for OCI push",
-		"registry", opts.Reference.Registry,
-		"repository", opts.Reference.Repository,
-		"tag", opts.Reference.Tag,
-		"chart_name", chartMeta.Name,
-		"chart_version", chartMeta.Version,
-	)
-
-	chartTGZ, err := buildHelmChartTGZ(ctx, workDir, chartMeta.Name)
-	if err != nil {
-		return nil, err
+	pushResult, pushErr := deps.pushOperation(ctx, op, PushOptions{
+		Registry:    opts.Reference.Registry,
+		Repository:  opts.Reference.Repository,
+		Tag:         opts.Reference.Tag,
+		PlainHTTP:   opts.PlainHTTP,
+		InsecureTLS: opts.InsecureTLS,
+	})
+	if pushErr != nil {
+		return nil, pushErr
 	}
-
-	configBlob, err := json.Marshal(chartMeta)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to marshal Helm chart config", err)
+	if pushResult == nil {
+		return nil, apperrors.New(apperrors.ErrCodeInternal, "Helm OCI push returned no result")
 	}
-
-	storePath := filepath.Join(absOutputDir, "oci-layout-helm")
-	if mkdirErr := os.MkdirAll(storePath, 0o755); mkdirErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create Helm OCI store directory", mkdirErr)
+	packageResult, releaseErr := op.release()
+	if releaseErr != nil {
+		return nil, releaseErr
 	}
-	store, err := oci.New(storePath)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create Helm OCI store", err)
-	}
-
-	manifestDesc, err := stageHelmOCIManifest(ctx, store, chartMeta, chartTGZ, configBlob, opts.Version)
-	if err != nil {
-		return nil, err
-	}
-	if tagErr := store.Tag(ctx, manifestDesc, opts.Reference.Tag); tagErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to tag Helm OCI manifest", tagErr)
-	}
-
-	pushResult, err := pushHelmOCIFromStore(ctx, opts, store)
-	if err != nil {
-		return nil, err
-	}
-
+	released = true
 	return &PackageAndPushResult{
 		Digest:    pushResult.Digest,
 		MediaType: pushResult.MediaType,
 		Size:      pushResult.Size,
 		Reference: pushResult.Reference,
-		StorePath: storePath,
+		StorePath: packageResult.StorePath,
 	}, nil
 }
 
-// validateHelmTag rejects OCI tags that helm v3 won't accept as chart
-// versions. Helm's registry client filters tags via
-// `semver.StrictNewVersion` (pkg/registry/client.go::Tags()) — any tag
-// that doesn't parse as semver is silently dropped, and `helm pull` /
-// `helm install --version <tag>` reports `unable to locate any tags in
-// provided repository` even when the artifact exists in the registry
-// with correct Helm OCI mediaTypes. Returning a typed error here
-// converts that silent helm-side failure into an actionable
-// bundle-time error with the constraint spelled out.
-//
-// One concession to common usage: a leading `v` (e.g. `v1.2.3`) is
-// stripped before the parse because helm itself strips it (see
-// `pkg/registry/client.go::Tags()` → `strings.TrimPrefix(tag, "v")` is
-// implicit in the version compare path). Users who reach for `v1.2.3`
-// should not be punished for a stylistic choice helm accepts.
-func validateHelmTag(tag string) error {
-	candidate := strings.TrimPrefix(tag, "v")
-	if _, err := semver.StrictNewVersion(candidate); err != nil {
+type helmPackageDependencies struct {
+	prepareSource func(context.Context, string, string, []string) (*preparedSource, error)
+	loadChart     func(context.Context, *preparedSource, string) (*chartYAML, error)
+	newLayout     func(context.Context, string) (*ownedLayout, error)
+	beforeLayout  func() error
+	buildArchive  func(context.Context, *preparedSource, *ownedLayout, string) (string, ociv1.Descriptor, error)
+	newStore      func(context.Context, *ownedLayout) (localOCIStore, error)
+	beforeStore   func() error
+	afterStore    func() error
+	pushFileBlob  func(context.Context, localOCIStore, *ownedLayout, ociv1.Descriptor, string) error
+	removeArchive func(*ownedLayout, string) error
+	stageManifest func(context.Context, localOCIStore, *chartYAML, ociv1.Descriptor, []byte, string) (ociv1.Descriptor, error)
+}
+
+func defaultHelmPackageDependencies() helmPackageDependencies {
+	generic := defaultGenericPackageDependencies()
+	return helmPackageDependencies{
+		prepareSource: func(
+			ctx context.Context,
+			sourceDir, outputDir string,
+			sourceFiles []string,
+		) (*preparedSource, error) {
+
+			return preparePackageSource(ctx, sourceDir, outputDir, "", sourceFiles)
+		},
+		loadChart:    loadChartYAML,
+		newLayout:    newOwnedLayout,
+		buildArchive: buildHelmChartTGZ,
+		newStore: func(ctx context.Context, layout *ownedLayout) (localOCIStore, error) {
+			return newRootOCIStore(ctx, layout)
+		},
+		pushFileBlob:  pushFileBlob,
+		removeArchive: generic.removeArchive,
+		stageManifest: stageHelmOCIManifest,
+	}
+}
+
+func packageHelmOperation(ctx context.Context, opts HelmChartOptions) (*packageOperation, error) {
+	return packageHelmOperationWithDependencies(ctx, opts, defaultHelmPackageDependencies())
+}
+
+func packageHelmOperationWithDependencies(
+	ctx context.Context,
+	opts HelmChartOptions,
+	deps helmPackageDependencies,
+) (_ *packageOperation, retErr error) {
+
+	if err := validateHelmChartOptions(opts); err != nil {
+		return nil, err
+	}
+	stageCtx, stageCancel := context.WithTimeout(ctx, defaults.OCISourceStageTimeout)
+	prepared, prepareErr := deps.prepareSource(stageCtx, opts.SourceDir, opts.OutputDir, opts.SourceFiles)
+	stageCancel()
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	defer func() {
+		if closeErr := prepared.Close(); closeErr != nil {
+			if retErr == nil {
+				retErr = closeErr
+			} else {
+				slog.Warn("failed to close prepared Helm source after primary error",
+					"error", closeErr, "primary", retErr)
+			}
+		}
+	}()
+
+	localCtx, localCancel := context.WithTimeout(ctx, defaults.OCILocalPackageTimeout)
+	defer localCancel()
+	meta, loadErr := deps.loadChart(localCtx, prepared, opts.Reference.Tag)
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	if path.Base(opts.Reference.Repository) != meta.Name {
+		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("OCI repository basename %q must match Chart.yaml name %q",
+				path.Base(opts.Reference.Repository), meta.Name))
+	}
+	if err := runPackageHook(deps.beforeLayout, "Helm OCI layout creation precondition failed"); err != nil {
+		return nil, err
+	}
+	if err := prepared.validate(); err != nil {
+		return nil, err
+	}
+	layout, layoutErr := deps.newLayout(localCtx, opts.OutputDir)
+	if layoutErr != nil {
+		return nil, layoutErr
+	}
+	keepLayout := false
+	defer func() {
+		if keepLayout {
+			return
+		}
+		if closeErr := layout.Close(); closeErr != nil {
+			if retErr == nil {
+				retErr = closeErr
+			} else {
+				slog.Warn("failed to remove Helm OCI layout after primary error",
+					"error", closeErr, "primary", retErr)
+			}
+		}
+	}()
+
+	archiveName, archiveDescriptor, archiveErr := deps.buildArchive(
+		localCtx, prepared, layout, meta.Name)
+	if archiveErr != nil {
+		return nil, archiveErr
+	}
+	if err := prepared.validate(); err != nil {
+		return nil, err
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	if err := runPackageHook(deps.beforeStore, "Helm OCI store open precondition failed"); err != nil {
+		return nil, err
+	}
+	store, storeErr := deps.newStore(localCtx, layout)
+	if storeErr != nil {
+		return nil, apperrors.PropagateOrWrap(
+			storeErr, apperrors.ErrCodeInternal, "failed to create Helm OCI layout store")
+	}
+	if err := runPackageHook(deps.afterStore, "Helm OCI store open postcondition failed"); err != nil {
+		return nil, err
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	if err := deps.pushFileBlob(localCtx, store, layout, archiveDescriptor, archiveName); err != nil {
+		return nil, apperrors.PropagateOrWrap(
+			err, apperrors.ErrCodeInternal, "failed to push Helm chart archive into OCI layout")
+	}
+	if err := deps.removeArchive(layout, archiveName); err != nil {
+		return nil, apperrors.PropagateOrWrap(
+			err, apperrors.ErrCodeInternal, "failed to remove staged Helm chart archive")
+	}
+	configBlob, marshalErr := json.Marshal(meta)
+	if marshalErr != nil {
+		return nil, apperrors.Wrap(
+			apperrors.ErrCodeInternal, "failed to marshal Helm chart config", marshalErr)
+	}
+	manifest, manifestErr := deps.stageManifest(
+		localCtx, store, meta, archiveDescriptor, configBlob, opts.Version)
+	if manifestErr != nil {
+		return nil, manifestErr
+	}
+	if err := store.Tag(localCtx, manifest, opts.Reference.Tag); err != nil {
+		return nil, apperrors.PropagateOrWrap(
+			err, apperrors.ErrCodeInternal, "failed to tag Helm OCI manifest")
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	if err := prepared.Close(); err != nil {
+		return nil, err
+	}
+	manifest = immutableDescriptor(manifest)
+	refString := fmt.Sprintf("%s/%s:%s", stripProtocol(opts.Reference.Registry),
+		opts.Reference.Repository, opts.Reference.Tag)
+	op := &packageOperation{
+		layout:   layout,
+		store:    store,
+		manifest: manifest,
+		result: PackageResult{
+			Descriptor: manifest,
+			Digest:     manifest.Digest.String(),
+			MediaType:  manifest.MediaType,
+			Size:       manifest.Size,
+			Reference:  refString,
+			StorePath:  layout.Path(),
+		},
+	}
+	keepLayout = true
+	return op, nil
+}
+
+func validateHelmChartOptions(opts HelmChartOptions) error {
+	if opts.Reference == nil || !opts.Reference.IsOCI {
 		return apperrors.New(apperrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("Helm OCI requires a semver-compatible tag; got %q. "+
-				"`helm pull` / `helm install --version <tag>` filter tags via "+
-				"semver.StrictNewVersion and silently drop non-semver tags, "+
-				"surfacing as `unable to locate any tags in provided repository`. "+
-				"Wrap arbitrary identifiers as a semver pre-release, e.g. "+
-				"`0.0.0-%s`.", tag, tag))
+			"OCI reference is required for PackageAndPushHelmChart")
+	}
+	if opts.Reference.Tag == "" {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required for Helm OCI push")
+	}
+	if _, err := HelmChartVersionFromTag(opts.Reference.Tag); err != nil {
+		return err
+	}
+	if err := validateRegistryReference(opts.Reference.Registry, opts.Reference.Repository); err != nil {
+		return err
+	}
+	if opts.SourceFiles != nil && !containsSourceFile(opts.SourceFiles, "Chart.yaml") {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest,
+			"SourceFiles must explicitly include Chart.yaml")
 	}
 	return nil
 }
 
-// loadAndRewriteChartYAML reads Chart.yaml from sourceDir, sets its
-// version to tag, and writes the result back. Returns the parsed chart
-// metadata so callers can build the OCI config blob without re-parsing.
-//
-// The rewrite is intentional and idempotent — see
-// PackageAndPushHelmChart for the chart-version-equals-OCI-tag
-// invariant.
-func loadAndRewriteChartYAML(sourceDir, tag string) (*chartYAML, error) {
-	chartPath := filepath.Join(sourceDir, "Chart.yaml")
+func containsSourceFile(files []string, expected string) bool {
+	for _, file := range files {
+		if file == expected {
+			return true
+		}
+	}
+	return false
+}
 
-	// Bounded read: SourceDir is caller-supplied, so a hostile symlink
-	// (/proc, NFS, FUSE) could trick os.ReadFile into allocating the
-	// whole file into memory before yaml.Unmarshal would notice. Open
-	// + LimitReader against the Chart.yaml-shaped cap from pkg/defaults
-	// keeps the allocation bounded even under an attacker-influenced
-	// source path. See CLAUDE.md anti-pattern table for the rule.
-	f, err := os.Open(chartPath) //nolint:gosec // path is under caller-supplied source dir
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInvalidRequest, "failed to open Chart.yaml from source directory", err)
+func loadChartYAML(
+	ctx context.Context,
+	source *preparedSource,
+	expectedTag string,
+) (*chartYAML, error) {
+
+	if source == nil {
+		return nil, apperrors.New(apperrors.ErrCodeInternal, "prepared Helm source is required")
 	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxChartYAMLBytes+1))
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInvalidRequest, "failed to read Chart.yaml from source directory", err)
-	}
-	if int64(len(data)) > defaults.MaxChartYAMLBytes {
+	if !containsSourceFile(source.relativeFiles(), "Chart.yaml") {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("Chart.yaml exceeds %d bytes — refusing to read unbounded source", defaults.MaxChartYAMLBytes))
+			"selected Helm chart files do not include Chart.yaml")
 	}
-
+	if err := source.validate(); err != nil {
+		return nil, err
+	}
+	file, openErr := source.open(ctx, "Chart.yaml")
+	if openErr != nil {
+		return nil, openErr
+	}
+	reader := newContextReadCloser(ctx, file)
+	info, statErr := file.Stat()
+	if statErr != nil {
+		closeErr := reader.Close()
+		return nil, wrapContextualIOFailure(
+			ctx, stderrors.Join(statErr, closeErr),
+			apperrors.ErrCodeInternal, "failed to inspect and close retained Chart.yaml")
+	}
+	if info.Size() > defaults.MaxChartYAMLBytes {
+		primary := apperrors.New(apperrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("Chart.yaml exceeds %d bytes", defaults.MaxChartYAMLBytes))
+		if closeErr := reader.Close(); closeErr != nil {
+			slog.Warn("failed to close oversized retained Chart.yaml after primary error",
+				"error", closeErr, "primary", primary)
+		}
+		return nil, primary
+	}
+	data, readErr := io.ReadAll(io.LimitReader(reader, defaults.MaxChartYAMLBytes+1))
+	closeErr := reader.Close()
+	if readErr != nil || closeErr != nil {
+		return nil, wrapContextualIOFailure(
+			ctx, stderrors.Join(readErr, closeErr),
+			apperrors.ErrCodeInternal, "failed to read and verify retained Chart.yaml")
+	}
+	if err := source.validate(); err != nil {
+		return nil, err
+	}
 	var meta chartYAML
-	if unmarshalErr := yaml.Unmarshal(data, &meta); unmarshalErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInvalidRequest, "failed to parse Chart.yaml", unmarshalErr)
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return nil, apperrors.Wrap(apperrors.ErrCodeInvalidRequest, "failed to parse Chart.yaml", err)
 	}
 	if meta.Name == "" {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "Chart.yaml: name is required")
 	}
-	if nameErr := validateChartName(meta.Name); nameErr != nil {
-		return nil, nameErr
+	switch meta.APIVersion {
+	case "v1", "v2":
+	default:
+		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("Chart.yaml: apiVersion must be v1 or v2; got %q", meta.APIVersion))
 	}
-	if meta.APIVersion == "" {
-		meta.APIVersion = "v2"
+	if err := validateChartName(meta.Name); err != nil {
+		return nil, err
 	}
-	meta.Version = tag
-
-	// The marshaled bytes get written back to Chart.yaml, which is then
-	// tarred into the chart.tgz that becomes the OCI artifact's layer
-	// blob. The layer digest is consumed by helm OCI's content-
-	// addressable cache and by any downstream attestation. Deterministic
-	// marshal is therefore mandatory — the chartYAML struct itself is
-	// stable, but `yaml.v3` makes formatting choices (block-vs-flow
-	// scalar style, line wrapping) that can vary; using the project's
-	// deterministic serializer is the lighter belt-and-suspenders
-	// matching the rest of the digest-feeding paths in this repo.
-	rewritten, err := serializer.MarshalYAMLDeterministic(meta)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to marshal Chart.yaml", err)
+	if meta.Version == "" {
+		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "Chart.yaml: version is required")
 	}
-	if err := os.WriteFile(chartPath, rewritten, 0o600); err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to rewrite Chart.yaml with OCI tag version", err)
+	encoded, encodeErr := HelmTagFromChartVersion(meta.Version)
+	if encodeErr != nil {
+		return nil, encodeErr
+	}
+	if encoded != expectedTag {
+		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("Chart.yaml version %q encodes to tag %q, expected %q",
+				meta.Version, encoded, expectedTag))
 	}
 	return &meta, nil
 }
 
-// validateChartName rejects chart names whose layout would let the tar
-// entry prefix (`<chartName>/<rel>`) escape the chart root on extraction.
-// Helm itself enforces the Chart.yaml name to be `[a-z0-9-]+` at install
-// time, but the OCI push path here is exposed as a public function and
-// a future caller with a name derived from less-validated input could
-// otherwise produce a tarball with absolute or parent-traversal entries.
-//
-// filepath.IsLocal catches `/`, `..`, drive letters, and parent
-// references; the extra ContainsAny adds belt-and-suspenders against
-// control characters and slashes (IsLocal accepts an embedded NUL on
-// some platforms).
 func validateChartName(name string) error {
 	if name == "" {
 		return apperrors.New(apperrors.ErrCodeInvalidRequest, "chart name is required")
 	}
 	if !filepath.IsLocal(name) || strings.ContainsAny(name, "/\\\x00") {
 		return apperrors.New(apperrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("chart name %q contains unsafe characters — must be a single path segment without `/`, `..`, or control chars", name))
+			fmt.Sprintf("chart name %q must be one safe path segment", name))
 	}
 	return nil
 }
 
-// buildHelmChartTGZ produces a Helm-conformant chart.tgz: a gzipped tar
-// where every entry is prefixed with `<chart-name>/` (the Helm "chart
-// root" convention). `helm package` produces exactly this layout; helm
-// v3's pull / install both depend on the prefix so the chart's
-// templates/ resolution roots correctly inside the extracted directory.
-//
-// Reproducible-build hygiene: mtimes are zeroed and uid/gid/uname/
-// gname are stripped (left at their zero values) so two AICR runs
-// against the same source tree produce the same chart.tgz digest,
-// which the OCI registry then dedups.
-//
-// ctx is checked on entry and per directory entry so a parent timeout
-// (push deadline, server shutdown) terminates the walk without
-// orphaning a partially-written buffer.
-func buildHelmChartTGZ(ctx context.Context, sourceDir, chartName string) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeUnavailable, "chart packaging canceled", err)
-	}
-	// Defense-in-depth: loadAndRewriteChartYAML already validated the
-	// name, but this function is exported and a future caller might
-	// construct chartName from a different source. Reject here too so
-	// the tar-entry prefix is always a safe single segment.
+func buildHelmChartTGZ(
+	ctx context.Context,
+	source *preparedSource,
+	layout *ownedLayout,
+	chartName string,
+) (string, ociv1.Descriptor, error) {
+
 	if err := validateChartName(chartName); err != nil {
-		return nil, err
+		return "", ociv1.Descriptor{}, err
 	}
-
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-
-	walkErr := filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		rel, relErr := filepath.Rel(sourceDir, path)
-		if relErr != nil {
-			return relErr
-		}
-		if rel == "." {
-			// Skip the synthetic chart-root directory entry; helm v3
-			// extracts by file path and tolerates its absence, and
-			// emitting it adds noise to the tar that defeats the
-			// reproducible-digest goal whenever a tool inserts/omits it.
-			return nil
-		}
-		entry := chartName + "/" + filepath.ToSlash(rel)
-
-		if info.IsDir() {
-			hdr := &tar.Header{
-				Name:     entry + "/",
-				Mode:     0o755,
-				Typeflag: tar.TypeDir,
-			}
-			return tw.WriteHeader(hdr)
-		}
-		// Skip non-regular files (symlinks, sockets, etc.) — chart
-		// bundles produced by argocdhelm are always plain files;
-		// surfacing the rest defensively avoids pushing an unsupported
-		// tar entry the registry would otherwise accept silently.
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		hdr := &tar.Header{
-			Name:     entry,
-			Mode:     int64(info.Mode().Perm()),
-			Size:     info.Size(),
-			Typeflag: tar.TypeReg,
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		f, openErr := os.Open(filepath.Clean(path)) //nolint:gosec // walking caller-supplied source dir
-		if openErr != nil {
-			return openErr
-		}
-		_, copyErr := io.Copy(tw, f)
-		closeErr := f.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
-	})
-	if walkErr != nil {
-		// filepath.Walk callbacks return ctx.Err() on cancellation
-		// (see the entry-point check at the top of the closure).
-		// Surfacing those as ErrCodeInternal would misclassify a
-		// caller-initiated cancel or a parent-timeout as a bug, and
-		// flatten the CI's distinction between "chart packaging
-		// failed" and "parent context expired". Classify by the
-		// inner error so the same path stays ErrCodeInternal for
-		// real I/O failures and ErrCodeTimeout for cancellation.
-		if stderrors.Is(walkErr, context.Canceled) || stderrors.Is(walkErr, context.DeadlineExceeded) {
-			return nil, apperrors.PropagateOrWrap(walkErr, apperrors.ErrCodeTimeout, "chart packaging canceled")
-		}
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to build Helm chart tarball", walkErr)
+	name, descriptor, err := buildDeterministicTarGzip(
+		ctx, source, layout, archiveOptions{Prefix: chartName})
+	if err != nil {
+		return "", ociv1.Descriptor{}, err
 	}
-	if err := tw.Close(); err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to close tar writer", err)
-	}
-	if err := gz.Close(); err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to close gzip writer", err)
-	}
-	return buf.Bytes(), nil
+	descriptor.MediaType = helmLayerMediaType
+	descriptor.Annotations = nil
+	return name, descriptor, nil
 }
 
-// stageHelmOCIManifest pushes the chart layer + config blob into store
-// and packs an OCI 1.0 manifest with the Helm config mediaType. v1.0
-// is intentional: helm v3's pull path reads manifest.config.mediaType
-// to discover the chart artifactType. v1.1's separate `artifactType`
-// field with an empty config works for some registries but not all
-// (notably older registry:2 builds observed in #961's repro); v1.0
-// keeps the legacy interpretation where the config blob's mediaType
-// IS the artifact type.
-func stageHelmOCIManifest(ctx context.Context, store *oci.Store, meta *chartYAML, chartTGZ, configBlob []byte, aicrVersion string) (ociv1.Descriptor, error) {
-	layerDesc := ociv1.Descriptor{
-		MediaType: helmLayerMediaType,
-		Digest:    digest.FromBytes(chartTGZ),
-		Size:      int64(len(chartTGZ)),
-	}
-	if err := store.Push(ctx, layerDesc, bytes.NewReader(chartTGZ)); err != nil {
-		return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add chart layer to OCI store", err)
-	}
+func stageHelmOCIManifest(
+	ctx context.Context,
+	store localOCIStore,
+	meta *chartYAML,
+	chartDescriptor ociv1.Descriptor,
+	configBlob []byte,
+	aicrVersion string,
+) (ociv1.Descriptor, error) {
 
-	configDesc := ociv1.Descriptor{
-		MediaType: helmConfigMediaType,
-		Digest:    digest.FromBytes(configBlob),
-		Size:      int64(len(configBlob)),
+	configDescriptor := content.NewDescriptorFromBytes(helmConfigMediaType, configBlob)
+	configReader := newContextReadCloser(ctx, io.NopCloser(bytes.NewReader(configBlob)))
+	pushErr := store.Push(ctx, configDescriptor, configReader)
+	closeErr := configReader.Close()
+	if pushErr != nil {
+		return ociv1.Descriptor{}, apperrors.PropagateOrWrap(
+			pushErr, apperrors.ErrCodeInternal, "failed to add Helm chart config to OCI store")
 	}
-	if err := store.Push(ctx, configDesc, bytes.NewReader(configBlob)); err != nil {
-		return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add chart config to OCI store", err)
+	if closeErr != nil {
+		return ociv1.Descriptor{}, apperrors.Wrap(
+			apperrors.ErrCodeInternal, "failed to close Helm chart config reader", closeErr)
 	}
 
 	annotations := map[string]string{
@@ -479,50 +499,15 @@ func stageHelmOCIManifest(ctx context.Context, store *oci.Store, meta *chartYAML
 	if aicrVersion != "" {
 		annotations["com.nvidia.aicr.version"] = aicrVersion
 	}
-
-	packOpts := oras.PackManifestOptions{
-		Layers:              []ociv1.Descriptor{layerDesc},
-		ConfigDescriptor:    &configDesc,
-		ManifestAnnotations: annotations,
-	}
-	manifestDesc, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_0, helmConfigMediaType, packOpts)
+	manifest, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_0,
+		helmConfigMediaType, oras.PackManifestOptions{
+			Layers:              []ociv1.Descriptor{chartDescriptor},
+			ConfigDescriptor:    &configDescriptor,
+			ManifestAnnotations: annotations,
+		})
 	if err != nil {
-		return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack Helm OCI manifest", err)
+		return ociv1.Descriptor{}, apperrors.PropagateOrWrap(
+			err, apperrors.ErrCodeInternal, "failed to pack Helm OCI manifest")
 	}
-	return manifestDesc, nil
-}
-
-// pushHelmOCIFromStore uploads the staged manifest tree from an OCI
-// Image Layout to the remote registry. Wraps the same retry policy
-// as the generic AICR push path so the two flows share transient-
-// failure handling.
-func pushHelmOCIFromStore(ctx context.Context, opts HelmChartOptions, store *oci.Store) (*PushResult, error) {
-	registryHost := stripProtocol(opts.Reference.Registry)
-	refString := fmt.Sprintf("%s/%s:%s", registryHost, opts.Reference.Repository, opts.Reference.Tag)
-
-	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s", registryHost, opts.Reference.Repository))
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to initialize remote repository", err)
-	}
-	repo.PlainHTTP = opts.PlainHTTP
-
-	authClient, err := createAuthClientForHost(registryHost, opts.PlainHTTP, opts.InsecureTLS)
-	if err != nil {
-		slog.Warn("failed to initialize Docker credential store, continuing without authentication", "error", err)
-	}
-	repo.Client = authClient
-
-	copyOpts := oras.DefaultCopyOptions
-	copyOpts.Concurrency = defaults.OCIPushConcurrency
-	desc, err := copyWithRetry(ctx, store, opts.Reference.Tag, repo, opts.Reference.Tag, copyOpts, oras.Copy)
-	if err != nil {
-		return nil, err
-	}
-
-	return &PushResult{
-		Digest:    desc.Digest.String(),
-		MediaType: desc.MediaType,
-		Size:      desc.Size,
-		Reference: refString,
-	}, nil
+	return manifest, nil
 }

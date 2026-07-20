@@ -180,6 +180,13 @@ type Generator struct {
 	// without touching package state. Ignored when VendorCharts is false.
 	Puller localformat.ChartPuller
 
+	// Serial chains each component's dependsOn to the previous component in
+	// deployment order (a linear release chain) instead of projecting the
+	// declared dependencyRefs onto the DAG, so components reconcile strictly
+	// one at a time. Off by default (native DAG). Operator escape hatch wired
+	// from --serial; see config.Serial and serialDependsOn.
+	Serial bool
+
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so provenance.yaml can be written after component
 	// generation without re-threading the slice through every helper.
@@ -294,13 +301,39 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Add source file paths to resources list.
 	resources = append(resources, sourceResourcePaths(helmSources, gitSources)...)
 
+	// Fail closed on a bad dependency graph before projecting it onto Flux's
+	// dependsOn: Generate is exported, so a direct caller could hand-build a
+	// cyclic or dangling RecipeResult that would otherwise become a cyclic
+	// Flux DAG and stall reconciliation. Validate the UNFILTERED ComponentRefs
+	// (not the enabled-filtered sortedRefs) so the graph builder's own
+	// enabled-filtering can treat an edge to a declared-but-disabled component
+	// as satisfied externally rather than mistaking it for an undeclared
+	// dependency; argocd and helmfile validate the unfiltered refs for the same
+	// reason. The levels themselves are discarded — flux renders the exact DAG.
+	if _, levelErr := recipe.ComponentRefsTopologicalLevels(g.RecipeResult.ComponentRefs); levelErr != nil {
+		return nil, errors.PropagateOrWrap(levelErr, errors.ErrCodeInternal,
+			"failed to validate dependency graph")
+	}
+
+	// Project each component's declared dependencyRefs straight onto Flux's
+	// native dependsOn DAG: a component gates only on its actual dependencies
+	// (their terminal releases), and components with none reconcile in
+	// parallel. See declaredDependsOn for why this differs from the tier-based
+	// argocd/helmfile deployers. Under --serial, fall back to a linear chain
+	// (each component depends on the previous) so releases reconcile strictly
+	// one at a time.
+	depsByComponent := declaredDependsOn(sortedRefs, g.ComponentManifests)
+	if g.Serial {
+		depsByComponent = serialDependsOn(sortedRefs, g.ComponentManifests)
+	}
+
 	// Generate per-component resources.
-	for i, ref := range sortedRefs {
+	for _, ref := range sortedRefs {
 		if err := ctx.Err(); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled during component generation", err)
 		}
 		compResources, compErr := g.generateComponentResources(
-			ctx, ref, i, sortedRefs, outputDir, helmSources, gitSources, puller, output)
+			ctx, ref, depsByComponent, outputDir, helmSources, gitSources, puller, output)
 		if compErr != nil {
 			return nil, compErr
 		}
@@ -318,7 +351,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	readmeData := ReadmeData{
 		Namespace:      ns,
 		BundlerVersion: deployer.NormalizeVersionWithDefault(g.Version),
-		Components:     buildComponentSummaries(sortedRefs, g.ComponentPreManifests, g.ComponentManifests),
+		Components:     buildComponentSummaries(sortedRefs, g.ComponentPreManifests, g.ComponentManifests, depsByComponent),
 	}
 	if err := writeTemplate(output, readmeTemplate, readmeData,
 		outputDir, fileReadme, "failed to write README.md"); err != nil {
@@ -382,8 +415,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 // generateComponentResources generates all Flux resources for a single component
 // and returns the resource paths to include in the root kustomization.yaml.
-func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.ComponentRef, index int,
-	sortedRefs []recipe.ComponentRef, outputDir string,
+func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.ComponentRef,
+	deps map[string][]string, outputDir string,
 	helmSources map[string]*HelmRepoSourceData, gitSources map[string]*GitRepoSourceData,
 	puller localformat.ChartPuller,
 	output *deployer.Output) ([]string, error) {
@@ -397,7 +430,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			fmt.Sprintf("failed to create component directory %s", ref.Name), err)
 	}
 
-	primaryDependsOn := g.buildPrimaryDependsOn(sortedRefs, index)
+	primaryDependsOn := buildPrimaryDependsOn(deps, ref.Name)
 	hasPreManifests := len(g.ComponentPreManifests[ref.Name]) > 0
 	hasManifests := len(g.ComponentManifests[ref.Name]) > 0
 	var resources []string
@@ -594,19 +627,84 @@ func (g *Generator) detectInjectedReleaseCollisions(sortedRefs []recipe.Componen
 	return nil
 }
 
-// buildPrimaryDependsOn returns the dependsOn reference for the head of the
-// current component's chain (the <name>-pre release if pre-manifests exist,
-// otherwise the primary HelmRelease). The reference targets the previous
-// component's TERMINAL release — its <prev>-post folder when the previous
-// component has post-manifests, otherwise <prev>. This ensures the next
-// component waits for the previous component's full chain
-// (pre → primary → post) to reconcile before starting.
-func (g *Generator) buildPrimaryDependsOn(sortedRefs []recipe.ComponentRef, index int) []DependsOnRef {
-	if index == 0 {
+// buildPrimaryDependsOn returns the dependsOn references for the head of a
+// component's chain (its <name>-pre release when pre-manifests exist, otherwise
+// the primary HelmRelease), from the precomputed dependency map. A component
+// with no dependencies has no entries and returns nil, so independent
+// components reconcile in parallel. See declaredDependsOn.
+func buildPrimaryDependsOn(deps map[string][]string, name string) []DependsOnRef {
+	targets := deps[name]
+	if len(targets) == 0 {
 		return nil
 	}
-	prev := sortedRefs[index-1]
-	return []DependsOnRef{{Name: terminalReleaseNameFor(prev, g.ComponentManifests)}}
+	refs := make([]DependsOnRef, 0, len(targets))
+	for _, t := range targets {
+		refs = append(refs, DependsOnRef{Name: t})
+	}
+	return refs
+}
+
+// declaredDependsOn maps each component to the dependsOn targets its head
+// release should carry: the terminal release of each of its declared
+// dependencyRefs. Unlike the argocd and helmfile deployers — whose total-order
+// mechanisms (integer sync-waves / sequential sub-helmfiles) can only
+// approximate the dependency DAG as depth tiers, and therefore over-constrain
+// a component to wait on every sibling at the prior depth — Flux's dependsOn is
+// a native DAG, so this projects the recipe's declared edges onto it exactly.
+// A flux user reading the generated HelmRelease sees dependsOn mirror
+// dependencyRefs one-for-one.
+//
+// The terminal release honors a dependency's -post tail (terminalReleaseNameFor),
+// so the dependent waits for the full chain. A dependencyRef pointing at a
+// component that is not in the (already enabled-filtered) ref set — disabled via
+// overrides.enabled=false, or provided externally — is dropped rather than
+// generating an edge to a release that will not exist, matching recipe
+// resolution's enabled-filtering. Targets are sorted for deterministic output;
+// components with no surviving edges are absent from the map (nil dependsOn).
+func declaredDependsOn(sortedRefs []recipe.ComponentRef, postManifests map[string]map[string][]byte) map[string][]string {
+	refByName := make(map[string]recipe.ComponentRef, len(sortedRefs))
+	for _, r := range sortedRefs {
+		refByName[r.Name] = r
+	}
+	out := make(map[string][]string, len(sortedRefs))
+	for _, c := range sortedRefs {
+		if len(c.DependencyRefs) == 0 {
+			continue
+		}
+		targets := make([]string, 0, len(c.DependencyRefs))
+		for _, dep := range c.DependencyRefs {
+			depRef, ok := refByName[dep]
+			if !ok {
+				// Disabled, externally provided, or undeclared: no release to
+				// depend on. Recipe resolution already validated real edges.
+				continue
+			}
+			targets = append(targets, terminalReleaseNameFor(depRef, postManifests))
+		}
+		if len(targets) > 0 {
+			sort.Strings(targets)
+			out[c.Name] = targets
+		}
+	}
+	return out
+}
+
+// serialDependsOn maps each component to a single dependsOn target: the
+// terminal release of the previous component in deployment order. This is the
+// pre-parallelism linear chain (previous -> <name>-pre -> <name> -> <name>-post
+// -> next) that --serial restores, so releases reconcile strictly one at a
+// time regardless of the actual dependency graph. The head of the chain (index
+// 0) has no predecessor and is absent from the map (nil dependsOn).
+func serialDependsOn(sortedRefs []recipe.ComponentRef, postManifests map[string]map[string][]byte) map[string][]string {
+	out := make(map[string][]string, len(sortedRefs))
+	prevTerminal := ""
+	for _, c := range sortedRefs {
+		if prevTerminal != "" {
+			out[c.Name] = []string{prevTerminal}
+		}
+		prevTerminal = terminalReleaseNameFor(c, postManifests)
+	}
+	return out
 }
 
 // terminalReleaseNameFor returns the name of the LAST HelmRelease emitted for a
@@ -622,6 +720,16 @@ func terminalReleaseNameFor(ref recipe.ComponentRef, postManifests map[string]ma
 		return ref.Name + "-post"
 	}
 	return ref.Name
+}
+
+// dependsOnStr renders a dependsOn target list for the README "Depends On"
+// column: the sorted names joined by ", ", or "-" when the release has no
+// dependency (a level-0 head).
+func dependsOnStr(names []string) string {
+	if len(names) == 0 {
+		return "-"
+	}
+	return strings.Join(names, ", ")
 }
 
 // nonAlphanumericRe collapses runs of non-DNS characters into a single hyphen.
@@ -671,32 +779,30 @@ func sourceResourcePaths(helmSources map[string]*HelmRepoSourceData, gitSources 
 // buildComponentSummaries builds the component summary list for the README.
 // The list mirrors the actual HelmRelease graph (pre → primary → post) so the
 // rendered "Depends On" column matches what Flux will reconcile.
-func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, manifests map[string]map[string][]byte) []ComponentSummary {
+func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, manifests map[string]map[string][]byte, deps map[string][]string) []ComponentSummary {
 	summaries := make([]ComponentSummary, 0, len(sortedRefs))
-	for i, ref := range sortedRefs {
+	for _, ref := range sortedRefs {
 		version := ref.Version
 		if version == "" {
 			version = ref.Tag
 		}
 
-		// Terminal of the previous component (its <prev>-post when post-manifests
-		// exist, otherwise <prev>). Head of the chain has no previous, so "-".
-		previousTerminal := "-"
-		if i > 0 {
-			previousTerminal = terminalReleaseNameFor(sortedRefs[i-1], manifests)
-		}
+		// The head of a component's chain depends on the terminal release of
+		// each of its declared dependencyRefs (see declaredDependsOn). A
+		// component with no dependencies is rendered as "-".
+		headDependsOn := dependsOnStr(deps[ref.Name])
 
 		// When pre-manifests exist, generation inserts a <name>-pre HelmRelease
 		// before the primary and rewires the primary's dependsOn to point at it.
 		// Reflect that in the README so the table matches the generated CRs.
-		primaryDependsOn := previousTerminal
+		primaryDependsOn := headDependsOn
 		if len(preManifests[ref.Name]) > 0 {
 			preName := ref.Name + "-pre"
 			summaries = append(summaries, ComponentSummary{
 				Name:         preName,
 				Type:         summaryTypeHelmRelease,
 				Namespace:    ref.Namespace,
-				DependsOnStr: previousTerminal,
+				DependsOnStr: headDependsOn,
 			})
 			primaryDependsOn = preName
 		}

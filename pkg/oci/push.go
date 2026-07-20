@@ -21,6 +21,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -29,12 +30,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
+	"sync"
 	"time"
 
-	"github.com/distribution/reference"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	oras "oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote"
@@ -82,6 +83,9 @@ type PackageOptions struct {
 	Tag string
 	// SubDir optionally limits packaging to a subdirectory within SourceDir.
 	SubDir string
+	// SourceFiles is the complete file set to package. Nil recursively
+	// discovers files; a non-nil empty slice is invalid.
+	SourceFiles []string
 	// Annotations are additional manifest annotations to include.
 	// Standard OCI annotations (org.opencontainers.image.*) are recommended.
 	Annotations map[string]string
@@ -89,6 +93,8 @@ type PackageOptions struct {
 
 // PackageResult contains the result of local OCI packaging.
 type PackageResult struct {
+	// Descriptor is the exact immutable manifest descriptor produced locally.
+	Descriptor ociv1.Descriptor
 	// Digest is the SHA256 digest of the packaged artifact.
 	Digest string
 	// MediaType is the manifest media type
@@ -153,203 +159,695 @@ func validateRegistryReference(registry, repository string) error {
 
 // Package creates a local OCI artifact in OCI Image Layout format.
 // This stores the artifact locally without pushing to a remote registry.
-func Package(ctx context.Context, opts PackageOptions) (retResult *PackageResult, retErr error) {
-	if opts.Tag == "" {
-		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required for OCI packaging")
-	}
-
-	if opts.Registry == "" {
-		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "registry is required for OCI packaging")
-	}
-
-	if opts.Repository == "" {
-		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "repository is required for OCI packaging")
-	}
-
-	// Validate registry and repository format
-	if err := validateRegistryReference(opts.Registry, opts.Repository); err != nil {
-		return nil, err
-	}
-
-	// Determine the directory to package from
-	packageFromDir, cleanup, err := preparePushDir(ctx, opts.SourceDir, opts.SubDir)
+func Package(ctx context.Context, opts PackageOptions) (*PackageResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaults.OCIBundlePublishTimeout)
+	defer cancel()
+	op, err := packageGenericOperation(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	// Check for context cancellation before expensive operations
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", ctxErr)
-	}
-
-	// Convert to absolute path
-	absSourceDir, err := filepath.Abs(packageFromDir)
+	result, err := op.release()
 	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to get absolute path for source dir", err)
+		return nil, err
 	}
-
-	// Strip protocol from registry for docker reference compatibility
-	registryHost := stripProtocol(opts.Registry)
-
-	// Build and validate the image reference
-	refString := fmt.Sprintf("%s/%s:%s", registryHost, opts.Repository, opts.Tag)
-	if _, parseErr := reference.ParseNormalizedNamed(refString); parseErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInvalidRequest, fmt.Sprintf("invalid image reference '%s'", refString), parseErr)
-	}
-
-	// Create OCI Image Layout store at output directory
-	ociStorePath := filepath.Join(opts.OutputDir, "oci-layout")
-	if mkdirErr := os.MkdirAll(ociStorePath, 0o755); mkdirErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create OCI store directory", mkdirErr)
-	}
-
-	ociStore, err := oci.New(ociStorePath)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create OCI store", err)
-	}
-	// Note: oci.Store doesn't require explicit closing
-
-	// Create a file store to read from source directory
-	fs, err := file.New(absSourceDir)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create file store", err)
-	}
-	defer func() {
-		// File store close may flush state; surface as a wrapped error.
-		if closeErr := fs.Close(); closeErr != nil && retErr == nil {
-			retErr = apperrors.Wrap(apperrors.ErrCodeInternal, "failed to close file store", closeErr)
-		}
-	}()
-
-	// Make tars deterministic for reproducible builds
-	fs.TarReproducible = true
-
-	// Check for context cancellation before adding files
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", ctxErr)
-	}
-
-	// Add all contents from the file store root
-	layerDesc, err := fs.Add(ctx, ".", ociv1.MediaTypeImageLayerGzip, absSourceDir)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add source directory to store", err)
-	}
-
-	// Pack an OCI 1.1 manifest with our artifact type
-	packOpts := oras.PackManifestOptions{
-		Layers: []ociv1.Descriptor{layerDesc},
-	}
-
-	// Build manifest annotations - always set a fixed timestamp for reproducibility
-	packOpts.ManifestAnnotations = make(map[string]string)
-	for k, v := range opts.Annotations {
-		packOpts.ManifestAnnotations[k] = v
-	}
-
-	// Always add consistent creation timestamp to ensure reproducible builds
-	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = reproducibleTimestamp
-
-	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, artifactType, packOpts)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack manifest", err)
-	}
-
-	// Tag the manifest in file store
-	if tagErr := fs.Tag(ctx, manifestDesc, opts.Tag); tagErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to tag manifest", tagErr)
-	}
-
-	// Check for context cancellation before copy operation
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", ctxErr)
-	}
-
-	// Copy from file store to OCI layout store. This is a local-only copy
-	// (no network), but still bounded so a wedged store can't hang forever.
-	copyOpts := oras.DefaultCopyOptions
-	copyOpts.Concurrency = defaults.OCIPushConcurrency
-
-	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.RegistryPushTimeout)
-	defer pushCancel()
-	desc, err := oras.Copy(pushCtx, fs, opts.Tag, ociStore, opts.Tag, copyOpts)
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy to OCI store", err)
-	}
-
-	return &PackageResult{
-		Digest:    desc.Digest.String(),
-		MediaType: desc.MediaType,
-		Size:      desc.Size,
-		Reference: refString,
-		StorePath: ociStorePath,
-	}, nil
+	return result, nil
 }
 
 // PushFromStore pushes an already-packaged OCI artifact from a local OCI store to a remote registry.
 //
 //nolint:unparam // PushResult is part of the public API, returned for future callers
-func PushFromStore(ctx context.Context, storePath string, opts PushOptions) (*PushResult, error) {
-	if opts.Tag == "" {
-		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required to push OCI image")
-	}
+func PushFromStore(
+	ctx context.Context,
+	storePath string,
+	expected ociv1.Descriptor,
+	opts PushOptions,
+) (*PushResult, error) {
 
-	// Validate registry and repository format
-	if err := validateRegistryReference(opts.Registry, opts.Repository); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, defaults.OCIBundlePublishTimeout)
+	defer cancel()
+	return pushFromStoreWithDependencies(ctx, storePath, expected, opts, defaultPushOperationDependencies())
+}
+
+type genericPackageDependencies struct {
+	prepareSource func(context.Context, string, string, string, []string) (*preparedSource, error)
+	newLayout     func(context.Context, string) (*ownedLayout, error)
+	beforeLayout  func() error
+	buildArchive  func(context.Context, *preparedSource, *ownedLayout, archiveOptions) (string, ociv1.Descriptor, error)
+	newStore      func(context.Context, *ownedLayout) (localOCIStore, error)
+	beforeStore   func() error
+	afterStore    func() error
+	pushFileBlob  func(context.Context, localOCIStore, *ownedLayout, ociv1.Descriptor, string) error
+	removeArchive func(*ownedLayout, string) error
+	stageManifest func(context.Context, localOCIStore, string, ociv1.Descriptor, PackageOptions) (ociv1.Descriptor, error)
+}
+
+func defaultGenericPackageDependencies() genericPackageDependencies {
+	return genericPackageDependencies{
+		prepareSource: preparePackageSource,
+		newLayout:     newOwnedLayout,
+		buildArchive:  buildDeterministicTarGzip,
+		newStore: func(ctx context.Context, layout *ownedLayout) (localOCIStore, error) {
+			return newRootOCIStore(ctx, layout)
+		},
+		pushFileBlob: pushFileBlob,
+		removeArchive: func(layout *ownedLayout, archiveName string) error {
+			if err := layout.validate(); err != nil {
+				return err
+			}
+			if err := validateSelectedPath(archiveName); err != nil || strings.Contains(archiveName, "/") {
+				return apperrors.New(apperrors.ErrCodeInternal, "archive name is not layout-relative")
+			}
+			if err := layout.child.Remove(archiveName); err != nil {
+				return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to remove staged archive", err)
+			}
+			return nil
+		},
+		stageManifest: stageGenericOCIManifest,
+	}
+}
+
+type packageOperation struct {
+	layout   *ownedLayout
+	store    localOCIStore
+	manifest ociv1.Descriptor
+	result   PackageResult
+}
+
+func packageGenericOperation(ctx context.Context, opts PackageOptions) (*packageOperation, error) {
+	return packageGenericOperationWithDependencies(ctx, opts, defaultGenericPackageDependencies())
+}
+
+func packageGenericOperationWithDependencies(
+	ctx context.Context,
+	opts PackageOptions,
+	deps genericPackageDependencies,
+) (_ *packageOperation, retErr error) {
+
+	if err := validatePackageOperation(ctx, opts); err != nil {
+		return nil, err
+	}
+	prepared, prepareErr := prepareGenericPackageSource(ctx, opts, deps)
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	defer func() {
+		if closeErr := prepared.Close(); closeErr != nil {
+			if retErr == nil {
+				retErr = closeErr
+			} else {
+				slog.Warn("failed to close prepared OCI source after primary error", "error", closeErr)
+			}
+		}
+	}()
+	if err := prepared.validate(); err != nil {
+		return nil, err
+	}
+	localCtx, localCancel := context.WithTimeout(ctx, defaults.OCILocalPackageTimeout)
+	defer localCancel()
+	if err := runPackageHook(deps.beforeLayout, "OCI layout creation precondition failed"); err != nil {
+		return nil, err
+	}
+	if err := prepared.validate(); err != nil {
 		return nil, err
 	}
 
-	// Check for context cancellation
-	if err := ctx.Err(); err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", err)
+	layout, layoutErr := deps.newLayout(localCtx, opts.OutputDir)
+	if layoutErr != nil {
+		return nil, layoutErr
+	}
+	keepLayout := false
+	defer func() {
+		if keepLayout {
+			return
+		}
+		if closeErr := layout.Close(); closeErr != nil {
+			if retErr == nil {
+				retErr = closeErr
+			} else {
+				slog.Warn("failed to remove OCI layout after primary error", "error", closeErr)
+			}
+		}
+	}()
+	if err := prepared.validate(); err != nil {
+		return nil, err
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
 	}
 
-	// Strip protocol from registry for docker reference compatibility
-	registryHost := stripProtocol(opts.Registry)
+	archiveName, archiveDescriptor, archiveErr := deps.buildArchive(
+		localCtx, prepared, layout, archiveOptions{})
+	if archiveErr != nil {
+		return nil, archiveErr
+	}
+	if err := prepared.validate(); err != nil {
+		return nil, err
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	if err := runPackageHook(deps.beforeStore, "OCI store open precondition failed"); err != nil {
+		return nil, err
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	store, storeErr := deps.newStore(localCtx, layout)
+	if storeErr != nil {
+		return nil, apperrors.PropagateOrWrap(
+			storeErr, apperrors.ErrCodeInternal, "failed to create OCI layout store")
+	}
+	if err := runPackageHook(deps.afterStore, "OCI store open postcondition failed"); err != nil {
+		return nil, err
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	if blobErr := deps.pushFileBlob(localCtx, store, layout, archiveDescriptor, archiveName); blobErr != nil {
+		return nil, apperrors.PropagateOrWrap(blobErr, apperrors.ErrCodeInternal,
+			"failed to push archive into OCI layout")
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	if removeErr := deps.removeArchive(layout, archiveName); removeErr != nil {
+		return nil, apperrors.PropagateOrWrap(removeErr, apperrors.ErrCodeInternal,
+			"failed to remove staged archive")
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	manifest, manifestErr := deps.stageManifest(localCtx, store, archiveName, archiveDescriptor, opts)
+	if manifestErr != nil {
+		return nil, manifestErr
+	}
+	if err := layout.validate(); err != nil {
+		return nil, err
+	}
+	if err := prepared.Close(); err != nil {
+		return nil, err
+	}
+	manifest = immutableDescriptor(manifest)
+	refString := fmt.Sprintf("%s/%s:%s", stripProtocol(opts.Registry), opts.Repository, opts.Tag)
+	op := &packageOperation{
+		layout:   layout,
+		store:    store,
+		manifest: manifest,
+		result: PackageResult{
+			Descriptor: manifest,
+			Digest:     manifest.Digest.String(),
+			MediaType:  manifest.MediaType,
+			Size:       manifest.Size,
+			Reference:  refString,
+			StorePath:  layout.Path(),
+		},
+	}
+	keepLayout = true
+	return op, nil
+}
 
-	// Build the reference string
-	refString := fmt.Sprintf("%s/%s:%s", registryHost, opts.Repository, opts.Tag)
+func validatePackageOperation(ctx context.Context, opts PackageOptions) error {
+	if err := validatePackageOptions(opts); err != nil {
+		return err
+	}
+	return contextError(ctx, "OCI packaging canceled")
+}
 
-	// Open existing OCI store
-	ociStore, err := oci.New(storePath)
+func prepareGenericPackageSource(
+	ctx context.Context,
+	opts PackageOptions,
+	deps genericPackageDependencies,
+) (*preparedSource, error) {
+
+	stageCtx, cancel := context.WithTimeout(ctx, defaults.OCISourceStageTimeout)
+	defer cancel()
+	return deps.prepareSource(
+		stageCtx, opts.SourceDir, opts.OutputDir, opts.SubDir, opts.SourceFiles)
+}
+
+func runPackageHook(hook func() error, message string) error {
+	if hook == nil {
+		return nil
+	}
+	if err := hook(); err != nil {
+		return apperrors.PropagateOrWrap(err, apperrors.ErrCodeInternal, message)
+	}
+	return nil
+}
+
+func validatePackageOptions(opts PackageOptions) error {
+	if opts.Tag == "" {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required for OCI packaging")
+	}
+	if opts.Registry == "" {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest, "registry is required for OCI packaging")
+	}
+	if opts.Repository == "" {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest, "repository is required for OCI packaging")
+	}
+	if err := validateDistributionTag(opts.Tag); err != nil {
+		return err
+	}
+	return validateRegistryReference(opts.Registry, opts.Repository)
+}
+
+func immutableDescriptor(descriptor ociv1.Descriptor) ociv1.Descriptor {
+	return ociv1.Descriptor{
+		MediaType: descriptor.MediaType,
+		Digest:    descriptor.Digest,
+		Size:      descriptor.Size,
+	}
+}
+
+func pushFileBlob(
+	ctx context.Context,
+	store localOCIStore,
+	layout *ownedLayout,
+	descriptor ociv1.Descriptor,
+	archiveName string,
+) (retErr error) {
+
+	if err := layout.validate(); err != nil {
+		return err
+	}
+	file, err := layout.child.Open(archiveName)
 	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to open OCI store", err)
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to open staged archive", err)
 	}
-	// Note: oci.Store doesn't require explicit closing
+	if err := layout.validate(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	reader := newContextReadCloser(ctx, file)
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			if retErr == nil {
+				retErr = apperrors.Wrap(apperrors.ErrCodeInternal, "failed to close staged archive", closeErr)
+			} else {
+				slog.Warn("failed to close staged archive after primary error", "error", closeErr)
+			}
+		}
+	}()
+	if err := store.Push(ctx, descriptor, reader); err != nil {
+		if ctx.Err() != nil {
+			return contextError(ctx, "local OCI blob push canceled")
+		}
+		return apperrors.PropagateOrWrap(
+			err, apperrors.ErrCodeInternal, "failed to push staged archive")
+	}
+	return nil
+}
 
-	// Prepare remote repository
-	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s", registryHost, opts.Repository))
+func stageGenericOCIManifest(
+	ctx context.Context,
+	store localOCIStore,
+	_ string,
+	archiveDescriptor ociv1.Descriptor,
+	opts PackageOptions,
+) (ociv1.Descriptor, error) {
+
+	packOpts := oras.PackManifestOptions{Layers: []ociv1.Descriptor{archiveDescriptor}}
+	packOpts.ManifestAnnotations = make(map[string]string, len(opts.Annotations)+1)
+	for key, value := range opts.Annotations {
+		packOpts.ManifestAnnotations[key] = value
+	}
+	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = reproducibleTimestamp
+	manifest, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, artifactType, packOpts)
+	if err != nil {
+		return ociv1.Descriptor{}, apperrors.PropagateOrWrap(
+			err, apperrors.ErrCodeInternal, "failed to pack OCI manifest")
+	}
+	if err := store.Tag(ctx, manifest, opts.Tag); err != nil {
+		return ociv1.Descriptor{}, apperrors.PropagateOrWrap(
+			err, apperrors.ErrCodeInternal, "failed to tag OCI manifest")
+	}
+	return manifest, nil
+}
+
+func (o *packageOperation) Close() error {
+	if o == nil || o.layout == nil {
+		return nil
+	}
+	return o.layout.Close()
+}
+
+func (o *packageOperation) release() (*PackageResult, error) {
+	path, err := o.layout.release()
+	if err != nil {
+		return nil, err
+	}
+	result := o.result
+	result.StorePath = path
+	return &result, nil
+}
+
+type pushOperationDependencies struct {
+	newTarget         func(PushOptions) (publicationTarget, error)
+	openStoreRoot     func(context.Context, string, func(*os.Root) error) (*rootedDirectory, error)
+	newReadOnlyStore  func(fs.FS) content.ReadOnlyStorage
+	beforeStoreOpen   func() error
+	afterStoreOpen    func() error
+	closeStoreRoot    func(*os.Root) error
+	maxAttempts       int
+	initialBackoff    time.Duration
+	perAttemptTimeout time.Duration
+	copyGraph         copyGraphFunc
+	pushAttempt       pushDescriptorAttemptFunc
+	beforeAttempt     func(int) error
+	source            func(content.ReadOnlyStorage) content.ReadOnlyStorage
+}
+
+type pushDescriptorAttemptFunc func(
+	context.Context,
+	content.ReadOnlyStorage,
+	publicationTarget,
+	ociv1.Descriptor,
+	string,
+	apperrors.ErrorCode,
+	oras.CopyGraphOptions,
+	copyGraphFunc,
+) error
+
+func defaultPushOperationDependencies() pushOperationDependencies {
+	return pushOperationDependencies{
+		newTarget: newPublicationTarget,
+		openStoreRoot: func(
+			ctx context.Context,
+			path string,
+			closeRoot func(*os.Root) error,
+		) (*rootedDirectory, error) {
+
+			return openRootedDirectoryWithClose(
+				ctx, path, apperrors.ErrCodeInvalidRequest, nil, closeRoot)
+		},
+		newReadOnlyStore:  func(fsys fs.FS) content.ReadOnlyStorage { return oci.NewStorageFromFS(fsys) },
+		closeStoreRoot:    func(root *os.Root) error { return root.Close() },
+		maxAttempts:       defaults.RegistryPushRetries,
+		initialBackoff:    defaults.RegistryPushBackoff,
+		perAttemptTimeout: defaults.RegistryPushTimeout,
+		copyGraph:         oras.CopyGraph,
+		pushAttempt:       pushFrozenDescriptorAttempt,
+		source:            func(source content.ReadOnlyStorage) content.ReadOnlyStorage { return source },
+	}
+}
+
+func newPublicationTarget(opts PushOptions) (publicationTarget, error) {
+	registryHost := stripProtocol(opts.Registry)
+	repository, err := remote.NewRepository(fmt.Sprintf("%s/%s", registryHost, opts.Repository))
 	if err != nil {
 		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to initialize remote repository", err)
 	}
-	repo.PlainHTTP = opts.PlainHTTP
-
-	// Configure auth client using Docker credentials if available
-	authClient, err := createAuthClientForHost(registryHost, opts.PlainHTTP, opts.InsecureTLS)
-	if err != nil {
-		slog.Warn("failed to initialize Docker credential store, continuing without authentication",
-			"error", err)
+	repository.PlainHTTP = opts.PlainHTTP
+	authClient, authErr := createAuthClientForHost(registryHost, opts.PlainHTTP, opts.InsecureTLS)
+	if authErr != nil {
+		slog.Warn("failed to initialize Docker credential store, continuing without authentication", "error", authErr)
 	}
-	repo.Client = authClient
+	repository.Client = authClient
+	return &remotePublicationTarget{publicationTargetCore: repository, client: authClient.Client}, nil
+}
 
-	// Copy from OCI store to remote repository, bounded by a per-attempt
-	// timeout and wrapped in a small retry policy for transient failures.
-	copyOpts := oras.DefaultCopyOptions
-	copyOpts.Concurrency = defaults.OCIPushConcurrency
+type remotePublicationTarget struct {
+	publicationTargetCore
+	client *http.Client
+}
 
-	desc, err := copyWithRetry(ctx, ociStore, opts.Tag, repo, opts.Tag, copyOpts, oras.Copy)
+func (t *remotePublicationTarget) CloseIdleConnections() {
+	if t.client != nil {
+		t.client.CloseIdleConnections()
+	}
+}
+
+func pushPackageOperation(
+	ctx context.Context,
+	op *packageOperation,
+	opts PushOptions,
+) (*PushResult, error) {
+
+	return pushPackageOperationWithDependencies(ctx, op, opts, defaultPushOperationDependencies())
+}
+
+func pushPackageOperationWithDependencies(
+	ctx context.Context,
+	op *packageOperation,
+	opts PushOptions,
+	deps pushOperationDependencies,
+) (*PushResult, error) {
+
+	if op == nil || op.layout == nil || op.store == nil {
+		return nil, apperrors.New(apperrors.ErrCodeInternal, "package operation is incomplete")
+	}
+	return pushFrozenDescriptor(ctx, deps.source(op.store), op.manifest, opts,
+		apperrors.ErrCodeInternal, op.layout.validate, deps)
+}
+
+func pushFromStoreWithDependencies(
+	ctx context.Context,
+	storePath string,
+	expected ociv1.Descriptor,
+	opts PushOptions,
+	deps pushOperationDependencies,
+) (*PushResult, error) {
+
+	if err := validatePushOptions(opts); err != nil {
+		return nil, err
+	}
+	if err := validateExpectedManifest(expected); err != nil {
+		return nil, err
+	}
+	if err := contextError(ctx, "OCI store push canceled"); err != nil {
+		return nil, err
+	}
+	storeRoot, rootOpenErr := deps.openStoreRoot(ctx, storePath, deps.closeStoreRoot)
+	if rootOpenErr != nil {
+		return nil, rootOpenErr
+	}
+	closeStore := func(primary error) error {
+		closeErr := storeRoot.close("public OCI store root", deps.closeStoreRoot)
+		if primary != nil && closeErr != nil {
+			slog.Warn("failed to close public OCI store after primary error",
+				"error", closeErr, "primary", primary)
+			return primary
+		}
+		return stderrors.Join(primary, closeErr)
+	}
+	if deps.beforeStoreOpen != nil {
+		if err := deps.beforeStoreOpen(); err != nil {
+			return nil, closeStore(apperrors.PropagateOrWrap(
+				err, apperrors.ErrCodeInvalidRequest, "public OCI store open precondition failed"))
+		}
+	}
+	if err := storeRoot.validate(apperrors.ErrCodeInvalidRequest); err != nil {
+		return nil, closeStore(err)
+	}
+	store := deps.newReadOnlyStore(storeRoot.root.FS())
+	if deps.afterStoreOpen != nil {
+		if err := deps.afterStoreOpen(); err != nil {
+			return nil, closeStore(apperrors.PropagateOrWrap(
+				err, apperrors.ErrCodeInvalidRequest, "public OCI store open postcondition failed"))
+		}
+	}
+	if err := storeRoot.validate(apperrors.ErrCodeInvalidRequest); err != nil {
+		return nil, closeStore(err)
+	}
+	validate := func() error { return storeRoot.validate(apperrors.ErrCodeInvalidRequest) }
+	result, pushErr := pushFrozenDescriptor(ctx, deps.source(store), immutableDescriptor(expected), opts,
+		apperrors.ErrCodeInvalidRequest, validate, deps)
+	if closeErr := closeStore(pushErr); closeErr != nil {
+		return nil, closeErr
+	}
+	return result, nil
+}
+
+func validatePushOptions(opts PushOptions) error {
+	if opts.Tag == "" {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required to push OCI image")
+	}
+	if opts.Registry == "" || opts.Repository == "" {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest, "registry and repository are required")
+	}
+	if err := validateDistributionTag(opts.Tag); err != nil {
+		return err
+	}
+	return validateRegistryReference(opts.Registry, opts.Repository)
+}
+
+func validateExpectedManifest(expected ociv1.Descriptor) error {
+	if expected.MediaType == "" || expected.Digest == "" || expected.Size <= 0 {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest,
+			"expected OCI manifest descriptor requires media type, digest, and positive size")
+	}
+	if err := expected.Digest.Validate(); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInvalidRequest, "expected OCI manifest digest is invalid", err)
+	}
+	switch expected.MediaType {
+	case ociv1.MediaTypeImageManifest,
+		ociv1.MediaTypeImageIndex,
+		"application/vnd.docker.distribution.manifest.v2+json",
+		"application/vnd.docker.distribution.manifest.list.v2+json":
+		return nil
+	default:
+		return apperrors.New(apperrors.ErrCodeInvalidRequest, "expected descriptor is not a supported OCI manifest")
+	}
+}
+
+func pushFrozenDescriptor(
+	ctx context.Context,
+	source content.ReadOnlyStorage,
+	expected ociv1.Descriptor,
+	opts PushOptions,
+	sourceFailureCode apperrors.ErrorCode,
+	validateSource func() error,
+	deps pushOperationDependencies,
+) (*PushResult, error) {
+
+	if err := validatePushOptions(opts); err != nil {
+		return nil, err
+	}
+	if err := validateExpectedManifest(expected); err != nil {
+		if sourceFailureCode == apperrors.ErrCodeInternal {
+			return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "generated OCI descriptor is invalid", err)
+		}
+		return nil, err
+	}
+	target, err := deps.newTarget(opts)
 	if err != nil {
 		return nil, err
 	}
+	if target == nil {
+		return nil, apperrors.New(apperrors.ErrCodeInternal, "OCI publication target is nil")
+	}
+	defer target.CloseIdleConnections()
+	attempts := deps.maxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	backoff := deps.initialBackoff
+	copyOptions := oras.DefaultCopyGraphOptions
+	copyOptions.Concurrency = defaults.OCIPushConcurrency
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := contextError(ctx, "OCI registry push canceled"); err != nil {
+			return nil, err
+		}
+		if deps.beforeAttempt != nil {
+			if err := deps.beforeAttempt(attempt); err != nil {
+				return nil, apperrors.PropagateOrWrap(err, apperrors.ErrCodeInternal,
+					"OCI push attempt precondition failed")
+			}
+		}
+		if err := validateSource(); err != nil {
+			return nil, err
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, deps.perAttemptTimeout)
+		lastErr = deps.pushAttempt(
+			attemptCtx, source, target, expected, opts.Tag, sourceFailureCode, copyOptions, deps.copyGraph)
+		parentErr := ctx.Err()
+		attemptErr := attemptCtx.Err()
+		cancel()
+		if parentErr != nil {
+			return nil, contextError(ctx, "OCI registry push canceled")
+		}
+		if attemptErr != nil {
+			lastErr = attemptErr
+		}
+		if lastErr == nil {
+			if err := contextError(ctx, "OCI registry push canceled"); err != nil {
+				return nil, err
+			}
+			return &PushResult{
+				Digest:    expected.Digest.String(),
+				MediaType: expected.MediaType,
+				Size:      expected.Size,
+				Reference: fmt.Sprintf("%s/%s:%s", stripProtocol(opts.Registry), opts.Repository, opts.Tag),
+			}, nil
+		}
+		if ctx.Err() != nil {
+			return nil, contextError(ctx, "OCI registry push canceled")
+		}
+		if !isTransientPushError(lastErr) && !apperrors.IsTransient(lastErr) {
+			return nil, classifyRegistryPushFailure(lastErr, false)
+		}
+		if attempt == attempts {
+			break
+		}
+		timer := time.NewTimer(jitterDuration(backoff))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, contextError(ctx, "OCI registry retry canceled")
+		case <-timer.C:
+		}
+		backoff *= 2
+	}
+	return nil, classifyRegistryPushFailure(lastErr, true)
+}
 
-	return &PushResult{
-		Digest:    desc.Digest.String(),
-		MediaType: desc.MediaType,
-		Size:      desc.Size,
-		Reference: refString,
-	}, nil
+func pushFrozenDescriptorAttempt(
+	ctx context.Context,
+	source content.ReadOnlyStorage,
+	target publicationTarget,
+	expected ociv1.Descriptor,
+	tag string,
+	sourceFailureCode apperrors.ErrorCode,
+	copyOptions oras.CopyGraphOptions,
+	copyGraph copyGraphFunc,
+) error {
+
+	if err := copyGraphWithTrackedSource(
+		ctx, source, target, expected, sourceFailureCode, copyOptions, copyGraph); err != nil {
+		return err
+	}
+	remoteDescriptor, err := target.Resolve(ctx, expected.Digest.String())
+	if err != nil {
+		return err
+	}
+	if !content.Equal(remoteDescriptor, expected) {
+		return apperrors.New(apperrors.ErrCodeInternal,
+			"remote OCI descriptor does not match the immutable local descriptor")
+	}
+	if err := target.Tag(ctx, expected, tag); err != nil {
+		return err
+	}
+	return nil
+}
+
+func classifyRegistryPushFailure(err error, exhausted bool) error {
+	if err == nil {
+		return nil
+	}
+	var response *errcode.ErrorResponse
+	if stderrors.As(err, &response) {
+		var code apperrors.ErrorCode
+		switch response.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			code = apperrors.ErrCodeUnauthorized
+		case http.StatusNotFound:
+			code = apperrors.ErrCodeNotFound
+		case http.StatusConflict:
+			code = apperrors.ErrCodeConflict
+		case http.StatusTooManyRequests:
+			code = apperrors.ErrCodeRateLimitExceeded
+		default:
+			switch {
+			case response.StatusCode >= 400 && response.StatusCode < 500:
+				code = apperrors.ErrCodeInvalidRequest
+			case response.StatusCode >= 500:
+				code = apperrors.ErrCodeUnavailable
+			default:
+				code = apperrors.ErrCodeInternal
+			}
+		}
+		return apperrors.Wrap(code, "OCI registry push failed", err)
+	}
+	if exhausted && (isTransientPushError(err) || apperrors.IsTransient(err)) {
+		return apperrors.Wrap(
+			apperrors.ErrCodeUnavailable, "OCI registry push failed after retries", err)
+	}
+	var structured *apperrors.StructuredError
+	if stderrors.As(err, &structured) {
+		return err
+	}
+	return apperrors.Wrap(apperrors.ErrCodeInternal, "OCI registry push failed", err)
 }
 
 // ReferrerOptions configures a single-blob OCI manifest attached via
@@ -365,6 +863,12 @@ type ReferrerOptions struct {
 	PlainHTTP bool
 	// InsecureTLS disables TLS verification for self-signed registries.
 	InsecureTLS bool
+
+	// ExcludedRoots optionally names existing real directories that referrer
+	// staging must remain outside in both lexical and resolved filesystem
+	// topology. Evidence publication requires at least one exclusion; generic
+	// low-level callers may leave the slice nil when no local trust root exists.
+	ExcludedRoots []string
 
 	// ArtifactType identifies the referrer manifest's purpose, e.g.
 	// "application/vnd.dev.sigstore.bundle.v0.3+json". The same value
@@ -383,48 +887,105 @@ type ReferrerOptions struct {
 	Annotations map[string]string
 }
 
+type referrerPushDependencies struct {
+	pack      func(context.Context, ReferrerOptions) (*referrerPackage, error)
+	newTarget func(PushOptions) (publicationTarget, error)
+	copy      copyFunc
+}
+
+func defaultReferrerPushDependencies() referrerPushDependencies {
+	return referrerPushDependencies{
+		pack:      packReferrer,
+		newTarget: newPublicationTarget,
+		copy: func(
+			ctx context.Context,
+			src oras.ReadOnlyTarget,
+			srcRef string,
+			dst oras.Target,
+			dstRef string,
+			opts oras.CopyOptions,
+		) (ociv1.Descriptor, error) {
+
+			return copyWithRetry(ctx, src, srcRef, dst, dstRef, opts, oras.Copy)
+		},
+	}
+}
+
 // PushReferrer pushes a single-layer OCI manifest with a Subject set,
 // attaching it as a Referrer of the subject artifact. cosign discovers
 // signatures attached this way via the OCI Distribution 1.1 Referrers
 // API. The tag is derived from the referrer manifest digest so multiple
 // referrers can coexist without colliding on a fixed tag.
 func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error) {
+	return pushReferrerWithDependencies(ctx, opts, defaultReferrerPushDependencies())
+}
+
+func pushReferrerWithDependencies(
+	ctx context.Context,
+	opts ReferrerOptions,
+	deps referrerPushDependencies,
+) (retResult *PushResult, retErr error) {
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.OCIBundlePublishTimeout)
+	defer cancel()
+
+	if err := contextError(ctx, "OCI referrer push canceled"); err != nil {
+		return nil, err
+	}
 	if err := validateRegistryReference(opts.Registry, opts.Repository); err != nil {
 		return nil, err
 	}
-	fs, tmpDir, tag, err := packReferrer(ctx, opts)
-	if err != nil {
-		return nil, err
+	packed, packErr := deps.pack(ctx, opts)
+	if packErr != nil {
+		return nil, packErr
 	}
 	defer func() {
-		if closeErr := fs.Close(); closeErr != nil {
-			slog.Warn("failed to close referrer file store", "error", closeErr)
-		}
-		if rmErr := os.RemoveAll(tmpDir); rmErr != nil {
-			slog.Warn("failed to remove referrer temp dir", "path", tmpDir, "error", rmErr)
+		if closeErr := packed.Close(); closeErr != nil {
+			if retErr == nil {
+				retResult = nil
+				retErr = closeErr
+			} else {
+				slog.Warn("failed to close referrer package after primary error",
+					"error", closeErr, "primary", retErr)
+			}
 		}
 	}()
-
-	registryHost := stripProtocol(opts.Registry)
-	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s", registryHost, opts.Repository))
-	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to initialize remote repository", err)
+	if validateErr := packed.validate(); validateErr != nil {
+		return nil, validateErr
 	}
-	repo.PlainHTTP = opts.PlainHTTP
 
-	authClient, err := createAuthClientForHost(registryHost, opts.PlainHTTP, opts.InsecureTLS)
-	if err != nil {
-		slog.Warn("failed to initialize credential store; continuing without auth", "error", err)
+	target, targetErr := deps.newTarget(PushOptions{
+		Registry:    opts.Registry,
+		Repository:  opts.Repository,
+		PlainHTTP:   opts.PlainHTTP,
+		InsecureTLS: opts.InsecureTLS,
+	})
+	if targetErr != nil {
+		return nil, targetErr
 	}
-	repo.Client = authClient
+	if target == nil {
+		return nil, apperrors.New(apperrors.ErrCodeInternal, "OCI publication target is nil")
+	}
+	defer target.CloseIdleConnections()
 
 	copyOpts := oras.DefaultCopyOptions
 	copyOpts.Concurrency = defaults.OCIPushConcurrency
-	desc, err := copyWithRetry(ctx, fs, tag, repo, tag, copyOpts, oras.Copy)
-	if err != nil {
+	if validateErr := packed.validate(); validateErr != nil {
+		return nil, validateErr
+	}
+	desc, copyErr := deps.copy(ctx, packed.store, packed.tag, target, packed.tag, copyOpts)
+	if copyErr != nil {
+		return nil, wrapContextualIOFailure(
+			ctx, copyErr, apperrors.ErrCodeInternal, "failed to push OCI referrer")
+	}
+	if err := contextError(ctx, "OCI referrer push canceled"); err != nil {
 		return nil, err
 	}
+	if validateErr := packed.validate(); validateErr != nil {
+		return nil, validateErr
+	}
 
+	registryHost := stripProtocol(opts.Registry)
 	return &PushResult{
 		Digest:    desc.Digest.String(),
 		MediaType: desc.MediaType,
@@ -433,49 +994,158 @@ func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error
 	}, nil
 }
 
-// packReferrer builds the referrer manifest in a local file store and
-// returns the store, temp dir path, and the digest-derived tag. The
-// caller defers closing fs and removing tmpDir.
-func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, string, string, error) {
+type referrerPackage struct {
+	store          *file.Store
+	workspace      *Workspace
+	tag            string
+	closeStore     func(*file.Store) error
+	closeWorkspace func(*Workspace) error
+	closeOnce      sync.Once
+	closeErr       error
+}
+
+func (p *referrerPackage) validate() error {
+	if p == nil || p.store == nil || p.workspace == nil || p.tag == "" {
+		return apperrors.New(apperrors.ErrCodeInternal, "referrer package ownership is incomplete")
+	}
+	return p.workspace.validate()
+}
+
+// Close releases the referrer store before removing its private workspace.
+// The checked result is cached so callers can safely invoke Close more than once.
+func (p *referrerPackage) Close() error {
+	if p == nil {
+		return nil
+	}
+	p.closeOnce.Do(func() {
+		if p.store != nil {
+			if p.closeStore == nil {
+				p.closeErr = stderrors.Join(p.closeErr, apperrors.New(
+					apperrors.ErrCodeInternal, "referrer store cleanup is unavailable"))
+			} else if err := p.closeStore(p.store); err != nil {
+				p.closeErr = stderrors.Join(p.closeErr, apperrors.Wrap(
+					apperrors.ErrCodeInternal, "failed to close referrer file store", err))
+			}
+		}
+		if p.workspace != nil {
+			if p.closeWorkspace == nil {
+				p.closeErr = stderrors.Join(p.closeErr, apperrors.New(
+					apperrors.ErrCodeInternal, "referrer workspace cleanup is unavailable"))
+			} else if err := p.closeWorkspace(p.workspace); err != nil {
+				p.closeErr = stderrors.Join(p.closeErr, apperrors.PropagateOrWrap(
+					err, apperrors.ErrCodeInternal, "failed to close referrer workspace"))
+			}
+		}
+	})
+	return p.closeErr
+}
+
+type referrerPackDependencies struct {
+	newWorkspace   func(context.Context, string, ...string) (*Workspace, error)
+	newStore       func(string) (*file.Store, error)
+	closeStore     func(*file.Store) error
+	closeWorkspace func(*Workspace) error
+}
+
+func defaultReferrerPackDependencies() referrerPackDependencies {
+	return referrerPackDependencies{
+		newWorkspace:   NewPrivateWorkspace,
+		newStore:       file.New,
+		closeStore:     func(store *file.Store) error { return store.Close() },
+		closeWorkspace: func(workspace *Workspace) error { return workspace.Close() },
+	}
+}
+
+func normalizeReferrerPackDependencies(deps referrerPackDependencies) referrerPackDependencies {
+	defaults := defaultReferrerPackDependencies()
+	if deps.newWorkspace == nil {
+		deps.newWorkspace = defaults.newWorkspace
+	}
+	if deps.newStore == nil {
+		deps.newStore = defaults.newStore
+	}
+	if deps.closeStore == nil {
+		deps.closeStore = defaults.closeStore
+	}
+	if deps.closeWorkspace == nil {
+		deps.closeWorkspace = defaults.closeWorkspace
+	}
+	return deps
+}
+
+// packReferrer builds the referrer manifest in a private local file store.
+func packReferrer(ctx context.Context, opts ReferrerOptions) (*referrerPackage, error) {
+	return packReferrerWithDependencies(ctx, opts, defaultReferrerPackDependencies())
+}
+
+func packReferrerWithDependencies(
+	ctx context.Context,
+	opts ReferrerOptions,
+	deps referrerPackDependencies,
+) (*referrerPackage, error) {
+
+	deps = normalizeReferrerPackDependencies(deps)
+
 	if opts.ArtifactType == "" {
-		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "ArtifactType is required")
+		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "ArtifactType is required")
 	}
 	if len(opts.LayerContent) == 0 {
-		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "LayerContent must be non-empty")
+		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "LayerContent must be non-empty")
 	}
 	if opts.Subject.Digest == "" {
-		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "Subject.Digest is required")
+		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "Subject.Digest is required")
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", err)
+	if err := contextError(ctx, "referrer packaging canceled"); err != nil {
+		return nil, err
 	}
 
-	tmpDir, err := os.MkdirTemp("", "oras-referrer-*")
-	if err != nil {
-		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp dir", err)
+	workspace, workspaceErr := deps.newWorkspace(ctx, "aicr-oci-referrer-", opts.ExcludedRoots...)
+	if workspaceErr != nil {
+		return nil, apperrors.PropagateOrWrap(
+			workspaceErr, apperrors.ErrCodeInternal, "failed to create referrer workspace")
+	}
+	packed := &referrerPackage{
+		workspace:      workspace,
+		closeStore:     deps.closeStore,
+		closeWorkspace: deps.closeWorkspace,
+	}
+	fail := func(primary error) (*referrerPackage, error) {
+		if cleanupErr := packed.Close(); cleanupErr != nil {
+			slog.Warn("failed to close rejected referrer package after primary error",
+				"error", cleanupErr, "primary", primary)
+		}
+		return nil, primary
+	}
+	if validateErr := workspace.validate(); validateErr != nil {
+		return fail(validateErr)
 	}
 
 	const layerFilename = "payload"
-	layerPath := filepath.Join(tmpDir, layerFilename)
-	if writeErr := os.WriteFile(layerPath, opts.LayerContent, 0o600); writeErr != nil {
-		_ = os.RemoveAll(tmpDir)
-		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stage referrer layer", writeErr)
+	if writeErr := writeReferrerLayer(ctx, workspace, layerFilename, opts.LayerContent); writeErr != nil {
+		return fail(writeErr)
 	}
-
-	fs, err := file.New(tmpDir)
-	if err != nil {
-		_ = os.RemoveAll(tmpDir)
-		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create referrer file store", err)
+	if validateErr := workspace.validate(); validateErr != nil {
+		return fail(validateErr)
 	}
+	fs, storeErr := deps.newStore(workspace.Path())
+	if storeErr != nil {
+		return fail(apperrors.Wrap(
+			apperrors.ErrCodeInternal, "failed to create referrer file store", storeErr))
+	}
+	packed.store = fs
 	fs.TarReproducible = true
+	if validateErr := workspace.validate(); validateErr != nil {
+		return fail(validateErr)
+	}
 
-	layerDesc, err := fs.Add(ctx, layerFilename, opts.ArtifactType, layerPath)
-	if err != nil {
-		if closeErr := fs.Close(); closeErr != nil {
-			slog.Warn("failed to close referrer file store during error cleanup", "error", closeErr)
-		}
-		_ = os.RemoveAll(tmpDir)
-		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add referrer layer", err)
+	layerPath := filepath.Join(workspace.Path(), layerFilename)
+	layerDesc, addErr := fs.Add(ctx, layerFilename, opts.ArtifactType, layerPath)
+	if addErr != nil {
+		return fail(wrapContextualIOFailure(
+			ctx, addErr, apperrors.ErrCodeInternal, "failed to add referrer layer"))
+	}
+	if validateErr := workspace.validate(); validateErr != nil {
+		return fail(validateErr)
 	}
 
 	subject := opts.Subject
@@ -489,25 +1159,93 @@ func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, strin
 	}
 	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = reproducibleTimestamp
 
-	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, opts.ArtifactType, packOpts)
-	if err != nil {
-		if closeErr := fs.Close(); closeErr != nil {
-			slog.Warn("failed to close referrer file store during error cleanup", "error", closeErr)
-		}
-		_ = os.RemoveAll(tmpDir)
-		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack referrer manifest", err)
+	manifestDesc, manifestErr := oras.PackManifest(
+		ctx, fs, oras.PackManifestVersion1_1, opts.ArtifactType, packOpts)
+	if manifestErr != nil {
+		return fail(wrapContextualIOFailure(
+			ctx, manifestErr, apperrors.ErrCodeInternal, "failed to pack referrer manifest"))
+	}
+	if validateErr := workspace.validate(); validateErr != nil {
+		return fail(validateErr)
 	}
 
 	tag := strings.TrimPrefix(manifestDesc.Digest.String(), "sha256:")
 	if tagErr := fs.Tag(ctx, manifestDesc, tag); tagErr != nil {
-		if closeErr := fs.Close(); closeErr != nil {
-			slog.Warn("failed to close referrer file store during error cleanup", "error", closeErr)
+		return fail(wrapContextualIOFailure(
+			ctx, tagErr, apperrors.ErrCodeInternal, "failed to tag referrer manifest"))
+	}
+	if validateErr := workspace.validate(); validateErr != nil {
+		return fail(validateErr)
+	}
+	packed.tag = tag
+	return packed, nil
+}
+
+func writeReferrerLayer(
+	ctx context.Context,
+	workspace *Workspace,
+	name string,
+	content []byte,
+) (retErr error) {
+
+	if err := contextError(ctx, "referrer layer staging canceled"); err != nil {
+		return err
+	}
+	if err := workspace.validate(); err != nil {
+		return err
+	}
+	file, err := workspace.child.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create referrer layer", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			retErr = stderrors.Join(retErr, apperrors.Wrap(
+				apperrors.ErrCodeInternal, "failed to close referrer layer", closeErr))
 		}
-		_ = os.RemoveAll(tmpDir)
-		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to tag referrer manifest", tagErr)
+	}()
+	if err := file.Chmod(0o600); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to secure referrer layer", err)
+	}
+	opened, openedErr := file.Stat()
+	named, namedErr := workspace.child.Lstat(name)
+	if openedErr != nil || namedErr != nil || !opened.Mode().IsRegular() ||
+		named.Mode()&os.ModeSymlink != 0 || !named.Mode().IsRegular() ||
+		opened.Mode().Perm() != 0o600 || named.Mode().Perm() != 0o600 ||
+		opened.Size() != 0 || named.Size() != 0 || !os.SameFile(opened, named) {
+
+		return apperrors.Wrap(apperrors.ErrCodeInternal,
+			"referrer layer identity changed during creation", stderrors.Join(openedErr, namedErr))
+	}
+	written, writeErr := file.Write(content)
+	if writeErr == nil && written != len(content) {
+		writeErr = io.ErrShortWrite
+	}
+	if writeErr != nil {
+		return wrapContextualIOFailure(
+			ctx, writeErr, apperrors.ErrCodeInternal, "failed to write referrer layer")
+	}
+	if err := contextError(ctx, "referrer layer staging canceled"); err != nil {
+		return err
+	}
+	if err := workspace.validate(); err != nil {
+		return err
+	}
+	openedAfter, openedAfterErr := file.Stat()
+	namedAfter, namedAfterErr := workspace.child.Lstat(name)
+	if openedAfterErr != nil || namedAfterErr != nil ||
+		!openedAfter.Mode().IsRegular() || namedAfter.Mode()&os.ModeSymlink != 0 ||
+		!namedAfter.Mode().IsRegular() || openedAfter.Mode().Perm() != 0o600 ||
+		namedAfter.Mode().Perm() != 0o600 ||
+		openedAfter.Size() != int64(len(content)) || namedAfter.Size() != int64(len(content)) ||
+		!os.SameFile(opened, openedAfter) || !os.SameFile(opened, namedAfter) {
+
+		return apperrors.Wrap(apperrors.ErrCodeInternal,
+			"referrer layer identity changed after write",
+			stderrors.Join(openedAfterErr, namedAfterErr))
 	}
 
-	return fs, tmpDir, tag, nil
+	return nil
 }
 
 // copyFunc matches the signature of oras.Copy and is injected into
@@ -537,23 +1275,39 @@ func copyWithRetryConfig(ctx context.Context, src oras.ReadOnlyTarget, srcRef st
 	backoff := initialBackoff
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled before push", ctxErr)
+			return ociv1.Descriptor{}, contextError(ctx, "registry push canceled before attempt")
 		}
 
 		pushCtx, pushCancel := context.WithTimeout(ctx, perAttemptTimeout)
 		desc, lastErr = copy(pushCtx, src, srcRef, dst, dstRef, opts)
+		parentErr := contextError(ctx, "registry push canceled")
+		attemptErr := contextError(pushCtx, "registry push attempt canceled")
 		pushCancel()
-		if lastErr == nil {
+		if parentErr != nil {
+			return ociv1.Descriptor{}, parentErr
+		}
+		if attemptErr != nil {
+			if attempt == maxAttempts {
+				return ociv1.Descriptor{}, attemptErr
+			}
+			lastErr = attemptErr
+		} else if lastErr == nil {
+			if err := contextError(ctx, "registry push canceled"); err != nil {
+				return ociv1.Descriptor{}, err
+			}
 			return desc, nil
 		}
 
 		// Don't retry if the parent context was canceled or for non-transient
 		// errors (e.g., 4xx auth/validation failures from the registry).
-		if stderrors.Is(lastErr, context.Canceled) || stderrors.Is(ctx.Err(), context.Canceled) {
-			return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "registry push canceled", lastErr)
+		if ctx.Err() != nil {
+			return ociv1.Descriptor{}, contextError(ctx, "registry push canceled")
 		}
-		if !isTransientPushError(lastErr) {
-			return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "registry push failed", lastErr)
+		if stderrors.Is(lastErr, context.Canceled) {
+			return ociv1.Descriptor{}, classifyRegistryPushFailure(lastErr, false)
+		}
+		if !isTransientPushError(lastErr) && !apperrors.IsTransient(lastErr) {
+			return ociv1.Descriptor{}, classifyRegistryPushFailure(lastErr, false)
 		}
 
 		if attempt == maxAttempts {
@@ -568,13 +1322,13 @@ func copyWithRetryConfig(ctx context.Context, src oras.ReadOnlyTarget, srcRef st
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "registry push canceled during backoff", ctx.Err())
+			return ociv1.Descriptor{}, contextError(ctx, "registry push canceled during backoff")
 		case <-timer.C:
 		}
 		backoff *= 2
 	}
 
-	return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "registry push failed after retries", lastErr)
+	return ociv1.Descriptor{}, classifyRegistryPushFailure(lastErr, true)
 }
 
 // isTransientPushError reports whether err looks like a recoverable
@@ -637,72 +1391,6 @@ func jitterDuration(d time.Duration) time.Duration {
 	return time.Duration(float64(d) * jitter)
 }
 
-// preparePushDir prepares the directory for pushing by hard-linking the
-// source tree into a temp directory. Always uses a temp dir — never the
-// caller's source directory directly — so the oras file store, which
-// can write manifest blobs into its root, never leaves stray files in
-// user space. (The org.opencontainers.image.title annotation has been
-// observed materializing as a literal filename inside the root the
-// file store is constructed against.)
-//
-// When subDir is set, the temp dir mirrors the subdir layout so the
-// resulting OCI artifact preserves the same path structure.
-//
-// Returns the directory to push from and a cleanup function (always
-// non-nil now that the no-temp-dir shortcut is gone). ctx cancels the
-// directory walk so a parent timeout (push timeout, server shutdown)
-// terminates staging work without orphaning the temp dir.
-func preparePushDir(ctx context.Context, sourceDir, subDir string) (string, func(), error) {
-	tempDir, err := os.MkdirTemp("", "oras-push-*")
-	if err != nil {
-		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp directory", err)
-	}
-
-	cleanup := func() {
-		if err := os.RemoveAll(tempDir); err != nil {
-			slog.Warn("failed to cleanup temp directory",
-				"path", tempDir,
-				"error", err)
-		}
-	}
-
-	srcPath := sourceDir
-	dstPath := tempDir
-	if subDir != "" {
-		// Reject non-local paths (absolute, parent-traversing, or
-		// containing reserved Windows names) so filepath.Join can't
-		// produce a hardlink target outside the temp dir or a source
-		// outside the caller's sourceDir.
-		if !filepath.IsLocal(subDir) {
-			cleanup()
-			return "", nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
-				"subDir must be a local relative path: "+subDir)
-		}
-		srcPath = filepath.Join(sourceDir, subDir)
-		dstPath = filepath.Join(tempDir, subDir)
-	}
-	if err := hardLinkDir(ctx, srcPath, dstPath); err != nil {
-		// $TMPDIR is often on a different filesystem from sourceDir
-		// (tmpfs, overlayfs in containers, NFS-mounted workspaces),
-		// in which case os.Link returns EXDEV. Fall back to a full
-		// recursive copy so the push still succeeds — the temp dir
-		// still gives the oras file store its own root so the
-		// "annotation as filename" leak the no-shortcut refactor was
-		// meant to prevent is still avoided.
-		if stderrors.Is(err, syscall.EXDEV) {
-			if copyErr := copyDir(ctx, srcPath, dstPath); copyErr != nil {
-				cleanup()
-				return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy files across filesystems", copyErr)
-			}
-			return tempDir, cleanup, nil
-		}
-		cleanup()
-		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create hard links", err)
-	}
-
-	return tempDir, cleanup, nil
-}
-
 // stripProtocol removes http:// or https:// prefix from a registry URL.
 func stripProtocol(registry string) string {
 	registry = strings.TrimPrefix(registry, "https://")
@@ -735,7 +1423,10 @@ func createAuthClientForHost(host string, plainHTTP, insecureTLS bool) (*auth.Cl
 	}
 
 	client := &auth.Client{
-		Client: &http.Client{Timeout: defaults.HTTPClientTimeout, Transport: transport},
+		// Registry uploads can legitimately exceed the generic HTTP client
+		// ceiling. Dial/TLS/header bounds live on the transport; the registry
+		// attempt context is the total-operation deadline.
+		Client: &http.Client{Transport: transport},
 		Cache:  auth.NewCache(),
 	}
 
@@ -745,133 +1436,4 @@ func createAuthClientForHost(host string, plainHTTP, insecureTLS bool) (*auth.Cl
 	}
 
 	return client, credErr
-}
-
-// hardLinkDir recursively creates hard links from src to dst.
-// This is much faster than copying and uses no additional disk space.
-//
-// Note: Hard links may not work on Windows for files on different volumes
-// or filesystems that don't support them. This function is primarily
-// intended for Linux/container environments. ctx is checked on entry
-// and per directory entry so a large tree's walk respects cancellation.
-func hardLinkDir(ctx context.Context, src, dst string) error {
-	if err := ctx.Err(); err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "hard link walk canceled", err)
-	}
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source directory", err)
-	}
-
-	if mkdirErr := os.MkdirAll(dst, srcInfo.Mode()); mkdirErr != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create destination directory", mkdirErr)
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to read source directory", err)
-	}
-
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return apperrors.Wrap(apperrors.ErrCodeUnavailable, "hard link walk canceled", err)
-		}
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-
-		if entry.IsDir() {
-			if err := hardLinkDir(ctx, srcPath, dstPath); err != nil {
-				return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to hard link subdirectory", err)
-			}
-		} else {
-			if err := os.Link(srcPath, dstPath); err != nil {
-				return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create hard link", err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// copyDir is the cross-filesystem fallback for hardLinkDir. Hard links
-// require src and dst to share an inode space (same filesystem); when
-// $TMPDIR is on a different mount (tmpfs, overlay, NFS), os.Link
-// returns EXDEV and we fall back to a full byte copy. Streams via
-// io.Copy so multi-GB bundles don't materialize in memory. ctx is
-// checked per directory entry; a canceled walk returns
-// ErrCodeUnavailable so a parent timeout can short-circuit a large
-// fallback copy.
-func copyDir(ctx context.Context, src, dst string) error {
-	if err := ctx.Err(); err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy walk canceled", err)
-	}
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source directory", err)
-	}
-
-	if mkdirErr := os.MkdirAll(dst, srcInfo.Mode()); mkdirErr != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create destination directory", mkdirErr)
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to read source directory", err)
-	}
-
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy walk canceled", err)
-		}
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-
-		if entry.IsDir() {
-			if err := copyDir(ctx, srcPath, dstPath); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := copyFile(ctx, srcPath, dstPath); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// copyFile streams src → dst, preserving the source mode and capturing
-// close errors on the writable handle so flush failures aren't lost.
-// ctx is checked on entry only; in-flight io.Copy does not poll the
-// context — a single file's copy is bounded by its own size, not by
-// the walk duration.
-func copyFile(ctx context.Context, src, dst string) (retErr error) {
-	if err := ctx.Err(); err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy canceled", err)
-	}
-	info, err := os.Stat(src)
-	if err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source file", err)
-	}
-
-	in, err := os.Open(filepath.Clean(src)) //nolint:gosec // src is bundle content under the caller's directory
-	if err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to open source file", err)
-	}
-	defer func() { _ = in.Close() }()
-
-	out, err := os.OpenFile(filepath.Clean(dst), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode()) //nolint:gosec // dst is package-controlled tempdir
-	if err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create destination file", err)
-	}
-	defer func() {
-		if closeErr := out.Close(); closeErr != nil && retErr == nil {
-			retErr = apperrors.Wrap(apperrors.ErrCodeInternal, "failed to close destination file", closeErr)
-		}
-	}()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy file content", err)
-	}
-	return nil
 }

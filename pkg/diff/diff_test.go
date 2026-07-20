@@ -17,6 +17,7 @@ package diff
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -47,6 +48,496 @@ func makeSubtype(name string, data map[string]measurement.Reading) measurement.S
 	return measurement.Subtype{
 		Name: name,
 		Data: data,
+	}
+}
+
+func makePFSubtype(
+	data map[string]measurement.Reading,
+	contextValues map[string]string,
+	items []measurement.ItemEntry,
+) measurement.Subtype {
+
+	return measurement.Subtype{
+		Name:    "PF",
+		Data:    data,
+		Context: contextValues,
+		Items:   items,
+	}
+}
+
+func paths(result *Result) []string {
+	got := make([]string, len(result.Changes))
+	for i := range result.Changes {
+		got[i] = result.Changes[i].Path
+	}
+	return got
+}
+
+func assertChanges(t *testing.T, result *Result, want []Change) {
+	t.Helper()
+	if !reflect.DeepEqual(result.Changes, want) {
+		t.Fatalf("changes = %#v, want %#v", result.Changes, want)
+	}
+}
+
+func TestSnapshots_SubtypeContext(t *testing.T) {
+	tests := []struct {
+		name       string
+		baseline   map[string]string
+		target     map[string]string
+		wantKind   ChangeKind
+		wantBase   *string
+		wantTarget *string
+	}{
+		{"added", nil, map[string]string{"node": "n1"}, Added, nil, strPtr("n1")},
+		{"removed", map[string]string{"node": "n1"}, nil, Removed, strPtr("n1"), nil},
+		{"modified", map[string]string{"node": "n1"}, map[string]string{"node": "n2"}, Modified, strPtr("n1"), strPtr("n2")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+				makePFSubtype(nil, tt.baseline, nil),
+			))
+			target := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+				makePFSubtype(nil, tt.target, nil),
+			))
+
+			assertChanges(t, Snapshots(baseline, target), []Change{{
+				Kind:     tt.wantKind,
+				Severity: SeverityInfo,
+				Path:     "Network.PF.context.node",
+				Baseline: tt.wantBase,
+				Target:   tt.wantTarget,
+			}})
+		})
+	}
+}
+
+func TestSnapshots_AddedRemovedSubtypeWithOnlyContext(t *testing.T) {
+	contextOnly := makePFSubtype(nil, map[string]string{"node": "n1"}, nil)
+	emptyMeasurement := makeMeasurement(measurement.Type("Network"))
+	structuredMeasurement := makeMeasurement(measurement.Type("Network"), contextOnly)
+
+	tests := []struct {
+		name     string
+		baseline *snapshotter.Snapshot
+		target   *snapshotter.Snapshot
+		want     Change
+	}{
+		{
+			name:     "added",
+			baseline: makeSnapshot(emptyMeasurement),
+			target:   makeSnapshot(structuredMeasurement),
+			want: Change{
+				Kind: Added, Severity: SeverityInfo, Path: "Network.PF.context.node", Target: strPtr("n1"),
+			},
+		},
+		{
+			name:     "removed",
+			baseline: makeSnapshot(structuredMeasurement),
+			target:   makeSnapshot(emptyMeasurement),
+			want: Change{
+				Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.context.node", Baseline: strPtr("n1"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertChanges(t, Snapshots(tt.baseline, tt.target), []Change{tt.want})
+		})
+	}
+}
+
+func TestSnapshots_AddedRemovedMeasurementWithOnlyContext(t *testing.T) {
+	structured := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, map[string]string{"node": "n1"}, nil),
+	))
+	empty := makeSnapshot()
+
+	tests := []struct {
+		name     string
+		baseline *snapshotter.Snapshot
+		target   *snapshotter.Snapshot
+		want     Change
+	}{
+		{
+			name:     "added",
+			baseline: empty,
+			target:   structured,
+			want: Change{
+				Kind: Added, Severity: SeverityInfo, Path: "Network.PF.context.node", Target: strPtr("n1"),
+			},
+		},
+		{
+			name:     "removed",
+			baseline: structured,
+			target:   empty,
+			want: Change{
+				Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.context.node", Baseline: strPtr("n1"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertChanges(t, Snapshots(tt.baseline, tt.target), []Change{tt.want})
+		})
+	}
+}
+
+func TestSnapshots_SubtypeItems(t *testing.T) {
+	baselineItems := []measurement.ItemEntry{{
+		Context: map[string]string{"name": "pf0"},
+		Data:    map[string]measurement.Reading{"mtu": measurement.Int(1500)},
+	}}
+	targetItems := []measurement.ItemEntry{
+		{
+			Context: map[string]string{"name": "pf1"},
+			Data:    map[string]measurement.Reading{"mtu": measurement.Int(9000)},
+		},
+		{
+			Context: map[string]string{"name": "pf2"},
+			Data:    map[string]measurement.Reading{"mtu": measurement.Int(1500)},
+		},
+	}
+
+	baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, baselineItems),
+	))
+	target := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, targetItems),
+	))
+	result := Snapshots(baseline, target)
+
+	wantPaths := []string{
+		"Network.PF.items.length",
+		"Network.PF.items[0].context.name",
+		"Network.PF.items[0].data.mtu",
+		"Network.PF.items[1].context.name",
+		"Network.PF.items[1].data.mtu",
+	}
+	if got := paths(result); !reflect.DeepEqual(got, wantPaths) {
+		t.Fatalf("paths = %v, want %v", got, wantPaths)
+	}
+	assertChanges(t, result, []Change{
+		{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items.length", Baseline: strPtr("1"), Target: strPtr("2")},
+		{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items[0].context.name", Baseline: strPtr("pf0"), Target: strPtr("pf1")},
+		{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items[0].data.mtu", Baseline: strPtr("1500"), Target: strPtr("9000")},
+		{Kind: Added, Severity: SeverityInfo, Path: "Network.PF.items[1].context.name", Target: strPtr("pf2")},
+		{Kind: Added, Severity: SeverityInfo, Path: "Network.PF.items[1].data.mtu", Target: strPtr("1500")},
+	})
+}
+
+func TestSnapshots_EmptyItemAdditionDetected(t *testing.T) {
+	baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, nil),
+	))
+	target := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, []measurement.ItemEntry{{}}),
+	))
+
+	assertChanges(t, Snapshots(baseline, target), []Change{{
+		Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items.length", Baseline: strPtr("0"), Target: strPtr("1"),
+	}})
+}
+
+func TestSnapshots_ItemRemoval(t *testing.T) {
+	baselineItems := []measurement.ItemEntry{
+		{
+			Context: map[string]string{"name": "pf0"},
+			Data:    map[string]measurement.Reading{"mtu": measurement.Int(1500)},
+		},
+		{
+			Context: map[string]string{"name": "pf1"},
+			Data:    map[string]measurement.Reading{"mtu": measurement.Int(9000)},
+		},
+	}
+	targetItems := baselineItems[:1]
+
+	baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, baselineItems),
+	))
+	target := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, targetItems),
+	))
+
+	assertChanges(t, Snapshots(baseline, target), []Change{
+		{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items.length", Baseline: strPtr("2"), Target: strPtr("1")},
+		{Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.items[1].context.name", Baseline: strPtr("pf1")},
+		{Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.items[1].data.mtu", Baseline: strPtr("9000")},
+	})
+}
+
+func TestSnapshots_ItemReorderIsDrift(t *testing.T) {
+	pf0 := measurement.ItemEntry{
+		Context: map[string]string{"name": "pf0"},
+		Data:    map[string]measurement.Reading{"mtu": measurement.Int(1500)},
+	}
+	pf1 := measurement.ItemEntry{
+		Context: map[string]string{"name": "pf1"},
+		Data:    map[string]measurement.Reading{"mtu": measurement.Int(9000)},
+	}
+	baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, []measurement.ItemEntry{pf0, pf1}),
+	))
+	target := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, []measurement.ItemEntry{pf1, pf0}),
+	))
+
+	assertChanges(t, Snapshots(baseline, target), []Change{
+		{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items[0].context.name", Baseline: strPtr("pf0"), Target: strPtr("pf1")},
+		{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items[0].data.mtu", Baseline: strPtr("1500"), Target: strPtr("9000")},
+		{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items[1].context.name", Baseline: strPtr("pf1"), Target: strPtr("pf0")},
+		{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items[1].data.mtu", Baseline: strPtr("9000"), Target: strPtr("1500")},
+	})
+}
+
+func TestSnapshots_ItemNilReading(t *testing.T) {
+	var typedNil *measurement.Scalar[int]
+	tests := []struct {
+		name       string
+		baseline   measurement.Reading
+		target     measurement.Reading
+		wantBase   string
+		wantTarget string
+	}{
+		{"literal nil baseline", nil, measurement.Int(1500), "<nil>", "1500"},
+		{"typed nil baseline", typedNil, measurement.Int(1500), "<nil>", "1500"},
+		{"typed nil target", measurement.Int(1500), typedNil, "1500", "<nil>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+				makePFSubtype(nil, nil, []measurement.ItemEntry{{
+					Data: map[string]measurement.Reading{"mtu": tt.baseline},
+				}}),
+			))
+			target := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+				makePFSubtype(nil, nil, []measurement.ItemEntry{{
+					Data: map[string]measurement.Reading{"mtu": tt.target},
+				}}),
+			))
+
+			assertChanges(t, Snapshots(baseline, target), []Change{{
+				Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items[0].data.mtu", Baseline: strPtr(tt.wantBase), Target: strPtr(tt.wantTarget),
+			}})
+		})
+	}
+}
+
+func TestSnapshots_AddedRemovedSubtypeWithOnlyItems(t *testing.T) {
+	items := []measurement.ItemEntry{{
+		Context: map[string]string{"name": "pf0"},
+		Data:    map[string]measurement.Reading{"mtu": measurement.Int(1500)},
+	}}
+	emptyMeasurement := makeMeasurement(measurement.Type("Network"))
+	structuredMeasurement := makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, items),
+	)
+
+	tests := []struct {
+		name     string
+		baseline *snapshotter.Snapshot
+		target   *snapshotter.Snapshot
+		want     []Change
+	}{
+		{
+			name:     "added",
+			baseline: makeSnapshot(emptyMeasurement),
+			target:   makeSnapshot(structuredMeasurement),
+			want: []Change{
+				{Kind: Added, Severity: SeverityInfo, Path: "Network.PF.items.length", Target: strPtr("1")},
+				{Kind: Added, Severity: SeverityInfo, Path: "Network.PF.items[0].context.name", Target: strPtr("pf0")},
+				{Kind: Added, Severity: SeverityInfo, Path: "Network.PF.items[0].data.mtu", Target: strPtr("1500")},
+			},
+		},
+		{
+			name:     "removed",
+			baseline: makeSnapshot(structuredMeasurement),
+			target:   makeSnapshot(emptyMeasurement),
+			want: []Change{
+				{Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.items.length", Baseline: strPtr("1")},
+				{Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.items[0].context.name", Baseline: strPtr("pf0")},
+				{Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.items[0].data.mtu", Baseline: strPtr("1500")},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertChanges(t, Snapshots(tt.baseline, tt.target), tt.want)
+		})
+	}
+}
+
+func TestSnapshots_AddedRemovedMeasurementWithOnlyItems(t *testing.T) {
+	structured := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(nil, nil, []measurement.ItemEntry{{
+			Context: map[string]string{"name": "pf0"},
+			Data:    map[string]measurement.Reading{"mtu": measurement.Int(1500)},
+		}}),
+	))
+	empty := makeSnapshot()
+
+	tests := []struct {
+		name     string
+		baseline *snapshotter.Snapshot
+		target   *snapshotter.Snapshot
+		want     []Change
+	}{
+		{
+			name:     "added",
+			baseline: empty,
+			target:   structured,
+			want: []Change{
+				{Kind: Added, Severity: SeverityInfo, Path: "Network.PF.items.length", Target: strPtr("1")},
+				{Kind: Added, Severity: SeverityInfo, Path: "Network.PF.items[0].context.name", Target: strPtr("pf0")},
+				{Kind: Added, Severity: SeverityInfo, Path: "Network.PF.items[0].data.mtu", Target: strPtr("1500")},
+			},
+		},
+		{
+			name:     "removed",
+			baseline: structured,
+			target:   empty,
+			want: []Change{
+				{Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.items.length", Baseline: strPtr("1")},
+				{Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.items[0].context.name", Baseline: strPtr("pf0")},
+				{Kind: Removed, Severity: SeverityInfo, Path: "Network.PF.items[0].data.mtu", Baseline: strPtr("1500")},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertChanges(t, Snapshots(tt.baseline, tt.target), tt.want)
+		})
+	}
+}
+
+func TestSnapshots_StructuredFieldsDeterministic(t *testing.T) {
+	baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(
+			map[string]measurement.Reading{
+				"zeta":  measurement.Str("before-z"),
+				"alpha": measurement.Str("before-a"),
+			},
+			map[string]string{
+				"zone": "west",
+				"node": "n1",
+			},
+			[]measurement.ItemEntry{{
+				Context: map[string]string{"zone": "west", "name": "pf0"},
+				Data: map[string]measurement.Reading{
+					"speed": measurement.Int(100),
+					"mtu":   measurement.Int(1500),
+				},
+			}},
+		),
+	))
+	target := makeSnapshot(makeMeasurement(measurement.Type("Network"),
+		makePFSubtype(
+			map[string]measurement.Reading{
+				"zeta":  measurement.Str("after-z"),
+				"alpha": measurement.Str("after-a"),
+			},
+			map[string]string{
+				"zone": "east",
+				"node": "n2",
+			},
+			[]measurement.ItemEntry{{
+				Context: map[string]string{"zone": "east", "name": "pf1"},
+				Data: map[string]measurement.Reading{
+					"speed": measurement.Int(200),
+					"mtu":   measurement.Int(9000),
+				},
+			}},
+		),
+	))
+
+	first := Snapshots(baseline, target)
+	if len(first.Changes) == 0 {
+		t.Fatal("expected structured field changes")
+	}
+	for i := 0; i < 100; i++ {
+		next := Snapshots(baseline, target)
+		if !reflect.DeepEqual(first.Changes, next.Changes) {
+			t.Fatalf("run %d changes = %#v, want %#v", i, next.Changes, first.Changes)
+		}
+	}
+}
+
+func TestSnapshots_ReservedDataKeysUseDistinctDeterministicPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		baseline measurement.Subtype
+		target   measurement.Subtype
+		want     []Change
+	}{
+		{
+			name: "subtype context namespace",
+			baseline: makePFSubtype(
+				map[string]measurement.Reading{"context.node": measurement.Str("before")},
+				map[string]string{"node": "n1"},
+				nil,
+			),
+			target: makePFSubtype(
+				map[string]measurement.Reading{"context.node": measurement.Str("after")},
+				map[string]string{"node": "n2"},
+				nil,
+			),
+			want: []Change{
+				{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.context.node", Baseline: strPtr("n1"), Target: strPtr("n2")},
+				{Kind: Modified, Severity: SeverityInfo, Path: `Network.PF["context.node"]`, Baseline: strPtr("before"), Target: strPtr("after")},
+			},
+		},
+		{
+			name: "subtype items namespace",
+			baseline: makePFSubtype(
+				map[string]measurement.Reading{"items.length": measurement.Str("before")},
+				nil,
+				nil,
+			),
+			target: makePFSubtype(
+				map[string]measurement.Reading{"items.length": measurement.Str("after")},
+				nil,
+				[]measurement.ItemEntry{{}},
+			),
+			want: []Change{
+				{Kind: Modified, Severity: SeverityInfo, Path: "Network.PF.items.length", Baseline: strPtr("0"), Target: strPtr("1")},
+				{Kind: Modified, Severity: SeverityInfo, Path: `Network.PF["items.length"]`, Baseline: strPtr("before"), Target: strPtr("after")},
+			},
+		},
+		{
+			name: "item data uses the same encoding",
+			baseline: makePFSubtype(nil, nil, []measurement.ItemEntry{{
+				Data: map[string]measurement.Reading{"context.node": measurement.Str("before")},
+			}}),
+			target: makePFSubtype(nil, nil, []measurement.ItemEntry{{
+				Data: map[string]measurement.Reading{"context.node": measurement.Str("after")},
+			}}),
+			want: []Change{{
+				Kind: Modified, Severity: SeverityInfo, Path: `Network.PF.items[0].data["context.node"]`, Baseline: strPtr("before"), Target: strPtr("after"),
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"), tt.baseline))
+			target := makeSnapshot(makeMeasurement(measurement.Type("Network"), tt.target))
+
+			first := Snapshots(baseline, target)
+			assertChanges(t, first, tt.want)
+			for i := 0; i < 100; i++ {
+				next := Snapshots(baseline, target)
+				if !reflect.DeepEqual(first.Changes, next.Changes) {
+					t.Fatalf("run %d changes = %#v, want %#v", i, next.Changes, first.Changes)
+				}
+			}
+		})
 	}
 }
 

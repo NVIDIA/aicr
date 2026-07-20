@@ -83,7 +83,7 @@ func (w *ConfigMapWriter) Serialize(ctx context.Context, snapshot any) error {
 	// as reader.go's ConfigMap read path.
 	k8sClient, config, err := client.GetKubeClientWithConfig(w.kubeconfig)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to get kubernetes client", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to get kubernetes client")
 	}
 
 	// Log authentication context for audit

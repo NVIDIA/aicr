@@ -119,6 +119,25 @@ func TestConfigReadinessHooks(t *testing.T) {
 	}
 }
 
+func TestConfigSerial(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want bool
+	}{
+		{"default false", NewConfig(), false},
+		{"enabled true", NewConfig(WithSerial(true)), true},
+		{"explicit false", NewConfig(WithSerial(false)), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.Serial(); got != tt.want {
+				t.Errorf("Serial() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -803,6 +822,26 @@ func TestWithBundleChartName(t *testing.T) {
 			cfg := NewConfig(tt.opts...)
 			if got := cfg.BundleChartName(); got != tt.want {
 				t.Errorf("BundleChartName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWithBundleChartVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{name: "default is empty", want: ""},
+		{name: "explicit semantic version", opts: []Option{WithBundleChartVersion("1.2.3+build.5")}, want: "1.2.3+build.5"},
+		{name: "later option wins", opts: []Option{WithBundleChartVersion("1.0.0"), WithBundleChartVersion("2.0.0")}, want: "2.0.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig(tt.opts...)
+			if got := cfg.BundleChartVersion(); got != tt.want {
+				t.Errorf("BundleChartVersion() = %q, want %q", got, tt.want)
 			}
 		})
 	}

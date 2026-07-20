@@ -19,6 +19,16 @@ import (
 	"testing"
 )
 
+// namedReservations builds bare Reservation rows (name + both nightly intents,
+// no min-version gate) for the ordering tests, which assert version order only.
+func namedReservations(names ...string) []Reservation {
+	out := make([]Reservation, 0, len(names))
+	for _, n := range names {
+		out = append(out, Reservation{Name: n, NightlyIntents: []string{IntentTraining, IntentInference}})
+	}
+	return out
+}
+
 // versionsOf returns the ordered AICRVersion strings for a reservation's
 // cells, with the tip-of-main cell rendered as "main" so order is readable.
 func versionsOf(cells []Cell) []string {
@@ -91,7 +101,7 @@ func TestExpandScheduleOrdering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ExpandSchedule(tt.reservations, rawTags, tt.includeMain, tt.previousN)
+			got := ExpandSchedule(namedReservations(tt.reservations...), rawTags, tt.includeMain, tt.previousN)
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %d reservations, want %d", len(got), len(tt.want))
 			}
@@ -120,7 +130,7 @@ func TestExpandScheduleOrdering(t *testing.T) {
 }
 
 func TestExpandScheduleEmptyTags(t *testing.T) {
-	got := ExpandSchedule([]string{"aws-h100"}, nil, true, 2)
+	got := ExpandSchedule(namedReservations("aws-h100"), nil, true, 2)
 	if v := versionsOf(got["aws-h100"]); !reflect.DeepEqual(v, []string{"main"}) {
 		t.Errorf("empty tags = %v, want [main]", v)
 	}
@@ -128,9 +138,82 @@ func TestExpandScheduleEmptyTags(t *testing.T) {
 
 func TestExpandScheduleNegativePreviousN(t *testing.T) {
 	// A negative previousN is clamped to zero (main only).
-	got := ExpandSchedule([]string{"aws-h100"}, []string{"v1.0.0"}, true, -3)
+	got := ExpandSchedule(namedReservations("aws-h100"), []string{"v1.0.0"}, true, -3)
 	if v := versionsOf(got["aws-h100"]); !reflect.DeepEqual(v, []string{"main"}) {
 		t.Errorf("negative previousN = %v, want [main]", v)
+	}
+}
+
+// TestEligibleNightlyIntents covers the per-intent min-version gate directly:
+// main runs everything, a release below an intent's minimum drops that intent,
+// a release at or above it keeps it, and untouched intents always run.
+func TestEligibleNightlyIntents(t *testing.T) {
+	gated := Reservation{
+		Name:                     "azure-h100",
+		NightlyIntents:           []string{IntentTraining, IntentInference},
+		NightlyIntentMinVersions: map[string]string{IntentInference: "v0.18.0"},
+	}
+	tests := []struct {
+		name    string
+		res     Reservation
+		version string
+		isMain  bool
+		want    []string
+	}{
+		{"main runs every intent despite the gate", gated, "", true, []string{IntentTraining, IntentInference}},
+		{"release below the gate drops inference", gated, "v0.17.0", false, []string{IntentTraining}},
+		{"release at the gate keeps inference", gated, "v0.18.0", false, []string{IntentTraining, IntentInference}},
+		{"release above the gate keeps inference", gated, "v0.19.0", false, []string{IntentTraining, IntentInference}},
+		{
+			"no gate runs every intent",
+			Reservation{Name: "aws-h100", NightlyIntents: []string{IntentTraining, IntentInference}},
+			"v0.1.0", false, []string{IntentTraining, IntentInference},
+		},
+		{
+			"absent nightly-intents defaults to training and is ungated",
+			Reservation{Name: "x"},
+			"v0.1.0", false, []string{IntentTraining},
+		},
+		{
+			"unparseable release version fails open (keeps all intents)",
+			gated, "not-a-semver", false, []string{IntentTraining, IntentInference},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.res.EligibleNightlyIntents(tt.version, tt.isMain)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("EligibleNightlyIntents(%q, main=%v) = %v, want %v", tt.version, tt.isMain, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExpandScheduleAppliesMinVersionGate verifies the gate flows through to
+// per-cell Cell.Intents: main and the at/above release carry both intents; the
+// below-minimum release carries only training.
+func TestExpandScheduleAppliesMinVersionGate(t *testing.T) {
+	res := Reservation{
+		Name:                     "azure-h100",
+		NightlyIntents:           []string{IntentTraining, IntentInference},
+		NightlyIntentMinVersions: map[string]string{IntentInference: "v2.0.0"},
+	}
+	got := ExpandSchedule([]Reservation{res}, []string{"v1.0.0", "v2.0.0"}, true, 2)
+	byVersion := map[string][]string{}
+	for _, c := range got["azure-h100"] {
+		key := c.AICRVersion
+		if c.IsMain {
+			key = "main"
+		}
+		byVersion[key] = c.Intents
+	}
+	want := map[string][]string{
+		"main":   {IntentTraining, IntentInference},
+		"v2.0.0": {IntentTraining, IntentInference},
+		"v1.0.0": {IntentTraining},
+	}
+	if !reflect.DeepEqual(byVersion, want) {
+		t.Errorf("per-cell intents = %v, want %v", byVersion, want)
 	}
 }
 

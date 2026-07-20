@@ -76,9 +76,10 @@ jobs:
     # each = up to ~40m). Only one of train/serve runs per intent, so the budget
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
     # timeout cancels pending always() steps, so an undersized cap would skip
-    # teardown and leak the GPU node. 190 UAT + ~30 setup + ~40 teardown = ~260,
-    # so 270 leaves the teardown headroom even on a worst-case phase run.
-    timeout-minutes: 270
+    # teardown and leak the GPU node. 190 UAT + ~30 setup + ~8 failure-path debug
+    # collection (Collect cluster debug bundle) + ~40 teardown = ~268, so 280
+    # leaves the teardown headroom even on a worst-case phase run.
+    timeout-minutes: 280
     permissions:
       contents: read
       actions: read
@@ -107,7 +108,10 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:latest"
+      # v0.5.16. Keep the release tag for update visibility and the digest for
+      # execution identity. Review the upstream release and verify its signature
+      # before rotating both values; never use a tag-only actuator reference.
+      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.16@sha256:f586ffa14dccb867c81fb8a12484f6e31d3adad93242292b7c9cc00c93af2367"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
@@ -162,7 +166,7 @@ jobs:
         # Main cells only: release cells install a prebuilt binary and must not
         # depend on the source Go toolchain (a broken Go pin shouldn't fail them).
         if: inputs.aicr_version == '' && inputs.skip_tests != true
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -366,8 +370,8 @@ jobs:
         id: infra
         if: inputs.lifecycle != 'daytime-down'
         run: |
-          set -euox pipefail
-          docker run \
+          set -euo pipefail
+          /usr/bin/docker run \
             -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
             -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
@@ -537,6 +541,34 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # Refresh the GCP session before collecting (mirrors the AWS rationale): a
+      # long tuning-race failure can outlast the WIF token minted at setup, which
+      # would leave every kubectl in the collector failing auth and the bundle
+      # silently empty. The gke-gcloud-auth-plugin reads ADC live, so re-auth alone
+      # refreshes kubectl — no get-credentials re-run needed.
+      - name: Re-authenticate to GCP for debug collection
+        if: failure() && steps.prep.outcome != 'skipped'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
+
+      # Snapshot live cluster state on failure BEFORE teardown, while the
+      # cluster is still up. The runner-local artifacts above say WHAT check
+      # failed; this captures WHY — node conditions/taints, cluster events
+      # (reboots, pod evictions), the operator CRs (incl. Skyhook status.status
+      # the readiness gate keys off of), and operator/check-Job pod logs.
+      # Best-effort (the collector guards every kubectl call) and bounded so it
+      # never eats the teardown budget or leaks the GPU node.
+      - name: Collect cluster debug bundle
+        if: failure() && steps.prep.outcome != 'skipped'
+        timeout-minutes: 8
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/gcp/run debug "${TEST_CONFIG}" || true
+
       - name: Upload failure debug
         if: failure() && steps.prep.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -551,6 +583,7 @@ jobs:
             evidence/pointer.yaml
             train-logs/**
             serve-logs/**
+            cluster-debug/**
           retention-days: 30
           if-no-files-found: ignore
 
@@ -603,10 +636,15 @@ jobs:
           # clutter. aiperf-bench is included so the tag pushed by the build
           # step above (#1636) does not leak.
           for phase in deployment performance conformance aiperf-bench agent; do
+            # gh api prints the raw error body to stdout on a 404 (a phase whose
+            # package was never pushed — e.g. agent, which the build loop above
+            # does not build) and skips --jq, so VERSION_ID can capture a JSON
+            # blob with control chars. Require a numeric id before deleting so
+            # the 404 body, the empty case, and multi-line output all fail closed.
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
-            if [[ -n "${VERSION_ID}" ]]; then
+            if [[ "${VERSION_ID}" =~ ^[0-9]+$ ]]; then
               gh api --method DELETE \
                 "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
             fi
@@ -648,13 +686,13 @@ jobs:
           )
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
           destroyed=false
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
-            if docker run \
+            if /usr/bin/docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
               -e KEY_CONTENT="$(base64 < ${{ steps.auth_teardown.outputs.credentials_file_path }})" \

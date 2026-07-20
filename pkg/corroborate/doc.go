@@ -31,6 +31,16 @@
 // FAILING, UNTESTED. A verified-but-unallowlisted signer is admitted as a
 // zero-weight "reported" dot that can never reach CONFIRMED on its own.
 //
+// Each recipe's consensus is baked two ways. The strict per-version grids
+// (Tab.Versions, newest-first) count agreement only among runs at the SAME AICR
+// version, because a re-run against a different tool release is not a reproduction
+// of the same result. The relaxed cross-version grid (Tab.Combined) folds each
+// distinct signer's single latest run, version-blind, into one grid — the
+// dashboard's default "all versions" view, which surfaces every source that has
+// attested the recipe (including sources whose latest run predates the newest
+// release). Selecting a specific AICR version switches the renderer to that
+// version's strict grid.
+//
 // The generator (Generate) reads the source-keyed GCS layout (Contract 3:
 // results/<group>/<dashboard>/<tab>/<signer-id-hash>/<run-id>/{meta.json,
 // ctrf/<phase>.json}) from a local directory, derives each recipe's coordinate

@@ -455,7 +455,50 @@ func TestDefaultServerName(t *testing.T) {
 	}
 }
 
+type committedHeaderTrackingWriter struct {
+	*httptest.ResponseRecorder
+	committed         bool
+	headerAfterCommit bool
+}
+
+func (w *committedHeaderTrackingWriter) Header() http.Header {
+	if w.committed {
+		w.headerAfterCommit = true
+	}
+	return w.ResponseRecorder.Header()
+}
+
+func (w *committedHeaderTrackingWriter) WriteHeader(statusCode int) {
+	w.ResponseRecorder.WriteHeader(statusCode)
+	w.committed = true
+}
+
+func TestResponseWriter_WriteAfterCommitDoesNotTouchHeaders(t *testing.T) {
+	w := &committedHeaderTrackingWriter{ResponseRecorder: httptest.NewRecorder()}
+	rw := newResponseWriter(w)
+	rw.WriteHeader(http.StatusCreated)
+
+	if _, err := rw.Write([]byte("body")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if w.headerAfterCommit {
+		t.Error("Write() accessed response headers after they were committed")
+	}
+}
+
 func TestResponseWriter(t *testing.T) {
+	t.Run("construction leaves handler headers untouched", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		_ = newResponseWriter(w)
+
+		if got := w.Header().Get("Content-Type"); got != "" {
+			t.Errorf("Content-Type = %q before commit, want empty", got)
+		}
+		if got := w.Header().Get("X-Content-Type-Options"); got != "" {
+			t.Errorf("X-Content-Type-Options = %q before commit, want empty", got)
+		}
+	})
+
 	t.Run("WriteHeader deduplication", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		rw := newResponseWriter(w)
@@ -485,6 +528,82 @@ func TestResponseWriter(t *testing.T) {
 		}
 		if rw.Status() != http.StatusOK {
 			t.Errorf("auto status = %d, want %d", rw.Status(), http.StatusOK)
+		}
+	})
+
+	t.Run("Write defaults to a non-HTML content type", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rw := newResponseWriter(w)
+
+		if _, err := rw.Write([]byte("<script>alert('xss')</script>")); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		if got := w.Header().Get("Content-Type"); got != "application/octet-stream" {
+			t.Errorf("Content-Type = %q, want application/octet-stream", got)
+		}
+		if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+		}
+	})
+
+	t.Run("Write preserves an explicit content type", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rw := newResponseWriter(w)
+		rw.Header().Set("Content-Type", "application/zip")
+
+		if _, err := rw.Write([]byte("<script>alert('xss')</script>")); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		if got := w.Header().Get("Content-Type"); got != "application/zip" {
+			t.Errorf("Content-Type = %q, want application/zip", got)
+		}
+		if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+		}
+	})
+
+	t.Run("Write restores safe headers deleted by a handler", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rw := newResponseWriter(w)
+		rw.Header().Del("Content-Type")
+		rw.Header().Del("X-Content-Type-Options")
+
+		if _, err := rw.Write([]byte("<script>alert('xss')</script>")); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		if got := w.Header().Get("Content-Type"); got != "application/octet-stream" {
+			t.Errorf("Content-Type = %q, want application/octet-stream", got)
+		}
+		if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+		}
+	})
+
+	t.Run("WriteHeader preserves a handler-selected content type", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rw := newResponseWriter(w)
+
+		http.Error(rw, "invalid request", http.StatusBadRequest)
+
+		if got := w.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+			t.Errorf("Content-Type = %q, want text/plain; charset=utf-8", got)
+		}
+		if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+		}
+	})
+
+	t.Run("WriteHeader commits safe response headers", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rw := newResponseWriter(w)
+
+		rw.WriteHeader(http.StatusNoContent)
+
+		if got := w.Header().Get("Content-Type"); got != "application/octet-stream" {
+			t.Errorf("Content-Type = %q, want application/octet-stream", got)
+		}
+		if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 		}
 	})
 

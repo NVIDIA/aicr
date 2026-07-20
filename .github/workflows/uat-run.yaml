@@ -130,6 +130,11 @@ jobs:
       cloud: ${{ steps.row.outputs.cloud }}
       cluster_config_path: ${{ steps.row.outputs['cluster-config-path'] }}
       test_config_dir: ${{ steps.row.outputs['test-config-dir'] }}
+      # Accelerator selects the per-accelerator test-config filename
+      # (<accelerator>-<intent>-config.yaml) in the AWS pipeline. The AWS
+      # account (tenancy) is NOT plumbed here: the AWS pipeline derives it from
+      # the cluster-config's .deployment.tenancy, the single source of truth.
+      accelerator: ${{ steps.row.outputs.accelerator }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -139,7 +144,7 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
       - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -183,6 +188,7 @@ jobs:
       lifecycle: ${{ inputs.lifecycle }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
+      accelerator: ${{ needs.resolve.outputs.accelerator }}
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
 

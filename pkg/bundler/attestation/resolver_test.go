@@ -240,6 +240,75 @@ func TestResolveAttesterLazyKMS(t *testing.T) {
 	}
 }
 
+// TestResolveAttesterDisableTLogUpload verifies DisableTLogUpload wires the
+// no-tlog override onto the KMS attester (offline / air-gapped signing) for
+// both the eager and lazy resolvers, and only when SigningKey is set. Keyless
+// signing (SigningKey empty) ignores the flag and always uploads. See #409.
+func TestResolveAttesterDisableTLogUpload(t *testing.T) {
+	const keyURI = "awskms://arn:aws:kms:us-east-1:111:key/abc"
+
+	resolvers := []struct {
+		name    string
+		resolve func(ResolveOptions) (Attester, error)
+	}{
+		{"eager", func(o ResolveOptions) (Attester, error) {
+			return ResolveAttester(context.Background(), o)
+		}},
+		{"lazy", func(o ResolveOptions) (Attester, error) {
+			return ResolveAttesterLazy(context.Background(), o)
+		}},
+	}
+
+	cases := []struct {
+		name      string
+		opts      ResolveOptions
+		wantKMS   bool // attester must (KMS) / must not (keyless) be a *KMSAttester
+		wantRekor bool // expected HasRekorEntry()
+	}{
+		{
+			// KMS + DisableTLogUpload:true → no Rekor entry.
+			name:      "kms uploads disabled",
+			opts:      ResolveOptions{Attest: true, SigningKey: keyURI, DisableTLogUpload: true},
+			wantKMS:   true,
+			wantRekor: false,
+		},
+		{
+			// KMS + DisableTLogUpload:false (default) → Rekor entry.
+			name:      "kms default uploads",
+			opts:      ResolveOptions{Attest: true, SigningKey: keyURI},
+			wantKMS:   true,
+			wantRekor: true,
+		},
+		{
+			// Keyless (no SigningKey) + DisableTLogUpload:true → still a keyless
+			// attester that always uploads; the flag is ignored on this path.
+			name:      "keyless ignores disable and uploads",
+			opts:      ResolveOptions{Attest: true, IdentityToken: "tok", DisableTLogUpload: true},
+			wantKMS:   false,
+			wantRekor: true,
+		},
+	}
+
+	for _, r := range resolvers {
+		t.Run(r.name, func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					att, err := r.resolve(tc.opts)
+					if err != nil {
+						t.Fatalf("resolve: %v", err)
+					}
+					if _, ok := att.(*KMSAttester); ok != tc.wantKMS {
+						t.Fatalf("attester type = %T, want *KMSAttester: %v", att, tc.wantKMS)
+					}
+					if att.HasRekorEntry() != tc.wantRekor {
+						t.Errorf("HasRekorEntry() = %v, want %v", att.HasRekorEntry(), tc.wantRekor)
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestResolveAttesterLazy_DefersTokenResolution verifies the lazy entry
 // point does not touch the OIDC chain at construction time. Constructing
 // a lazy attester with a pre-canceled context plus a forced device-flow

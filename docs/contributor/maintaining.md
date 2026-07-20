@@ -52,12 +52,12 @@ failure during the first 60s after tag publish. Re-run the workflow.
 ## Release Supply-Chain Monitoring
 
 The `Rekor Monitor` workflow (`.github/workflows/rekor-monitor.yaml`) runs
-hourly and calls the upstream `sigstore/rekor-monitor` reusable workflow. It
-watches the **Rekor v2** transparency log (where AICR release signing writes
-since [#1650](https://github.com/NVIDIA/aicr/issues/1650)) for two things, both
-in one job: that the log stays append-only (consistency), and that no entry
-appears under AICR's release signing identity that a release did not produce
-(identity). On either failure it opens an issue.
+hourly and runs our own monitor, `tools/rekor-monitor`, against the **Rekor v2**
+transparency log (where AICR release signing writes since
+[#1650](https://github.com/NVIDIA/aicr/issues/1650)). In one job it checks two
+things: that the log stays append-only (consistency), and that no entry appears
+under AICR's release signing identity that a release did not produce (identity).
+On any failure it opens a tracking issue; a later clean run closes it.
 
 This protects the trust root every AICR consumer depends on: the release
 binaries, the signed recipe catalog, and the container images all chain to that
@@ -75,48 +75,74 @@ grows, so it can never keep up inside a bounded CI job: the earlier v1
 identity config timed out on every run and never completed a single scan
 ([#1623](https://github.com/NVIDIA/aicr/issues/1623)). Rekor **v2** is
 tile-based: bulk 256-entry reads let a single worker outpace the log, so the
-identity scan is a cheap job that always finishes. This is why the whole design
-is a single unbounded scan again rather than sharded paging.
+identity scan is a cheap job that always finishes.
 
-### Shard selection (automatic, no manual re-tune)
+### Why our own tool, not the upstream reusable workflow
 
-The monitor selects Rekor v2 by pointing its `url` at a v2 shard listed in the
-Sigstore `SigningConfig`; a match on a v2 service switches it to v2, after which
-it auto-discovers the **full** shard set from TUF and refreshes it every run.
+The upstream `sigstore/rekor-monitor` reusable workflow selects its Rekor API
+version and discovers shards from Sigstore's **default** signing config,
+`signing_config.v0.2.json`. That config lists only Rekor v1 and, per Sigstore's
+[rekor-evolution](https://blog.sigstore.dev/rekor-evolution/) plan, keeps v1 as
+the ecosystem default "for the foreseeable future". AICR opted into v2 **early**
+via a separate TUF target, `signing_config_rekor_v2.v0.2.json` (see `pkg/trust`),
+which the upstream tool never reads and exposes no flag to select. So pointing
+it at a v2 shard URL just falls through to v1 and fails.
 
-The shard URL is **not hardcoded**. The `resolve-v2-shard` job computes it at run
-time from the same TUF-distributed signing config that release signing resolves,
-then feeds it to the monitor:
+`tools/rekor-monitor` closes exactly that gap: it reads the v2 signing config
+AICR actually signs against (`trust.ResolveSigningConfig`) and then reuses the
+upstream rekor-monitor **library** packages for the security-critical work (tile
+consistency proofs and identity search), so we do not reimplement
+transparency-log verification. To inspect the current v2 shard the way the tool
+resolves it:
 
 ```bash
-# Same command the resolve-v2-shard job runs (works from a fresh checkout).
 go run ./cmd/aicr trust update --emit-signing-config signing-config.json
 jq -er '[.rekorTlogUrls[] | select(.majorApiVersion == 2)] | sort_by(.validFor.start) | last | .url' signing-config.json
 ```
 
-Because it reads the signing config directly, the monitor provably watches where
-releases actually write, and yearly shard rotation (`log2025-1` -> `log2026-1`
--> ...) needs no change to this workflow. If the resolve job ever fails (for
-example the TUF CDN is unreachable), the monitor job is skipped for that run and
-retries on the next hourly tick.
+When Sigstore makes v2 the ecosystem default, `signing_config.v0.2.json` will
+list the v2 shards, the upstream reusable workflow can monitor v2 directly, and
+this tool can be retired. Until then upstream exposes no flag to point the
+monitor at a non-default signing config (it always reads
+`signing_config.v0.2.json`); a feature request for that would let early v2
+adopters drop this tool.
 
-### First run after switching from v1: reset the checkpoint
+### Checkpoint and first run
 
-The `checkpoint` artifact persists a **v1** checkpoint from the prior config; a
-v2 run cannot parse it and will fail. After merging a change that moves this
-workflow to v2, delete the stale artifact once so the first v2 run establishes a
-fresh v2 baseline (it saves the current v2 tree head and scans forward from
-there):
+The monitor persists its cursor as the `rekor-v2-checkpoint` artifact between
+runs (a deliberately fresh name, so the stale v1 `checkpoint` artifact from the
+earlier design is simply ignored, no migration). The **first** run has no prior
+checkpoint, so it establishes a baseline at the current v2 tree head and skips
+the identity scan; every run after that scans only the newly-added window.
+Entries predating the baseline are covered by release-time verification (the
+`aicr verify` path), not by this monitor.
 
-```bash
-gh api "repos/NVIDIA/aicr/actions/artifacts?name=checkpoint" \
-  --jq '.artifacts[].id' \
-  | xargs -I{} gh api -X DELETE "repos/NVIDIA/aicr/actions/artifacts/{}"
-```
+### Shard rotation (and what the operator sees)
 
-The first v2 run then watches forward from the current head; historical entries
-predating the baseline are covered by release-time verification (the `aicr
-verify` path), not by this monitor.
+Shard rotation (`log2025-1` -> `log2026-1` -> ...) needs no config change here:
+the tool reads the live shard set from the signing config every run. It does,
+however, leave a small, **intentionally visible** identity-scan gap that a
+maintainer should recognize in the run logs:
+
+- **On the first pass after rotation**, the previous checkpoint is on the old
+  shard and the current one is on the new shard (different logs), so there is no
+  meaningful cross-shard window. The monitor **re-baselines on the new shard**
+  and logs `shard rotation detected: ... re-baselining ...`. Entries appended to
+  the old shard just before rotation, and new-shard entries before the
+  re-baseline, are not identity-scanned this pass (the vendored `IdentitySearch`
+  only reads the latest shard).
+- **If the new shard is still empty** when the monitor first sees it, the
+  size-0 checkpoint is not persisted (`WriteCheckpointRekorV2` skips size-0
+  writes), so the pass collapses to a normal first run and logs `baseline
+  established at tree size N (first run; identity scan skipped)` once the shard
+  has entries. Those `[0, N-1]` entries are the standard forward-looking
+  first-run gap.
+
+In both cases the un-scanned entries are covered by **release-time verification**
+(`aicr verify` runs against each release's own bundle), so this is a
+monitoring-coverage gap, not a verification gap. A follow-up may add a one-time
+new-shard backfill; until then, treat a rotation log line as a prompt to
+spot-check releases made around the rotation boundary.
 
 ## Reviewing Recipe Contributions
 

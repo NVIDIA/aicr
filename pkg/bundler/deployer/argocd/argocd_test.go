@@ -1812,10 +1812,10 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 	}
 
 	for _, rel := range []string{
-		// Primary: multi-source upstream-helm (sync-wave 0)
+		// Primary: multi-source upstream-helm at its level's primary wave (1)
 		"001-gpu-operator/application.yaml",
 		"001-gpu-operator/values.yaml",
-		// Readiness gate: path-based single-source at the next sync-wave (1)
+		// Readiness gate: path-based single-source at the level's gate wave (3)
 		"002-gpu-operator-readiness/application.yaml",
 		"002-gpu-operator-readiness/Chart.yaml",
 		"002-gpu-operator-readiness/values.yaml",
@@ -1882,6 +1882,209 @@ func TestReadinessGateSyncWaveOrdering(t *testing.T) {
 	if !strings.Contains(string(content), "path: 002-gpu-operator-readiness") {
 		t.Errorf("readiness Application should be path-based at its folder:\n%s", content)
 	}
+}
+
+// TestWaveForFolder pins the level→sync-wave arithmetic: within a level's
+// band [level*stride, level*stride+3] the per-phase offset preserves the
+// -pre → primary → -post → -readiness ordering, and the band width equals the
+// stride so consecutive levels never overlap.
+func TestWaveForFolder(t *testing.T) {
+	tests := []struct {
+		name   string
+		folder localformat.Folder
+		level  int
+		want   int
+	}{
+		{"pre L0", localformat.Folder{Name: "cert-manager-pre", Parent: "cert-manager"}, 0, 0},
+		{"primary L0", localformat.Folder{Name: "cert-manager", Parent: "cert-manager"}, 0, 1},
+		{"post L0", localformat.Folder{Name: "cert-manager-post", Parent: "cert-manager"}, 0, 2},
+		{"readiness L0", localformat.Folder{Name: "cert-manager-readiness", Parent: "cert-manager"}, 0, 3},
+		{"pre L1", localformat.Folder{Name: "gpu-operator-pre", Parent: "gpu-operator"}, 1, 4},
+		{"primary L1", localformat.Folder{Name: "gpu-operator", Parent: "gpu-operator"}, 1, 5},
+		{"post L1", localformat.Folder{Name: "gpu-operator-post", Parent: "gpu-operator"}, 1, 6},
+		{"readiness L1", localformat.Folder{Name: "gpu-operator-readiness", Parent: "gpu-operator"}, 1, 7},
+		{"primary L2", localformat.Folder{Name: "nvsentinel", Parent: "nvsentinel"}, 2, 9},
+		// A component literally named "<x>-pre" (no sibling injects the
+		// suffix, so Parent == Name) classifies as a primary, not a pre.
+		{"component named like pre", localformat.Folder{Name: "foo-pre", Parent: "foo-pre"}, 0, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := waveForFolder(tt.folder, tt.level); got != tt.want {
+				t.Errorf("waveForFolder(%q@L%d) = %d, want %d", tt.folder.Name, tt.level, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGenerate_LevelBasedSyncWaves is the end-to-end proof that independent
+// components deploy in parallel while genuine dependencies still gate. The
+// graph: cert-manager and nfd have no dependencies (level 0); gpu-operator
+// depends on both (level 1). Each carries a readiness gate. Under level-based
+// scheduling cert-manager and nfd must share the level-0 primary wave (deploy
+// together), and gpu-operator must land in a strictly higher band than every
+// level-0 folder — including the level-0 gate Jobs — so Argo CD holds it until
+// the whole prior level is Healthy.
+func TestGenerate_LevelBasedSyncWaves(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager", Version: "v1.14.0",
+			Type: recipe.ComponentTypeHelm, Source: "https://charts.jetstack.io"},
+		{Name: "nfd", Namespace: "node-feature-discovery", Chart: "node-feature-discovery", Version: "v0.15.0",
+			Type: recipe.ComponentTypeHelm, Source: "https://kubernetes-sigs.github.io/node-feature-discovery/charts"},
+		{Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator", Version: "v25.3.3",
+			Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager", "nfd"}},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+
+	gate := func(name string) []byte {
+		return []byte("apiVersion: batch/v1\nkind: Job\nmetadata:\n" +
+			"  name: " + name + "-readiness-gate\n  namespace: {{ .Release.Namespace }}\n")
+	}
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {}, "nfd": {}, "gpu-operator": {},
+		},
+		Version:        "v0.0.0-test",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentReadiness: map[string]map[string][]byte{
+			"cert-manager": {"readiness.yaml": gate("cert-manager")},
+			"nfd":          {"readiness.yaml": gate("nfd")},
+			"gpu-operator": {"readiness.yaml": gate("gpu-operator")},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// waveFor globs the NNN-prefixed folder whose name ends in the exact
+	// suffix and returns its sync-wave, so the assertions don't hardcode the
+	// localformat index numbering.
+	certWave := waveForComponentFolder(t, outputDir, "cert-manager")
+	nfdWave := waveForComponentFolder(t, outputDir, "nfd")
+	certGate := waveForComponentFolder(t, outputDir, "cert-manager-readiness")
+	nfdGate := waveForComponentFolder(t, outputDir, "nfd-readiness")
+	gpuWave := waveForComponentFolder(t, outputDir, "gpu-operator")
+	gpuGate := waveForComponentFolder(t, outputDir, "gpu-operator-readiness")
+
+	// Level 0 independents deploy in parallel: identical primary wave.
+	if certWave != nfdWave {
+		t.Errorf("independent level-0 components must share a wave: cert-manager=%d nfd=%d", certWave, nfdWave)
+	}
+	// The dependent lands in a strictly higher band than every level-0 folder,
+	// gate Jobs included, so it cannot start until level 0 is Healthy.
+	for _, l0 := range []int{certWave, nfdWave, certGate, nfdGate} {
+		if gpuWave <= l0 {
+			t.Errorf("gpu-operator wave (%d) must exceed every level-0 wave, got level-0 wave %d", gpuWave, l0)
+		}
+	}
+	// Exact bands: level 0 primary=1/gate=3, level 1 primary=5/gate=7.
+	if certWave != 1 || certGate != 3 || gpuWave != 5 || gpuGate != 7 {
+		t.Errorf("unexpected waves: cert=%d certGate=%d gpu=%d gpuGate=%d; want 1/3/5/7",
+			certWave, certGate, gpuWave, gpuGate)
+	}
+}
+
+// TestGenerate_SerialSyncWaves is the escape-hatch counterpart to
+// TestGenerate_LevelBasedSyncWaves: with Serial set, every folder takes a
+// sync-wave equal to its linear position, so even independent components
+// (cert-manager, nfd) get distinct, strictly increasing waves and deploy one
+// at a time — the pre-parallelism behavior restored by --serial.
+func TestGenerate_SerialSyncWaves(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager", Version: "v1.14.0",
+			Type: recipe.ComponentTypeHelm, Source: "https://charts.jetstack.io"},
+		{Name: "nfd", Namespace: "node-feature-discovery", Chart: "node-feature-discovery", Version: "v0.15.0",
+			Type: recipe.ComponentTypeHelm, Source: "https://kubernetes-sigs.github.io/node-feature-discovery/charts"},
+		{Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator", Version: "v25.3.3",
+			Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia",
+			DependencyRefs: []string{"cert-manager", "nfd"}},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"cert-manager": {}, "nfd": {}, "gpu-operator": {}},
+		Version:         "v0.0.0-test",
+		RepoURL:         "https://github.com/example/aicr-bundles.git",
+		TargetRevision:  "main",
+		Serial:          true,
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	cert := waveForComponentFolder(t, outputDir, "cert-manager")
+	nfd := waveForComponentFolder(t, outputDir, "nfd")
+	gpu := waveForComponentFolder(t, outputDir, "gpu-operator")
+
+	// Linear position waves: 0, 1, 2 in deployment order.
+	if cert != 0 || nfd != 1 || gpu != 2 {
+		t.Errorf("serial waves = cert:%d nfd:%d gpu:%d; want 0/1/2", cert, nfd, gpu)
+	}
+	// The defining property of serial mode: independent components do NOT
+	// share a wave (contrast TestGenerate_LevelBasedSyncWaves where cert==nfd).
+	if cert == nfd {
+		t.Errorf("serial mode must give independent components distinct waves; cert==nfd==%d", cert)
+	}
+}
+
+// TestGenerate_SerialStillValidatesTopology guards the fail-closed invariant:
+// even in --serial mode (where sync-waves come from the linear index, not
+// dependency levels), Generate must still reject a cyclic dependency graph.
+// A direct library caller can hand-build a RecipeResult, so the graph
+// validation must not be gated behind the parallel path.
+func TestGenerate_SerialStillValidatesTopology(t *testing.T) {
+	ctx := context.Background()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{Name: "a", Namespace: "a", Chart: "a", Version: "v1", Type: recipe.ComponentTypeHelm,
+			Source: "https://example.com", DependencyRefs: []string{"b"}},
+		{Name: "b", Namespace: "b", Chart: "b", Version: "v1", Type: recipe.ComponentTypeHelm,
+			Source: "https://example.com", DependencyRefs: []string{"a"}}, // a <-> b cycle
+	}
+	recipeResult.DeploymentOrder = []string{"a", "b"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"a": {}, "b": {}},
+		Version:         "v0.0.0-test",
+		RepoURL:         "https://github.com/example/aicr-bundles.git",
+		TargetRevision:  "main",
+		Serial:          true,
+	}
+
+	if _, err := g.Generate(ctx, t.TempDir()); err == nil {
+		t.Fatal("expected Generate to reject a cyclic dependency graph in --serial mode, got nil error")
+	}
+}
+
+// waveForComponentFolder returns the sync-wave of the single NNN-<suffix>
+// folder's application.yaml under outputDir. Shared by the level-based and
+// serial sync-wave tests.
+func waveForComponentFolder(t *testing.T, outputDir, suffix string) int {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(outputDir, "*-"+suffix))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected exactly one folder ending in %q, got %v (err %v)", suffix, matches, err)
+	}
+	return syncWaveOf(t, filepath.Join(matches[0], "application.yaml"))
 }
 
 // syncWaveOf parses the argocd.argoproj.io/sync-wave annotation from an

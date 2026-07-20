@@ -496,6 +496,12 @@ func (s *MetadataStore) availableOSForCriteria(criteria *Criteria) []string {
 	return result
 }
 
+// requireOSIfNeeded is the joint service+accelerator OS gate. It is NOT
+// subsumed by verifyCriteriaCoverage: coverage permits service and
+// accelerator to be honored by separate overlays, while this guard demands
+// one overlay carry both before the OS-agnostic tier is considered served
+// (see issue #1542, design 4.1). Both checks run; this guard first.
+//
 // requireOSIfNeeded returns ErrCodeInvalidRequest when the caller requested a
 // specific service+accelerator combination without specifying an OS, and no
 // OS-agnostic overlay exists for that exact combination while OS-gated overlays
@@ -757,6 +763,13 @@ func (s *MetadataStore) evaluateMixinConstraints(
 			continue // already evaluated per-overlay
 		}
 		result := evaluator(constraint)
+		if result.Error != nil && !isNotFoundEvalError(result.Error) {
+			// Fail closed on non-NotFound evaluation errors (design 5.2).
+			// ConstraintEvaluatorFunc returns a plain error; propagate it
+			// as-is when it already carries a structured code, otherwise
+			// wrap so it doesn't reach the server layer as an uncoded 500.
+			return mixinEvalResult{}, aicrerrors.PropagateOrWrap(result.Error, aicrerrors.ErrCodeInternal, "constraint evaluation failed")
+		}
 		if !result.Passed {
 			affectedCandidates := constraintCandidates[constraint.Name]
 			if len(affectedCandidates) == 0 {
@@ -1002,6 +1015,14 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 		return nil, err
 	}
 
+	// Post-condition (issue #1542): every stated criteria dimension must be
+	// honored by the final applied set. Runs after mergeOverlayChains so
+	// ancestor-supplied coverage counts; mixins carry no criteria and cannot
+	// change coverage.
+	if err := s.verifyCriteriaCoverage(criteria, appliedOverlays, nil, nil); err != nil {
+		return nil, err
+	}
+
 	if len(appliedOverlays) <= 1 {
 		slog.Warn("no environment-specific overlays matched, using base configuration only",
 			"criteria", criteria.String(),
@@ -1053,7 +1074,10 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 			"overlay", overlay.Metadata.Name,
 			"constraint_count", len(overlay.Spec.Constraints))
 
-		passed, warnings := s.evaluateOverlayConstraints(overlay, evaluator)
+		passed, warnings, evalErr := s.evaluateOverlayConstraints(overlay, evaluator)
+		if evalErr != nil {
+			return nil, evalErr
+		}
 		if passed {
 			filteredOverlays = append(filteredOverlays, overlay)
 			slog.Debug("overlay passed all constraints",
@@ -1103,6 +1127,14 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 		appliedOverlays = mixinResult.AppliedOverlays
 	}
 
+	// Post-condition (issue #1542): runs against the FINAL applied set —
+	// after per-overlay constraint exclusion AND the mixin-failure fallback
+	// rebuild — so a stated dimension whose only coverage was excluded
+	// fails loudly instead of shipping a silent partial (design 5.4).
+	if err = s.verifyCriteriaCoverage(criteria, appliedOverlays, excludedOverlays, constraintWarnings); err != nil {
+		return nil, err
+	}
+
 	if len(excludedOverlays) > 0 {
 		slog.Warn("some overlays were excluded due to constraint failures",
 			"excluded", excludedOverlays,
@@ -1134,11 +1166,17 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 
 // evaluateOverlayConstraints evaluates all constraints in an overlay.
 // Returns true if all constraints pass, false otherwise.
-// Returns warnings for any constraints that failed or had errors.
-func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, evaluator ConstraintEvaluatorFunc) (bool, []ConstraintWarning) {
+// Returns warnings for clean mismatches and NotFound evaluation errors (the
+// graceful-degradation signal); any other evaluation error aborts immediately
+// and is returned as the third value instead of being folded into a warning.
+// The third return value is non-nil (the evaluator's own structured error,
+// code preserved) for any non-NotFound evaluation error — a malformed
+// constraint or internal evaluation failure must not silently degrade the
+// recipe (issue #1542, design 5.2).
+func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, evaluator ConstraintEvaluatorFunc) (bool, []ConstraintWarning, error) {
 	if len(overlay.Spec.Constraints) == 0 {
 		// No constraints means the overlay passes
-		return true, nil
+		return true, nil, nil
 	}
 
 	var warnings []ConstraintWarning
@@ -1148,8 +1186,16 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 		result := evaluator(constraint)
 
 		switch {
+		case result.Error != nil && !isNotFoundEvalError(result.Error):
+			// Fail closed: a malformed constraint or internal evaluation
+			// failure must not silently degrade the recipe (issue #1542,
+			// design 5.2). ConstraintEvaluatorFunc returns a plain error;
+			// propagate as-is when it already carries a structured code,
+			// otherwise wrap so it doesn't reach the server layer uncoded.
+			return false, nil, aicrerrors.PropagateOrWrap(result.Error, aicrerrors.ErrCodeInternal, "constraint evaluation failed")
 		case result.Error != nil:
-			// Treat evaluation errors as failures with a warning
+			// NotFound: the snapshot does not exhibit this measurement —
+			// the designed graceful-degradation signal. Exclude with warning.
 			warnings = append(warnings, ConstraintWarning{
 				Overlay:    overlay.Metadata.Name,
 				Constraint: constraint.Name,
@@ -1185,7 +1231,7 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 		}
 	}
 
-	return allPassed, warnings
+	return allPassed, warnings, nil
 }
 
 // mixinComponentRefSafeForMerge reports whether a mixin's componentRef sets

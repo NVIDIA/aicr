@@ -136,6 +136,9 @@ outputs:
   ministack_image:
     description: 'MiniStack image (token-free AWS emulator for the KMS e2e)'
     value: ${{ steps.versions.outputs.ministack_image }}
+  openbao_image:
+    description: 'OpenBAO image (Vault-compatible Transit server for the Vault KMS e2e)'
+    value: ${{ steps.versions.outputs.openbao_image }}
   mkcert:
     description: 'mkcert version (trusted localhost TLS cert for the KMS e2e)'
     value: ${{ steps.versions.outputs.mkcert }}
@@ -197,6 +200,7 @@ runs:
         echo "zarf=$(yq eval '.testing_tools.zarf' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "awscli=$(yq eval '.testing_tools.awscli' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "ministack_image=$(yq eval '.testing_tools.ministack_image' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "openbao_image=$(yq eval '.testing_tools.openbao_image' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "mkcert=$(yq eval '.testing_tools.mkcert' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "mkcert_sha256_linux_amd64=$(yq eval '.testing_tools.mkcert_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "mkcert_sha256_linux_arm64=$(yq eval '.testing_tools.mkcert_checksums.linux_arm64' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -256,5 +260,6 @@ runs:
         echo "  gpu_operator_chart_version: ${{ steps.versions.outputs.gpu_operator_chart_version }}"
         echo "  awscli: ${{ steps.versions.outputs.awscli }}"
         echo "  ministack_image: ${{ steps.versions.outputs.ministack_image }}"
+        echo "  openbao_image: ${{ steps.versions.outputs.openbao_image }}"
         echo "  mkcert: ${{ steps.versions.outputs.mkcert }}"
         echo "  snapshot_agent_base_image: ${{ steps.versions.outputs.snapshot_agent_base_image }}"

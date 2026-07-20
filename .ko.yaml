@@ -12,7 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# No defaultBaseImage: the aicr CLI/agent is a pure-Go binary that discovers
-# the GPU SKU driver-free via NFD/PCI, so it no longer needs nvidia-smi or the
-# CUDA base (and its recurring CVE surface). With no override, ko uses its
-# default static, distroless base image (cgr.dev/chainguard/static).
+# The aicr CLI/agent is a pure-Go binary that discovers the GPU SKU driver-free
+# via NFD/PCI, so it needs neither nvidia-smi nor the CUDA base (and its
+# recurring CVE surface). It runs on NVIDIA's own static distroless base rather
+# than ko's default (cgr.dev/chainguard/static). ko still stamps its default
+# nonroot user (UID 65532) numerically, so it runs unprivileged regardless of
+# the base image's own nvs (UID 1000) account. This defaultBaseImage applies to
+# `ko build` CLI invocations (e.g. the vuln-scan workflow); goreleaser's kos
+# entries pin the same image explicitly via base_image.
+defaultBaseImage: nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69

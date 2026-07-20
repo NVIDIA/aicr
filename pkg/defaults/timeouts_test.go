@@ -275,3 +275,41 @@ func TestTopologyTimeoutGreaterThanK8s(t *testing.T) {
 			CollectorTopologyTimeout, CollectorK8sTimeout)
 	}
 }
+
+func TestOCIPhaseBudgetConstants(t *testing.T) {
+	tests := []struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}{
+		{name: "source stage", got: OCISourceStageTimeout, want: 2 * time.Minute},
+		{name: "local package", got: OCILocalPackageTimeout, want: 4 * time.Minute},
+		{name: "registry attempt", got: RegistryPushTimeout, want: 7 * time.Minute},
+		{name: "image refs", got: OCIImageRefsWriteTimeout, want: 30 * time.Second},
+		{name: "whole publish", got: OCIBundlePublishTimeout, want: 35 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Fatalf("timeout = %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOCIBundlePublishTimeoutWorstCaseInvariant(t *testing.T) {
+	const maximumJitterNumerator = 5
+	const maximumJitterDenominator = 4
+	worstBackoff := RegistryPushBackoff * maximumJitterNumerator / maximumJitterDenominator
+	worstBackoffs := worstBackoff + 2*worstBackoff
+	worstCase := 2*OCISourceStageTimeout + OCILocalPackageTimeout +
+		time.Duration(RegistryPushRetries)*RegistryPushTimeout +
+		worstBackoffs + OCIImageRefsWriteTimeout
+	want := 29*time.Minute + 33*time.Second + 750*time.Millisecond
+	if worstCase != want {
+		t.Fatalf("OCI worst-case budget = %v, want exact %v", worstCase, want)
+	}
+	if headroom := OCIBundlePublishTimeout - worstCase; headroom <= 5*time.Minute {
+		t.Fatalf("OCI whole-publish headroom = %v, want > 5m", headroom)
+	}
+}

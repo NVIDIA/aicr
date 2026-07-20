@@ -1,0 +1,149 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# EKS GB200 UAT cluster (reservation aws-gb200, infra/uat/reservations.yaml).
+#
+# Differs from the p5 cluster-config.yaml (aws-h100) in three structural ways,
+# all forced by GB200 hardware and its Capacity Block:
+#   1. CROSS-ACCOUNT — the Capacity Block is held in tenancy 897722687756
+#      (dgx-cloud-runai-prod-22), not the standard UAT account. The AWS
+#      pipeline assumes the OIDC role in .deployment.tenancy below — this field
+#      is the single source of truth for the account (the reservation carries no
+#      account field; the pipeline derives AWS_ACCOUNT_ID from here). Prereq:
+#      apply infra/uat-aws-account in 897722687756 first (GitHub OIDC provider
+#      + github-actions-role-aicr).
+#   2. LOCAL ZONE — p6e-gb200 capacity lives in us-east-1-dfw-2a (parent AZ
+#      us-east-1d). The EKS control plane cannot live in a Local Zone, so the
+#      GPU worker + pod subnets are in the Local Zone while control-plane /
+#      system / public subnets stay in region AZs (incl. us-east-1d, the
+#      parent). Local-Zone worker egress routes through a region NAT.
+#   3. arm64 + Capacity Block — GB200 is Grace/arm64 and the reservation is a
+#      time-bounded Capacity Block (marketType below), not a standing CR.
+#
+# Two mchmarny/cluster actuator workarounds are load-bearing (see the inline
+# notes on the worker nodeGroup and adminRoles).
+
+apiVersion: github.com/mchmarny/cluster/v1alpha1
+kind: Cluster
+
+deployment:
+  id: aicr-uat-gb200            # workflow overrides with a run-scoped id
+  provider: eks
+  tenancy: "897722687756"       # dgx-cloud-runai-prod-22 (GB200 Capacity Block)
+  location: us-east-1
+  state: tenancy                # remote TF state in this account's S3
+  destroy: false
+  tags:
+    env: dev
+
+cluster:
+  eks:
+    version: "1.35"
+    # Empty: the CI OIDC role (github-actions-role-aicr) is the cluster
+    # CREATOR and gets cluster-admin automatically
+    # (bootstrap_cluster_creator_admin_permissions=true). The actuator ALSO
+    # writes an explicit access entry per adminRole; listing the creator's own
+    # role here collides with the bootstrap entry and 409s. Human admins can
+    # add this account's SSO admin role once its name is known (it differs from
+    # the standard account's AWSReservedSSO_CS-Admin_55d42b5a9a2a8c35).
+    adminRoles: []
+    controlPlane:
+      allowedCidrs:
+        - 216.228.127.128/30
+        - 52.41.222.58/32
+        - 54.68.11.139/32
+        - 128.77.49.32/30
+    addOns:
+      coreDns: ""
+      kubeProxy: ""
+      vpcCni: ""
+
+network:
+  eks:
+    cidrs:
+      host: 10.0.0.0/16
+      pod: 100.65.0.0/16
+    subnets:
+      # Control-plane / system / public subnets MUST be in region AZs (the EKS
+      # control plane cannot live in a Local Zone). Include us-east-1d — the
+      # Local Zone's parent — so cross-zone routing to the workers is local.
+      public:
+        - cidr: 10.0.1.0/27
+          zone: us-east-1a
+        - cidr: 10.0.2.0/27
+          zone: us-east-1d
+      system:
+        - cidr: 10.0.4.0/22
+          zone: us-east-1a
+        - cidr: 10.0.8.0/22
+          zone: us-east-1d
+      # GPU workers + pods live in the Local Zone where the Capacity Block is.
+      worker:
+        - cidr: 10.0.128.0/17
+          zone: us-east-1-dfw-2a
+          disableEndpoints: true
+      pod:
+        - cidr: 100.65.0.0/16
+          zone: us-east-1-dfw-2a
+          disableEndpoints: true
+    securityGroups:
+      additionalRules:
+        - target: system
+          direction: ingress
+          fromPort: 4222
+          toPort: 4222
+          protocol: tcp
+          # VPC-CNI does not SNAT in-VPC pod-to-pod traffic, so NATS on the
+          # system node sees the pod source IP (pod subnet), not the node IP.
+          cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker node + pod subnet CIDRs
+          description: "Allow NATS from worker nodes and pods"
+
+compute:
+  eks:
+    nodeGroups:
+      system:
+        instanceType: m7i.xlarge
+        capacity:
+          desired: 3
+        labels:
+          nodeGroup: system-worker
+          dedicated: system-workload
+      workers:
+        - name: gpu-worker
+          instanceType: p6e-gb200.36xlarge
+          architecture: arm64               # GB200 = Grace/arm64 (arm64 Ubuntu EKS AMI)
+          gpuType: gb200
+          # REQUIRED: auto-derivation breaks on the "p6e-gb200.*" name — the
+          # actuator keys its accelerator map on "p6e" but split(".")[0] yields
+          # "p6e-gb200", so it falls through to the generic-GPU EFA branch and
+          # emits an invalid launch template (device_index=1 on a 1-device
+          # network card) → CreateAutoScalingGroup ValidationError. The explicit
+          # value selects the correct GB200 branch.
+          accelerator: gb200
+          capacity:
+            # Two GPU nodes: activates the multi-node NCCL East-West fabric
+            # check (nccl-all-reduce-bw-net) and lets the TrainJob (numNodes: 2)
+            # span both nodes.
+            desired: 2
+            reservation:
+              preference: capacity-reservations-only
+              target: cr-0e2f3833a602809a6
+              marketType: capacity-block    # REQUIRED — GB200 CRs are Capacity Blocks
+          labels:
+            nodeGroup: gpu-worker
+            dedicated: user-workload
+          taints:
+            - key: skyhook.nvidia.com
+              value: runtime-required
+              effect: NoSchedule

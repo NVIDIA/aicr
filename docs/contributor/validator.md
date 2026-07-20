@@ -260,10 +260,14 @@ commit that ran the image build, *not necessarily* HEAD, and
 Confirm the tag exists (see below) and fall back to `:edge` or the last
 published SHA.
 
-**`:latest` is the last _stable_ release, never `main`.** It is moved only
-by the on-tag release pipeline for stable tags (the `:latest` step is gated
-on a non-pre-release tag), so a validator change merged to `main` after the
-last stable release is absent from `:latest` until the next one. Running
+**`:latest` is the last _stable_ release, never `main`.** The on-tag workflow
+first builds every validator architecture under one run-unique candidate tag,
+resolves one authoritative digest map, and scans both platforms and attests
+those exact digests. Only then may version aliases move; a stable release
+verifies all seven version aliases before it starts updating any `:latest`
+alias. A pre-release promotes its version alias but never `:latest`, so a
+validator change merged to `main` after the last stable release is absent from
+`:latest` until the next one. Running
 `AICR_VALIDATOR_IMAGE_TAG=latest` against a `main`-tracking recipe can
 therefore silently run *older* validator behavior — e.g. a
 `performance.constraints` pin such as `inference-model` /
@@ -272,6 +276,16 @@ by a validator new enough to read it; an older `:latest` validator ignores
 the pin and runs its compiled default, which can surface as a misleading
 result (for `nccl-benchmark-profile`, a silent skip) rather than a clear
 version error.
+
+The seven GHCR alias updates cannot be atomic across repositories. Promotion
+performs an all-images, read-only preflight before its first write and accepts
+each `:latest` only at that image's immediate-prior or current-candidate
+digest. It also rejects an out-of-order stable release when the same or a newer
+stable version is already public. If a later registry write fails, re-running
+the failed workflow jobs with the same candidate converges the remaining
+aliases without overwriting a conflicting version. Candidate tags are retained
+for that recovery and for audit; cleanup is intentionally deferred to a
+separate retention design.
 
 **To run the validator built on `main`** (e.g. testing a recipe whose pins
 are not yet in a release), point at `:edge` or a published `main` commit —

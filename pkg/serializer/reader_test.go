@@ -185,6 +185,17 @@ func TestNewReader(t *testing.T) {
 	})
 }
 
+func TestFromConfigMapPreservesKubeconfigErrorCode(t *testing.T) {
+	kubeconfig := writeInvalidKubeconfig(t)
+
+	_, err := FromFileWithKubeconfigContext[testConfig](
+		t.Context(),
+		"cm://default/test",
+		kubeconfig,
+	)
+	assertOutermostErrorCode(t, err, errors.ErrCodeInvalidRequest)
+}
+
 func TestReader_DeserializeJSON(t *testing.T) {
 	t.Run("valid json object", func(t *testing.T) {
 		jsonData := `{"name":"test","value":123}`

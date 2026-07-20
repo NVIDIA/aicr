@@ -42,8 +42,8 @@ Visual: File system tree structure showing multiple component folders
 bundle/
 ├── deploy.sh                     # root automation script (executable)
 ├── README.md                     # root deployment guide
-├── checksums.txt                 # SHA256 of every generated payload file
-├── recipe.yaml                   # canonical post-resolution recipe
+├── checksums.txt                 # closed-world SHA256 inventory; covers recipe.yaml and every regular payload file
+├── recipe.yaml                   # canonical post-resolution recipe; listed in checksums.txt
 ├── NNN-cert-manager/             # each folder is prefixed with its NNN deployment-order
 │   ├── install.sh                # index (computed from the dependency graph — e.g. cert-manager
 │   ├── values.yaml               # and NFD sort ahead of gpu-operator, which depends on them)
@@ -60,7 +60,8 @@ bundle/
 
 Folder icons with component names
 Deployer badges: "Script", "Argo CD", "Flux"
-Caption: "Per-component folders with deployer-specific artifacts"
+Security callout: "aicr verify . derives required directories from checksums.txt and rejects every additional file or directory, symlink, and other non-regular filesystem object"
+Caption: "Per-component folders with deployer-specific artifacts, published only from a verified closed-world inventory"
 
 ---
 
@@ -86,5 +87,6 @@ Visual Flow Summary:
 - Footer: Dark bg, white text
 - Emphasize the "single source of truth" nature of the Recipe stage
 - Show data volume: many → one → many transformation
-- Show checksum verification as a security/integrity feature
+- Show closed-world checksum verification as a security/integrity feature; make the visual link from checksums.txt to recipe.yaml explicit
+- Show recipe.yaml as a covered payload in the verified inventory
 - Include subtle Kubernetes/cloud-native iconography

@@ -20,9 +20,11 @@
 #   Verify  — aicr verify (with default + min-trust-level + tamper paths)
 #
 # When --attest is passed, the CLI signs `checksums.txt` with SLSA Build
-# Provenance v1 via Sigstore keyless OIDC (Fulcio cert + Rekor log entry),
-# and copies the binary's own SLSA attestation into the bundle so the
-# verifier can walk the full chain back to NVIDIA CI.
+# Provenance v1 via Sigstore keyless OIDC (Fulcio cert + Rekor log entry).
+# That manifest inventories every regular payload file, including recipe.yaml;
+# closed-world verification also rejects any additional filesystem entry. The
+# CLI copies its own SLSA attestation into the bundle so the verifier can walk
+# the full chain back to NVIDIA CI.
 #
 # Signing requires Fulcio + Rekor egress and an OIDC source — either ambient
 # GitHub Actions OIDC, or an interactive browser sign-in. On hosts where
@@ -201,7 +203,8 @@ fi   # end SKIP_ATTEST guard
 # --- inspect the bundle -------------------------------------------------------
 
 banner "Inspect the bundle layout"
-note "Content files + checksums.txt + attestation/ holding the two signed predicates."
+note "Closed-world payload inventory + checksums.txt + the two permitted attestation files."
+note "Only checksums.txt and the two attestation JSON files may sit outside the manifest."
 run ls -R "$BUNDLE"
 
 banner "Inspect the bundle attestation predicate"
@@ -214,8 +217,10 @@ run bash -c "jq '{ subject_count: (.dsseEnvelope.payload | @base64d | fromjson |
 # --- verify -------------------------------------------------------------------
 
 banner "Verify — default (auto-detect maximum trust level)"
-note "Five gates: checksums → bundle signature → bundle predicate → binary attestation chain → identity pin."
-note "The reported trust level is the highest level every gate passed at."
+note "Five gates: closed-world inventory → bundle signature → bundle predicate → binary attestation chain → identity pin."
+note "Extra files, directories, symlinks, or other non-regular objects fail verification."
+note "Legacy bundles with incomplete manifests report unknown trust and must be regenerated."
+note "The trust level reflects the verified chain and is capped at attested when external data was used."
 pause "Press Enter to run aicr verify (default)"
 run "$AICR" verify "$BUNDLE"
 
@@ -233,8 +238,9 @@ run bash -c "set -o pipefail; '$AICR' verify '$BUNDLE' --format json | jq '{ tru
 # --- tamper -------------------------------------------------------------------
 
 banner "Tamper-evident: mutate a content file, verify fails"
-note "The signature's subject is the digest of checksums.txt, which pins every generated payload file, including recipe.yaml."
-note "Mutating any file listed in checksums.txt breaks its checksum; mutating checksums.txt breaks the signature."
+note "The signature's subject is the digest of checksums.txt, which pins the complete payload inventory, including recipe.yaml."
+note "Mutating a listed file breaks its checksum; mutating or reordering checksums.txt breaks the signature."
+note "Adding an unlisted filesystem entry also fails the exact-tree check."
 # Pick a file the bundle is guaranteed to contain. README.md is always present.
 TAMPER_TARGET="$BUNDLE/README.md"
 if [ ! -f "$TAMPER_TARGET" ]; then

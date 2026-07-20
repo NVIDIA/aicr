@@ -19,11 +19,18 @@
 #   1. Helm releases in known AICR component namespaces
 #   2. `aicr validate` artifacts (namespace, SA, CRB, leftover Jobs/CMs)
 #   3. Custom Resource Definitions owned by AICR components
-#   4. AICR component namespaces (with stuck-finalizer rescue)
+#   4. AICR component + check-created namespaces (with stuck-finalizer rescue)
 #
 # Scope is intentionally narrow: only namespaces and CRDs known to be installed
-# by AICR registry components are touched. Cluster-scoped resources outside the
-# AICR component domains are left alone.
+# by AICR registry components (plus namespaces created by conformance checks)
+# are touched. Cluster-scoped resources outside the AICR component domains are
+# left alone.
+#
+# On shared / bring-up clusters a registry component may be deliberately owned
+# out-of-band (installed by the platform team, excluded from the AICR recipe).
+# Destroying it is data loss AICR does not own, so `--exclude-ns` and
+# `--exclude-crd` fence such installs out of the Helm, CRD, and namespace
+# phases (phase 2 only touches aicr-labelled validator artifacts). See #1672.
 
 set -euo pipefail
 
@@ -35,6 +42,10 @@ DRY_RUN=false
 ASSUME_YES=false
 KEEP_CRDS=false
 KEEP_NAMESPACES=false
+# Namespaces / CRD-name substrings the operator has fenced out of every phase
+# (out-of-band or platform-owned installs). Populated by --exclude-ns/--exclude-crd.
+EXCLUDE_NS=()
+EXCLUDE_CRD=()
 
 usage() {
     cat <<EOF
@@ -43,12 +54,36 @@ Usage: tools/cleanup [options]
 Removes AICR-installed Kubernetes resources from the currently selected cluster.
 
 Options:
-  -n, --dry-run         Print actions without executing
-  -y, --yes             Skip confirmation prompt
-      --keep-crds       Don't delete CRDs (useful when reinstalling same version)
-      --keep-namespaces Don't delete component namespaces
-  -h, --help            Show this help
+  -n, --dry-run             Print actions without executing
+  -y, --yes                 Skip confirmation prompt
+      --keep-crds           Don't delete CRDs (useful when reinstalling same version)
+      --keep-namespaces     Don't delete component namespaces
+      --exclude-ns <ns>     Protect a namespace from Helm uninstall and namespace
+                            deletion (repeatable; comma-separated values accepted)
+      --exclude-crd <match> Protect CRDs whose name contains <match> from deletion
+                            (repeatable; comma-separated values accepted)
+  -h, --help                Show this help
+
+Exclusions fence out-of-band / platform-owned installs that AICR does not own.
+Example: nodewright/skyhook installed out-of-band, excluded from the recipe:
+  tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com
 EOF
+}
+
+# split_csv_append <array-name> <value>: append comma-separated tokens of <value>
+# to the named array, trimming surrounding whitespace and skipping empties so
+# `--exclude-ns 'skyhook, gpu-operator'` protects BOTH (not ' gpu-operator',
+# which would never match and silently leave gpu-operator unprotected).
+split_csv_append() {
+    local __arr="$1" __val="$2" __tok
+    local __ifs="$IFS"
+    IFS=','
+    for __tok in $__val; do
+        __tok="${__tok#"${__tok%%[![:space:]]*}"}"  # strip leading whitespace
+        __tok="${__tok%"${__tok##*[![:space:]]}"}"   # strip trailing whitespace
+        [[ -n "$__tok" ]] && eval "${__arr}+=(\"\$__tok\")"
+    done
+    IFS="$__ifs"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +92,12 @@ while [[ $# -gt 0 ]]; do
         -y|--yes) ASSUME_YES=true; shift ;;
         --keep-crds) KEEP_CRDS=true; shift ;;
         --keep-namespaces) KEEP_NAMESPACES=true; shift ;;
+        --exclude-ns)
+            [[ $# -ge 2 && "$2" != -* ]] || err "--exclude-ns requires a namespace argument"
+            split_csv_append EXCLUDE_NS "$2"; shift 2 ;;
+        --exclude-crd)
+            [[ $# -ge 2 && "$2" != -* ]] || err "--exclude-crd requires a match argument"
+            split_csv_append EXCLUDE_CRD "$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) err "unknown flag: $1" ;;
     esac
@@ -94,6 +135,13 @@ AICR_NAMESPACES=(
     topograph
 )
 
+# Namespaces created at runtime by AICR conformance checks (not registry
+# components). These are torn down by the check itself, but an interrupted run
+# leaves them behind, so cleanup deletes them as a backstop. See #1672.
+AICR_CHECK_NAMESPACES=(
+    gang-scheduling-test
+)
+
 # CRD API-group suffixes owned by AICR components. Matched as substrings
 # against `kubectl get crd -o name`. New component groups should be added here.
 AICR_CRD_PATTERNS=(
@@ -121,6 +169,23 @@ ctx="$(kubectl config current-context 2>/dev/null || echo unknown)"
 msg "Target cluster context: ${ctx}"
 if $DRY_RUN; then
     msg "DRY-RUN mode — no changes will be applied."
+fi
+if (( ${#EXCLUDE_NS[@]} > 0 )); then
+    msg "Excluding namespaces (Helm + namespace deletion): ${EXCLUDE_NS[*]}"
+fi
+if (( ${#EXCLUDE_CRD[@]} > 0 )); then
+    msg "Excluding CRDs matching: ${EXCLUDE_CRD[*]}"
+fi
+# --exclude-ns and --exclude-crd are almost always needed as a pair: protecting
+# only the namespace still lets Phase 3 delete the install's cluster-scoped CRDs
+# (cascade-deleting its CRs), and protecting only the CRDs still deletes the
+# namespace. Warn on an asymmetric invocation so a half-fenced install is not
+# silently destroyed.
+if (( ${#EXCLUDE_NS[@]} > 0 )) && (( ${#EXCLUDE_CRD[@]} == 0 )); then
+    log_warning "--exclude-ns given without --exclude-crd: Phase 3 will still delete the install's CRDs (and cascade its CRs). Add --exclude-crd for its API group(s)."
+fi
+if (( ${#EXCLUDE_CRD[@]} > 0 )) && (( ${#EXCLUDE_NS[@]} == 0 )); then
+    log_warning "--exclude-crd given without --exclude-ns: Phase 1/4 will still uninstall Helm releases in and delete the install's namespace. Add --exclude-ns."
 fi
 
 # Detect whether gpu-operator manages the NVIDIA kernel driver on this
@@ -219,11 +284,41 @@ is_aicr_namespace() {
     return 1
 }
 
+# is_excluded_ns <namespace>: true when the operator fenced this namespace out
+# with --exclude-ns.
+is_excluded_ns() {
+    local target="$1" ns
+    (( ${#EXCLUDE_NS[@]} == 0 )) && return 1
+    for ns in "${EXCLUDE_NS[@]}"; do
+        [[ "$target" == "$ns" ]] && return 0
+    done
+    return 1
+}
+
+# is_excluded_crd <crd-name>: true when the CRD name contains any --exclude-crd
+# match. Applied after pattern matching, so a broad pattern (e.g. nvidia.com)
+# cannot pull an excluded group's CRDs (e.g. skyhook.nvidia.com) back in.
+is_excluded_crd() {
+    local target="$1" pat
+    (( ${#EXCLUDE_CRD[@]} == 0 )) && return 1
+    for pat in "${EXCLUDE_CRD[@]}"; do
+        [[ "$target" == *"$pat"* ]] && return 0
+    done
+    return 1
+}
+
+# All namespaces cleanup owns: registry components plus check-created backstops.
+ALL_NAMESPACES=("${AICR_NAMESPACES[@]}" "${AICR_CHECK_NAMESPACES[@]}")
+
 # Phase 1: Uninstall Helm releases in AICR namespaces.
 msg "Phase 1: Uninstalling Helm releases in AICR namespaces..."
 if command -v helm >/dev/null 2>&1; then
     while IFS=$'\t' read -r release ns; do
         [[ -z "$release" || -z "$ns" ]] && continue
+        if is_excluded_ns "$ns"; then
+            msg "  skip (excluded ns): helm release ${release} -n ${ns}"
+            continue
+        fi
         if is_aicr_namespace "$ns"; then
             msg "  helm uninstall ${release} -n ${ns}"
             hm uninstall "$release" -n "$ns" --wait --timeout 2m
@@ -267,12 +362,22 @@ if ! $KEEP_CRDS; then
         for pat in "${AICR_CRD_PATTERNS[@]}"; do
             echo "  match CRDs against pattern: ${pat}"
         done
+        for pat in "${EXCLUDE_CRD[@]:+${EXCLUDE_CRD[@]}}"; do
+            echo "  excluding CRDs matching: ${pat}"
+        done
     else
         all_crds="$(kubectl get crd -o name --request-timeout=30s 2>/dev/null || true)"
         for pat in "${AICR_CRD_PATTERNS[@]}"; do
             # shellcheck disable=SC2086
             matches=$(echo "$all_crds" | grep -F "$pat" || true)
             for crd in $matches; do
+                # Fence out operator-owned CRDs. Checked here (post-match) so a
+                # broad pattern (nvidia.com) cannot pull an excluded group's
+                # CRDs (skyhook.nvidia.com) back in.
+                if is_excluded_crd "$crd"; then
+                    msg "  skip (excluded): $crd"
+                    continue
+                fi
                 # --request-timeout bounds the API call so a wedged apiserver
                 # cannot park this step indefinitely. Don't swallow failures:
                 # a timed-out delete leaves a stale CRD that breaks reinstall,
@@ -289,8 +394,12 @@ fi
 
 # Phase 4: Namespaces.
 if ! $KEEP_NAMESPACES; then
-    msg "Phase 4: Deleting AICR component namespaces..."
-    for ns in "${AICR_NAMESPACES[@]}"; do
+    msg "Phase 4: Deleting AICR component + check namespaces..."
+    for ns in "${ALL_NAMESPACES[@]}"; do
+        if is_excluded_ns "$ns"; then
+            msg "  skip (excluded ns): ${ns}"
+            continue
+        fi
         if $DRY_RUN; then
             echo "  kubectl delete ns ${ns} --ignore-not-found --wait=false"
         else
@@ -305,7 +414,8 @@ if ! $KEEP_NAMESPACES; then
     # finish first, then strip finalizers from residual namespaced objects.
     if ! $DRY_RUN; then
         sleep 10
-        for ns in "${AICR_NAMESPACES[@]}"; do
+        for ns in "${ALL_NAMESPACES[@]}"; do
+            is_excluded_ns "$ns" && continue
             kubectl get ns "$ns" >/dev/null 2>&1 || continue
             phase="$(kubectl get ns "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")"
             [[ "$phase" != "Terminating" ]] && continue

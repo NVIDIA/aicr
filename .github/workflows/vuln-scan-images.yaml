@@ -62,7 +62,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -92,7 +92,8 @@ jobs:
         env:
           GOFLAGS: -mod=vendor
           KO_DOCKER_REPO: ghcr.io/nvidia/aicrd
-          KO_DEFAULTBASEIMAGE: gcr.io/distroless/static:nonroot
+          # Base image inherited from .ko.yaml (nvcr.io/nvidia/distroless/static),
+          # same as the aicr build above.
         run: |
           set -euo pipefail
           ko build ./cmd/aicrd \

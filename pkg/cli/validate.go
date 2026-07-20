@@ -158,7 +158,7 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 	// Ensure namespace exists before deploying the agent Job.
 	clientset, _, err := k8sclient.GetKubeClient()
 	if err != nil {
-		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+		return nil, "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to create kubernetes client")
 	}
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.namespace}}
 	if _, nsErr := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); nsErr != nil {

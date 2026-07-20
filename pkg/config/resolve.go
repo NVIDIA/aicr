@@ -113,6 +113,11 @@ type BundleResolved struct {
 	// public-good Sigstore default in place.
 	RekorURL string
 
+	// SigningKey is spec.bundle.attestation.signingKey; a durable, non-secret
+	// KMS key reference that selects KMS-backed signing. Empty leaves keyless
+	// OIDC signing in place. See #407.
+	SigningKey string
+
 	// InsecureTLS is spec.bundle.registry.insecureTLS.
 	InsecureTLS bool
 
@@ -236,19 +241,8 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 		}
 	}
 
-	if b.Attestation != nil {
-		out.Attest = b.Attestation.Enabled
-		out.CertIDRegexp = b.Attestation.CertificateIdentityRegexp
-		out.OIDCDeviceFlow = b.Attestation.OIDCDeviceFlow
-		// Validate the signing endpoints at the conversion boundary so a
-		// malformed config value fails here with spec-path attribution
-		// (and is caught for non-CLI callers of Resolve too), rather than
-		// only later in CLI flag parsing.
-		if err := validateAttestationEndpoints(b.Attestation); err != nil {
-			return nil, err
-		}
-		out.FulcioURL = b.Attestation.FulcioURL
-		out.RekorURL = b.Attestation.RekorURL
+	if err := resolveAttestation(b.Attestation, out); err != nil {
+		return nil, err
 	}
 
 	if b.Registry != nil {
@@ -257,6 +251,27 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 	}
 
 	return out, nil
+}
+
+// resolveAttestation projects the bundle attestation spec onto the resolved
+// output. It is a no-op when a is nil (the section is optional). Signing
+// endpoints are validated at this conversion boundary so a malformed config
+// value fails here with spec-path attribution (and is caught for non-CLI
+// callers of Resolve too), rather than only later in CLI flag parsing.
+func resolveAttestation(a *AttestationSpec, out *BundleResolved) error {
+	if a == nil {
+		return nil
+	}
+	if err := validateAttestationEndpoints(a); err != nil {
+		return err
+	}
+	out.Attest = a.Enabled
+	out.CertIDRegexp = a.CertificateIdentityRegexp
+	out.OIDCDeviceFlow = a.OIDCDeviceFlow
+	out.FulcioURL = a.FulcioURL
+	out.RekorURL = a.RekorURL
+	out.SigningKey = a.SigningKey
+	return nil
 }
 
 // validateAttestationEndpoints rejects malformed private Sigstore endpoints in

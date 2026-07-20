@@ -16,11 +16,15 @@ package attestation
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
+	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -192,5 +196,65 @@ func TestRequireTLogPolicy_VerifierOptions(t *testing.T) {
 	opts := NewRequireTLogPolicy().VerifierOptions()
 	if len(opts) != 2 {
 		t.Fatalf("VerifierOptions() returned %d options, want 2", len(opts))
+	}
+}
+
+func TestNoTLogVerifyPolicy_VerifierOptions(t *testing.T) {
+	opts := NewNoTLogVerifyPolicy().VerifierOptions()
+	// The offline policy carries exactly one option (WithNoObserverTimestamps),
+	// which sigstore-go requires be specified exclusively.
+	if len(opts) != 1 {
+		t.Fatalf("VerifierOptions() returned %d options, want 1", len(opts))
+	}
+	if opts[0] == nil {
+		t.Fatal("VerifierOptions()[0] is nil")
+	}
+}
+
+// TestNoTLogVerifyPolicy_RoundTrip proves the offline relaxation is load-bearing:
+// a key-signed bundle produced with NewNoTLogPolicy() (no Rekor entry, no
+// timestamp) verifies fully offline with NewNoTLogVerifyPolicy(), while the same
+// bundle FAILS under the default NewRequireTLogPolicy() (which demands a tlog
+// inclusion proof / observer timestamp the air-gapped bundle does not carry).
+func TestNoTLogVerifyPolicy_RoundTrip(t *testing.T) {
+	ctx := context.Background()
+
+	// One key drives both the offline signer and the matching key verifier.
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	signID := &fakeKeyIdentity{signer: &localECDSASigner{priv: priv}, uri: "awskms://test/key"}
+
+	res, err := SignStatementWith(ctx, validStatementJSON(t), signID, NewNoTLogPolicy())
+	if err != nil {
+		t.Fatalf("SignStatementWith (offline, no tlog): %v", err)
+	}
+
+	// Build the key verification identity from the public half. Inject an empty
+	// trust-root source (not the default public-good root, which would require a
+	// TUF fetch) to keep the round trip fully offline: a key-based, no-timestamp
+	// verify needs only the key material, exactly the air-gapped guarantee.
+	offlineSrc := func(context.Context) (root.TrustedMaterial, error) {
+		return root.TrustedMaterialCollection{}, nil
+	}
+	pemPath := writeTempPubPEM(t, &priv.PublicKey)
+	verID, err := NewKeyVerificationIdentity(ctx, pemPath, offlineSrc)
+	if err != nil {
+		t.Fatalf("NewKeyVerificationIdentity: %v", err)
+	}
+
+	// validStatementJSON binds subject checksums.txt to an all-zero sha256, so
+	// the artifact digest is 32 zero bytes.
+	digest := make([]byte, 32)
+
+	if _, err := VerifyStatementWith(ctx, res.BundleJSON, verID, NewNoTLogVerifyPolicy(), digest); err != nil {
+		t.Fatalf("offline verify with NewNoTLogVerifyPolicy() must succeed, got %v", err)
+	}
+
+	// The relaxation is load-bearing: the same tlog-less bundle must fail the
+	// default policy, which requires a transparency-log / observer timestamp.
+	if _, err := VerifyStatementWith(ctx, res.BundleJSON, verID, NewRequireTLogPolicy(), digest); err == nil {
+		t.Fatal("verify with NewRequireTLogPolicy() must fail for a tlog-less bundle, got nil error")
 	}
 }

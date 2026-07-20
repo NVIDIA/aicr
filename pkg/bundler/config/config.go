@@ -243,6 +243,11 @@ type Config struct {
 	// targetRevision` triple resolves against the real artifact. See #1019.
 	bundleChartName string
 
+	// bundleChartVersion overrides only the semantic Helm chart version written
+	// into the argocd-helm bundle's Chart.yaml. Empty keeps the normalized recipe
+	// version. OCI callers set this to the SemVer form decoded from the raw tag.
+	bundleChartVersion string
+
 	// ociParentNamespace is the OCI registry + repository path with the chart-name
 	// segment stripped (e.g. "oci://ghcr.io/nvidia" for "oci://ghcr.io/nvidia/my-bundle:v1").
 	// Baked into the argocd-helm bundle's root values.yaml as the default repoURL.
@@ -265,6 +270,16 @@ type Config struct {
 	// that Helm/Argo CD/Flux cannot assess natively. Off by default so
 	// existing bundle output is unchanged; opt-in via --readiness-hooks. See #904.
 	readinessHooks bool
+
+	// serial forces every deployer to sequence components strictly one at a
+	// time in deployment order, disabling the concurrency the argocd,
+	// argocd-helm, flux, and helmfile deployers emit by default (per-tier
+	// sync-wave bands, declared-dependency dependsOn, and intra-component
+	// needs: respectively). Off by default; opt-in via --serial. An operator
+	// escape hatch for bisecting rollout problems or reproducing the
+	// pre-parallelism ordering. The helm deploy.sh is already serial, so the
+	// flag is a no-op for it.
+	serial bool
 
 	// bundlers is a positive filter on recipe component names (the
 	// `bundlers` query parameter on POST /v1/bundle): when non-empty, only
@@ -477,6 +492,12 @@ func (c *Config) BundleChartName() string {
 	return c.bundleChartName
 }
 
+// BundleChartVersion returns the semantic Chart.yaml version override for the
+// argocd-helm deployer. Empty means "use the normalized recipe version".
+func (c *Config) BundleChartVersion() string {
+	return c.bundleChartVersion
+}
+
 // OCIParentNamespace returns the OCI parent namespace baked into the
 // argocd-helm bundle's root values.yaml as the default repoURL. See #1342.
 func (c *Config) OCIParentNamespace() string {
@@ -494,6 +515,14 @@ func (c *Config) AppName() string {
 // opt-in via --readiness-hooks on the CLI. See #904.
 func (c *Config) ReadinessHooks() bool {
 	return c.readinessHooks
+}
+
+// Serial reports whether deployers should sequence components strictly one at
+// a time in deployment order instead of parallelizing independent components.
+// Off by default; opt-in via --serial. Affects the argocd, argocd-helm, flux,
+// and helmfile deployers (helm is already serial).
+func (c *Config) Serial() bool {
+	return c.serial
 }
 
 // Bundlers returns a copy of the positive component-name filter. Empty means
@@ -762,6 +791,15 @@ func WithBundleChartName(name string) Option {
 	}
 }
 
+// WithBundleChartVersion sets the semantic Helm version written into the
+// argocd-helm bundle's Chart.yaml. It does not accept or normalize a raw OCI
+// Distribution tag; callers must pass the already-decoded SemVer form.
+func WithBundleChartVersion(version string) Option {
+	return func(c *Config) {
+		c.bundleChartVersion = version
+	}
+}
+
 // WithOCIParentNamespace sets the OCI parent namespace (registry + repo path
 // without the chart segment) baked into the argocd-helm bundle's values.yaml
 // as the default repoURL. Empty keeps repoURL as "" (local output). See #1342.
@@ -791,6 +829,16 @@ func WithAppName(name string) Option {
 func WithReadinessHooks(enabled bool) Option {
 	return func(c *Config) {
 		c.readinessHooks = enabled
+	}
+}
+
+// WithSerial forces deployers to sequence components strictly one at a time in
+// deployment order, disabling the per-tier / declared-dependency concurrency
+// the argocd, argocd-helm, flux, and helmfile deployers emit by default. Off
+// by default; opt-in via --serial. A rollback / debugging escape hatch.
+func WithSerial(enabled bool) Option {
+	return func(c *Config) {
+		c.serial = enabled
 	}
 }
 

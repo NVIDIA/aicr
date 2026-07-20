@@ -579,6 +579,26 @@ aws ec2 reboot-instances --instance-ids <ids>
 kubectl uncordon <gpu-node>
 ```
 
+### Excluding Out-of-Band Installs from Cleanup
+
+On shared or bring-up clusters, a registry component may be deliberately
+installed and owned outside AICR (for example, nodewright/skyhook installed
+out-of-band by the platform team, with the AICR recipe intentionally excluding
+it). Stock `tools/cleanup` would otherwise destroy such an install three ways:
+the Helm uninstall in its namespace, the CRD pattern match, and the namespace
+deletion. Fence it out of all three phases:
+
+```bash
+tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com
+```
+
+Both flags are repeatable and accept comma-separated values. `--exclude-ns`
+protects a namespace from Helm uninstall and namespace deletion; `--exclude-crd`
+protects CRDs whose name contains the given match from deletion, applied *after*
+pattern matching so a broad pattern (`nvidia.com`) cannot pull an excluded
+group's CRDs (`skyhook.nvidia.com`) back in. Run with `--dry-run` first to
+confirm what will and will not be removed.
+
 ### Debugging Tests
 
 ```bash
