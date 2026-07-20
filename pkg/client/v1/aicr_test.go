@@ -774,7 +774,11 @@ func TestResolveRecipeFromCriteriaLossless(t *testing.T) {
 	}
 	defer c.Close()
 
-	crit, err := recipe.BuildCriteriaWithRegistry(nil, recipe.WithAcceleratorRegistry("h100"), recipe.WithIntentRegistry("training"))
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
 	}
@@ -1224,7 +1228,11 @@ func TestSelectFromRecipe(t *testing.T) {
 	}
 	defer c.Close()
 
-	crit, err := recipe.BuildCriteriaWithRegistry(nil, recipe.WithAcceleratorRegistry("h100"), recipe.WithIntentRegistry("training"))
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
 	}

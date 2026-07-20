@@ -223,6 +223,7 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 		evaluator    ConstraintEvaluatorFunc
 		wantPassed   bool
 		wantWarnings int
+		wantErr      bool
 	}{
 		{
 			name:        "no constraints passes",
@@ -261,7 +262,10 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 			wantWarnings: 1,
 		},
 		{
-			name: "evaluator returns error",
+			// Models a measurement absent from the snapshot — the evaluator's
+			// designed NotFound degradation signal (design 5.2) — so it must
+			// still exclude gracefully with a warning, not fail the build.
+			name: "evaluator returns NotFound error",
 			constraints: []Constraint{
 				{Name: "k8s", Value: ">= 1.30"},
 			},
@@ -269,13 +273,16 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 				return ConstraintEvalResult{
 					Passed: false,
 					Actual: "unknown",
-					Error:  fmt.Errorf("value not found"),
+					Error:  aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found"),
 				}
 			},
 			wantPassed:   false,
 			wantWarnings: 1,
 		},
 		{
+			// The default branch models a measurement absent from the
+			// snapshot (NotFound); mixed with an ordinary constraint failure
+			// (os) to confirm both still surface as warnings, not an error.
 			name: "mixed pass fail error",
 			constraints: []Constraint{
 				{Name: "k8s", Value: ">= 1.30"},
@@ -289,11 +296,26 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 				case "os":
 					return ConstraintEvalResult{Passed: false, Actual: "rhel"}
 				default:
-					return ConstraintEvalResult{Error: fmt.Errorf("not found")}
+					return ConstraintEvalResult{Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "not found")}
 				}
 			},
 			wantPassed:   false,
 			wantWarnings: 2,
+		},
+		{
+			// Models a malformed constraint / internal evaluator failure —
+			// must fail closed (propagated error), never degrade gracefully.
+			name: "evaluator returns non-NotFound error fails closed",
+			constraints: []Constraint{
+				{Name: "k8s", Value: ">= 1.30"},
+			},
+			evaluator: func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{
+					Passed: false,
+					Error:  aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "invalid constraint expression"),
+				}
+			},
+			wantErr: true,
 		},
 	}
 
@@ -304,8 +326,17 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 			overlay.Spec.Constraints = tt.constraints
 
 			store := &MetadataStore{}
-			passed, warnings := store.evaluateOverlayConstraints(overlay, tt.evaluator)
+			passed, warnings, err := store.evaluateOverlayConstraints(overlay, tt.evaluator)
 
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if passed != tt.wantPassed {
 				t.Errorf("passed = %v, want %v", passed, tt.wantPassed)
 			}
@@ -318,6 +349,33 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMetadataStore_EvaluateOverlayConstraints_WrapsUnstructuredError covers
+// CodeRabbit's finding: ConstraintEvaluatorFunc accepts a plain error, so a
+// non-StructuredError evaluator failure must be wrapped with a code (rather
+// than propagated bare) or it reaches the server layer as an uncoded 500.
+func TestMetadataStore_EvaluateOverlayConstraints_WrapsUnstructuredError(t *testing.T) {
+	overlay := &RecipeMetadata{}
+	overlay.Metadata.Name = "test-overlay"
+	overlay.Spec.Constraints = []Constraint{
+		{Name: "k8s", Value: ">= 1.30"},
+	}
+
+	store := &MetadataStore{}
+	_, _, err := store.evaluateOverlayConstraints(overlay, func(_ Constraint) ConstraintEvalResult {
+		return ConstraintEvalResult{Passed: false, Error: errors.New("boom")}
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		t.Fatalf("expected ErrCodeInternal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected cause %q preserved in error chain, got %v", "boom", err)
 	}
 }
 
@@ -1021,11 +1079,16 @@ func assertSingleNameField(t *testing.T, items []any, field, want string) {
 	}
 }
 
-// TestEvaluatorFailingLeafExcludesCandidate verifies that when a leaf overlay's
-// constraints fail evaluation, no ancestor overlay is used as a fallback
-// candidate. With maximal leaf selection, ancestors are not independent
-// candidates — only non-excluded leaf candidates and non-chain overlays
-// (like monitoring-hpa) remain applied.
+// TestEvaluatorFailingLeafExcludesCandidate pins issue #1542: when
+// constraint evaluation excludes the only overlay covering the full
+// stated criteria (service+accelerator+intent+os), the surviving
+// overlays (base, plus the independent non-ancestor monitoring-hpa) no
+// longer satisfy the query's stated dimensions. Before task 6 wired the
+// evaluator path into verifyCriteriaCoverage, this silently shipped a
+// base-only result; now it must fail the build instead of masking the
+// dropped coverage. The excludedOverlays context on the returned error
+// still pins the underlying exclusion-isolation invariant: only the
+// matched leaf is excluded, never its ancestors.
 func TestEvaluatorFailingLeafExcludesCandidate(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
@@ -1046,55 +1109,40 @@ func TestEvaluatorFailingLeafExcludesCandidate(t *testing.T) {
 		return ConstraintEvalResult{Passed: false, Actual: "fail"}
 	}
 
-	result, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, failAllEvaluator)
-	if err != nil {
-		t.Fatalf("BuildRecipeResultWithEvaluator failed: %v", err)
+	_, err = store.BuildRecipeResultWithEvaluator(ctx, criteria, failAllEvaluator)
+	if err == nil {
+		t.Fatal("expected coverage error: excluding the only full-match leaf uncovers stated dimensions")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected StructuredError, got %v", err)
 	}
 
-	// The leaf candidate (h100-eks-ubuntu-training) should be excluded
-	if len(result.Metadata.ExcludedOverlays) == 0 {
-		t.Fatal("expected at least one excluded overlay")
+	excludedOverlays, ok := se.Context["excludedOverlays"].([]ExcludedOverlay)
+	if !ok || len(excludedOverlays) == 0 {
+		t.Fatalf("expected non-empty excludedOverlays context, got %v", se.Context["excludedOverlays"])
 	}
-
 	excluded := make(map[string]ExcludedOverlayReason)
-	for _, overlay := range result.Metadata.ExcludedOverlays {
+	for _, overlay := range excludedOverlays {
 		excluded[overlay.Name] = overlay.Reason
 	}
 
 	// The leaf should be excluded
 	if _, ok := excluded["h100-eks-ubuntu-training"]; !ok {
-		t.Errorf("expected h100-eks-ubuntu-training in ExcludedOverlays, got %v", result.Metadata.ExcludedOverlays)
+		t.Errorf("expected h100-eks-ubuntu-training in excludedOverlays, got %v", excludedOverlays)
 	}
 	if excluded["h100-eks-ubuntu-training"] != ExcludedOverlayReasonConstraintFailed {
 		t.Errorf("expected constraint-failed reason, got %q", excluded["h100-eks-ubuntu-training"])
 	}
 
-	// Ancestors should NOT appear in ExcludedOverlays (they were never candidates)
+	// Ancestors should NOT appear in excludedOverlays (they were never candidates)
 	for _, ancestor := range []string{"eks", testOverlayEKSTraning, "h100-eks-training"} {
 		if _, ok := excluded[ancestor]; ok {
-			t.Errorf("ancestor %q should not appear in ExcludedOverlays (not a candidate)", ancestor)
+			t.Errorf("ancestor %q should not appear in excludedOverlays (not a candidate)", ancestor)
 		}
-	}
-
-	// Applied overlays should not contain any ancestor of the excluded leaf.
-	// Only base and non-chain overlays (like monitoring-hpa) should remain.
-	applied := make(map[string]bool)
-	for _, name := range result.Metadata.AppliedOverlays {
-		applied[name] = true
-	}
-	for _, ancestor := range []string{"eks", testOverlayEKSTraning, "h100-eks-training"} {
-		if applied[ancestor] {
-			t.Errorf("ancestor %q should not be applied as fallback when leaf is excluded", ancestor)
-		}
-	}
-
-	// base is always applied; monitoring-hpa matches intent:any and is not
-	// an ancestor of h100-eks-ubuntu-training, so it remains as an independent leaf.
-	if !applied["base"] {
-		t.Error("base should always be applied")
-	}
-	if !applied["monitoring-hpa"] {
-		t.Error("monitoring-hpa should remain applied (independent non-ancestor leaf)")
 	}
 }
 
@@ -1322,11 +1370,14 @@ func TestMixinComponentRefSafeForMerge(t *testing.T) {
 	}
 }
 
-// TestMixinConstraintFailureExcludesCandidate verifies that when a mixin-contributed
-// constraint fails evaluation (e.g., os-ubuntu kernel constraint against a snapshot
-// with kernel < 6.8), the composed candidate is excluded and the result falls back
-// to base-only output. This tests the post-compose evaluation path in
-// evaluateMixinConstraints.
+// TestMixinConstraintFailureExcludesCandidate pins issue #1542 for the
+// mixin post-compose path: excluding the only overlay covering the full
+// stated criteria (service+accelerator+intent+os) via a failed mixin
+// constraint leaves the stated os/service/intent dimensions uncovered by
+// the surviving base+monitoring-hpa set. That must now fail the build via
+// verifyCriteriaCoverage (task 6) rather than silently degrading to
+// base-only output. The excludedOverlays/constraintWarnings context on the
+// returned error still pins the underlying mixin-exclusion behavior.
 func TestMixinConstraintFailureExcludesCandidate(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
@@ -1356,45 +1407,38 @@ func TestMixinConstraintFailureExcludesCandidate(t *testing.T) {
 		return ConstraintEvalResult{Passed: true, Actual: "ok"}
 	}
 
-	result, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, selectiveEvaluator)
-	if err != nil {
-		t.Fatalf("BuildRecipeResultWithEvaluator failed: %v", err)
+	_, err = store.BuildRecipeResultWithEvaluator(ctx, criteria, selectiveEvaluator)
+	if err == nil {
+		t.Fatal("expected coverage error: mixin exclusion uncovers the stated os/service/intent dimensions")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected StructuredError, got %v", err)
 	}
 
-	// The mixin constraint (kernel >= 6.8) should have failed post-compose,
-	// causing a fallback to base-only output
-	if len(result.Metadata.ExcludedOverlays) == 0 {
-		t.Fatal("expected excluded overlays from mixin constraint failure")
+	// The mixin constraint (kernel >= 6.8) should have failed post-compose
+	excludedOverlays, ok := se.Context["excludedOverlays"].([]ExcludedOverlay)
+	if !ok || len(excludedOverlays) == 0 {
+		t.Fatalf("expected non-empty excludedOverlays context, got %v", se.Context["excludedOverlays"])
 	}
 	excluded := make(map[string]ExcludedOverlayReason)
-	for _, overlay := range result.Metadata.ExcludedOverlays {
+	for _, overlay := range excludedOverlays {
 		excluded[overlay.Name] = overlay.Reason
 	}
 	if excluded["h100-eks-ubuntu-training"] != ExcludedOverlayReasonMixinConstraintFailed {
 		t.Fatalf("expected mixin-constraint-failed reason, got %q", excluded["h100-eks-ubuntu-training"])
 	}
 
-	// Applied overlays should be base-only (plus monitoring-hpa which has no
-	// mixin constraints and passes evaluation independently)
-	applied := make(map[string]bool)
-	for _, name := range result.Metadata.AppliedOverlays {
-		applied[name] = true
-	}
-	if !applied[baseRecipeName] {
-		t.Error("base should always be applied")
-	}
-
-	// The EKS chain overlays should NOT be in applied (they were part of the
-	// composed candidate that failed post-compose evaluation)
-	for _, name := range []string{"h100-eks-ubuntu-training", "h100-eks-training", "eks-training", "eks"} {
-		if applied[name] {
-			t.Errorf("%q should not be applied after mixin constraint failure", name)
-		}
-	}
-
 	// Constraint warnings should include the failing mixin constraint
+	warnings, ok := se.Context["constraintWarnings"].([]ConstraintWarning)
+	if !ok {
+		t.Fatalf("expected constraintWarnings context, got %v", se.Context["constraintWarnings"])
+	}
 	foundKernelWarning := false
-	for _, w := range result.Metadata.ConstraintWarnings {
+	for _, w := range warnings {
 		if w.Constraint == "OS.sysctl./proc/sys/kernel/osrelease" {
 			foundKernelWarning = true
 		}
@@ -1402,10 +1446,6 @@ func TestMixinConstraintFailureExcludesCandidate(t *testing.T) {
 	if !foundKernelWarning {
 		t.Error("expected constraint warning for OS.sysctl./proc/sys/kernel/osrelease from mixin")
 	}
-
-	t.Logf("excluded: %v", result.Metadata.ExcludedOverlays)
-	t.Logf("applied: %v", result.Metadata.AppliedOverlays)
-	t.Logf("warnings: %d", len(result.Metadata.ConstraintWarnings))
 }
 
 func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) {
@@ -1519,45 +1559,55 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 		}
 	}
 
-	result, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
-	if err != nil {
-		t.Fatalf("BuildRecipeResultWithEvaluator failed: %v", err)
+	// Query states accelerator=h100, and h100-shared-training is the only
+	// overlay carrying it. Once the mixin constraint excludes that leaf,
+	// nothing in the surviving set (base, monitoring) covers accelerator=h100
+	// exactly, so verifyCriteriaCoverage (task 6) now fails the build instead
+	// of silently degrading to an accelerator-agnostic result (issue #1542).
+	// The excludedOverlays/constraintWarnings context on the error still pins
+	// the underlying chain-isolation invariant: only the failed leaf and its
+	// own ancestor are excluded/removed, never the independent "monitoring"
+	// chain.
+	_, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+	if err == nil {
+		t.Fatal("expected coverage error: mixin exclusion uncovers the stated accelerator dimension")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected StructuredError, got %v", err)
 	}
 
+	excludedOverlays, ok := se.Context["excludedOverlays"].([]ExcludedOverlay)
+	if !ok || len(excludedOverlays) == 0 {
+		t.Fatalf("expected non-empty excludedOverlays context, got %v", se.Context["excludedOverlays"])
+	}
 	excluded := make(map[string]ExcludedOverlayReason)
-	for _, overlay := range result.Metadata.ExcludedOverlays {
+	for _, overlay := range excludedOverlays {
 		excluded[overlay.Name] = overlay.Reason
 	}
-	if _, ok := excluded["h100-shared-training"]; !ok {
-		t.Fatalf("expected failed leaf in ExcludedOverlays, got %v", result.Metadata.ExcludedOverlays)
+	if _, present := excluded["h100-shared-training"]; !present {
+		t.Fatalf("expected failed leaf in excludedOverlays, got %v", excludedOverlays)
 	}
 	if excluded["h100-shared-training"] != ExcludedOverlayReasonMixinConstraintFailed {
 		t.Fatalf("failed leaf reason = %q, want %q",
 			excluded["h100-shared-training"], ExcludedOverlayReasonMixinConstraintFailed)
 	}
-	if _, ok := excluded[testOverlaySharedTrain]; ok {
-		t.Fatalf("ancestor should not appear in ExcludedOverlays, got %v", result.Metadata.ExcludedOverlays)
+	if _, present := excluded[testOverlaySharedTrain]; present {
+		t.Fatalf("ancestor should not appear in excludedOverlays, got %v", excludedOverlays)
 	}
-	if _, ok := excluded["monitoring"]; ok {
-		t.Fatalf("independent passing leaf should not be excluded, got %v", result.Metadata.ExcludedOverlays)
-	}
-
-	applied := make(map[string]bool)
-	for _, name := range result.Metadata.AppliedOverlays {
-		applied[name] = true
-	}
-	if !applied[baseRecipeName] {
-		t.Fatal("base should always remain applied")
-	}
-	if applied[testOverlaySharedTrain] || applied["h100-shared-training"] {
-		t.Fatalf("failed candidate chain should be removed from applied overlays, got %v", result.Metadata.AppliedOverlays)
-	}
-	if !applied["monitoring"] {
-		t.Fatalf("independent passing leaf should remain applied, got %v", result.Metadata.AppliedOverlays)
+	if _, present := excluded["monitoring"]; present {
+		t.Fatalf("independent passing leaf should not be excluded, got %v", excludedOverlays)
 	}
 
+	warnings, ok := se.Context["constraintWarnings"].([]ConstraintWarning)
+	if !ok {
+		t.Fatalf("expected constraintWarnings context, got %v", se.Context["constraintWarnings"])
+	}
 	foundWarning := false
-	for _, warning := range result.Metadata.ConstraintWarnings {
+	for _, warning := range warnings {
 		if warning.Constraint != "OS.kernel" {
 			continue
 		}
@@ -1572,16 +1622,17 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 	if !foundWarning {
 		t.Fatal("expected warning for failed mixin constraint")
 	}
-
-	componentNames := make(map[string]bool)
-	for _, ref := range result.ComponentRefs {
-		componentNames[ref.Name] = true
-	}
-	if !componentNames["nvidia-dcgm-exporter"] {
-		t.Fatalf("surviving mixin component was dropped: %v", result.ComponentRefs)
-	}
 }
 
+// TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf pins
+// issue #1542: the query states accelerator=h100, and leaf-a is the only
+// overlay carrying it. Excluding leaf-a via a failed mixin constraint
+// leaves nothing covering the stated accelerator dimension (leaf-b is
+// accelerator=any), so verifyCriteriaCoverage (task 6) must fail the build
+// rather than silently falling back to leaf-b's fully-composed but
+// dimension-mismatched result. The error's excludedOverlays/
+// constraintWarnings context still pins the original fallback-rebuild
+// isolation invariant this test was named for.
 func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testing.T) {
 	ctx := context.Background()
 
@@ -1685,34 +1736,310 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 		}
 	}
 
+	// Query states accelerator=h100, and leaf-a is the only overlay carrying
+	// it (leaf-b is accelerator=any). Once the mixin constraint excludes
+	// leaf-a, nothing in the surviving set covers accelerator=h100 exactly,
+	// so verifyCriteriaCoverage (task 6) now fails the build instead of
+	// silently degrading to leaf-b's accelerator-agnostic result (issue
+	// #1542). The excludedOverlays/constraintWarnings context on the error
+	// still pins the underlying fallback-rebuild invariant: only leaf-a is
+	// excluded, never the shared ancestor or the surviving leaf-b chain.
+	_, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+	if err == nil {
+		t.Fatal("expected coverage error: mixin exclusion uncovers the stated accelerator dimension")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected StructuredError, got %v", err)
+	}
+
+	excludedOverlays, ok := se.Context["excludedOverlays"].([]ExcludedOverlay)
+	if !ok || len(excludedOverlays) == 0 {
+		t.Fatalf("expected non-empty excludedOverlays context, got %v", se.Context["excludedOverlays"])
+	}
+	excluded := make(map[string]ExcludedOverlayReason)
+	for _, overlay := range excludedOverlays {
+		excluded[overlay.Name] = overlay.Reason
+	}
+	if excluded["leaf-a"] != ExcludedOverlayReasonMixinConstraintFailed {
+		t.Fatalf("expected leaf-a excluded with mixin-constraint-failed, got %v", excludedOverlays)
+	}
+	if _, present := excluded[testOverlaySharedTrain]; present {
+		t.Fatalf("shared ancestor should not appear in excludedOverlays, got %v", excludedOverlays)
+	}
+	if _, present := excluded["leaf-b"]; present {
+		t.Fatalf("surviving leaf-b should not appear in excludedOverlays, got %v", excludedOverlays)
+	}
+
+	warnings, ok := se.Context["constraintWarnings"].([]ConstraintWarning)
+	if !ok {
+		t.Fatalf("expected constraintWarnings context, got %v", se.Context["constraintWarnings"])
+	}
+	foundWarning := false
+	for _, warning := range warnings {
+		if warning.Constraint == "GPU.ready" && warning.Overlay == "leaf-a" {
+			foundWarning = true
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected constraint warning for GPU.ready on leaf-a, got %v", warnings)
+	}
+}
+
+// TestMixinConstraintFailureDegradesForUnstatedDimension pins the SUCCESS
+// path through the mixin-failure fallback rebuild after the task-6 coverage
+// post-condition: when a mixin constraint excludes a candidate chain whose
+// stated-dimension coverage is fully duplicated by a surviving overlay, the
+// build must still succeed (graceful degradation), with the excluded
+// candidate reported in metadata and the survivor applied. This is the
+// mixin-path sibling of the per-overlay "clean mismatch on
+// unstated-dimension overlay still degrades" subtest in
+// TestBuildRecipeResultWithEvaluator_FailClosed.
+func TestMixinConstraintFailureDegradesForUnstatedDimension(t *testing.T) {
+	ctx := context.Background()
+
+	baseMeta := &RecipeMetadata{}
+	baseMeta.Metadata.Name = testRecipeBase
+
+	// Survivor: fully covers every dimension the query states, no mixins.
+	survivor := &RecipeMetadata{}
+	survivor.Metadata.Name = testOverlayEKSTraning
+	survivor.Spec.Criteria = &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+	survivor.Spec.ComponentRefs = []ComponentRef{
+		{
+			Name:    "training-component",
+			Type:    ComponentTypeHelm,
+			Source:  "https://example.com/charts",
+			Chart:   "training-component",
+			Version: "1.0.0",
+		},
+	}
+
+	// Candidate excluded via mixin constraint. Its criteria state the same
+	// dimensions the survivor covers, so its exclusion uncovers nothing.
+	monitoring := &RecipeMetadata{}
+	monitoring.Metadata.Name = "monitoring"
+	monitoring.Spec.Criteria = &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+	monitoring.Spec.Mixins = []string{"monitoring-gate"}
+
+	store := &MetadataStore{
+		Base: baseMeta,
+		Overlays: map[string]*RecipeMetadata{
+			testOverlayEKSTraning: survivor,
+			"monitoring":          monitoring,
+		},
+		Mixins: map[string]*RecipeMixin{
+			"monitoring-gate": {
+				Kind:       RecipeMixinKind,
+				APIVersion: RecipeAPIVersion,
+				Metadata: struct {
+					Name string `json:"name" yaml:"name"`
+				}{Name: "monitoring-gate"},
+				Spec: struct {
+					Constraints   []Constraint   `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+					ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
+				}{
+					Constraints: []Constraint{{Name: "Monitoring.enabled", Value: "true"}},
+				},
+			},
+		},
+	}
+
+	criteria := &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+
+	evaluator := func(c Constraint) ConstraintEvalResult {
+		if c.Name == "Monitoring.enabled" {
+			return ConstraintEvalResult{Passed: false, Actual: "false"}
+		}
+		return ConstraintEvalResult{Passed: true, Actual: "ok"}
+	}
+
 	result, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
 	if err != nil {
-		t.Fatalf("BuildRecipeResultWithEvaluator failed: %v", err)
+		t.Fatalf("expected graceful degradation (survivor covers all stated dimensions), got %v", err)
+	}
+
+	excluded := make(map[string]ExcludedOverlayReason)
+	for _, overlay := range result.Metadata.ExcludedOverlays {
+		excluded[overlay.Name] = overlay.Reason
+	}
+	if excluded["monitoring"] != ExcludedOverlayReasonMixinConstraintFailed {
+		t.Fatalf("expected monitoring excluded with mixin-constraint-failed, got %v", result.Metadata.ExcludedOverlays)
+	}
+	if _, present := excluded[testOverlayEKSTraning]; present {
+		t.Fatalf("survivor should not be excluded, got %v", result.Metadata.ExcludedOverlays)
 	}
 
 	applied := make(map[string]bool)
 	for _, name := range result.Metadata.AppliedOverlays {
 		applied[name] = true
 	}
-	if !applied[testOverlaySharedTrain] {
-		t.Fatalf("shared ancestor should remain applied for surviving leaf, got %v", result.Metadata.AppliedOverlays)
+	if !applied[baseRecipeName] {
+		t.Fatal("base should always remain applied")
 	}
-	if !applied["leaf-b"] {
-		t.Fatalf("surviving leaf should remain applied, got %v", result.Metadata.AppliedOverlays)
+	if !applied[testOverlayEKSTraning] {
+		t.Fatalf("surviving overlay should remain applied after fallback rebuild, got %v", result.Metadata.AppliedOverlays)
 	}
-	if applied["leaf-a"] {
-		t.Fatalf("failed leaf should be excluded, got %v", result.Metadata.AppliedOverlays)
+	if applied["monitoring"] {
+		t.Fatalf("mixin-excluded candidate should not be applied, got %v", result.Metadata.AppliedOverlays)
 	}
 
 	componentNames := make(map[string]bool)
 	for _, ref := range result.ComponentRefs {
 		componentNames[ref.Name] = true
 	}
-	if !componentNames["shared-component"] {
-		t.Fatalf("shared ancestor component was lost after fallback rebuild: %v", result.ComponentRefs)
+	if !componentNames["training-component"] {
+		t.Fatalf("survivor component was lost after fallback rebuild: %v", result.ComponentRefs)
 	}
-	if !componentNames["surviving-component"] {
-		t.Fatalf("surviving leaf mixin component was lost after fallback rebuild: %v", result.ComponentRefs)
+}
+
+// TestMixinConstraintFailClosedOnInternalEvaluatorError pins issue #1542
+// design 5.2 for the mixin post-compose path (evaluateMixinConstraints):
+// a non-NotFound evaluator error on a mixin-contributed constraint must fail
+// the build immediately with its own preserved code, exactly like the
+// per-overlay fail-closed behavior in evaluateOverlayConstraints
+// (TestBuildRecipeResultWithEvaluator_FailClosed). NotFound remains the only
+// graceful-degradation signal; every other code propagates as-is instead of
+// silently excluding the candidate chain.
+func TestMixinConstraintFailClosedOnInternalEvaluatorError(t *testing.T) {
+	ctx := context.Background()
+
+	baseMeta := &RecipeMetadata{}
+	baseMeta.Metadata.Name = testRecipeBase
+
+	overlay := &RecipeMetadata{}
+	overlay.Metadata.Name = testOverlayEKSTraning
+	overlay.Spec.Criteria = &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+	// Per-overlay constraint the evaluator must pass cleanly, so the only
+	// failure the test observes comes from the mixin-contributed constraint.
+	overlay.Spec.Constraints = []Constraint{
+		{Name: testK8sVersionConstant, Value: ">= 1.28"},
+	}
+	overlay.Spec.Mixins = []string{"os-gate"}
+
+	store := &MetadataStore{
+		Base: baseMeta,
+		Overlays: map[string]*RecipeMetadata{
+			testOverlayEKSTraning: overlay,
+		},
+		Mixins: map[string]*RecipeMixin{
+			"os-gate": {
+				Kind:       RecipeMixinKind,
+				APIVersion: RecipeAPIVersion,
+				Metadata: struct {
+					Name string `json:"name" yaml:"name"`
+				}{Name: "os-gate"},
+				Spec: struct {
+					Constraints   []Constraint   `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+					ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
+				}{
+					Constraints: []Constraint{{Name: "OS.kernel.version", Value: ">= 6.8"}},
+				},
+			},
+		},
+	}
+
+	criteria := &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+
+	evaluator := func(c Constraint) ConstraintEvalResult {
+		if c.Name == "OS.kernel.version" {
+			return ConstraintEvalResult{Passed: false, Error: aicrerrors.New(aicrerrors.ErrCodeInternal, "evaluation failed")}
+		}
+		// Any per-overlay constraint (K8s.server.version here) passes cleanly.
+		return ConstraintEvalResult{Passed: true, Actual: "ok"}
+	}
+
+	_, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+	if err == nil {
+		t.Fatal("expected fail-closed error from mixin constraint evaluation")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		t.Fatalf("expected ErrCodeInternal preserved from mixin evaluator error, got %v", err)
+	}
+}
+
+// TestMixinConstraintFailClosedOnUnstructuredEvaluatorError covers
+// CodeRabbit's finding: a ConstraintEvaluatorFunc returning a plain
+// (non-StructuredError) error on the mixin-constraint path must still be
+// coded before it reaches the caller, not propagated bare.
+func TestMixinConstraintFailClosedOnUnstructuredEvaluatorError(t *testing.T) {
+	ctx := context.Background()
+
+	baseMeta := &RecipeMetadata{}
+	baseMeta.Metadata.Name = testRecipeBase
+
+	overlay := &RecipeMetadata{}
+	overlay.Metadata.Name = testOverlayEKSTraning
+	overlay.Spec.Criteria = &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+	overlay.Spec.Constraints = []Constraint{
+		{Name: testK8sVersionConstant, Value: ">= 1.28"},
+	}
+	overlay.Spec.Mixins = []string{"os-gate"}
+
+	store := &MetadataStore{
+		Base: baseMeta,
+		Overlays: map[string]*RecipeMetadata{
+			testOverlayEKSTraning: overlay,
+		},
+		Mixins: map[string]*RecipeMixin{
+			"os-gate": {
+				Kind:       RecipeMixinKind,
+				APIVersion: RecipeAPIVersion,
+				Metadata: struct {
+					Name string `json:"name" yaml:"name"`
+				}{Name: "os-gate"},
+				Spec: struct {
+					Constraints   []Constraint   `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+					ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
+				}{
+					Constraints: []Constraint{{Name: "OS.kernel.version", Value: ">= 6.8"}},
+				},
+			},
+		},
+	}
+
+	criteria := &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+
+	evaluator := func(c Constraint) ConstraintEvalResult {
+		if c.Name == "OS.kernel.version" {
+			return ConstraintEvalResult{Passed: false, Error: errors.New("boom")}
+		}
+		return ConstraintEvalResult{Passed: true, Actual: "ok"}
+	}
+
+	_, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+	if err == nil {
+		t.Fatal("expected fail-closed error from mixin constraint evaluation")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		t.Fatalf("expected unstructured mixin evaluator error wrapped as ErrCodeInternal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected cause %q preserved in error chain, got %v", "boom", err)
 	}
 }
 
@@ -2439,8 +2766,14 @@ func TestBuildRecipeResult_OSRequired(t *testing.T) {
 			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
 		},
 		{
-			name:     "unknown service without os does not error",
-			criteria: &Criteria{Service: CriteriaServiceType("xyz"), Accelerator: CriteriaAcceleratorH100},
+			// The OS guard itself does not fire for an unrecognized service (no
+			// OS-gated overlay exists to name it in the guard message), but the
+			// criteria coverage post-condition (issue #1542) now catches it: the
+			// stated service dimension is honored by no overlay at all.
+			name:        "unknown service without os returns coverage error",
+			criteria:    &Criteria{Service: CriteriaServiceType("xyz"), Accelerator: CriteriaAcceleratorH100},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "xyz",
 		},
 	}
 	for _, tt := range tests {
@@ -2526,5 +2859,307 @@ func TestBuildRecipeResultWithEvaluator_OSRequired(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildRecipeResult_CriteriaCoverage(t *testing.T) {
+	ctx := context.Background()
+
+	// Catalog mirrors the live repro shape: OS-agnostic service tier,
+	// platform content only on an OS-gated leaf, plus one OS-agnostic
+	// platform leaf on another service (the Kind shape).
+	base := &RecipeMetadata{}
+	base.Metadata.Name = testRecipeBase
+	mk := func(name string, c *Criteria, baseRef string) *RecipeMetadata {
+		o := &RecipeMetadata{}
+		o.Metadata.Name = name
+		o.Spec.Criteria = c
+		o.Spec.Base = baseRef
+		return o
+	}
+	eks := mk("eks", &Criteria{Service: CriteriaServiceEKS}, "")
+	h100Any := mk("h100-any", &Criteria{Accelerator: CriteriaAcceleratorH100}, "")
+	eksTr := mk("eks-training", &Criteria{Service: CriteriaServiceEKS,
+		Intent: CriteriaIntentTraining}, "eks")
+	// Joint OS-agnostic mid-tier mirrors the real embedded data shape: the
+	// requireOSIfNeeded guard finds its joint service+accelerator match here
+	// and passes, so verifyCriteriaCoverage is what rejects an uncovered
+	// platform in the repro subtest below.
+	h100EksTr := mk("h100-eks-training", &Criteria{
+		Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100,
+		Intent: CriteriaIntentTraining}, "eks-training")
+	eksUbuKf := mk("h100-eks-ubuntu-training-kubeflow", &Criteria{
+		Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100,
+		Intent: CriteriaIntentTraining, OS: CriteriaOSUbuntu,
+		Platform: CriteriaPlatformKubeflow}, "eks-training")
+	kindKf := mk("h100-kind-training-kubeflow", &Criteria{
+		Service: CriteriaServiceKind, Accelerator: CriteriaAcceleratorH100,
+		Intent: CriteriaIntentTraining, Platform: CriteriaPlatformKubeflow}, "")
+	store := &MetadataStore{Base: base, Overlays: map[string]*RecipeMetadata{
+		"eks": eks, "h100-any": h100Any, "eks-training": eksTr,
+		"h100-eks-training":                 h100EksTr,
+		"h100-eks-ubuntu-training-kubeflow": eksUbuKf,
+		"h100-kind-training-kubeflow":       kindKf,
+	}}
+
+	t.Run("issue 1542 repro: stated platform uncovered errors", func(t *testing.T) {
+		_, err := store.BuildRecipeResult(ctx, &Criteria{
+			Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100,
+			Intent: CriteriaIntentTraining, Platform: CriteriaPlatformKubeflow})
+		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
+		}
+		// A guard-origin error can never satisfy this: only the coverage
+		// post-condition names the uncovered platform dimension.
+		if !strings.Contains(err.Error(), "platform 'kubeflow'") {
+			t.Fatalf("expected coverage error naming platform 'kubeflow', got: %v", err)
+		}
+	})
+
+	t.Run("generic tier still succeeds", func(t *testing.T) {
+		result, err := store.BuildRecipeResult(ctx, &Criteria{
+			Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100,
+			Intent: CriteriaIntentTraining})
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if result == nil {
+			t.Fatal("nil result")
+		}
+	})
+
+	t.Run("OS-agnostic platform leaf succeeds without OS (Kind shape)", func(t *testing.T) {
+		_, err := store.BuildRecipeResult(ctx, &Criteria{
+			Service: CriteriaServiceKind, Accelerator: CriteriaAcceleratorH100,
+			Intent: CriteriaIntentTraining, Platform: CriteriaPlatformKubeflow})
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+	})
+
+	t.Run("fully stated query resolves through OS-gated leaf", func(t *testing.T) {
+		_, err := store.BuildRecipeResult(ctx, &Criteria{
+			Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100,
+			Intent: CriteriaIntentTraining, OS: CriteriaOSUbuntu,
+			Platform: CriteriaPlatformKubeflow})
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+	})
+}
+
+// TestBuildRecipeResult_GuardAndCoverageComposition pins design 4.1: the
+// joint service+accelerator OS guard fires where per-dimension coverage
+// alone would pass (service and accelerator covered by SEPARATE overlays).
+func TestBuildRecipeResult_GuardAndCoverageComposition(t *testing.T) {
+	ctx := context.Background()
+	base := &RecipeMetadata{}
+	base.Metadata.Name = testRecipeBase
+	a := &RecipeMetadata{}
+	a.Metadata.Name = "svc-foo"
+	a.Spec.Criteria = &Criteria{Service: CriteriaServiceEKS}
+	b := &RecipeMetadata{}
+	b.Metadata.Name = "accel-gpu"
+	b.Spec.Criteria = &Criteria{Accelerator: CriteriaAcceleratorH100}
+	c := &RecipeMetadata{}
+	c.Metadata.Name = "svc-accel-ubuntu"
+	c.Spec.Criteria = &Criteria{Service: CriteriaServiceEKS,
+		Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu}
+	store := &MetadataStore{Base: base, Overlays: map[string]*RecipeMetadata{
+		"svc-foo": a, "accel-gpu": b, "svc-accel-ubuntu": c,
+	}}
+
+	_, err := store.BuildRecipeResult(ctx, &Criteria{
+		Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100})
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("expected guard ErrCodeInvalidRequest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "specify an OS") {
+		t.Fatalf("expected the OS-guard message (guard runs before coverage), got: %v", err)
+	}
+}
+
+// TestBuildRecipeResultWithEvaluator_FailClosed pins design 5.2: any
+// constraint-evaluation error whose code is NOT ErrCodeNotFound must fail
+// the build immediately with its own preserved code. ErrCodeNotFound
+// ("value not found in snapshot") remains the evaluator's designed
+// graceful-degradation signal (exclusion), distinct from every other code
+// which indicates a malformed constraint or internal evaluator failure.
+func TestBuildRecipeResultWithEvaluator_FailClosed(t *testing.T) {
+	ctx := context.Background()
+	base := &RecipeMetadata{}
+	base.Metadata.Name = testRecipeBase
+	o := &RecipeMetadata{}
+	o.Metadata.Name = "eks"
+	o.Spec.Criteria = &Criteria{Service: CriteriaServiceEKS}
+	o.Spec.Constraints = []Constraint{{Name: "K8s.server.version", Value: ">= 1.28"}}
+	store := &MetadataStore{Base: base, Overlays: map[string]*RecipeMetadata{"eks": o}}
+	criteria := &Criteria{Service: CriteriaServiceEKS}
+
+	tests := []struct {
+		name     string
+		evalErr  error
+		wantCode aicrerrors.ErrorCode
+	}{
+		{
+			name:     "InvalidRequest (malformed constraint) fails closed with own code",
+			evalErr:  aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "invalid constraint expression"),
+			wantCode: aicrerrors.ErrCodeInvalidRequest,
+		},
+		{
+			name:     "Internal fails closed with own code",
+			evalErr:  aicrerrors.New(aicrerrors.ErrCodeInternal, "evaluation failed"),
+			wantCode: aicrerrors.ErrCodeInternal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evaluator := func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{Passed: false, Error: tt.evalErr}
+			}
+			_, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !errors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+				t.Fatalf("expected code %s, got %v", tt.wantCode, err)
+			}
+		})
+	}
+
+	// NotFound is still a graceful *exclusion* at the constraint-evaluation
+	// layer (evaluateOverlayConstraints does not fail closed for it), but
+	// the store here has exactly one overlay, and it is the only coverage
+	// for the stated service=eks dimension. Now that
+	// BuildRecipeResultWithEvaluator wires the evaluator path into
+	// verifyCriteriaCoverage (task 6), excluding that overlay leaves
+	// service=eks uncovered, so the build must fail with ErrCodeInvalidRequest
+	// instead of silently shipping a base-only result.
+	t.Run("NotFound exclusion strips only coverage: build fails", func(t *testing.T) {
+		evaluator := func(_ Constraint) ConstraintEvalResult {
+			return ConstraintEvalResult{Passed: false, Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found in snapshot")}
+		}
+		_, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+		if err == nil {
+			t.Fatal("expected coverage error: stated service dimension's only coverage was constraint-excluded")
+		}
+		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
+		}
+		var se *aicrerrors.StructuredError
+		if !errors.As(err, &se) {
+			t.Fatalf("expected StructuredError, got %v", err)
+		}
+		if se.Context["excludedOverlays"] == nil {
+			t.Error("coverage error should carry excludedOverlays context")
+		}
+	})
+
+	t.Run("clean mismatch on unstated-dimension overlay still degrades", func(t *testing.T) {
+		// Query states nothing the excluded overlay uniquely covers beyond
+		// service... use an overlay the query did NOT state a dimension for:
+		monitoring := &RecipeMetadata{}
+		monitoring.Metadata.Name = "monitoring"
+		monitoring.Spec.Criteria = &Criteria{} // matches everything
+		monitoring.Spec.Constraints = []Constraint{{Name: "K8s.server.version", Value: ">= 99"}}
+		s2 := &MetadataStore{Base: base, Overlays: map[string]*RecipeMetadata{
+			"eks": o, "monitoring": monitoring}}
+		evaluator := func(constraint Constraint) ConstraintEvalResult {
+			if constraint.Value == ">= 99" {
+				return ConstraintEvalResult{Passed: false, Actual: "1.33"}
+			}
+			return ConstraintEvalResult{Passed: true, Actual: "1.33"}
+		}
+		result, err := s2.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+		if err != nil {
+			t.Fatalf("expected graceful degradation, got %v", err)
+		}
+		if len(result.Metadata.ExcludedOverlays) != 1 {
+			t.Fatalf("expected 1 excluded overlay, got %+v", result.Metadata.ExcludedOverlays)
+		}
+	})
+
+	// Mixed-cause (design §8): an overlay with two constraints where the
+	// evaluator returns NotFound for the first and Internal for the second.
+	// evaluateOverlayConstraints processes constraints in declaration order
+	// and returns immediately on the first non-NotFound error, so ordering
+	// the NotFound constraint first is what makes this test meaningful — it
+	// proves the fail-closed Internal cause wins over the graceful NotFound
+	// exclusion rather than being masked by it.
+	t.Run("mixed-cause: NotFound then Internal fails closed with Internal", func(t *testing.T) {
+		mixed := &RecipeMetadata{}
+		mixed.Metadata.Name = "eks-mixed"
+		mixed.Spec.Criteria = &Criteria{Service: CriteriaServiceEKS}
+		mixed.Spec.Constraints = []Constraint{
+			{Name: "GPU.driver.version", Value: ">= 570"},    // evaluated first: NotFound
+			{Name: testK8sVersionConstant, Value: ">= 1.28"}, // evaluated second: Internal
+		}
+		s3 := &MetadataStore{Base: base, Overlays: map[string]*RecipeMetadata{"eks-mixed": mixed}}
+		evaluator := func(c Constraint) ConstraintEvalResult {
+			switch c.Name {
+			case "GPU.driver.version":
+				return ConstraintEvalResult{Passed: false, Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found in snapshot")}
+			case testK8sVersionConstant:
+				return ConstraintEvalResult{Passed: false, Error: aicrerrors.New(aicrerrors.ErrCodeInternal, "evaluation failed")}
+			}
+			return ConstraintEvalResult{Passed: true}
+		}
+		_, err := s3.BuildRecipeResultWithEvaluator(ctx, criteria, evaluator)
+		if err == nil {
+			t.Fatal("expected fail-closed error: Internal cause must win over NotFound graceful exclusion")
+		}
+		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+			t.Fatalf("expected ErrCodeInternal (fail-closed wins over NotFound), got %v", err)
+		}
+	})
+}
+
+// TestBuildRecipeResultWithEvaluator_CoverageAfterExclusion pins issue #1542:
+// a stated dimension whose only coverage is stripped by constraint
+// evaluation must surface as a coverage error, not a silent partial build.
+func TestBuildRecipeResultWithEvaluator_CoverageAfterExclusion(t *testing.T) {
+	ctx := context.Background()
+	base := &RecipeMetadata{}
+	base.Metadata.Name = testRecipeBase
+	mk := func(name string, c *Criteria, constraints []Constraint) *RecipeMetadata {
+		o := &RecipeMetadata{}
+		o.Metadata.Name = name
+		o.Spec.Criteria = c
+		o.Spec.Constraints = constraints
+		return o
+	}
+	eks := mk("eks", &Criteria{Service: CriteriaServiceEKS}, nil)
+	// The ONLY platform coverage, gated by a constraint that will cleanly fail.
+	kf := mk("eks-ubuntu-kubeflow", &Criteria{Service: CriteriaServiceEKS,
+		OS: CriteriaOSUbuntu, Platform: CriteriaPlatformKubeflow},
+		[]Constraint{{Name: "OS.kernel.version", Value: ">= 6.8"}})
+	store := &MetadataStore{Base: base, Overlays: map[string]*RecipeMetadata{
+		"eks": eks, "eks-ubuntu-kubeflow": kf}}
+
+	evaluator := func(constraint Constraint) ConstraintEvalResult {
+		if constraint.Name == "OS.kernel.version" {
+			return ConstraintEvalResult{Passed: false, Actual: "6.5"}
+		}
+		return ConstraintEvalResult{Passed: true}
+	}
+
+	_, err := store.BuildRecipeResultWithEvaluator(ctx, &Criteria{
+		Service: CriteriaServiceEKS, OS: CriteriaOSUbuntu,
+		Platform: CriteriaPlatformKubeflow}, evaluator)
+	if err == nil {
+		t.Fatal("expected coverage error: stated platform's only coverage was constraint-excluded")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected StructuredError, got %v", err)
+	}
+	if se.Context["excludedOverlays"] == nil {
+		t.Error("coverage error should carry excludedOverlays context")
+	}
+	if se.Context["constraintWarnings"] == nil {
+		t.Error("coverage error should carry constraintWarnings context")
 	}
 }

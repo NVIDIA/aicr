@@ -15,10 +15,12 @@
 
 set -euo pipefail
 
+# NOTE: no --os here. The Kind overlay tree is deliberately OS-agnostic —
+# stating an OS that no Kind overlay distinguishes is rejected by the
+# criteria-coverage post-condition (issue #1542) as an uncovered dimension.
 RECIPE_ARGS=(
   --service kind
   --accelerator "${AICR_ACCELERATOR}"
-  --os ubuntu
   --intent "${AICR_INTENT}"
 )
 if [[ -n "${AICR_PLATFORM:-}" ]]; then
