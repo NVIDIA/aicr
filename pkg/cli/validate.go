@@ -617,6 +617,10 @@ Run validation without failing on check errors (informational mode):
 			evidenceDir := stringFlagOrConfig(cmd, "evidence-dir", cncfCfg.Dir)
 			cncfSubmission := boolFlagOrConfig(cmd, "cncf-submission", cncfCfg.CNCFSubmission)
 			features := stringSliceFlagOrConfig(cmd, "feature", cncfCfg.Features)
+			// Resolved once here (flag > config) and reused by the guards below and
+			// the mode banner further down.
+			noCluster := boolFlagOrConfig(cmd, "no-cluster", resolved.NoCluster)
+			explicitAttest := cmd.IsSet("emit-attestation") || cmd.IsSet(flagPush)
 
 			// Validate flag combinations.
 			if cncfSubmission && evidenceDir == "" {
@@ -624,6 +628,27 @@ Run validation without failing on check errors (informational mode):
 			}
 			if len(features) > 0 && !cncfSubmission {
 				return errors.New(errors.ErrCodeInvalidRequest, "--feature requires --cncf-submission")
+			}
+			// --cncf-submission deploys GPU workloads and collects behavioral
+			// evidence against the active kube-context, so it is incompatible with
+			// the offline --no-cluster dry-run. The short-circuit below reaches the
+			// live-cluster collector directly, bypassing the noCluster handling
+			// further down, so reject the combination here rather than silently
+			// contacting the cluster.
+			if cncfSubmission && noCluster {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					"--cncf-submission cannot be combined with --no-cluster: the behavioral evidence collector requires a live cluster")
+			}
+			// An explicit --emit-attestation/--push is a request to sign and
+			// (optionally) push an attestation; --no-cluster is an offline dry-run
+			// whose checks are all skipped, so the two conflict. Reject the
+			// explicit combination rather than warn-and-ignore an explicit CLI flag
+			// (repo rule) — consistent with the --cncf-submission guard above. A
+			// config-driven spec.validate.evidence.attestation is still silently
+			// suppressed in --no-cluster mode by evidenceConfigForRunMode below.
+			if noCluster && explicitAttest {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					"--emit-attestation/--push cannot be combined with --no-cluster: an offline dry-run must not sign or push an attestation")
 			}
 
 			// Short-circuit: --cncf-submission bypasses normal validation and runs
@@ -657,7 +682,6 @@ Run validation without failing on check errors (informational mode):
 
 			failOnError := boolFlagOrConfig(cmd, "fail-on-error", derefBoolOr(resolved.FailOnError, true))
 			failFast := boolFlagOrConfig(cmd, "fail-fast", derefBoolOr(resolved.FailFast, false))
-			noCluster := boolFlagOrConfig(cmd, "no-cluster", resolved.NoCluster)
 
 			// Mode banner: make it explicit whether this run touches a live
 			// cluster (issue #1383). --no-cluster is an offline dry-run that
@@ -758,7 +782,7 @@ Run validation without failing on check errors (informational mode):
 					"cleanupHint", "kubectl delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator")
 			}
 
-			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
+			evidenceCfg := evidenceConfigForRunMode(noCluster, buildRecipeEvidenceConfig(cmd, resolved))
 
 			return runValidation(ctx, client, rec, snap, validationConfig{
 				phases:                phases,

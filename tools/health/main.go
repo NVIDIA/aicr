@@ -43,6 +43,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/health"
+	"github.com/NVIDIA/aicr/pkg/testgrid"
 	"github.com/NVIDIA/aicr/tools/internal/docgen"
 )
 
@@ -79,6 +80,14 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "compute recipe health")
 	}
 
+	// Presence is read from the committed manifest embedded in pkg/testgrid, so
+	// the Evidence deep-links are constructed offline and the run stays
+	// hermetic — no dashboard fetch.
+	presence, err := testgrid.LoadPresence()
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load testgrid presence")
+	}
+
 	if mkErr := os.MkdirAll(outDir, 0o755); mkErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "mkdir out-dir", mkErr)
 	}
@@ -89,6 +98,7 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 			AICRVersion:   aicrVersion,
 			Deterministic: deterministic,
 			NoTitle:       noTitle,
+			Presence:      presence,
 		})
 	}); err != nil {
 		return err

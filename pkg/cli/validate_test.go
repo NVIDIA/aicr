@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
@@ -205,6 +207,12 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 			wantErr:    true,
 			errContain: "unknown feature",
 		},
+		{
+			name:       "cncf-submission with no-cluster",
+			args:       []string{"aicr", "validate", "--cncf-submission", "--evidence-dir", "/tmp/test", "--no-cluster"},
+			wantErr:    true,
+			errContain: "--cncf-submission cannot be combined with --no-cluster",
+		},
 	}
 
 	for _, tt := range tests {
@@ -221,10 +229,53 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if tt.wantErr && tt.errContain != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.errContain) {
+			if tt.wantErr {
+				// Every flag-combination rejection in this command is a
+				// well-formed-but-invalid request, so assert the structured
+				// code (not just the message text) — a wrong code would map to
+				// the wrong HTTP status / exit behavior for library callers.
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+				}
+				if tt.errContain != "" && (err == nil || !strings.Contains(err.Error(), tt.errContain)) {
 					t.Errorf("error = %v, want error containing %q", err, tt.errContain)
 				}
+			}
+		})
+	}
+}
+
+// TestValidateCmd_NoClusterEvidenceFlags asserts that explicitly requesting an
+// attestation (--emit-attestation / --push) alongside the offline --no-cluster
+// dry-run is rejected with ErrCodeInvalidRequest, rather than warn-and-ignored.
+// (Config-driven suppression is a separate path — see evidenceConfigForRunMode.)
+func TestValidateCmd_NoClusterEvidenceFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "emit-attestation with no-cluster",
+			args: []string{"aicr", "validate", "--no-cluster", "--emit-attestation", "/tmp/out"},
+		},
+		{
+			name: "push with no-cluster",
+			args: []string{"aicr", "validate", "--no-cluster", "--emit-attestation", "/tmp/out", "--push", "ghcr.io/x/y"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := validateCmd()
+			app := &cli.Command{Name: "aicr", Commands: []*cli.Command{cmd}}
+			err := app.Run(t.Context(), tt.args)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), "cannot be combined with --no-cluster") {
+				t.Errorf("error = %v, want a combined-with-no-cluster message", err)
 			}
 		})
 	}
