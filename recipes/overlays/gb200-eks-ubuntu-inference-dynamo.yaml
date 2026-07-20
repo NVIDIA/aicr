@@ -38,13 +38,11 @@ spec:
     - name: grove
       type: Helm
       source: oci://ghcr.io/ai-dynamo/grove
-      version: "v0.1.0-alpha.8"
       valuesFile: components/grove/values.yaml
 
     - name: dynamo-platform
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
-      version: "1.2.1"
       valuesFile: components/dynamo-platform/values.yaml
       dependencyRefs:
         - grove

@@ -40,13 +40,16 @@ import (
 // #1418 aws-efa bug (registry bumped v0.5.26 -> v0.5.29, but every EKS recipe
 // still rendered v0.5.26, and nothing flagged it).
 //
-// The invariant enforced here: every overlay/mixin componentRefs version/tag
-// MUST equal the component's registry defaultVersion/defaultTag, unless the
-// divergence is explicitly declared in versionPinExemptions with a reason.
-// This makes the registry default the single source of truth: a component
-// bump must update the registry default (which the BOM reads) and every
-// overlay that pins it, or CI fails. Undeclared drift is a hard failure;
-// declared divergences are, by definition, not silent.
+// The invariant enforced here (per #1616): a base/overlay/mixin componentRef
+// MUST NOT pin a version/tag at all, unless the pin is an intentional
+// divergence explicitly declared in versionPinExemptions with a reason. This
+// makes the registry default the single source of truth: a component bump
+// updates the registry default (which the BOM reads) in one place, and an
+// external --data registry that overrides defaultVersion takes effect for
+// every overlay that does not intentionally diverge. A non-exempted pin fails
+// whether it diverges (undeclared drift) or equals the default (redundant —
+// it doubles bump churn and shields the overlay from external registry
+// overrides); declared divergences are, by definition, not silent.
 func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 	ctx := context.Background()
 
@@ -87,12 +90,14 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 	}
 
 	checked := 0
+	refsSeen := 0
 
 	// checkRefs compares every pinned componentRef in one overlay/mixin source
 	// against the registry default, honoring the exemption list.
 	checkRefs := func(source string, refs []ComponentRef) {
 		for i := range refs {
 			ref := refs[i]
+			refsSeen++
 
 			// A componentRef pins its version via `version` (Helm) or `tag`
 			// (Kustomize). Compare whichever is set against the matching
@@ -128,6 +133,12 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 
 			checked++
 			if pin == def {
+				t.Errorf("redundant pin: overlay/mixin %q pins %s.%s=%q, which equals the "+
+					"registry defaultVersion for component %q. Remove the pin — resolution falls "+
+					"back to the registry default, and a redundant pin doubles bump churn and "+
+					"shields the overlay from external registry defaultVersion overrides. "+
+					"See issue #1616.",
+					source, ref.Name, field, pin, ref.Name)
 				continue
 			}
 
@@ -156,9 +167,10 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 			t.Errorf("version drift: overlay/mixin %q pins %s.%s=%q but registry "+
 				"defaultVersion=%q for component %q.\n"+
 				"  The BOM (docs/user/container-images.md) renders the registry default, so it would\n"+
-				"  advertise %q while this recipe installs %q. Re-align the pin to the registry default\n"+
-				"  (or bump both together). If the divergence is intentional, add an entry to\n"+
-				"  versionPinExemptions in version_pin_guard_test.go with a justification. See issue #1424.",
+				"  advertise %q while this recipe installs %q. Remove the pin (the registry default\n"+
+				"  applies at resolution) or bump the registry default instead. If the divergence is\n"+
+				"  intentional, add an entry to versionPinExemptions in version_pin_guard_test.go\n"+
+				"  with a justification. See issues #1424 and #1616.",
 				source, ref.Name, field, pin, def, ref.Name, def, pin)
 		}
 	}
@@ -198,10 +210,13 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 		assertExemptionDefaultsInstalled(ctx, t, store, reg)
 	}
 
-	// A registry/overlay refactor that stops surfacing any pinned refs would
-	// make this guard vacuous; fail loudly rather than pass on nothing.
-	if checked == 0 {
-		t.Fatal("no pinned componentRefs discovered — the version-pin guard would be vacuous; " +
+	// Zero PINNED refs is the healthy steady state after #1616 (pins exist
+	// only for exempted divergences), so the vacuity sentinel is the ref
+	// count: a registry/overlay refactor that stops surfacing componentRefs
+	// entirely would make this guard vacuous — fail loudly rather than pass
+	// on nothing.
+	if refsSeen == 0 {
+		t.Fatal("no componentRefs discovered — the version-pin guard would be vacuous; " +
 			"verify loadMetadataStore and the recipes/overlays/ directory")
 	}
 	t.Logf("verified %d pinned componentRefs against registry defaults (%d declared exemptions)",

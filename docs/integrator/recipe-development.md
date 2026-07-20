@@ -23,7 +23,6 @@ spec:
     intent: training
   componentRefs:
     - name: gpu-operator
-      version: v26.3.2
       valuesFile: components/gpu-operator/eks-gb200-training.yaml
       overrides:
         driver:
@@ -313,12 +312,14 @@ a drop-in for upstreaming. See
 componentRefs:
   - name: gpu-operator
     type: Helm
-    version: v26.3.2
     valuesFile: components/gpu-operator/values.yaml
     overrides:
       driver:
         version: "580.82.07"
 ```
+
+The chart version comes from the registry default — see
+[Chart Version Pinning](#chart-version-pinning).
 
 #### Kustomize components
 
@@ -339,6 +340,27 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 > not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
 
 ## Component Configuration
+
+### Chart Version Pinning
+
+Do not set `version:` (Helm) or `tag:` (Kustomize) on a `componentRef` that
+installs the component's registry default. Resolution falls back to the
+registry entry's `helm.defaultVersion` / `kustomize.defaultTag` in
+`recipes/registry.yaml`, which is the single source of truth for chart
+versions — bumping a component means bumping the registry default, in one
+place.
+
+Pin a version only when the overlay must intentionally diverge from the
+registry default, and declare that divergence in `versionPinExemptions`
+(`pkg/recipe/version_pin_guard_test.go`) with a justification. CI rejects any
+non-exempted pin: a pin that differs from the registry default is undeclared
+drift, and a pin that merely repeats the default is redundant — it doubles
+bump churn and shields the overlay from external registry overrides.
+
+This split keeps external data trees composable: an external `--data`
+registry that overrides a component's `defaultVersion` takes effect for every
+overlay that does not pin, while an explicit (exempted) pin still wins. See
+issue [#1616](https://github.com/NVIDIA/aicr/issues/1616).
 
 ### Configuration Patterns
 
@@ -535,25 +557,25 @@ spec:
     intent: training
   componentRefs:
     - name: gpu-operator
-      version: v26.3.2
       valuesFile: components/gpu-operator/eks-gb200-training.yaml
 ```
 
 ### Updating Recipes
 
-**Updating versions:**
+**Updating versions:** bump the component's registry default in
+`recipes/registry.yaml` — overlays inherit it, so no overlay edit is needed
+(see [Chart Version Pinning](#chart-version-pinning)):
 ```yaml
-# Update component version
-componentRefs:
-  - name: gpu-operator
-    version: v26.3.2  # Changed from v26.3.1
+# recipes/registry.yaml
+- name: gpu-operator
+  helm:
+    defaultVersion: v26.3.2  # Changed from v26.3.1
 ```
 
 **Adding components:**
 ```yaml
 componentRefs:
   - name: new-component
-    version: v1.0.0
     valuesFile: components/new-component/values.yaml
     dependencyRefs: [existing-component]  # Optional
 ```

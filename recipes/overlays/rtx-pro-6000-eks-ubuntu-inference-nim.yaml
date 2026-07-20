@@ -38,7 +38,6 @@ spec:
     - name: k8s-nim-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
-      version: "3.1.0"
       valuesFile: components/k8s-nim-operator/values.yaml
       dependencyRefs:
         - cert-manager

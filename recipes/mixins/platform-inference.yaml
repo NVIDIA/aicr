@@ -21,7 +21,6 @@ spec:
     - name: agentgateway-crds
       type: Helm
       source: oci://cr.agentgateway.dev/charts
-      version: v1.3.1
       valuesFile: components/agentgateway-crds/values.yaml
       manifestFiles:
         - components/agentgateway-crds/manifests/gateway-api-crds.yaml
@@ -30,7 +29,6 @@ spec:
     - name: agentgateway
       type: Helm
       source: oci://cr.agentgateway.dev/charts
-      version: v1.3.1
       valuesFile: components/agentgateway/values.yaml
       manifestFiles:
         - components/agentgateway/manifests/inference-gateway.yaml
