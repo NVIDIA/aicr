@@ -65,21 +65,6 @@ const perfConstraintNCCLBenchmarkRuntime = v1.PerfConstraintNCCLBenchmarkRuntime
 // closed if it arrives unresolved (see resolveNCCLBenchmarkRuntime).
 const perfConstraintNCCLBenchmarkRuntimeRef = v1.PerfConstraintNCCLBenchmarkRuntimeRef
 
-// A recipe-supplied nccl-benchmark-runtime must be exactly this Kubeflow
-// Trainer identity. The validator only ever applies it through
-// trainingRuntimeGVR (trainer.kubeflow.org/v1alpha1) and force-sets its
-// name/namespace, so a recipe can supply a TrainingRuntime — and nothing else.
-// It cannot inject an arbitrary resource kind or version into the validator
-// namespace. The version is pinned to match trainingRuntimeGVR and the shared
-// testdata/trainjob.yaml runtimeRef; a mismatch would be applied to the wrong
-// endpoint and rejected, so it is rejected up front with an actionable error.
-const kindTrainingRuntime = "TrainingRuntime"
-
-// benchmarkRuntimeAPIVersion is the required apiVersion for a recipe-supplied
-// runtime, assembled from the same group/version as trainingRuntimeGVR so the
-// three stay in lockstep.
-var benchmarkRuntimeAPIVersion = trainingRuntimeGVR.Group + "/" + trainingRuntimeGVR.Version
-
 // resolveNCCLBenchmarkRuntime reads the optional nccl-benchmark-runtime
 // performance constraint. Returns "" when the constraint is absent or blank —
 // callers fall back to the criteria/profile-selected embedded template. A
@@ -120,69 +105,15 @@ func resolveNCCLBenchmarkRuntime(ctx *validators.Context) (string, error) {
 		}
 		return "", nil
 	}
-	if err := validateBenchmarkRuntime(carrier); err != nil {
+	// Shape-check the carrier via the contract shared with the orchestrator
+	// (pkg/validator/v1) — a wrong kind/apiVersion, unparseable YAML, or a
+	// missing "node" replicatedJob fails closed with ErrCodeInvalidRequest,
+	// turning what would otherwise be a late ErrCodeInternal deep inside
+	// applyNCCLWorkerScheduling into an early, recipe-actionable error.
+	if err := v1.ValidateBenchmarkRuntime(carrier); err != nil {
 		return "", err
 	}
 	return carrier, nil
-}
-
-// validateBenchmarkRuntime confirms a recipe-supplied runtime template is a
-// Kubeflow TrainingRuntime of the expected apiVersion before the pod commits to
-// the custom path. The identity fields (apiVersion, kind) never carry ${VAR}
-// placeholders, so the raw content unmarshals for this shape check even before
-// substitution. A wrong kind/apiVersion, or content that does not parse as
-// YAML, is rejected fail-closed so a typo cannot masquerade as a passing (or
-// silently skipped) benchmark.
-func validateBenchmarkRuntime(content string) error {
-	obj := &unstructured.Unstructured{}
-	if err := yaml.Unmarshal([]byte(content), obj); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid %s: not parseable as YAML", perfConstraintNCCLBenchmarkRuntime), err)
-	}
-	if obj.GetAPIVersion() != benchmarkRuntimeAPIVersion || obj.GetKind() != kindTrainingRuntime {
-		return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid %s: must be a %s %s (got apiVersion=%q kind=%q)",
-				perfConstraintNCCLBenchmarkRuntime, benchmarkRuntimeAPIVersion, kindTrainingRuntime,
-				obj.GetAPIVersion(), obj.GetKind()))
-	}
-	// The runtime must declare the "node" replicatedJob the shared TrainJob sizes
-	// and the validator injects scheduling into / reads launcher logs from, AND
-	// that job must carry the worker pod spec at template.spec.template.spec —
-	// the path applyNCCLWorkerScheduling mutates. Names are literals (no ${VAR}),
-	// so the raw pre-substitution content is authoritative. Checking both here
-	// turns what would otherwise be a late ErrCodeInternal deep inside
-	// applyNCCLWorkerScheduling — after the Trainer install and cluster sizing —
-	// into an early, recipe-actionable ErrCodeInvalidRequest before any cluster
-	// access.
-	return validateNodeReplicatedJob(obj)
-}
-
-// validateNodeReplicatedJob confirms the TrainingRuntime declares the "node"
-// replicatedJob (nodeJobName) under spec.template.spec.replicatedJobs and that
-// the job carries the worker pod spec at template.spec.template.spec. Returns
-// ErrCodeInvalidRequest naming the specific gap, or nil.
-func validateNodeReplicatedJob(obj *unstructured.Unstructured) error {
-	jobs, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
-	if err == nil && found {
-		for _, raw := range jobs {
-			jobMap, ok := raw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if name, _, _ := unstructured.NestedString(jobMap, "name"); name != nodeJobName {
-				continue
-			}
-			if _, ok, err := unstructured.NestedMap(jobMap, "template", "spec", "template", "spec"); err != nil || !ok {
-				return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("invalid %s: %q replicatedJob must define the worker pod spec at template.spec.template.spec",
-						perfConstraintNCCLBenchmarkRuntime, nodeJobName))
-			}
-			return nil
-		}
-	}
-	return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
-		fmt.Sprintf("invalid %s: must declare a %q replicatedJob (spec.template.spec.replicatedJobs) — the NCCL worker cohort",
-			perfConstraintNCCLBenchmarkRuntime, nodeJobName))
 }
 
 // customRuntimeNodeSelector extracts the "node" replicatedJob's worker
@@ -190,7 +121,7 @@ func validateNodeReplicatedJob(obj *unstructured.Unstructured) error {
 // nil when the runtime pins no worker nodeSelector. The caller sizes the worker
 // cohort against the same nodes the runtime will place workers on, so
 // WorkerCount and placement stay consistent. The content was already
-// shape-validated by validateBenchmarkRuntime, so a parse failure here is
+// shape-validated by v1.ValidateBenchmarkRuntime, so a parse failure here is
 // unexpected but still surfaced fail-closed.
 func customRuntimeNodeSelector(content string) (map[string]string, error) {
 	obj := &unstructured.Unstructured{}

@@ -56,16 +56,16 @@ func (v *Validator) resolveBenchmarkRuntimeRef(ctx context.Context, vi *v1.Valid
 	// a blank earlier entry must not hide a later non-blank duplicate (and the
 	// overlay merge already collapses same-named constraints, so a duplicate here
 	// is a malformed input). Exactly one of each is allowed.
-	if n := countPerfConstraint(cs, v1.PerfConstraintNCCLBenchmarkRuntimeRef); n > 1 {
+	if n := v1.CountConstraint(cs, v1.PerfConstraintNCCLBenchmarkRuntimeRef); n > 1 {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("declare at most one %s constraint (found %d)", v1.PerfConstraintNCCLBenchmarkRuntimeRef, n))
 	}
-	if n := countPerfConstraint(cs, v1.PerfConstraintNCCLBenchmarkRuntime); n > 1 {
+	if n := v1.CountConstraint(cs, v1.PerfConstraintNCCLBenchmarkRuntime); n > 1 {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("declare at most one %s constraint (found %d)", v1.PerfConstraintNCCLBenchmarkRuntime, n))
 	}
 
-	ref, ok := findPerfConstraint(cs, v1.PerfConstraintNCCLBenchmarkRuntimeRef)
+	ref, ok := v1.FindConstraint(cs, v1.PerfConstraintNCCLBenchmarkRuntimeRef)
 	if !ok {
 		return nil
 	}
@@ -74,13 +74,20 @@ func (v *Validator) resolveBenchmarkRuntimeRef(ctx context.Context, vi *v1.Valid
 		return nil
 	}
 
-	// A ref and an inline runtime together are ambiguous — fail closed rather
-	// than silently preferring one.
-	inline, hasInline := findPerfConstraint(vi.Config.Performance.Constraints, v1.PerfConstraintNCCLBenchmarkRuntime)
-	if hasInline && strings.TrimSpace(inline.Value) != "" {
+	// A ref is mutually exclusive with an inline runtime and with a benchmark
+	// profile — supply your own runtime OR borrow an embedded one, never both.
+	// Both conflicts are pure recipe-authoring errors, so reject them here (before
+	// any Job is deployed) rather than leaving the ref+profile case to fail late
+	// in the pod.
+	if inline, ok := v1.FindConstraint(cs, v1.PerfConstraintNCCLBenchmarkRuntime); ok && strings.TrimSpace(inline.Value) != "" {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s and an inline %s are both set — supply one",
 				v1.PerfConstraintNCCLBenchmarkRuntimeRef, v1.PerfConstraintNCCLBenchmarkRuntime))
+	}
+	if profile, ok := v1.FindConstraint(cs, v1.PerfConstraintNCCLBenchmarkProfile); ok && strings.TrimSpace(profile.Value) != "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s and %s are mutually exclusive — supply a runtime or borrow an embedded profile, not both",
+				v1.PerfConstraintNCCLBenchmarkRuntimeRef, v1.PerfConstraintNCCLBenchmarkProfile))
 	}
 
 	relPath, err := benchmarkRuntimeRefPath(raw)
@@ -119,6 +126,16 @@ func (v *Validator) resolveBenchmarkRuntimeRef(ctx context.Context, vi *v1.Valid
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s=%q resolved to an empty file (%q)",
 				v1.PerfConstraintNCCLBenchmarkRuntimeRef, raw, relPath))
+	}
+
+	// Shape-check the resolved file against the same contract the pod enforces,
+	// so a runtime that isn't a valid TrainingRuntime fails fast here (offline,
+	// before any Job) instead of only in the pod after the Trainer install. The
+	// check parses the raw pre-substitution content; ${VAR} placeholders live in
+	// value positions and don't affect the identity / replicatedJob shape.
+	if err := v1.ValidateBenchmarkRuntime(string(content)); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s=%q (%q) resolved to an invalid runtime", v1.PerfConstraintNCCLBenchmarkRuntimeRef, raw, relPath), err)
 	}
 
 	// Consume the ref: rebuild the constraint slice without it (and without any
@@ -177,25 +194,4 @@ func invalidRuntimeRef(ref string) error {
 // non-empty name — no path separators, no "."/".." traversal.
 func isSafeRefSegment(s string) bool {
 	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, `/\`)
-}
-
-// findPerfConstraint returns the first constraint with the given name.
-func findPerfConstraint(cs []recipe.Constraint, name string) (recipe.Constraint, bool) {
-	for _, c := range cs {
-		if c.Name == name {
-			return c, true
-		}
-	}
-	return recipe.Constraint{}, false
-}
-
-// countPerfConstraint counts constraints with the given name.
-func countPerfConstraint(cs []recipe.Constraint, name string) int {
-	n := 0
-	for _, c := range cs {
-		if c.Name == name {
-			n++
-		}
-	}
-	return n
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -57,6 +58,21 @@ spec:
 
 func runtimeConstraint(v string) recipe.Constraint {
 	return recipe.Constraint{Name: perfConstraintNCCLBenchmarkRuntime, Value: v}
+}
+
+// TestBenchmarkRuntimeIdentityLocked pins the pod's apply-side identifiers to the
+// shared shape-check constants in pkg/validator/v1. The shape validator
+// (v1.ValidateBenchmarkRuntime) accepts a runtime by these; the pod then applies
+// it through trainingRuntimeGVR and injects scheduling into nodeJobName. If the
+// two drift, the validator would accept a runtime it then can't apply — this
+// test fails first.
+func TestBenchmarkRuntimeIdentityLocked(t *testing.T) {
+	if got := trainingRuntimeGVR.Group + "/" + trainingRuntimeGVR.Version; got != v1.BenchmarkRuntimeAPIVersion {
+		t.Errorf("apply GVR apiVersion = %q, want v1.BenchmarkRuntimeAPIVersion %q", got, v1.BenchmarkRuntimeAPIVersion)
+	}
+	if nodeJobName != v1.BenchmarkRuntimeNodeJob {
+		t.Errorf("nodeJobName = %q, want v1.BenchmarkRuntimeNodeJob %q", nodeJobName, v1.BenchmarkRuntimeNodeJob)
+	}
 }
 
 func TestResolveNCCLBenchmarkRuntime(t *testing.T) {

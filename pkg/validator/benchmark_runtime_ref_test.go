@@ -55,7 +55,17 @@ spec:
     spec:
       replicatedJobs:
         - name: node
+          template:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
 `
+
+// notATrainingRuntime is valid YAML but the wrong kind — used to exercise the
+// orchestrator's resolve-time shape check.
+const notATrainingRuntime = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: nope\n"
 
 func perfInput(cs ...recipe.Constraint) *v1.ValidationInput {
 	return &v1.ValidationInput{
@@ -69,7 +79,7 @@ func ncclRuntimeCarrier(vi *v1.ValidationInput) (string, bool) {
 	if vi.Config.Performance == nil {
 		return "", false
 	}
-	c, ok := findPerfConstraint(vi.Config.Performance.Constraints, v1.PerfConstraintNCCLBenchmarkRuntime)
+	c, ok := v1.FindConstraint(vi.Config.Performance.Constraints, v1.PerfConstraintNCCLBenchmarkRuntime)
 	return c.Value, ok
 }
 
@@ -173,6 +183,23 @@ func TestResolveBenchmarkRuntimeRef(t *testing.T) {
 			wantErrSub: "empty file",
 		},
 		{
+			name:       "resolved file is not a TrainingRuntime fails closed",
+			input:      perfInput(refC("gb200/mycloud")),
+			dp:         &fakeDataProvider{files: map[string][]byte{goodPath: []byte(notATrainingRuntime)}},
+			wantErr:    true,
+			wantErrSub: "resolved to an invalid runtime",
+		},
+		{
+			name: "ref alongside a profile fails closed",
+			input: perfInput(
+				refC("gb200/mycloud"),
+				recipe.Constraint{Name: v1.PerfConstraintNCCLBenchmarkProfile, Value: "gb200/eks"},
+			),
+			dp:         &fakeDataProvider{files: map[string][]byte{goodPath: []byte(testBenchmarkRuntime)}},
+			wantErr:    true,
+			wantErrSub: "mutually exclusive",
+		},
+		{
 			name:       "ref set but no data provider fails closed",
 			input:      perfInput(refC("gb200/mycloud")),
 			dp:         nil,
@@ -228,7 +255,7 @@ func TestResolveBenchmarkRuntimeRef(t *testing.T) {
 			}
 			// Exactly one carrier must remain — any pre-existing (blank) one is
 			// dropped so first-match consumers see the resolved value.
-			if n := countPerfConstraint(tt.input.Config.Performance.Constraints, v1.PerfConstraintNCCLBenchmarkRuntime); n != 1 {
+			if n := v1.CountConstraint(tt.input.Config.Performance.Constraints, v1.PerfConstraintNCCLBenchmarkRuntime); n != 1 {
 				t.Errorf("carrier count = %d, want exactly 1", n)
 			}
 		})
@@ -251,7 +278,7 @@ func TestResolveBenchmarkRuntimeRefIdempotent(t *testing.T) {
 	}
 
 	// Ref consumed, exactly one carrier present with the file content.
-	if _, ok := findPerfConstraint(vi.Config.Performance.Constraints, v1.PerfConstraintNCCLBenchmarkRuntimeRef); ok {
+	if _, ok := v1.FindConstraint(vi.Config.Performance.Constraints, v1.PerfConstraintNCCLBenchmarkRuntimeRef); ok {
 		t.Errorf("ref constraint should have been consumed after resolution")
 	}
 	carriers := 0
