@@ -33,6 +33,11 @@ type coverageClassification struct {
 	Outcome    string   `yaml:"outcome"`              // "success" | "error"
 	Uncovered  []string `yaml:"uncovered,omitempty"`  // coverage errors
 	RequiresOS bool     `yaml:"requiresOS,omitempty"` // requireOSIfNeeded guard errors
+	// ValidCompletions pins the completion-suggestion content per uncovered
+	// dimension (canonical tupleKey strings, in minimalTuples order) so a
+	// regression in the suggestion machinery on the real catalog flips a
+	// golden entry instead of shipping wrong or empty guidance.
+	ValidCompletions map[string][]string `yaml:"validCompletions,omitempty"`
 }
 
 // TestCoverageGoldenMatrix pins the resolution outcome of every projection
@@ -106,7 +111,9 @@ func TestCoverageGoldenMatrix(t *testing.T) {
 			t.Errorf("projection %q missing from golden (new data?) — regenerate deliberately", k)
 			continue
 		}
-		if w.Outcome != got[k].Outcome || !equalStrings(w.Uncovered, got[k].Uncovered) || w.RequiresOS != got[k].RequiresOS {
+		if w.Outcome != got[k].Outcome || !equalStrings(w.Uncovered, got[k].Uncovered) ||
+			w.RequiresOS != got[k].RequiresOS || !equalCompletions(w.ValidCompletions, got[k].ValidCompletions) {
+
 			t.Errorf("projection %q flipped: golden %+v, now %+v", k, w, got[k])
 		}
 	}
@@ -148,11 +155,11 @@ func classify(ctx context.Context, t *testing.T, store *MetadataStore, q *Criter
 	if strings.Contains(msg, "specify an OS") {
 		return coverageClassification{Outcome: "error", RequiresOS: true}
 	}
-	uncovered := uncoveredFromError(err)
+	uncovered, completions := coverageDetailsFromError(err)
 	if len(uncovered) == 0 {
 		t.Fatalf("projection %q failed with unexpected error: %v", q.String(), err)
 	}
-	return coverageClassification{Outcome: "error", Uncovered: uncovered}
+	return coverageClassification{Outcome: "error", Uncovered: uncovered, ValidCompletions: completions}
 }
 
 func setCriteriaDimension(c *Criteria, name, value string) {
@@ -170,25 +177,41 @@ func setCriteriaDimension(c *Criteria, name, value string) {
 	}
 }
 
-// uncoveredFromError extracts the uncovered dimension names from a
-// StructuredError's "uncovered" context entries, or nil when err does not
-// carry one (e.g., a non-coverage error).
-func uncoveredFromError(err error) []string {
+// coverageDetailsFromError extracts the uncovered dimension names and their
+// completion suggestions (as canonical tupleKey strings, preserving
+// minimalTuples order) from a StructuredError's "uncovered" context entries,
+// or nils when err does not carry one (e.g., a non-coverage error).
+func coverageDetailsFromError(err error) ([]string, map[string][]string) {
 	var se *aicrerrors.StructuredError
 	if !stderrors.As(err, &se) {
-		return nil
+		return nil, nil
 	}
 	entries, ok := se.Context["uncovered"].([]map[string]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	names := make([]string, 0, len(entries))
+	var completions map[string][]string
 	for _, e := range entries {
-		if name, ok := e["dimension"].(string); ok {
-			names = append(names, name)
+		name, ok := e["dimension"].(string)
+		if !ok {
+			continue
 		}
+		names = append(names, name)
+		tuples, _ := e["validCompletions"].([]map[string]string)
+		if len(tuples) == 0 {
+			continue
+		}
+		keys := make([]string, 0, len(tuples))
+		for _, tuple := range tuples {
+			keys = append(keys, tupleKey(tuple))
+		}
+		if completions == nil {
+			completions = map[string][]string{}
+		}
+		completions[name] = keys
 	}
-	return names
+	return names, completions
 }
 
 // writeGolden marshals got to goldenPath. yaml.v3 sorts map keys on encode,
@@ -221,6 +244,21 @@ func equalStrings(a, b []string) bool {
 	}
 	for i := range a {
 		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// equalCompletions reports whether two per-dimension completion maps hold
+// the same tuple-key lists (order-sensitive, matching minimalTuples order).
+func equalCompletions(a, b map[string][]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok || !equalStrings(av, bv) {
 			return false
 		}
 	}

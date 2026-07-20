@@ -306,4 +306,73 @@ func TestVerifyCriteriaCoverage(t *testing.T) {
 			t.Errorf("message missing expected clause:\n  got:  %q\n  want to contain: %q", msg, expectedClause)
 		}
 	})
+
+	t.Run("excluded-only provider wording", func(t *testing.T) {
+		// The full eksUbuKf tuple is stated, so its completion tuple is
+		// empty and dropped — but the overlay DOES provide the platform;
+		// it was constraint-excluded. The clause must not claim "no recipe
+		// provides" while excludedOverlays says otherwise.
+		err := store.verifyCriteriaCoverage(
+			&Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100,
+				Intent: CriteriaIntentTraining, OS: CriteriaOSUbuntu,
+				Platform: CriteriaPlatformKubeflow},
+			[]string{baseRecipeName, "eks"},
+			[]ExcludedOverlay{{Name: "h100-eks-ubuntu-training-kubeflow",
+				Reason: ExcludedOverlayReasonConstraintFailed}}, nil)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "platform 'kubeflow'") ||
+			!strings.Contains(msg, "is provided only by overlays excluded by failing constraints (see excludedOverlays)") {
+
+			t.Errorf("expected excluded-provider wording, got %q", msg)
+		}
+		if strings.Contains(msg, "no recipe provides platform") {
+			t.Errorf("message must not claim no recipe provides an excluded-but-existing platform: %q", msg)
+		}
+	})
+
+	t.Run("multi-tuple wording joins all supported combinations", func(t *testing.T) {
+		eksKf := covOverlay("eks-ubuntu-kubeflow", &Criteria{
+			Service: CriteriaServiceEKS, OS: CriteriaOSUbuntu,
+			Platform: CriteriaPlatformKubeflow}, "")
+		okeKf := covOverlay("oke-ubuntu-kubeflow", &Criteria{
+			Service: CriteriaServiceOKE, OS: CriteriaOSUbuntu,
+			Platform: CriteriaPlatformKubeflow}, "")
+		multi := covStore(t, eksKf, okeKf)
+
+		err := multi.verifyCriteriaCoverage(
+			&Criteria{Platform: CriteriaPlatformKubeflow},
+			[]string{baseRecipeName}, nil, nil)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		expectedClause := "platform 'kubeflow' requires additional criteria; supported combinations: (service=eks, os=ubuntu), (service=oke, os=ubuntu)"
+		if !strings.Contains(err.Error(), expectedClause) {
+			t.Errorf("message missing multi-tuple clause:\n  got:  %q\n  want to contain: %q", err.Error(), expectedClause)
+		}
+	})
+
+	t.Run("same-dimension singletons list all valid values sorted", func(t *testing.T) {
+		eks := covOverlay("eks", &Criteria{Service: CriteriaServiceEKS}, "")
+		ubuntuKf := covOverlay("eks-ubuntu-kubeflow", &Criteria{
+			Service: CriteriaServiceEKS, OS: CriteriaOSUbuntu,
+			Platform: CriteriaPlatformKubeflow}, "eks")
+		rhelKf := covOverlay("eks-rhel-kubeflow", &Criteria{
+			Service: CriteriaServiceEKS, OS: CriteriaOSRHEL,
+			Platform: CriteriaPlatformKubeflow}, "eks")
+		single := covStore(t, eks, ubuntuKf, rhelKf)
+
+		err := single.verifyCriteriaCoverage(
+			&Criteria{Service: CriteriaServiceEKS, Platform: CriteriaPlatformKubeflow},
+			[]string{baseRecipeName, "eks"}, nil, nil)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "requires os (valid: rhel, ubuntu)") {
+			t.Errorf("message missing sorted multi-value list:\n  got: %q\n  want to contain: %q",
+				err.Error(), "requires os (valid: rhel, ubuntu)")
+		}
+	})
 }

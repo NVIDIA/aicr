@@ -211,7 +211,8 @@ func (s *MetadataStore) verifyCriteriaCoverage(criteria *Criteria, appliedOverla
 	for _, dimName := range uncovered {
 		want := criteriaDimensionValue(criteria, dimName)
 		tuples := s.completionTuplesFor(criteria, dimName, want)
-		clauses = append(clauses, completionClause(criteria, dimName, want, tuples))
+		onlyExcluded := len(tuples) == 0 && s.excludedOverlayProvides(dimName, want, excluded)
+		clauses = append(clauses, completionClause(criteria, dimName, want, tuples, onlyExcluded))
 		entries = append(entries, map[string]any{
 			"dimension":        dimName,
 			"requestedValue":   want,
@@ -230,6 +231,22 @@ func (s *MetadataStore) verifyCriteriaCoverage(criteria *Criteria, appliedOverla
 		strings.Join(clauses, "; "), ctx)
 }
 
+// excludedOverlayProvides reports whether any constraint-excluded overlay
+// carries dimName=want — i.e. the dimension has a provider in the catalog
+// that was removed by constraint evaluation rather than never existing.
+func (s *MetadataStore) excludedOverlayProvides(dimName, want string, excluded []ExcludedOverlay) bool {
+	for _, ex := range excluded {
+		meta, ok := s.GetRecipeByName(ex.Name)
+		if !ok || meta.Spec.Criteria == nil {
+			continue
+		}
+		if criteriaDimensionValue(meta.Spec.Criteria, dimName) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // criteriaDimensionValue reads one named dimension's value.
 func criteriaDimensionValue(c *Criteria, dimName string) string {
 	for _, dim := range coverageDimensions {
@@ -242,10 +259,17 @@ func criteriaDimensionValue(c *Criteria, dimName string) string {
 
 // completionClause renders one uncovered dimension's error clause.
 // Single-field wording is used ONLY when all minimal tuples are singletons
-// over the same dimension (design 5.1).
-func completionClause(criteria *Criteria, dimName, want string, tuples []map[string]string) string {
+// over the same dimension (design 5.1). onlyExcluded distinguishes "the
+// catalog has no such recipe" from "a recipe exists but every provider was
+// constraint-excluded" — saying "no recipe provides" in the latter case
+// would contradict the excludedOverlays context attached to the same error.
+func completionClause(criteria *Criteria, dimName, want string, tuples []map[string]string, onlyExcluded bool) string {
 	stated := criteria.String()
 	if len(tuples) == 0 {
+		if onlyExcluded {
+			return fmt.Sprintf("%s '%s' for %s is provided only by overlays excluded by failing constraints (see excludedOverlays)",
+				dimName, want, stated)
+		}
 		return fmt.Sprintf("no recipe provides %s '%s' for %s", dimName, want, stated)
 	}
 	if key, values, ok := sameDimensionSingletons(tuples); ok {
