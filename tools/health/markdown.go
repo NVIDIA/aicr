@@ -23,6 +23,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/testgrid"
 )
 
 // detailDimensions is the fixed render order for the per-dimension structural
@@ -43,16 +44,25 @@ var detailDimensions = []string{
 // from a graded pass/warn/fail/unknown.
 const dimNotScored = "—"
 
-// evidencePending is the literal value rendered in the Evidence column for
-// every recipe in V1. No attestations exist yet (recipes/evidence/ is empty),
-// so the column is uniformly pending and never overstates what is known. The
-// hand-written doc header explains why; see ADR-009 §3.
+// evidencePending is the value rendered in the Evidence column for a recipe
+// that has no dashboard presence yet (RQ1 / #1283). Most recipes are pending
+// today — the dashboard only covers the UAT-driven coordinates — so the column
+// never overstates what is known: absence of a link is an honest "no live
+// posture yet", not a claim. Recipes with a committed presence render a
+// deterministic deep-link instead; see evidenceCell. The hand-written doc
+// header explains the column; see ADR-009 §3 and #1283.
 const evidencePending = "pending"
 
 // markdownOptions configures matrix rendering.
 type markdownOptions struct {
 	// AICRVersion labels the run in the non-deterministic generated-stamp line.
 	AICRVersion string
+
+	// Presence is the committed dashboard presence set. A recipe whose resolved
+	// coordinate is present renders a deep-link in the Evidence column; the rest
+	// render evidencePending. A nil Presence renders every recipe pending (the
+	// pre-RQ1 behavior), so rendering degrades safely if the manifest is absent.
+	Presence *testgrid.Presence
 
 	// Deterministic suppresses per-run metadata (the generated timestamp) so
 	// the output is byte-stable and committable.
@@ -105,7 +115,7 @@ func renderMatrix(w io.Writer, report *health.Report, opts markdownOptions) erro
 	}
 
 	writeSummary(sw, report)
-	writeMatrix(sw, report)
+	writeMatrix(sw, report, opts.Presence)
 
 	if sw.err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write recipe-health markdown", sw.err)
@@ -136,7 +146,7 @@ func writeSummary(sw *stickyWriter, report *health.Report) {
 }
 
 // writeMatrix emits the per-recipe matrix table.
-func writeMatrix(sw *stickyWriter, report *health.Report) {
+func writeMatrix(sw *stickyWriter, report *health.Report, presence *testgrid.Presence) {
 	fmt.Fprintf(sw, "## Recipes\n\n")
 	fmt.Fprintln(sw, "| Recipe | Service | Accelerator | OS | Intent | Platform | Status | Coverage | Evidence |")
 	fmt.Fprintln(sw, "|--------|---------|-------------|----|--------|----------|--------|----------|----------|")
@@ -151,10 +161,32 @@ func writeMatrix(sw *stickyWriter, report *health.Report) {
 			dimCell(string(crit.Platform)),
 			c.Structure.Status,
 			coverageCell(c.Structure.Coverage),
-			evidencePending,
+			evidenceCell(crit, presence),
 		)
 	}
 	fmt.Fprintln(sw)
+}
+
+// evidenceCell renders the Evidence column for one recipe. It emits a
+// deterministic Markdown deep-link into the dashboard only when the recipe
+// resolves to a concrete coordinate that has a committed dashboard presence;
+// otherwise it renders evidencePending. Link construction is pure and offline
+// (pkg/testgrid.LinkFor over pkg/recipe.CoordinateFor), so the generator stays
+// hermetic and byte-deterministic. The cell never carries a status or a
+// pass/fail/count token — it points at the live board and nothing more, per
+// #1283 (RQ2 owns keeping the link honest; #1224 owns any later freshness
+// token). A recipe with a wildcard/absent required dimension (e.g. a100-any)
+// has no concrete coordinate and stays pending.
+func evidenceCell(crit *recipe.Criteria, presence *testgrid.Presence) string {
+	if presence == nil {
+		return evidencePending
+	}
+	co, err := recipe.CoordinateFor(crit)
+	if err != nil || !presence.Has(co) {
+		return evidencePending
+	}
+	path := co.Path()
+	return fmt.Sprintf("[%s](%s)", path, testgrid.LinkFor(co))
 }
 
 // dimCell renders a single criteria dimension. An unspecified dimension ("any"

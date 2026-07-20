@@ -1,0 +1,47 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Dashboard presence manifest (RQ1 / #1283).
+#
+# The committed set of TestGrid/validation.aicr.run coordinate paths that
+# currently carry at least one real presence on the evidence dashboard. The
+# recipe-health generator (tools/health) reads this list to decide which
+# Evidence cells become a deterministic deep-link into the dashboard and which
+# stay an honest `pending` — it stays hermetic (no network) because presence is
+# read from this committed file, never fetched.
+#
+# Each entry is a "<group>/<dashboard>/<tab>" coordinate path, exactly as
+# pkg/recipe.CoordinateFor(criteria).Path() renders it: group=service,
+# dashboard=<accelerator>-<os>, tab=<intent>[-<platform>].
+#
+# Today the dashboard only covers the UAT-driven recipes; most recipes stay
+# `pending` until real-hardware coverage broadens. This file is the single
+# source of truth for "linked" — the weekly, warning-only testgrid-link-check
+# bot (RQ2 / #1284) fetches the live dashboard data and warns when an entry
+# here no longer resolves, keeping the manifest honest without blocking merges.
+#
+# To add a coordinate: confirm https://validation.aicr.run/#/<path> shows real
+# data, then add the path below (keep the list sorted), then run
+# `make recipe-health-docs` and commit the regenerated
+# docs/user/recipe-health.md in the same PR — the Evidence link only lands once
+# the committed matrix is regenerated (recipe-health-check is advisory, not in
+# the merge gate, so a presence-only edit would otherwise leave the doc stale
+# until the weekly refresh PR picks it up).
+coordinates:
+  - aks/h100-ubuntu/inference-dynamo
+  - aks/h100-ubuntu/training-kubeflow
+  - eks/h100-ubuntu/inference-dynamo
+  - eks/h100-ubuntu/training-kubeflow
+  - gke/h100-cos/inference-dynamo
+  - gke/h100-cos/training-kubeflow
