@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-07-20T22:33:47Z
+    bundle:
+      digest: sha256:3ec33498d3df68b688ae96280634c1a4403b7502a49016be54aecc70b0d2549e
+      oci: ghcr.io/yuanchen8911/aicr-evidence:rtx-pro-6000-eks-ubuntu-inference-dynamo-a0b50095a5b8
+      predicateType: https://aicr.run/recipe-evidence/v1
+    signer:
+      identity: https://github.com/yuanchen8911/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/aks-h100-training-inference
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 2208554439
+recipe: rtx-pro-6000-eks-ubuntu-inference-dynamo
+schemaVersion: 1.0.0
