@@ -333,6 +333,10 @@ aicr recipe   -s cm://default/snapshot --intent training
 
 When both a snapshot and explicit criteria are given, the explicit values win (e.g. `--snapshot … --service gke` overrides the detected service).
 
+**Every stated criteria dimension must be honored:** for `service`, `accelerator`, `intent`, `os`, and `platform`, resolution now enforces a coverage post-condition — if you state a value for one of these dimensions, at least one applied overlay must carry that exact value, or the request fails with an actionable `INVALID_REQUEST` error instead of silently returning a recipe that ignores what you asked for. The error names the uncovered dimension and, where possible, the additional criteria that would make the request resolvable (e.g. `platform 'kubeflow' ... requires os (valid: ubuntu)`). `--nodes` is exempt from this check — it is advisory only, since no overlay gates on node count, and stating it never requires matching node-count-specific recipe content to exist.
+
+**Snapshot-detected dimensions are advisory, not strict:** on the `--snapshot` path, `service`, `accelerator`, and `os` can be auto-detected from the cluster fingerprint rather than stated by you. If the coverage post-condition above fails and every uncovered dimension came from that detection (none of them were set via a CLI flag or `--config`), AICR relaxes those dimensions back to unstated and retries resolution once, logging a warning that names each relaxed dimension and its detected value — this handles overlay trees that are deliberately agnostic to a dimension the snapshot still reports (e.g. an OS-agnostic Kind overlay tree observing `os=ubuntu` on the node). Dimensions you passed explicitly via a flag are never relaxed: if any uncovered dimension was explicitly stated, the error still fails the request.
+
 #### Config File Mode (Recommended)
 
 Generate recipes using an `AICRConfig` document. The same file format also drives the `bundle` command, so a single file can describe an end-to-end recipe-to-bundle workflow.
@@ -407,7 +411,7 @@ Generate recipes using direct system parameters:
 **Examples:**
 ```shell
 # Basic recipe for Ubuntu on EKS with H100
-aicr recipe --os ubuntu --service eks --accelerator h100
+aicr recipe --os ubuntu --service eks --accelerator h100 --intent training
 
 # Training workload with multiple GPU nodes
 aicr recipe \
@@ -427,7 +431,7 @@ aicr recipe \
   --platform kubeflow
 
 # Save to file (--gpu is an alias for --accelerator)
-aicr recipe --os ubuntu --gpu h100 --output recipe.yaml
+aicr recipe --os ubuntu --gpu h100 --service eks --intent training --output recipe.yaml
 ```
 
 #### Snapshot Mode
@@ -685,6 +689,12 @@ Query a specific value from the fully hydrated recipe configuration. Resolves a 
 from criteria (same as `aicr recipe`), merges all base, overlay, and inline value
 overrides, then extracts the value at the given dot-path selector.
 
+Because `aicr query` resolves criteria the same way `aicr recipe` does, it is subject
+to the same coverage post-condition: a stated `service`/`accelerator`/`intent`/`os`/`platform`
+value that no overlay honors fails the query with an actionable error rather than
+silently extracting a value from an unrelated recipe. `--nodes` remains advisory and
+is never required to be covered.
+
 **Synopsis:**
 ```shell
 aicr query --selector <path> [flags]
@@ -762,19 +772,20 @@ aicr query --service eks --accelerator h100 --intent training --selector .
 **Advanced Examples:**
 
 ```shell
-# Cross-cloud comparison: how Prometheus storage differs between EKS and GKE
+# Cross-cloud comparison: Prometheus storage across providers
 # EKS provisions a 50Gi persistent EBS volume (gp2)
 aicr query --service eks --intent training \
   --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
-# GKE uses a 10Gi ephemeral emptyDir (GMP handles long-term retention)
-aicr query --service gke --intent training \
+# GKE also provisions a 50Gi persistent volume, but only under the COS overlay —
+# GKE has no OS-agnostic recipe, so os=cos must be stated explicitly
+aicr query --service gke --os cos --intent training \
   --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
 
 # Compare deployment order across clouds
-# EKS deploys 12 components (includes aws-ebs-csi-driver, aws-efa, nodewright-customizations)
+# EKS deploys 14 components (includes aws-ebs-csi-driver, aws-efa, nodewright-customizations)
 aicr query --service eks --accelerator h100 --intent training --selector deploymentOrder
-# GKE deploys 9 components (storage and networking are platform-managed)
-aicr query --service gke --accelerator h100 --intent training --selector deploymentOrder
+# GKE (COS) deploys 13 components (includes gke-nccl-tcpxo; storage/networking are otherwise platform-managed)
+aicr query --service gke --os cos --accelerator h100 --intent training --selector deploymentOrder
 
 # Pin the exact driver version into Terraform/Pulumi variables
 DRIVER_VERSION=$(aicr query --service eks --accelerator h100 --intent training \
@@ -3197,7 +3208,7 @@ AICR respects standard environment variables:
 ### Quick Recipe Generation
 
 ```shell
-aicr recipe --os ubuntu --accelerator h100 | jq '.componentRefs[]'
+aicr recipe --os ubuntu --accelerator h100 --service eks --intent training | jq '.componentRefs[]'
 ```
 
 ### Save All Steps
@@ -3212,20 +3223,23 @@ aicr bundle -r recipe.yaml -o ./bundles
 
 ```shell
 # Extract GPU Operator version from recipe
-aicr recipe --os ubuntu --accelerator h100 --format json | \
+aicr recipe --os ubuntu --accelerator h100 --service eks --intent training --format json | \
   jq -r '.componentRefs[] | select(.name=="gpu-operator") | .version'
 
 # Get all component versions
-aicr recipe --os ubuntu --accelerator h100 --format json | \
+aicr recipe --os ubuntu --accelerator h100 --service eks --intent training --format json | \
   jq -r '.componentRefs[] | "\(.name): \(.version)"'
 ```
 
 ### Multiple Environments
 
 ```shell
-# Generate recipes for different cloud providers
-for service in eks gke aks; do
-  aicr recipe --os ubuntu --service $service --gpu h100 \
+# Generate recipes for different cloud providers.
+# os is per-service: GKE only ships a COS-based recipe, EKS/AKS ship Ubuntu.
+for pair in eks:ubuntu gke:cos aks:ubuntu; do
+  service=${pair%%:*}
+  os=${pair##*:}
+  aicr recipe --os "$os" --service "$service" --gpu h100 --intent training \
     --output recipe-${service}.yaml
 done
 ```
@@ -3248,9 +3262,17 @@ aicr --debug snapshot
 ### Recipe Not Found
 
 ```shell
-# Query parameters may not match any overlay
-# Try broader query:
+# A partial query can be ambiguous: no single recipe covers h100+ubuntu
+# without also stating service and intent, so this fails with an
+# actionable error instead of silently returning a partial recipe:
 aicr recipe --os ubuntu --gpu h100
+# error: os 'ubuntu' requires additional criteria; supported combinations:
+#   (service=aks, intent=inference), (service=aks, intent=training),
+#   (service=bcm, intent=training), (service=eks, intent=inference),
+#   (service=eks, intent=training)
+
+# Fix by adding one of the combinations the error lists:
+aicr recipe --os ubuntu --gpu h100 --service eks --intent training
 ```
 
 ### Bundle Generation Fails

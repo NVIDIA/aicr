@@ -169,7 +169,7 @@ func TestRecipeEndpointPOST(t *testing.T) {
 		},
 		{
 			name:        "valid JSON body with platform",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","os":"ubuntu","intent":"training","platform":"kubeflow"}}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 		},

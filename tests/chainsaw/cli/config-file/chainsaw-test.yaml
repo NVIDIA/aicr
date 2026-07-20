@@ -49,7 +49,7 @@ spec:
               EOF
 
               cat > "${WORK}/config.json" << 'EOF'
-              {"kind":"AICRConfig","apiVersion":"aicr.run/v1alpha2","metadata":{"name":"test"},"spec":{"recipe":{"criteria":{"service":"gke","accelerator":"a100","os":"ubuntu","intent":"inference"}}}}
+              {"kind":"AICRConfig","apiVersion":"aicr.run/v1alpha2","metadata":{"name":"test"},"spec":{"recipe":{"criteria":{"service":"gke","accelerator":"a100","os":"cos","intent":"inference"}}}}
               EOF
 
               echo 'kind: wrongKind' > "${WORK}/invalid-kind.yaml"
@@ -112,9 +112,13 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-config-file"
-              ${AICR_BIN} recipe --config "${WORK}/config.yaml" --service gke \
+              # aks (like eks) is covered by config.yaml's accelerator=h100/
+              # os=ubuntu/intent=training; gke instead requires os=cos, which
+              # would trip the criteria-coverage post-condition here and
+              # obscure the flag-override behavior under test.
+              ${AICR_BIN} recipe --config "${WORK}/config.yaml" --service aks \
                 -o "${WORK}/override.yaml"
-              grep -q "gke" "${WORK}/override.yaml"
+              grep -q "aks" "${WORK}/override.yaml"
             check:
               ($error == null): true
 

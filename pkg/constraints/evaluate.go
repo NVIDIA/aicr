@@ -61,7 +61,11 @@ func Evaluate(constraint recipe.Constraint, snap *snapshotter.Snapshot) EvalResu
 
 	passed, err := parsed.Evaluate(actual)
 	if err != nil {
-		result.Error = errors.Wrap(errors.ErrCodeInternal, "evaluation failed", err)
+		// Evaluate's own errors already carry a structured code — e.g.
+		// ErrCodeInvalidRequest for an unparseable version value — which
+		// downstream fail-closed handling preserves (issue #1542, design
+		// 5.2). Wrapping with ErrCodeInternal here would clobber it.
+		result.Error = errors.PropagateOrWrap(err, errors.ErrCodeInternal, "evaluation failed")
 		return result
 	}
 
