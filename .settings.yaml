@@ -41,11 +41,11 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.115.0'
+  grype: 'v0.116.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.1'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.46.0'
+  syft: 'v1.48.0'
 
 # E2E Testing Tools
 testing_tools:
