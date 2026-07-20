@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/testgrid"
 )
 
 // budgetCeiling is the compute-budget gate referenced by the ADR-009 epic
@@ -144,6 +145,105 @@ func TestRenderMatrixByteStable(t *testing.T) {
 	}
 	if !bytes.Equal(a.Bytes(), b.Bytes()) {
 		t.Errorf("deterministic output differs across runs:\n--- run 1 ---\n%s\n--- run 2 ---\n%s", a.String(), b.String())
+	}
+}
+
+// TestEvidenceCell asserts the Evidence-column rendering: a present coordinate
+// becomes a deep-link with no status/count token; everything else is pending.
+func TestEvidenceCell(t *testing.T) {
+	presence, err := testgrid.LoadPresence()
+	if err != nil {
+		t.Fatalf("LoadPresence() error = %v", err)
+	}
+
+	// A committed-present coordinate (eks / h100-ubuntu / training-kubeflow).
+	present := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+		Platform:    recipe.CriteriaPlatformKubeflow,
+	}
+	// Same coordinate but no platform — a distinct, not-present tab.
+	absentTab := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+	}
+	// A wildcard/absent required dimension has no concrete coordinate.
+	noCoord := &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100}
+
+	tests := []struct {
+		name     string
+		crit     *recipe.Criteria
+		presence *testgrid.Presence
+		want     string
+	}{
+		{
+			name:     "present renders deep-link",
+			crit:     present,
+			presence: presence,
+			want:     "[eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow)",
+		},
+		{"absent coordinate is pending", absentTab, presence, evidencePending},
+		{"unmappable criteria is pending", noCoord, presence, evidencePending},
+		{"nil presence degrades to pending", present, nil, evidencePending},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evidenceCell(tt.crit, tt.presence)
+			if got != tt.want {
+				t.Errorf("evidenceCell() = %q, want %q", got, tt.want)
+			}
+			// The Evidence cell must never carry a status/count token.
+			for _, banned := range []string{"pass", "fail", "warn", "P:", "C:"} {
+				if got != evidencePending && strings.Contains(got, banned) {
+					t.Errorf("evidence cell %q leaked a status/count token %q", got, banned)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderMatrixLinksPresentCoordinate asserts the full matrix render emits a
+// deep-link for a present recipe while other recipes stay pending.
+func TestRenderMatrixLinksPresentCoordinate(t *testing.T) {
+	presence, err := testgrid.LoadPresence()
+	if err != nil {
+		t.Fatalf("LoadPresence() error = %v", err)
+	}
+	report := &health.Report{
+		SchemaVersion: health.SchemaVersion,
+		Combos: []health.ComboHealth{
+			{
+				Criteria: &recipe.Criteria{
+					Service:     recipe.CriteriaServiceEKS,
+					Accelerator: recipe.CriteriaAcceleratorH100,
+					OS:          recipe.CriteriaOSUbuntu,
+					Intent:      recipe.CriteriaIntentTraining,
+					Platform:    recipe.CriteriaPlatformKubeflow,
+				},
+				LeafOverlay: "h100-eks-ubuntu-training-kubeflow",
+				Structure:   health.StructureHealth{Status: health.StatusPass},
+			},
+			{
+				Criteria:    &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
+				LeafOverlay: "h100-any",
+				Structure:   health.StructureHealth{Status: health.StatusPass},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := renderMatrix(&buf, report, markdownOptions{Deterministic: true, NoTitle: true, Presence: presence}); err != nil {
+		t.Fatalf("renderMatrix() error = %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "[eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow)") {
+		t.Errorf("present recipe missing deep-link:\n%s", out)
+	}
+	if !strings.Contains(out, "| h100-any | — | h100 | — | — | — | pass | — | pending |") {
+		t.Errorf("unmappable recipe should stay pending:\n%s", out)
 	}
 }
 

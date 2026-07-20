@@ -189,8 +189,9 @@ jobs:
           dispatch_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RESERVATION}-${ACTION}"
           # aicr_version is left empty (daytime always runs main/tip), so
           # uat-run.yaml's run-name renders '@ main'; the dispatch_key suffix
-          # makes the title globally unique.
-          title="UAT ${RESERVATION} @ main #${dispatch_key}"
+          # makes the title globally unique. MUST match uat-run.yaml's run-name
+          # exactly (now includes intent).
+          title="UAT ${RESERVATION} ${INTENT} @ main #${dispatch_key}"
           echo "::group::${title}"
 
           gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" \

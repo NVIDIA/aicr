@@ -57,6 +57,32 @@ const (
 	draKubeletPluginSuffix = "-kubelet-plugin"
 
 	nodewrightCompleteState = "complete"
+
+	// runtimeRequiredTaintKey / runtimeRequiredTaintValue identify the
+	// workload-gate taint the nodewright (skyhook) operator manages for Skyhook
+	// CRs with runtimeRequired: true (see tuning.yaml `runtimeRequired: true`).
+	//
+	// Why gate on this taint and not status.status: a GPU node joins carrying
+	// this NoSchedule taint, and the operator removes it once *all*
+	// runtime-required Skyhooks targeting that node are complete *on that node*
+	// (per-node, not per-package). Unlike status.status — an aggregate over
+	// (packages × matching nodes) that re-opens to in_progress on every package
+	// reboot and each newly-joined node — the taint is applied once and removed
+	// once as the monotone terminal step, so "taint absent" is a durable
+	// "done, won't reboot again" signal rather than a probabilistic settling
+	// heuristic (see issue #1775). Note the operator re-applies the taint across
+	// reboots only when configured with REAPPLY_ON_REBOOT/reapplyOnReboot=true
+	// (the gke-cos and bcm overlays); on those the taint flaps like the status
+	// and the stability window rides through it, so gating on the taint is never
+	// weaker than gating on the status.
+	//
+	// Values match the skyhook chart's default
+	// controllerManager.manager.env.runtimeRequiredTaint
+	// (skyhook.nvidia.com=runtime-required:NoSchedule), which AICR ships
+	// unchanged and the UAT GPU node pools pre-taint with verbatim
+	// (tests/uat/aws/cluster-config.yaml).
+	runtimeRequiredTaintKey   = "skyhook.nvidia.com"
+	runtimeRequiredTaintValue = "runtime-required"
 )
 
 var (
@@ -437,27 +463,66 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		return err
 	}
 
-	// Poll status.status until every expected Skyhook CR reports "complete"
-	// continuously for the stability window, or the budget elapses. status.status
-	// is non-monotonic during tuning: a reboot (or a newly-joined GPU node)
-	// re-opens it to in_progress, so a single sample is not terminal. Polling
-	// rides through the reboot flaps rather than failing the whole deployment
-	// phase on a transient in_progress. See pkg/defaults GPUReadiness* for sizing.
+	// Poll two signals until both hold continuously for the stability window, or
+	// the budget elapses:
+	//
+	//  1. Every expected Skyhook CR reports status.status == "complete".
+	//  2. No node still carries the runtime-required NoSchedule taint the
+	//     operator removes as its monotone terminal step.
+	//
+	// status.status alone is non-monotonic during tuning: a reboot (or a
+	// newly-joined GPU node) re-opens it to in_progress, and — worse — it can
+	// momentarily read "complete" in the lull between two package reboots while
+	// tuning is still in flight, which is exactly how the gate certified a
+	// cluster ready and then had tuning re-open post-gate (issue #1775). Adding
+	// the taint gate closes that hole: during such a lull the runtime-required
+	// taint is still present, so the probe stays unhealthy until tuning is truly
+	// done on every node. Polling rides through the reboot flaps rather than
+	// failing the deployment phase on a transient in_progress / re-taint. See
+	// pkg/defaults GPUReadiness* for sizing.
 	return pollUntilStable(ctx,
-		fmt.Sprintf("%d expected Nodewright(s)", len(expectedNames)),
+		fmt.Sprintf("%d expected Nodewright(s) + runtime-required taint clearance", len(expectedNames)),
 		func() error {
-			failures := nodewrightStatusFailures(ctx, dynClient, expectedNames)
+			// The Skyhook status Gets and the node-list taint scan are
+			// independent read-only calls, so fan them out (per repo CLAUDE.md
+			// "Sequential calls to N independent read-only K8s APIs → fan-out
+			// with errgroup") rather than paying both round-trips serially every
+			// poll iteration.
+			var statusFailures, taintFailures []string
+			var taintErr error
+			g := new(errgroup.Group)
+			g.Go(func() error {
+				statusFailures = nodewrightStatusFailures(ctx, dynClient, expectedNames)
+				return nil
+			})
+			g.Go(func() error {
+				taintFailures, taintErr = runtimeRequiredTaintFailures(ctx)
+				return nil
+			})
+			_ = g.Wait()
+
+			if taintErr != nil {
+				// A transient node-list failure (e.g. an apiserver hiccup while
+				// a GPU node reboots) must not be read as "taint absent". Return
+				// it so the poll resets the dwell and retries — fail closed.
+				return taintErr
+			}
+			failures := make([]string, 0, len(statusFailures)+len(taintFailures))
+			failures = append(failures, statusFailures...)
+			failures = append(failures, taintFailures...)
 			if len(failures) == 0 {
 				return nil
 			}
 			return errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("%d of %d expected Nodewright(s) not ready:\n  %s",
-					len(failures), len(expectedNames), strings.Join(failures, "\n  ")))
+				fmt.Sprintf("%d Nodewright readiness signal(s) not settled:\n  %s",
+					len(failures), strings.Join(failures, "\n  ")))
 		},
 		func() {
 			for _, name := range expectedNames {
 				fmt.Printf("  Nodewright %s: %s (stable ≥%s)\n", name, nodewrightCompleteState, gpuReadinessStabilityWindow)
 			}
+			fmt.Printf("  Nodewright runtime-required taint (%s=%s:%s): cleared from all nodes (stable ≥%s)\n",
+				runtimeRequiredTaintKey, runtimeRequiredTaintValue, corev1.TaintEffectNoSchedule, gpuReadinessStabilityWindow)
 		})
 }
 
@@ -513,6 +578,60 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 		return fmt.Sprintf("Nodewright %s: status=%s (want %s)", name, status, nodewrightCompleteState)
 	}
 	return ""
+}
+
+// runtimeRequiredTaintFailures lists cluster nodes and returns a failure string
+// for each that still carries the nodewright (skyhook) runtime-required
+// NoSchedule taint — the durable "tuning not yet complete on this node" signal
+// (see runtimeRequiredTaintKey). An empty slice means the taint is cleared from
+// every node (or was never applied, e.g. a Skyhook without runtimeRequired:
+// true), so this gate is a no-op when the recipe does not opt into the feature.
+//
+// A List error (transient apiserver failure, RBAC gap) is returned so the
+// caller fails closed: "could not list nodes" must never be read as "taint
+// absent". The error rides through the poll's dwell reset like any other
+// unhealthy sample.
+func runtimeRequiredTaintFailures(ctx *validators.Context) ([]string, error) {
+	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	defer cancel()
+
+	nodes, err := ctx.Clientset.CoreV1().Nodes().List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to list nodes for the nodewright runtime-required taint gate", err)
+	}
+
+	var failures []string
+	for i := range nodes.Items {
+		// Honor cancellation while walking a potentially large node list, per
+		// repo CLAUDE.md "Always check ctx.Done() in long-running operations".
+		select {
+		case <-listCtx.Done():
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				"canceled while scanning nodes for the nodewright runtime-required taint gate", listCtx.Err())
+		default:
+		}
+		node := &nodes.Items[i]
+		for j := range node.Spec.Taints {
+			if isRuntimeRequiredTaint(&node.Spec.Taints[j]) {
+				failures = append(failures, fmt.Sprintf(
+					"node %s: still carries the runtime-required taint %s=%s:%s (nodewright tuning not complete on this node)",
+					node.Name, runtimeRequiredTaintKey, runtimeRequiredTaintValue, corev1.TaintEffectNoSchedule))
+				break
+			}
+		}
+	}
+	return failures, nil
+}
+
+// isRuntimeRequiredTaint reports whether t is the nodewright (skyhook)
+// runtime-required workload-gate taint. It matches on key+value and requires the
+// NoSchedule effect so an unrelated taint that happens to share the key cannot
+// mask an in-flight tuning.
+func isRuntimeRequiredTaint(t *corev1.Taint) bool {
+	return t.Key == runtimeRequiredTaintKey &&
+		t.Value == runtimeRequiredTaintValue &&
+		t.Effect == corev1.TaintEffectNoSchedule
 }
 
 // expectedNodewrightNames derives the set of Nodewright CR names that this
