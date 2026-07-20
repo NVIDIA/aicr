@@ -59,16 +59,19 @@ var rendererHTML []byte
 const platformNone = "(none)"
 
 // Facet axis keys, emitted in index.json's criteria map and each tab's coord.
+// Exported so external consumers that read a Tab.Coord map (e.g. pkg/testgrid)
+// share this single source of truth for the key spelling rather than
+// hand-writing string literals that could silently drift.
 const (
-	axisService     = "service"
-	axisAccelerator = "accelerator"
-	axisOS          = "os"
-	axisIntent      = "intent"
-	axisPlatform    = "platform"
+	AxisService     = "service"
+	AxisAccelerator = "accelerator"
+	AxisOS          = "os"
+	AxisIntent      = "intent"
+	AxisPlatform    = "platform"
 )
 
 // criteriaAxes is the fixed facet-axis order emitted in index.json.
-var criteriaAxes = []string{axisService, axisAccelerator, axisOS, axisIntent, axisPlatform}
+var criteriaAxes = []string{AxisService, AxisAccelerator, AxisOS, AxisIntent, AxisPlatform}
 
 // Options configures Generate.
 type Options struct {
@@ -844,7 +847,7 @@ func assembleGroups(builts []recipeTab) []Group {
 		}
 		da := groupMap[svc][dash]
 		if da == nil {
-			da = &dashAgg{accelerator: b.tab.Coord[axisAccelerator], os: b.tab.Coord[axisOS]}
+			da = &dashAgg{accelerator: b.tab.Coord[AxisAccelerator], os: b.tab.Coord[AxisOS]}
 			groupMap[svc][dash] = da
 		}
 		da.tabs = append(da.tabs, b.tab)
@@ -869,7 +872,7 @@ func assembleGroups(builts []recipeTab) []Group {
 		for _, dk := range dashKeys {
 			da := dashes[dk]
 			sort.Slice(da.tabs, func(i, j int) bool {
-				return da.tabs[i].Coord[axisIntent]+"-"+da.tabs[i].Coord[axisPlatform] < da.tabs[j].Coord[axisIntent]+"-"+da.tabs[j].Coord[axisPlatform]
+				return da.tabs[i].Coord[AxisIntent]+"-"+da.tabs[i].Coord[AxisPlatform] < da.tabs[j].Coord[AxisIntent]+"-"+da.tabs[j].Coord[AxisPlatform]
 			})
 			dashboards = append(dashboards, Dashboard{Accelerator: da.accelerator, OS: da.os, Tabs: da.tabs})
 		}
@@ -892,25 +895,25 @@ func phaseRollup(statesByPhase map[string][]State) map[string]string {
 // emitted as "" (the renderer treats it as the (none) facet).
 func coordMap(c recipe.Criteria) map[string]string {
 	return map[string]string{
-		axisService:     string(c.Service),
-		axisAccelerator: string(c.Accelerator),
-		axisOS:          string(c.OS),
-		axisIntent:      string(c.Intent),
-		axisPlatform:    string(c.Platform),
+		AxisService:     string(c.Service),
+		AxisAccelerator: string(c.Accelerator),
+		AxisOS:          string(c.OS),
+		AxisIntent:      string(c.Intent),
+		AxisPlatform:    string(c.Platform),
 	}
 }
 
 // recordPresent tracks which criteria values actually appear, for the facet
 // dropdowns.
 func recordPresent(present map[string]map[string]struct{}, c recipe.Criteria) {
-	present[axisService][string(c.Service)] = struct{}{}
-	present[axisAccelerator][string(c.Accelerator)] = struct{}{}
-	present[axisOS][string(c.OS)] = struct{}{}
-	present[axisIntent][string(c.Intent)] = struct{}{}
+	present[AxisService][string(c.Service)] = struct{}{}
+	present[AxisAccelerator][string(c.Accelerator)] = struct{}{}
+	present[AxisOS][string(c.OS)] = struct{}{}
+	present[AxisIntent][string(c.Intent)] = struct{}{}
 	if p := string(c.Platform); p != "" {
-		present[axisPlatform][p] = struct{}{}
+		present[AxisPlatform][p] = struct{}{}
 	} else {
-		present[axisPlatform][platformNone] = struct{}{}
+		present[AxisPlatform][platformNone] = struct{}{}
 	}
 }
 
@@ -922,11 +925,11 @@ func criteriaValues(present map[string]map[string]struct{}) map[string][]string 
 	platformVals := append([]string{}, recipe.GetCriteriaPlatformTypes()...)
 	platformVals = append(platformVals, platformNone)
 	canonical := map[string][]string{
-		axisService:     recipe.GetCriteriaServiceTypes(),
-		axisAccelerator: recipe.GetCriteriaAcceleratorTypes(),
-		axisOS:          recipe.GetCriteriaOSTypes(),
-		axisIntent:      recipe.GetCriteriaIntentTypes(),
-		axisPlatform:    platformVals,
+		AxisService:     recipe.GetCriteriaServiceTypes(),
+		AxisAccelerator: recipe.GetCriteriaAcceleratorTypes(),
+		AxisOS:          recipe.GetCriteriaOSTypes(),
+		AxisIntent:      recipe.GetCriteriaIntentTypes(),
+		AxisPlatform:    platformVals,
 	}
 	out := make(map[string][]string, len(criteriaAxes))
 	for _, axis := range criteriaAxes {

@@ -579,7 +579,7 @@ func TestApplyCriteriaOverrides(t *testing.T) {
 					&cli.IntFlag{Name: "nodes"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return applyCriteriaOverrides(cmd, tt.initial, recipe.NewCriteriaRegistry())
+					return applyCriteriaOverrides(cmd, tt.initial, recipe.NewCriteriaRegistry(), nil)
 				},
 			}
 

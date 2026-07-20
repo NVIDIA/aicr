@@ -29,7 +29,13 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 
 **Coverage** is a descriptor — it is *never* graded, so a deliberately minimal recipe is never penalized for declaring fewer checks. It is a compact per-phase summary of the **declared** validation checks, in the form `R:n D:n P:n C:n` — the count of named checks declared for the readiness, deployment, performance, and conformance phases respectively.
 
-**Evidence** is a literal `pending` for every recipe today. No conformance attestations exist yet, so the column is honestly uniform: it reports the absence of evidence rather than overstating what is known. A differentiated, evidence-derived column lands once the first signed attestation does.
+**Evidence** deep-links each recipe that has a live dashboard presence to its coordinate on the AICR evidence dashboard at [validation.aicr.run](https://validation.aicr.run) (`/#/<group>/<dashboard>/<tab>`, where `group` is the service, `dashboard` is `<accelerator>-<os>`, and `tab` is `<intent>[-<platform>]`). A recipe without a presence stays a literal `pending` — the column reports the absence of live posture rather than overstating what is known. Today the dashboard covers only the UAT-driven coordinates, so most rows are `pending` until real-hardware coverage broadens; this matrix does not gate on that.
+
+The link is constructed **hermetically and deterministically** from the recipe's resolved criteria using the shared `pkg/recipe.CoordinateFor` mapping — the generator makes no network call, and the coordinate carries **no Kubernetes version**, so a link is stable across k8s-version rolls. The Evidence cell is a link and nothing more: it points at the live board and carries **no** pass/fail state or count. Which recipes are linked is driven by a committed presence manifest (`pkg/testgrid/presence.yaml`); a weekly, warning-only bot keeps it honest by reporting any link that no longer resolves against the live dashboard data (it never blocks merges or edits this doc).
+
+> **Community-source posture is author-asserted provenance, not independently-verified correctness.** A coordinate's tab placement and any community-sourced results on the dashboard are declared by the signing author; corroboration counts agreement at the same AICR version but does not itself certify runtime correctness. Read the linked board accordingly.
+
+The deep-link is the current Evidence rendering. It is distinct from — and coexists with — [ADR-009](../design/009-recipe-health-tracking.md)'s deferred, verify-gated *in-cell freshness* state (`unattested` vs aged, derived from a signed attestation's `AttestedAt`): the link points at the live board, and an optional freshness token can later annotate the same cell without replacing the link. See also the [coverage matrix](coverage-matrix.md) for the complementary breadth view.
 
 {/* BEGIN AICR-HEALTH */}
 ## Summary
@@ -50,8 +56,8 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 | rtx-pro-6000-any | — | rtx-pro-6000 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | monitoring-hpa | — | — | — | — | — | pass | R:0 D:0 P:0 C:0 | pending |
 | a100-aks-ubuntu-training-kubeflow | aks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
-| h100-aks-ubuntu-inference-dynamo | aks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| h100-aks-ubuntu-training-kubeflow | aks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
+| h100-aks-ubuntu-inference-dynamo | aks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [aks/h100-ubuntu/inference-dynamo](https://validation.aicr.run/#/aks/h100-ubuntu/inference-dynamo) |
+| h100-aks-ubuntu-training-kubeflow | aks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | [aks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/aks/h100-ubuntu/training-kubeflow) |
 | h100-aks-ubuntu-training-slurm | aks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
 | h100-bcm-ubuntu-training | bcm | h100 | ubuntu | training | — | pass | R:0 D:4 P:0 C:5 | pending |
@@ -59,9 +65,9 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 | gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:10 | pending |
 | gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:8 | pending |
 | gb200-eks-ubuntu-training-slurm | eks | gb200 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
-| h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
+| h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [eks/h100-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/h100-ubuntu/inference-dynamo) |
 | h100-eks-ubuntu-inference-nim | eks | h100 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
-| h100-eks-ubuntu-training-kubeflow | eks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
+| h100-eks-ubuntu-training-kubeflow | eks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | [eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow) |
 | h100-eks-ubuntu-training-slurm | eks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h200-eks-inference | eks | h200 | — | inference | — | pass | R:0 D:4 P:0 C:5 | pending |
 | h200-eks-training | eks | h200 | — | training | — | pass | R:0 D:4 P:1 C:10 | pending |
@@ -70,8 +76,8 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 | a100-gke-cos-training-kubeflow | gke | a100 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | b200-gke-cos-inference-dynamo | gke | b200 | cos | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
 | b200-gke-cos-training-kubeflow | gke | b200 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
-| h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
-| h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
+| h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [gke/h100-cos/inference-dynamo](https://validation.aicr.run/#/gke/h100-cos/inference-dynamo) |
+| h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | [gke/h100-cos/training-kubeflow](https://validation.aicr.run/#/gke/h100-cos/training-kubeflow) |
 | h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-kind-inference-dynamo | kind | h100 | — | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-kind-training-kubeflow | kind | h100 | — | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
