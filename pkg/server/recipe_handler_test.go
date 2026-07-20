@@ -60,13 +60,13 @@ func TestHandleRecipes_Success(t *testing.T) {
 		{
 			name:   "GET h100 training",
 			method: http.MethodGet,
-			target: "/v1/recipe?accelerator=h100&intent=training",
+			target: "/v1/recipe?service=eks&accelerator=h100&intent=training",
 		},
 		{
 			name:        "POST h100 training JSON",
 			method:      http.MethodPost,
 			target:      "/v1/recipe",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"accelerator":"h100","intent":"training"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","intent":"training"}}`,
 			contentType: "application/json",
 		},
 	}
@@ -168,7 +168,7 @@ func TestHandleQuery_Success(t *testing.T) {
 		{
 			name:   "GET with selector",
 			method: http.MethodGet,
-			target: "/v1/query?accelerator=h100&intent=training&selector=" + selector,
+			target: "/v1/query?service=eks&accelerator=h100&intent=training&selector=" + selector,
 		},
 		{
 			// QueryRequest.Criteria is a *recipe.Criteria (flat fields), NOT a
@@ -177,7 +177,7 @@ func TestHandleQuery_Success(t *testing.T) {
 			name:        "POST with selector",
 			method:      http.MethodPost,
 			target:      "/v1/query",
-			body:        `{"criteria":{"accelerator":"h100","intent":"training"},"selector":"` + selector + `"}`,
+			body:        `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},"selector":"` + selector + `"}`,
 			contentType: "application/json",
 		},
 	}
@@ -218,7 +218,7 @@ func TestHandleQuery_Success(t *testing.T) {
 // resolves criteria from the flat body — i.e. the POST criteria actually take
 // effect rather than unmarshalling to empty criteria.
 func TestHandleQuery_POSTCriteriaTakesEffect(t *testing.T) {
-	const body = `{"criteria":{"accelerator":"h100","intent":"training"},"selector":"components.gpu-operator.values.driver.version"}`
+	const body = `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},"selector":"components.gpu-operator.values.driver.version"}`
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/query", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -239,7 +239,7 @@ func TestHandleQuery_POSTCriteriaTakesEffect(t *testing.T) {
 func TestHandleQuery_SelectorNotFound(t *testing.T) {
 	h := newTestHandler(t, nil)
 	req := httptest.NewRequest(http.MethodGet,
-		"/v1/query?accelerator=h100&intent=training&selector=components.does.not.exist", nil)
+		"/v1/query?service=eks&accelerator=h100&intent=training&selector=components.does.not.exist", nil)
 	w := httptest.NewRecorder()
 
 	h.HandleQuery(w, req)
@@ -254,7 +254,7 @@ func TestHandleQuery_SelectorNotFound(t *testing.T) {
 func TestHandleQuery_NoSelector(t *testing.T) {
 	h := newTestHandler(t, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/query?accelerator=h100&intent=training", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/query?service=eks&accelerator=h100&intent=training", nil)
 	w := httptest.NewRecorder()
 
 	h.HandleQuery(w, req)

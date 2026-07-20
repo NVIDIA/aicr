@@ -228,7 +228,15 @@ paths:
                         version: "580.82.07"
                         cudaVersion: "13.1"
         "400":
-          description: Invalid request parameters
+          description: >
+            Invalid request: malformed criteria, allowlist violation, or — new —
+            a stated criteria dimension not honored by any applicable recipe
+            overlay (uncovered dimension). Uncovered-dimension errors carry a
+            machine-readable `details.uncovered` array (dimension,
+            requestedValue, validCompletions). Snapshot-driven resolution
+            (CLI `--snapshot` / Go SDK) may additionally attach
+            `excludedOverlays` / `constraintWarnings`; this HTTP API resolves
+            from criteria only and never emits those fields.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -244,6 +252,23 @@ paths:
                     message: "Invalid recipe query"
                     details:
                       error: "invalid os family: windows"
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
+                uncoveredDimension:
+                  summary: Stated criteria dimension not honored by any overlay
+                  value:
+                    code: INVALID_REQUEST
+                    message: >-
+                      platform 'kubeflow' for criteria(service=eks,
+                      accelerator=h100, intent=training, platform=kubeflow)
+                      requires os (valid: ubuntu)
+                    details:
+                      uncovered:
+                        - dimension: platform
+                          requestedValue: kubeflow
+                          validCompletions:
+                            - os: ubuntu
                     requestId: "550e8400-e29b-41d4-a716-446655440000"
                     timestamp: "2025-01-15T10:30:00Z"
                     retryable: false
@@ -390,7 +415,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/RecipeResponse"
         "400":
-          description: Invalid request body or criteria values
+          description: >
+            Invalid request: malformed criteria, allowlist violation, or — new —
+            a stated criteria dimension not honored by any applicable recipe
+            overlay (uncovered dimension). Uncovered-dimension errors carry a
+            machine-readable `details.uncovered` array (dimension,
+            requestedValue, validCompletions). Snapshot-driven resolution
+            (CLI `--snapshot` / Go SDK) may additionally attach
+            `excludedOverlays` / `constraintWarnings`; this HTTP API resolves
+            from criteria only and never emits those fields.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -406,6 +439,23 @@ paths:
                     message: "Invalid recipe criteria"
                     details:
                       error: "invalid service type: windows"
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
+                uncoveredDimension:
+                  summary: Stated criteria dimension not honored by any overlay
+                  value:
+                    code: INVALID_REQUEST
+                    message: >-
+                      platform 'kubeflow' for criteria(service=eks,
+                      accelerator=h100, intent=training, platform=kubeflow)
+                      requires os (valid: ubuntu)
+                    details:
+                      uncovered:
+                        - dimension: platform
+                          requestedValue: kubeflow
+                          validCompletions:
+                            - os: ubuntu
                     requestId: "550e8400-e29b-41d4-a716-446655440000"
                     timestamp: "2025-01-15T10:30:00Z"
                     retryable: false
@@ -581,7 +631,15 @@ paths:
                     enabled: true
                     useOpenKernelModules: true
         "400":
-          description: Invalid request parameters or criteria
+          description: >
+            Invalid request: malformed criteria, allowlist violation, or — new —
+            a stated criteria dimension not honored by any applicable recipe
+            overlay (uncovered dimension). Uncovered-dimension errors carry a
+            machine-readable `details.uncovered` array (dimension,
+            requestedValue, validCompletions). Snapshot-driven resolution
+            (CLI `--snapshot` / Go SDK) may additionally attach
+            `excludedOverlays` / `constraintWarnings`; this HTTP API resolves
+            from criteria only and never emits those fields.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -589,6 +647,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+              examples:
+                invalidParameter:
+                  summary: Invalid query parameter
+                  value:
+                    code: INVALID_REQUEST
+                    message: "Invalid recipe query"
+                    details:
+                      error: "invalid os family: windows"
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
+                uncoveredDimension:
+                  summary: Stated criteria dimension not honored by any overlay
+                  value:
+                    code: INVALID_REQUEST
+                    message: >-
+                      platform 'kubeflow' for criteria(service=eks,
+                      accelerator=h100, intent=training, platform=kubeflow)
+                      requires os (valid: ubuntu)
+                    details:
+                      uncovered:
+                        - dimension: platform
+                          requestedValue: kubeflow
+                          validCompletions:
+                            - os: ubuntu
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
         "404":
           description: Selector path not found in hydrated recipe
           headers:
@@ -679,7 +765,15 @@ paths:
               schema:
                 description: The value at the selector path (scalar, object, or array)
         "400":
-          description: Invalid request body or criteria values
+          description: >
+            Invalid request: malformed criteria, allowlist violation, or — new —
+            a stated criteria dimension not honored by any applicable recipe
+            overlay (uncovered dimension). Uncovered-dimension errors carry a
+            machine-readable `details.uncovered` array (dimension,
+            requestedValue, validCompletions). Snapshot-driven resolution
+            (CLI `--snapshot` / Go SDK) may additionally attach
+            `excludedOverlays` / `constraintWarnings`; this HTTP API resolves
+            from criteria only and never emits those fields.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -687,6 +781,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+              examples:
+                invalidCriteria:
+                  summary: Invalid criteria value
+                  value:
+                    code: INVALID_REQUEST
+                    message: "Invalid recipe criteria"
+                    details:
+                      error: "invalid service type: windows"
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
+                uncoveredDimension:
+                  summary: Stated criteria dimension not honored by any overlay
+                  value:
+                    code: INVALID_REQUEST
+                    message: >-
+                      platform 'kubeflow' for criteria(service=eks,
+                      accelerator=h100, intent=training, platform=kubeflow)
+                      requires os (valid: ubuntu)
+                    details:
+                      uncovered:
+                        - dimension: platform
+                          requestedValue: kubeflow
+                          validCompletions:
+                            - os: ubuntu
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
         "404":
           description: Selector path not found in hydrated recipe
           headers:

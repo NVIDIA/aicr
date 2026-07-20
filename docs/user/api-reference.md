@@ -143,8 +143,8 @@ curl "http://localhost:8080/v1/recipe?accelerator=h100"
 # Full specification
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8"
 
-# Using gpu alias
-curl "http://localhost:8080/v1/recipe?gpu=gb200&service=gke"
+# Using gpu alias (os is required here: gb200 on gke has no OS-agnostic recipe)
+curl "http://localhost:8080/v1/recipe?gpu=gb200&service=gke&os=cos"
 
 # Pretty print with jq
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.'
@@ -221,7 +221,29 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 
 **Error Responses:**
 - `400 Bad Request` - Invalid criteria format, missing required fields, or invalid enum values
+- `400 Bad Request` - A stated criteria dimension is not honored by any applicable recipe overlay (uncovered dimension). This applies to both `GET /v1/recipe` and `POST /v1/recipe`: every dimension you state (`service`, `accelerator`, `intent`, `os`, `platform`) must be matched by at least one applied overlay, or the request fails instead of silently returning a recipe that ignores it. `nodes` is exempt — it is advisory and never required to be covered. The response's `details.uncovered` array names the offending dimension(s), the requested value, and any `validCompletions` (additional criteria that would make the request coverable). Snapshot-driven resolution (CLI `--snapshot` / Go SDK) may additionally attach `excludedOverlays` and `constraintWarnings` to the error; the HTTP API resolves from criteria only and never emits those two fields.
 - `405 Method Not Allowed` - Only GET and POST are supported
+
+**Uncovered-Dimension Error Example:**
+
+```json
+{
+  "code": "INVALID_REQUEST",
+  "message": "platform 'kubeflow' for criteria(service=eks, accelerator=h100, intent=training, platform=kubeflow) requires os (valid: ubuntu)",
+  "details": {
+    "uncovered": [
+      {
+        "dimension": "platform",
+        "requestedValue": "kubeflow",
+        "validCompletions": [{"os": "ubuntu"}]
+      }
+    ]
+  },
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-01-15T10:30:00Z",
+  "retryable": false
+}
+```
 
 **Response:**
 
@@ -313,6 +335,10 @@ All GET /v1/recipe parameters are supported, plus:
 
 - **Scalar values** (string, number, bool) are returned as plain JSON values
 - **Complex values** (maps, lists) are returned as JSON objects/arrays
+
+**Error Responses:**
+
+`GET /v1/query` and `POST /v1/query` resolve a recipe through the same engine as `/v1/recipe`, so a stated criteria dimension not honored by any applicable overlay fails the same way: `400 Bad Request` with the `details.uncovered` array described in the [POST /v1/recipe error responses](#post-v1recipe) above.
 
 **Examples:**
 

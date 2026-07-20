@@ -60,7 +60,7 @@ func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
 		},
 	}
 
-	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry()); err != nil {
+	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry(), nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestApplyCriteriaFromConfig_FillsEmptyCriteria(t *testing.T) {
 			},
 		},
 	}
-	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry()); err != nil {
+	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry(), nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if string(criteria.Service) != "eks" {
@@ -129,11 +129,35 @@ func TestRecipeCmd_ConfigFlag_FlagOverride(t *testing.T) {
 	cfgPath := writeYAML(t, "config.yaml", testRecipeConfig)
 	root := newRootCmd()
 
+	// Write to a real file (rather than "-o -") so the generated recipe's
+	// criteria can be read back and asserted on — "-o -" always writes to
+	// os.Stdout directly (see serializer.NewFileWriterOrStdoutWithKubeconfig),
+	// bypassing cmd.Root().Writer.
+	outPath := filepath.Join(t.TempDir(), "recipe.yaml")
+
+	// aks (like eks) is covered by accelerator=h100/intent=training/os=ubuntu;
+	// gke instead requires os=cos, so overriding to gke here would trip the
+	// criteria-coverage post-condition on an incoherent os/service pairing
+	// rather than exercise the flag-override behavior this test targets.
 	err := root.Run(context.Background(), []string{
-		name, "recipe", "--config", cfgPath, "--service", "gke", "-o", "-",
+		name, "recipe", "--config", cfgPath, "--service", "aks", "-o", outPath,
 	})
 	if err != nil {
 		t.Fatalf("recipe with --config + flag override failed: %v", err)
+	}
+
+	// Assert the CLI flag actually landed in the generated recipe's criteria
+	// — config sets service: eks, so this test would still pass if
+	// --service aks were silently ignored rather than exercised.
+	out, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read generated recipe: %v", err)
+	}
+	if !strings.Contains(string(out), "service: aks") {
+		t.Errorf("expected generated recipe criteria to show service: aks (CLI override), got:\n%s", out)
+	}
+	if strings.Contains(string(out), "service: eks") {
+		t.Errorf("generated recipe still shows config's service: eks — CLI override did not take effect:\n%s", out)
 	}
 }
 
