@@ -249,6 +249,14 @@ jobs:
   # concurrency group ("pages", cancel-in-progress:false) coalesces the
   # flurry from a multi-cell nightly batch into a single queued rebuild
   # that the newest dispatch supersedes.
+  #
+  # The refresh is BEST-EFFORT: the evidence is already in the bucket and the
+  # dashboard self-heals on the next ingest or push to main, so a transient
+  # dispatch failure must never fail this workflow_call chain — otherwise the
+  # nightly controller would record a fully-successful, multi-hour UAT cell as
+  # a failed leg. The dispatch step retries, then warns (never fails), so
+  # staleness is surfaced but not fatal — the same not-cry-wolf posture as
+  # uat-superseded-notice.yaml.
   # ---------------------------------------------------------------------
   trigger-dashboard:
     name: Trigger dashboard publish
@@ -269,6 +277,17 @@ jobs:
           # Always target main: the dashboard deploys only from the default
           # branch, and the evidence tree it renders is the canonical GCS
           # bucket regardless of which ref this ingest ran on.
-          gh workflow run evidence-dashboard-publish.yaml \
-            --repo "$REPO" --ref main
-          echo "dispatched Evidence: Dashboard Publish on main"
+          #
+          # Bounded retry, then warn-and-succeed: the `if` guard keeps a failed
+          # attempt from tripping `set -e`, and the trailing warning exits 0 so a
+          # best-effort refresh cannot fail the calling UAT run.
+          for attempt in 1 2 3; do
+            if gh workflow run evidence-dashboard-publish.yaml \
+              --repo "$REPO" --ref main; then
+              echo "dispatched Evidence: Dashboard Publish on main"
+              exit 0
+            fi
+            echo "dispatch attempt ${attempt} failed; retrying in 5s..."
+            sleep 5
+          done
+          echo "::warning::could not dispatch Evidence: Dashboard Publish after 3 attempts; the dashboard will refresh on the next ingest or push to main"
