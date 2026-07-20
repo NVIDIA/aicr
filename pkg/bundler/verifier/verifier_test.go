@@ -185,6 +185,51 @@ func TestVerify_NilOptions(t *testing.T) {
 	}
 }
 
+// TestVerify_IgnoreTLogRequiresKey pins the defense-in-depth guard: offline
+// verification (IgnoreTLog) is key-based only, so Verify must reject the option
+// with ErrCodeInvalidRequest when Key is empty, before any bundle inspection.
+func TestVerify_IgnoreTLogRequiresKey(t *testing.T) {
+	dir := createTestBundle(t)
+
+	tests := []struct {
+		name    string
+		opts    *VerifyOptions
+		wantErr bool
+	}{
+		{"ignore tlog without key", &VerifyOptions{IgnoreTLog: true}, true},
+		{"ignore tlog with key", &VerifyOptions{IgnoreTLog: true, Key: "awskms://test/key"}, false},
+		{"no ignore tlog, no key", &VerifyOptions{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Verify(context.Background(), dir, tt.opts)
+			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("Verify() error = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			// The non-error cases here assert only that the guard did NOT trip;
+			// downstream verification (e.g. a bogus KMS key) may still fail, so we
+			// only require the error, if any, is not the guard's InvalidRequest.
+			if err != nil && strings.Contains(err.Error(), "offline verification") {
+				t.Fatalf("Verify() unexpectedly tripped IgnoreTLog guard: %v", err)
+			}
+		})
+	}
+
+	// The guard runs before the bundle-directory stat, so an invalid
+	// IgnoreTLog/Key combination is reported as InvalidRequest even when the
+	// directory does not exist (it must not be masked by NotFound).
+	t.Run("guard precedes NotFound for a missing directory", func(t *testing.T) {
+		_, err := Verify(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"),
+			&VerifyOptions{IgnoreTLog: true})
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("Verify() error = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+}
+
 func TestExtractToolVersion(t *testing.T) {
 	t.Run("valid bundle with tool version", func(t *testing.T) {
 		// Build a minimal sigstore bundle JSON with a DSSE envelope

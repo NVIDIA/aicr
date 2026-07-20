@@ -174,8 +174,10 @@ jobs:
             echo "::notice::Reservation ${RESERVATION} opts out of the nightly batch (nightly-intents: []); skipping this leg."
             exit 0
           fi
-          IFS=',' read -r -a intents <<< "$NIGHTLY_INTENTS_CSV"
-          echo "Nightly intents for ${RESERVATION}: ${intents[*]}"
+          # The actual per-cell intents come from the schedule below, which
+          # applies the reservation's nightly-intent-min-versions gate per
+          # version; this line is just the leg-level summary of what's enrolled.
+          echo "Nightly intents for ${RESERVATION}: ${NIGHTLY_INTENTS_CSV} (release cells further gated by nightly-intent-min-versions)"
 
           # Validate previous_n before the broker consumes it. `--previous-n` is
           # an int flag so it rejects non-integers, but it would accept a
@@ -213,8 +215,19 @@ jobs:
           # release cells first — never main's inference. Each (version × intent)
           # is a full provision→CUJ→teardown dispatched through the shared lease,
           # so the intents serialize automatically (no contention).
+          #
+          # Intents are per-CELL: the schedule already applied each
+          # reservation's nightly-intent-min-versions gate, so a release that
+          # predates an intent's minimum version carries a shorter (or empty)
+          # .intents list and that (version × intent) never dispatches; `main`
+          # always carries every listed intent.
           for ver in "${versions[@]}"; do
-            for intent in "${intents[@]}"; do
+            mapfile -t cell_intents < <(jq -r --arg r "$RESERVATION" --arg v "$ver" \
+              '.[$r][] | select(.aicr_version == $v) | .intents[]' <<<"$schedule")
+            # A fully-gated release cell (no eligible intents) contributes
+            # nothing — skip it without consuming the time-box or cell counter.
+            (( ${#cell_intents[@]} == 0 )) && continue
+            for intent in "${cell_intents[@]}"; do
               if (( $(date +%s) >= deadline )); then
                 echo "::notice::Time-box reached — dropping remaining cells for ${RESERVATION} (oldest release first)."
                 break 2

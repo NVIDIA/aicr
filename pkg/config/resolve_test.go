@@ -249,6 +249,7 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 			OIDCDeviceFlow:            true,
 			FulcioURL:                 "https://fulcio.internal.example.com",
 			RekorURL:                  "https://rekor.internal.example.com",
+			SigningKey:                "awskms://alias/aicr-signing",
 		},
 		Registry: &config.RegistrySpec{InsecureTLS: true, PlainHTTP: true},
 	}
@@ -307,6 +308,9 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 	}
 	if got.FulcioURL != "https://fulcio.internal.example.com" || got.RekorURL != "https://rekor.internal.example.com" {
 		t.Errorf("Sigstore URLs: got fulcio=%q rekor=%q", got.FulcioURL, got.RekorURL)
+	}
+	if got.SigningKey != "awskms://alias/aicr-signing" {
+		t.Errorf("SigningKey: got %q", got.SigningKey)
 	}
 	if !got.InsecureTLS || !got.PlainHTTP {
 		t.Errorf("Registry: got insecure=%v plain=%v", got.InsecureTLS, got.PlainHTTP)

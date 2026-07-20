@@ -556,10 +556,28 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 		})
 	}
 
+	// Cross-version "all versions" grid: fold each signer's single latest run
+	// (latestAny, version-blind) into one consensus grid. This is the dashboard's
+	// default view — it includes every source that has attested this recipe, even
+	// sources whose latest run predates the newest release (which the newest strict
+	// grid, tabVersions[0], omits — such a source stays visible in its own version
+	// grid). A throwaway grid-signer set keeps the series column set (built from the
+	// per-version grids above) unchanged: a signer's latest run also lands in its
+	// own version grid, so this adds no series column the per-version pass missed.
+	// Consensus here counts agreement ACROSS versions — weaker than same-version
+	// reproduction — which the renderer surfaces explicitly.
+	combinedRows, combinedStates := computeGrid(unionRows(latestAny), signerIDs, latestAny, map[string]struct{}{})
+	combined := &TabVersion{
+		AICRVer:     "",
+		PhaseRollup: phaseRollup(combinedStates),
+		Tests:       combinedRows,
+	}
+
 	tab := Tab{
 		Recipe:   agg.name,
 		Coord:    coordMap(agg.criteria),
 		Versions: tabVersions,
+		Combined: combined,
 	}
 	// The time-series spans every build/version, so its union test set must come
 	// from ALL runs (not just each signer's newest), or a test that ran only in an

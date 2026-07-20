@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/urfave/cli/v3"
 )
 
@@ -37,7 +39,7 @@ func TestBundleVerifyCmd_HasExpectedFlags(t *testing.T) {
 		t.Errorf("Name = %q, want %q", cmd.Name, "verify")
 	}
 
-	expectedFlags := []string{"min-trust-level", "require-creator", "cli-version-constraint", "certificate-identity-regexp", "key", "trust-root", "format"}
+	expectedFlags := []string{"min-trust-level", "require-creator", "cli-version-constraint", "certificate-identity-regexp", "key", "trust-root", "insecure-ignore-tlog", "format"}
 	for _, name := range expectedFlags {
 		found := false
 		for _, f := range cmd.Flags {
@@ -290,6 +292,54 @@ func TestBundleVerifyCmd_KeyFlagDefinition(t *testing.T) {
 		return
 	}
 	t.Fatal("--key flag not found")
+}
+
+// TestBundleVerifyCmd_IgnoreTLogRequiresKey asserts the CLI rejects
+// --insecure-ignore-tlog unless --key is also supplied: offline/air-gapped
+// verification is key-based, so the flag combo must fail with
+// ErrCodeInvalidRequest before any bundle inspection.
+func TestBundleVerifyCmd_IgnoreTLogRequiresKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    func(dir string) []string
+		wantErr bool
+	}{
+		{
+			name:    "ignore-tlog without key",
+			args:    func(dir string) []string { return []string{"verify", dir, "--insecure-ignore-tlog"} },
+			wantErr: true,
+		},
+		{
+			name: "ignore-tlog with key",
+			args: func(dir string) []string {
+				return []string{"verify", dir, "--insecure-ignore-tlog", "--key", "/nonexistent/key.pem"}
+			},
+			wantErr: false, // guard passes; downstream key resolution may still fail
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeVerifiableKeyFixture(t)
+			cmd := bundleVerifyCmd()
+			var buf bytes.Buffer
+			cmd.Writer = &buf
+
+			err := cmd.Run(context.Background(), tt.args(dir))
+			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("Run() error = %v, want ErrCodeInvalidRequest", err)
+				}
+				if !strings.Contains(err.Error(), "--insecure-ignore-tlog requires --key") {
+					t.Fatalf("Run() error = %v, want message naming the --key requirement", err)
+				}
+				return
+			}
+			// The guard must NOT be the failure cause when --key is present.
+			if err != nil && strings.Contains(err.Error(), "--insecure-ignore-tlog requires --key") {
+				t.Fatalf("Run() unexpectedly tripped the --key guard: %v", err)
+			}
+		})
+	}
 }
 
 func TestBundleVerifyCmd_RejectsUnmanagedFile(t *testing.T) {
