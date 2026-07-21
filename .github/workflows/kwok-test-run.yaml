@@ -41,6 +41,7 @@ jobs:
   test:
     name: '${{ matrix.pair.recipe }} (${{ matrix.pair.deployer }})'
     runs-on: ubuntu-latest
+    # Raised from 18→20: flux-oci lane's bounded readiness check alone takes ~7min.
     timeout-minutes: 20
     strategy:
       fail-fast: false

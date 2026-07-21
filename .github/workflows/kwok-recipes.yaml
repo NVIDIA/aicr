@@ -102,6 +102,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          # --- Deployer list: single source of truth (#1172) ---
+          # Defined once, here (before dispatch, since dispatch also needs it).
+          # Tier 1 and Tier 3 both consume it to build their {recipe, deployer}
+          # pairs. Tier 2 stays helm-only by deliberate policy (see ADR-003
+          # "Tier 2 deployer coverage"). Keep .github/actions/kwok-test/action.yml's
+          # deployer input doc-string in sync with this list (prose only, not enforced).
+          deployers='["helm","argocd-oci","argocd-helm-oci","argocd-git","flux-oci","flux-git"]'
+
           # --- workflow_dispatch: test exactly the requested recipe ---
           if [[ -n "${DISPATCH_RECIPE}" ]]; then
             single=$(jq -cn --arg r "${DISPATCH_RECIPE}" --argjson deployers "$deployers" \
@@ -239,23 +247,7 @@ jobs:
           # --- Tier 3: full matrix (all testable overlays) ---
           tier3="$all"
 
-          # --- Deployer list: single source of truth (#1172) ---
-          # Defined once, here. Tier 1 and Tier 3 both consume it to build
-          # their {recipe, deployer} pairs. Tier 2 stays helm-only by
-          # deliberate policy (see ADR-003 "Tier 2 deployer coverage") — it
-          # exercises diff-affected accelerator overlays against the default
-          # deployer only, not the full set below.
-          # Keep .github/actions/kwok-test/action.yml's deployer input
-          # doc-string in sync with this list (prose only, not enforced).
-          deployers='["helm","argocd-oci","argocd-helm-oci","argocd-git","flux-oci","flux-git"]'
-
           tier1_pairs=$(jq -cn --argjson recipes "$tier1" --argjson deployers "$deployers" '
-            [ $recipes[] as $r | $deployers[] as $d | {recipe: $r, deployer: $d} ]
-          ')
-
-          tier2_pairs=$(jq -cn --argjson recipes "$tier2" '
-            [ $recipes[] as $r | {recipe: $r, deployer: "helm"} ]
-          ')
 
           # --- Tier 3 batching ---
           # GitHub caps a single job's matrix at 256 configurations. Tier 3
@@ -312,43 +304,11 @@ jobs:
     needs: discover
     if: >-
       github.event_name != 'schedule' &&
-      needs.discover.outputs.tier1 != '[]' &&
-      needs.discover.outputs.tier1 != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 18
-    strategy:
-      fail-fast: false
-      matrix:
-        recipe: ${{ fromJSON(needs.discover.outputs.tier1) }}
-        deployer: [helm, argocd-oci, argocd-helm-oci, argocd-git, flux-oci, flux-git]
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run KWOK test
-        uses: ./.github/actions/kwok-test
-        with:
-          recipe: ${{ matrix.recipe }}
-          deployer: ${{ matrix.deployer }}
-          go_version: ${{ steps.versions.outputs.go }}
-          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
-          kind_version: ${{ steps.versions.outputs.kind }}
-          helm_version: ${{ steps.versions.outputs.helm }}
-          kwok_version: ${{ steps.versions.outputs.kwok }}
-          kubectl_version: ${{ steps.versions.outputs.kubectl }}
-          yq_version: ${{ steps.versions.outputs.yq }}
-          flux_version: ${{ steps.versions.outputs.flux }}
-          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
-          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
-          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
-          # keep == this job's timeout-minutes (asserted by sync-budget_test.sh)
-          job_timeout_minutes: '18'
+      needs.discover.outputs.tier1_pairs != '[]' &&
+      needs.discover.outputs.tier1_pairs != ''
+    uses: ./.github/workflows/kwok-test-run.yaml
+    with:
+      pairs: ${{ needs.discover.outputs.tier1_pairs }}
 
   # ── Tier 2: diff-aware accelerator tests (PR only, conditional) ──
   # Helm-only by deliberate policy — see ADR-003 "Tier 2 deployer coverage".
@@ -357,41 +317,11 @@ jobs:
     needs: discover
     if: >-
       github.event_name == 'pull_request' &&
-      needs.discover.outputs.tier2 != '[]' &&
-      needs.discover.outputs.tier2 != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 18
-    strategy:
-      fail-fast: false
-      matrix:
-        recipe: ${{ fromJSON(needs.discover.outputs.tier2) }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run KWOK test
-        uses: ./.github/actions/kwok-test
-        with:
-          recipe: ${{ matrix.recipe }}
-          go_version: ${{ steps.versions.outputs.go }}
-          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
-          kind_version: ${{ steps.versions.outputs.kind }}
-          helm_version: ${{ steps.versions.outputs.helm }}
-          kwok_version: ${{ steps.versions.outputs.kwok }}
-          kubectl_version: ${{ steps.versions.outputs.kubectl }}
-          yq_version: ${{ steps.versions.outputs.yq }}
-          flux_version: ${{ steps.versions.outputs.flux }}
-          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
-          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
-          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
-          # keep == this job's timeout-minutes (asserted by sync-budget_test.sh)
-          job_timeout_minutes: '18'
+      needs.discover.outputs.tier2_pairs != '[]' &&
+      needs.discover.outputs.tier2_pairs != ''
+    uses: ./.github/workflows/kwok-test-run.yaml
+    with:
+      pairs: ${{ needs.discover.outputs.tier2_pairs }}
 
   # ── Tier 3: full matrix (push to main + nightly schedule) ──
   # The recipe × deployer cross-product exceeds GitHub's 256-config matrix cap,
@@ -401,6 +331,7 @@ jobs:
   # main never cancel in-flight Tier 3 runs; the batch id keeps every shard of a
   # single run in its own group so they all run in parallel.
   test-tier3:
+    name: 'Tier 3'
     needs: discover
     concurrency:
       group: kwok-tier3-${{ github.sha }}-${{ matrix.batch.id }}
