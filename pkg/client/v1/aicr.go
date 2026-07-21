@@ -1207,10 +1207,11 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 // from unit tests so no Kubernetes resources are created and every
 // check reports as "skipped". WithValidationNamespace, WithValidationRunID,
 // WithValidationCleanup, WithValidationTolerations,
-// WithValidationNodeSelector, and WithValidationPhases cover the
-// production-controller knobs. The validator catalog loads through this
-// Client's own DataProvider, so a Client built from FilesystemSource
-// validates against that recipe source rather than the package global.
+// WithValidationNodeSelector, WithValidationKubeconfig, and
+// WithValidationPhases cover the production-controller knobs. The validator
+// catalog loads through this Client's own DataProvider, so a Client built from
+// FilesystemSource validates against that recipe source rather than the
+// package global.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, recipe, or snap is nil,

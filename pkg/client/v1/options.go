@@ -46,6 +46,7 @@ type ValidateOption func(*validateConfig)
 // nil to mean unset because the empty slice has different semantics
 // (e.g., "no tolerations at all" vs "no override; use default").
 type validateConfig struct {
+	kubeconfig       string
 	namespace        *string
 	runID            *string
 	cleanup          *bool
@@ -116,7 +117,10 @@ func buildValidateConfig(opts []ValidateOption) *validateConfig {
 // here and zero edits on the facade surface. phases is intentionally NOT
 // translated here — it is passed directly to ValidatePhases by the caller.
 func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
-	out := make([]validator.Option, 0, 11)
+	out := make([]validator.Option, 0, 12)
+	if cfg.kubeconfig != "" {
+		out = append(out, validator.WithKubeconfig(cfg.kubeconfig))
+	}
 	if cfg.namespace != nil {
 		out = append(out, validator.WithNamespace(*cfg.namespace))
 	}
@@ -155,6 +159,16 @@ func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
 		out = append(out, validator.WithFailFast(*cfg.failFast))
 	}
 	return out
+}
+
+// WithValidationKubeconfig sets an explicit, run-scoped kubeconfig path for
+// every Kubernetes API operation performed by Client.ValidateState, including
+// namespace, RBAC, ConfigMap, validator Job, and result operations. The file is
+// reloaded for each validation run. Empty uses the shared default Kubernetes
+// client and its standard KUBECONFIG, ~/.kube/config, then in-cluster discovery
+// chain.
+func WithValidationKubeconfig(kubeconfig string) ValidateOption {
+	return func(c *validateConfig) { c.kubeconfig = kubeconfig }
 }
 
 // WithValidationNamespace sets the Kubernetes namespace where

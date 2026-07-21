@@ -114,6 +114,7 @@ func TestStability_Validate(t *testing.T) {
 	// Element type pins each WithValidation* return to aicr.ValidateOption;
 	// dropping or retyping any factory becomes a compile error.
 	_ = []aicr.ValidateOption{
+		aicr.WithValidationKubeconfig("/path/to/kubeconfig"),
 		aicr.WithValidationNamespace("ns"),
 		aicr.WithValidationRunID("rid"),
 		aicr.WithValidationCleanup(true),

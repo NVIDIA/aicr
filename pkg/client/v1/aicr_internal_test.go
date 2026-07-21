@@ -656,6 +656,24 @@ func TestWithValidationTolerations_ExplicitNilOverrides(t *testing.T) {
 	}
 }
 
+// TestWithValidationKubeconfig_RoundTrip proves the facade-owned option is
+// translated to validator.WithKubeconfig without relying on process-global
+// KUBECONFIG state.
+func TestWithValidationKubeconfig_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	const path = "/path/to/target-kubeconfig"
+	cfg := buildValidateConfig([]ValidateOption{WithValidationKubeconfig(path)})
+	if cfg.kubeconfig != path {
+		t.Fatalf("kubeconfig = %q, want %q", cfg.kubeconfig, path)
+	}
+
+	v := validator.New(validateOptionsFromConfig(cfg)...)
+	if v.Kubeconfig != path {
+		t.Errorf("validator.Kubeconfig = %q, want %q", v.Kubeconfig, path)
+	}
+}
+
 // TestWithValidationTimeout_OptIn pins FIX D: WithValidationTimeout captures
 // a pointer-wrapped duration so the ValidateState switch can distinguish
 // unset (nil → default 60m), explicit 0 (no facade cap), and explicit >0.
