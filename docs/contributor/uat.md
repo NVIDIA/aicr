@@ -191,7 +191,8 @@ The nightly batch runs a **cross-version regression** per reservation: `main` (b
 **Tunables** — workflow inputs on `uat-nightly-batch.yaml` (these are the scheduled-run defaults):
 
 - `previous_n` — stable releases below `main` to run per reservation (default `2`; `0` = `main` only).
-- `deadline_offset_hours` — hours after batch start to stop dispatching new cells (default `5`). The controller job watches each cell sequentially and GitHub caps a hosted job at 6h, so this stays below that ceiling (and the job's own `timeout-minutes`) to keep the graceful drop-oldest reachable rather than being killed mid-cell.
+- `deadline_offset_hours` — hours after batch start to stop dispatching new cells (default `5`). This is a **secondary** cap: the controller also enforces a **budget-aware** cutoff derived from the drive job's own `timeout-minutes`, stopping dispatch once fewer than `max_cell_minutes` remain so the last cell always finishes before GitHub kills the job. The effective cutoff is the earlier of the two, so `deadline_offset_hours` no longer needs hand-tuning against the job timeout to keep the graceful drop-oldest reachable.
+- `max_cell_minutes` — wall-clock a single dispatched cell may need to complete (default `150`). Sets the drive job's dispatch reserve: a new cell is dispatched only if at least this many minutes remain before the job's `timeout-minutes` (a small setup slack is also held back), so an overrun sheds the oldest remaining cell gracefully instead of hard-failing the leg mid-cell. Keep it at or above the realistic worst-case cell duration.
 
 To test a single released version by hand: `gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100 -f aicr_version=v1.2.3`. (`--ref main` dispatches the nightly-path revision of the workflow, not your feature branch's.)
 
