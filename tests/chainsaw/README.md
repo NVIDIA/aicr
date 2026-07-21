@@ -35,19 +35,6 @@ AICR_BIN=$(pwd)/dist/aicr_darwin_arm64_v8.0/aicr \
   chainsaw test --no-cluster --test-dir tests/chainsaw/cli/recipe-generation
 ```
 
-Snapshot tests (cluster required):
-
-```bash
-# Setup (one-time)
-make cluster-create
-make image IMAGE_REGISTRY=localhost:5001/aicr IMAGE_TAG=local
-for node in $(docker ps --filter "name=aicr-worker" --format "{{.Names}}"); do
-  docker cp tools/fake-nvidia-smi "${node}:/usr/local/bin/nvidia-smi"
-  docker exec "$node" chmod +x /usr/local/bin/nvidia-smi
-done
-chainsaw test --test-dir tests/chainsaw/snapshot/deploy-agent
-```
-
 ## CLI Tests
 
 No cluster needed. All tests receive `AICR_BIN` and `REPO_ROOT` from the environment.
@@ -68,11 +55,9 @@ No cluster needed. All tests receive `AICR_BIN` and `REPO_ROOT` from the environ
 
 ## Snapshot Tests
 
-Requires a Kind cluster with fake nvidia-smi injected.
+Snapshot collection against a cluster is covered by `test_snapshot()` in `tests/e2e/run.sh`, run in the e2e CI job (cloud/Kind path).
 
-| Test | Replaces | What it tests |
-|------|----------|---------------|
-| `snapshot/deploy-agent` | `test_snapshot()` in `tests/e2e/run.sh` | Job completion, ConfigMap creation, snapshot document structure |
+A Talos-specific chainsaw variant lives under `snapshot/deploy-agent-talos/` and is run manually via `make talos-snapshot-test`; see `tools/talos-test/README.md` for setup.
 
 ## File Structure
 
@@ -93,7 +78,7 @@ tests/chainsaw/
 │   ├── validate-agent-flags/                     # Agent flag presence
 │   └── validate-phases/                          # Multi-phase validation
 └── snapshot/
-    └── deploy-agent/                             # K8s Job + ConfigMap assertions
+    └── deploy-agent-talos/                       # Talos snapshot Job + ConfigMap assertions
 ```
 
 ## References
