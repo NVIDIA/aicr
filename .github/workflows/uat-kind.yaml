@@ -83,7 +83,12 @@ jobs:
     # confusing partial run.
     if: inputs.lifecycle == 'nightly'
     runs-on: linux-amd64-gpu-h100-latest-1
-    timeout-minutes: 180
+    # Cover the sum of the sequential step budgets (setup 25 + image build 20 +
+    # tools + prep 20 + install 90 + conformance 45 + train 30 + verify 5) plus
+    # headroom for the always()-run cleanup, so a job-level timeout never kills
+    # teardown and leaks the nvkind cluster on the shared runner. Matches the
+    # cloud lanes' 280.
+    timeout-minutes: 280
     permissions:
       contents: read
       id-token: write  # Sigstore keyless signing (ambient GitHub Actions OIDC)
@@ -179,6 +184,13 @@ jobs:
             echo "AICR_IMAGE=ko.local:smoke-test"
             echo "AICR_VALIDATOR_IMAGE=ko.local:smoke-test"
             echo "AICR_VALIDATOR_IMAGE_REGISTRY=ko.local"
+            # aicr-build side-loads the validators as ko.local/<...>:latest, but
+            # the main binary is stamped with a real commit, so the catalog would
+            # rewrite :latest -> :sha-<commit> (a tag that was never loaded) and
+            # the validator Jobs ImagePullBackOff. Pin the tag to :latest to
+            # override that rewrite (catalog resolution step 3) so it matches the
+            # loaded images. Release cells leave this unset (released :<version>).
+            echo "AICR_VALIDATOR_IMAGE_TAG=latest"
           } >> "$GITHUB_ENV"
 
       # Main cell (aicr_version empty): build the host aicr binary from source,
@@ -377,6 +389,7 @@ jobs:
       contents: read
       id-token: write  # WIF for the publish job
       packages: read   # GHCR pull for the verify job
+      actions: write   # dispatch the dashboard-publish refresh after publish
     uses: ./.github/workflows/evidence-ingest.yaml
     with:
       bundle_ref: ${{ needs.uat-kind.outputs.bundle_ref }}

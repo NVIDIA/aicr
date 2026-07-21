@@ -170,8 +170,8 @@ jobs:
           go build -o ./bin/uat-broker ./tools/uat-broker
           ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
 
-  # One of run-aws / run-gcp / run-azure fires based on the resolved cloud
-  # (the registry validates cloud membership, so at most one matches; the
+  # One of run-aws / run-gcp / run-azure / run-kind fires based on the resolved
+  # cloud (the registry validates cloud membership, so at most one matches; the
   # unmapped-cloud job below fails closed if a registry cloud has no
   # run-<cloud> job here yet). The caller job grants the permission SUPERSET
   # its callee needs — a reusable workflow's jobs are ceilinged by the calling
@@ -253,7 +253,7 @@ jobs:
     if: needs.resolve.outputs.cloud == 'kind'
     permissions:
       contents: read  # checkout inside the called pipeline
-      actions: read  # required by the nested evidence-ingest job
+      actions: write  # nested evidence-ingest dashboard-publish dispatch (a reusable workflow cannot elevate the caller token, so grant the ceiling here)
       id-token: write  # keyless cosign + GCS evidence-publish WIF
       packages: write  # push validator/agent + evidence images to GHCR
     uses: ./.github/workflows/uat-kind.yaml

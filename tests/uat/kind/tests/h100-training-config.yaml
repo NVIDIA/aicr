@@ -47,7 +47,6 @@ spec:
       # `--toleration '*'`.
       tolerations:
         - "*"
-      requireGpu: true
 
   recipe:
     criteria:
@@ -89,7 +88,6 @@ spec:
       namespace: aicr-validation
       tolerations:
         - "*"
-      requireGpu: true
     evidence:
       attestation:
         # Setting `out` enables emit. The push target is the stable per-recipe

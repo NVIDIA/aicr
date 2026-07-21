@@ -37,7 +37,6 @@ spec:
       namespace: aicr-validation
       tolerations:
         - "*"
-      requireGpu: true
 
   recipe:
     criteria:
@@ -71,7 +70,6 @@ spec:
       namespace: aicr-validation
       tolerations:
         - "*"
-      requireGpu: true
     evidence:
       attestation:
         out: ./evidence

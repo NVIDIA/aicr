@@ -168,8 +168,11 @@ reservations:
     # an actuator.
     cluster-config-path: tests/uat/kind/cluster-config.yaml
     test-config-dir: tests/uat/kind/tests
-    # Enrolled with both intents to mirror the AWS/GCP rows. Pending a green
-    # manual acceptance run on the GPU runner (evidence emit + sign needs
-    # Fulcio/Rekor egress from the self-hosted runner); set to [] to opt out of
-    # the nightly cron during bring-up if the first nightly is red.
-    nightly-intents: [training, inference]
+    # Opted OUT of the nightly batch during bring-up (explicit empty list, NOT a
+    # bare `nightly-intents:` which would default to [training] and schedule
+    # unvalidated multi-hour runs on the shared GPU runner). Stays manually
+    # dispatchable via uat-run.yaml. Enroll ([training], then add inference)
+    # after green manual acceptance runs on the H100 runner and verified
+    # ingestion — evidence emit + sign also needs Fulcio/Rekor egress from the
+    # self-hosted runner, which the acceptance run confirms.
+    nightly-intents: []
