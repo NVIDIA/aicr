@@ -433,6 +433,49 @@ already present in the compiled matrix, so the
 (advertised tuple ⇒ parseable template) covers every profile a recipe can
 name. See `validators/performance/nccl_benchmark_profile.go`.
 
+#### NCCL: recipe-supplied runtime (`nccl-benchmark-runtime-ref`)
+
+A profile still requires an embedded template to borrow, so it cannot cover a
+private service+accelerator whose fabric matches none of the shipped templates
+([#1792](https://github.com/NVIDIA/aicr/issues/1792)). The optional
+`nccl-benchmark-runtime-ref` performance constraint closes that gap: its value is
+a bare `{accelerator}/{service}` naming a Kubeflow `TrainingRuntime` the recipe
+ships in its `--data` tree at
+`validators/performance/testdata/{accelerator}/{service}/runtime.yaml` — the same
+layout the embedded templates use, so an external runtime is a drop-in for
+upstreaming.
+
+Resolution is split across the two-stage design:
+
+- **Orchestrator** (`pkg/validator/benchmark_runtime_ref.go`,
+  `resolveBenchmarkRuntimeRef`, called at the top of `ValidatePhases` /
+  `ValidatePhase`): reads the referenced file through the recipe `DataProvider`
+  and lowers its content into the `nccl-benchmark-runtime` **carrier** constraint
+  before the `/data/validation` ConfigMap is written. Fails closed
+  (`ErrCodeInvalidRequest`) on a malformed/traversal ref, a missing/empty file,
+  an absent `DataProvider`, or a ref set alongside an inline carrier. The two
+  constraint names are defined once in `pkg/validator/v1` (`PerfConstraintNCCLBenchmarkRuntime*`)
+  so the write side and the pod read side cannot drift.
+- **Pod** (`validators/performance/nccl_benchmark_runtime.go`): reads the
+  `nccl-benchmark-runtime` carrier and renders it — via the same `${VAR}`
+  substitution as the baked-in templates, through the shared `renderYAMLTemplate`
+  core — in place of `testdata/{accelerator}/{service}`.
+  `validateNcclAllReduceBw` bypasses the `ncclCombinationSupported` applicability
+  gate entirely (applicability is granted by the recipe's explicit opt-in, keyed
+  on its own criteria) and `applyNCCLResources` skips every service-specific step
+  — EFA/TCPXO/RDMA discovery, the GB200-NVreg / GKE-TCPXO preflights, RoCE claim
+  application, and NVLS/IMEX provisioning — because the supplied runtime owns its
+  fabric wiring. Transport verification still runs (the `-net` / `-nvls` markers
+  are transport-internal and fabric-agnostic), so a runtime paired with a named
+  variant must still prove its transport rather than pass on bandwidth alone; the
+  worker cohort is also sized against the runtime's own `nodeSelector` so
+  `WorkerCount` matches placement. It fails
+  closed on a carrier that is not a `trainer.kubeflow.org/v1alpha1`
+  `TrainingRuntime` with a `node` replicatedJob. The runtime is applied only
+  through `trainingRuntimeGVR` with a force-set name/namespace, so a recipe can
+  supply a `TrainingRuntime` and nothing else — not an arbitrary resource kind.
+  It is mutually exclusive with `nccl-benchmark-profile`.
+
 #### `inference-perf`: model, concurrency, and weights cache
 
 The `inference-perf` check warms vLLM before measuring, so the one-time

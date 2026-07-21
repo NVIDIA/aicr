@@ -256,11 +256,6 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	service := ctx.ValidationInput.Criteria.Service
 	accelerator := ctx.ValidationInput.Criteria.Accelerator
 
-	fabric, err := ncclFabric()
-	if err != nil {
-		return "", false, err
-	}
-
 	// The benchmark target defaults to the recipe's criteria; an explicit
 	// nccl-benchmark-profile constraint overrides it so recipes whose criteria
 	// are absent from the compiled matrix (external --data services, new
@@ -273,13 +268,53 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	if err != nil {
 		return "", false, err
 	}
+
+	// A recipe may supply its own TrainingRuntime (nccl-benchmark-runtime) when
+	// its criteria pair has neither a compiled matrix entry nor an embedded
+	// template to borrow — completing the data-driven vision for private
+	// --data-only services (NVIDIA/aicr#1792). It is mutually exclusive with the
+	// borrow-an-embedded-template profile: a recipe supplies its own runtime OR
+	// names an embedded one, never both.
+	customRuntime, err := resolveNCCLBenchmarkRuntime(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if customRuntime != "" && profile != nil {
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s (or %s) and %s are mutually exclusive: supply a runtime or borrow an embedded profile, not both",
+				perfConstraintNCCLBenchmarkRuntime, perfConstraintNCCLBenchmarkRuntimeRef, perfConstraintNCCLBenchmarkProfile))
+	}
+
+	// Fabric selection (AICR_NCCL_FABRIC) governs only the baked-in template path
+	// — EFA vs ConnectX-RoCE NIC wiring and the transport-variant template. A
+	// recipe-supplied runtime owns its own fabric end to end, so a malformed
+	// AICR_NCCL_FABRIC must not fail it; validate the env only when no custom
+	// runtime is in play. The default is inconsequential on the custom path
+	// (every fabric-dependent branch below is gated on customRuntime == "").
+	fabric := fabricEFA
+	if customRuntime == "" {
+		fabric, err = ncclFabric()
+		if err != nil {
+			return "", false, err
+		}
+	}
+
 	if profile != nil {
 		target = *profile
 		slog.Info("Recipe declares an NCCL benchmark profile — overriding criteria-derived applicability",
 			"profile", target.String(), "criteriaService", service, "criteriaAccelerator", accelerator)
 	}
 
-	if !ncclCombinationSupported(variant, fabric, target) {
+	// A recipe-supplied runtime grants applicability on its own: the recipe
+	// explicitly opted in with a complete TrainingRuntime, keyed on its own
+	// criteria, so the compiled applicability gate (which governs only the
+	// criteria/profile → embedded-template paths) is bypassed. The supplied
+	// runtime owns its fabric wiring, so service-specific NIC discovery,
+	// preflights, and NVLS/IMEX provisioning are skipped further below.
+	if customRuntime != "" {
+		slog.Info("Recipe supplies its own NCCL benchmark runtime — bypassing compiled applicability and service-specific fabric plumbing",
+			"criteriaService", service, "criteriaAccelerator", accelerator, "variant", string(variant))
+	} else if !ncclCombinationSupported(variant, fabric, target) {
 		slog.Info("Skipping NCCL All Reduce bandwidth validation: unsupported variant/service/accelerator combination",
 			"variant", string(variant), "target", target.String(), "fromProfile", target.fromProfile, "fabric", string(fabric))
 		if target.fromProfile {
@@ -299,13 +334,35 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 	slog.Info("Target bandwidth threshold", "threshold", threshold, "tolerance", "10%")
 
+	// Size the worker cohort against the same nodes the workers will actually
+	// land on. Precedence matches applyNCCLWorkerScheduling: a user
+	// --node-selector wins; otherwise a recipe-supplied runtime keeps its own
+	// worker nodeSelector, so size against that too — else WorkerCount would
+	// count nodes the runtime's selector then excludes, leaving workers Pending.
+	//
+	// Scope: only nodeSelector is factored in. Richer scheduling constraints in
+	// a custom runtime (nodeAffinity, un-tolerated taints) are the scheduler's
+	// job to enforce, not the validator's to simulate; a runtime that narrows
+	// placement below the sized cohort fails SAFE — workers stay Pending and the
+	// launcher wait times out with a diagnostic, never a false pass. Operators
+	// wanting the sized and scheduled cohorts to match exactly pass
+	// --node-selector.
+	sizingSelector := ctx.NodeSelector
+	if customRuntime != "" && len(sizingSelector) == 0 {
+		rs, rsErr := customRuntimeNodeSelector(customRuntime)
+		if rsErr != nil {
+			return "", false, rsErr
+		}
+		sizingSelector = rs
+	}
+
 	// Determine GPU configuration from cluster. The service comes from the
 	// benchmark target (an EKS-profiled cluster gets the EKS instance-type
 	// narrowing) but the accelerator stays the recipe's own criteria value:
 	// the GFD gpu.product node filter identifies the cluster's hardware, and
 	// a profile naming gb200 must not filter a cluster of an unmatched newer
 	// accelerator down to zero nodes.
-	gpuConfig, err := determineGPUConfig(ctx, target.service, accelerator)
+	gpuConfig, err := determineGPUConfig(ctx, target.service, accelerator, sizingSelector)
 	if err != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
 	}
@@ -325,7 +382,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// and NCCL silently falls back to Socket. Preflights key off the
 	// benchmark target: opting into a profile opts into that profile's
 	// environment contract, preflights included.
-	if fabric == fabricEFA && gb200NetPreflightApplies(variant, target.accelerator, target.service) {
+	if customRuntime == "" && fabric == fabricEFA && gb200NetPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}
@@ -338,7 +395,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// artifacts the workers never start sshd and the launcher mpirun fails
 	// with an opaque "pod failed" minutes later. Fail fast with an actionable
 	// error naming the unready nodes instead.
-	if gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
+	if customRuntime == "" && gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}
@@ -347,7 +404,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime)
 	if err != nil {
 		return "", false, err
 	}
@@ -369,9 +426,14 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// For named variants, assert the expected transport actually carried traffic.
-	// This turns the variant label into a hard guarantee — a GB200 cluster
-	// with a broken IMEX domain will fail loudly on the NVLS variant instead of
-	// silently falling back to EFA.
+	// This turns the variant label into a hard guarantee — a GB200 cluster with a
+	// broken IMEX domain fails loudly on the NVLS variant instead of silently
+	// falling back to EFA. Applies to recipe-supplied runtimes too: the markers
+	// (NCCL's "Using network" and "NVLS comm" log lines) are transport-internal
+	// and fabric-agnostic, so a runtime paired with -net / -nvls must still prove
+	// its transport rather than pass on bandwidth alone. The default check
+	// (variantDefault, no marker) is a no-op here, which is the documented
+	// pairing for a custom runtime.
 	if err := verifyTransportFromLogs(logs, variant); err != nil {
 		return logs, false, err
 	}
@@ -395,7 +457,8 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 // It applies the per-platform TrainingRuntime and shared TrainJob, waits for the launcher
 // pod to complete, and returns the benchmark logs.
 func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
-	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType) (string, error) {
+	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
+	customRuntime string) (string, error) {
 
 	dynamicClient := ctx.DynamicClient
 
@@ -429,9 +492,11 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// resource it deletes, so running it after an early failure is safe.
 	defer cleanupNCCLResources(dynamicClient, gpuConfig.Namespace)
 
-	// Apply runtime and trainjob resources.
-	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric); applyErr != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL resources", applyErr)
+	// Apply runtime and trainjob resources. Propagate an inner code rather than
+	// forcing ErrCodeInternal — a recipe-supplied runtime that fails to render is
+	// an ErrCodeInvalidRequest (recipe-authoring error), not an internal fault.
+	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime); applyErr != nil {
+		return "", aicrErrors.PropagateOrWrap(applyErr, aicrErrors.ErrCodeInternal, "failed to apply NCCL resources")
 	}
 
 	podHelper := &helper.PodLifecycle{
@@ -638,8 +703,12 @@ func anyNodeHasLabel(nodes []v1.Node, key string) bool {
 // determineGPUConfig analyzes the snapshot to determine GPU node configuration.
 // The returned Nodes slice is already narrowed to the TrainJob's target set
 // via resolveTargetGPUNodes so WorkerCount, GPUCountPerNode, and TotalGPUCount
-// agree with what the worker podSpec will later schedule onto.
-func determineGPUConfig(ctx *validators.Context, service recipe.CriteriaServiceType, accelerator recipe.CriteriaAcceleratorType) (*gpuConfiguration, error) {
+// agree with what the worker podSpec will later schedule onto. override is the
+// node selector to size against (and the first precedence in resolveTargetGPUNodes)
+// — normally ctx.NodeSelector, but a recipe-supplied runtime's own worker
+// nodeSelector when it pins its own nodes, so sizing and placement use the same
+// cohort.
+func determineGPUConfig(ctx *validators.Context, service recipe.CriteriaServiceType, accelerator recipe.CriteriaAcceleratorType, override map[string]string) (*gpuConfiguration, error) {
 	slog.Info("Analyzing GPU node configuration...")
 
 	gpuNodes, err := helper.FindSchedulableGpuNodes(ctx.Ctx, ctx.Clientset)
@@ -651,7 +720,7 @@ func determineGPUConfig(ctx *validators.Context, service recipe.CriteriaServiceT
 	}
 	slog.Info("Found GPU nodes", "count", len(gpuNodes))
 
-	targetNodes, err := resolveTargetGPUNodes(gpuNodes, ctx.NodeSelector, service, accelerator)
+	targetNodes, err := resolveTargetGPUNodes(gpuNodes, override, service, accelerator)
 	if err != nil {
 		return nil, err
 	}
@@ -681,8 +750,8 @@ func determineGPUConfig(ctx *validators.Context, service recipe.CriteriaServiceT
 // YAML files with template substitution using the dynamic client.
 // Runtime: testdata/{accelerator}/{service}/runtime[-{variant}].yaml (per-platform+variant)
 // TrainJob: testdata/trainjob.yaml (shared, just runtimeRef + numNodes)
-func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType) error {
-	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric))
+func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string) error {
+	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "")
 
 	templateData := map[string]string{
 		"NAMESPACE":          config.Namespace,
@@ -697,7 +766,8 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	var instanceType string
 
 	// For GKE, discover GPU NIC network names (cluster-specific prefixes).
-	if service == recipe.CriteriaServiceGKE {
+	// Skipped for a recipe-supplied runtime, which owns its own fabric wiring.
+	if customRuntime == "" && service == recipe.CriteriaServiceGKE {
 		gpuNICs, err := discoverGKEGPUNICNetworks(ctx.Ctx, dynamicClient)
 		if err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to discover GKE GPU NIC networks", err)
@@ -713,7 +783,8 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 
 	// For EKS, discover instance type and EFA adapter count from GPU nodes.
 	// EFA count of 0 is valid — NCCL falls back to TCP (slower but functional).
-	if service == recipe.CriteriaServiceEKS {
+	// Skipped for a recipe-supplied runtime, which owns its own fabric wiring.
+	if customRuntime == "" && service == recipe.CriteriaServiceEKS {
 		warnIfHeterogeneousNodes(config.Nodes)
 		it, efaCount, err := discoverEKSNodeConfig(config.Nodes)
 		if err != nil {
@@ -744,44 +815,24 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// have every /dev/infiniband device mounted. A count of 0 is valid —
 	// NCCL falls back to TCP over the pod network (slower but functional),
 	// mirroring the EKS zero-EFA behavior above.
-	if service == recipe.CriteriaServiceAKS {
+	// Skipped for a recipe-supplied runtime, which owns its own fabric wiring.
+	if customRuntime == "" && service == recipe.CriteriaServiceAKS {
 		if err := applyAKSTemplateData(config, templateData); err != nil {
 			return err
 		}
 	}
 
-	// Build effective worker scheduling: user override takes precedence over platform default.
-	defaultNodeSelector, defaultTolerations, err := platformWorkerScheduling(service, instanceType, config.Nodes)
+	effectiveNodeSelector, effectiveTolerations, err := effectiveWorkerScheduling(ctx, service, instanceType, config, customRuntime)
 	if err != nil {
 		return err
-	}
-	effectiveNodeSelector := defaultNodeSelector
-	// Gate on len() rather than != nil so an explicit but empty selector does
-	// not silently clear the platform default for scheduling while
-	// resolveTargetGPUNodes (which gates on len > 0) still narrows the counted
-	// set — that asymmetry would let workers schedule outside the cohort the
-	// job was sized for.
-	if len(ctx.NodeSelector) > 0 {
-		effectiveNodeSelector = ctx.NodeSelector
-		slog.Info("Using user-provided node selector override for NCCL workers", "selector", ctx.NodeSelector)
-	}
-	effectiveTolerations := defaultTolerations
-	if ctx.Tolerations != nil {
-		effectiveTolerations = ctx.Tolerations
-		slog.Info("Using user-provided toleration override for NCCL workers", "count", len(ctx.Tolerations))
-	}
-
-	if service == recipe.CriteriaServiceAny && len(effectiveNodeSelector) == 0 {
-		return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
-			"self-managed clusters (service=any) require --node-selector to identify GPU nodes "+
-				"(e.g., --node-selector nvidia.com/gpu.present=true)")
 	}
 
 	// RoCE NET: the worker pod references a RoCE DRA ResourceClaimTemplate
 	// (nccl-roce-rct). parseYAMLTemplate is single-document, so apply the claim
 	// as a standalone object before the runtime (it must exist when the TrainJob
-	// later creates the worker pods that reference it).
-	if fabric == fabricRoCE {
+	// later creates the worker pods that reference it). Skipped for a
+	// recipe-supplied runtime: it declares any DRA claims it needs itself.
+	if customRuntime == "" && fabric == fabricRoCE {
 		// Claim one ConnectX RoCE device per GPU via DRA (NCCL maps GPU->NIC);
 		// the per-node device pool (e.g. 8 on p6e-gb300r) is >= GPUs/node. Set
 		// here — keyed by fabric, not service — so adding a non-EKS RoCE service
@@ -801,9 +852,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		slog.Info("Applied RoCE ResourceClaimTemplate", "name", ncclRoceClaimName, "count", templateData["ROCE_DEVICE_COUNT"])
 	}
 
-	runtimeObj, err := parseYAMLTemplate(templatePath(accelerator, service, variant, fabric, "runtime.yaml"), templateData)
+	runtimeObj, err := buildNCCLRuntimeObject(customRuntime, accelerator, service, variant, fabric, config.Namespace, templateData)
 	if err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse training runtime template", err)
+		return err
 	}
 	if err := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
@@ -825,8 +876,10 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// auto-create a ResourceClaimTemplate that runtime-nvls.yaml references;
 	// without this, the NVL72 fabric is visible to NCCL but /dev/nvidia-caps-
 	// imex-channels isn't mounted into the workers and MNNVL aborts with
-	// "Cuda failure 800 'operation not permitted'".
-	if variant == variantNVLS {
+	// "Cuda failure 800 'operation not permitted'". Skipped for a recipe-supplied
+	// runtime: IMEX/ComputeDomain wiring is part of the fabric contract the
+	// runtime owns, so it must declare any ComputeDomain/ResourceClaim it needs.
+	if customRuntime == "" && variant == variantNVLS {
 		if err := applyNCCLComputeDomain(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply ComputeDomain", err)
 		}
@@ -1072,6 +1125,82 @@ func waitForIMEXClaimTemplate(ctx context.Context, dynamicClient dynamic.Interfa
 	}
 }
 
+// effectiveWorkerScheduling resolves the nodeSelector and tolerations stamped
+// onto the NCCL worker pods. A user --node-selector / --tolerations override
+// (ctx.NodeSelector / ctx.Tolerations) wins; otherwise the platform default is
+// used — EXCEPT for a recipe-supplied runtime, which owns its own worker
+// scheduling. Applying the platform default to a custom runtime would clobber
+// it: the EKS default stamps {instance-type: ""} (instanceType is never
+// discovered on the custom path — a selector matching zero nodes), and
+// GKE/OKE/AKS overwrite with a cloud-specific selector (GKE even hard-errors on
+// missing accelerator labels). The service=any explicit-selector requirement
+// likewise applies only to the baked-in path.
+func effectiveWorkerScheduling(ctx *validators.Context, service recipe.CriteriaServiceType,
+	instanceType string, config *gpuConfiguration, customRuntime string) (map[string]string, []v1.Toleration, error) {
+
+	var defaultNodeSelector map[string]string
+	var defaultTolerations []v1.Toleration
+	if customRuntime == "" {
+		ns, tol, err := platformWorkerScheduling(service, instanceType, config.Nodes)
+		if err != nil {
+			return nil, nil, err
+		}
+		defaultNodeSelector, defaultTolerations = ns, tol
+	}
+
+	effectiveNodeSelector := defaultNodeSelector
+	// Gate on len() rather than != nil so an explicit but empty selector does
+	// not silently clear the platform default for scheduling while
+	// resolveTargetGPUNodes (which gates on len > 0) still narrows the counted
+	// set — that asymmetry would let workers schedule outside the cohort the
+	// job was sized for.
+	if len(ctx.NodeSelector) > 0 {
+		effectiveNodeSelector = ctx.NodeSelector
+		slog.Info("Using user-provided node selector override for NCCL workers", "selector", ctx.NodeSelector)
+	}
+	effectiveTolerations := defaultTolerations
+	if ctx.Tolerations != nil {
+		effectiveTolerations = ctx.Tolerations
+		slog.Info("Using user-provided toleration override for NCCL workers", "count", len(ctx.Tolerations))
+	}
+
+	if customRuntime == "" && service == recipe.CriteriaServiceAny && len(effectiveNodeSelector) == 0 {
+		return nil, nil, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			"self-managed clusters (service=any) require --node-selector to identify GPU nodes "+
+				"(e.g., --node-selector nvidia.com/gpu.present=true)")
+	}
+
+	return effectiveNodeSelector, effectiveTolerations, nil
+}
+
+// buildNCCLRuntimeObject selects and renders the TrainingRuntime the NCCL
+// TrainJob will reference. A recipe-supplied nccl-benchmark-runtime is rendered
+// from its inline template with its identity forced to what the shared TrainJob's
+// runtimeRef expects and confined to the validator namespace (the value was
+// shape-checked as a Kubeflow TrainingRuntime at resolve time). Otherwise the
+// baked-in per-platform testdata template is read from disk.
+func buildNCCLRuntimeObject(customRuntime string, accelerator recipe.CriteriaAcceleratorType,
+	service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
+	namespace string, templateData map[string]string) (*unstructured.Unstructured, error) {
+
+	if customRuntime != "" {
+		obj, err := renderYAMLTemplate(customRuntime, templateData)
+		if err != nil {
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest, "failed to render recipe-supplied nccl-benchmark-runtime", err)
+		}
+		obj.SetName(ncclTrainingRuntimeName)
+		obj.SetNamespace(namespace)
+		slog.Info("Rendered recipe-supplied NCCL TrainingRuntime", "name", ncclTrainingRuntimeName, "namespace", namespace)
+		return obj, nil
+	}
+
+	obj, err := parseYAMLTemplate(templatePath(accelerator, service, variant, fabric, "runtime.yaml"), templateData)
+	if err != nil {
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse training runtime template", err)
+	}
+	return obj, nil
+}
+
 // parseYAMLTemplate reads a YAML template file, performs ${KEY} substitution,
 // and unmarshals it into an unstructured object.
 func parseYAMLTemplate(path string, data map[string]string) (*unstructured.Unstructured, error) {
@@ -1079,12 +1208,20 @@ func parseYAMLTemplate(path string, data map[string]string) (*unstructured.Unstr
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read template", err)
 	}
-	yamlContent := string(content)
+	return renderYAMLTemplate(string(content), data)
+}
+
+// renderYAMLTemplate performs ${KEY} substitution on an in-memory YAML template
+// string and unmarshals the result into an unstructured object. It is the
+// substitution core shared by parseYAMLTemplate (baked-in testdata templates,
+// read from disk) and the recipe-supplied nccl-benchmark-runtime path (the
+// template arrives inline in ValidationInput, never touching the filesystem).
+func renderYAMLTemplate(content string, data map[string]string) (*unstructured.Unstructured, error) {
 	for key, value := range data {
-		yamlContent = strings.ReplaceAll(yamlContent, "${"+key+"}", value)
+		content = strings.ReplaceAll(content, "${"+key+"}", value)
 	}
 	obj := &unstructured.Unstructured{}
-	if err := yaml.Unmarshal([]byte(yamlContent), obj); err != nil {
+	if err := yaml.Unmarshal([]byte(content), obj); err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse YAML", err)
 	}
 	return obj, nil

@@ -44,7 +44,6 @@ spec:
     # (see docs/integrator/aks-gpu-setup.md)
     - name: gpu-operator
       type: Helm
-      version: "v26.3.2"
       valuesFile: components/gpu-operator/values-aks.yaml
       dependencyRefs:
         - network-operator
@@ -66,7 +65,6 @@ spec:
     - name: network-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
-      version: "26.1.1"
       valuesFile: components/network-operator/values-aks.yaml
       manifestFiles:
         - components/network-operator/manifests/nfd-network-rule.yaml

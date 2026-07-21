@@ -69,6 +69,31 @@ The Go pieces:
    `ingest-evidence` job on a successful run, passing the digest-pinned
    ref read from the conformance step's `evidence/pointer.yaml`.
 
+## Dashboard refresh
+
+A successful ingest lands new evidence in the bucket, so the last job,
+`trigger-dashboard`, dispatches
+[`evidence-dashboard-publish.yaml`](evidence-dashboard-publish.md) to
+re-render the site. It runs `needs: publish`, so it inherits the
+`produced == 'true'` gate — a no-op ingest (allowlist-only change, deleted
+pointer) never fires it.
+
+The push-to-`main` ingest path already re-triggers the dashboard through
+that workflow's own `push:` trigger; the dispatch exists for the
+**first-party UAT path**, which reaches this workflow as a nested
+`workflow_call` (`uat-run` → `uat-{aws,gcp,azure}` → `evidence-ingest`,
+already at GitHub's four-level reuse limit). A nested call emits no
+top-level run event and cannot nest a fifth reusable workflow, so a
+`workflow_dispatch` is the only way to start a fresh top-level dashboard
+run from that depth. It needs `actions: write`, threaded down from the
+`uat-run` `run-*` jobs through each cloud pipeline's `ingest-evidence`
+job.
+
+The dashboard's `concurrency: { group: pages, cancel-in-progress: false }`
+serializes to one running build and one queued build, the newest dispatch
+superseding the queued one — so a multi-cell nightly batch collapses its
+flurry of ingests into a single coalesced rebuild rather than a backlog.
+
 ## meta.json
 
 Each run directory carries one `meta.json` (schema

@@ -71,7 +71,18 @@ components: []
 ```
 
 External components in this file are merged with the embedded registry; on
-name collision, the external definition wins.
+name collision, the external definition wins. An entry replaces its embedded
+counterpart **wholesale** — to override just `helm.defaultVersion`, copy the
+full embedded entry and change that one field, or the other coordinates
+(repository, chart, scheduling paths) are silently dropped.
+
+Overriding a component's `defaultVersion` this way takes effect for every
+embedded overlay that references the component: embedded overlays do not pin
+versions that equal the registry default, so resolution falls back to your
+merged default. The exception is an overlay with an explicit, intentionally
+divergent pin (declared in `versionPinExemptions`) — that pin still wins. See
+issue [#1616](https://github.com/NVIDIA/aicr/issues/1616) and
+[Chart Version Pinning](recipe-development.md#chart-version-pinning).
 
 ## Adding a criteria value
 
@@ -130,6 +141,15 @@ to opt into one of the embedded benchmarks. The profile selects the benchmark
 template and fabric handling; node identification still follows the recipe's
 own accelerator. See
 [Opting external recipes into a benchmark profile](../user/validation.md#opting-external-recipes-into-a-benchmark-profile).
+If the private service's fabric matches none of the embedded templates, ship the
+benchmark itself: put a Kubeflow `TrainingRuntime` in your `--data` tree at
+`validators/performance/testdata/{accelerator}/{service}/runtime.yaml` and point
+the `nccl-benchmark-runtime-ref` constraint at it (`{accelerator}/{service}`).
+Pass the same `--data <dir>` to `aicr validate` so it can resolve the referenced
+file; validation then gates it keyed on the recipe's own criteria with no
+compiled entry required, and the file is a drop-in should the runtime ever be
+upstreamed.
+See [Supplying a benchmark runtime for a private service](../user/validation.md#supplying-a-benchmark-runtime-for-a-private-service).
 
 ## Adding a component
 

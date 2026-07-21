@@ -443,7 +443,7 @@ func TestReleaseHomebrewWorkflowPolicy(t *testing.T) {
 	assertPermissions(t, homebrew, map[string]string{"actions": "read", "contents": "read"})
 	text := marshalYAML(t, homebrew)
 	for _, required := range []string{
-		"actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
 		"actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
 		"name: ${{ needs.build-ko.outputs.homebrew_artifact_name }}",
 		"path: /tmp/aicr-homebrew-formula",

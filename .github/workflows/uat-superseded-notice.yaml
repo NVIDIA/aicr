@@ -86,8 +86,9 @@ jobs:
           fi
 
           # RUN_TITLE is the triggering run's display title. uat-run.yaml sets a
-          # run-name of "UAT <reservation> @ <version> ..." (#1579), so the title
-          # names the superseded reservation. It is trusted workflow_run metadata
+          # run-name of "UAT <reservation> <intent> @ <version> ..." (#1579), so
+          # the title names the superseded reservation. It is trusted workflow_run
+          # metadata
           # passed via env (never inlined into the script). The step-summary is
           # file content (safe as-is); the ::warning:: command is percent-encoded
           # below since %, CR, and LF are workflow-command metacharacters.

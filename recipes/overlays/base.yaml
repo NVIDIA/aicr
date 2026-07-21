@@ -28,19 +28,16 @@ spec:
     - name: nfd
       type: Helm
       source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
-      version: 0.19.0
       valuesFile: components/nfd/values.yaml
 
     - name: cert-manager
       type: Helm
       source: https://charts.jetstack.io
-      version: v1.20.2
       valuesFile: components/cert-manager/values.yaml
 
     - name: gpu-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
-      version: v26.3.2
       valuesFile: components/gpu-operator/values.yaml
       dependencyRefs:
         - nfd
@@ -50,7 +47,6 @@ spec:
     - name: nvsentinel
       type: Helm
       source: oci://ghcr.io/nvidia
-      version: v1.9.0
       valuesFile: components/nvsentinel/values.yaml
       dependencyRefs:
         - cert-manager
@@ -64,19 +60,16 @@ spec:
     - name: nodewright-operator
       type: Helm
       source: oci://ghcr.io/nvidia/nodewright/charts
-      version: v0.17.1
       valuesFile: components/nodewright-operator/values.yaml
 
     - name: prometheus-operator-crds
       type: Helm
       source: https://prometheus-community.github.io/helm-charts
-      version: 28.0.1
       valuesFile: components/prometheus-operator-crds/values.yaml
 
     - name: kube-prometheus-stack
       type: Helm
       source: https://prometheus-community.github.io/helm-charts
-      version: 84.4.0
       valuesFile: components/kube-prometheus-stack/values.yaml
       dependencyRefs:
         - prometheus-operator-crds
@@ -84,7 +77,6 @@ spec:
     - name: k8s-ephemeral-storage-metrics
       type: Helm
       source: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
-      version: 1.19.2
       valuesFile: components/k8s-ephemeral-storage-metrics/values.yaml
       dependencyRefs:
         - kube-prometheus-stack
@@ -96,7 +88,6 @@ spec:
     - name: nvidia-dra-driver-gpu
       type: Helm
       source: oci://registry.k8s.io/dra-driver-nvidia/charts
-      version: "0.4.1"
       valuesFile: components/nvidia-dra-driver-gpu/values.yaml
       dependencyRefs:
         - gpu-operator
@@ -104,7 +95,6 @@ spec:
     - name: kai-scheduler
       type: Helm
       source: oci://ghcr.io/kai-scheduler/kai-scheduler
-      version: v0.14.1
       valuesFile: components/kai-scheduler/values.yaml
       dependencyRefs:
         - gpu-operator
