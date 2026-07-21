@@ -986,10 +986,10 @@ const STATE_META = {
   CONTESTED:{ cls:"st-contested", ic:"⚠",  label:"CONTESTED",   desc:"sources disagree — inspect the runs" },
   FAILING:  { cls:"st-failing",   ic:"✗",  label:"FAILING",     desc:"corroborated as failing" },
   UNTESTED: { cls:"st-untested",  ic:"–",  label:"UNTESTED",    desc:"no evidence yet" },
-  // PARTIAL is an overview-only recipe rollup: corroborated on the phases that
-  // ran, but not all phases are covered (e.g. a runner without the hardware for
-  // performance). Never a per-row or per-phase state — see rollupRecipe.
-  PARTIAL:  { cls:"st-partial",   ic:"◐",  label:"PARTIAL",     desc:"passing where tested, but not all phases have run" },
+  // PARTIAL is a rollup-only state (phase or recipe), never a per-row state:
+  // corroborated where it ran, but some rows/phases have not been run yet (e.g.
+  // a runner without the hardware for performance). See rollupPhase/rollupRecipe.
+  PARTIAL:  { cls:"st-partial",   ic:"◐",  label:"PARTIAL",     desc:"passing where tested, but not everything has run" },
 };
 const STATE_COLOR = {
   CONFIRMED:"var(--confirmed)", SINGLE:"var(--single)", CONTESTED:"var(--contested)",
@@ -1108,14 +1108,20 @@ function consensusOf(test){
   return { state: test._consensus, passAllow, failAllow, reported: test._reported };
 }
 function rollupPhase(tests){
-  let chosen = null, anyTest = false, pass = 0, fail = 0, reported = 0;
+  let chosen = null, anyTest = false, pass = 0, fail = 0, reported = 0, positive = 0;
   for (const t of tests){
     anyTest = true;
     const c = consensusOf(t);
     pass += c.passAllow; fail += c.failAllow; reported += c.reported;
+    if (c.state === "CONFIRMED" || c.state === "SINGLE") positive++;
     if (chosen === null || PHASE_PRIORITY.indexOf(c.state) < PHASE_PRIORITY.indexOf(chosen)) chosen = c.state;
   }
   if (!anyTest) chosen = "UNTESTED";
+  // A phase with some passing rows but others not yet run would otherwise be
+  // dragged to UNTESTED by its not-run rows, hiding the coverage it does have.
+  // Surface that as PARTIAL. CONTESTED/FAILING outrank UNTESTED, so chosen is
+  // only UNTESTED here when nothing failed. Mirrors Go RollupPhase.
+  if (chosen === "UNTESTED" && positive > 0) chosen = "PARTIAL";
   return { state: chosen, pass, fail, reported, total: pass + fail };
 }
 function rollupRecipe(recipe){
@@ -1944,10 +1950,13 @@ function renderMatrix(recipe){
   const tbody = document.createElement("tbody");
   PHASES.forEach(ph => {
     let tests = aTests.filter(t => t.phase === ph);
-    if (tests.length === 0) return;
+    // An empty phase (no rows at all) is still shown as an UNTESTED coverage gap
+    // rather than hidden, so a category nobody has run is visible instead of
+    // silently missing.
+    const empty = tests.length === 0;
     tests = sortTests(tests);
 
-    const rollState = aRollup[ph] || rollupPhase(tests).state; // baked Go state (active version)
+    const rollState = aRollup[ph] || (empty ? "UNTESTED" : rollupPhase(tests).state); // baked Go state (active version)
     const phaseKey = `${recipe.name}/${ph}`;
     const collapsed = collapsedPhases.has(phaseKey);
 
@@ -1959,7 +1968,7 @@ function renderMatrix(recipe){
     inner.className = "phase-sec-inner" + (collapsed ? " collapsed" : "");
     inner.innerHTML =
       `<span class="ptw">▾</span><span class="pname">${ph}</span>` +
-      `<span class="pmeta">${tests.length} test${tests.length>1?"s":""} · rollup ${rollState}</span>`;
+      `<span class="pmeta">${empty ? "not run" : tests.length + " test" + (tests.length>1?"s":"")} · rollup ${rollState}</span>`;
     inner.tabIndex = 0;
     inner.setAttribute("role", "button");
     inner.setAttribute("aria-expanded", String(!collapsed));
@@ -1975,6 +1984,34 @@ function renderMatrix(recipe){
     tbody.appendChild(secTr);
 
     if (collapsed) return;
+
+    if (empty){
+      // Placeholder row for a category with no runs: an UNTESTED consensus badge
+      // and empty tiles across every source column.
+      const tr = document.createElement("tr");
+      tr.className = "trow";
+      const tdTest = document.createElement("td");
+      tdTest.className = "cell-test";
+      tdTest.textContent = "(no tests run)";
+      tr.appendChild(tdTest);
+      const tdCons = document.createElement("td");
+      tdCons.className = "cell-cons";
+      const consWrap = document.createElement("span");
+      consWrap.className = "cons-cell";
+      consWrap.appendChild(badgeEl("UNTESTED", 0, 0, 0));
+      tdCons.appendChild(consWrap);
+      tr.appendChild(tdCons);
+      cols.forEach(({src}) => {
+        const td = document.createElement("td");
+        td.className = "cell-src";
+        const meta = SOURCES[src];
+        if (meta && !meta.allowlisted) td.classList.add("reported-col");
+        td.appendChild(tileEl("empty"));
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+      return;
+    }
 
     tests.forEach(test => {
       const c = consensusOf(test);
@@ -2130,7 +2167,16 @@ async function openTimeSeries(recipe, src, focusTest){
   // body grid — recipe's FULL union test list × builds (results default not-run).
   // paint() rebuilds the table so collapsible phase sections can re-render
   // without re-fetching the series.
-  const tests = recipe.tests;
+  //
+  // Rows come from the phase-aware ALL-build union (series.rows), not the latest
+  // combined grid (recipe.tests): a phase whose rows ran only in older builds is
+  // absent from every signer's latest run, so rendering from recipe.tests would
+  // drop those rows and mislabel the phase "not run" even though the series still
+  // holds their historical result. Fall back to recipe.tests for series data
+  // written before the rows field existed.
+  const tests = (series.rows && series.rows.length)
+    ? series.rows.map(r => ({ name: r.name, phase: r.phase }))
+    : recipe.tests;
   function paint(){
     host.innerHTML = "";
     // AICR version filtered this source down to nothing — say so rather than
@@ -2187,7 +2233,8 @@ async function openTimeSeries(recipe, src, focusTest){
     const tbody = document.createElement("tbody");
     PHASES.forEach(ph => {
       const phaseTests = tests.filter(t => t.phase === ph);
-      if (phaseTests.length === 0) return;
+      // Show an empty phase as an UNTESTED coverage gap instead of hiding it.
+      const empty = phaseTests.length === 0;
       const phaseKey = `${recipe.name}/${src}/${ph}`;
       const collapsed = collapsedTsPhases.has(phaseKey);
 
@@ -2199,7 +2246,7 @@ async function openTimeSeries(recipe, src, focusTest){
       inner.className = "phase-sec-inner" + (collapsed ? " collapsed" : "");
       inner.innerHTML =
         `<span class="ptw">▾</span><span class="pname">${esc(ph)}</span>` +
-        `<span class="pmeta">${phaseTests.length} test${phaseTests.length>1?"s":""}</span>`;
+        `<span class="pmeta">${empty ? "not run" : phaseTests.length + " test" + (phaseTests.length>1?"s":"")}</span>`;
       inner.tabIndex = 0;
       inner.setAttribute("role", "button");
       inner.setAttribute("aria-expanded", String(!collapsed));
@@ -2216,13 +2263,38 @@ async function openTimeSeries(recipe, src, focusTest){
 
       if (collapsed) return;
 
+      if (empty){
+        // Placeholder row for a category this source never ran: empty tiles
+        // across every build column.
+        const tr = document.createElement("tr");
+        tr.className = "ts-row";
+        const td0 = document.createElement("td");
+        td0.className = "ts-name ts-name-norun";
+        td0.innerHTML = `<span class="norun-tag">no tests run</span>`;
+        tr.appendChild(td0);
+        for (let b = 0; b < vn; b++){
+          const td = document.createElement("td");
+          td.className = "ts-cell" + (dimCol[b] ? " dimcol" : "");
+          td.appendChild(tileEl("not-run"));
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+        return;
+      }
+
       phaseTests.forEach(test => {
         const tr = document.createElement("tr");
         tr.className = "ts-row";
         if (focusTest && test.name === focusTest) tr.style.boxShadow = "inset 3px 0 0 var(--green)";
         const td0 = document.createElement("td");
         td0.className = "ts-name";
-        const neverRan = resultFor(test, src) === null;
+        // "Not reported by this source" is derived from the source's own build
+        // columns (not recipe.tests runs), so it is correct for historical-only
+        // rows that have no entry in the latest combined grid.
+        const neverRan = !vcols.some(bm => {
+          const r = bm.results && bm.results[test.name];
+          return r === "pass" || r === "fail";
+        });
         if (neverRan){
           td0.classList.add("ts-name-norun");
           td0.innerHTML = `${esc(test.name)}<span class="norun-tag">not reported by this source</span>`;

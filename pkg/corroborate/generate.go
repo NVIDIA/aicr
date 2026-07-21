@@ -741,7 +741,11 @@ func registerSource(sources map[string]Source, run *signerRun) {
 // identity's runs (newest-first), pre-reduced in buildRecipe so a signer that
 // submitted under two IDHashes contributes one column series, not two.
 func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowKey, runsByID map[string][]*signerRun) Series {
+	// rowKeys is the all-build union, already ordered by PhaseOrder then name.
+	// names drives the per-build Results maps; rows carries the phase-aware union
+	// the drilldown renders from (so older-build-only phases are still shown).
 	names := make([]string, 0, len(rowKeys))
+	rows := make([]SeriesRow, 0, len(rowKeys))
 	nameSeen := map[string]struct{}{}
 	for _, rk := range rowKeys {
 		if _, ok := nameSeen[rk.name]; ok {
@@ -749,6 +753,7 @@ func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowK
 		}
 		nameSeen[rk.name] = struct{}{}
 		names = append(names, rk.name)
+		rows = append(rows, SeriesRow{Name: rk.name, Phase: rk.phase})
 	}
 
 	builds := make(map[string][]SeriesBuild)
@@ -780,7 +785,7 @@ func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowK
 		health[id] = computeHealth(cols, names)
 	}
 
-	return Series{Recipe: agg.name, Builds: builds, Health: health}
+	return Series{Recipe: agg.name, Rows: rows, Builds: builds, Health: health}
 }
 
 // computeHealth derives a signer's run-health summary across its build columns.
