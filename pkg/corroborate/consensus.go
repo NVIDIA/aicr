@@ -39,6 +39,12 @@ const (
 	// StateUntested means no allowlisted signer ran the row — a coverage gap,
 	// distinct from FAILING.
 	StateUntested State = "UNTESTED"
+
+	// StatePartial is a phase- and recipe-level rollup only, never a per-row
+	// state: some rows are corroborated as passing but others have not been run,
+	// so the category has real coverage that a plain UNTESTED rollup would hide.
+	// See RollupPhase.
+	StatePartial State = "PARTIAL"
 )
 
 // Result is a single signer's bucketed outcome for one row, after mapping the
@@ -194,15 +200,30 @@ func priorityOf(st State) int {
 // RollupPhase folds a set of row states into a single phase state using the
 // worst-first precedence. An empty set (no rows in the phase) rolls up to
 // UNTESTED.
+//
+// A phase with a mix of passing and not-yet-run rows would be dragged all the
+// way to UNTESTED by the worst-first precedence, hiding the coverage it does
+// have. That mixed state rolls up to PARTIAL instead. Real problems still win:
+// CONTESTED and FAILING outrank UNTESTED, so the worst is only UNTESTED here
+// when nothing failed — and PARTIAL is used only when some row is positive.
 func RollupPhase(states []State) State {
 	if len(states) == 0 {
 		return StateUntested
 	}
 	worst := states[0]
+	hasPositive := false
+	for _, st := range states {
+		if st == StateConfirmed || st == StateSingle {
+			hasPositive = true
+		}
+	}
 	for _, st := range states[1:] {
 		if priorityOf(st) < priorityOf(worst) {
 			worst = st
 		}
+	}
+	if worst == StateUntested && hasPositive {
+		return StatePartial
 	}
 	return worst
 }

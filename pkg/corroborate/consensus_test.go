@@ -169,11 +169,14 @@ func TestRollupPhase(t *testing.T) {
 	}{
 		{"empty rolls up untested", nil, StateUntested},
 		{"single confirmed", []State{StateConfirmed}, StateConfirmed},
-		{"untested outranks confirmed", []State{StateConfirmed, StateConfirmed, StateUntested}, StateUntested},
+		{"all untested stays untested", []State{StateUntested, StateUntested}, StateUntested},
+		{"confirmed plus untested is partial", []State{StateConfirmed, StateConfirmed, StateUntested}, StatePartial},
+		{"single plus untested is partial", []State{StateSingle, StateUntested}, StatePartial},
 		{"single outranks confirmed", []State{StateConfirmed, StateSingle}, StateSingle},
-		{"failing outranks untested", []State{StateUntested, StateFailing}, StateFailing},
+		{"failing plus untested is not partial", []State{StateUntested, StateFailing}, StateFailing},
+		{"failing plus passing plus untested stays failing", []State{StateConfirmed, StateUntested, StateFailing}, StateFailing},
 		{"contested outranks failing", []State{StateFailing, StateContested}, StateContested},
-		{"contested wins over everything", []State{StateConfirmed, StateSingle, StateUntested, StateFailing, StateContested}, StateContested},
+		{"contested wins even with passing and untested", []State{StateConfirmed, StateSingle, StateUntested, StateFailing, StateContested}, StateContested},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
