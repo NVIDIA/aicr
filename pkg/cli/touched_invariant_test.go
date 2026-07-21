@@ -152,6 +152,47 @@ measurements:
           ID: ubuntu
 `
 
+const kindSlurmSnapshotYAML = `kind: Snapshot
+measurements:
+  - type: K8s
+    subtypes:
+      - subtype: node
+        data:
+          provider: kind
+      - subtype: server
+        data:
+          version: "1.34.0"
+  - type: GPU
+    subtypes:
+      - subtype: hardware
+        data:
+          model: h100
+`
+
+const kindDetectedSlurmSnapshotYAML = `kind: Snapshot
+measurements:
+  - type: K8s
+    subtypes:
+      - subtype: node
+        data:
+          provider: kind
+      - subtype: server
+        data:
+          version: "1.34.0"
+      - subtype: slinky-slurm
+        data:
+          api-available: true
+          detected: true
+          collection-state: detected
+          api-version: v1alpha1
+          controller-count: 1
+  - type: GPU
+    subtypes:
+      - subtype: hardware
+        data:
+          model: h100
+`
+
 // TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed drives the full CLI path
 // (flag parse → applyCriteriaOverrides marks touched → coverage failure →
 // relaxSnapshotDerivedCoverage refuses): a user-stated --os on a snapshot
@@ -197,5 +238,51 @@ func TestRecipeCmd_Snapshot_DerivedDimensionRelaxed(t *testing.T) {
 	}
 	if strings.Contains(string(out), "os: ubuntu") {
 		t.Errorf("generated recipe still states os: ubuntu — snapshot-derived os was not relaxed:\n%s", out)
+	}
+}
+
+func TestRecipeCmd_Snapshot_ExplicitSlurmPlatform(t *testing.T) {
+	tests := []struct {
+		name     string
+		snapshot string
+	}{
+		{
+			name:     "old snapshot without Slinky subtype",
+			snapshot: kindSlurmSnapshotYAML,
+		},
+		{
+			name:     "Tier 1 detected Slinky subtype",
+			snapshot: kindDetectedSlurmSnapshotYAML,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapPath := writeYAML(t, "snapshot.yaml", tt.snapshot)
+			outPath := filepath.Join(t.TempDir(), "recipe.yaml")
+
+			err := newRootCmd().Run(context.Background(), []string{
+				name,
+				"recipe",
+				"--snapshot", snapPath,
+				"--intent", "training",
+				"--platform", "slurm",
+				"-o", outPath,
+			})
+			if err != nil {
+				t.Fatalf("recipe --snapshot --intent training --platform slurm failed: %v", err)
+			}
+			out, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatalf("read generated recipe: %v", err)
+			}
+			output := string(out)
+			if !strings.Contains(output, "platform: slurm") {
+				t.Errorf("generated recipe does not retain explicit platform: slurm:\n%s", output)
+			}
+			if !strings.Contains(output, "name: slinky-slurm") {
+				t.Errorf("generated recipe did not select the inline Slurm leaf:\n%s", output)
+			}
+		})
 	}
 }

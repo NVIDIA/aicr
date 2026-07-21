@@ -28,6 +28,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
 )
 
 // policyListConcurrency caps fan-out of per-GVR ClusterPolicy List calls.
@@ -37,7 +38,15 @@ const policyListConcurrency = 4
 
 // collectClusterPolicies retrieves ClusterPolicy custom resources from all API groups and namespaces.
 // It dynamically discovers all ClusterPolicy CRDs regardless of their API group.
-func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]measurement.Reading, error) {
+func (k *Collector) collectClusterPolicies(
+	ctx context.Context,
+	discoveryClient discovery.DiscoveryInterface,
+) (map[string]measurement.Reading, error) {
+
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
+	}
+
 	// Resolve the cached dynamic client (constructed lazily on first call).
 	dynamicClient, err := k.getDynamicClient()
 	if err != nil {
@@ -45,9 +54,14 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 	}
 
 	// Discover all API resources
-	discoveryClient := k.ClientSet.Discovery()
 	apiResourceLists, err := discoveryClient.ServerPreferredResources()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "policy discovery cancelled", ctxErr)
+		}
+		if errors.IsTransient(err) {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "policy discovery timed out", err)
+		}
 		// ServerPreferredResources can return a partial result with an error
 		// We should continue if we got some resources
 		slog.Debug("error discovering API resources (continuing with partial results)", slog.String("error", err.Error()))

@@ -38,6 +38,10 @@ Each stage transforms input data into a different format:
 - **server**: Version info from `/version` endpoint
 - **image**: Container images from all pods across namespaces
 - **policy**: GPU Operator ClusterPolicy custom resource
+- **slinky-slurm**: Controller presence plus a secret-safe, single-Controller
+  projection of associated NodeSet, LoginSet, RestApi, and Accounting CRs
+- **mariadb-operator**: Official `k8s.mariadb.com/mariadbs` API conflict
+  evidence (not database availability or health)
 
 **GPU Hardware:**
 - Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
@@ -64,8 +68,11 @@ Each stage transforms input data into a different format:
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
 │   ├─ K8s                                                │
-│   │   └─ subtypes: [server, image, policy]              │
-│   │       └─ data: map[string]Reading                   │
+│   │   └─ subtypes: [server, image, policy, node,        │
+│   │                 slinky-slurm, mariadb-operator]      │
+│   │       ├─ data: map[string]Reading                   │
+│   │       └─ slinky-slurm.items: []ItemEntry            │
+│   │             (allowlisted resource context + data)   │
 │   │                                                     │
 │   ├─ GPU                                                │
 │   │   └─ subtypes: [hardware]                           │
@@ -170,6 +177,9 @@ aicr recipe --os ubuntu --accelerator h100 --service eks --intent training --pla
 ```bash
 aicr snapshot --output system.yaml
 aicr recipe --snapshot system.yaml --intent training --platform kubeflow
+
+# Slinky Slurm remains an explicit platform choice
+aicr recipe --snapshot system.yaml --intent training --platform slurm
 ```
 
 **Snapshot Mode (ConfigMap)** - Read from Kubernetes:
@@ -210,6 +220,15 @@ count**. Intent and platform are recipe-author choices the cluster cannot
 reveal, so they always resolve to `any` and must be supplied via CLI flags.
 Other snapshot fields (K8s server version, OS version, kernel) are captured as
 measurements and become constraint *targets*, not recipe criteria.
+
+`K8s.slinky-slurm` records whether a Slinky Controller declaration was
+observed, but does not infer `platform: slurm`. Slinky can coexist with other
+training or inference stacks, and its resource projection does not reconstruct
+Helm values. `K8s.mariadb-operator` likewise records only official API/CR
+conflict evidence and never infers accounting intent or database source.
+Hybrid resolution therefore combines snapshot-derived infrastructure criteria
+with explicit intent and platform, as in the Slurm command above. Older
+snapshots without either subtype remain valid inputs.
 
 ### Recipe Generation
 

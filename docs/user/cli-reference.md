@@ -438,11 +438,23 @@ aicr recipe --os ubuntu --gpu h100 --service eks --intent training --output reci
 
 Generate recipes from captured snapshots:
 
+Snapshots derive infrastructure criteria such as service, accelerator, and OS,
+but `intent` and `platform` remain explicit choices. `K8s.slinky-slurm`
+reports declared Slinky Controller presence and, for a single Controller, a
+secret-safe associated-resource topology; it does not select Slurm or
+reconstruct the installed chart's Helm values. `K8s.mariadb-operator` records
+official MariaDB Operator API/CR conflict evidence but does not infer database
+availability, accounting intent, or database source. Pass `--platform slurm`
+to resolve a Slurm leaf. Older snapshots without either subtype remain
+compatible.
+
 **Flags:**
+
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--snapshot` | `-s` | string | Path/URI to snapshot (file path, URL, or cm://namespace/name) |
 | `--intent` | | string | Workload intent: training, inference |
+| `--platform` | | string | Explicit platform/framework type, including slurm |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
@@ -456,6 +468,9 @@ Generate recipes from captured snapshots:
 ```shell
 # Generate recipe from local snapshot file
 aicr recipe --snapshot system.yaml --intent training
+
+# Resolve the Slurm leaf from snapshot-derived infrastructure criteria
+aicr recipe --snapshot system.yaml --intent training --platform slurm
 
 # From ConfigMap (requires cluster access)
 aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --intent training

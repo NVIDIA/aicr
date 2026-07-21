@@ -43,7 +43,7 @@ Each subdirectory is one collector; one collector emits one
 | Kind | Package | Emits | Notes |
 |------|---------|-------|-------|
 | GPU | `pkg/collector/gpu` | `TypeGPU` | One subtype: `hardware` (NFD/PCI enumeration; resolves the accelerator SKU from the PCI device ID). Driver-free — no nvidia-smi. Degrades to no subtype when sysfs is unavailable. |
-| Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image info, network policy, node-local info. Uses the singleton `pkg/k8s/client`. |
+| Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image inventory, GPU Operator ClusterPolicy, node-local info, secret-safe Slinky resource topology, and official MariaDB Operator API conflict evidence. Uses the singleton `pkg/k8s/client`. |
 | OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `sysctl`. |
 | SystemD | `pkg/collector/systemd` | `TypeSystemD` | D-Bus probe of configured services. Routes to Talos via factory when `os: talos`. |
 | Topology | `pkg/collector/topology` | `TypeNodeTopology` | Cluster-wide taints and labels across all nodes — see [Cross-cutting topology collector](#cross-cutting-topology-collector). |
@@ -54,6 +54,27 @@ Each subdirectory is one collector; one collector emits one
 The mapping from collector to `measurement.Type` is one-to-one for
 all collectors except Talos, which substitutes for systemd and os in
 the factory when the OS criteria is `talos`.
+
+The Kubernetes collector fans its sub-collectors out in parallel. Its
+`slinky-slurm` sub-collector performs version-agnostic discovery for the exact
+`slinky.slurm.net` `controllers` resource and then lists Controllers
+cluster-wide through the dynamic client. It emits an explicit `absent`,
+`detected`, `unsupported-multicluster`, or `unknown` state rather than adding a
+new measurement Type or factory registration. When exactly one Controller is
+selected, it fans out read-only Lists for NodeSet, LoginSet, RestApi, and
+referenced Accounting CRs, associates them through same-namespace references,
+and projects only an explicit scalar allowlist. Missing APIs or unresolved
+references omit child items and counts; other K8s subtypes remain intact.
+
+The `mariadb-operator` sub-collector reuses the same discovery seam for the
+official `k8s.mariadb.com/mariadbs` API. Its
+`absent | api-detected | crs-detected | unknown` state is conflict evidence,
+not database availability or operator health. Both paths are read-only and
+never inspect operator Deployments, pods, Services, Secrets, status, or
+free-form configuration. See the
+[Slinky](../integrator/measurement-api.md#k8s-slinky-slurm-shape) and
+[MariaDB](../integrator/measurement-api.md#k8s-mariadb-operator-shape)
+measurement contracts for field-presence semantics.
 
 ## Collector Interface
 
