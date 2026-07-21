@@ -73,19 +73,23 @@ const (
 	// gpuDriverPreinstalled means the sampled GPU node has the nvidia
 	// kernel module loaded. Auto-inject driver.enabled=false to prevent
 	// the GPU Operator from installing a second driver on top of the
-	// one the platform (GKE-COS, OKE bare-metal) has already
+	// one the platform (AKS, GKE-COS, OKE bare-metal) has already
 	// provisioned — but only when the resolved overlay already carries
 	// the full coordinated preinstalled-driver profile (see
-	// hasPreinstalledDriverProfile). Bare AKS/EKS get a warning instead
+	// hasPreinstalledDriverProfile). Bare EKS gets a warning instead
 	// of a half-configured Operator.
 	gpuDriverPreinstalled
 
 	// gpuDriverAbsent means the sampled GPU node does not have the
-	// nvidia kernel module loaded. No override — every provider
-	// values.yaml either sets driver.enabled=true (base, inherited by
-	// EKS/AKS) or is a documented preinstalled-driver overlay that
-	// already carries driver.enabled=false statically. Overriding here
-	// would only regress those.
+	// nvidia kernel module loaded. Never an override — and when the
+	// resolved overlay declares the preinstalled-driver profile (AKS,
+	// GKE-COS, OKE carry driver.enabled=false statically) the recipe
+	// assumes a platform-provided driver the cluster does not have, so
+	// the deployed bundle would leave GPU nodes driverless. Resolution
+	// warns with the bundle-time GPU-Operator-managed override set (a
+	// blocking bundle-time coherence validation is tracked in #1757).
+	// Overlays whose operator installs the driver (base, inherited by
+	// EKS) proceed unchanged.
 	gpuDriverAbsent
 )
 
@@ -289,18 +293,31 @@ func isDisambiguatedLabelKey(k string) bool {
 // hostPaths.driverInstallDir settings the AKS driver-only-install
 // profile documents as required together.
 //
-// Bare AKS/EKS overlays lack this marker; auto-detect skips them so
+// Bare EKS overlays lack this marker; auto-detect skips them so
 // callers get a warning instead of a half-configured Operator (driver
 // off, toolkit + gdrcopy still on with no operator-managed driver
-// root). Fixing those cases requires a full preinstalled-profile
+// root). Fixing that case requires a full preinstalled-profile
 // overlay (tracked separately) — this gate keeps the current PR from
-// regressing them into a strictly worse state.
+// regressing it into a strictly worse state.
 func hasPreinstalledDriverProfile(ctx context.Context, r *recipe.RecipeResult) bool {
 	if r == nil {
 		return false
 	}
 	values, err := r.GetValuesForComponentWithContext(ctx, gpuOperatorComponentName)
-	if err != nil || len(values) == 0 {
+	if err != nil {
+		// A read error (e.g. context deadline) is NOT "no preinstalled
+		// profile" — returning false silently here would suppress the
+		// absent-driver mismatch warning in the caller's gpuDriverAbsent
+		// branch. It never produces a wrong artifact (the only-false policy
+		// makes the absent case a no-op), but surface the error so the lost
+		// observability is visible rather than silent.
+		slog.Warn("gpu-operator preinstalled-driver profile check: failed to read "+
+			"component values; treating as no preinstalled-driver profile "+
+			"(an absent-driver mismatch warning may be suppressed for this resolve)",
+			"component", gpuOperatorComponentName, "error", err)
+		return false
+	}
+	if len(values) == 0 {
 		return false
 	}
 	driver, ok := values["driver"].(map[string]any)
@@ -323,9 +340,25 @@ func hasPreinstalledDriverProfile(ctx context.Context, r *recipe.RecipeResult) b
 // The injection is a no-op on rendered Helm output for overlays that
 // already carry the profile (the resolved recipe records the override
 // explicitly for auditability, so the emitted YAML is not byte-for-byte
-// identical); bare AKS/EKS get a slog.Warn instead so the operator
+// identical); bare EKS gets a slog.Warn instead so the operator
 // knows to add a proper preinstalled overlay before the deploy will do
 // the right thing.
+//
+// The inverse mismatch — the sampled GPU node has NO driver loaded but
+// the resolved overlay declares the preinstalled-driver profile (e.g.
+// the AKS driver-only default on a cluster whose GPU pools were created
+// with `--gpu-driver none`) — emits a slog.Warn. On AKS the warning
+// names the bundle-time GPU-Operator-managed override set; on other
+// preinstalled-profile platforms (GKE-COS, OKE) it gives generic
+// reprovisioning guidance instead, because the AKS override tuple is
+// incoherent there (GKE-COS keeps hostPaths.driverInstallDir pointed at
+// the host driver root, which driver.enabled=true would desynchronize
+// from the DRA driver root, and COS's read-only root cannot take an
+// operator-managed driver install at all). It cannot hard-fail here:
+// `aicr recipe` has no `--set`, so erroring at resolution would leave
+// supported GPU-Operator-managed clusters with no way to reach the
+// bundle-time overrides intended for them. A blocking bundle-time
+// ownership-coherence validation is tracked in issue #1757.
 //
 // Merge precedence for the final Helm values is
 // base values.yaml → ValuesFile → Overrides (see pkg/recipe/adapter.go).
@@ -334,6 +367,32 @@ func applyGPUDriverAutoOverride(ctx context.Context, r *recipe.RecipeResult, sna
 	state := computeGPUDriverState(snap)
 	if r == nil {
 		slog.Debug("gpu-operator driver auto-detect: nil recipe result",
+			"state", state.String())
+		return
+	}
+	if state == gpuDriverAbsent && hasPreinstalledDriverProfile(ctx, r) {
+		// The GPU-Operator-managed override tuple is only coherent for
+		// AKS (see the function comment); other preinstalled-profile
+		// platforms get generic reprovisioning guidance.
+		remediation := "reprovision the GPU node pools with the " +
+			"platform's default NVIDIA driver install (see the " +
+			"platform's GPU setup guide under docs/integrator/)"
+		if r.Criteria != nil && r.Criteria.Service == recipe.CriteriaServiceAKS {
+			remediation = "either reprovision the GPU node pools with " +
+				"the platform's default driver install (AKS: omit " +
+				"--gpu-driver none), or bundle in GPU-Operator-managed " +
+				"mode: --set gpuoperator:driver.enabled=true " +
+				"--set gpuoperator:toolkit.enabled=true " +
+				"--set gpuoperator:operator.runtimeClass=nvidia " +
+				"--set dradriver:nvidiaDriverRoot=/run/nvidia/driver"
+		}
+		slog.Warn("gpu-operator driver mismatch: the resolved recipe assumes a "+
+			"platform-preinstalled NVIDIA driver and container toolkit "+
+			"(gpu-operator driver.enabled=false — e.g. the AKS driver-only "+
+			"default), but the sampled GPU node reports no NVIDIA kernel "+
+			"driver loaded. Deploying this configuration would leave GPU "+
+			"nodes driverless. Remediation: "+remediation,
+			"component", gpuOperatorComponentName,
 			"state", state.String())
 		return
 	}
@@ -350,7 +409,7 @@ func applyGPUDriverAutoOverride(ctx context.Context, r *recipe.RecipeResult, sna
 			"(gpu-operator values do not declare driver.enabled=false). Skipping "+
 			"injection to avoid a half-configured Operator (driver off, toolkit "+
 			"and gdrcopy still enabled with no operator-managed driver root). "+
-			"Use a preinstalled-profile overlay (GKE-COS, OKE) or an overlay "+
+			"Use a preinstalled-profile overlay (AKS, GKE-COS, OKE) or an overlay "+
 			"that declares the full coordinated profile.",
 			"component", gpuOperatorComponentName,
 			"state", state.String())

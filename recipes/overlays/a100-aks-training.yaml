@@ -35,7 +35,8 @@ spec:
       value: ">= 1.30"
 
   componentRefs:
-    # A100-specific GPU Operator overrides (inherits valuesFile from aks-training)
+    # GPU Operator dependency ordering (inherits valuesFile from aks-training;
+    # gdrcopy stays disabled there — inert under the driver-only profile).
     - name: gpu-operator
       type: Helm
       dependencyRefs:
@@ -43,9 +44,6 @@ spec:
         - cert-manager
         - kube-prometheus-stack
         - nodewright-customizations
-      overrides:
-        gdrcopy:
-          enabled: true
 
     # A100 reuses the h100 nodewright tuning profile (tuning.yaml), mirroring
     # a100-eks-training: nvidia-setup ships aks configs only for aks-h100, and
@@ -60,6 +58,10 @@ spec:
         service: aks
         accelerator: h100
         intent: multiNodeTraining
+        # Azure-managed driver profile: skip the nvidia-tuned package (no
+        # nvidia-tuned-triggered reboot; nvidia-setup-full still reboots for
+        # host prep); re-enable with --set nodewrightcustomizations:tuningEnabled=true.
+        tuningEnabled: false
       dependencyRefs:
         - nodewright-operator
 
