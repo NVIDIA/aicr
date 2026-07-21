@@ -44,6 +44,8 @@ navigation:
         path: user/validation.md
       - page: Coverage Matrix
         path: user/coverage-matrix.md
+      - page: Slurm Accounting
+        path: user/slinky-slurm-accounting.md
 
   - section: Integrator Guide
     contents:

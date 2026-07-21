@@ -42,6 +42,22 @@ topologyUpdater:
   # mounting kubelet state files (TLS material, pod manifests,
   # checkpoint data) into the TU container.
   kubeletStateDir: ""
+  # Raise the topology-updater memory limit above the chart default
+  # (60Mi). topologyUpdater is only enabled on GPU-node recipes, whose
+  # workers are high-core (e.g. 144-vCPU GB200/Grace, 192-vCPU p5). The
+  # Go binary leaves GOMAXPROCS=nproc, so the runtime sizes for every
+  # core and the pod-resources/NUMA scan over a large multi-NUMA node
+  # pushes the working set past 60Mi → OOMKilled → CrashLoopBackOff (seen
+  # on GB200/EKS, 144-vCPU nodes). A core-count-independent limit bump is
+  # the deterministic fix — same class as the aws-ebs-csi sidecar OOM
+  # (#1693). Requests raised too so the DaemonSet keeps Burstable QoS with
+  # headroom.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
 
 # GC enabled for cleanup of stale NodeFeature/NodeResourceTopology CRs
 gc:
