@@ -85,11 +85,7 @@ jobs:
       tier3_batches: ${{ steps.classify.outputs.tier3_batches }}
     steps:
       - name: Checkout
-<<<<<<< HEAD
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-=======
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
->>>>>>> ff27aee1 (ci(kwok): consolidate tiers behind shared kwok-test-run.yaml (#1172))
         with:
           persist-credentials: false
           # Full checkout needed for diff-aware Tier 2 discovery
@@ -108,7 +104,8 @@ jobs:
 
           # --- workflow_dispatch: test exactly the requested recipe ---
           if [[ -n "${DISPATCH_RECIPE}" ]]; then
-            single=$(jq -cn --arg r "${DISPATCH_RECIPE}" '[{recipe: $r, deployer: "helm"}]')
+            single=$(jq -cn --arg r "${DISPATCH_RECIPE}" --argjson deployers "$deployers" \
+              '[ $deployers[] as $d | {recipe: $r, deployer: $d} ]')
             echo "tier1_pairs=${single}" >> "$GITHUB_OUTPUT"
             echo "tier2_pairs=[]"        >> "$GITHUB_OUTPUT"
             echo "tier3_batches=[]"      >> "$GITHUB_OUTPUT"
@@ -248,6 +245,8 @@ jobs:
           # deliberate policy (see ADR-003 "Tier 2 deployer coverage") — it
           # exercises diff-affected accelerator overlays against the default
           # deployer only, not the full set below.
+          # Keep .github/actions/kwok-test/action.yml's deployer input
+          # doc-string in sync with this list (prose only, not enforced).
           deployers='["helm","argocd-oci","argocd-helm-oci","argocd-git","flux-oci","flux-git"]'
 
           tier1_pairs=$(jq -cn --argjson recipes "$tier1" --argjson deployers "$deployers" '
@@ -291,9 +290,13 @@ jobs:
           echo "tier2_pairs=${tier2_pairs}"     >> "$GITHUB_OUTPUT"
           echo "tier3_batches=${tier3_batches}" >> "$GITHUB_OUTPUT"
 
-                   tier1_count=$(echo "$tier1_pairs" | jq 'length')
+          tier1_count=$(echo "$tier1_pairs" | jq 'length')
           if (( tier1_count > 200 )); then
             echo "::warning::Tier 1 contains ${tier1_count} pairs and is approaching GitHub's 256-configuration matrix limit"
+          fi
+          if (( tier1_count > 256 )); then
+            echo "::error::Tier 1 has grown to ${tier1_count} pairs (>256) — exceeds GitHub's matrix cap. Batch Tier 1 like Tier 3, or tighten the generic-overlay criteria."
+            exit 1
           fi
           tier2_count=$(echo "$tier2_pairs" | jq 'length')
           tier3_pairs=$(echo "$tier3_batches" | jq '[.[].pairs[]] | length')
@@ -305,6 +308,7 @@ jobs:
   # tier1_pairs is well under 256 entries, so it's passed in a single call —
   # no batching needed.
   test-tier1:
+    name: 'Tier 1'
     needs: discover
     if: >-
       github.event_name != 'schedule' &&
@@ -349,6 +353,7 @@ jobs:
   # ── Tier 2: diff-aware accelerator tests (PR only, conditional) ──
   # Helm-only by deliberate policy — see ADR-003 "Tier 2 deployer coverage".
   test-tier2:
+    name: 'Tier 2'
     needs: discover
     if: >-
       github.event_name == 'pull_request' &&
@@ -461,4 +466,3 @@ jobs:
           fi
 
           echo "All recipe validations passed" >> $GITHUB_STEP_SUMMARY
-          
