@@ -15,7 +15,7 @@ require (
 	github.com/nvidia/k8s-launch-kit v0.0.0-20260713111738-0507f25caee7
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
-	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_golang v1.24.0
 	github.com/sigstore/protobuf-specs v0.5.1
 	github.com/sigstore/rekor-monitor v0.0.0-20260622135518-170374c6119e
 	github.com/sigstore/sigstore v1.10.8
@@ -30,6 +30,7 @@ require (
 	github.com/urfave/cli/v3 v3.10.1
 	golang.org/x/mod v0.38.0
 	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	golang.org/x/time v0.15.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
@@ -209,7 +210,6 @@ require (
 	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/api v0.288.0 // indirect
 	google.golang.org/genproto v0.0.0-20260706201446-f0a921348800 // indirect
