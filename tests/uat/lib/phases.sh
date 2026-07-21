@@ -65,6 +65,10 @@ TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
 TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
 TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
 TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
+# TrainJob node count. Defaults to 2 to span the cloud lanes' 2-GPU pools (and
+# exercise multi-node distributed training); the single-GPU nvkind lane
+# (tests/uat/kind/run) overrides to 1.
+TRAINJOB_NUM_NODES="${TRAINJOB_NUM_NODES:-2}"
 HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
 # Budget for the post-install readiness gate (see phase_install), which runs
 # `aicr validate --phase deployment` until it passes READINESS_CONSECUTIVE_PASSES
@@ -484,7 +488,7 @@ metadata:
   namespace: ${TRAINJOB_NAMESPACE}
 spec:
   trainer:
-    numNodes: 2
+    numNodes: ${TRAINJOB_NUM_NODES}
     image: ${TRAINJOB_IMAGE}
     command:
       - python3

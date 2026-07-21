@@ -588,7 +588,7 @@ func TestCommittedRegistryValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("committed reservations.yaml invalid: %v", err)
 	}
-	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure, "aws-gb200": CloudAWS}
+	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure, "aws-gb200": CloudAWS, "kind-h100": CloudKind}
 	for name, cloud := range want {
 		res, err := reg.Lookup(name)
 		if err != nil {
@@ -644,6 +644,9 @@ func TestCommittedRegistryValid(t *testing.T) {
 		// `nightly-intents:` (which defaults to [training]) — provisioning real
 		// GB200 Capacity-Block capacity nightly — fails this guard instead.
 		"aws-gb200": {},
+		// kind-h100 (nvkind real-silicon lane, DC5 #1278) enrolled with both
+		// intents to mirror the AWS/GCP rows.
+		"kind-h100": {IntentTraining, IntentInference},
 	}
 	for name, want := range wantNightly {
 		res, lookupErr := reg.Lookup(name)
