@@ -50,15 +50,17 @@ func TestDocsStateNames(t *testing.T) {
 	}
 	doc := string(data)
 
-	// Scope each check to the section that is supposed to define the tokens, so
-	// that deleting the States table or the Source classes table fails this test.
-	// Checking the whole document would let a stray prose mention elsewhere keep
-	// it green even after the defining table was removed.
+	// Scope each check to the section that is supposed to define the tokens, and
+	// assert the token's defining *table row* (a leading "| `<token>` |" cell),
+	// not merely that the token appears somewhere in the section. State/Class
+	// names also recur in the surrounding prose, so a plain substring check would
+	// stay green even if the defining table were deleted — the very drift this
+	// guard exists to catch. Requiring the table row means removing either table
+	// fails the test.
 	consensus := docSection(doc, "Consensus model")
 	if consensus == "" {
 		t.Fatalf("%s: missing \"## Consensus model\" section", evidenceDashboardDoc)
 	}
-	// Every State constant must appear verbatim in the Consensus model section.
 	for _, st := range []corroborate.State{
 		corroborate.StateConfirmed,
 		corroborate.StateSingle,
@@ -66,9 +68,9 @@ func TestDocsStateNames(t *testing.T) {
 		corroborate.StateFailing,
 		corroborate.StateUntested,
 	} {
-		if !strings.Contains(consensus, string(st)) {
-			t.Errorf("%s: missing consensus state %q — add it to the Consensus model section",
-				evidenceDashboardDoc, st)
+		if row := tableRow(string(st)); !strings.Contains(consensus, row) {
+			t.Errorf("%s: Consensus model section is missing the States-table row for %q (expected a cell %q) — the table must define it, not just prose",
+				evidenceDashboardDoc, st, row)
 		}
 	}
 
@@ -76,33 +78,55 @@ func TestDocsStateNames(t *testing.T) {
 	if classes == "" {
 		t.Fatalf("%s: missing \"## Source classes\" section", evidenceDashboardDoc)
 	}
-	// Every Class constant must appear verbatim in the Source classes section.
 	for _, cl := range []corroborate.Class{
 		corroborate.ClassFirstParty,
 		corroborate.ClassCommunity,
 		corroborate.ClassPartner,
 	} {
-		if !strings.Contains(classes, string(cl)) {
-			t.Errorf("%s: missing source class %q — add it to the Source classes section",
-				evidenceDashboardDoc, cl)
+		if row := tableRow(string(cl)); !strings.Contains(classes, row) {
+			t.Errorf("%s: Source classes section is missing the classes-table row for %q (expected a cell %q) — the table must define it, not just prose",
+				evidenceDashboardDoc, cl, row)
 		}
 	}
 }
 
+// tableRow is the leading Markdown-table cell that defines a token, e.g.
+// "| `CONFIRMED` |". Matching this (rather than the bare token) ties the guard
+// to the defining table row, so deleting the table fails the test even though
+// the token still appears in prose.
+func tableRow(token string) string {
+	return "| `" + token + "` |"
+}
+
 // docSection returns the body of the top-level ("## ") Markdown section whose
-// heading text is title, from that heading up to the next top-level heading (or
-// end of document). Nested "### " subsections are kept; other "## " sections are
-// excluded. It returns "" when the section is absent so callers can fail closed
-// rather than silently matching a token that lives in a different section.
+// heading line is exactly "## "+title, from just after that heading line to the
+// next top-level heading line (or end of document). Matching is anchored to
+// whole lines, so a "### "+title subsection, a fenced-code line, or prose that
+// merely mentions the heading text does not match; nested "### " subsections
+// within the section are kept. It returns "" when the section is absent so
+// callers fail closed rather than matching a token from a different section.
 func docSection(doc, title string) string {
 	head := "## " + title
-	start := strings.Index(doc, head)
+	lines := strings.Split(doc, "\n")
+	start := -1
+	for i, ln := range lines {
+		if strings.TrimRight(ln, " \t") == head {
+			start = i + 1
+			break
+		}
+	}
 	if start < 0 {
 		return ""
 	}
-	rest := doc[start+len(head):]
-	if next := strings.Index(rest, "\n## "); next >= 0 {
-		return rest[:next]
+	var b strings.Builder
+	for _, ln := range lines[start:] {
+		// A "## " prefix is exactly two hashes then a space; "### " lines start
+		// with "###" and so are not H2 boundaries.
+		if strings.HasPrefix(strings.TrimRight(ln, " \t"), "## ") {
+			break
+		}
+		b.WriteString(ln)
+		b.WriteByte('\n')
 	}
-	return rest
+	return b.String()
 }

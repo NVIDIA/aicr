@@ -58,8 +58,10 @@ one consensus grid, version-blind. Selecting a specific `aicr` version switches
 to that version's **strict same-version consensus** — only runs from the same
 release corroborate one another (cross-version agreement is not reproduction),
 scoped latest-per-signer at that version. In both views a signer's older builds
-never dilute its latest, and the strict view additionally keeps a previous
-Kubernetes minor or a different `aicr` version out of a current result.
+never dilute its latest, and the strict view additionally refuses to let a
+different `aicr` release corroborate a current one. (Kubernetes minor is not a
+consensus dimension: the k8s facet only dims mismatched columns for display —
+see [Facets](#facets) — it never removes them from consensus.)
 
 ### The coordinate and stable URLs
 
