@@ -35,8 +35,8 @@ func GetEmbeddedFS() embed.FS {
 	return recipes.FS
 }
 
-// GetManifestContent retrieves a manifest file from the package-global
-// DataProvider. Path should be relative to data directory (e.g.,
+// GetManifestContent retrieves a manifest file from the embedded catalog
+// (defaultEmbeddedProvider). Path should be relative to data directory (e.g.,
 // "components/network-operator/manifests/nfd-network-rule.yaml").
 //
 // This entry point is preserved for back-compat with callers that have no
@@ -71,7 +71,7 @@ func GetManifestContentWithProvider(dp DataProvider, path string) ([]byte, error
 
 // GetManifestContentWithContext reads a manifest file from the supplied
 // DataProvider, honoring the caller's context for cancellation/timeout.
-// A nil provider falls back to GetDataProvider().
+// A nil provider falls back to the embedded catalog (defaultEmbeddedProvider).
 func GetManifestContentWithContext(ctx context.Context, dp DataProvider, path string) ([]byte, error) {
 	if dp == nil {
 		dp = defaultEmbeddedProvider

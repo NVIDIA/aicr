@@ -294,10 +294,10 @@ func GetComponentRegistryFor(dp DataProvider) (*ComponentRegistry, error) {
 	return entry.registry, entry.err
 }
 
-// GetComponentRegistry returns the component registry for the package-global
-// DataProvider. New callers — especially those that need per-tenant
-// isolation — should use GetComponentRegistryFor directly with a
-// caller-supplied provider.
+// GetComponentRegistry returns the component registry for the embedded
+// catalog (defaultEmbeddedProvider). New callers — especially those that
+// need per-tenant isolation — should use GetComponentRegistryFor directly
+// with a caller-supplied provider.
 func GetComponentRegistry() (*ComponentRegistry, error) {
 	return GetComponentRegistryFor(defaultEmbeddedProvider)
 }
@@ -305,7 +305,7 @@ func GetComponentRegistry() (*ComponentRegistry, error) {
 // EvictCachedRegistry drops the cached registry for the supplied provider
 // so the next GetComponentRegistryFor call rebuilds from source. Passing a
 // nil provider is a no-op (callers handle that case explicitly to avoid
-// silently evicting the package-global registry).
+// silently evicting the embedded-default registry).
 func EvictCachedRegistry(dp DataProvider) {
 	if dp == nil {
 		return
@@ -359,9 +359,9 @@ func ResetComponentRegistryForTesting() {
 }
 
 // loadComponentRegistryFor loads the component registry from the supplied
-// provider. It is pure with respect to the package-global DataProvider —
-// callers that need package-global semantics route through
-// GetComponentRegistry, which resolves the provider once at the entry point.
+// provider. It is pure with respect to shared package state — callers that
+// need the embedded default route through GetComponentRegistry, which
+// resolves to defaultEmbeddedProvider at the entry point.
 //
 // First-load I/O is bounded with defaults.FileReadTimeout so a hung
 // backing store (e.g., a stalled --data NFS mount) cannot park the

@@ -591,11 +591,9 @@ func (c *Criteria) String() string {
 }
 
 // RegistryCriteriaOption is a functional option for building a Criteria
-// against an explicit *CriteriaRegistry. Unlike CriteriaOption (which
-// closes over the package-global registry through the ParseCriteria*Type
-// shims), a RegistryCriteriaOption resolves its enum value against the
-// registry threaded in by BuildCriteriaWithRegistry, so a caller holding a
-// per-provider registry (from GetCriteriaRegistryFor) builds and validates
+// against an explicit *CriteriaRegistry: it resolves its enum value against
+// the registry threaded in by BuildCriteriaWithRegistry, so a caller holding
+// a per-provider registry (from GetCriteriaRegistryFor) builds and validates
 // criteria against THAT provider's registered values.
 type RegistryCriteriaOption func(reg *CriteriaRegistry, c *Criteria) error
 
@@ -682,7 +680,7 @@ func WithNodesRegistry(n int) RegistryCriteriaOption {
 // resolving each field against the supplied registry. This is the path
 // per-provider callers (e.g., the CLI holding a registry from
 // GetCriteriaRegistryFor) use to build and validate criteria against a
-// specific provider's registered values rather than the package global.
+// specific provider's registered values rather than the embedded catalog's.
 //
 // A nil reg falls back to a fresh ephemeral registry (NewCriteriaRegistry)
 // so the call is still well-defined for callers that have not yet bound a
