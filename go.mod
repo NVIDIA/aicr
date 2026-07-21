@@ -15,7 +15,7 @@ require (
 	github.com/nvidia/k8s-launch-kit v0.0.0-20260713111738-0507f25caee7
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
-	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_golang v1.24.0
 	github.com/sigstore/protobuf-specs v0.5.1
 	github.com/sigstore/rekor-monitor v0.0.0-20260622135518-170374c6119e
 	github.com/sigstore/sigstore v1.10.8
