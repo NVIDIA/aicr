@@ -71,7 +71,18 @@ components: []
 ```
 
 External components in this file are merged with the embedded registry; on
-name collision, the external definition wins.
+name collision, the external definition wins. An entry replaces its embedded
+counterpart **wholesale** — to override just `helm.defaultVersion`, copy the
+full embedded entry and change that one field, or the other coordinates
+(repository, chart, scheduling paths) are silently dropped.
+
+Overriding a component's `defaultVersion` this way takes effect for every
+embedded overlay that references the component: embedded overlays do not pin
+versions that equal the registry default, so resolution falls back to your
+merged default. The exception is an overlay with an explicit, intentionally
+divergent pin (declared in `versionPinExemptions`) — that pin still wins. See
+issue [#1616](https://github.com/NVIDIA/aicr/issues/1616) and
+[Chart Version Pinning](recipe-development.md#chart-version-pinning).
 
 ## Adding a criteria value
 
