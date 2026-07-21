@@ -32,9 +32,9 @@ parallel and is not a replacement or deferral of either surface.
 
 ## How to read it — CSP-first navigation
 
-The dashboard shares the same five-level, CSP-first addressing space as the
-TestGrid. Navigating it follows the same structure documented in
-[TestGrid](./testgrid.md):
+The dashboard shares its first four CSP-first addressing levels with the
+[TestGrid](./testgrid.md); the fifth column is organized per-signer here (see
+[Consensus model](#consensus-model)) rather than per-build:
 
 | Level | Value | Example |
 |-------|-------|---------|
@@ -42,7 +42,7 @@ TestGrid. Navigating it follows the same structure documented in
 | **Dashboard** | accelerator + OS | `h100-ubuntu` |
 | **Tab** | intent, optionally with platform | `training-kubeflow` |
 | **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-ready` |
-| **Source column** | one signer | one allowlisted party |
+| **Source column** | one signer | one allowlisted party (or a verified-but-unknown reported signer) |
 
 From the catalog overview you navigate: pick a group → pick a dashboard → pick
 a tab to reach the **consensus grid** for that recipe. Every cell in the grid
@@ -52,10 +52,14 @@ below). Clicking a dot opens the **per-source drilldown**: that signer's
 build-by-build history for the recipe, with a link to the signed evidence
 artifact for each build.
 
-The facet controls (aicr-version, k8s) let you scope the view; the default
-scope is **latest-per-signer**: for each signer only the most recent
-in-scope build counts toward the consensus. This prevents a stale build from a
-previous Kubernetes minor from silently diluting a current result.
+The facet controls (aicr-version, k8s) let you scope the view. The default is
+the **all-versions** view: each signer's single most recent run is folded into
+one consensus grid, version-blind. Selecting a specific `aicr` version switches
+to that version's **strict same-version consensus** — only runs from the same
+release corroborate one another (cross-version agreement is not reproduction),
+scoped latest-per-signer at that version. In both views a signer's older builds
+never dilute its latest, and the strict view additionally keeps a previous
+Kubernetes minor or a different `aicr` version out of a current result.
 
 ### The coordinate and stable URLs
 
@@ -101,19 +105,31 @@ average. When at least one allowlisted signer passes and at least one fails,
 the grid surfaces the disagreement so a reader can investigate; the only
 way a `CONTESTED` row disappears is by all signers converging on one result.
 
+The five states are computed in two grids. The **default all-versions grid**
+folds each signer's single most recent run version-blind, so `CONFIRMED` there
+means ≥ 2 distinct allowlisted signers passed the row on their latest run —
+which the board flags as weaker than same-version reproduction. Picking an
+`aicr` version (see [Facets](#facets)) switches to that version's **strict
+same-version grid**, where two signers corroborate only if they ran the same
+release; the same row can therefore be `CONFIRMED` in the all-versions grid or
+at one version and `SINGLE` at another.
+
 ### `not-run` is excluded from counting
 
 A signer whose latest in-scope run skipped or left a check pending has a
 `not-run` outcome for that row. `not-run` contributes to neither the pass
 count nor the fail count, so it can neither promote a row to `CONFIRMED` nor
-suppress a `CONTESTED`. A signer with all `not-run` outcomes is omitted from
-the index grid entirely; its full history is still visible in the per-source
-drilldown.
+suppress a `CONTESTED`. A signer that never records a pass or fail — every
+in-scope outcome is `not-run` — is absent from both the index grid and the
+per-source drilldown; `not-run` cells appear in the drilldown only for signers
+that have a pass or fail on some other row or build.
 
 ### Phase rollup
 
-Each recipe tab also shows a per-phase rolled-up state (readiness, deployment,
-performance, conformance). The rollup is **worst-first**: the phase state is the
+Each recipe tab also shows a per-phase rolled-up state (deployment, conformance,
+performance). (Readiness is evaluated inline without containers, so it produces
+no evidence rows and does not appear on the board.) The rollup is
+**worst-first**: the phase state is the
 worst-ranked state among all its rows, in this priority order (worst first):
 
 `CONTESTED` → `FAILING` → `UNTESTED` → `SINGLE` → `CONFIRMED`
@@ -201,17 +217,26 @@ time). A verified-but-unknown community signer can never promote a row to
 
 Two facets let you slice the view:
 
-- **aicr-version** — the `aicr` release that produced the run. UAT normally
-  builds only the current checkout, so the default view is effectively `main`.
-  The facet becomes meaningful when the multi-version pipeline is live.
-- **k8s** (Kubernetes `major.minor`) — the cluster version observed in the
-  run. A result from an old Kubernetes minor is never silently fused with a
-  current-version result; the facet lets you scope to the version you care
-  about, and the **latest-per-signer default** already avoids mixing stale and
-  current results from the same signer without any manual filtering.
+- **aicr-version** — the `aicr` release that produced the run. This is a
+  whole-dashboard **consensus lens**, not a parallel dimming filter: consensus
+  is baked both as a cross-version all-versions grid and per version, and the
+  lens selects which one you see. The default (**all versions**) is the
+  cross-version grid — each signer's single latest run, version-blind; picking a
+  specific version switches every summary (grid, overview, catalog) to that
+  version's strict same-version consensus. In the per-source drilldown the lens
+  hard-**filters** columns to the selected version. Because UAT release cells
+  run several `aicr` releases per coordinate, the lens is already meaningful
+  today.
+- **k8s** (Kubernetes `major.minor`) — the cluster version observed in the run.
+  Unlike the version lens, k8s only **dims** non-matching build columns (in both
+  the matrix and the per-source drilldown) — it never removes them — so an old
+  Kubernetes minor is visually distinguished but never silently fused with a
+  current-version result.
 
-Both facets are parallel: you can combine them to view, for example, only
-results from `v0.42.0` on Kubernetes `1.33`.
+The two controls compose but are not symmetric: the `aicr` version lens chooses
+*which* consensus grid you are viewing (and filters drilldown columns), while
+k8s only dims columns within whatever the lens selected — for example, the
+`v0.42.0` consensus grid with its non-`1.33` columns dimmed.
 
 ## How it relates to TestGrid and Recipe Health
 
@@ -220,8 +245,11 @@ results from `v0.42.0` on Kubernetes `1.33`.
 The evidence corroboration dashboard (GP) and the [AICR TestGrid](./testgrid.md)
 (TG) are **siblings that share the same foundation**:
 
-- They read from the same GCS bucket and the same verified, source-keyed
-  evidence tree.
+- They read the same verified, source-keyed evidence tree in the same layout.
+  (Whether the two surfaces share a single GCS bucket and publish service
+  account, or stand up their own, is an open GP3/TG1 deconfliction tracked in
+  [ADR-012](../design/012-recipe-coordinate-mapping.md) — the shared contract
+  is the evidence tree and its layout, not a specific bucket.)
 - They both derive recipe coordinates from the **single shared mapping
   function** `pkg/recipe.CoordinateFor` (see
   [ADR-012](../design/012-recipe-coordinate-mapping.md)), the anti-drift
@@ -243,9 +271,10 @@ The difference is in the rendering stack:
 
 **RQ1 (#1283) targets this dashboard.** It is the link target today because
 TG4a/TG4b's live API and UI have not shipped yet — not because TG work is
-deferred; the two surfaces are being built in parallel (see above). The
-Recipe Health Evidence column deep-links here:docs/user/testgrid.md `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` —
-this site's origin plus `#/` plus the recipe's `Coordinate.Path()` — built
+deferred; the two surfaces are being built in parallel (see above). Once RQ1
+lands, the Recipe Health Evidence column will deep-link here —
+`https://validation.aicr.run/#/<group>/<dashboard>/<tab>`, i.e. this site's
+origin plus `/#/` plus the recipe's `Coordinate.Path()` — built
 offline from resolved criteria via `pkg/recipe.CoordinateFor`, with no network
 call from the generator. Only recipes with an actual dashboard presence get a
 link; the rest keep an honest `pending` until real-hardware coverage broadens.
@@ -284,8 +313,9 @@ cluster upgrade never breaks it. The cross-link is advisory and
 never a merge gate; the Evidence column links, it never copies this
 dashboard's content.
 
-ADR-009's verify-gated in-cell freshness state (AttestedAt age, unattested-vs-aged
+ADR-009's verify-gated freshness signal (AttestedAt age, unattested-vs-aged
 trust distinction) is a distinct, later refinement that ADR-009 tracks
-independently. It coexists with the deep-link: the link points at the live
-board; an optional freshness annotation can later appear in the same cell
-without changing what the link resolves to.
+independently as a **separate validation-posture (Evidence) column** that carries
+that freshness distinction, not an in-cell state. It coexists with the
+deep-link: the link points at the live board; the column can land later without
+changing what the link resolves to.

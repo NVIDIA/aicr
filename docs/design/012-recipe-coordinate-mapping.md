@@ -225,9 +225,12 @@ greenfield UI, and an always-on GKE host cluster. Both are built in parallel;
 this ADR's mapping function, taxonomy, and column-metadata schema are shared,
 not duplicated, by both.
 
-- **Same foundation.** GP and TG read the same GCS bucket, the same verified,
-  source-keyed evidence tree, and the same `pkg/recipe.CoordinateFor` mapping
-  (§Mapping rules above). Neither forks the taxonomy.
+- **Same foundation.** GP and TG read the same verified, source-keyed evidence
+  tree and derive coordinates from the same `pkg/recipe.CoordinateFor` mapping
+  (§Mapping rules above). Neither forks the taxonomy. (Whether they share one
+  GCS bucket and publish service account, or stand up their own, is deliberately
+  left open — see the deconfliction note below; the shared contract is the
+  evidence tree and its layout, not a specific bucket.)
 - **Forward-compatible, not throwaway.** GP4's (#1404) coordinate-keyed JSON
   contract (`index.json` + `series/*.json`) is a forward-compatible input to
   TG's workers/API/UI — a future migration consumes GP's already-coordinate-keyed

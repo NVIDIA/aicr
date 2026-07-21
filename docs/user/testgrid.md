@@ -77,8 +77,8 @@ Trust in a column comes from its provenance metadata. Each build column carries 
 ## Interim evidence dashboard
 
 The [Evidence Corroboration Dashboard](./evidence-dashboard.md) is the
-**interim static GitHub Pages surface** for the same evidence. It reads from
-the same GCS bucket and the same verified, source-keyed evidence tree, and
+**interim static GitHub Pages surface** for the same evidence. It reads the
+same verified, source-keyed evidence tree (in the same layout) and
 derives recipe coordinates using the same shared mapping function
 (`pkg/recipe.CoordinateFor`, [ADR-012](../design/012-recipe-coordinate-mapping.md)).
 It is published at [`https://validation.aicr.run`](https://validation.aicr.run)
@@ -92,7 +92,10 @@ other.
 
 The two surfaces share the same foundation:
 
-- Same GCS bucket and verified source-keyed evidence tree.
+- The same verified source-keyed evidence tree, in the same layout. (Whether
+  the two surfaces share one GCS bucket or stand up their own is an open
+  GP3/TG1 deconfliction tracked in ADR-012; the shared contract is the
+  evidence tree, not a specific bucket.)
 - Same recipe→coordinate mapping (`pkg/recipe.CoordinateFor`) — the
   anti-drift guarantee that both surfaces place every recipe in the same
   `<group>/<dashboard>/<tab>`.
@@ -104,8 +107,8 @@ RQ1 (#1283) — the follow-on to #1224's `pending` Evidence column — targets
 the evidence dashboard specifically: it is the link
 target today because TG4a/TG4b's live API and UI have not shipped yet — not
 because TG work is deferred; the two surfaces are being built in parallel
-(see above). The Recipe Health Evidence column deep-links to the dashboard's
-coordinate URL —
+(see above). Once RQ1 lands, the Recipe Health Evidence column will deep-link
+to the dashboard's coordinate URL —
 `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` — built offline
 from resolved criteria via `pkg/recipe.CoordinateFor`. The link is stable
 across Kubernetes upgrades because the Kubernetes version lives in the

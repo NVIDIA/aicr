@@ -30,11 +30,13 @@ const docsDir = "../../docs/user"
 // and Class constant.
 const evidenceDashboardDoc = "evidence-dashboard.md"
 
-// TestDocsStateNames is the GP6 drift-guard: it verifies that the
-// consensus-model explainer in docs/user/evidence-dashboard.md names every
-// corroboration State constant and every source Class constant exactly as the
-// Go code spells them, so the docs and the generator can never silently
-// diverge.
+// TestDocsStateNames is the GP6 drift-guard: it verifies that every
+// corroboration State constant appears verbatim in the "Consensus model"
+// section of docs/user/evidence-dashboard.md, and every source Class constant
+// in the "Source classes" section, exactly as the Go code spells them — so the
+// docs and the generator can never silently diverge. Scoping each check to its
+// defining section (not the whole file) means deleting either table fails the
+// test instead of passing on an incidental prose mention elsewhere.
 //
 // If this test fails after a rename in pkg/corroborate, update
 // docs/user/evidence-dashboard.md to match.
@@ -48,7 +50,15 @@ func TestDocsStateNames(t *testing.T) {
 	}
 	doc := string(data)
 
-	// Every State constant must appear verbatim in the consensus-model section.
+	// Scope each check to the section that is supposed to define the tokens, so
+	// that deleting the States table or the Source classes table fails this test.
+	// Checking the whole document would let a stray prose mention elsewhere keep
+	// it green even after the defining table was removed.
+	consensus := docSection(doc, "Consensus model")
+	if consensus == "" {
+		t.Fatalf("%s: missing \"## Consensus model\" section", evidenceDashboardDoc)
+	}
+	// Every State constant must appear verbatim in the Consensus model section.
 	for _, st := range []corroborate.State{
 		corroborate.StateConfirmed,
 		corroborate.StateSingle,
@@ -56,21 +66,43 @@ func TestDocsStateNames(t *testing.T) {
 		corroborate.StateFailing,
 		corroborate.StateUntested,
 	} {
-		if !strings.Contains(doc, string(st)) {
+		if !strings.Contains(consensus, string(st)) {
 			t.Errorf("%s: missing consensus state %q — add it to the Consensus model section",
 				evidenceDashboardDoc, st)
 		}
 	}
 
-	// Every Class constant must appear verbatim in the source-classes section.
+	classes := docSection(doc, "Source classes")
+	if classes == "" {
+		t.Fatalf("%s: missing \"## Source classes\" section", evidenceDashboardDoc)
+	}
+	// Every Class constant must appear verbatim in the Source classes section.
 	for _, cl := range []corroborate.Class{
 		corroborate.ClassFirstParty,
 		corroborate.ClassCommunity,
 		corroborate.ClassPartner,
 	} {
-		if !strings.Contains(doc, string(cl)) {
+		if !strings.Contains(classes, string(cl)) {
 			t.Errorf("%s: missing source class %q — add it to the Source classes section",
 				evidenceDashboardDoc, cl)
 		}
 	}
+}
+
+// docSection returns the body of the top-level ("## ") Markdown section whose
+// heading text is title, from that heading up to the next top-level heading (or
+// end of document). Nested "### " subsections are kept; other "## " sections are
+// excluded. It returns "" when the section is absent so callers can fail closed
+// rather than silently matching a token that lives in a different section.
+func docSection(doc, title string) string {
+	head := "## " + title
+	start := strings.Index(doc, head)
+	if start < 0 {
+		return ""
+	}
+	rest := doc[start+len(head):]
+	if next := strings.Index(rest, "\n## "); next >= 0 {
+		return rest[:next]
+	}
+	return rest
 }
