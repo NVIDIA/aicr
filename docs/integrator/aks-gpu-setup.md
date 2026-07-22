@@ -134,8 +134,12 @@ advertise zero `nvidia.com/gpu`.
 
 | Mode | Nodepool | GPU Operator values |
 |------|----------|---------------------|
-| GPU Operator-managed (default, recommended) | `--gpu-driver none` (AKS "None/BYO" install profile) | `driver.enabled=true`, `toolkit.enabled=true` (recipe defaults) |
-| AKS driver-only | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` (all three together) |
+| AKS driver-only (default) | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` (recipe defaults) |
+| GPU Operator-managed | `--gpu-driver none` (AKS "None/BYO" install profile) | `driver.enabled=true`, `toolkit.enabled=true`, `operator.runtimeClass=nvidia`, plus `dradriver:nvidiaDriverRoot=/run/nvidia/driver` (all together) |
+
+AICR's default follows the CSP default: an `az aks nodepool add` without GPU
+driver flags preinstalls the NVIDIA driver and container toolkit from the AKS
+node image, and the AKS recipes ship the matching GPU Operator values.
 
 Both modes use an *unmanaged* GPU node pool. Do not combine AICR with
 AKS-managed GPU node pools (`--enable-managed-gpu=true`, preview —
@@ -144,10 +148,10 @@ its own device plugin, DCGM exporter, and GPU health tooling, which duplicate
 and conflict with the GPU Operator operands AICR deploys. See
 [AKS install profiles](https://learn.microsoft.com/en-us/azure/aks/aks-managed-gpu-nodes#install-profiles).
 
-### Recommended: Let GPU Operator Manage the Driver
+### Default: Use the AKS Driver-Only Profile
 
-Create nodepools with `--gpu-driver none` so AKS skips its driver installation
-and the GPU Operator handles it:
+Create nodepools with the AKS **Driver only** install profile — the AKS
+default, so simply omit `--gpu-driver none`:
 
 ```shell
 az aks nodepool add \
@@ -155,20 +159,182 @@ az aks nodepool add \
   --resource-group <rg> \
   --name gpupool \
   --node-vm-size Standard_ND96isr_H100_v5 \
-  --gpu-driver none \
   --node-count 1
 ```
 
-No changes to AICR recipes are needed — this is the default configuration. The
-recipe defaults (`driver.enabled=true`, `toolkit.enabled=true`) give the GPU
-Operator ownership of the full stack: it installs the driver and configures the
-containerd `nvidia` runtime handler through its container-toolkit DaemonSet.
+No changes to AICR recipes are needed — this is the default configuration.
+The AKS node image preinstalls the NVIDIA driver and container toolkit and
+preconfigures containerd, so the recipe defaults (`driver.enabled=false`,
+`toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime`)
+leave driver and container-runtime ownership with AKS. AICR's GPU Operator
+still deploys and owns the rest of the GPU stack: device plugin, DCGM
+exporter, GPU Feature Discovery, and the validator.
 
-Note that `--gpu-driver none` shifts driver lifecycle and compatibility
-responsibility from Microsoft's node-image QA to the GPU Operator (and the AICR
-recipe's pinned versions), and node bring-up now includes driver installation
-time. See
-[Skip GPU driver installation](https://learn.microsoft.com/en-us/azure/aks/use-nvidia-gpu#skip-gpu-driver-install).
+Driver lifecycle and compatibility stay with Microsoft's node-image QA —
+driver versions follow the AKS node-image release cadence rather than the
+AICR recipe's pins. `operator.runtimeClass` must match the runtime handler
+preconfigured on the AKS node image; NVIDIA's AKS example uses
+`nvidia-container-runtime` (see
+[GPU Operator on Microsoft AKS](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/microsoft-aks.html)).
+
+`driver.rdma.useHostMofed` remains `false` in this mode — it is inert while
+`driver.enabled=false`, but keeping it correct prevents a later ownership-mode
+change from reviving the `nvidia_peermem` symbol-mismatch bug (see the comment
+in `recipes/components/gpu-operator/values-aks.yaml`).
+
+**GPUDirect RDMA (`nvidia-peermem`) under the driver-only profile.** With
+`driver.enabled=false` there is no GPU Operator driver DaemonSet to load the
+`nvidia-peermem` kernel module (`driver.rdma.enabled` is inert), and the
+AKS-managed driver install does not load it automatically. Azure's RDMA
+guidance requires a dedicated reloader in this mode, so the AKS recipes ship
+Azure's `nvidia-peermem-reloader` DaemonSet as a `network-operator` manifest
+(`recipes/components/network-operator/manifests/nvidia-peermem-reloader.yaml`):
+a retry loop keeps re-asserting `modprobe nvidia-peermem` (via the node's own
+kmod) until the driver and the OFED `ib_core` stack are both present, and
+re-loads it if a driver update unloads it. The pod deliberately reports Ready
+immediately — deployers helm-wait on the network-operator manifests before
+gpu-operator installs, so a modprobe-gated readiness probe would deadlock the
+GPU-Operator-managed alternative profile below, where the driver only appears
+after gpu-operator deploys (and where the operator's driver pod loads
+`nvidia-peermem` itself, making the reloader a harmless no-op). It targets
+IB-capable nodes (the same `pci-15b3.present` NFD label as the
+NicClusterPolicy) and is removed together with the RDMA stack by the
+documented opt-out (`--set networkoperator:enabled=false`). See
+[Azure's GPU driver guidance](https://azure.github.io/aks-rdma-infiniband/configurations/gpu-drivers).
+
+**Stub `nvidia-peermem` builds and the DMA-BUF path.** The reloader
+re-asserts the module where the module is loadable — it cannot make an
+unloadable module load. On some AKS node images (observed on
+`AKSUbuntu-2404gen2containerd-202606.19.0`, kernel `6.8.0-1059-azure`,
+preinstalled driver 580.126.09) the preinstalled
+`/lib/modules/<kernel>/updates/dkms/nvidia-peermem.ko` is a stub DKMS build:
+`modprobe nvidia-peermem` fails with `Invalid argument` and no dmesg trace —
+the signature of NVIDIA's conftest finding no OFED-style headers at image
+bake and compiling the peer-memory support out — even though the running
+kernel exports `ib_register_peer_memory_client` and the IB stack (`ib_core`,
+`mlx5_ib`) is loaded after nodewright host prep. On such images the
+reloader's retry loop is the expected steady state ("not loadable yet",
+indefinitely), and GPUDirect RDMA is carried by the kernel's DMA-BUF path
+instead (driver 580 + kernel 6.8 + mlx5 + a DMA-BUF-capable NCCL) — that
+path delivered the validated NCCL bandwidth below. Only when neither path is
+available — no loadable `nvidia-peermem` and no DMA-BUF support — is
+GPUDirect RDMA lost; NCCL then falls back to host-memory staging and the
+calibrated all-reduce gate will regress or fail.
+
+**Validation status.** This profile is validated end-to-end on AKS H100
+(2x `Standard_ND96isr_H100_v5`, node image
+`AKSUbuntu-2404gen2containerd-202606.19.0`, preinstalled driver 580.126.09)
+for both intents: the deployment phase passes all four checks
+(operator-health, expected-resources, gpu-operator-version,
+check-nvidia-smi) for training and inference, and the training performance
+phase passes the calibrated NCCL all-reduce gate at 157.29 GB/s (16 GiB
+message size across 2 nodes, gate >= 150). The Dynamo inference counterpart
+(`h100-aks-ubuntu-inference-dynamo`) passes `inference-perf` at
+148,004 tok/s throughput (gate >= 50,000) with 579.70 ms TTFT p99
+(gate <= 2,000) — Qwen/Qwen3-8B at 256 concurrency per GPU via
+dynamo-router on a single ND96isr node. Other SKUs and node images have
+not been exercised — run `aicr validate` after deployment and report gaps.
+
+**Inference-perf model-cache cold load on the default StorageClass.** The
+`inference-perf` check stages the model checkpoint on a model-cache PVC; on
+AKS the cluster-default Azure disk StorageClass can be slow enough that a
+cold load — several decode workers reading the checkpoint shards
+concurrently from one RWO PVC — exceeds the check's default 10-minute
+workload-ready window. The check then fails with
+`DynamoGraphDeployment not ready: TIMEOUT` while the workers are healthily
+loading (not a performance failure — the run above passed once the window
+was raised). Two remedies: override the catalog entry via `--data` (see
+[Validator Extension](validator-extension.md)) setting the
+`AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` and
+`AICR_INFERENCE_PERF_HEALTH_TIMEOUT` envs and raising the entry `timeout`
+in tandem, or point `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` at a
+faster class (for example premium SSD v2).
+
+**Device-isolation hardening under the driver-only profile.** The AKS node
+image preinstalls the NVIDIA container toolkit with the upstream permissive
+defaults in `/etc/nvidia-container-runtime/config.toml`
+(`accept-nvidia-visible-devices-envvar-when-unprivileged = true`,
+`accept-nvidia-visible-devices-as-volume-mounts = false`). Because
+containerd's default runtime on GPU nodes is `nvidia-container-runtime`, every
+container passes through the toolkit, so an unprivileged pod whose image sets
+`NVIDIA_VISIBLE_DEVICES=all` (the default in most CUDA base images) would be
+handed all host GPUs with no Kubernetes allocation — breaking container-level
+GPU isolation and failing the `secure-accelerator-access` conformance check.
+With `driver.enabled=false` and `toolkit.enabled=false` there is no operator
+toolkit DaemonSet to harden the config, so the AKS recipes ship a small
+`nvidia-toolkit-hardening` DaemonSet (a `gpu-operator` manifest) that re-asserts
+`accept-nvidia-visible-devices-envvar-when-unprivileged = false` and
+`accept-nvidia-visible-devices-as-volume-mounts = true` via `nvidia-ctk config
+--in-place`. The toolkit re-reads its config at every container start, so no
+containerd restart is needed and running pods are unaffected. Its readiness
+probe is fail-closed — the pod reports Ready only while the current assert
+succeeds — so it surfaces a node's **inability to harden** (`nvidia-ctk`
+missing or incompatible, so the keys can never be set) rather than passing
+green. It does not detect a silent permissive revert as a readiness
+transition: a transient permissive-but-valid rewrite of `config.toml` is simply
+repaired by the next `--in-place` re-assert within ≤60s (the re-assert
+succeeds, so Ready never flips — the config is corrected, not flagged as
+drift).
+
+The DaemonSet renders **only** in the driver-only profile
+(`toolkit.enabled=false`). Under the GPU-Operator-managed fallback
+(`--gpu-driver none` + `toolkit.enabled=true`) it is omitted, because the
+operator owns the toolkit there — the AKS values set the same hardened keys via
+`gpu-operator.toolkit.env`
+(`ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false`,
+`ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS=true`), which the toolkit
+installer writes into the config, and gating the DaemonSet out avoids a
+helm-wait deadlock on nodes where `nvidia-ctk` is not preinstalled.
+
+**Scope of the hardening.** Setting the env-var key to `false` closes the
+`NVIDIA_VISIBLE_DEVICES` env-var path — the path `secure-accelerator-access`
+exercises. Setting `accept-nvidia-visible-devices-as-volume-mounts = true` is
+required so the device plugin's volume-mounts allocation strategy still works
+for legitimately allocated pods, but it leaves the **volume-mounts
+device-request path open** (a pod that declares a `/dev/null`-backed mount whose
+destination is under `/var/run/nvidia-container-devices` can still select
+devices — the pinned toolkit v1.19.1 accepts the volume-mount device request
+only when the mount *source* is `/dev/null`). This is the same posture as
+GPU-Operator-managed mode — not a regression — but it means full multi-tenant
+isolation additionally requires an admission policy restricting a
+`/dev/null`-backed mount whose destination is under
+`/var/run/nvidia-container-devices`. A
+green `secure-accelerator-access` result confirms the env-var path is closed,
+not that isolation is complete. Migrating this host-config hardening into the
+nodewright `nvidia-setup` package — the canonical host-configuration channel on
+AKS — and retiring the DaemonSet is tracked in
+[#1839](https://github.com/NVIDIA/aicr/issues/1839).
+
+**GPU-Operator-managed override tuple.** The documented fallback override set
+(`driver.enabled=true`, `toolkit.enabled=true`, `operator.runtimeClass=nvidia`,
+`dradriver:nvidiaDriverRoot=/run/nvidia/driver`) does not need an explicit
+`gpuoperator:hostPaths.driverInstallDir` — the base `values.yaml` already pins
+`hostPaths.driverInstallDir=/run/nvidia/driver`, so it stays in lockstep with
+the DRA driver root.
+
+**Migration note for pre-existing AKS recipes:** a recipe file references the
+catalog's values files by path, so an AKS recipe generated *before* this
+default flip resolves the new `driver.enabled=false` / `toolkit.enabled=false`
+values on its next `aicr bundle` while retaining its old baked overrides —
+in particular, the DRA driver root stays at the operator container path and
+the resulting bundle is incoherent. **Regenerate pre-flip AKS recipes**
+(`aicr recipe ...`) before bundling with this AICR version, or supply the
+complete GPU Operator-managed override set (all four `--set` flags from the
+alternative profile below) if the cluster's GPU pools were created with
+`--gpu-driver none`. A bundle-time coherence check that catches this
+automatically is tracked in
+[#1757](https://github.com/NVIDIA/aicr/issues/1757).
+
+**Mismatch warning:** resolving an AKS recipe from a snapshot
+(`aicr recipe --snapshot`) warns when the sampled GPU node reports no NVIDIA
+driver loaded — the signature of a `--gpu-driver none` pool resolved against
+the driver-only recipe defaults. Deploying that combination would leave GPU
+nodes driverless (nothing on the node provides a driver and the recipe does
+not install one). Either flip the bundle to GPU Operator-managed mode with
+the overrides below, or reprovision the pool with the AKS default driver
+install and re-snapshot. Criteria-only resolves
+(`aicr recipe --service aks ...`) have no cluster signal and are not warned —
+the deployment-phase `gpu-operator-health` validation is the backstop.
 
 `Standard_ND96isr_H100_v5` is the 8-GPU ND H100 v5 SKU. The AKS Dynamo
 inference throughput gate (`inference-throughput`) is a fixed absolute
@@ -191,55 +357,109 @@ Azure. Private or egress-restricted AKS clusters must allow registry egress to
 ACR) before running the performance phase; otherwise the benchmark workers
 fail at image pull and the check fails without measuring anything.
 
-### Alternative: Use the AKS Driver-Only Profile
+**GDRCopy in the driver-only profile.** The AKS recipes set
+`gdrcopy.enabled: false` because the operator deploys GDRCopy as a sidecar
+container in the operator-managed driver pod; with `driver.enabled=false` that
+pod is never created, so the setting is inert against the preinstalled driver.
+Note that using GDRCopy requires both the `gdrdrv` kernel module on the node
+and the userspace library in the workload image; whether the Azure-managed
+node image ships `gdrdrv` remains unverified. To get operator-deployed
+GDRCopy, switch to the GPU-Operator-managed profile below and add
+`--set gpuoperator:gdrcopy.enabled=true` alongside the four overrides.
 
-If you prefer AKS to install the driver (e.g., for driver version pinning by
-AKS), create the nodepool with the AKS **Driver only** install profile
-(`--enable-managed-gpu=false`, the AKS default — simply omit
-`--gpu-driver none`). Only driver and container-runtime ownership transfers to
-AKS; AICR's GPU Operator still deploys and owns the device plugin, DCGM
-exporter, and the rest of the GPU stack. This requires **all three** overrides
-together — never set only one side, because a partial configuration either
-leaves containerd without a working `nvidia` runtime or conflicts with the
-preinstalled driver:
+### Alternative: Let GPU Operator Manage the Driver
+
+If you prefer the GPU Operator to install the driver (e.g., to pin the driver
+version through the AICR recipe rather than follow the AKS node-image
+cadence), create nodepools with `--gpu-driver none` so AKS skips its driver
+installation:
+
+```shell
+az aks nodepool add \
+  --cluster-name <cluster> \
+  --resource-group <rg> \
+  --name gpupool \
+  --node-vm-size Standard_ND96isr_H100_v5 \
+  --gpu-driver none \
+  --node-count 1
+```
+
+This requires **all four** overrides together — never set only one side,
+because a partial configuration either leaves containerd without a working
+`nvidia` runtime, conflicts with a preinstalled driver, or points the DRA
+kubelet plugin at the wrong driver root:
 
 ```shell
 aicr bundle -r recipe.yaml \
-  --set gpuoperator:driver.enabled=false \
-  --set gpuoperator:toolkit.enabled=false \
-  --set gpuoperator:operator.runtimeClass=nvidia-container-runtime
+  --set gpuoperator:driver.enabled=true \
+  --set gpuoperator:toolkit.enabled=true \
+  --set gpuoperator:operator.runtimeClass=nvidia \
+  --set dradriver:nvidiaDriverRoot=/run/nvidia/driver
 ```
 
-Or add to your values override file:
+Or, for the gpu-operator side, add to your values override file:
 
 ```yaml
 driver:
-  enabled: false
+  enabled: true
 toolkit:
-  enabled: false
+  enabled: true
 operator:
-  runtimeClass: nvidia-container-runtime
+  runtimeClass: nvidia
 ```
 
-`operator.runtimeClass` must match the runtime handler preconfigured on the AKS
-node image; NVIDIA's AKS example uses `nvidia-container-runtime` (see
-[GPU Operator on Microsoft AKS](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/microsoft-aks.html)).
+The `dradriver:nvidiaDriverRoot` override retargets `nvidia-dra-driver-gpu`
+from the AKS recipe default (`/`, the host-installed driver location) to the
+GPU Operator driver container's install root — the operator populates
+`/run/nvidia/driver`; nothing installs a driver at the host root in this
+mode.
 
-`driver.rdma.useHostMofed` remains `false` in this mode too — it is inert while
-`driver.enabled=false`, but keeping it correct prevents a later ownership-mode
-change from reviving the `nvidia_peermem` symbol-mismatch bug (see the comment
-in `recipes/components/gpu-operator/values-aks.yaml`).
+This gives the GPU Operator ownership of the full stack: it installs the
+driver and configures the containerd `nvidia` runtime handler through its
+container-toolkit DaemonSet. `--gpu-driver none` shifts driver lifecycle and
+compatibility responsibility from Microsoft's node-image QA to the GPU
+Operator (and the AICR recipe's pinned versions), and node bring-up now
+includes driver installation time. See
+[Skip GPU driver installation](https://learn.microsoft.com/en-us/azure/aks/use-nvidia-gpu#skip-gpu-driver-install).
 
-This profile has not yet been validated end-to-end with network-operator/RDMA.
+`driver.rdma.useHostMofed` remains `false` in this mode too — the recipe
+supplies MOFED through the Network Operator's OFED container, not a
+host-preinstalled MOFED (see the comment in
+`recipes/components/gpu-operator/values-aks.yaml`).
 
 ## InfiniBand RDMA Host Setup (nodewright)
 
 AKS recipes deliver the InfiniBand RDMA host configuration (persistent
 `ib_umad`/`rdma_ucm` module loading, `LimitMEMLOCK=infinity` for containerd and
 kubelet) through nodewright: the `nodewright-customizations` component applies
-`nvidia-setup` and `nvidia-tuned` packages to GPU nodes, with reboots handled
-as nodewright interrupts. This replaces the earlier privileged
-`ib-node-config` DaemonSet.
+`nvidia-setup` packages to GPU nodes, with reboots handled as nodewright
+interrupts. This replaces the earlier privileged `ib-node-config` DaemonSet.
+
+**The `nvidia-tuned` package is disabled by default on AKS.** Under the
+Azure-managed driver profile the AKS overlays set
+`nodewright-customizations` `tuningEnabled: false`, which omits `nvidia-tuned`
+from the Skyhook packages (no tuning-triggered node reboot) and chains
+`nvidia-setup-full` directly off `nvidia-setup-kernel`. The RDMA host prep
+above still runs — it lives in `nvidia-setup`, not `nvidia-tuned`. An A/B
+comparison on an AKS H100 cluster also measured the tuned inference profile
+(isolcpus/hugepages) regressing inference TTFT from ~550 ms to ~6 s, so
+untuned is the better default today. To re-enable the tuning profile:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --set nodewrightcustomizations:tuningEnabled=true \
+  -o ./bundles
+```
+
+**Upgrading in place does not revert previously applied tuning.** The
+`tuningEnabled: false` gate only controls whether `nvidia-tuned` renders into
+the Skyhook CR — nodewright package uninstall defaults off and the tuning
+customization declares no uninstall block, so a cluster that already applied
+`nvidia-tuned` keeps its host state (isolcpus, hugepages, GRUB changes) after
+upgrading to a `tuningEnabled: false` bundle. That state remains until the
+nodes are reimaged or recreated; recreating the GPU node pool is the clean
+path. Automated remediation is tracked in
+[#1820](https://github.com/NVIDIA/aicr/issues/1820).
 
 **Pass a keyed toleration on AKS.** AKS admission collapses a pod's toleration
 list to just the wildcard (`operator: Exists`, no key) when one is present,

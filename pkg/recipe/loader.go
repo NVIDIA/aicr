@@ -26,9 +26,9 @@ import (
 
 // LoadFromFileWithProvider loads a recipe from the given path bound to an explicit DataProvider.
 // Overlay inputs (kind: RecipeMetadata) are hydrated through a builder bound to
-// dp (so external --data overlays resolve against dp, not the package global),
-// and the returned result carries dp via its provider field. A nil dp falls
-// back to the package-global provider (matching LoadFromFile).
+// dp (so external --data overlays resolve against dp, not the embedded
+// default), and the returned result carries dp via its provider field. A nil
+// dp falls back to the embedded catalog.
 func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version string, dp DataProvider) (*RecipeResult, error) {
 	rec, err := serializer.FromFileWithKubeconfig[RecipeResult](path, kubeconfig)
 	if err != nil {
@@ -64,8 +64,8 @@ func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version str
 		// Bind the builder to dp when supplied so the overlay resolves
 		// against the caller's provider; the hydrated result inherits dp
 		// via the metadata store (finalizeRecipeResult threads it through).
-		// A nil dp omits the option, matching LoadFromFile's package-global
-		// behavior exactly.
+		// A nil dp omits the option, so the builder falls back to the
+		// embedded catalog.
 		opts := []Option{WithVersion(version)}
 		if dp != nil {
 			opts = append(opts, WithDataProvider(dp))
@@ -81,7 +81,7 @@ func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version str
 	} else if dp != nil {
 		// Already-hydrated RecipeResult: the builder never runs, so bind the
 		// caller's provider directly so downstream value/manifest reads route
-		// through dp rather than the package global.
+		// through dp rather than the embedded default.
 		rec.provider = dp
 	}
 

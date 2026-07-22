@@ -64,9 +64,12 @@ spec:
       checks:
         - inference-perf
       # Conservative smoke gate mirrored from the H100 EKS/GKE Dynamo
-      # overlays until Azure-specific baselines are available. Model +
-      # concurrency are pinned so the gate stays valid independent of
-      # the compiled defaults.
+      # overlays. An Azure baseline now exists (aicr-test6, 2026-07-21,
+      # single Standard_ND96isr_H100_v5 node, untuned driver-only
+      # profile): 148,004 tok/s throughput, 579.7 ms TTFT p99. The gates
+      # deliberately remain conservative smoke thresholds well below that
+      # baseline. Model + concurrency are pinned so the gate stays valid
+      # independent of the compiled defaults.
       #
       # NOTE: inference-throughput here is a fixed absolute full-node value that
       # assumes an 8-GPU ND H100 node (Standard_ND96isr_H100_v5 — the GPU

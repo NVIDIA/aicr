@@ -40,15 +40,16 @@ const (
 // docs/user/container-images.md is an exact projection of the registry's
 // pinned versions. See issue #1424.
 //
-// TestOverlayVersionPinsMatchRegistry (pkg/recipe) enforces that recipes match
-// the registry default; this test enforces the other half of #1424's
-// acceptance — that the *committed BOM* matches the registry too. Without it, a
-// coordinated bump (registry defaultVersion and every overlay pin moved
-// together) passes the recipe guard even when `make bom-docs` was never re-run,
-// leaving the committed doc advertising the old version. `make bom-check`
-// catches this by re-rendering but is opt-in; this test gates only the version
-// column (no Helm rendering / network) and runs under `make test`, so a stale
-// pin fails CI deterministically.
+// TestOverlayVersionPinsMatchRegistry (pkg/recipe) enforces that recipes carry
+// no non-exempted pins, so non-exempted refs resolve to the registry default;
+// this test enforces the other half of #1424's acceptance — that the
+// *committed BOM* matches the registry too. Without it, a registry-only bump
+// (the normal bump shape after #1616 — overlays carry no pins to move) passes
+// the recipe guard even when `make bom-docs` was never re-run, leaving the
+// committed doc advertising the old version. `make bom-check` catches this by
+// re-rendering but is opt-in; this test gates only the version column (no
+// Helm rendering / network) and runs under `make test`, so a stale BOM
+// version column fails CI deterministically.
 //
 // The check is bidirectional and exact:
 //   - every registry component must have a row in the generated table

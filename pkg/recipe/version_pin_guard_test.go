@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -30,9 +31,10 @@ import (
 // component's registry defaultVersion (recipes/registry.yaml). But at recipe
 // resolution the registry default is only a FALLBACK: an overlay/mixin
 // componentRef that sets `version` (Helm) or `tag` (Kustomize) overrides it
-// (see ComponentRef.ApplyRegistryDefaults in metadata.go). So the BOM equals
-// what recipes actually install ONLY when no overlay pin diverges from the
-// registry default.
+// (see ComponentRef.ApplyRegistryDefaults in metadata.go). Declared
+// divergent pins surface in the BOM's variants table (#1611), so a
+// represented divergence is truthful; the untruthful shape is a default row
+// left with no consumers.
 //
 // The dangerous shape is a component whose SOLE consumer overlay pins a
 // version different from the registry default: the registry default is then
@@ -76,6 +78,25 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 			t.Errorf("versionPinExemptions entry for source=%q component=%q has no reason",
 				e.source, e.component)
 		}
+		if e.field == "tag" {
+			// Fail closed until the BOM can represent a Kustomize variant:
+			// tools/bom/variants.go derives the Version-variants table from
+			// Helm version pins only, so an exempted divergent tag would pass
+			// this guard AND the BOM freshness gate while staying invisible
+			// in the committed variants table — the #1424 fiction with a
+			// green CI. Extend the BOM variants pipeline to Kustomize tags
+			// before accepting a tag exemption.
+			t.Errorf("versionPinExemptions entry for source=%q component=%q binds field=\"tag\", "+
+				"which is not supported yet: the BOM variants pipeline derives variants from "+
+				"Helm version pins only, so this divergence would be invisible in "+
+				"docs/user/container-images.md. Extend tools/bom/variants.go first.",
+				e.source, e.component)
+		} else if e.field != "version" {
+			t.Errorf("versionPinExemptions entry for source=%q component=%q has field=%q, "+
+				"want \"version\" (Helm) — the exemption must bind to the deployment type's "+
+				"pin field so a type migration cannot reuse it",
+				e.source, e.component, e.field)
+		}
 		if e.expectedPin == "" || e.expectedDefault == "" {
 			t.Errorf("versionPinExemptions entry for source=%q component=%q must set both "+
 				"expectedPin and expectedDefault so drift within the exemption is caught",
@@ -99,20 +120,6 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 			ref := refs[i]
 			refsSeen++
 
-			// A componentRef pins its version via `version` (Helm) or `tag`
-			// (Kustomize). Compare whichever is set against the matching
-			// registry default; a ref that pins neither inherits the default
-			// and cannot diverge.
-			pin := ref.Version
-			field := "version"
-			if pin == "" && ref.Tag != "" {
-				pin = ref.Tag
-				field = "tag"
-			}
-			if pin == "" {
-				continue
-			}
-
 			cfg := reg.Get(ref.Name)
 			if cfg == nil {
 				// Not a registry component (e.g. an in-tree kustomize
@@ -121,10 +128,58 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 				continue
 			}
 
-			def := cfg.Helm.DefaultVersion
-			if field == "tag" {
-				def = cfg.Kustomize.DefaultTag
+			k := pinKey{source: source, component: ref.Name}
+			// markExemptionUsed suppresses the stale-exemption sweep for refs
+			// that fail closed below: the ref still declares its (broken)
+			// divergence, so a second "delete the exemption" error would be
+			// misleading — the fail-closed error is the actionable signal.
+			markExemptionUsed := func() {
+				if _, exempted := exemptByKey[k]; exempted {
+					usedExemption[k] = true
+				}
 			}
+
+			// An explicit ref.Type that contradicts the registry component's
+			// type escapes both selectPin branches (such a ref pins neither
+			// field the registry type implies), and resolution follows
+			// ref.Type without inheriting the registry default — the recipe
+			// would deploy one shape while the BOM advertises the other. Fail
+			// closed; an empty Type inherits the registry type and is fine.
+			if refTypeMismatch(ref, cfg) {
+				t.Errorf("type mismatch: overlay/mixin %q declares component %q as %s but the "+
+					"registry defines it as %s; align the ref's type with the registry entry "+
+					"(or change the registry entry) so the version-pin guard and the BOM stay "+
+					"truthful.",
+					source, ref.Name, ref.Type, cfg.GetType())
+				markExemptionUsed()
+				continue
+			}
+
+			// Pin-field selection is driven by the REGISTRY component's type,
+			// never by whichever ref field happens to be populated: a stray
+			// tag on a Helm component (or version on a Kustomize one) would
+			// otherwise select the other type's default — empty on a
+			// well-formed registry entry — and silently skip the guard. Fail
+			// closed on the stray field instead; resolution coherence rejects
+			// the mixed shape for Helm refs, and the guard mirrors that at
+			// declaration level.
+			sel := selectPin(ref, cfg)
+			if sel.stray != "" {
+				t.Errorf("mixed-field pin: overlay/mixin %q sets %s=%q on %s component %q; "+
+					"the %s field does not apply to this component type — remove it (a "+
+					"mixed-field ref deploys ambiguously and cannot be checked against a "+
+					"registry default).",
+					source, sel.strayField, sel.stray, cfg.GetType(), ref.Name, sel.strayField)
+				markExemptionUsed()
+				continue
+			}
+			pin, field := sel.pin, sel.field
+			if pin == "" {
+				// A ref that pins nothing inherits the registry default and
+				// cannot diverge.
+				continue
+			}
+			def, defField := sel.def, sel.defField
 			if def == "" {
 				// No registry default to diverge from. `make bom-pinning-check`
 				// separately enforces that every Helm component is pinned.
@@ -134,29 +189,36 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 			checked++
 			if pin == def {
 				t.Errorf("redundant pin: overlay/mixin %q pins %s.%s=%q, which equals the "+
-					"registry defaultVersion for component %q. Remove the pin — resolution falls "+
+					"registry %s for component %q. Remove the pin — resolution falls "+
 					"back to the registry default, and a redundant pin doubles bump churn and "+
-					"shields the overlay from external registry defaultVersion overrides. "+
+					"shields the overlay from external registry %s overrides. "+
 					"See issue #1616.",
-					source, ref.Name, field, pin, ref.Name)
+					source, ref.Name, field, pin, defField, ref.Name, defField)
 				continue
 			}
 
-			k := pinKey{source: source, component: ref.Name}
 			if e, ok := exemptByKey[k]; ok {
 				usedExemption[k] = true
 				// An exemption blesses ONE specific divergence, not the pair
 				// forever. If either the pin or the registry default has moved
-				// since the exemption was written, the documented justification
-				// no longer describes reality — fail so the author re-reviews
-				// (and re-cites) rather than letting a new divergence ride the
-				// old exemption.
+				// since the exemption was written — or the component migrated
+				// deployment types so the pin now lives on a different field —
+				// the documented justification no longer describes reality:
+				// fail so the author re-reviews (and re-cites) rather than
+				// letting a new divergence ride the old exemption.
+				if e.field != field {
+					t.Errorf("out-of-date versionPinExemptions entry for %s/%s: exemption "+
+						"declares field=%q but the recipe now pins %s=%q; a deployment-type "+
+						"migration is a new divergence — re-review and re-justify it. See issue #1424.",
+						source, ref.Name, e.field, field, pin)
+					continue
+				}
 				if pin != e.expectedPin || def != e.expectedDefault {
 					t.Errorf("out-of-date versionPinExemptions entry for %s/%s: exemption "+
-						"blesses pin=%q vs default=%q, but the recipe now has %s=%q vs default=%q.\n"+
+						"blesses pin=%q vs default=%q, but the recipe now has %s=%q vs registry %s=%q.\n"+
 						"  Update the exemption's expectedPin/expectedDefault and re-justify the "+
 						"divergence, or re-align the pin. See issue #1424.",
-						source, ref.Name, e.expectedPin, e.expectedDefault, field, pin, def)
+						source, ref.Name, e.expectedPin, e.expectedDefault, field, pin, defField, def)
 					continue
 				}
 				t.Logf("exempted divergence: %s/%s pins %s=%q vs registry default %q — %s",
@@ -165,13 +227,13 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 			}
 
 			t.Errorf("version drift: overlay/mixin %q pins %s.%s=%q but registry "+
-				"defaultVersion=%q for component %q.\n"+
+				"%s=%q for component %q.\n"+
 				"  The BOM (docs/user/container-images.md) renders the registry default, so it would\n"+
 				"  advertise %q while this recipe installs %q. Remove the pin (the registry default\n"+
 				"  applies at resolution) or bump the registry default instead. If the divergence is\n"+
 				"  intentional, add an entry to versionPinExemptions in version_pin_guard_test.go\n"+
 				"  with a justification. See issues #1424 and #1616.",
-				source, ref.Name, field, pin, def, ref.Name, def, pin)
+				source, ref.Name, field, pin, defField, def, ref.Name, def, pin)
 		}
 	}
 
@@ -320,8 +382,136 @@ type pinKey struct {
 	component string
 }
 
-// versionPinExemption documents a componentRef whose overlay/mixin version pin
-// is INTENTIONALLY different from the component's registry defaultVersion.
+// pinSelection maps a declared componentRef to the pin field and registry
+// default the guard compares, selected by the registry component's type. The
+// other type's field, if set, lands in stray/strayField so the caller can
+// fail closed on the mixed shape instead of comparing against an empty
+// default and silently skipping.
+type pinSelection struct {
+	pin, field        string // the type-matched declared pin ("" when unpinned)
+	def, defField     string // the matching registry default and its field name
+	stray, strayField string // a pin declared on the other type's field, if any
+}
+
+// refTypeMismatch reports whether a ref explicitly declares a deployment
+// type different from its registry component's type (case-insensitively,
+// matching coherenceProblem's treatment). An empty ref.Type inherits the
+// registry type and never mismatches.
+func refTypeMismatch(ref ComponentRef, cfg *ComponentConfig) bool {
+	return ref.Type != "" && !strings.EqualFold(string(ref.Type), string(cfg.GetType()))
+}
+
+// TestRefTypeMismatch pins the mismatch contract the guard fails closed on.
+func TestRefTypeMismatch(t *testing.T) {
+	helmCfg := &ComponentConfig{
+		Name: "helm-comp",
+		Helm: HelmConfig{DefaultRepository: "https://charts.example.com", DefaultVersion: "1.2.3"},
+	}
+	kustomizeCfg := &ComponentConfig{
+		Name:      "kustomize-comp",
+		Kustomize: KustomizeConfig{DefaultSource: "https://github.com/example/app", DefaultTag: "v9"},
+	}
+
+	tests := []struct {
+		name string
+		ref  ComponentRef
+		cfg  *ComponentConfig
+		want bool
+	}{
+		{"empty type inherits", ComponentRef{Name: "helm-comp"}, helmCfg, false},
+		{"matching helm type", ComponentRef{Name: "helm-comp", Type: ComponentTypeHelm}, helmCfg, false},
+		{"matching helm type lowercase", ComponentRef{Name: "helm-comp", Type: "helm"}, helmCfg, false},
+		{"kustomize ref on helm component", ComponentRef{Name: "helm-comp", Type: ComponentTypeKustomize}, helmCfg, true},
+		{"helm ref on kustomize component", ComponentRef{Name: "kustomize-comp", Type: ComponentTypeHelm}, kustomizeCfg, true},
+		{"matching kustomize type", ComponentRef{Name: "kustomize-comp", Type: ComponentTypeKustomize}, kustomizeCfg, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := refTypeMismatch(tt.ref, tt.cfg); got != tt.want {
+				t.Errorf("refTypeMismatch() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// selectPin performs the type-driven selection for one ref against its
+// registry config.
+func selectPin(ref ComponentRef, cfg *ComponentConfig) pinSelection {
+	if cfg.GetType() == ComponentTypeKustomize {
+		return pinSelection{
+			pin: ref.Tag, field: "tag",
+			def: cfg.Kustomize.DefaultTag, defField: "kustomize.defaultTag",
+			stray: ref.Version, strayField: "version",
+		}
+	}
+	return pinSelection{
+		pin: ref.Version, field: "version",
+		def: cfg.Helm.DefaultVersion, defField: "helm.defaultVersion",
+		stray: ref.Tag, strayField: "tag",
+	}
+}
+
+// TestSelectPin pins the type-driven selection contract, including the
+// mixed-field stray detection that must fail closed in the guard.
+func TestSelectPin(t *testing.T) {
+	helmCfg := &ComponentConfig{
+		Name: "helm-comp",
+		Helm: HelmConfig{DefaultRepository: "https://charts.example.com", DefaultVersion: "1.2.3"},
+	}
+	kustomizeCfg := &ComponentConfig{
+		Name:      "kustomize-comp",
+		Kustomize: KustomizeConfig{DefaultSource: "https://github.com/example/app", DefaultTag: "v9"},
+	}
+
+	tests := []struct {
+		name string
+		ref  ComponentRef
+		cfg  *ComponentConfig
+		want pinSelection
+	}{
+		{
+			name: "helm version pin",
+			ref:  ComponentRef{Name: "helm-comp", Version: "1.2.3"},
+			cfg:  helmCfg,
+			want: pinSelection{pin: "1.2.3", field: "version", def: "1.2.3", defField: "helm.defaultVersion", strayField: "tag"},
+		},
+		{
+			name: "helm unpinned",
+			ref:  ComponentRef{Name: "helm-comp"},
+			cfg:  helmCfg,
+			want: pinSelection{field: "version", def: "1.2.3", defField: "helm.defaultVersion", strayField: "tag"},
+		},
+		{
+			name: "helm with stray tag fails closed",
+			ref:  ComponentRef{Name: "helm-comp", Tag: "v9"},
+			cfg:  helmCfg,
+			want: pinSelection{field: "version", def: "1.2.3", defField: "helm.defaultVersion", stray: "v9", strayField: "tag"},
+		},
+		{
+			name: "kustomize tag pin",
+			ref:  ComponentRef{Name: "kustomize-comp", Tag: "v9"},
+			cfg:  kustomizeCfg,
+			want: pinSelection{pin: "v9", field: "tag", def: "v9", defField: "kustomize.defaultTag", strayField: "version"},
+		},
+		{
+			name: "kustomize with stray version fails closed",
+			ref:  ComponentRef{Name: "kustomize-comp", Version: "1.2.3", Tag: "v9"},
+			cfg:  kustomizeCfg,
+			want: pinSelection{pin: "v9", field: "tag", def: "v9", defField: "kustomize.defaultTag", stray: "1.2.3", strayField: "version"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := selectPin(tt.ref, tt.cfg); got != tt.want {
+				t.Errorf("selectPin() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// versionPinExemption documents a componentRef whose overlay/mixin
+// version/tag pin is INTENTIONALLY different from the component's registry
+// default (helm.defaultVersion or kustomize.defaultTag, per field).
 //
 // Add an entry ONLY when an overlay must legitimately run a different chart
 // version than the registry default (e.g. a platform validated against an
@@ -336,6 +526,7 @@ type pinKey struct {
 type versionPinExemption struct {
 	source          string // overlay/mixin metadata.name that declares the pin
 	component       string // componentRef name
+	field           string // pin field this exemption binds to: "version" (Helm). "tag" is rejected until the BOM variants pipeline supports Kustomize tags.
 	expectedPin     string // the exact divergent version/tag this exemption blesses
 	expectedDefault string // the registry default at the time the exemption was written
 	reason          string // why the divergence is intentional (cite an issue/PR)
@@ -345,6 +536,7 @@ var versionPinExemptions = []versionPinExemption{
 	{
 		source:          "aks",
 		component:       "kube-prometheus-stack",
+		field:           "version",
 		expectedPin:     "83.7.0",
 		expectedDefault: "84.4.0",
 		reason: "AKS is pinned to chart 83.7.0 to match its validated working cluster " +

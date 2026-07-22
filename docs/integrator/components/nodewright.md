@@ -90,6 +90,50 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 
 {/* END AICR-TUNING */}
 
+Note: the generated table lists the packages *pinned in the manifests* and
+cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.3.2`,
+but AKS recipes disable it by default via `nodewright-customizations`
+`tuningEnabled: false` under the Azure-managed driver profile; see
+[AKS GPU setup](../aks-gpu-setup.md#infiniband-rdma-host-setup-nodewright)
+for the rationale and re-enable path.
+
+The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
+applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
+omits the `nvidia-tuned` package while `nvidia-setup` keeps running, and on the
+single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`) it
+suppresses the whole tuning Skyhook CR, since the tuning package is that CR's
+only content. No recipe sets it outside AKS today, so default renderings are
+unchanged elsewhere.
+
+The tuning Skyhook CR is a normal release-managed resource (no Helm hooks), so
+flipping `tuningEnabled` from `true` to `false` retracts it on all deployers —
+under Helm/Argo (which already stripped the hooks at bundle time) and under
+Flux (where a hook resource would otherwise have been orphaned on the flip,
+since `before-hook-creation` never fires when the CR leaves the render).
+Ordering after the Skyhook CRD install is handled by component dependency
+ordering (`nodewright-customizations` depends on `nodewright-operator`), not an
+intra-release hook.
+
+One-time Flux migration: a cluster that was **already** running a pre-hook-removal
+bundle created the `tuning` Skyhook as a Helm hook (outside the release
+lifecycle). The first upgrade to a bundle carrying this change must keep
+`tuningEnabled=true` so Helm adopts the now-managed CR into the release; only
+then does a later upgrade with `tuningEnabled=false` prune it. If the first
+upgrade *both* removes the hooks *and* sets `tuningEnabled=false`, nothing
+renders for Helm to adopt and the legacy hook-created Skyhook is left behind —
+delete it explicitly in that case (`kubectl delete skyhook tuning -n skyhook`).
+Helm/Argo clusters are unaffected (they never created it as a hook).
+
+Known limitation: the `nodewright-customizations` deployment health check
+asserts the `tuning` Skyhook CR reaches `status.status: complete` and cannot
+see value gates. When the whole CR is suppressed — `tuningEnabled: false` on a
+`tuning-gke.yaml`/`tuning-generic.yaml` recipe, or `enabled: false` anywhere —
+`aicr validate --phase deployment` fails that check on the deliberately
+untuned cluster; skip it in that configuration. (AKS is unaffected by
+`tuningEnabled: false`: its `tuning` CR still renders with the `nvidia-setup`
+packages.) A value-aware health check that tolerates the intentionally-absent
+CR is tracked in [#1844](https://github.com/NVIDIA/aicr/issues/1844).
+
 See [recipes/components/nodewright-customizations/manifests](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests) for the specifics on packages and their configuration.
 
 ## Tuning-gke

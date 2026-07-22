@@ -63,7 +63,12 @@ compute:
             nodeGroup: cpu-worker
         - name: gpuworker1
           gpuType: h100  # NDSH100v5 family: 2x96=192 of 1152 vCPUs
-          gpuDriverInstall: false  # no Azure driver — GPU software managed in-cluster (GPU Operator)
+          # AKS driver-only profile (the Azure default): the node image
+          # preinstalls the NVIDIA driver + container toolkit, matching the
+          # AKS recipe defaults (gpu-operator driver.enabled=false,
+          # toolkit.enabled=false). Existing pools provisioned with
+          # gpuDriverInstall: false must be recreated to pick this up.
+          gpuDriverInstall: true
           osDiskSizeGb: 512
           size: 2
           autoscaling:

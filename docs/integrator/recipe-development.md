@@ -346,20 +346,31 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 Do not set `version:` (Helm) or `tag:` (Kustomize) on a `componentRef` that
 installs the component's registry default. Resolution falls back to the
 registry entry's `helm.defaultVersion` / `kustomize.defaultTag` in
-`recipes/registry.yaml`, which is the single source of truth for chart
+`recipes/registry.yaml`, which is the single source of truth for component
 versions — bumping a component means bumping the registry default, in one
 place.
 
 Pin a version only when the overlay must intentionally diverge from the
-registry default, and declare that divergence in `versionPinExemptions`
-(`pkg/recipe/version_pin_guard_test.go`) with a justification. CI rejects any
-non-exempted pin: a pin that differs from the registry default is undeclared
-drift, and a pin that merely repeats the default is redundant — it doubles
-bump churn and shields the overlay from external registry overrides.
+registry default. For recipes contributed to this repo (the embedded
+catalog), additionally declare that divergence in `versionPinExemptions`
+(`pkg/recipe/version_pin_guard_test.go`) with a justification. CI rejects a
+non-exempted embedded pin whenever the component has a matching registry
+default: a pin that differs from it is undeclared drift, and a pin that
+merely repeats it is redundant — it doubles bump churn and shields the
+overlay from external registry overrides. Only Helm `version` divergences
+can be exempted today: a Kustomize `tag` exemption is rejected because the
+BOM variants pipeline cannot yet represent it (extend `tools/bom/variants.go`
+first).
+
+External `--data` overlays are not scanned by this guard: at resolution an
+explicit pin always wins over the registry default, so external trees may
+pin without declaring anything or rebuilding AICR — see
+[data extension](data-extension.md#registryyaml-is-required).
 
 This split keeps external data trees composable: an external `--data`
-registry that overrides a component's `defaultVersion` takes effect for every
-overlay that does not pin, while an explicit (exempted) pin still wins. See
+registry that overrides a component's registry default (`defaultVersion` /
+`defaultTag`) takes effect for every overlay that does not pin, while an
+explicit pin still wins. See
 issue [#1616](https://github.com/NVIDIA/aicr/issues/1616).
 
 ### Configuration Patterns
@@ -409,7 +420,7 @@ Base → ValuesFile → Overrides → CLI --set flags
 # Result: driver.version="580.13.01", driver.repository="nvcr.io/nvidia" (preserved)
 ```
 
-**Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is resolved from a snapshot (via `aicr recipe --snapshot` or `ResolveRecipeFromSnapshot`), AICR reads the sampled GPU node's `driver-loaded` measurement and injects `gpu-operator.overrides.driver.enabled=false` when the NVIDIA kernel module is already loaded on the node — as an Overrides entry, so it wins over base and provider values files. Explicit CLI `--set` flags retain higher precedence and can supersede the injection. The gate: injection only fires when the resolved overlay already declares the coordinated preinstalled-driver profile (`gpu-operator.driver.enabled=false` in the merged base+valuesFile) — that scopes auto-detect to overlays like GKE-COS and OKE, and skips bare AKS/EKS with a warning instead of leaving the Operator half-configured. Policy is only-false (never forces `true`), so recipes resolved without a snapshot fall back to today's static defaults. Capture the snapshot **before** deploying the GPU Operator: a snapshot taken after a prior AICR-managed driver install still reports `driver-loaded=true` and would flip a re-deploy toward driverless nodes; AICR emits a warning when both `driver-loaded=true` and a gpu-operator ClusterPolicy are present in the snapshot. See [Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
+**Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is resolved from a snapshot (via `aicr recipe --snapshot` or `ResolveRecipeFromSnapshot`), AICR reads the sampled GPU node's `driver-loaded` measurement and injects `gpu-operator.overrides.driver.enabled=false` when the NVIDIA kernel module is already loaded on the node — as an Overrides entry, so it wins over base and provider values files. Explicit CLI `--set` flags retain higher precedence and can supersede the injection. The gate: injection only fires when the resolved overlay already declares the coordinated preinstalled-driver profile (`gpu-operator.driver.enabled=false` in the merged base+valuesFile) — that scopes auto-detect to overlays like AKS, GKE-COS, and OKE, and skips bare EKS with a warning instead of leaving the Operator half-configured. Policy is only-false (never forces `true`), so recipes resolved without a snapshot fall back to today's static defaults. Capture the snapshot **before** deploying the GPU Operator: a snapshot taken after a prior AICR-managed driver install still reports `driver-loaded=true` and would flip a re-deploy toward driverless nodes; AICR emits a warning when both `driver-loaded=true` and a gpu-operator ClusterPolicy are present in the snapshot. See [Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
 
 ## Disable a Component in an Overlay
 

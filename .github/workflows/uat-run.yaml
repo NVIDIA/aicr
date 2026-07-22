@@ -170,8 +170,8 @@ jobs:
           go build -o ./bin/uat-broker ./tools/uat-broker
           ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
 
-  # One of run-aws / run-gcp / run-azure fires based on the resolved cloud
-  # (the registry validates cloud membership, so at most one matches; the
+  # One of run-aws / run-gcp / run-azure / run-kind fires based on the resolved
+  # cloud (the registry validates cloud membership, so at most one matches; the
   # unmapped-cloud job below fails closed if a registry cloud has no
   # run-<cloud> job here yet). The caller job grants the permission SUPERSET
   # its callee needs — a reusable workflow's jobs are ceilinged by the calling
@@ -241,6 +241,32 @@ jobs:
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
 
+  # nvkind real-silicon lane (DC5 #1278). "kind" is not a cloud but a
+  # self-hosted GPU-runner lane; it slots into the same dispatch model so it
+  # rides the nightly batch and shares tests/uat/kind/run + tests/uat/lib. It
+  # provisions on the runner (no cloud actuator), so it needs no cloud OIDC —
+  # but it DOES do keyless cosign (id-token), GHCR push (packages), and the
+  # nested evidence-ingest GCS WIF, so the permission superset matches the
+  # cloud lanes.
+  run-kind:
+    needs: resolve
+    if: needs.resolve.outputs.cloud == 'kind'
+    permissions:
+      contents: read  # checkout inside the called pipeline
+      actions: write  # nested evidence-ingest dashboard-publish dispatch (a reusable workflow cannot elevate the caller token, so grant the ceiling here)
+      id-token: write  # keyless cosign + GCS evidence-publish WIF
+      packages: write  # push validator/agent + evidence images to GHCR
+    uses: ./.github/workflows/uat-kind.yaml
+    with:
+      reservation: ${{ inputs.reservation }}
+      aicr_version: ${{ inputs.aicr_version }}
+      intent: ${{ inputs.intent }}
+      lifecycle: ${{ inputs.lifecycle }}
+      cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
+      test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
+      skip_delete: ${{ inputs.skip_delete }}
+      skip_tests: ${{ inputs.skip_tests }}
+
   # Fail closed on an unmapped cloud. The broker validates cloud membership
   # against its own set, but a cloud can be added there (and to the registry)
   # before its run-<cloud> job exists here — without this job the dispatch
@@ -251,7 +277,8 @@ jobs:
     if: >-
       needs.resolve.outputs.cloud != 'aws' &&
       needs.resolve.outputs.cloud != 'gcp' &&
-      needs.resolve.outputs.cloud != 'azure'
+      needs.resolve.outputs.cloud != 'azure' &&
+      needs.resolve.outputs.cloud != 'kind'
     runs-on: ubuntu-latest
     steps:
       - name: Fail on unmapped cloud

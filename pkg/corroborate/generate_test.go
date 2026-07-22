@@ -537,6 +537,79 @@ func TestGenerateSeries(t *testing.T) {
 	if s.Health[srcNVIDIA].FlakePct != 100 {
 		t.Errorf("nvidia flakePct = %d, want 100", s.Health["a1nvidia"].FlakePct)
 	}
+
+	// Older-build-only phase: nvidia's OLDER build ran conformance/gpu-operator-
+	// conformance and no signer's latest run has a conformance row. The
+	// phase-aware all-build union (Series.Rows) must still carry it so the
+	// drilldown renders the historical row instead of hiding it / mislabeling the
+	// phase "not run".
+	var confRow *SeriesRow
+	for i := range s.Rows {
+		if s.Rows[i].Name == "gpu-operator-conformance" {
+			confRow = &s.Rows[i]
+			break
+		}
+	}
+	if confRow == nil {
+		t.Fatalf("series rows missing older-build-only conformance row; got %+v", s.Rows)
+	}
+	if confRow.Phase != "conformance" {
+		t.Errorf("older-build-only row phase = %q, want conformance", confRow.Phase)
+	}
+	// Its historical result survives on the older nvidia build; the newest build,
+	// which never ran conformance, reports not-run.
+	if got := nv[1].Results["gpu-operator-conformance"]; got != "pass" {
+		t.Errorf("older nvidia conformance = %q, want pass", got)
+	}
+	if got := nv[0].Results["gpu-operator-conformance"]; got != "not-run" {
+		t.Errorf("newest nvidia conformance = %q, want not-run", got)
+	}
+}
+
+// TestGenerateOlderOnlyPhaseAbsentFromCombinedGrid confirms an older-build-only
+// phase row is absent from the default combined (all-versions) grid the
+// drilldown would otherwise render from, while still appearing in the older
+// version's grid — the exact gap Series.Rows closes for the drilldown.
+func TestGenerateOlderOnlyPhaseAbsentFromCombinedGrid(t *testing.T) {
+	out, _ := generateInto(t, filepath.Join("testdata", "allowlist.yaml"))
+	data, err := os.ReadFile(filepath.Join(out, "data", "index.json"))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	var idx Index
+	if err := json.Unmarshal(data, &idx); err != nil {
+		t.Fatalf("parse index: %v", err)
+	}
+	tab := findTab(t, idx, "h100-eks-ubuntu-training-kubeflow")
+	if tab.Combined == nil {
+		t.Fatal("recipe has no combined grid")
+	}
+	if tabHasRow(tab.Combined, "gpu-operator-conformance") {
+		t.Error("combined all-versions grid unexpectedly contains older-build-only conformance row")
+	}
+	// It is present in the older version's strict grid, proving the fixture is a
+	// genuine older-build-only phase (not simply missing everywhere).
+	if !anyVersionHasRow(tab, "gpu-operator-conformance") {
+		t.Error("no per-version grid carries the older-build-only conformance row")
+	}
+}
+
+func tabHasRow(v *TabVersion, name string) bool {
+	for _, r := range v.Tests {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func anyVersionHasRow(tab Tab, name string) bool {
+	for i := range tab.Versions {
+		if tabHasRow(&tab.Versions[i], name) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompatibleMetaSchema(t *testing.T) {

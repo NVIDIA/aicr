@@ -106,14 +106,17 @@ func writeLocalHelmFolder(
 		return Folder{}, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("create folder %s", dir), err)
 	}
+	// templates/ is created lazily, only when the first non-empty manifest is
+	// written. A component whose manifests all render empty (e.g. a
+	// single-package tuning manifest with tuningEnabled=false) must NOT leave an
+	// empty templates/ directory behind — the inventory verifier rejects it as
+	// an unexpected directory, and a template-less Helm chart (Chart.yaml +
+	// values only) is valid and installs as a harmless no-op.
 	templatesDir, err := deployer.SafeJoin(folderDir, "templates")
 	if err != nil {
 		return Folder{}, errors.Wrap(errors.ErrCodeInvalidRequest, "templates dir path unsafe", err)
 	}
-	if err = os.MkdirAll(templatesDir, 0o755); err != nil {
-		return Folder{}, errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("create templates dir for %s", dir), err)
-	}
+	templatesDirCreated := false
 
 	// Chart.yaml
 	chartData := struct {
@@ -184,6 +187,13 @@ func writeLocalHelmFolder(
 		if jerr != nil {
 			return Folder{}, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("template file path unsafe: %s", baseName), jerr)
+		}
+		if !templatesDirCreated {
+			if mkErr := os.MkdirAll(templatesDir, 0o755); mkErr != nil {
+				return Folder{}, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("create templates dir for %s", dir), mkErr)
+			}
+			templatesDirCreated = true
 		}
 		if werr := writeFile(outPath, rendered, 0o644); werr != nil {
 			return Folder{}, werr

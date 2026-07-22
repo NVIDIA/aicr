@@ -39,12 +39,23 @@ spec:
     # Azure Disk CSI is a built-in AKS addon (enabled by default since AKS 1.21).
 
     # AKS-specific GPU Operator overrides
-    # GPU Operator-managed mode: the operator installs the driver and the
-    # container toolkit on `--gpu-driver none` nodepools
+    # AKS driver-only mode (the Azure default): the AKS node image
+    # preinstalls the driver and container toolkit; the operator owns
+    # the rest of the GPU stack (device plugin, DCGM, GFD, ...)
     # (see docs/integrator/aks-gpu-setup.md)
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-aks.yaml
+      # Device-isolation hardening for the driver-only profile: with
+      # driver.enabled=false there is no gpu-operator toolkit DaemonSet to
+      # write the hardened /etc/nvidia-container-runtime/config.toml keys, so
+      # the AKS node image's permissive toolkit defaults would let any
+      # unprivileged pod with NVIDIA_VISIBLE_DEVICES=all grab all GPUs
+      # unallocated (secure-accelerator-access conformance failure). This
+      # DaemonSet re-asserts the hardened keys. See the manifest header and
+      # docs/integrator/aks-gpu-setup.md.
+      manifestFiles:
+        - components/gpu-operator/manifests/nvidia-toolkit-hardening-aks.yaml
       dependencyRefs:
         - network-operator
 
@@ -52,6 +63,10 @@ spec:
     # Manifests deliver the full RDMA stack that the Helm chart does not template:
     #   - NicClusterPolicy: MOFED driver, RDMA shared device plugin, DOCA telemetry
     #   - NFD NodeFeatureRule: labels IB-capable nodes (pci-15b3.present=true)
+    #   - nvidia-peermem reloader: loads nvidia-peermem for GPUDirect RDMA —
+    #     required under the AKS driver-only default, where no GPU Operator
+    #     driver DaemonSet exists to load it and the Azure-managed driver
+    #     does not load it automatically
     # Host MEMLOCK limits and IB module loading moved to nodewright
     # (nvidia-setup aks-h100 via the nodewright-customizations tuning manifest,
     # wired in the accelerator overlays), replacing the privileged
@@ -69,6 +84,7 @@ spec:
       manifestFiles:
         - components/network-operator/manifests/nfd-network-rule.yaml
         - components/network-operator/manifests/nic-cluster-policy-aks.yaml
+        - components/network-operator/manifests/nvidia-peermem-reloader.yaml
       dependencyRefs:
         - nfd
         - cert-manager
@@ -89,10 +105,16 @@ spec:
                     requests:
                       storage: 50Gi
     # AKS has no control-plane nodes — remove the default nodeAffinity
-    # that requires node-role.kubernetes.io/control-plane
+    # that requires node-role.kubernetes.io/control-plane.
+    # nvidiaDriverRoot: the AKS driver-only profile preinstalls the NVIDIA
+    # driver on the node image at the host root (gpu-operator
+    # driver.enabled=false, so nothing populates the base default
+    # /run/nvidia/driver). Same pattern as OKE (values-oke.yaml) and
+    # kind; GKE-COS uses its own host path.
     - name: nvidia-dra-driver-gpu
       type: Helm
       overrides:
+        nvidiaDriverRoot: "/"
         controller:
           affinity:
             nodeAffinity: null

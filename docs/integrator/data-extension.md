@@ -80,8 +80,12 @@ Overriding a component's `defaultVersion` this way takes effect for every
 embedded overlay that references the component: embedded overlays do not pin
 versions that equal the registry default, so resolution falls back to your
 merged default. The exception is an overlay with an explicit, intentionally
-divergent pin (declared in `versionPinExemptions`) — that pin still wins. See
-issue [#1616](https://github.com/NVIDIA/aicr/issues/1616) and
+divergent pin — an explicit pin always wins over the registry default at
+resolution. (The `versionPinExemptions` list is CI policy for recipes
+embedded in the AICR repo, not a runtime input: the guard test that
+consumes it never walks `--data` trees, so your external overlays may pin
+freely without declaring anything or rebuilding AICR.) See issue
+[#1616](https://github.com/NVIDIA/aicr/issues/1616) and
 [Chart Version Pinning](recipe-development.md#chart-version-pinning).
 
 ## Adding a criteria value
@@ -179,7 +183,7 @@ components:
 ```
 
 Component values are **not** auto-discovered by filename. For a Helm
-component, a values file under `components/<name>/` is consumed only when a
+component, a values file under `components/<name>/` is consumed only when
 an overlay's `componentRef` names it via a
 `valuesFile:` path relative to the data directory (a `componentRef` — and thus
 `valuesFile` — lives on an overlay, not on the `registry.yaml` entry); the merge order is base
@@ -192,8 +196,10 @@ Reference the component from an overlay's `componentRefs:` to include it in
 recipes that match the overlay's criteria.
 
 **Helm components must resolve with an effective chart version.** Declare
-`helm.defaultVersion` in the registry entry, or pin `version:` on every
-`componentRef` that references the component. A Helm `componentRef` that
+`helm.defaultVersion` in the registry entry (preferred — it keeps the version
+in one place, matching the embedded catalog's convention; see
+[Chart Version Pinning](recipe-development.md#chart-version-pinning)), or pin
+`version:` on every `componentRef` that references the component. A Helm `componentRef` that
 resolves without one is rejected at recipe resolution (`INVALID_REQUEST`)
 rather than passed through — several deployers would otherwise emit the empty
 version verbatim and Helm would silently install "latest" at deploy time.

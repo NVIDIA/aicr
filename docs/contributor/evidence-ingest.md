@@ -65,9 +65,14 @@ The Go pieces:
 2. **`workflow_call` / `workflow_dispatch` with `bundle_ref`** — a
    first-party UAT run ingests its bundle directly, by ref, with no repo
    commit. The signature is pinned to the NVIDIA/aicr Actions identity.
-   `uat-aws.yaml` and `uat-gcp.yaml` call this workflow as a dependent
-   `ingest-evidence` job on a successful run, passing the digest-pinned
-   ref read from the conformance step's `evidence/pointer.yaml`.
+   `uat-aws.yaml`, `uat-gcp.yaml`, `uat-azure.yaml`, and — for real-silicon
+   `service: kind` recipes on the self-hosted GPU runners — `uat-kind.yaml`
+   (DC5 #1278) call this workflow as a dependent `ingest-evidence` job on a
+   successful run, passing the digest-pinned ref read from the conformance
+   step's `evidence/pointer.yaml`. The nvkind lane is a sibling of the cloud
+   lanes: dispatched by the shared `uat-run.yaml` from the `kind-h100`
+   reservation row and scoped to H100 x1, single-GPU (whatever the runner
+   physically has).
 
 ## Dashboard refresh
 

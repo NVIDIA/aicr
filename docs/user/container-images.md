@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **34**
-- Unique images: **86**
+- Unique images: **87**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -39,7 +39,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.3.2 | 14 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.3.2 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
@@ -49,7 +49,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.18.2 | 1 |
-| network-operator | helm | nvidia/network-operator | 26.1.1 | 4 |
+| network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
@@ -126,6 +126,7 @@ _No images extracted._
 
 ### gpu-operator
 
+- `docker.io/library/busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028`
 - `nvcr.io/nvidia/cloud-native/dcgm:4.5.2-1-ubuntu22.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.5.2`
 - `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.0`
@@ -189,6 +190,7 @@ _No images extracted._
 
 ### network-operator
 
+- `docker.io/library/busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.1.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`

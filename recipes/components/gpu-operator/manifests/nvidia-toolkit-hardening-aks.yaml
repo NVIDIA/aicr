@@ -1,0 +1,199 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA Container Toolkit device-isolation hardening for the AKS driver-only
+# profile.
+#
+# Under the AKS Azure-managed driver profile the container toolkit is
+# preinstalled by the node image, which ships the upstream permissive
+# defaults in /etc/nvidia-container-runtime/config.toml:
+#   accept-nvidia-visible-devices-envvar-when-unprivileged = true  (default)
+#   accept-nvidia-visible-devices-as-volume-mounts         = false (default)
+# and containerd's default_runtime_name is nvidia-container-runtime, so EVERY
+# container on a GPU node passes through the toolkit. The consequence: any
+# unprivileged pod whose image sets NVIDIA_VISIBLE_DEVICES=all — which every
+# CUDA base image does — is granted ALL host GPUs with no Kubernetes device
+# allocation. The secure-accelerator-access conformance check fails, and the
+# isolation gap is real for any multi-tenant workload.
+#
+# Scope: this DaemonSet renders ONLY when gpu-operator.toolkit.enabled is
+# false (the driver-only default). Under the GPU-Operator-managed fallback
+# (--gpu-driver none + toolkit.enabled=true) it is omitted — there the operator
+# owns the toolkit and the hardened keys are set via gpu-operator.toolkit.env
+# (ACCEPT_NVIDIA_VISIBLE_DEVICES_* in values-aks*.yaml). Gating it out of the
+# fallback also avoids a helm-wait deadlock: on --gpu-driver none nodes
+# nvidia-ctk is not preinstalled, so the fail-closed probe (below) would never
+# go Ready and could hold the gpu-operator-post helm --wait.
+#
+# This DaemonSet re-asserts the hardened pair via `nvidia-ctk config
+# --in-place` (TOML-safe; the preinstalled toolkit ships nvidia-ctk). The
+# toolkit re-reads config.toml at every container start, so no containerd
+# restart is needed and already-running pods are unaffected. The loop
+# re-asserts after a node reimage/upgrade rewrites the config.
+#
+# What this closes — and what it does NOT:
+#   accept-nvidia-visible-devices-envvar-when-unprivileged = false
+#     Ignores the NVIDIA_VISIBLE_DEVICES env var for unprivileged containers —
+#     closes the ENV-VAR unauthorized-GPU path (the path secure-accelerator-
+#     access exercises).
+#   accept-nvidia-visible-devices-as-volume-mounts = true
+#     Required so the device plugin's volume-mounts strategy (DEVICE_LIST_
+#     STRATEGY includes volume-mounts, base values.yaml) can hand ALLOCATED
+#     devices to legitimately scheduled pods without breaking them (CDI-
+#     allocated pods likewise unaffected). It leaves the VOLUME-MOUNTS
+#     device-request path open — the same posture as GPU-Operator-managed mode,
+#     not a regression — so full multi-tenant isolation additionally requires
+#     an admission policy restricting a /dev/null-backed mount whose destination
+#     is under /var/run/nvidia-container-devices (the pinned toolkit v1.19.1
+#     accepts the volume-mount device request only when the mount SOURCE is
+#     /dev/null). secure-accelerator-access does not
+#     exercise the volume-mounts path, so a green result is not proof of
+#     complete isolation.
+#
+# Fail-closed readiness probe: the loop touches /tmp/hardened only after a
+# successful `nvidia-ctk config --in-place` and REMOVES it on any failure; the
+# probe checks it. Readiness tracks the ability to harden, not config drift:
+# the probe surfaces the INABILITY to assert the hardened keys (nvidia-ctk
+# missing/incompatible → the assert fails → the pod drops out of Ready),
+# instead of latching Ready permanently after one success. It does NOT detect a
+# silent permissive revert as a readiness transition — a transient permissive-
+# but-valid rewrite of config.toml is simply repaired by the next `--in-place`
+# re-assert within ≤60s (the re-assert succeeds, so the sentinel stays present
+# and Ready never flips). The config is corrected, not flagged as drift.
+#
+# Boot-window caveat (KNOWN residual race): because the keys are asserted only
+# after this pod's first loop iteration, there is a window on a freshly booted
+# or reimaged node where the permissive node-image defaults are still live.
+# This window IS reachable — the exploit pod requests no nvidia.com/gpu (it
+# grabs GPUs via the NVIDIA_VISIBLE_DEVICES env var), so it does not wait for
+# device-plugin advertisement and can schedule as soon as it tolerates the GPU
+# node taint, including before this DaemonSet's first assert. A post-schedulable
+# DaemonSet cannot close this by construction. The readiness probe below makes
+# a persistently-failing assert visible (the pod does not report Ready until
+# the config is asserted at least once) so a broken hardening is caught at
+# deploy time rather than silently passing — but it does not eliminate the
+# race. The DURABLE fix is migrating the hardening into the nodewright
+# `nvidia-setup` package, which runs during Skyhook host prep while the node is
+# cordoned and NOT yet workload-schedulable; that closes the window entirely
+# and is tracked in https://github.com/NVIDIA/aicr/issues/1839.
+{{- $gpuOp := index .Values "gpu-operator" }}
+{{- $toolkit := index $gpuOp "toolkit" }}
+{{- /* Render only in the driver-only profile (toolkit.enabled=false). In the */}}
+{{- /* GPU-Operator-managed fallback the operator owns the toolkit and the */}}
+{{- /* hardened keys come from toolkit.env, so this DaemonSet is omitted (and */}}
+{{- /* cannot deadlock helm --wait on nodes where nvidia-ctk is not present). */}}
+{{- if eq (toString (index $toolkit "enabled")) "false" }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-toolkit-hardening
+  namespace: gpu-operator
+  labels:
+    app.kubernetes.io/name: nvidia-toolkit-hardening
+    app.kubernetes.io/managed-by: aicr
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nvidia-toolkit-hardening
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nvidia-toolkit-hardening
+    spec:
+      tolerations:
+        # Harden every GPU node regardless of its pool taint scheme, matching
+        # the nvidia-peermem-reloader precedent. DaemonSet pods are exempt from
+        # drain eviction, so the AKS wildcard-toleration hazard (nodewright#296)
+        # does not apply.
+        - operator: Exists
+      affinity:
+        nodeAffinity:
+          # GPU nodes only: the toolkit config is only security-relevant where
+          # GPUs exist. Select on the AKS-native accelerator label, which is
+          # present from node boot — unlike NFD/GFD GPU labels
+          # (nvidia.com/gpu.present, pci-10de.present) that appear only after
+          # the gpu-operator operands roll out, so hardening lands as early as
+          # possible.
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.azure.com/accelerator
+                    operator: In
+                    values:
+                      - nvidia
+      priorityClassName: system-node-critical
+      containers:
+        - name: nvidia-toolkit-hardening
+          image: docker.io/library/busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028
+          command:
+            - /bin/sh
+            - -c
+            - |
+              prev=""
+              while true; do
+                if chroot /host nvidia-ctk config --in-place \
+                     --set accept-nvidia-visible-devices-envvar-when-unprivileged=false \
+                     --set accept-nvidia-visible-devices-as-volume-mounts=true >/dev/null 2>&1; then
+                  cur=hardened
+                  # Fail-closed sentinel: present only while the CURRENT assert
+                  # succeeds. Touched on success, removed on any failure below,
+                  # so the readiness probe tracks live state instead of latching.
+                  touch /tmp/hardened
+                else
+                  cur=failed
+                  # Assert failed (nvidia-ctk missing/incompatible): the keys
+                  # could not be hardened. Drop out of Ready so the inability to
+                  # harden surfaces. (A merely-reverted-but-valid config is not
+                  # a failure here — the --in-place re-assert above repairs it.)
+                  rm -f /tmp/hardened
+                fi
+                if [ "$cur" != "$prev" ]; then
+                  if [ "$cur" = "hardened" ]; then
+                    echo "nvidia-container-toolkit device-isolation keys asserted"
+                  else
+                    echo "nvidia-ctk config assert failed (toolkit missing or incompatible); NOT ready, retrying every 60s"
+                  fi
+                  prev=$cur
+                fi
+                sleep 60
+              done
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/hardened"]
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          securityContext:
+            privileged: true
+          # Modest bounds for a busybox re-assert loop — gives the pod a
+          # Guaranteed-vs-BestEffort QoS floor on a system-node-critical
+          # DaemonSet rather than leaving it unbounded.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+{{- end }}

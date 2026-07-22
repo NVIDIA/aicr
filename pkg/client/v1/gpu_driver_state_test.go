@@ -397,7 +397,7 @@ func TestApplyGPUDriverAutoOverride_UnitCases(t *testing.T) {
 		{
 			// The gate needs GetValuesForComponent to resolve — this stub
 			// result has no data provider, so hasPreinstalledDriverProfile
-			// returns false. That is the "bare AKS/EKS" behavior: warn +
+			// returns false. That is the "bare EKS" behavior: warn +
 			// skip, never leave the Operator half-configured.
 			name:         "preinstalled snapshot without a preinstalled-profile overlay is skipped",
 			result:       makeResult(gpuOp(nil)),
