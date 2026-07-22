@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -63,6 +64,13 @@ const (
 	// stays Pending ("no persistent volumes available … and no storage class is
 	// set"). Unset uses the cluster's default StorageClass.
 	envModelCacheStorageClass = "AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS"
+
+	// envModelCachePopulateTimeout overrides the wait bound for the one-time
+	// model-cache populate Job (default defaults.ModelCachePopulateTimeout). It is
+	// distinct from AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT because the populate
+	// Job pays a cold image pull plus a first-ever multi-GB download and needs a
+	// larger budget than the DynamoGraphDeployment readiness wait (issue #1859).
+	envModelCachePopulateTimeout = "AICR_INFERENCE_PERF_MODEL_CACHE_POPULATE_TIMEOUT"
 
 	// modelCachePVCName is the per-run PVC holding the Hugging Face cache.
 	modelCachePVCName = "aicr-model-cache"
@@ -177,6 +185,17 @@ func clusterHasDefaultStorageClass(ctx *validators.Context) (bool, error) {
 // WaitForFirstConsumer RWO volume binds there) that downloads the model into it.
 // It blocks until the download completes so the cache is ready before the
 // DynamoGraphDeployment workers start. A no-op when the cache is disabled.
+// populateJobTimeout resolves the wait budget for the one-time model-cache
+// populate Job: the dedicated defaults.ModelCachePopulateTimeout, env-overridable
+// via envModelCachePopulateTimeout. It is deliberately decoupled from the
+// DynamoGraphDeployment workload-ready budget (envWorkloadReadyTimeout /
+// defaults.InferenceWorkloadReadyTimeout) because the populate Job pays a cold
+// image pull plus a first-ever multi-GB download (issue #1859). Keep it a named
+// seam so the decoupling stays test-guarded.
+func populateJobTimeout() (time.Duration, error) {
+	return durationFromEnv(envModelCachePopulateTimeout, defaults.ModelCachePopulateTimeout)
+}
+
 func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	if !modelCacheEnabled(config) {
 		return nil
@@ -228,17 +247,23 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 	slog.Info("Populating model cache (one-time download)",
 		"pvc", modelCachePVCName, "model", config.model, "job", jobName)
 
-	// The download can be slow for large models; reuse the (configurable)
-	// workload-ready budget as the wait bound.
-	readyTimeout, terr := durationFromEnv(envWorkloadReadyTimeout, defaults.InferenceWorkloadReadyTimeout)
+	populateTimeout, terr := populateJobTimeout()
 	if terr != nil {
 		return terr
 	}
-	if werr := pod.WaitForJobCompletion(ctx.Ctx, ctx.Clientset, config.namespace, jobName, readyTimeout); werr != nil {
+	if werr := pod.WaitForJobCompletion(ctx.Ctx, ctx.Clientset, config.namespace, jobName, populateTimeout); werr != nil {
 		// WaitForJobCompletion returns coded errors (ErrCodeTimeout on the ready
 		// deadline, ErrCodeUnavailable when the watch closes). Preserve that
 		// classification instead of flattening every failure to ErrCodeInternal.
-		return errors.PropagateOrWrap(werr, errors.ErrCodeInternal, "model-cache populate Job did not complete")
+		// On a timeout, surface the durable remedies in-band (an operator
+		// triaging a red run won't be reading the env-var reference): the
+		// download is likely throttled anonymously — provide the HF-token secret
+		// — or the model is large enough to need a bigger budget.
+		return errors.PropagateOrWrap(werr, errors.ErrCodeInternal,
+			fmt.Sprintf("model-cache populate Job did not complete within %s "+
+				"(provide the optional HF-token secret to remove anonymous-download throttling, "+
+				"or raise %s / the catalog timeout for very large models)",
+				populateTimeout, envModelCachePopulateTimeout))
 	}
 	slog.Info("Model cache populated", "pvc", modelCachePVCName)
 	return nil

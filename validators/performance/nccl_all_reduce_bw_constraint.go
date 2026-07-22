@@ -725,14 +725,12 @@ func determineGPUConfig(ctx *validators.Context, service recipe.CriteriaServiceT
 		return nil, err
 	}
 
-	// Get GPU count from first target node (assuming homogeneous target set)
-	firstNode := targetNodes[0]
-	gpuResource := v1.ResourceName("nvidia.com/gpu")
-	gpuQuantity := firstNode.Status.Allocatable[gpuResource]
-	gpuCountPerNode := int(gpuQuantity.Value())
-
-	if gpuCountPerNode == 0 {
-		return nil, aicrErrors.New(aicrErrors.ErrCodeInternal, "no GPUs found on nodes")
+	// Size the workers from a per-node GPU census that requires every target
+	// node to advertise the same count — a node short of its peers fails fast
+	// with a named diagnostic rather than an opaque launcher timeout (#1858).
+	gpuCountPerNode, err := uniformGPUCountPerNode(targetNodes)
+	if err != nil {
+		return nil, err
 	}
 
 	totalGPUs := len(targetNodes) * gpuCountPerNode
@@ -744,6 +742,65 @@ func determineGPUConfig(ctx *validators.Context, service recipe.CriteriaServiceT
 		Namespace:       ctx.Namespace,
 		Nodes:           targetNodes,
 	}, nil
+}
+
+// uniformGPUCountPerNode returns the per-node allocatable nvidia.com/gpu after
+// verifying every target node advertises the same positive count, and logs the
+// full per-node census on every call so the counts are visible even on the
+// happy path. It is the GPU-count analog of uniformFabricResourceCount (the
+// fabric-count census in nccl_eks_utils.go): both census the same allocatable
+// resource across all target nodes and fail closed on disagreement, naming the
+// cohort — this one flags nodes below the peer max, the fabric one flags any
+// deviation from the first node.
+//
+// NCCL schedules whole-node workers sized from this count, so a node advertising
+// fewer GPUs than its peers — a degraded GPU or driver fault, e.g. an H100 node
+// enumerating 7 of 8 GPUs (issue #1858) — would leave one worker Pending and the
+// launcher would eventually fail with an opaque "pod failed". Failing fast here
+// with the census and the short node named turns that into an immediate,
+// actionable diagnostic. A uniformly low count (every node 7) is not flagged:
+// it is a coherent — if unusual — topology the run can still execute, and this
+// gate cannot know the SKU's nominal count; the census still surfaces it.
+func uniformGPUCountPerNode(nodes []v1.Node) (int, error) {
+	if len(nodes) == 0 {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInternal, "no target GPU nodes for the GPU-count census")
+	}
+
+	gpuResource := v1.ResourceName(helper.GpuResourceName)
+	names := make([]string, len(nodes))
+	counts := make([]int, len(nodes))
+	maxCount := 0
+	for i := range nodes {
+		q := nodes[i].Status.Allocatable[gpuResource]
+		counts[i] = int(q.Value())
+		names[i] = nodes[i].Name
+		if counts[i] > maxCount {
+			maxCount = counts[i]
+		}
+	}
+
+	census := make([]string, len(nodes))
+	for i := range nodes {
+		census[i] = fmt.Sprintf("%s=%d", names[i], counts[i])
+	}
+	slog.Info("GPU census across target nodes", "perNode", strings.Join(census, " "), "expected", maxCount)
+
+	if maxCount == 0 {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInternal, "no GPUs found on the target nodes")
+	}
+
+	var short []string
+	for i := range nodes {
+		if counts[i] < maxCount {
+			short = append(short, fmt.Sprintf("%s=%d/%d", names[i], counts[i], maxCount))
+		}
+	}
+	if len(short) > 0 {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("GPU count non-uniform across %d target node(s): %s — NCCL whole-node workers sized to %d GPUs cannot schedule on a short node. Likely causes: the cluster is still converging / the GPU device-plugin has not finished rolling out (re-run once uniform), or a genuine degraded GPU / driver fault (check nvidia-smi -L and dmesg for NVRM/Xid on the affected node)",
+				len(nodes), strings.Join(short, ", "), maxCount))
+	}
+	return maxCount, nil
 }
 
 // applyNCCLResources applies the per-platform TrainingRuntime and shared TrainJob

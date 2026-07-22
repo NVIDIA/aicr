@@ -2848,6 +2848,9 @@ func validatePerfTuningEnvs() error {
 	if _, err := durationFromEnv(envWorkloadReadyTimeout, defaults.InferenceWorkloadReadyTimeout); err != nil {
 		return err
 	}
+	if _, err := durationFromEnv(envModelCachePopulateTimeout, defaults.ModelCachePopulateTimeout); err != nil {
+		return err
+	}
 	if _, err := durationFromEnv(envHealthTimeout, defaults.InferenceHealthTimeout); err != nil {
 		return err
 	}

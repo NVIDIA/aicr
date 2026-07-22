@@ -20,7 +20,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	v1 "k8s.io/api/core/v1"
@@ -208,6 +210,38 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 
 // TestEnsureModelCache_DisabledNoop verifies that with the cache disabled no PVC
 // or Job is created — the default behavior is unchanged.
+// TestPopulateJobTimeout guards the #1859 decoupling: the model-cache populate
+// wait uses the dedicated ModelCachePopulateTimeout, NOT the DynamoGraphDeployment
+// workload-ready budget. A regression swapping the constant/env back would be
+// caught here.
+func TestPopulateJobTimeout(t *testing.T) {
+	// Default: the dedicated populate budget, distinct from workload-ready.
+	t.Setenv(envModelCachePopulateTimeout, "")
+	t.Setenv(envWorkloadReadyTimeout, "")
+	got, err := populateJobTimeout()
+	if err != nil {
+		t.Fatalf("populateJobTimeout() default error = %v", err)
+	}
+	if got != defaults.ModelCachePopulateTimeout {
+		t.Fatalf("default = %v, want ModelCachePopulateTimeout (%v)", got, defaults.ModelCachePopulateTimeout)
+	}
+	if got == defaults.InferenceWorkloadReadyTimeout {
+		t.Fatal("populate budget must be decoupled from InferenceWorkloadReadyTimeout")
+	}
+
+	// Widening the workload-ready knob must NOT change the populate budget.
+	t.Setenv(envWorkloadReadyTimeout, "59m")
+	if got, err = populateJobTimeout(); err != nil || got != defaults.ModelCachePopulateTimeout {
+		t.Fatalf("workload-ready env leaked into populate budget: got %v err %v", got, err)
+	}
+
+	// The dedicated populate knob overrides.
+	t.Setenv(envModelCachePopulateTimeout, "20m")
+	if got, err = populateJobTimeout(); err != nil || got != 20*time.Minute {
+		t.Fatalf("populate override not honored: got %v err %v", got, err)
+	}
+}
+
 func TestEnsureModelCache_DisabledNoop(t *testing.T) {
 	client := fake.NewClientset()
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
