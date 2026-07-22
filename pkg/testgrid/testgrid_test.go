@@ -128,7 +128,8 @@ func TestLivePaths(t *testing.T) {
 								"service": "eks", "accelerator": "h100", "os": "ubuntu",
 								"intent": "inference",
 							}},
-							// A malformed tab (missing os) is skipped, not mis-placed.
+							// An os-agnostic tab (no os, e.g. nvkind) is not malformed:
+							// it maps to the "<accelerator>-any" dashboard.
 							{Coord: map[string]string{
 								"service": "eks", "accelerator": "h100", "intent": "training",
 							}},
@@ -142,6 +143,7 @@ func TestLivePaths(t *testing.T) {
 	want := map[string]struct{}{
 		"eks/h100-ubuntu/training-kubeflow": {},
 		"eks/h100-ubuntu/inference":         {},
+		"eks/h100-any/training":             {},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("LivePaths() = %v, want %v", keys(got), keys(want))
