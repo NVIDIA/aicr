@@ -178,11 +178,19 @@ reservations:
     # an actuator.
     cluster-config-path: tests/uat/kind/cluster-config.yaml
     test-config-dir: tests/uat/kind/tests
-    # Opted OUT of the nightly batch during bring-up (explicit empty list, NOT a
-    # bare `nightly-intents:` which would default to [training] and schedule
-    # unvalidated multi-hour runs on the shared GPU runner). Stays manually
-    # dispatchable via uat-run.yaml. Enroll ([training], then add inference)
-    # after green manual acceptance runs on the H100 runner and verified
-    # ingestion — evidence emit + sign also needs Fulcio/Rekor egress from the
-    # self-hosted runner, which the acceptance run confirms.
-    nightly-intents: []
+    # Enrolled with both intents after green manual acceptance runs on the H100
+    # runner: training (run 29954092703) and inference (run 29965464868) — each
+    # a full install → --phase all validate → CUJ → signed evidence emitted +
+    # verified. (An earlier inference run failed on a degraded runner instance;
+    # the build-on-GPU-runner variance behind that is tracked in #1869.)
+    nightly-intents: [training, inference]
+    # Gate release cells to v0.18.0: the uat-kind lane and the os-agnostic
+    # coordinate mapping (#1851, which lets a service:kind recipe — os=any —
+    # produce a valid dashboard coordinate) landed AFTER v0.17.0. A release cell
+    # running a v0.17.0 aicr would reject `os: any` in CoordinateFor and emit no
+    # ingestable evidence, so today only `main` runs nvkind nightly; the release
+    # cells auto-enroll once v0.18.0 ships with the fix. Bump this if the actual
+    # first-fixed tag differs. (Same mechanism azure-h100 uses.)
+    nightly-intent-min-versions:
+      training: v0.18.0
+      inference: v0.18.0

@@ -644,12 +644,12 @@ func TestCommittedRegistryValid(t *testing.T) {
 		// `nightly-intents:` (which defaults to [training]) — provisioning real
 		// GB200 Capacity-Block capacity nightly — fails this guard instead.
 		"aws-gb200": {},
-		// kind-h100 (nvkind real-silicon lane, DC5 #1278) is OPTED OUT of the
-		// nightly batch during bring-up (explicit empty list). Locked here so an
-		// accidental edit to a bare `nightly-intents:` (which defaults to
-		// [training]) — scheduling unvalidated GPU-runner runs nightly — fails
-		// this guard. Enroll after a green manual H100 acceptance run.
-		"kind-h100": {},
+		// kind-h100 (nvkind real-silicon lane, DC5 #1278) enrolled with both
+		// intents after green manual H100 acceptance runs (training 29954092703,
+		// inference 29965464868). Release cells are gated to v0.18.0 via
+		// nightly-intent-min-versions (the lane + os-agnostic coordinate fix
+		// #1851 postdate v0.17.0), so only `main` runs nvkind nightly for now.
+		"kind-h100": {IntentTraining, IntentInference},
 	}
 	for name, want := range wantNightly {
 		res, lookupErr := reg.Lookup(name)
