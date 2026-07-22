@@ -20,6 +20,26 @@
 # complete, blocked, waiting, disabled, paused, in_progress, erroring. This check
 # asserts status.status is "complete" so that node-level customizations (e.g. tuning)
 # have been applied to all matching nodes.
+#
+# Value-gate awareness (#1844): this static assert cannot see the component's
+# effective Helm values, so it would fail when the whole `tuning` Skyhook CR is
+# deliberately suppressed — e.g. `--set nodewrightcustomizations:tuningEnabled=false`
+# on a single-package tuning manifest (tuning-gke.yaml / tuning-generic.yaml). The
+# deployment validator therefore renders the component's manifests with the
+# effective values and skips this assert when they yield no Skyhook CR (see
+# nodewrightHealthCheckSuppressed in validators/deployment/expected_resources.go).
+# The skip is fail-closed: whenever the values keep the CR, the render still lists
+# it and this assert runs — only an intentionally-absent CR is tolerated. The
+# render-aware Go readiness check (verifyNodewrightReady) enforces the same
+# status.status == "complete" signal (plus the runtime-required taint gate), so
+# nodewright readiness is never left unverified.
+#
+# Boundary: the suppression must be in the recipe (an overlay-declared or inline
+# `overrides:`, e.g. the AKS tuningEnabled: false default), because the in-cluster
+# validator Job renders from the recipe it is handed. A bundle-time-only
+# `--set` is NOT persisted to the recipe and `aicr validate` has no `--set`, so
+# it does not reach this render. See docs/contributor/validator.md
+# ("Value-gate awareness").
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:

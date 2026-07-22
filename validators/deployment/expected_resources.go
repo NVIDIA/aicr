@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/chainsaw"
@@ -223,10 +224,25 @@ func checkExpectedResources(ctx *validators.Context) error {
 		default:
 		}
 		if ref.HealthCheckAsserts != "" {
-			chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
-				Name:       ref.Name,
-				AssertYAML: ref.HealthCheckAsserts,
-			})
+			// The registry-declared static assert cannot see value gates, so on a
+			// component whose effective values suppress the Skyhook CR the assert
+			// targets (e.g. tuningEnabled=false on a single-package tuning
+			// manifest) it would fail on a deliberately-untuned cluster. Skip it
+			// in that case, mirroring the render-aware Go readiness check. Only
+			// nodewright-customizations is subject to this; a render/read error
+			// propagates rather than silently skipping. See #1844.
+			suppressed, suppressErr := nodewrightHealthCheckSuppressed(ref)
+			if suppressErr != nil {
+				return suppressErr
+			}
+			if suppressed {
+				fmt.Printf("  [chainsaw] %s: skipped — effective values suppress the tuning Skyhook CR (see #1844)\n", ref.Name)
+			} else {
+				chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
+					Name:       ref.Name,
+					AssertYAML: ref.HealthCheckAsserts,
+				})
+			}
 		}
 		for _, er := range ref.ExpectedResources {
 			if err := helper.VerifyResource(ctx.Ctx, ctx.Clientset, er); err != nil {
@@ -432,13 +448,24 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		return err
 	}
 	if len(expectedNames) == 0 {
-		// The recipe enabled nodewright-customizations but declared no Nodewright
-		// manifests, so we cannot prove readiness. Fail closed rather than
-		// silently pass — treating this as a recipe misconfiguration that the
-		// user should see.
-		return errors.New(errors.ErrCodeNotFound,
-			fmt.Sprintf("no Nodewright CR names could be extracted from component %s manifestFiles=%v",
-				ref.Name, ref.ManifestFiles))
+		if len(ref.ManifestFiles) == 0 {
+			// The recipe enabled nodewright-customizations but declared no
+			// Nodewright manifests, so we cannot prove readiness. Fail closed
+			// rather than silently pass — a genuine recipe misconfiguration the
+			// user should see.
+			return errors.New(errors.ErrCodeNotFound,
+				fmt.Sprintf("no Nodewright CR names could be extracted from component %s manifestFiles=%v",
+					ref.Name, ref.ManifestFiles))
+		}
+		// Manifests are declared but the effective values suppress every Skyhook
+		// CR (e.g. tuningEnabled=false on a single-package tuning manifest, which
+		// gates out the whole tuning CR). There is nothing to verify — the CR is
+		// intentionally absent. This is NOT fail-open: expectedNodewrightNames
+		// renders with the effective values, so any CR those values keep would
+		// still be listed and asserted. See #1844.
+		fmt.Printf("  Nodewright: all Skyhook CRs suppressed by effective values (manifestFiles=%v); nothing to verify\n",
+			ref.ManifestFiles)
+		return nil
 	}
 
 	// Discovery-gate the CRD before attempting Get by name: CRD not
@@ -634,11 +661,74 @@ func isRuntimeRequiredTaint(t *corev1.Taint) bool {
 		t.Effect == corev1.TaintEffectNoSchedule
 }
 
+// nodewrightHealthCheckSuppressed reports whether the registry-declared static
+// health-check assert for the nodewright-customizations component targets a
+// Skyhook CR that the component's effective values gate off. The static assert
+// (recipes/checks/nodewright-customizations/health-check.yaml) asserts the
+// tuning Skyhook reaches status.status: complete and cannot see value gates, so
+// it must be skipped when the CR is intentionally absent — otherwise it fails on
+// a deliberately-untuned cluster (issue #1844).
+//
+// It reuses the same render-aware extraction the Go readiness check uses: with
+// manifests declared but a zero rendered CR set, every Skyhook CR is gated off.
+// Only the nodewright-customizations component is subject to this; every other
+// component's assert queues unconditionally. Fail-closed: a render error
+// propagates so a broken template is never mistaken for "nothing to assert".
+func nodewrightHealthCheckSuppressed(ref recipe.ComponentRef) (bool, error) {
+	if ref.Name != nodewrightCustomizationsComponent {
+		return false, nil
+	}
+	if len(ref.ManifestFiles) == 0 {
+		// No manifests to render — leave the assert in place so its own failure
+		// (or the Go check's misconfiguration error) surfaces the problem.
+		return false, nil
+	}
+	names, err := expectedNodewrightNames(ref)
+	if err != nil {
+		return false, err
+	}
+	return len(names) == 0, nil
+}
+
 // expectedNodewrightNames derives the set of Nodewright CR names that this
 // component is expected to deploy, by reading each ManifestFile through the
-// recipe data provider and extracting the metadata.name of every Nodewright
-// resource declared in those files.
+// recipe data provider, rendering it with the component's effective Helm
+// values, and extracting the metadata.name of every Nodewright resource in the
+// rendered output.
+//
+// Rendering (not raw-template scanning) is what makes the check value-aware: a
+// CR that the effective values gate off — e.g. tuningEnabled=false suppressing
+// the whole tuning Skyhook on a single-package tuning manifest
+// (tuning-gke.yaml / tuning-generic.yaml) — drops out of the render and is
+// therefore not asserted on a deliberately-untuned cluster (issue #1844). This
+// stays fail-closed: the render reflects the effective values, so any CR those
+// values keep still appears here and is verified. A CR that is *expected* but
+// missing on the cluster still fails — only a CR the values deliberately
+// suppress is tolerated.
+//
+// Values are resolved from the ref alone (base values.yaml → ValuesFile →
+// inline Overrides) via the embedded data provider, mirroring how the bundler
+// renders these same manifests. Manifest reads use the package-global provider,
+// matching the pre-existing behavior of this check.
 func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
+	values, err := recipe.GetComponentValues(&ref)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to resolve effective values for component %s", ref.Name), err)
+	}
+
+	chartName := ref.Chart
+	if chartName == "" {
+		chartName = ref.Name
+	}
+	renderInput := manifest.RenderInput{
+		ComponentName: ref.Name,
+		Namespace:     ref.Namespace,
+		ChartName:     chartName,
+		ChartVersion:  ref.Version,
+		Values:        values,
+	}
+
 	seen := make(map[string]bool)
 	var names []string
 	for _, path := range ref.ManifestFiles {
@@ -647,7 +737,13 @@ func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to load manifest %s for component %s", path, ref.Name), err)
 		}
-		for _, name := range extractNodewrightNamesFromManifest(content) {
+		rendered, rerr := manifest.Render(content, renderInput)
+		if rerr != nil {
+			// Fail closed: a render error must not be read as "no CRs to verify".
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to render manifest %s for component %s with effective values", path, ref.Name), rerr)
+		}
+		for _, name := range extractNodewrightNamesFromManifest(rendered) {
 			if seen[name] {
 				continue
 			}
@@ -659,10 +755,12 @@ func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 }
 
 // nodewrightKindRE and nodewrightMetadataNameRE are narrow extractors for Nodewright
-// CR names out of a manifest file that may contain Helm template directives
-// ({{ ... }}). A full YAML parse is not an option: templated lines are not
-// valid YAML on their own, and evaluating Helm templates at validate time
-// would require chart values the validator does not have.
+// CR names out of a manifest that has been Helm-rendered by expectedNodewrightNames
+// (so value-gated CRs are already absent). Rendered output is concrete YAML, but
+// these line-oriented patterns are retained over a full YAML parse because the
+// rendered documents can still carry Helm-hook annotations and blank optional
+// blocks, and the templated-name guard below stays as defense in depth in case a
+// name ever fails to render to a literal.
 //
 // These patterns make three chart-shape assumptions that hold across every
 // manifest AICR ships today (tuning, no-op, tuning-gke in

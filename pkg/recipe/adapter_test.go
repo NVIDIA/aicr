@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"reflect"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -482,6 +483,70 @@ func TestGetValuesForComponent_OverridesMergeDeep(t *testing.T) {
 	t.Logf("Deep merge works correctly - overrides merged, not replaced")
 }
 
+// TestGetComponentValues_BareRef pins the package-level GetComponentValues
+// helper added for #1844: it resolves the same effective values a bare
+// ComponentRef would merge (base → ValuesFile → Overrides) without a
+// RecipeResult, mirroring RecipeResult.GetValuesForComponent. The deployment
+// validator uses it to render a component's manifests exactly as the bundler
+// would.
+func TestGetComponentValues_BareRef(t *testing.T) {
+	t.Run("no valuesFile and no overrides returns empty map", func(t *testing.T) {
+		got, err := GetComponentValues(&ComponentRef{Name: "manifest-only", Version: "v1.0.0"})
+		if err != nil {
+			t.Fatalf("GetComponentValues() error = %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("GetComponentValues() = %v, want empty map", got)
+		}
+	})
+
+	t.Run("inline overrides are merged", func(t *testing.T) {
+		ref := &ComponentRef{
+			Name: "nodewright-customizations",
+			Overrides: map[string]any{
+				"tuningEnabled": false,
+				"accelerator":   "h100",
+			},
+		}
+		got, err := GetComponentValues(ref)
+		if err != nil {
+			t.Fatalf("GetComponentValues() error = %v", err)
+		}
+		if v, ok := got["tuningEnabled"].(bool); !ok || v {
+			t.Fatalf("tuningEnabled = %v (%T), want false", got["tuningEnabled"], got["tuningEnabled"])
+		}
+		if v, _ := got["accelerator"].(string); v != "h100" {
+			t.Fatalf("accelerator = %q, want h100", v)
+		}
+	})
+
+	t.Run("matches RecipeResult.GetValuesForComponent for the same ref", func(t *testing.T) {
+		ref := ComponentRef{
+			Name:       "gpu-operator",
+			Version:    "v25.3.4",
+			ValuesFile: "components/gpu-operator/values.yaml",
+			Overrides:  map[string]any{"driver": map[string]any{"version": "999.99.99"}},
+		}
+		viaResult, err := (&RecipeResult{ComponentRefs: []ComponentRef{ref}}).GetValuesForComponent("gpu-operator")
+		if err != nil {
+			t.Fatalf("GetValuesForComponent() error = %v", err)
+		}
+		viaBareRef, err := GetComponentValues(&ref)
+		if err != nil {
+			t.Fatalf("GetComponentValues() error = %v", err)
+		}
+		if !reflect.DeepEqual(viaResult, viaBareRef) {
+			t.Fatalf("GetComponentValues and GetValuesForComponent disagree:\n bare = %v\n result = %v", viaBareRef, viaResult)
+		}
+	})
+
+	t.Run("nil ref is rejected", func(t *testing.T) {
+		if _, err := GetComponentValues(nil); err == nil {
+			t.Fatal("GetComponentValues(nil) error = nil, want error")
+		}
+	})
+}
+
 // TestGetValuesForComponent_BuilderIntegration tests inline overrides
 // with real recipe building from criteria.
 func TestGetValuesForComponent_BuilderIntegration(t *testing.T) {
@@ -718,7 +783,7 @@ spec:
 // buildProviderWithManifest returns an inMemoryDataProvider seeded with a
 // single manifest file at the supplied path. Used to verify that
 // GetManifestContentWithProvider reads from the supplied provider rather
-// than the package-global.
+// than the embedded default.
 func buildProviderWithManifest(t *testing.T, path string, content []byte) DataProvider {
 	t.Helper()
 	files := map[string][]byte{
@@ -730,8 +795,8 @@ func buildProviderWithManifest(t *testing.T, path string, content []byte) DataPr
 // TestRecipeResult_GetValuesForComponent_HonorsBoundProvider verifies that
 // when a RecipeResult was built from a Builder bound via WithDataProvider,
 // GetValuesForComponent reads the component's valuesFile from that bound
-// provider — not from the package-global DataProvider. This closes the
-// silent-fallback-to-global path flagged in reviewer feedback on Tasks 4/5.
+// provider — not from the embedded default. This closes the
+// silent-fallback path flagged in reviewer feedback on Tasks 4/5.
 func TestRecipeResult_GetValuesForComponent_HonorsBoundProvider(t *testing.T) {
 	t.Cleanup(ResetMetadataStoreForTesting)
 	t.Cleanup(ResetComponentRegistryForTesting)
@@ -745,9 +810,9 @@ func TestRecipeResult_GetValuesForComponent_HonorsBoundProvider(t *testing.T) {
 		t.Fatalf("BuildFromCriteria: %v", err)
 	}
 
-	// values.yaml exists in the BOUND provider only; the package-global
-	// embedded values.yaml has different content (no driver.version key at
-	// all). If GetValuesForComponent reaches for the global, the type
+	// values.yaml exists in the BOUND provider only; the default embedded
+	// values.yaml has different content (no driver.version key at
+	// all). If GetValuesForComponent reaches for the embedded default, the type
 	// assertion below will fail.
 	vals, err := result.GetValuesForComponent("gpu-operator")
 	if err != nil {
@@ -763,14 +828,8 @@ func TestRecipeResult_GetValuesForComponent_HonorsBoundProvider(t *testing.T) {
 	}
 }
 
-// TestRecipeResult_GetValuesForComponent_BoundProviderSurvivesGlobalSwap
-// pins the invariant that RecipeResult.provider defeats post-build mutations
-// of the package-global DataProvider. After building a recipe against dpA,
-// swapping the global to dpB (with different values content) must not change
-// what GetValuesForComponent returns — the bound provider wins.
-
 // TestGetManifestContentWithProvider verifies the explicit-provider variant
-// reads from the supplied DataProvider rather than the package-global.
+// reads from the supplied DataProvider rather than the embedded default.
 func TestGetManifestContentWithProvider(t *testing.T) {
 	dp := buildProviderWithManifest(t, "components/x/manifests/special.yaml", []byte("from-bound\n"))
 	got, err := GetManifestContentWithProvider(dp, "components/x/manifests/special.yaml")
@@ -783,8 +842,9 @@ func TestGetManifestContentWithProvider(t *testing.T) {
 }
 
 // TestGetManifestContentWithProvider_NilFallback verifies that passing a nil
-// DataProvider falls back to the package-global provider — preserving
-// back-compat for callers that don't have a RecipeResult-bound provider.
+// DataProvider falls back to the embedded catalog (defaultEmbeddedProvider) —
+// preserving back-compat for callers that don't have a RecipeResult-bound
+// provider.
 func TestGetManifestContentWithProvider_NilFallback(t *testing.T) {
 	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/nfd-network-rule.yaml")
 	if err != nil {

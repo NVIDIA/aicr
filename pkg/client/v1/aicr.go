@@ -695,8 +695,11 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 	// has the NVIDIA kernel driver loaded AND the resolved overlay
 	// declares the coordinated preinstalled-driver profile, inject
 	// gpu-operator.driver.enabled=false so the Operator does not install
-	// a second driver on top. Bare AKS/EKS overlays get a warning
-	// instead of the injection (see gpu_driver_state.go).
+	// a second driver on top. Bare EKS overlays get a warning
+	// instead of the injection. The inverse mismatch — a
+	// preinstalled-driver overlay (e.g. the AKS driver-only default)
+	// resolved against a cluster with no driver on the sampled GPU node —
+	// warns with the bundle-time override set (see gpu_driver_state.go).
 	applyGPUDriverAutoOverride(ctx, internal, internalSnap)
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {

@@ -26,10 +26,13 @@ apiVersion: skyhook.nvidia.com/v1alpha1
 kind: Skyhook
 metadata:
   annotations:
-    # Helm hooks ensure this CR is applied after the Skyhook CRD is installed
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "10"
-    "helm.sh/hook-delete-policy": before-hook-creation
+    # No Helm hooks: this Skyhook CR is release-managed so that disabling tuning
+    # (tuningEnabled=false) actually retracts it. As a hook it would be orphaned
+    # under Flux on a true->false flip (before-hook-creation never fires once the
+    # CR leaves the render). Ordering after the Skyhook CRD is handled by the
+    # component dependency on nodewright-operator, not an intra-release hook;
+    # helm/argo already strip these hooks at bundle time.
+    aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/part-of: skyhook-operator
     app.kubernetes.io/created-by: aicr
@@ -40,7 +43,8 @@ metadata:
 spec:
   runtimeRequired: true
   # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
-  autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
+  {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
+  autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
   # Dynamic: Supports --accelerated-node-toleration CLI flag
   additionalTolerations:
     {{- if $cust.acceleratedTolerations }}
@@ -98,6 +102,21 @@ spec:
         memoryLimit: 8192Mi
         memoryRequest: 4096Mi
 
+    {{- /* Per-package gate (default true). The AKS overlays set tuningEnabled: false */}}
+    {{- /* under the Azure-managed driver profile: skipping nvidia-tuned avoids its */}}
+    {{- /* OWN reboot (nvidia-setup-full below still reboots for host prep), and an */}}
+    {{- /* A/B on AKS H100 measured the aks-h100-inference tuned */}}
+    {{- /* profile (isolcpus/hugepages) regressing inference TTFT from ~550ms to ~6s, */}}
+    {{- /* so untuned is the better default there. nvidia-setup stays enabled either */}}
+    {{- /* way — on AKS its real job is RDMA host prep (MEMLOCK limits + IB module */}}
+    {{- /* loading). Re-enable with --set nodewrightcustomizations:tuningEnabled=true. */}}
+    {{- /* NOTE: keep these template comments single-line — pkg/bom and pkg/tuning */}}
+    {{- /* strip template directives line-by-line before parsing this file as YAML. */}}
+    {{- /* Sprig-safe gate: only an explicit false disables (absent/true render). */}}
+    {{- /* Never use `| default true` here — Sprig's default treats false as empty */}}
+    {{- /* and would silently re-enable the package under --deployer flux. */}}
+    {{- if ne (toString (index $cust "tuningEnabled")) "false" }}
+
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
       version: "0.3.2"
@@ -117,6 +136,7 @@ spec:
         {{- end }}
       dependsOn:
         nvidia-setup-kernel: "0.5.0"
+    {{- end }}
 
     # Full setup after kernel is in place
     nvidia-setup-full:
@@ -146,5 +166,11 @@ spec:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "false"
       dependsOn:
+        {{- /* With tuning disabled, chain directly off the kernel package — */}}
+        {{- /* never leave a dangling dependsOn on the omitted nvidia-tuned. */}}
+        {{- if ne (toString (index $cust "tuningEnabled")) "false" }}
         nvidia-tuned: "0.3.2"
+        {{- else }}
+        nvidia-setup-kernel: "0.5.0"
+        {{- end }}
 {{- end }}
