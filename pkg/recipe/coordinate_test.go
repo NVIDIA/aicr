@@ -87,6 +87,10 @@ func TestCoordinateFor(t *testing.T) {
 		{name: "accelerator any", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorAny, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining}, wantErr: true},
 		{name: "intent any", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentAny}, wantErr: true},
 		{name: "service contains slash", c: &Criteria{Service: CriteriaServiceType("acme/ncp"), Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining}, wantErr: true},
+		// os is optional now, but a concrete os with a "/" must still fail closed:
+		// it would inject a spurious coordinate-path segment (the same invariant
+		// requireConcrete enforced before os became optional).
+		{name: "os contains slash", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSType("a/b"), Intent: CriteriaIntentTraining}, wantErr: true},
 		{name: "platform contains slash", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining, Platform: CriteriaPlatformType("a/b")}, wantErr: true},
 	}
 	for _, tt := range tests {
