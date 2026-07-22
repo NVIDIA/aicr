@@ -29,6 +29,14 @@
       "coordinate": {"group": "gke", "dashboard": "h100-cos", "tab": "training"},
       "path": "gke/h100-cos/training",
       "url": "https://nvidia.github.io/aicr-testgrid/#/gke/h100-cos/training"
+    },
+    {
+      "name": "h100-kind-training-kubeflow",
+      "_comment": "os-agnostic recipe (nvkind, DC5 #1278): overlays declare no os, so the resolved criteria carry os=any and the dashboard segment is the literal h100-any (kept, not dropped).",
+      "criteria": {"service": "kind", "accelerator": "h100", "os": "any", "intent": "training", "platform": "kubeflow"},
+      "coordinate": {"group": "kind", "dashboard": "h100-any", "tab": "training-kubeflow"},
+      "path": "kind/h100-any/training-kubeflow",
+      "url": "https://nvidia.github.io/aicr-testgrid/#/kind/h100-any/training-kubeflow"
     }
   ]
 }
