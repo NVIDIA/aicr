@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# UAT runner (nvkind / service: kind — DC5 #1278). Thin shim over
+# tests/uat/lib/phases.sh, which holds the cloud-agnostic phase implementations
+# and the phase dispatcher. Invoked phase-by-phase from
+# .github/workflows/uat-kind.yaml so per-phase failures surface in the GitHub
+# Actions UI.
+#
+# The cluster is a SINGLE-NODE, single-GPU nvkind cluster on a self-hosted GPU
+# runner (provisioned by .github/actions/gpu-cluster-setup, not a cloud
+# actuator). kind-specific behavior:
+#   - TRAINJOB_NUM_NODES=1: one GPU, so the TrainJob runs on a single node (the
+#     cloud lanes default to 2 to span their 2-GPU pool). The multi-node NCCL
+#     East-West performance check skips gracefully on a single GPU node.
+#   - Validator/agent image resolution to the runner-local ko.local registry is
+#     set by uat-kind.yaml (AICR_IMAGE / AICR_VALIDATOR_IMAGE /
+#     AICR_VALIDATOR_IMAGE_REGISTRY) for main cells; release cells self-resolve
+#     released images. No credential-refresh hook is needed (the runner holds no
+#     expiring cloud session), so cloud_refresh_credentials stays the default
+#     no-op.
+#
+# Usage:
+#   AICR_BIN=./aicr RUN_ID=12345 ./run <phase> <test-config.yaml>
+# See tests/uat/lib/phases.sh for the phase list and the working files produced.
+
+set -euo pipefail
+
+# Single-GPU nvkind: run the TrainJob on one node. Set BEFORE sourcing so
+# phases.sh's `TRAINJOB_NUM_NODES="${TRAINJOB_NUM_NODES:-2}"` cloud default
+# defers to this; `:=` still honors an explicit env override for local repro.
+: "${TRAINJOB_NUM_NODES:=1}"
+export TRAINJOB_NUM_NODES
+
+# shellcheck source=../lib/phases.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/phases.sh"
+
+uat_main "$@"

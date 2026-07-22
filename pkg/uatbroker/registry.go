@@ -96,8 +96,8 @@ func (r *Registry) Validate() error {
 		seen[res.Name] = true
 		if !validClouds[res.Cloud] {
 			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("reservation %s has unknown cloud %q (want %s, %s, or %s)",
-					res.Name, res.Cloud, CloudAWS, CloudGCP, CloudAzure))
+				fmt.Sprintf("reservation %s has unknown cloud %q (want %s, %s, %s, or %s)",
+					res.Name, res.Cloud, CloudAWS, CloudGCP, CloudAzure, CloudKind))
 		}
 		// reservation-id is intentionally NOT required: quota-backed rows
 		// (Azure subscription quota) have no capacity-reservation identifier.

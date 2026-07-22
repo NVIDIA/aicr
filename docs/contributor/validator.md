@@ -826,6 +826,52 @@ restricted at runtime to read-only Chainsaw operations
 lint time so violations are caught before they ever reach the
 validator.
 
+**Value-gate awareness (#1844).** A registry assert file is static — it
+cannot see the component's effective Helm values. That is a problem for a
+manifest whose whole resource is gated behind a value: e.g.
+`--set nodewrightcustomizations:tuningEnabled=false` on a single-package
+tuning manifest (`tuning-gke.yaml` / `tuning-generic.yaml`) suppresses the
+entire `tuning` Skyhook CR, so an unconditional
+`assert status.status: complete` would fail on a deliberately-untuned
+cluster. The deployment validator resolves this by rendering the
+component's manifests with the effective values
+(`recipe.GetComponentValues` → `manifest.Render`) and skipping the assert
+when the render yields no matching CR — see `nodewrightHealthCheckSuppressed`
+and `expectedNodewrightNames` in
+`validators/deployment/expected_resources.go`. The skip is **fail-closed**:
+whenever the values keep the CR, the render still lists it and the assert
+runs, so only an intentionally-absent CR is tolerated (a CR that *should*
+deploy but is missing on the cluster still fails). The same render drives
+the Go readiness check `verifyNodewrightReady`, so both surfaces agree on
+which CRs to expect. This skip is scoped to `nodewright-customizations`;
+every other component's assert queues unconditionally.
+
+The suppression must be expressed **in the recipe** — an overlay-declared
+component `overrides:` (how `tuningEnabled: false` ships as the AKS default)
+or an inline `overrides:` in the recipe file — because that is what the
+render sees. Two boundaries follow from *where* the deployment validator
+gets its inputs (it runs in-cluster inside a Job, reading the recipe from a
+mounted ConfigMap with **no `DataProvider`** — only the embedded data baked
+into the validator image):
+
+- **A bundle-time-only `--set` is not honored.** `aicr bundle --set
+  nodewrightcustomizations:tuningEnabled=false` is applied in the bundler and
+  never persisted to the recipe; `aicr validate` has no `--set` flag and
+  reads the recipe as-is, so it renders *with* the CR and still expects it.
+  To suppress the assert on a deliberately-untuned cluster, the value must
+  live in the recipe (overlay default or inline `overrides:`), not a
+  transient bundle flag. (`aicr recipe` likewise has no value `--set`, so the
+  overlay/inline override is the only channel.) `Overrides` resolved from a
+  `--data` overlay *are* honored, because recipe resolution runs CLI-side and
+  bakes them into the serialized recipe before the Job receives it.
+- **`--data`-external files referenced by path are not readable in the Job.**
+  A component whose `manifestFiles` or base `valuesFile` exist only in an
+  external `--data` directory cannot be read by the embedded-only validator
+  (a pre-existing constraint for `manifestFiles`; the render's `valuesFile`
+  read shares the same embedded scope). It fails **closed** — an error, never
+  a false pass. In practice `nodewright-customizations` ships no values file
+  and uses inline `overrides:`, so there is no exposure here today.
+
 **Running:**
 
 ```bash

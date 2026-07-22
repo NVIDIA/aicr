@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/chainsaw"
@@ -46,6 +47,7 @@ import (
 const (
 	nodewrightCustomizationsComponent = "nodewright-customizations"
 	draDriverComponent                = "nvidia-dra-driver-gpu"
+	networkOperatorComponent          = "network-operator"
 
 	// draKubeletPluginSuffix is the chart-template-defined name suffix for
 	// the NVIDIA DRA driver's kubelet-plugin DaemonSet. The upstream chart
@@ -83,6 +85,19 @@ const (
 	// (tests/uat/aws/cluster-config.yaml).
 	runtimeRequiredTaintKey   = "skyhook.nvidia.com"
 	runtimeRequiredTaintValue = "runtime-required"
+
+	// nicClusterPolicyManifestMarker identifies the AKS NicClusterPolicy manifest
+	// (recipes/components/network-operator/manifests/nic-cluster-policy-aks.yaml)
+	// among a network-operator ComponentRef's ManifestFiles. Its presence means
+	// the recipe stands up an RDMA fabric (MOFED + rdma-shared-device-plugin), so
+	// a GPU node not yet advertising the shared resource is "still converging",
+	// not "no fabric". OCP wires a different component (network-operator-ocp) and
+	// manifest name and so does not match; kind/talos enable network-operator
+	// without this manifest and are likewise (correctly) not gated. The shared
+	// resource name and the RDMA node label are defined in validators/helper
+	// (AKSRdmaSharedResource, PCIMellanoxPresentLabel) so this gate and the NCCL
+	// consumer cannot drift.
+	nicClusterPolicyManifestMarker = "nic-cluster-policy"
 )
 
 var (
@@ -223,10 +238,25 @@ func checkExpectedResources(ctx *validators.Context) error {
 		default:
 		}
 		if ref.HealthCheckAsserts != "" {
-			chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
-				Name:       ref.Name,
-				AssertYAML: ref.HealthCheckAsserts,
-			})
+			// The registry-declared static assert cannot see value gates, so on a
+			// component whose effective values suppress the Skyhook CR the assert
+			// targets (e.g. tuningEnabled=false on a single-package tuning
+			// manifest) it would fail on a deliberately-untuned cluster. Skip it
+			// in that case, mirroring the render-aware Go readiness check. Only
+			// nodewright-customizations is subject to this; a render/read error
+			// propagates rather than silently skipping. See #1844.
+			suppressed, suppressErr := nodewrightHealthCheckSuppressed(ref)
+			if suppressErr != nil {
+				return suppressErr
+			}
+			if suppressed {
+				fmt.Printf("  [chainsaw] %s: skipped — effective values suppress the tuning Skyhook CR (see #1844)\n", ref.Name)
+			} else {
+				chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
+					Name:       ref.Name,
+					AssertYAML: ref.HealthCheckAsserts,
+				})
+			}
 		}
 		for _, er := range ref.ExpectedResources {
 			if err := helper.VerifyResource(ctx.Ctx, ctx.Clientset, er); err != nil {
@@ -403,6 +433,10 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 		capture(verifyDRAKubeletPluginReady(ctx, ref.Namespace))
 	}
 
+	if ref, ok := findEnabledComponent(refs, networkOperatorComponent); ok && recipeDeclaresRDMAFabric(ref) {
+		capture(verifyRDMAFabricReady(ctx))
+	}
+
 	return failures, firstStructured
 }
 
@@ -432,13 +466,24 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		return err
 	}
 	if len(expectedNames) == 0 {
-		// The recipe enabled nodewright-customizations but declared no Nodewright
-		// manifests, so we cannot prove readiness. Fail closed rather than
-		// silently pass — treating this as a recipe misconfiguration that the
-		// user should see.
-		return errors.New(errors.ErrCodeNotFound,
-			fmt.Sprintf("no Nodewright CR names could be extracted from component %s manifestFiles=%v",
-				ref.Name, ref.ManifestFiles))
+		if len(ref.ManifestFiles) == 0 {
+			// The recipe enabled nodewright-customizations but declared no
+			// Nodewright manifests, so we cannot prove readiness. Fail closed
+			// rather than silently pass — a genuine recipe misconfiguration the
+			// user should see.
+			return errors.New(errors.ErrCodeNotFound,
+				fmt.Sprintf("no Nodewright CR names could be extracted from component %s manifestFiles=%v",
+					ref.Name, ref.ManifestFiles))
+		}
+		// Manifests are declared but the effective values suppress every Skyhook
+		// CR (e.g. tuningEnabled=false on a single-package tuning manifest, which
+		// gates out the whole tuning CR). There is nothing to verify — the CR is
+		// intentionally absent. This is NOT fail-open: expectedNodewrightNames
+		// renders with the effective values, so any CR those values keep would
+		// still be listed and asserted. See #1844.
+		fmt.Printf("  Nodewright: all Skyhook CRs suppressed by effective values (manifestFiles=%v); nothing to verify\n",
+			ref.ManifestFiles)
+		return nil
 	}
 
 	// Discovery-gate the CRD before attempting Get by name: CRD not
@@ -634,11 +679,74 @@ func isRuntimeRequiredTaint(t *corev1.Taint) bool {
 		t.Effect == corev1.TaintEffectNoSchedule
 }
 
+// nodewrightHealthCheckSuppressed reports whether the registry-declared static
+// health-check assert for the nodewright-customizations component targets a
+// Skyhook CR that the component's effective values gate off. The static assert
+// (recipes/checks/nodewright-customizations/health-check.yaml) asserts the
+// tuning Skyhook reaches status.status: complete and cannot see value gates, so
+// it must be skipped when the CR is intentionally absent — otherwise it fails on
+// a deliberately-untuned cluster (issue #1844).
+//
+// It reuses the same render-aware extraction the Go readiness check uses: with
+// manifests declared but a zero rendered CR set, every Skyhook CR is gated off.
+// Only the nodewright-customizations component is subject to this; every other
+// component's assert queues unconditionally. Fail-closed: a render error
+// propagates so a broken template is never mistaken for "nothing to assert".
+func nodewrightHealthCheckSuppressed(ref recipe.ComponentRef) (bool, error) {
+	if ref.Name != nodewrightCustomizationsComponent {
+		return false, nil
+	}
+	if len(ref.ManifestFiles) == 0 {
+		// No manifests to render — leave the assert in place so its own failure
+		// (or the Go check's misconfiguration error) surfaces the problem.
+		return false, nil
+	}
+	names, err := expectedNodewrightNames(ref)
+	if err != nil {
+		return false, err
+	}
+	return len(names) == 0, nil
+}
+
 // expectedNodewrightNames derives the set of Nodewright CR names that this
 // component is expected to deploy, by reading each ManifestFile through the
-// recipe data provider and extracting the metadata.name of every Nodewright
-// resource declared in those files.
+// recipe data provider, rendering it with the component's effective Helm
+// values, and extracting the metadata.name of every Nodewright resource in the
+// rendered output.
+//
+// Rendering (not raw-template scanning) is what makes the check value-aware: a
+// CR that the effective values gate off — e.g. tuningEnabled=false suppressing
+// the whole tuning Skyhook on a single-package tuning manifest
+// (tuning-gke.yaml / tuning-generic.yaml) — drops out of the render and is
+// therefore not asserted on a deliberately-untuned cluster (issue #1844). This
+// stays fail-closed: the render reflects the effective values, so any CR those
+// values keep still appears here and is verified. A CR that is *expected* but
+// missing on the cluster still fails — only a CR the values deliberately
+// suppress is tolerated.
+//
+// Values are resolved from the ref alone (base values.yaml → ValuesFile →
+// inline Overrides) via the embedded data provider, mirroring how the bundler
+// renders these same manifests. Manifest reads use the package-global provider,
+// matching the pre-existing behavior of this check.
 func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
+	values, err := recipe.GetComponentValues(&ref)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to resolve effective values for component %s", ref.Name), err)
+	}
+
+	chartName := ref.Chart
+	if chartName == "" {
+		chartName = ref.Name
+	}
+	renderInput := manifest.RenderInput{
+		ComponentName: ref.Name,
+		Namespace:     ref.Namespace,
+		ChartName:     chartName,
+		ChartVersion:  ref.Version,
+		Values:        values,
+	}
+
 	seen := make(map[string]bool)
 	var names []string
 	for _, path := range ref.ManifestFiles {
@@ -647,7 +755,13 @@ func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to load manifest %s for component %s", path, ref.Name), err)
 		}
-		for _, name := range extractNodewrightNamesFromManifest(content) {
+		rendered, rerr := manifest.Render(content, renderInput)
+		if rerr != nil {
+			// Fail closed: a render error must not be read as "no CRs to verify".
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to render manifest %s for component %s with effective values", path, ref.Name), rerr)
+		}
+		for _, name := range extractNodewrightNamesFromManifest(rendered) {
 			if seen[name] {
 				continue
 			}
@@ -659,10 +773,12 @@ func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 }
 
 // nodewrightKindRE and nodewrightMetadataNameRE are narrow extractors for Nodewright
-// CR names out of a manifest file that may contain Helm template directives
-// ({{ ... }}). A full YAML parse is not an option: templated lines are not
-// valid YAML on their own, and evaluating Helm templates at validate time
-// would require chart values the validator does not have.
+// CR names out of a manifest that has been Helm-rendered by expectedNodewrightNames
+// (so value-gated CRs are already absent). Rendered output is concrete YAML, but
+// these line-oriented patterns are retained over a full YAML parse because the
+// rendered documents can still carry Helm-hook annotations and blank optional
+// blocks, and the templated-name guard below stays as defense in depth in case a
+// name ever fails to render to a literal.
 //
 // These patterns make three chart-shape assumptions that hold across every
 // manifest AICR ships today (tuning, no-op, tuning-gke in
@@ -822,6 +938,141 @@ func draKubeletPluginProbe(ctx *validators.Context, namespace string) (string, e
 	}
 
 	return ds.Name, nil
+}
+
+// recipeDeclaresRDMAFabric reports whether a network-operator ComponentRef
+// stands up an RDMA fabric on this cluster — i.e. it declares the AKS
+// NicClusterPolicy manifest that creates MOFED + the rdma-shared-device-plugin
+// (nicClusterPolicyManifestMarker). When true, a GPU node that does not yet
+// advertise aksRDMASharedResource is "still converging", so verifyRDMAFabricReady
+// waits for it; when false (kind's single-node nvkind, talos' namespace-only
+// ref) there is no shared fabric to gate on and the check is skipped.
+func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
+	for _, f := range ref.ManifestFiles {
+		if strings.Contains(f, nicClusterPolicyManifestMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyRDMAFabricReady blocks the deployment gate until the network operator's
+// shared RDMA device (helper.AKSRdmaSharedResource) is allocatable in a uniform,
+// positive count across every Mellanox RDMA-capable GPU node, held continuously for the
+// stability window.
+//
+// Why span the whole RDMA cohort rather than one node: NCCL all-reduce and any
+// other all-to-all fabric test participate every node together, so a single node
+// whose MOFED / rdma-shared-device-plugin has not finished rolling out degrades
+// the whole run. The network operator rolls MOFED out per node and one node can
+// lag another by many minutes (issue #1862), during which the shared resource is
+// present on only a subset of nodes. Gating on uniform allocatable presence stops
+// the downstream NCCL check's uniformFabricResourceCount from failing closed on a
+// transient, self-healing partial rollout, mirroring the DRA kubelet-plugin and
+// Nodewright "stable ≥window" treatment above.
+//
+// Why *this* node set: the probe scopes to schedulable GPU nodes that carry the
+// NicClusterPolicy's own nodeAffinity label (helper.PCIMellanoxPresentLabel) —
+// exactly the cohort the fabric can land on and the NCCL check runs on. A
+// cordoned/draining node, or a GPU node in a non-RDMA (non-Mellanox) pool, never advertises the
+// resource; including it would wedge the gate on a node the workload excludes.
+func verifyRDMAFabricReady(ctx *validators.Context) error {
+	var nodeCount int
+	return pollUntilStable(ctx,
+		fmt.Sprintf("RDMA shared-device fabric (%s) across RDMA GPU nodes", helper.AKSRdmaSharedResource),
+		func() error {
+			count, probeErr := rdmaFabricProbe(ctx)
+			nodeCount = count
+			return probeErr
+		},
+		func() {
+			fmt.Printf("  RDMA fabric (%s): allocatable (uniform) on all %d RDMA GPU node(s) (stable ≥%s)\n",
+				helper.AKSRdmaSharedResource, nodeCount, gpuReadinessStabilityWindow)
+		})
+}
+
+// rdmaFabricProbe does one readiness pass over the Mellanox RDMA-capable GPU cohort:
+// schedulable GPU nodes (via helper.FindSchedulableGpuNodes — cordoned nodes and
+// nodes not yet advertising nvidia.com/gpu are excluded) that also carry the
+// NicClusterPolicy nodeAffinity label helper.PCIMellanoxPresentLabel. It returns
+// nil — plus the cohort size — only when every such node advertises
+// helper.AKSRdmaSharedResource in a uniform, positive count. It fails closed on a
+// List error and when no RDMA GPU node is observed yet: "could not observe the
+// fabric" must never read as "fabric ready". The returned error rides the poll's
+// dwell reset like any other unhealthy sample.
+func rdmaFabricProbe(ctx *validators.Context) (int, error) {
+	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	defer cancel()
+
+	gpuNodes, err := helper.FindSchedulableGpuNodes(listCtx, ctx.Clientset)
+	if err != nil {
+		return 0, errors.Wrap(errors.ErrCodeInternal,
+			"failed to list nodes for the RDMA fabric readiness gate", err)
+	}
+
+	fabric := corev1.ResourceName(helper.AKSRdmaSharedResource)
+	type rdmaNode struct {
+		name  string
+		count int64
+	}
+	var cohort []rdmaNode
+	for i := range gpuNodes {
+		// Honor cancellation while walking a potentially large node list, per
+		// repo CLAUDE.md "Always check ctx.Done() in long-running operations".
+		select {
+		case <-listCtx.Done():
+			return 0, errors.Wrap(errors.ErrCodeTimeout,
+				"canceled while scanning nodes for the RDMA fabric readiness gate", listCtx.Err())
+		default:
+		}
+		node := &gpuNodes[i]
+		if node.Labels[helper.PCIMellanoxPresentLabel] != "true" {
+			continue
+		}
+		var count int64
+		if q, ok := node.Status.Allocatable[fabric]; ok {
+			count = q.Value()
+		}
+		cohort = append(cohort, rdmaNode{name: node.Name, count: count})
+	}
+
+	if len(cohort) == 0 {
+		return 0, errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("RDMA fabric gate: no schedulable Mellanox RDMA-capable GPU nodes observed yet (label %s=true)",
+				helper.PCIMellanoxPresentLabel))
+	}
+
+	// Not-ready nodes: the fabric resource is absent or zero — MOFED /
+	// rdma-shared-device-plugin has not finished rolling out on that node.
+	var notReady []string
+	for _, n := range cohort {
+		if n.count <= 0 {
+			notReady = append(notReady, n.name)
+		}
+	}
+	if len(notReady) > 0 {
+		return len(cohort), errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("%s not yet allocatable on %d of %d RDMA GPU node(s): %s "+
+				"(network operator MOFED / rdma-shared-device-plugin still rolling out)",
+				helper.AKSRdmaSharedResource, len(notReady), len(cohort), formatNames(notReady)))
+	}
+
+	// All present and positive: require a uniform count, matching the NCCL
+	// consumer's uniformFabricResourceCount. A skew (e.g. 1000 vs 500) means the
+	// fabric is still settling and the NCCL check would reject it as non-uniform.
+	want := cohort[0].count
+	var skew []string
+	for _, n := range cohort {
+		if n.count != want {
+			skew = append(skew, fmt.Sprintf("%s=%d", n.name, n.count))
+		}
+	}
+	if len(skew) > 0 {
+		return len(cohort), errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("%s allocatable count is non-uniform across %d RDMA GPU node(s) (want all == %d): %s",
+				helper.AKSRdmaSharedResource, len(cohort), want, formatNames(skew)))
+	}
+	return len(cohort), nil
 }
 
 func formatNames(names []string) string {

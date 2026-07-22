@@ -72,11 +72,28 @@ func TestCoordinateFor(t *testing.T) {
 			wantTab:   "training",
 			wantPath:  "eks/h100-ubuntu/training",
 		},
+		{
+			// os is optional (os-agnostic recipe, e.g. nvkind): an empty os yields
+			// the literal "-any" dashboard segment, not an error.
+			name:      "empty os yields -any dashboard",
+			criteria:  RecipeCriteria{Service: "kind", Accelerator: "h100", Intent: "training", Platform: "kubeflow"},
+			wantGroup: "kind",
+			wantDash:  "h100-any",
+			wantTab:   "training-kubeflow",
+			wantPath:  "kind/h100-any/training-kubeflow",
+		},
+		{
+			name:      "os any yields -any dashboard",
+			criteria:  RecipeCriteria{Service: "kind", Accelerator: "h100", OS: "any", Intent: "inference", Platform: "dynamo"},
+			wantGroup: "kind",
+			wantDash:  "h100-any",
+			wantTab:   "inference-dynamo",
+			wantPath:  "kind/h100-any/inference-dynamo",
+		},
 		// ── Error cases ────────────────────────────────────────────────────────
 		{name: "empty service", criteria: RecipeCriteria{Accelerator: "h100", OS: "ubuntu", Intent: "training"}, wantErr: true},
 		{name: "any service", criteria: RecipeCriteria{Service: "any", Accelerator: "h100", OS: "ubuntu", Intent: "training"}, wantErr: true},
 		{name: "empty accelerator", criteria: RecipeCriteria{Service: "eks", OS: "ubuntu", Intent: "training"}, wantErr: true},
-		{name: "empty os", criteria: RecipeCriteria{Service: "eks", Accelerator: "h100", Intent: "training"}, wantErr: true},
 		{name: "empty intent", criteria: RecipeCriteria{Service: "eks", Accelerator: "h100", OS: "ubuntu"}, wantErr: true},
 		{name: "any intent", criteria: RecipeCriteria{Service: "eks", Accelerator: "h100", OS: "ubuntu", Intent: "any"}, wantErr: true},
 	}

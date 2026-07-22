@@ -395,8 +395,11 @@ func TestCheckExpectedResources_PassesWhenRuntimeRequiredTaintCleared(t *testing
 
 // TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames pins the
 // fail-closed behavior when an enabled nodewright-customizations ref declares
-// no manifest files (or the manifests contain no Nodewright CRs). Rather than
-// silently pass, the check must surface this as a recipe misconfiguration.
+// no manifest files. Rather than silently pass, the check must surface this as a
+// recipe misconfiguration. (Contrast with #1844: manifests that ARE declared but
+// render zero Skyhook CRs due to a value gate pass — see
+// TestVerifyNodewrightReady_TolerantWhenAllCRsSuppressed — because the render
+// reflects the effective values, so absence there is deliberate, not missing.)
 func TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames(t *testing.T) {
 	t.Parallel()
 
@@ -758,6 +761,156 @@ func TestExtractNodewrightNamesFromManifest_TuningGke(t *testing.T) {
 	if !stringSlicesEqual(got, want) {
 		t.Fatalf("extractNodewrightNamesFromManifest(tuning-gke.yaml) = %v, want %v (metadata.name is 'tuning', not the filename basename)", got, want)
 		return
+	}
+}
+
+// TestExpectedNodewrightNames_RenderAware pins the value-aware behavior added
+// for #1844: expectedNodewrightNames renders each manifest with the component's
+// effective values, so a CR gated off by those values drops out of the
+// extracted set. The `enabled: false` override exercises the same value-gate
+// mechanism the tuningEnabled=false gate will use on the single-package tuning
+// manifests — the whole Skyhook CR is suppressed, and the check tolerates its
+// absence rather than asserting a CR that was deliberately not rendered.
+func TestExpectedNodewrightNames_RenderAware(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		manifests []string
+		overrides map[string]any
+		want      []string
+	}{
+		{
+			name:      "tuning.yaml, default values → CR expected",
+			manifests: []string{"components/nodewright-customizations/manifests/tuning.yaml"},
+			overrides: nil,
+			want:      []string{"tuning"},
+		},
+		{
+			name:      "single-package tuning-generic.yaml, default values → CR expected",
+			manifests: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+			overrides: nil,
+			want:      []string{"tuning"},
+		},
+		{
+			name:      "value gate suppresses the whole CR → nothing expected",
+			manifests: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+			overrides: map[string]any{"enabled": false},
+			want:      nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ref := recipe.ComponentRef{
+				Name:          nodewrightCustomizationsComponent,
+				Namespace:     "skyhook",
+				ManifestFiles: tc.manifests,
+				Overrides:     tc.overrides,
+			}
+			got, err := expectedNodewrightNames(ref)
+			if err != nil {
+				t.Fatalf("expectedNodewrightNames() error = %v, want nil", err)
+				return
+			}
+			if !stringSlicesEqual(got, tc.want) {
+				t.Fatalf("expectedNodewrightNames() = %v, want %v", got, tc.want)
+				return
+			}
+		})
+	}
+}
+
+// TestNodewrightHealthCheckSuppressed pins the gate that skips the static
+// chainsaw health-check assert when the component's effective values suppress
+// the tuning Skyhook CR (#1844). Only the nodewright-customizations component is
+// subject to it; a component with a renderable CR or no manifests keeps its
+// assert; a render-empty component with manifests declared is suppressed.
+func TestNodewrightHealthCheckSuppressed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		ref  recipe.ComponentRef
+		want bool
+	}{
+		{
+			name: "other component is never suppressed",
+			ref: recipe.ComponentRef{
+				Name:          "gpu-operator",
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+				Overrides:     map[string]any{"enabled": false},
+			},
+			want: false,
+		},
+		{
+			name: "nodewright with a renderable CR keeps its assert",
+			ref: recipe.ComponentRef{
+				Name:          nodewrightCustomizationsComponent,
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+			},
+			want: false,
+		},
+		{
+			name: "nodewright with all CRs gated off is suppressed",
+			ref: recipe.ComponentRef{
+				Name:          nodewrightCustomizationsComponent,
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+				Overrides:     map[string]any{"enabled": false},
+			},
+			want: true,
+		},
+		{
+			name: "nodewright with no manifests keeps its assert (misconfig surfaces elsewhere)",
+			ref: recipe.ComponentRef{
+				Name: nodewrightCustomizationsComponent,
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := nodewrightHealthCheckSuppressed(tc.ref)
+			if err != nil {
+				t.Fatalf("nodewrightHealthCheckSuppressed() error = %v, want nil", err)
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("nodewrightHealthCheckSuppressed() = %v, want %v", got, tc.want)
+				return
+			}
+		})
+	}
+}
+
+// TestVerifyNodewrightReady_TolerantWhenAllCRsSuppressed pins the fail-closed
+// distinction added for #1844: when manifests are declared but the effective
+// values render zero Skyhook CRs, readiness passes (nothing to verify) — the CR
+// was deliberately suppressed. This is checked before the CRD-discovery gate, so
+// no cluster state is required. Contrast with the no-manifests case, which still
+// fails closed as a misconfiguration (TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames).
+func TestVerifyNodewrightReady_TolerantWhenAllCRsSuppressed(t *testing.T) {
+	t.Parallel()
+
+	// A ref that keeps the component enabled for the readiness check but whose
+	// manifest gate renders the whole Skyhook CR away. `enabled: false` drives
+	// the same value gate the tuningEnabled=false path uses; calling
+	// verifyNodewrightReady directly bypasses the upstream IsEnabled filter so we
+	// exercise the render-empty branch itself.
+	ref := recipe.ComponentRef{
+		Name:          nodewrightCustomizationsComponent,
+		Namespace:     "skyhook",
+		ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+		Overrides:     map[string]any{"enabled": false},
+	}
+	ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")}, nil,
+		[]recipe.ComponentRef{ref})
+
+	if err := verifyNodewrightReady(ctx, ref); err != nil {
+		t.Fatalf("verifyNodewrightReady() error = %v, want nil (all CRs suppressed by effective values)", err)
 	}
 }
 

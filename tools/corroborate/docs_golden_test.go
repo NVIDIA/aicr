@@ -30,11 +30,13 @@ const docsDir = "../../docs/user"
 // and Class constant.
 const evidenceDashboardDoc = "evidence-dashboard.md"
 
-// TestDocsStateNames is the GP6 drift-guard: it verifies that the
-// consensus-model explainer in docs/user/evidence-dashboard.md names every
-// corroboration State constant and every source Class constant exactly as the
-// Go code spells them, so the docs and the generator can never silently
-// diverge.
+// TestDocsStateNames is the GP6 drift-guard: it verifies that every
+// corroboration State constant appears verbatim in the "Consensus model"
+// section of docs/user/evidence-dashboard.md, and every source Class constant
+// in the "Source classes" section, exactly as the Go code spells them — so the
+// docs and the generator can never silently diverge. Scoping each check to its
+// defining section (not the whole file) means deleting either table fails the
+// test instead of passing on an incidental prose mention elsewhere.
 //
 // If this test fails after a rename in pkg/corroborate, update
 // docs/user/evidence-dashboard.md to match.
@@ -48,7 +50,17 @@ func TestDocsStateNames(t *testing.T) {
 	}
 	doc := string(data)
 
-	// Every State constant must appear verbatim in the consensus-model section.
+	// Scope each check to the section that is supposed to define the tokens, and
+	// assert the token's defining *table row* (a leading "| `<token>` |" cell),
+	// not merely that the token appears somewhere in the section. State/Class
+	// names also recur in the surrounding prose, so a plain substring check would
+	// stay green even if the defining table were deleted — the very drift this
+	// guard exists to catch. Requiring the table row means removing either table
+	// fails the test.
+	consensus := docSection(doc, "Consensus model")
+	if consensus == "" {
+		t.Fatalf("%s: missing \"## Consensus model\" section", evidenceDashboardDoc)
+	}
 	for _, st := range []corroborate.State{
 		corroborate.StateConfirmed,
 		corroborate.StateSingle,
@@ -56,21 +68,65 @@ func TestDocsStateNames(t *testing.T) {
 		corroborate.StateFailing,
 		corroborate.StateUntested,
 	} {
-		if !strings.Contains(doc, string(st)) {
-			t.Errorf("%s: missing consensus state %q — add it to the Consensus model section",
-				evidenceDashboardDoc, st)
+		if row := tableRow(string(st)); !strings.Contains(consensus, row) {
+			t.Errorf("%s: Consensus model section is missing the States-table row for %q (expected a cell %q) — the table must define it, not just prose",
+				evidenceDashboardDoc, st, row)
 		}
 	}
 
-	// Every Class constant must appear verbatim in the source-classes section.
+	classes := docSection(doc, "Source classes")
+	if classes == "" {
+		t.Fatalf("%s: missing \"## Source classes\" section", evidenceDashboardDoc)
+	}
 	for _, cl := range []corroborate.Class{
 		corroborate.ClassFirstParty,
 		corroborate.ClassCommunity,
 		corroborate.ClassPartner,
 	} {
-		if !strings.Contains(doc, string(cl)) {
-			t.Errorf("%s: missing source class %q — add it to the Source classes section",
-				evidenceDashboardDoc, cl)
+		if row := tableRow(string(cl)); !strings.Contains(classes, row) {
+			t.Errorf("%s: Source classes section is missing the classes-table row for %q (expected a cell %q) — the table must define it, not just prose",
+				evidenceDashboardDoc, cl, row)
 		}
 	}
+}
+
+// tableRow is the leading Markdown-table cell that defines a token, e.g.
+// "| `CONFIRMED` |". Matching this (rather than the bare token) ties the guard
+// to the defining table row, so deleting the table fails the test even though
+// the token still appears in prose.
+func tableRow(token string) string {
+	return "| `" + token + "` |"
+}
+
+// docSection returns the body of the top-level ("## ") Markdown section whose
+// heading line is exactly "## "+title, from just after that heading line to the
+// next top-level heading line (or end of document). Matching is anchored to
+// whole lines, so a "### "+title subsection, a fenced-code line, or prose that
+// merely mentions the heading text does not match; nested "### " subsections
+// within the section are kept. It returns "" when the section is absent so
+// callers fail closed rather than matching a token from a different section.
+func docSection(doc, title string) string {
+	head := "## " + title
+	lines := strings.Split(doc, "\n")
+	start := -1
+	for i, ln := range lines {
+		if strings.TrimRight(ln, " \t") == head {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, ln := range lines[start:] {
+		// A "## " prefix is exactly two hashes then a space; "### " lines start
+		// with "###" and so are not H2 boundaries.
+		if strings.HasPrefix(strings.TrimRight(ln, " \t"), "## ") {
+			break
+		}
+		b.WriteString(ln)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }

@@ -63,12 +63,12 @@ func WithAllowLists(al *AllowLists) Option {
 }
 
 // WithDataProvider binds the Builder to a specific DataProvider, isolating
-// its metadata store and component registry from the process-global ones at
-// GetDataProvider().
+// its metadata store and component registry from the shared embedded-catalog
+// caches.
 //
 // Use this from any caller that constructs more than one Builder per process.
-// When unset, the Builder falls back to the package-global DataProvider —
-// preserving the CLI and API server behavior.
+// When unset, the Builder falls back to the embedded catalog
+// (defaultEmbeddedProvider) — preserving the CLI and API server behavior.
 func WithDataProvider(dp DataProvider) Option {
 	return func(b *Builder) {
 		b.dp = dp
@@ -92,11 +92,11 @@ func NewBuilder(opts ...Option) *Builder {
 type Builder struct {
 	Version    string
 	AllowLists *AllowLists
-	dp         DataProvider // nil ⇒ fall back to package-global
+	dp         DataProvider // nil ⇒ fall back to the embedded catalog
 }
 
 // DataProvider returns the Builder's bound provider, or nil if none is set
-// and the package-global will be used.
+// and the embedded catalog (defaultEmbeddedProvider) will be used.
 func (b *Builder) DataProvider() DataProvider {
 	if b == nil {
 		return nil

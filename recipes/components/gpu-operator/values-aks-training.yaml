@@ -14,6 +14,13 @@
 
 # GPU Operator Helm values
 # AKS Training configuration overrides
+#
+# This file REPLACES values-aks.yaml in the merge chain (an overlay's
+# valuesFile supersedes its base's), so the AKS driver-only ownership
+# profile is restated here: driver.enabled=false, toolkit.enabled=false,
+# operator.runtimeClass=nvidia-container-runtime — always the three
+# together. See values-aks.yaml and docs/integrator/aks-gpu-setup.md
+# for the full rationale and the GPU-Operator-managed alternative.
 
 cdi:
   enabled: true
@@ -31,9 +38,22 @@ cdi:
 # driver.enabled=false it is inert, but the correct value prevents a
 # future ownership-mode change from reviving the bug.
 driver:
+  # AKS driver-only profile: the node image preinstalls the driver.
+  enabled: false
   rdma:
     enabled: true
     useHostMofed: false
+
+# The operator deploys gdrcopy as a sidecar container in the operator-managed
+# driver pod, so it is inert under driver.enabled=false; re-enable with the
+# GPU-Operator-managed override set (see docs/integrator/aks-gpu-setup.md).
+gdrcopy:
+  enabled: false
+
+# The AKS node image preconfigures containerd with the
+# nvidia-container-runtime handler (see values-aks.yaml).
+operator:
+  runtimeClass: nvidia-container-runtime
 
 validator:
   plugin:
@@ -41,16 +61,25 @@ validator:
       - name: WITH_WORKLOAD
         value: "false"
 
-# AKS Ubuntu 24.04 GPU nodes run containerd 2.x (2.3 on current node
-# images) with a version=2 root config at /etc/containerd/config.toml. The container-toolkit's default
-# config source ("command" = `containerd config dump`) returns the
-# MIGRATED effective config (version=4), so the generated
-# /etc/containerd/conf.d/99-nvidia.toml declares a higher version than
-# the root file and containerd refuses to start ("drop-in config
-# version 4 higher than root config version 2"), taking the node
-# NotReady. Reading the on-disk file instead emits a matching
-# version=2 drop-in. See issue #1688.
+# AKS driver-only profile: the node image preinstalls the container
+# toolkit and preconfigures containerd, so the operator's toolkit
+# DaemonSet stays off. The RUNTIME_CONFIG_SOURCE env is inert while
+# enabled=false but kept correct for a GPU-Operator-managed flip
+# (containerd 2.x drop-in version mismatch, issue #1688 — see
+# values-aks.yaml for the full story).
 toolkit:
+  enabled: false
+  # Device-isolation hardening for the operator-managed toolkit (the
+  # GPU-Operator-managed fallback profile, --gpu-driver none + toolkit.enabled
+  # =true). Inert while toolkit.enabled=false (the driver-only default — there
+  # the node-image toolkit is hardened by the nvidia-toolkit-hardening
+  # DaemonSet instead). The toolkit installer reads these uppercase env names
+  # and writes the lowercase config.toml keys; RUNTIME_CONFIG_SOURCE=file does
+  # not suppress them.
   env:
     - name: RUNTIME_CONFIG_SOURCE
       value: file
+    - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+      value: "false"
+    - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS
+      value: "true"

@@ -23,7 +23,9 @@ All UAT runs go through one entry point, `uat-run.yaml` — the shared dispatch 
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100
 ```
 
-`uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, or `uat-azure.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
+`uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, `uat-azure.yaml`, or — for the `service: kind` real-silicon lane — `uat-kind.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
+
+The **nvkind lane** (`cloud: kind`, DC5 #1278) is a full sibling of the cloud lanes — same `uat-run` dispatch, same reservation lease, same nightly batch, same phase-by-phase runner (`tests/uat/kind/run`, sharing `tests/uat/lib/collect-debug.sh`), and the same signed-evidence emit → verify → ingest. It differs only in provisioning: instead of a `github.com/mchmarny/cluster` actuator it stands up a **single-node, single-GPU nvkind cluster on a self-hosted GPU runner** (`.github/actions/gpu-cluster-setup`) and tears it down with `.github/actions/gpu-test-cleanup` — no cloud credentials, no capacity reservation (the runner *is* the lease). Validator/agent images resolve to the runner-local `ko.local` registry for `main` cells; release cells install the released `aicr` and pull released images. Scope is honestly H100 ×1, single-GPU.
 
 Two further inputs shape the run (both default to the nightly-batch behavior, so the cron needs neither):
 
@@ -65,6 +67,8 @@ The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both inte
 | `aws-h100` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
 | `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
 | `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); inference gated to `>= v0.18.0` via `nightly-intent-min-versions` (see **Cost / tuning** below) |
+
+The `kind-h100` (nvkind) reservation is **opted out of the nightly batch** (`nightly-intents: []`) during bring-up — manually dispatchable via `uat-run.yaml`, enrolled after a green manual H100 acceptance run — so it is not listed above.
 
 **How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown cell (inference cells currently run provision→validate→teardown; the serve CUJ is disabled pending #1644), waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
 
@@ -191,7 +195,8 @@ The nightly batch runs a **cross-version regression** per reservation: `main` (b
 **Tunables** — workflow inputs on `uat-nightly-batch.yaml` (these are the scheduled-run defaults):
 
 - `previous_n` — stable releases below `main` to run per reservation (default `2`; `0` = `main` only).
-- `deadline_offset_hours` — hours after batch start to stop dispatching new cells (default `5`). The controller job watches each cell sequentially and GitHub caps a hosted job at 6h, so this stays below that ceiling (and the job's own `timeout-minutes`) to keep the graceful drop-oldest reachable rather than being killed mid-cell.
+- `deadline_offset_hours` — hours after batch start to stop dispatching new cells (default `5`). This is a **secondary** cap: the controller also enforces a **budget-aware** cutoff derived from the drive job's own `timeout-minutes`, stopping dispatch once fewer than `max_cell_minutes` remain so the last cell always finishes before GitHub kills the job. The effective cutoff is the earlier of the two, so `deadline_offset_hours` no longer needs hand-tuning against the job timeout to keep the graceful drop-oldest reachable.
+- `max_cell_minutes` — wall-clock a single dispatched cell may need to complete (default `150`). Sets the drive job's dispatch reserve: a new cell is dispatched only if at least this many minutes remain before the job's `timeout-minutes` (a small setup slack is also held back), so an overrun sheds the oldest remaining cell gracefully instead of hard-failing the leg mid-cell. Keep it at or above the realistic worst-case cell duration.
 
 To test a single released version by hand: `gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100 -f aicr_version=v1.2.3`. (`--ref main` dispatches the nightly-path revision of the workflow, not your feature branch's.)
 

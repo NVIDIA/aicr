@@ -73,9 +73,8 @@ type MetadataStore struct {
 
 	// provider is the DataProvider that produced this store. Components and
 	// callers that need provider-bound lookups (component registry, manifest
-	// content) should consult this field rather than GetDataProvider() so
-	// per-provider isolation holds even when the package-global provider has
-	// since been swapped.
+	// content) should consult this field rather than the embedded default so
+	// per-provider isolation holds.
 	provider DataProvider
 }
 
@@ -93,9 +92,9 @@ type pendingRegistryEntry struct {
 // share state. This is the multi-tenant entry point used by Builders bound
 // via WithDataProvider.
 //
-// A nil provider falls back to GetDataProvider() so the legacy
-// loadMetadataStore(ctx) entry point — which consults the package-global
-// provider — continues to work transparently.
+// A nil provider falls back to the embedded catalog
+// (defaultEmbeddedProvider), matching the legacy loadMetadataStore(ctx)
+// entry point below.
 //
 // Context cancellation that fires during the first build is surfaced AND
 // auto-evicted: when entry.err is context.Canceled or context.DeadlineExceeded
@@ -152,16 +151,16 @@ func isTransientLoadError(err error) bool {
 	return stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded)
 }
 
-// loadMetadataStore is the back-compat entry point that consults the
-// package-global DataProvider. New callers — especially those that need
-// per-tenant isolation — should use LoadMetadataStoreFor directly with a
-// caller-supplied provider.
+// loadMetadataStore is the back-compat entry point that loads from the
+// embedded catalog (defaultEmbeddedProvider — never a --data tree). New
+// callers — especially those that need per-tenant isolation — should use
+// LoadMetadataStoreFor directly with a caller-supplied provider.
 func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 	return LoadMetadataStoreFor(ctx, defaultEmbeddedProvider)
 }
 
 // buildMetadataStore performs the actual catalog walk against the supplied
-// provider. It is pure with respect to the package-global DataProvider — the
+// provider. It is pure with respect to shared package state — the
 // only side effect on package state is the call to seedCriteriaRegistry,
 // which seeds the criteria registry bound to the supplied provider (via
 // GetCriteriaRegistryFor) from every overlay's spec.criteria. So loading a
@@ -170,7 +169,7 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 //
 // The returned MetadataStore has its provider field set so downstream
 // lookups (e.g., applyRegistryDefaults) can route through the originating
-// provider even when the package-global provider has since been swapped.
+// provider rather than the embedded default.
 func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataStore, error) {
 	// Record cache miss on first load for the provider.
 	recipeCacheMisses.Inc()
@@ -379,12 +378,12 @@ func CachedStoreContainsForTesting(dp DataProvider) bool {
 	return ok
 }
 
-// LoadCatalog eagerly loads the recipe catalog into the package cache,
-// which has the side effect of seeding the criteria registry from every
-// overlay's spec.criteria. Call this immediately after SetDataProvider
-// so that subsequent ParseCriteria*Type lookups see values contributed
-// by `--data` overlays. The CLI calls it at the top of `aicr recipe`
-// Action and the API server should call it at startup; if the catalog
+// LoadCatalog eagerly loads the embedded recipe catalog into the package
+// cache, which has the side effect of seeding the criteria registry from
+// every embedded overlay's spec.criteria. Provider-bound catalogs (`--data`
+// trees) are seeded the same way when LoadMetadataStoreFor first builds
+// them — the CLI routes through the aicr.Client facade's LoadCatalog,
+// which does exactly that for the client-bound provider. If the catalog
 // is malformed, this surfaces the error before any criteria validation
 // runs (and before the registry is half-populated).
 func LoadCatalog(ctx context.Context) error {
@@ -935,9 +934,9 @@ func (s *MetadataStore) mergeOverlayChains(overlays []*RecipeMetadata, mergedSpe
 
 // finalizeRecipeResult validates, sorts, and builds the final RecipeResult.
 // The provider is consulted when filling in ComponentRef defaults from the
-// component registry so per-provider isolation holds even when the
-// package-global provider has since been swapped. A nil provider falls back
-// to the package-global DataProvider.
+// component registry so per-provider isolation holds. A nil provider falls
+// back to the embedded catalog (via GetComponentRegistryFor's
+// defaultEmbeddedProvider fallback).
 func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec *RecipeMetadataSpec, appliedOverlays []string) (*RecipeResult, error) {
 	if err := mergedSpec.ValidateDependencies(); err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "merged recipe validation failed", err)
@@ -1290,10 +1289,9 @@ func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 // reject far from the root cause.
 //
 // The provider parameter routes both the registry lookup and assertFile
-// reads through a specific DataProvider so per-provider isolation holds
-// even when the package-global provider has since been swapped. A nil
-// provider falls back to the package-global DataProvider via
-// GetComponentRegistryFor.
+// reads through a specific DataProvider so per-provider isolation holds.
+// A nil provider falls back to the embedded catalog via
+// GetComponentRegistryFor's defaultEmbeddedProvider fallback.
 //
 // See hydrateHealthCheckAsserts for the skip / inline-wins / no-assertFile
 // rules and #1219 for the motivation.

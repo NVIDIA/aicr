@@ -29,16 +29,24 @@
 #
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
 {{- $cust := index .Values "nodewright-customizations" }}
-{{- if ne (toString (index $cust "enabled")) "false" }}
+{{- /* tuningEnabled (default true) disables node tuning uniformly across the */}}
+{{- /* nodewright tuning manifests (cf. tuning.yaml). Here nvidia-tuned is the */}}
+{{- /* CR's only package, so the gate suppresses the whole Skyhook CR. */}}
+{{- /* Sprig-safe: only an explicit false disables (absent/true render); a */}}
+{{- /* "| default true" would swallow an explicit false under --deployer flux. */}}
+{{- if and (ne (toString (index $cust "enabled")) "false") (ne (toString (index $cust "tuningEnabled")) "false") }}
 ---
 apiVersion: skyhook.nvidia.com/v1alpha1
 kind: Skyhook
 metadata:
   annotations:
-    # Helm hooks ensure this CR is applied after the Skyhook CRD is installed
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "10"
-    "helm.sh/hook-delete-policy": before-hook-creation
+    # No Helm hooks: this Skyhook CR is release-managed so that disabling tuning
+    # (tuningEnabled=false) actually retracts it. As a hook it would be orphaned
+    # under Flux on a true->false flip (before-hook-creation never fires once the
+    # CR leaves the render). Ordering after the Skyhook CRD is handled by the
+    # component dependency on nodewright-operator, not an intra-release hook;
+    # helm/argo already strip these hooks at bundle time.
+    aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/part-of: skyhook-operator
     app.kubernetes.io/created-by: aicr
@@ -49,7 +57,8 @@ metadata:
 spec:
   runtimeRequired: true
   # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
-  autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
+  {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
+  autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
   # Dynamic: Supports --accelerated-node-toleration CLI flag
   additionalTolerations:
     {{- if $cust.acceleratedTolerations }}

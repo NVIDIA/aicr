@@ -266,7 +266,7 @@ func GetCriteriaRegistryFor(dp DataProvider) *CriteriaRegistry {
 // EvictCachedCriteriaRegistry drops the cached criteria registry for the
 // supplied provider so the next GetCriteriaRegistryFor call rebuilds an empty
 // registry. Passing a nil provider is a no-op (callers handle that case
-// explicitly to avoid silently evicting the package-global registry).
+// explicitly to avoid silently evicting another provider's registry).
 func EvictCachedCriteriaRegistry(dp DataProvider) {
 	if dp == nil {
 		return
@@ -309,9 +309,9 @@ func normalizeCriteriaValue(s string) string {
 //
 // Routing through dp keeps the criteria registry per-provider: loading a
 // provider's metadata store seeds THAT provider's registry, exactly like the
-// metadata store itself is per-provider. A nil dp falls back to the
-// package-global registry via GetCriteriaRegistryFor, preserving the legacy
-// global path.
+// metadata store itself is per-provider. A nil dp gets a fresh empty
+// registry from GetCriteriaRegistryFor (never cached), so callers always
+// pass the store's own provider.
 //
 // source is the string returned by the DataProvider's Source(path); we
 // translate it to a CriteriaOrigin here so callers don't have to know

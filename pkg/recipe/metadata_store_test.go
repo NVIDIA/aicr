@@ -2493,18 +2493,18 @@ func TestEvictCachedStore_NilIsNoOp(t *testing.T) {
 }
 
 // TestLoadMetadataStoreFor_NilProviderFallsBack verifies that passing a nil
-// DataProvider routes through GetDataProvider() instead of panicking, and
-// returns a non-nil store via the global fallback path.
+// DataProvider falls back to defaultEmbeddedProvider instead of panicking,
+// and returns a non-nil store via the embedded fallback path.
 func TestLoadMetadataStoreFor_NilProviderFallsBack(t *testing.T) {
-	// No identity assertion on the returned store — the global may have been
-	// populated by other tests. Only verify nil dp does not panic and returns
-	// a non-nil store via the global fallback.
+	// No identity assertion on the returned store — the embedded-default
+	// cache may have been populated by other tests. Only verify nil dp does
+	// not panic and returns a non-nil store via the embedded fallback.
 	store, err := LoadMetadataStoreFor(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("LoadMetadataStoreFor(nil): %v", err)
 	}
 	if store == nil {
-		t.Error("expected non-nil store via global fallback")
+		t.Error("expected non-nil store via embedded fallback")
 	}
 }
 

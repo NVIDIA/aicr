@@ -82,16 +82,25 @@ name is accelerator-first and the coordinate is service-first, and the two must
 stay *independently* correct — coupling them through string parsing would make a
 rename of either silently corrupt the other.
 
-- **Required, concrete dimensions:** `service`, `accelerator`, `os`, `intent`.
+- **Required, concrete dimensions:** `service`, `accelerator`, `intent`.
   Each must be a concrete value. A `nil` Criteria, an empty value, or the `any`
   wildcard (`CriteriaAnyValue`, the string `"any"`) **fails closed** with
   `ErrCodeInvalidRequest`, naming the offending dimension. A recipe that fails
   this check is *not coordinatable*; callers skip it (it has no board cell).
-- **Optional sub-segment — platform only:** `platform` is the single optional
-  segment. An empty or `any` platform yields a **bare intent tab** (`training`);
-  a concrete platform yields `<intent>-<platform>` (`training-kubeflow`). An
-  optional sub-segment is **dropped, never `"unknown"`-substituted** — there is
-  no placeholder token in the coordinate.
+- **Optional os — os-agnostic recipes:** `os` is optional. A concrete os yields
+  `<accelerator>-<os>` (`h100-ubuntu`); an empty or `any` os yields the literal
+  `<accelerator>-any` (`h100-any`). Unlike the platform sub-segment, os is
+  **kept as `-any`, not dropped**, so the dashboard segment stays a well-formed
+  `<accelerator>-<os>` pair that `splitDashboard` inverts and the renderer's
+  `<accelerator>-<os>` grouping stays aligned with the coordinate path. This is
+  the nvkind (`service: kind`) case: it runs on whatever OS the runner has, so
+  its overlays declare no os and it lands under an `h100-any` dashboard,
+  distinct from the cloud lanes' `h100-ubuntu`/`h100-cos`.
+- **Optional sub-segment — platform:** `platform` is an optional segment. An
+  empty or `any` platform yields a **bare intent tab** (`training`); a concrete
+  platform yields `<intent>-<platform>` (`training-kubeflow`). This sub-segment
+  is **dropped, never `"unknown"`-substituted** — there is no placeholder token
+  in the tab.
 - **Purity:** the function is pure — no clock, no maps, no registry, no I/O. The
   same Criteria always yields the same Coordinate.
 - **Join key:** the value by which recipes are *addressed* across systems is the
@@ -225,9 +234,12 @@ greenfield UI, and an always-on GKE host cluster. Both are built in parallel;
 this ADR's mapping function, taxonomy, and column-metadata schema are shared,
 not duplicated, by both.
 
-- **Same foundation.** GP and TG read the same GCS bucket, the same verified,
-  source-keyed evidence tree, and the same `pkg/recipe.CoordinateFor` mapping
-  (§Mapping rules above). Neither forks the taxonomy.
+- **Same foundation.** GP and TG read the same verified, source-keyed evidence
+  tree and derive coordinates from the same `pkg/recipe.CoordinateFor` mapping
+  (§Mapping rules above). Neither forks the taxonomy. (Whether they share one
+  GCS bucket and publish service account, or stand up their own, is deliberately
+  left open — see the deconfliction note below; the shared contract is the
+  evidence tree and its layout, not a specific bucket.)
 - **Forward-compatible, not throwaway.** GP4's (#1404) coordinate-keyed JSON
   contract (`index.json` + `series/*.json`) is a forward-compatible input to
   TG's workers/API/UI — a future migration consumes GP's already-coordinate-keyed

@@ -238,15 +238,15 @@ func writeMixedManifests(ctx context.Context, folderDir, dir string, c Component
 		return nil, nil
 	}
 
+	// templates/ is created lazily (see the same rationale in local_helm.go):
+	// a mixed component whose recipe-side manifests all render empty must not
+	// leave an empty templates/ directory that the inventory verifier rejects.
 	templatesDir, err := deployer.SafeJoin(folderDir, "templates")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"templates dir path unsafe", err)
 	}
-	if err = os.MkdirAll(templatesDir, 0o755); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("create templates dir for %s", dir), err)
-	}
+	templatesDirCreated := false
 
 	renderInput := renderInputForVendored(c)
 
@@ -292,6 +292,13 @@ func writeMixedManifests(ctx context.Context, folderDir, dir string, c Component
 		if jerr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("template file path unsafe: %s", baseName), jerr)
+		}
+		if !templatesDirCreated {
+			if mkErr := os.MkdirAll(templatesDir, 0o755); mkErr != nil {
+				return nil, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("create templates dir for %s", dir), mkErr)
+			}
+			templatesDirCreated = true
 		}
 		if werr := writeFile(outPath, hooked, 0o644); werr != nil {
 			return nil, werr

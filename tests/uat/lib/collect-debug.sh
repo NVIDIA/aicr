@@ -114,29 +114,42 @@ _cd_node_reboot_fingerprint() {
 # may have re-converged to complete and hidden the flip. Best-effort; never fails
 # the run. $1 is a short label distinguishing multiple captures.
 capture_skyhook_snapshot() {
-  local label="${1:-snapshot}"
-  command -v kubectl >/dev/null 2>&1 || return 0
-  mkdir -p "${CLUSTER_DEBUG_DIR}"
-  local out="${CLUSTER_DEBUG_DIR}/skyhook-at-failure-${label}.txt"
-  echo "::group::Capture skyhook snapshot at failure (${label})"
-  {
-    echo "##### skyhook snapshot (${label}) @ $(date -u +%Y-%m-%dT%H:%M:%SZ) #####"
-    echo "# Captured inline seconds after the failure — status.status here is the"
-    echo "# state at (or nearest to) the moment the check failed, not a re-converged"
-    echo "# teardown-time reading."
-    echo
-    echo "----- Skyhook CRs (full YAML: per-package/per-node status) -----"
-    _cd_bounded kubectl get skyhooks.skyhook.nvidia.com -A -o yaml 2>&1 || true
-    echo
-    echo "----- node reboot fingerprint (bootID / kernel / Ready transition / taints) -----"
-    _cd_node_reboot_fingerprint
-    echo
-    echo "----- skyhook namespace pods (tuning package pods) -----"
-    _cd_bounded kubectl get pods -n skyhook -o wide 2>&1 || true
-    echo "----- skyhook namespace events (by time) -----"
-    _cd_bounded kubectl get events -n skyhook --sort-by=.lastTimestamp 2>&1 || true
-  } | tee "${out}"
-  echo "::endgroup::"
+  # Immune to the caller's errexit: the run scripts source this under
+  # `set -euo pipefail`, and a best-effort snapshot must never abort the caller.
+  # A `| tee` whose upstream exits non-zero would otherwise kill the run
+  # mid-collection. Running the body in a subshell with `set +e` isolates the
+  # errexit change to this collector (auto-discarded when the subshell exits) and
+  # is portable to every bash the run scripts may use — `local` and positional
+  # params work in a subshell, unlike `local -` which is fatal on bash < 4.4
+  # (e.g. macOS system bash 3.2, per this file's portability note). Always
+  # returns 0: a best-effort snapshot never fails the run.
+  (
+    set +e
+    local label="${1:-snapshot}"
+    command -v kubectl >/dev/null 2>&1 || exit 0
+    mkdir -p "${CLUSTER_DEBUG_DIR}"
+    local out="${CLUSTER_DEBUG_DIR}/skyhook-at-failure-${label}.txt"
+    echo "::group::Capture skyhook snapshot at failure (${label})"
+    {
+      echo "##### skyhook snapshot (${label}) @ $(date -u +%Y-%m-%dT%H:%M:%SZ) #####"
+      echo "# Captured inline seconds after the failure — status.status here is the"
+      echo "# state at (or nearest to) the moment the check failed, not a re-converged"
+      echo "# teardown-time reading."
+      echo
+      echo "----- Skyhook CRs (full YAML: per-package/per-node status) -----"
+      _cd_bounded kubectl get skyhooks.skyhook.nvidia.com -A -o yaml 2>&1 || true
+      echo
+      echo "----- node reboot fingerprint (bootID / kernel / Ready transition / taints) -----"
+      _cd_node_reboot_fingerprint
+      echo
+      echo "----- skyhook namespace pods (tuning package pods) -----"
+      _cd_bounded kubectl get pods -n skyhook -o wide 2>&1 || true
+      echo "----- skyhook namespace events (by time) -----"
+      _cd_bounded kubectl get events -n skyhook --sort-by=.lastTimestamp 2>&1 || true
+    } | tee "${out}"
+    echo "::endgroup::"
+    exit 0
+  )
   return 0
 }
 
@@ -159,6 +172,19 @@ _cd_section() {
 # collect_cluster_debug snapshots live cluster state into CLUSTER_DEBUG_DIR.
 # Best-effort and self-bounding: safe to call from an `if: failure()` step.
 collect_cluster_debug() {
+  # Immune to the caller's errexit: the run scripts source this under
+  # `set -euo pipefail`. The MANIFEST block below ends with a `for snap in glob`
+  # loop whose final `[[ -f ]]` test returns 1 when the glob matches nothing
+  # (e.g. an install-phase failure with no inline skyhook-at-failure-*.txt),
+  # which under `pipefail` makes the `{ … } | tee` pipeline exit 1 and, under
+  # `set -e`, would abort this function BEFORE any kubectl runs — truncating the
+  # bundle to a partial MANIFEST. Running the body in a subshell with `set +e`
+  # isolates the errexit change (auto-discarded when the subshell exits) and is
+  # portable to every bash the run scripts may use, unlike `local -` (fatal on
+  # bash < 4.4). The body is intentionally not re-indented to keep the diff
+  # reviewable. Always returns 0: a best-effort collector never fails the run.
+  (
+  set +e
   mkdir -p "${CLUSTER_DEBUG_DIR}"
   echo "::group::Collect cluster debug bundle -> ${CLUSTER_DEBUG_DIR}/"
 
@@ -198,7 +224,7 @@ collect_cluster_debug() {
     echo "kubectl not on PATH; skipping live cluster collection" \
       | tee -a "${CLUSTER_DEBUG_DIR}/MANIFEST.yaml"
     echo "::endgroup::"
-    return 0
+    exit 0
   fi
 
   # --- Tier 1: cluster-wide state -------------------------------------------
@@ -280,5 +306,7 @@ collect_cluster_debug() {
 
   echo "cluster debug bundle written to ${CLUSTER_DEBUG_DIR}/ ($(du -sh "${CLUSTER_DEBUG_DIR}" 2>/dev/null | cut -f1))"
   echo "::endgroup::"
+  exit 0
+  )
   return 0
 }
