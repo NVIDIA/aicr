@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"reflect"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -480,6 +481,70 @@ func TestGetValuesForComponent_OverridesMergeDeep(t *testing.T) {
 	}
 
 	t.Logf("Deep merge works correctly - overrides merged, not replaced")
+}
+
+// TestGetComponentValues_BareRef pins the package-level GetComponentValues
+// helper added for #1844: it resolves the same effective values a bare
+// ComponentRef would merge (base → ValuesFile → Overrides) without a
+// RecipeResult, mirroring RecipeResult.GetValuesForComponent. The deployment
+// validator uses it to render a component's manifests exactly as the bundler
+// would.
+func TestGetComponentValues_BareRef(t *testing.T) {
+	t.Run("no valuesFile and no overrides returns empty map", func(t *testing.T) {
+		got, err := GetComponentValues(&ComponentRef{Name: "manifest-only", Version: "v1.0.0"})
+		if err != nil {
+			t.Fatalf("GetComponentValues() error = %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("GetComponentValues() = %v, want empty map", got)
+		}
+	})
+
+	t.Run("inline overrides are merged", func(t *testing.T) {
+		ref := &ComponentRef{
+			Name: "nodewright-customizations",
+			Overrides: map[string]any{
+				"tuningEnabled": false,
+				"accelerator":   "h100",
+			},
+		}
+		got, err := GetComponentValues(ref)
+		if err != nil {
+			t.Fatalf("GetComponentValues() error = %v", err)
+		}
+		if v, ok := got["tuningEnabled"].(bool); !ok || v {
+			t.Fatalf("tuningEnabled = %v (%T), want false", got["tuningEnabled"], got["tuningEnabled"])
+		}
+		if v, _ := got["accelerator"].(string); v != "h100" {
+			t.Fatalf("accelerator = %q, want h100", v)
+		}
+	})
+
+	t.Run("matches RecipeResult.GetValuesForComponent for the same ref", func(t *testing.T) {
+		ref := ComponentRef{
+			Name:       "gpu-operator",
+			Version:    "v25.3.4",
+			ValuesFile: "components/gpu-operator/values.yaml",
+			Overrides:  map[string]any{"driver": map[string]any{"version": "999.99.99"}},
+		}
+		viaResult, err := (&RecipeResult{ComponentRefs: []ComponentRef{ref}}).GetValuesForComponent("gpu-operator")
+		if err != nil {
+			t.Fatalf("GetValuesForComponent() error = %v", err)
+		}
+		viaBareRef, err := GetComponentValues(&ref)
+		if err != nil {
+			t.Fatalf("GetComponentValues() error = %v", err)
+		}
+		if !reflect.DeepEqual(viaResult, viaBareRef) {
+			t.Fatalf("GetComponentValues and GetValuesForComponent disagree:\n bare = %v\n result = %v", viaBareRef, viaResult)
+		}
+	})
+
+	t.Run("nil ref is rejected", func(t *testing.T) {
+		if _, err := GetComponentValues(nil); err == nil {
+			t.Fatal("GetComponentValues(nil) error = nil, want error")
+		}
+	})
 }
 
 // TestGetValuesForComponent_BuilderIntegration tests inline overrides

@@ -190,19 +190,54 @@ func (r *RecipeResult) GetValuesForComponentWithContext(ctx context.Context, nam
 		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("component %q not found in recipe", name))
 	}
 
+	// Prefer the result-bound provider (per-tenant isolation); resolveComponentValues
+	// falls back to the embedded-data singleton when it is nil (e.g. the result was
+	// decoded from a recipe file before BindDataProvider was called).
+	return resolveComponentValues(ctx, r.provider, ref)
+}
+
+// GetComponentValues resolves the effective Helm values for a single
+// ComponentRef (base values.yaml → ValuesFile → inline Overrides) using the
+// package-global embedded DataProvider. It mirrors GetManifestContent for
+// callers that hold a bare ComponentRef detached from any RecipeResult-bound
+// provider — notably the deployment validator, which renders a component's
+// manifests exactly as the bundler would so value-gated resources drop out of
+// the render (see #1844). Callers that still hold a RecipeResult should prefer
+// RecipeResult.GetValuesForComponent so an external --data overlay provider is
+// honored.
+//
+// Internally derives a defaults.FileReadTimeout-bounded context; callers that
+// already hold a context.Context should use GetComponentValuesWithContext.
+func GetComponentValues(ref *ComponentRef) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return GetComponentValuesWithContext(ctx, nil, ref)
+}
+
+// GetComponentValuesWithContext resolves the effective Helm values for ref via
+// the supplied DataProvider (nil falls back to the embedded-data singleton),
+// honoring the caller's context for cancellation/timeout.
+func GetComponentValuesWithContext(ctx context.Context, dp DataProvider, ref *ComponentRef) (map[string]any, error) {
+	if ref == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "component ref is nil")
+	}
+	return resolveComponentValues(ctx, dp, ref)
+}
+
+// resolveComponentValues merges a ComponentRef's values in precedence order
+// (base values.yaml → ValuesFile → inline Overrides). A nil provider falls back
+// to the embedded-data singleton. Shared by RecipeResult.GetValuesForComponent
+// (result-bound provider) and GetComponentValues (bare-ref, embedded provider).
+func resolveComponentValues(ctx context.Context, provider DataProvider, ref *ComponentRef) (map[string]any, error) {
 	// Start with empty result
 	result := make(map[string]any)
 
-	// If no valuesFile and no overrides, return empty map
+	// If no valuesFile and no overrides, return empty map without touching the
+	// provider (the common case for manifest-only components).
 	if ref.ValuesFile == "" && len(ref.Overrides) == 0 {
 		return result, nil
 	}
 
-	// Resolve provider once: prefer the result-bound provider (per-tenant
-	// isolation), fall back to the embedded-data singleton when the result
-	// was constructed without a Builder (e.g. decoded from a recipe file
-	// before BindDataProvider has been called).
-	provider := r.provider
 	if provider == nil {
 		provider = defaultEmbeddedProvider
 	}
@@ -210,7 +245,7 @@ func (r *RecipeResult) GetValuesForComponentWithContext(ctx context.Context, nam
 	// Step 1: Load base and/or overlay values from files (if ValuesFile specified)
 	if ref.ValuesFile != "" {
 		// Determine if this is an overlay values file (not the base values.yaml)
-		baseValuesFile := fmt.Sprintf("components/%s/values.yaml", name)
+		baseValuesFile := fmt.Sprintf("components/%s/values.yaml", ref.Name)
 		isOverlay := ref.ValuesFile != baseValuesFile
 
 		if isOverlay {
