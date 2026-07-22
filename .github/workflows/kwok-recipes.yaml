@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -248,6 +248,12 @@ jobs:
           tier3="$all"
 
           tier1_pairs=$(jq -cn --argjson recipes "$tier1" --argjson deployers "$deployers" '
+            [ $recipes[] as $r | $deployers[] as $d | {recipe: $r, deployer: $d} ]
+          ')
+
+          tier2_pairs=$(jq -cn --argjson recipes "$tier2" '
+            [ $recipes[] as $r | {recipe: $r, deployer: "helm"} ]
+          ')
 
           # --- Tier 3 batching ---
           # GitHub caps a single job's matrix at 256 configurations. Tier 3
