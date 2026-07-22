@@ -31,7 +31,14 @@
 #
 # Fields:
 #   name                human-facing reservation / lease key (must be unique)
-#   cloud               aws | gcp | azure
+#   cloud               aws | gcp | azure | kind. "kind" is not a cloud but the
+#                       self-hosted GPU-runner lane (nvkind on real silicon,
+#                       DC5 #1278): it rides the same reservation → uat-run →
+#                       uat-<cloud> dispatch model and nightly batch as the
+#                       cloud lanes, but provisions a single-node nvkind cluster
+#                       on the runner (no actuator) instead of a cloud cluster.
+#                       Its lease is the single self-hosted GPU runner. Scope is
+#                       honestly H100 x1, single-GPU — whatever the runner has.
 #   reservation-id      the cloud capacity-reservation identifier; GCP uses
 #                       the fully-qualified resource path (matches the value
 #                       embedded in cluster-config-path verbatim); OPTIONAL —
@@ -141,4 +148,31 @@ reservations:
     # real GB200 capacity nightly). Stays manually dispatchable via uat-run.yaml.
     # Enroll ([training]) after a green manual acceptance run and once the
     # Capacity-Block scheduling window is wired into the nightly broker.
+    nightly-intents: []
+  - name: kind-h100
+    cloud: kind
+    # No reservation-id: capacity is the self-hosted GPU runner
+    # (linux-amd64-gpu-h100-latest-1), not a cloud capacity reservation. The
+    # name is still the lease key, so contending runs queue exactly as on the
+    # cloud rows (and the runner's own concurrency is the physical single-slot
+    # backstop).
+    accelerator: h100
+    # Single-GPU: the runner exposes one H100. Activates neither the multi-node
+    # NCCL fabric check nor a 2-node TrainJob; the signed evidence is scoped to
+    # H100 x1 (DC5 #1278).
+    gpu-count: 1
+    # nvkind provisions from the runner directly (gpu-cluster-setup action), not
+    # a github.com/mchmarny/cluster actuator config — this path is an
+    # informational descriptor of the nvkind cluster shape and keeps the row's
+    # required cluster-config-path non-empty; uat-kind.yaml does not feed it to
+    # an actuator.
+    cluster-config-path: tests/uat/kind/cluster-config.yaml
+    test-config-dir: tests/uat/kind/tests
+    # Opted OUT of the nightly batch during bring-up (explicit empty list, NOT a
+    # bare `nightly-intents:` which would default to [training] and schedule
+    # unvalidated multi-hour runs on the shared GPU runner). Stays manually
+    # dispatchable via uat-run.yaml. Enroll ([training], then add inference)
+    # after green manual acceptance runs on the H100 runner and verified
+    # ingestion — evidence emit + sign also needs Fulcio/Rekor egress from the
+    # self-hosted runner, which the acceptance run confirms.
     nightly-intents: []

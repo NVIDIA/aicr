@@ -72,11 +72,13 @@ env:
   TRUSTED_REGISTRIES: ${{ vars.EVIDENCE_TRUSTED_REGISTRIES || 'ghcr.io/nvidia' }}
   # Allowed OIDC issuer for first-party (UAT) bundles.
   FIRST_PARTY_ISSUER: 'https://token.actions.githubusercontent.com'
-  # Identity regexp pinning first-party UAT signatures to the NVIDIA/aicr
-  # UAT workflows. Fully anchored so the verifier's signer match is exact
-  # (matches what uat-aws.yaml / uat-gcp.yaml / uat-azure.yaml pin in their
-  # own verify step).
-  FIRST_PARTY_IDENTITY: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp|azure)\.yaml@refs/heads/.+$'
+  # Identity regexp pinning first-party signatures to the NVIDIA/aicr
+  # evidence-producing UAT lanes. Fully anchored so the verifier's signer
+  # match is exact (matches what each lane pins in its own verify step): the
+  # cloud lanes (uat-aws/gcp/azure) plus the real-silicon nvkind lane
+  # (uat-kind, DC5 #1278). Keep in lockstep with the firstParty
+  # identityPattern entries in recipes/evidence/allowlist.yaml.
+  FIRST_PARTY_IDENTITY: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp|azure|kind)\.yaml@refs/heads/.+$'
 
 jobs:
   # ---------------------------------------------------------------------

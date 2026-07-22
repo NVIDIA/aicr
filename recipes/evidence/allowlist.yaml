@@ -65,6 +65,13 @@ firstParty:
   - label: aicr-uat-azure
     issuer: https://token.actions.githubusercontent.com
     identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-azure\.yaml@refs/heads/.+$'
+  # DC5 (#1278): real-silicon nvkind evidence on the self-hosted GPU runners
+  # (service: kind recipes, H100 x1). uat-kind.yaml is the reusable lane
+  # dispatched by uat-run.yaml (a sibling of uat-aws/gcp/azure), so its file
+  # path is the keyless signing identity.
+  - label: aicr-uat-kind
+    issuer: https://token.actions.githubusercontent.com
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-kind\.yaml@refs/heads/.+$'
 
 # Community: individual external contributors, keyed by source slug only.
 # Each commits pointers under recipes/evidence/<recipe>/<src>/ where <src> is

@@ -23,7 +23,9 @@ All UAT runs go through one entry point, `uat-run.yaml` — the shared dispatch 
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100
 ```
 
-`uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, or `uat-azure.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
+`uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, `uat-azure.yaml`, or — for the `service: kind` real-silicon lane — `uat-kind.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
+
+The **nvkind lane** (`cloud: kind`, DC5 #1278) is a full sibling of the cloud lanes — same `uat-run` dispatch, same reservation lease, same nightly batch, same phase-by-phase runner (`tests/uat/kind/run`, sharing `tests/uat/lib/collect-debug.sh`), and the same signed-evidence emit → verify → ingest. It differs only in provisioning: instead of a `github.com/mchmarny/cluster` actuator it stands up a **single-node, single-GPU nvkind cluster on a self-hosted GPU runner** (`.github/actions/gpu-cluster-setup`) and tears it down with `.github/actions/gpu-test-cleanup` — no cloud credentials, no capacity reservation (the runner *is* the lease). Validator/agent images resolve to the runner-local `ko.local` registry for `main` cells; release cells install the released `aicr` and pull released images. Scope is honestly H100 ×1, single-GPU.
 
 Two further inputs shape the run (both default to the nightly-batch behavior, so the cron needs neither):
 
@@ -65,6 +67,8 @@ The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both inte
 | `aws-h100` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
 | `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
 | `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); inference gated to `>= v0.18.0` via `nightly-intent-min-versions` (see **Cost / tuning** below) |
+
+The `kind-h100` (nvkind) reservation is **opted out of the nightly batch** (`nightly-intents: []`) during bring-up — manually dispatchable via `uat-run.yaml`, enrolled after a green manual H100 acceptance run — so it is not listed above.
 
 **How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown cell (inference cells currently run provision→validate→teardown; the serve CUJ is disabled pending #1644), waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
 

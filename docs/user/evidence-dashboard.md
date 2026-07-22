@@ -137,8 +137,21 @@ worst-ranked state among all its rows, in this priority order (worst first):
 `CONTESTED` → `FAILING` → `UNTESTED` → `SINGLE` → `CONFIRMED`
 
 A single `CONTESTED` row forces the whole phase to `CONTESTED`; a phase with
-all-`CONFIRMED` rows rolls up to `CONFIRMED`. A phase with no rows (because the
-recipe declares no checks for it) rolls up to `UNTESTED`.
+all-`CONFIRMED` rows rolls up to `CONFIRMED`.
+
+Worst-first has one exception, `PARTIAL`. A phase with a mix of passing
+(`CONFIRMED`/`SINGLE`) and not-yet-run (`UNTESTED`) rows — but nothing failing
+or contested — would be dragged all the way to `UNTESTED` by the precedence
+above, hiding the coverage it does have. That mixed state rolls up to `PARTIAL`
+instead: passing where it ran, but not every row has run. Real problems still
+win — `CONTESTED` and `FAILING` outrank `UNTESTED`, so a phase only reaches
+`PARTIAL` when nothing failed. (`PARTIAL` is a rollup state only; individual
+rows never carry it.)
+
+A phase with no rows — because the recipe declares no checks for it, or no
+signer has run any of them yet — rolls up to `UNTESTED` and is still shown on
+the board as an untested coverage gap rather than omitted, so a category nobody
+has run is visible instead of silently missing.
 
 ## Source classes
 

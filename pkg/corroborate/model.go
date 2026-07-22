@@ -207,11 +207,27 @@ type Series struct {
 	// Recipe is the overlay metadata.name.
 	Recipe string `json:"recipe"`
 
+	// Rows is the phase-aware union of every row across ALL builds, ordered by
+	// PhaseOrder then CTRF name. The drilldown renders its rows from this rather
+	// than the latest combined grid, so a phase whose rows ran only in older
+	// builds is still shown (with its historical result) instead of collapsing
+	// to a "not run" placeholder.
+	Rows []SeriesRow `json:"rows"`
+
 	// Builds maps each signer-id-hash to its build columns, newest first.
 	Builds map[string][]SeriesBuild `json:"builds"`
 
 	// Health maps each signer-id-hash to its derived run-health summary.
 	Health map[string]SeriesHealth `json:"health"`
+}
+
+// SeriesRow is one row of the all-build union: a CTRF name and the phase it
+// belongs to. Historical-only rows (present in older builds but dropped from
+// every signer's latest run) appear here even though they are absent from the
+// latest combined grid.
+type SeriesRow struct {
+	Name  string `json:"name"`
+	Phase string `json:"phase"`
 }
 
 // SeriesBuild is one signer run rendered as a build column.

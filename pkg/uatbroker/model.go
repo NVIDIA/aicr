@@ -14,15 +14,21 @@
 
 package uatbroker
 
-// Recognized cloud values for a reservation row.
+// Recognized cloud values for a reservation row. "kind" is not a cloud but a
+// self-hosted GPU-runner lane (nvkind on real silicon, DC5 #1278): it slots
+// into the same reservation → uat-run → uat-<cloud> dispatch model so it rides
+// the nightly batch and shares tests/uat/<cloud>/run + tests/uat/lib exactly
+// like the cloud lanes. Its "reservation" is the single self-hosted GPU runner
+// (an Actions concurrency lease), not a cloud capacity reservation.
 const (
 	CloudAWS   = "aws"
 	CloudGCP   = "gcp"
 	CloudAzure = "azure"
+	CloudKind  = "kind"
 )
 
 // validClouds is the set of accepted Reservation.Cloud values.
-var validClouds = map[string]bool{CloudAWS: true, CloudGCP: true, CloudAzure: true}
+var validClouds = map[string]bool{CloudAWS: true, CloudGCP: true, CloudAzure: true, CloudKind: true}
 
 // Recognized recipe-intent values. The daytime human-access rotation (#1281,
 // DC8) picks one flavor per reservation via Reservation.DaytimeIntent; these

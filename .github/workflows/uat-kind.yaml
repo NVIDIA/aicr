@@ -1,0 +1,396 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT - Kind
+
+# DC5 (#1278) — the nvkind real-silicon UAT lane. A `service: kind` sibling of
+# uat-aws.yaml / uat-gcp.yaml / uat-azure.yaml: it is dispatched by the shared
+# uat-run.yaml (which resolves the `kind-h100` reservation row and holds the
+# per-reservation lease) and rides the same nightly batch and version matrix.
+# It drives the SAME phase-by-phase runner (tests/uat/kind/run, a sibling of
+# tests/uat/aws/run sharing tests/uat/lib/collect-debug.sh) and emits the same
+# Sigstore-signed ADR-007 evidence bundle, ingested onto validation.aicr.run.
+#
+# The only differences from the cloud lanes are provisioning and teardown: the
+# cluster is a single-node, single-GPU nvkind cluster stood up on a self-hosted
+# GPU runner via .github/actions/gpu-cluster-setup (no cloud actuator, no cloud
+# credentials, no capacity reservation), and torn down by
+# .github/actions/gpu-test-cleanup. Validator/agent images resolve to the
+# runner-local ko.local registry for main cells; release cells install the
+# released aicr + self-resolve released images. Scope is honestly H100 x1,
+# single-GPU — whatever the runner physically has.
+#
+# This file's path IS the keyless signing identity (job_workflow_ref), so it —
+# not uat-run.yaml — is the workflow pinned in recipes/evidence/allowlist.yaml
+# and evidence-ingest.yaml's FIRST_PARTY_IDENTITY.
+
+on:
+  workflow_call:
+    inputs:
+      reservation:
+        description: 'Reservation name from infra/uat/reservations.yaml (kind-h100).'
+        type: string
+        required: true
+      aicr_version:
+        description: 'Released aicr version to test (e.g. v1.2.3); empty = build from source (main tip).'
+        type: string
+        default: ''
+      intent:
+        description: 'Recipe intent — selects tests/uat/kind/tests/h100-<intent>-config.yaml.'
+        type: string
+        default: training
+      lifecycle:
+        description: 'Cluster lifecycle. Only nightly is supported for the nvkind lane (no held daytime cluster on a shared runner).'
+        type: string
+        default: nightly
+      cluster_config_path:
+        description: 'Informational nvkind descriptor path (nvkind provisions from the runner, not this file).'
+        type: string
+        required: true
+      test_config_dir:
+        description: 'Directory holding the per-intent AICRConfig test files.'
+        type: string
+        required: true
+      skip_delete:
+        description: 'Skip cluster teardown (manual debugging only).'
+        type: boolean
+        default: false
+      skip_tests:
+        description: 'Skip UAT test execution (manual debugging only).'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  uat-kind:
+    name: nvkind ${{ inputs.reservation }} (${{ inputs.intent }})
+    # Daytime lifecycles never target the nvkind lane (kind-h100 carries no
+    # daytime-intent, so the daytime scheduler never dispatches it); guard
+    # anyway so a manual daytime dispatch is a clean no-op rather than a
+    # confusing partial run.
+    if: inputs.lifecycle == 'nightly'
+    runs-on: linux-amd64-gpu-h100-latest-1
+    # Cover the sum of the sequential step budgets (setup 25 + image build 20 +
+    # tools + prep 20 + install 90 + conformance 45 + train 30 + verify 5) plus
+    # headroom for the always()-run cleanup, so a job-level timeout never kills
+    # teardown and leaks the nvkind cluster on the shared runner. Matches the
+    # cloud lanes' 280.
+    timeout-minutes: 280
+    permissions:
+      contents: read
+      id-token: write  # Sigstore keyless signing (ambient GitHub Actions OIDC)
+      packages: write  # push the signed evidence bundle to GHCR; pull released images
+    concurrency:
+      # Belt-and-braces to uat-run.yaml's reservation lease: serialize runs of
+      # this lane on the shared single runner per intent.
+      group: uat-kind-${{ github.event_name }}-${{ github.ref }}-${{ inputs.intent }}
+      cancel-in-progress: false
+    env:
+      KIND_CLUSTER_NAME: uat-kind-${{ inputs.intent }}
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
+    outputs:
+      # Digest-pinned OCI ref of the signed evidence bundle, consumed by the
+      # ingest-evidence job below. Empty when no bundle was produced.
+      bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        env:
+          INTENT: ${{ inputs.intent }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+        run: |
+          set -euo pipefail
+          case "${INTENT}" in
+            training|inference) ;;
+            *) echo "::error::unsupported intent: ${INTENT}"; exit 1 ;;
+          esac
+          if [[ ! -f "${TEST_CONFIG}" ]]; then
+            echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
+          fi
+          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${KIND_CLUSTER_NAME}"
+
+      - name: Prepare GPU workflow
+        id: prepare
+        uses: ./.github/actions/gpu-workflow-prepare
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Set up GPU cluster
+        timeout-minutes: 25
+        uses: ./.github/actions/gpu-cluster-setup
+        with:
+          kind_node_image: ${{ steps.prepare.outputs.h100_kind_node_image }}
+          min_gpu_count: '1'
+          gpu_model_pattern: H100
+          min_free_disk_gb: '50'
+          min_available_memory_gb: '16'
+          cluster_create_timeout: 900s
+          control_plane_resource_patches: 'true'
+          control_plane_leader_election_tuning: 'true'
+
+      # Install the tools the shared tests/uat/kind/run phases need on PATH:
+      # kubectl + yq (used throughout phases.sh), helm, and helmfile (the
+      # install phase's `helmfile apply`). Mirrors the cloud lanes'
+      # setup-build-tools step; ko is handled by aicr-build for main cells.
+      - name: Install tools
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kubectl: 'true'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+          install_helm: 'true'
+          install_helmfile: 'true'
+          helmfile_version: '${{ steps.versions.outputs.helmfile }}'
+          helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
+
+      # Point validator + agent image resolution at the runner-local ko.local
+      # registry for MAIN cells (images side-loaded into kind by the aicr-build
+      # step below). Release cells leave these UNSET so the released binary
+      # self-resolves released images (ghcr.io/nvidia/...:<version>), which kind
+      # pulls. Written to GITHUB_ENV (not inline) so an empty value on a release
+      # cell never overrides the CLI's self-resolution default.
+      - name: Configure image resolution (main cell)
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        run: |
+          set -euo pipefail
+          {
+            echo "AICR_IMAGE=ko.local:smoke-test"
+            echo "AICR_VALIDATOR_IMAGE=ko.local:smoke-test"
+            echo "AICR_VALIDATOR_IMAGE_REGISTRY=ko.local"
+            # aicr-build side-loads the validators as ko.local/<...>:latest, but
+            # the main binary is stamped with a real commit, so the catalog would
+            # rewrite :latest -> :sha-<commit> (a tag that was never loaded) and
+            # the validator Jobs ImagePullBackOff. Pin the tag to :latest to
+            # override that rewrite (catalog resolution step 3) so it matches the
+            # loaded images. Release cells leave this unset (released :<version>).
+            echo "AICR_VALIDATOR_IMAGE_TAG=latest"
+          } >> "$GITHUB_ENV"
+
+      # Main cell (aicr_version empty): build the host aicr binary from source,
+      # stamped version=main so the emitted recipe/evidence report "main" + the
+      # commit (mirrors uat-aws.yaml).
+      - name: Build aicr binary
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        env:
+          GOFLAGS: -mod=vendor
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build \
+            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -o ./aicr ./cmd/aicr
+          VER_OUT="$(./aicr --version)"
+          echo "${VER_OUT}"
+          if ! printf '%s' "${VER_OUT}" | grep -qF "main (commit: ${COMMIT_SHA}"; then
+            echo "::error::aicr binary not stamped (want 'main (commit: ${COMMIT_SHA}…'); got: ${VER_OUT}" >&2
+            exit 1
+          fi
+
+      # Main cell: side-load the validator (all phases) + snapshot-agent images
+      # into the kind cluster under ko.local. build_cli is false — the host
+      # binary is the stamped go build above.
+      - name: Build validator + agent images into kind
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        timeout-minutes: 20
+        uses: ./.github/actions/aicr-build
+        with:
+          build_cli: 'false'
+          build_snapshot_agent: 'true'
+          validator_phases: 'deployment,conformance,performance'
+
+      # Release cell (aicr_version set): install the RELEASED aicr binary at that
+      # version. The released binary self-resolves its own version's validator +
+      # agent images from GHCR (kind pulls them), so no aicr-build/ko.local.
+      - name: Install released aicr
+        if: inputs.aicr_version != '' && inputs.skip_tests != true
+        uses: ./.github/actions/install-aicr-release
+        with:
+          aicr-version: ${{ inputs.aicr_version }}
+          cosign_version: ${{ steps.versions.outputs.cosign }}
+
+      # GHCR auth: push the signed evidence bundle (all cells) and pull released
+      # images into kind (release cells).
+      - name: Authenticate to GHCR
+        uses: ./.github/actions/ghcr-login
+
+      # UAT phases — the shared tests/uat/kind/run runner, phase-by-phase so each
+      # per-phase failure surfaces in the Actions UI (mirrors the cloud lanes).
+      - name: UAT - prep (snapshot + recipe + validate + bundle)
+        id: prep
+        if: inputs.skip_tests != true
+        timeout-minutes: 20
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run prep "${TEST_CONFIG}"
+
+      - name: UAT - install (helmfile apply + readiness gate)
+        id: install
+        if: inputs.skip_tests != true && steps.prep.outcome == 'success'
+        timeout-minutes: 90
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run install "${TEST_CONFIG}"
+
+      - name: UAT - validate (all phases) + emit signed evidence
+        id: conformance
+        if: inputs.skip_tests != true && steps.install.outcome == 'success'
+        timeout-minutes: 45
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run conformance "${TEST_CONFIG}"
+
+      - name: UAT - train (TrainJob)
+        id: train
+        if: inputs.skip_tests != true && steps.conformance.outcome == 'success' && inputs.intent == 'training'
+        timeout-minutes: 30
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run train "${TEST_CONFIG}"
+
+      # Inference: the served-inference CUJ is intentionally not executed (vLLM
+      # excluded from UAT), matching the cloud lanes. Evidence from the
+      # conformance step covers the deployed stack.
+
+      - name: UAT - verify (evidence verify)
+        id: verify
+        if: inputs.skip_tests != true && steps.conformance.outcome == 'success'
+        timeout-minutes: 5
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+          # Pin the expected Sigstore signer to THIS workflow's OIDC identity so
+          # verify only passes for bundles signed by this lane.
+          EXPECTED_ISSUER: https://token.actions.githubusercontent.com
+          EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-kind\.yaml@refs/heads/.+$'
+        run: ./tests/uat/kind/run verify "${TEST_CONFIG}"
+
+      - name: Export evidence bundle ref
+        id: evidence_ref
+        if: inputs.skip_tests != true && steps.conformance.outcome == 'success'
+        uses: ./.github/actions/export-evidence-ref
+
+      - name: Upload evidence pointer
+        if: always() && steps.conformance.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-kind-${{ inputs.intent }}-evidence-pointer-${{ github.run_id }}
+          path: evidence/pointer.yaml
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Collect cluster debug bundle
+        if: failure() && steps.prep.outcome != 'skipped'
+        timeout-minutes: 8
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run debug "${TEST_CONFIG}" || true
+
+      - name: Upload failure debug
+        if: failure() && steps.prep.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-kind-${{ inputs.intent }}-debug-${{ github.run_id }}
+          path: |
+            snapshot.yaml
+            recipe.yaml
+            dry-run.json
+            report.json
+            evidence-result.json
+            evidence/pointer.yaml
+            train-logs/**
+            cluster-debug/**
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Test Summary
+        if: always()
+        env:
+          SUMMARY_RESERVATION: ${{ inputs.reservation }}
+          SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
+          SUMMARY_INTENT: ${{ inputs.intent }}
+        run: |
+          {
+            echo "## UAT Results (nvkind — service: kind)"
+            echo ""
+            printf '**Reservation:** `%s` · **Intent:** `%s`\n' \
+              "$SUMMARY_RESERVATION" "$SUMMARY_INTENT"
+            printf '**Cluster:** `%s` (H100 x1, single-GPU, self-hosted runner)\n' "$KIND_CLUSTER_NAME"
+            printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
+            echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
+            echo ""
+            echo "| Phase | Status |"
+            echo "|-------|--------|"
+            echo "| Prep | ${{ steps.prep.outcome }} |"
+            echo "| Install | ${{ steps.install.outcome }} |"
+            echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
+            echo "| Train | ${{ steps.train.outcome }} |"
+            echo "| Verify | ${{ steps.verify.outcome }} |"
+            if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
+              echo ""
+              echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Teardown last so a slow cleanup cannot lose evidence. skip_delete is a
+      # manual debugging escape.
+      - name: GPU Test Cleanup
+        if: always() && inputs.skip_delete != true
+        timeout-minutes: 15
+        uses: ./.github/actions/gpu-test-cleanup
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact_name_prefix: uat-kind-${{ inputs.intent }}-cleanup
+          collect_artifacts: ${{ job.status != 'success' }}
+          diagnostic_mode: ${{ inputs.intent }}
+          upload_validation_artifacts: 'true'
+
+  # Ingest the signed nvkind evidence bundle into the corroboration bucket.
+  # Runs as its own job (separate runner) only when the run produced a bundle;
+  # the reusable evidence-ingest workflow re-verifies signer + issuer +
+  # identity + registry in a credential-free step before publishing to GCS.
+  ingest-evidence:
+    name: Ingest nvkind evidence
+    needs: uat-kind
+    if: needs.uat-kind.outputs.bundle_ref != ''
+    permissions:
+      contents: read
+      id-token: write  # WIF for the publish job
+      packages: read   # GHCR pull for the verify job
+      actions: write   # dispatch the dashboard-publish refresh after publish
+    uses: ./.github/workflows/evidence-ingest.yaml
+    with:
+      bundle_ref: ${{ needs.uat-kind.outputs.bundle_ref }}
+      recipe: kind-h100-${{ inputs.intent }}
