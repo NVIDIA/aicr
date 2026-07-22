@@ -20,6 +20,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 )
 
@@ -90,13 +91,20 @@ func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) e
 }
 
 func findPerformanceConstraint(ctx *validators.Context, name string) (recipe.Constraint, bool) {
+	return v1.FindConstraint(performanceConstraints(ctx), name)
+}
+
+// countPerformanceConstraint counts performance constraints with the given name.
+func countPerformanceConstraint(ctx *validators.Context, name string) int {
+	return v1.CountConstraint(performanceConstraints(ctx), name)
+}
+
+// performanceConstraints returns the recipe's performance-phase constraints in a
+// nil-safe way. The lookup semantics (first-match, count) live once in
+// pkg/validator/v1 so the pod and the orchestrator can't drift.
+func performanceConstraints(ctx *validators.Context) []recipe.Constraint {
 	if ctx.ValidationInput == nil || ctx.ValidationInput.Config.Performance == nil {
-		return recipe.Constraint{}, false
+		return nil
 	}
-	for _, c := range ctx.ValidationInput.Config.Performance.Constraints {
-		if c.Name == name {
-			return c, true
-		}
-	}
-	return recipe.Constraint{}, false
+	return ctx.ValidationInput.Config.Performance.Constraints
 }

@@ -189,3 +189,33 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestEvidenceConfigForRunMode(t *testing.T) {
+	cfg := &recipeEvidenceConfig{
+		OutDir: "/tmp/out",
+		Push:   "ghcr.io/nvidia/aicr-evidence/example",
+	}
+	tests := []struct {
+		name      string
+		noCluster bool
+		cfg       *recipeEvidenceConfig
+		wantNil   bool
+	}{
+		{"live cluster keeps emit config", false, cfg, false},
+		{"no-cluster drops emit config", true, cfg, true},
+		{"live cluster nil stays nil", false, nil, true},
+		{"no-cluster nil stays nil", true, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evidenceConfigForRunMode(tt.noCluster, tt.cfg)
+			if (got == nil) != tt.wantNil {
+				t.Fatalf("evidenceConfigForRunMode() nil = %v, want nil = %v", got == nil, tt.wantNil)
+			}
+			// A live-cluster run must pass the config through unchanged.
+			if !tt.noCluster && tt.cfg != nil && got != tt.cfg {
+				t.Errorf("live-cluster run mutated the evidence config: got %+v, want %+v", got, tt.cfg)
+			}
+		})
+	}
+}

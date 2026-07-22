@@ -18,8 +18,8 @@
 //   - KeylessAttester: Signs using OIDC-based Fulcio certificates and logs to Rekor.
 //     The OIDC token can come from any of the helpers below or be supplied directly
 //     by the caller (e.g., a token fetched out of band).
-//   - KMSAttester: Signs with a cloud-KMS-backed key (awskms:// | gcpkms:// |
-//     azurekms://) instead of OIDC, for CI/CD environments without an OIDC token.
+//   - KMSAttester: Signs with a KMS-backed key (awskms:// | gcpkms:// |
+//     azurekms:// | hashivault://) instead of OIDC, for CI/CD environments without an OIDC token.
 //     The resulting Sigstore bundle carries public-key verification material (no
 //     Fulcio certificate) and, by default, still logs to Rekor.
 //   - NoOpAttester: Returns nil (used when --attest is not set).
@@ -38,8 +38,10 @@
 // KMSAttester pairs a KMS identity with Rekor. This keeps the keyless and KMS
 // paths a single composition apart rather than parallel code.
 //
-// HashiCorp Vault (hashivault://) is intentionally unsupported: its client
-// libraries are MPL-2.0, which this project's license policy disallows.
+// HashiCorp Vault (hashivault://) is supported alongside the cloud KMS
+// providers. Its client libraries are MPL-2.0; their use is approved under this
+// project's license policy (see #1577) and the license-check target excludes
+// those packages from allowlist enforcement by path.
 //
 // Attestations use industry-standard formats:
 //   - DSSE (Dead Simple Signing Envelope) as the transport format
@@ -48,9 +50,12 @@
 //   - Sigstore bundle (.sigstore.json) packaging the signed envelope,
 //     certificate, and Rekor inclusion proof
 //
-// The attestation subject is checksums.txt (covering all bundle content files).
-// The SLSA predicate records build metadata including the tool version, recipe,
-// components, and resolvedDependencies (binary provenance + external data files).
+// The attestation subject is checksums.txt, which covers every bundle payload
+// file. BundleAttestationFile and BinaryAttestationFile are excluded from the checksum payload:
+// callers inventory those two exact paths as separately verified metadata to
+// avoid a self-referential manifest. The SLSA predicate records build metadata
+// including the tool version, recipe, components, and resolvedDependencies
+// (binary provenance + external data files).
 //
 // # Retry Contract
 //

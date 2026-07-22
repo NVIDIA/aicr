@@ -55,10 +55,10 @@ are pulled in at bundle time, not at recipe resolution.
 
 | | **Registry entry** | **Overlay** | **Mixin** |
 |---|---|---|---|
-| **Purpose** | Make a chart/kustomization available to recipes; set component-wide defaults | Pin versions, set values, scope by criteria | Share constraints or componentRefs across overlays |
+| **Purpose** | Make a chart/kustomization available to recipes; set component-wide defaults (incl. the component version/tag) | Set values, scope by criteria | Share constraints or componentRefs across overlays |
 | **Authority** | Component-wide (one entry per component) | Criteria-matched (selected by query) | Opt-in (referenced via `spec.mixins`) |
 | **File** | `recipes/registry.yaml` (one entry) | `recipes/overlays/<name>.yaml` (one file per shape) | `recipes/mixins/<name>.yaml` (one file per fragment) |
-| **Lifecycle** | Add once; bump `defaultVersion` on chart upgrade | Add per cluster shape; cull when shape retires | Stable; new mixin only when ≥ 2 leaves duplicate the same block |
+| **Lifecycle** | Add once; bump the registry default (`defaultVersion` / `defaultTag`) on upgrade | Add per cluster shape; cull when shape retires | Stable; new mixin only when ≥ 2 leaves duplicate the same block |
 | **Kind** | `ComponentRegistry` | `RecipeMetadata` | `RecipeMixin` |
 | **Carries criteria?** | No | Yes (`spec.criteria`) | No (rejected at load) |
 | **Carries `base`?** | No | Yes (single-parent chain) | No |
@@ -112,9 +112,11 @@ not both.
 the live ComponentConfig is the one in `pkg/recipe/components.go`.
 
 Defaults flow into a `ComponentRef` only when the field is empty —
-see [applyRegistryDefaults](#merge-algorithm) below. `defaultVersion`
-is the single source of truth for a component's version and a pinned
-overlay must not diverge from it unexpectedly — see
+see [applyRegistryDefaults](#merge-algorithm) below. The registry
+default (`helm.defaultVersion`, or `kustomize.defaultTag` for Kustomize
+components) is the single source of truth for a component's version;
+`base`, overlay, and mixin `componentRefs` alike carry no version pins
+except exemption-declared divergences — see
 [Version pinning is single-source](#version-pinning-is-single-source).
 
 ## Overlay (`recipes/overlays/`)
@@ -359,6 +361,74 @@ corrupt subsequent queries. The
 anti-patterns list calls this out — any new helper that touches
 overlay-derived maps must follow the same rule.
 
+## Criteria Coverage Post-Condition
+
+Resolution enforces a post-condition (issue #1542): every criteria dimension
+the caller explicitly states — `service`, `accelerator`, `intent`, `os`,
+`platform` — must be honored by at least one overlay in the final applied
+set (`appliedOverlays`), or resolution fails with `ErrCodeInvalidRequest`
+instead of silently returning a recipe that disregards a stated value.
+`verifyCriteriaCoverage` (`pkg/recipe/coverage.go`) runs last in both build
+paths, against the *final* applied set:
+
+- In `BuildRecipeResult`, after `mergeOverlayChains` and `mergeMixins` —
+  ancestor-supplied coverage counts, but mixins carry no `criteria` and
+  cannot contribute coverage.
+- In `BuildRecipeResultWithEvaluator`, after per-overlay constraint
+  exclusion *and* the mixin-constraint-failure rebuild — a dimension whose
+  only coverage came from a constraint-excluded overlay is still uncovered.
+  The error's context carries `excludedOverlays` / `constraintWarnings` when
+  constraint exclusion occurred during resolution, so the caller has that
+  context even though the exclusion is not always what caused this specific
+  dimension to go uncovered.
+
+The error's `uncovered` context entries (`dimension`, `requestedValue`,
+`validCompletions`) are computed from the maximal set of overlays that carry
+the requested value without conflicting with any other stated dimension —
+see `completionTuplesFor` / `minimalTuples`. `nodes` is deliberately excluded
+from `coverageDimensions`: no overlay gates on node count, so covering it
+would reject every `--nodes` query. It remains a matching dimension (present
+in `Criteria.Matches`) but carries no coverage guarantee — it is advisory.
+
+**Composition with the OS guard.** `requireOSIfNeeded` (the joint
+service+accelerator OS gate) is a separate, pre-existing check and runs
+*first*, before the merge. It is **not subsumed** by the coverage
+post-condition: coverage is satisfied when service and accelerator are each
+honored by *some* overlay independently, while the OS guard demands *one*
+overlay carry both service and accelerator together before it will consider
+the OS-agnostic tier served. Both checks apply; a request can trip either
+one independently.
+
+**Evaluator error classification is fail-closed.** During constraint
+evaluation on the snapshot-driven path, `ErrCodeNotFound` (the evaluator's
+designed signal for "measurement absent from snapshot") is the *only*
+error code that degrades gracefully into overlay exclusion. Every other
+error code returned by the evaluator propagates as a hard resolution
+failure (see `isNotFoundEvalError` in `pkg/recipe/coverage.go`, consumed at
+both call sites in `metadata_store.go`) — a malformed constraint expression
+or an evaluator bug must not be swallowed as a quiet exclusion.
+`ConstraintEvaluatorFunc` returns a plain `error`, so both fail-closed
+branches (`evaluateOverlayConstraints`, `evaluateMixinConstraints`) pass a
+non-`NotFound` error through `aicrerrors.PropagateOrWrap(..., ErrCodeInternal,
+...)` before returning it — an evaluator that hasn't adopted `pkg/errors`
+still surfaces a coded error instead of an uncoded 500 at the server layer.
+
+**The engine stays strict; the CLI's snapshot path relaxes derived-only
+failures.** Everything above describes `pkg/recipe`'s behavior, which never
+relaxes the post-condition — a coverage failure there is always terminal.
+The CLI's `--snapshot` flow (`pkg/cli/query.go`) layers a caller-side
+retry on top: `service`, `accelerator`, and `os` can be derived from the
+snapshot fingerprint rather than stated by the user (`intent` and
+`platform` are always user-stated — the fingerprint never derives them).
+If a coverage error's uncovered dimensions are *all* fingerprint-derived
+(none came from `--config` or a CLI flag), the CLI clears those dimensions
+to unstated and retries resolution once, logging a warning per relaxed
+dimension; if any uncovered dimension was user-stated, the error still
+propagates unchanged. This lets an overlay tree that is deliberately
+agnostic to a dimension (e.g. Kind's OS-agnostic overlays) tolerate a
+snapshot that still reports a concrete value for it, without weakening the
+post-condition for anyone who asked for that dimension explicitly.
+
 ## Determinism
 
 Recipe output is reproducible: same inputs → same bytes. The data
@@ -411,7 +481,7 @@ externally-visible product. Fields beyond `ComponentRefs` and
 | `Metadata.ConstraintWarnings` | Per-constraint detail for excluded overlays (overlay, constraint name, expected vs actual, reason text). |
 | `Validation` | Multi-phase config (`readiness`, `deployment`, `performance`, `conformance`) inherited from overlay metadata. |
 | `owner` (unexported) | `*Builder` that produced this result. `AssertOwnedBy(b)` enforces — two builders bound to different `DataProvider`s must not cross-read each other's results. |
-| `provider` (unexported) | `DataProvider` that produced this result; accessed via `(*RecipeResult).DataProvider()`. Lets `GetValuesForComponent` route file reads through the originating provider even after the package-global has rotated. |
+| `provider` (unexported) | `DataProvider` that produced this result; accessed via `(*RecipeResult).DataProvider()`. Lets `GetValuesForComponent` route file reads through the originating provider, preserving per-Client isolation. |
 
 `ComponentRef` extras beyond the chart-identity fields:
 
@@ -468,7 +538,9 @@ is regenerated by `make bom-docs`.
 `docs/user/container-images.md` in the same PR whenever you:**
 
 - Add or remove a component in `recipes/registry.yaml`
-- Bump a chart version (in `registry.yaml`, an overlay, or a mixin)
+- Bump a chart version — normally the registry default; overlay/mixin
+  pins exist only as declared exemptions, and bumping one changes the
+  BOM's variants table
 - Modify a component's `values.yaml` in a way that changes which
   images render (image repo override, subchart enable/disable, etc.)
 
@@ -515,23 +587,36 @@ a values change.
 The BOM renders each chart at its registry `defaultVersion`, but at
 resolution the registry default is only a *fallback*: a `componentRef`
 that sets `version` (Helm) or `tag` (Kustomize) in `base.yaml`, an
-overlay, or a mixin overrides it. So the BOM reflects what recipes
-actually install **only when no pin diverges from the registry
-default**. A pin that drifts from the default — most dangerously on a
-component whose sole consumer diverges — makes the BOM advertise a
-version no recipe installs (issue #1424; #1418's `aws-efa` bug).
+overlay, or a mixin overrides it. Declared divergent pins are
+represented truthfully by the BOM's Version-variants table (#1611), so
+a default row and a declared variant can coexist. The residual fiction
+is the **sole-consumer** case: a divergence that leaves the registry
+default with zero consumers makes the default row advertise a version
+no recipe installs (issue #1424; #1418's `aws-efa` bug).
 
-The registry `defaultVersion` is therefore the single source of truth
-for a component's version. `TestOverlayVersionPinsMatchRegistry`
+The registry default (`helm.defaultVersion` / `kustomize.defaultTag`)
+is therefore the single source of truth for a component's version, and
+`base`/overlay/mixin `componentRefs` carry **no version pins** apart
+from declared divergences (#1616): resolution falls back to the
+registry default, so a version bump edits `registry.yaml` in one place
+and no overlay needs touching. `TestOverlayVersionPinsMatchRegistry`
 (`pkg/recipe/version_pin_guard_test.go`, run by `make test` →
-`make qualify`) fails if any `base`/overlay/mixin pin diverges from the
-registry default. A version bump must update the registry default (the
-BOM reads it) **and** every pin that sets it, or CI fails. If an
+`make qualify`) fails on a non-exempted pin whenever the component has
+a matching registry default: a pin that diverges from it is undeclared
+drift, and a pin that equals it is redundant — it doubles bump churn
+and shields the overlay from an external registry's default override.
+(Refs outside the registry, or whose matching default is empty, are out
+of the guard's scope; `make bom-pinning-check` separately requires
+every embedded chart-bearing Helm component to declare `defaultVersion`
+— manifest-only components have no chart version to pin.) If an
 overlay must legitimately run a different chart version (e.g. a
-platform validated against an older chart), add an entry to
-`versionPinExemptions` with a justification — a declared divergence is
-not a silent one. Do **not** exempt a component whose only consumer
-diverges; that reinstates the exact fiction the guard prevents.
+platform validated against an older chart), pin it **and** add an entry
+to `versionPinExemptions` with a justification — a declared divergence
+is not a silent one. Only Helm `version` divergences are exemptable
+today; a Kustomize `tag` exemption is rejected until the BOM variants
+pipeline can represent it. Do **not** exempt a component whose only
+consumer diverges; that reinstates the exact fiction the guard
+prevents.
 
 ## Common Pitfalls
 
@@ -561,11 +646,16 @@ diverges; that reinstates the exact fiction the guard prevents.
   already carries — the resolver rejects with the offending field
   name. Move chart-changing logic to an overlay. (A mixin may still
   *introduce* a new component with these fields.)
-- **Bumping a chart version in only one place.** The registry
-  `defaultVersion` is the single source of truth; an overlay `version`
-  pin that drifts from it makes the BOM advertise a version no recipe
-  installs. `TestOverlayVersionPinsMatchRegistry` fails on undeclared
-  drift — see [Version pinning is single-source](#version-pinning-is-single-source).
+- **Pinning a component version/tag in a recipe ref.** The registry
+  default (`helm.defaultVersion` / `kustomize.defaultTag`) is the single
+  source of truth and `base`/overlay/mixin refs carry no non-exempted
+  version/tag pins; a bump edits `registry.yaml` only.
+  `TestOverlayVersionPinsMatchRegistry` fails on a non-exempted pin with
+  a matching registry default — divergent (undeclared drift; most
+  dangerously, when the diverging overlay is the component's sole
+  consumer the BOM's default row advertises a version no recipe
+  installs) or default-equal (redundant) — see
+  [Version pinning is single-source](#version-pinning-is-single-source).
 - **Assuming the cluster fingerprint is trustworthy.** The
   fingerprint block persisted in `aicr snapshot` output is
   advisory; trust-bearing consumers recompute via

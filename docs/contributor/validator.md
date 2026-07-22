@@ -260,10 +260,14 @@ commit that ran the image build, *not necessarily* HEAD, and
 Confirm the tag exists (see below) and fall back to `:edge` or the last
 published SHA.
 
-**`:latest` is the last _stable_ release, never `main`.** It is moved only
-by the on-tag release pipeline for stable tags (the `:latest` step is gated
-on a non-pre-release tag), so a validator change merged to `main` after the
-last stable release is absent from `:latest` until the next one. Running
+**`:latest` is the last _stable_ release, never `main`.** The on-tag workflow
+first builds every validator architecture under one run-unique candidate tag,
+resolves one authoritative digest map, and scans both platforms and attests
+those exact digests. Only then may version aliases move; a stable release
+verifies all seven version aliases before it starts updating any `:latest`
+alias. A pre-release promotes its version alias but never `:latest`, so a
+validator change merged to `main` after the last stable release is absent from
+`:latest` until the next one. Running
 `AICR_VALIDATOR_IMAGE_TAG=latest` against a `main`-tracking recipe can
 therefore silently run *older* validator behavior — e.g. a
 `performance.constraints` pin such as `inference-model` /
@@ -272,6 +276,16 @@ by a validator new enough to read it; an older `:latest` validator ignores
 the pin and runs its compiled default, which can surface as a misleading
 result (for `nccl-benchmark-profile`, a silent skip) rather than a clear
 version error.
+
+The seven GHCR alias updates cannot be atomic across repositories. Promotion
+performs an all-images, read-only preflight before its first write and accepts
+each `:latest` only at that image's immediate-prior or current-candidate
+digest. It also rejects an out-of-order stable release when the same or a newer
+stable version is already public. If a later registry write fails, re-running
+the failed workflow jobs with the same candidate converges the remaining
+aliases without overwriting a conflicting version. Candidate tags are retained
+for that recovery and for audit; cleanup is intentionally deferred to a
+separate retention design.
 
 **To run the validator built on `main`** (e.g. testing a recipe whose pins
 are not yet in a release), point at `:edge` or a published `main` commit —
@@ -418,6 +432,49 @@ already present in the compiled matrix, so the
 `TestSupportedNCCLCombinationsHaveRuntimeTemplates` wiring guard
 (advertised tuple ⇒ parseable template) covers every profile a recipe can
 name. See `validators/performance/nccl_benchmark_profile.go`.
+
+#### NCCL: recipe-supplied runtime (`nccl-benchmark-runtime-ref`)
+
+A profile still requires an embedded template to borrow, so it cannot cover a
+private service+accelerator whose fabric matches none of the shipped templates
+([#1792](https://github.com/NVIDIA/aicr/issues/1792)). The optional
+`nccl-benchmark-runtime-ref` performance constraint closes that gap: its value is
+a bare `{accelerator}/{service}` naming a Kubeflow `TrainingRuntime` the recipe
+ships in its `--data` tree at
+`validators/performance/testdata/{accelerator}/{service}/runtime.yaml` — the same
+layout the embedded templates use, so an external runtime is a drop-in for
+upstreaming.
+
+Resolution is split across the two-stage design:
+
+- **Orchestrator** (`pkg/validator/benchmark_runtime_ref.go`,
+  `resolveBenchmarkRuntimeRef`, called at the top of `ValidatePhases` /
+  `ValidatePhase`): reads the referenced file through the recipe `DataProvider`
+  and lowers its content into the `nccl-benchmark-runtime` **carrier** constraint
+  before the `/data/validation` ConfigMap is written. Fails closed
+  (`ErrCodeInvalidRequest`) on a malformed/traversal ref, a missing/empty file,
+  an absent `DataProvider`, or a ref set alongside an inline carrier. The two
+  constraint names are defined once in `pkg/validator/v1` (`PerfConstraintNCCLBenchmarkRuntime*`)
+  so the write side and the pod read side cannot drift.
+- **Pod** (`validators/performance/nccl_benchmark_runtime.go`): reads the
+  `nccl-benchmark-runtime` carrier and renders it — via the same `${VAR}`
+  substitution as the baked-in templates, through the shared `renderYAMLTemplate`
+  core — in place of `testdata/{accelerator}/{service}`.
+  `validateNcclAllReduceBw` bypasses the `ncclCombinationSupported` applicability
+  gate entirely (applicability is granted by the recipe's explicit opt-in, keyed
+  on its own criteria) and `applyNCCLResources` skips every service-specific step
+  — EFA/TCPXO/RDMA discovery, the GB200-NVreg / GKE-TCPXO preflights, RoCE claim
+  application, and NVLS/IMEX provisioning — because the supplied runtime owns its
+  fabric wiring. Transport verification still runs (the `-net` / `-nvls` markers
+  are transport-internal and fabric-agnostic), so a runtime paired with a named
+  variant must still prove its transport rather than pass on bandwidth alone; the
+  worker cohort is also sized against the runtime's own `nodeSelector` so
+  `WorkerCount` matches placement. It fails
+  closed on a carrier that is not a `trainer.kubeflow.org/v1alpha1`
+  `TrainingRuntime` with a `node` replicatedJob. The runtime is applied only
+  through `trainingRuntimeGVR` with a force-set name/namespace, so a recipe can
+  supply a `TrainingRuntime` and nothing else — not an arbitrary resource kind.
+  It is mutually exclusive with `nccl-benchmark-profile`.
 
 #### `inference-perf`: model, concurrency, and weights cache
 
@@ -768,6 +825,52 @@ restricted at runtime to read-only Chainsaw operations
 `ErrCodeInvalidRequest`. PR #1223 will add the same enforcement at
 lint time so violations are caught before they ever reach the
 validator.
+
+**Value-gate awareness (#1844).** A registry assert file is static — it
+cannot see the component's effective Helm values. That is a problem for a
+manifest whose whole resource is gated behind a value: e.g.
+`--set nodewrightcustomizations:tuningEnabled=false` on a single-package
+tuning manifest (`tuning-gke.yaml` / `tuning-generic.yaml`) suppresses the
+entire `tuning` Skyhook CR, so an unconditional
+`assert status.status: complete` would fail on a deliberately-untuned
+cluster. The deployment validator resolves this by rendering the
+component's manifests with the effective values
+(`recipe.GetComponentValues` → `manifest.Render`) and skipping the assert
+when the render yields no matching CR — see `nodewrightHealthCheckSuppressed`
+and `expectedNodewrightNames` in
+`validators/deployment/expected_resources.go`. The skip is **fail-closed**:
+whenever the values keep the CR, the render still lists it and the assert
+runs, so only an intentionally-absent CR is tolerated (a CR that *should*
+deploy but is missing on the cluster still fails). The same render drives
+the Go readiness check `verifyNodewrightReady`, so both surfaces agree on
+which CRs to expect. This skip is scoped to `nodewright-customizations`;
+every other component's assert queues unconditionally.
+
+The suppression must be expressed **in the recipe** — an overlay-declared
+component `overrides:` (how `tuningEnabled: false` ships as the AKS default)
+or an inline `overrides:` in the recipe file — because that is what the
+render sees. Two boundaries follow from *where* the deployment validator
+gets its inputs (it runs in-cluster inside a Job, reading the recipe from a
+mounted ConfigMap with **no `DataProvider`** — only the embedded data baked
+into the validator image):
+
+- **A bundle-time-only `--set` is not honored.** `aicr bundle --set
+  nodewrightcustomizations:tuningEnabled=false` is applied in the bundler and
+  never persisted to the recipe; `aicr validate` has no `--set` flag and
+  reads the recipe as-is, so it renders *with* the CR and still expects it.
+  To suppress the assert on a deliberately-untuned cluster, the value must
+  live in the recipe (overlay default or inline `overrides:`), not a
+  transient bundle flag. (`aicr recipe` likewise has no value `--set`, so the
+  overlay/inline override is the only channel.) `Overrides` resolved from a
+  `--data` overlay *are* honored, because recipe resolution runs CLI-side and
+  bakes them into the serialized recipe before the Job receives it.
+- **`--data`-external files referenced by path are not readable in the Job.**
+  A component whose `manifestFiles` or base `valuesFile` exist only in an
+  external `--data` directory cannot be read by the embedded-only validator
+  (a pre-existing constraint for `manifestFiles`; the render's `valuesFile`
+  read shares the same embedded scope). It fails **closed** — an error, never
+  a false pass. In practice `nodewright-customizations` ships no values file
+  and uses inline `overrides:`, so there is no exposure here today.
 
 **Running:**
 

@@ -21,7 +21,14 @@ name: UAT Run
 # manual dispatch of the same reservation/version can never be mistaken for the
 # controller's run. A manual dispatch omits the key and the suffix is dropped.
 # Quoted so YAML does not treat the ` #` in the dispatch_key suffix as a comment.
-run-name: "UAT ${{ inputs.reservation }} @ ${{ inputs.aicr_version || 'main' }}${{ inputs.dispatch_key != '' && format(' #{0}', inputs.dispatch_key) || '' }}"
+#
+# The intent (training|inference) is rendered so nightly/daytime runs are
+# self-describing in the Actions list. It defaults to `training` on both the
+# dispatch and call paths, so it is always present. IMPORTANT: the nightly
+# (uat-nightly-batch.yaml) and daytime (uat-daytime.yaml) controllers rebuild
+# this exact title to resolve the run they dispatched — keep their `title=`
+# construction in lockstep with this format string.
+run-name: "UAT ${{ inputs.reservation }} ${{ inputs.intent }} @ ${{ inputs.aicr_version || 'main' }}${{ inputs.dispatch_key != '' && format(' #{0}', inputs.dispatch_key) || '' }}"
 
 # The shared UAT dispatch surface and reservation-lease owner (#1274, DC1).
 # A human (workflow_dispatch) or the nightly batch (workflow_call) requests a
@@ -130,16 +137,21 @@ jobs:
       cloud: ${{ steps.row.outputs.cloud }}
       cluster_config_path: ${{ steps.row.outputs['cluster-config-path'] }}
       test_config_dir: ${{ steps.row.outputs['test-config-dir'] }}
+      # Accelerator selects the per-accelerator test-config filename
+      # (<accelerator>-<intent>-config.yaml) in the AWS pipeline. The AWS
+      # account (tenancy) is NOT plumbed here: the AWS pipeline derives it from
+      # the cluster-config's .deployment.tenancy, the single source of truth.
+      accelerator: ${{ steps.row.outputs.accelerator }}
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Load versions
         id: versions
         uses: ./.github/actions/load-versions
       - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -158,8 +170,8 @@ jobs:
           go build -o ./bin/uat-broker ./tools/uat-broker
           ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
 
-  # One of run-aws / run-gcp / run-azure fires based on the resolved cloud
-  # (the registry validates cloud membership, so at most one matches; the
+  # One of run-aws / run-gcp / run-azure / run-kind fires based on the resolved
+  # cloud (the registry validates cloud membership, so at most one matches; the
   # unmapped-cloud job below fails closed if a registry cloud has no
   # run-<cloud> job here yet). The caller job grants the permission SUPERSET
   # its callee needs — a reusable workflow's jobs are ceilinged by the calling
@@ -172,7 +184,7 @@ jobs:
     # cannot exceed the caller's permissions).
     permissions:
       contents: read  # checkout inside the called pipeline
-      actions: read  # required by the nested uat-{aws,gcp} + evidence-ingest jobs
+      actions: write  # nested uat-{aws,gcp} watchers + evidence-ingest dashboard dispatch
       id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
       packages: write  # push validator + snapshot-agent images to GHCR
     uses: ./.github/workflows/uat-aws.yaml
@@ -183,6 +195,7 @@ jobs:
       lifecycle: ${{ inputs.lifecycle }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
+      accelerator: ${{ needs.resolve.outputs.accelerator }}
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
 
@@ -193,7 +206,7 @@ jobs:
     # cannot exceed the caller's permissions).
     permissions:
       contents: read  # checkout inside the called pipeline
-      actions: read  # required by the nested uat-{aws,gcp} + evidence-ingest jobs
+      actions: write  # nested uat-{aws,gcp} watchers + evidence-ingest dashboard dispatch
       id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
       packages: write  # push validator + snapshot-agent images to GHCR
     uses: ./.github/workflows/uat-gcp.yaml
@@ -214,10 +227,36 @@ jobs:
     # cannot exceed the caller's permissions).
     permissions:
       contents: read  # checkout inside the called pipeline
-      actions: read  # required by the nested uat-* + evidence-ingest jobs
+      actions: write  # nested uat-* watchers + evidence-ingest dashboard dispatch
       id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
       packages: write  # push validator + snapshot-agent images to GHCR
     uses: ./.github/workflows/uat-azure.yaml
+    with:
+      reservation: ${{ inputs.reservation }}
+      aicr_version: ${{ inputs.aicr_version }}
+      intent: ${{ inputs.intent }}
+      lifecycle: ${{ inputs.lifecycle }}
+      cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
+      test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
+      skip_delete: ${{ inputs.skip_delete }}
+      skip_tests: ${{ inputs.skip_tests }}
+
+  # nvkind real-silicon lane (DC5 #1278). "kind" is not a cloud but a
+  # self-hosted GPU-runner lane; it slots into the same dispatch model so it
+  # rides the nightly batch and shares tests/uat/kind/run + tests/uat/lib. It
+  # provisions on the runner (no cloud actuator), so it needs no cloud OIDC —
+  # but it DOES do keyless cosign (id-token), GHCR push (packages), and the
+  # nested evidence-ingest GCS WIF, so the permission superset matches the
+  # cloud lanes.
+  run-kind:
+    needs: resolve
+    if: needs.resolve.outputs.cloud == 'kind'
+    permissions:
+      contents: read  # checkout inside the called pipeline
+      actions: write  # nested evidence-ingest dashboard-publish dispatch (a reusable workflow cannot elevate the caller token, so grant the ceiling here)
+      id-token: write  # keyless cosign + GCS evidence-publish WIF
+      packages: write  # push validator/agent + evidence images to GHCR
+    uses: ./.github/workflows/uat-kind.yaml
     with:
       reservation: ${{ inputs.reservation }}
       aicr_version: ${{ inputs.aicr_version }}
@@ -238,7 +277,8 @@ jobs:
     if: >-
       needs.resolve.outputs.cloud != 'aws' &&
       needs.resolve.outputs.cloud != 'gcp' &&
-      needs.resolve.outputs.cloud != 'azure'
+      needs.resolve.outputs.cloud != 'azure' &&
+      needs.resolve.outputs.cloud != 'kind'
     runs-on: ubuntu-latest
     steps:
       - name: Fail on unmapped cloud

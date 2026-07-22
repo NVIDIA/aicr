@@ -23,7 +23,6 @@ spec:
     intent: training
   componentRefs:
     - name: gpu-operator
-      version: v26.3.2
       valuesFile: components/gpu-operator/eks-gb200-training.yaml
       overrides:
         driver:
@@ -121,7 +120,7 @@ For example, `--platform slurm` leaves inline three `componentRefs`:
 
 - `slinky-slurm-operator-crds` — SchedMD Slinky CRDs
 - `slinky-slurm-operator` — the operator and admission webhook
-- `slinky-slurm` — the Slinky-managed Slurm cluster instance (Controller / LoginSet / NodeSet / RestApi), with leaf-specific `overrides` (e.g. H100 GRES wiring on the `nodesets.slinky` map)
+- `slinky-slurm` — the Slinky-managed Slurm cluster instance (Controller / LoginSet / NodeSet / RestApi), with leaf-specific `overrides` (e.g. GPU GRES wiring on `nodesets.slinky` and `controller.extraConfMap`)
 
 This is the same shape `dynamo-platform` uses across the `*-inference-dynamo` leaves. See `recipes/overlays/h100-eks-ubuntu-training-slurm.yaml` for the full example.
 
@@ -290,6 +289,22 @@ discovery, and preflights. See
 [Opting external recipes into a benchmark profile](../user/validation.md#opting-external-recipes-into-a-benchmark-profile)
 for the valid pairs and skip/fail semantics.
 
+When no embedded pair matches — a genuinely private service+accelerator with a
+fabric none of the shipped templates cover — supply the benchmark yourself:
+ship a Kubeflow `TrainingRuntime` in your `--data` tree at
+`validators/performance/testdata/{accelerator}/{service}/runtime.yaml` and
+reference it with the `nccl-benchmark-runtime-ref` constraint (a bare
+`{accelerator}/{service}` value). Run `aicr validate --data <dir> ...` so the
+referenced file is resolvable; it is read and rendered in place of a baked-in
+template, keyed on the recipe's own criteria with no compiled applicability
+entry. The runtime owns its fabric wiring (the validator skips service-specific
+fabric setup — discovery, preflights, and NVLS/IMEX provisioning — but still
+asserts transport for the `-net`/`-nvls` variants), must
+declare a `node` replicatedJob, and is mutually exclusive with
+`nccl-benchmark-profile`. Laying the file at the embedded testdata path makes it
+a drop-in for upstreaming. See
+[Supplying a benchmark runtime for a private service](../user/validation.md#supplying-a-benchmark-runtime-for-a-private-service).
+
 ### Component Types
 
 **Helm components** (most common):
@@ -297,12 +312,14 @@ for the valid pairs and skip/fail semantics.
 componentRefs:
   - name: gpu-operator
     type: Helm
-    version: v26.3.2
     valuesFile: components/gpu-operator/values.yaml
     overrides:
       driver:
         version: "580.82.07"
 ```
+
+The chart version comes from the registry default — see
+[Chart Version Pinning](#chart-version-pinning).
 
 #### Kustomize components
 
@@ -323,6 +340,38 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 > not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
 
 ## Component Configuration
+
+### Chart Version Pinning
+
+Do not set `version:` (Helm) or `tag:` (Kustomize) on a `componentRef` that
+installs the component's registry default. Resolution falls back to the
+registry entry's `helm.defaultVersion` / `kustomize.defaultTag` in
+`recipes/registry.yaml`, which is the single source of truth for component
+versions — bumping a component means bumping the registry default, in one
+place.
+
+Pin a version only when the overlay must intentionally diverge from the
+registry default. For recipes contributed to this repo (the embedded
+catalog), additionally declare that divergence in `versionPinExemptions`
+(`pkg/recipe/version_pin_guard_test.go`) with a justification. CI rejects a
+non-exempted embedded pin whenever the component has a matching registry
+default: a pin that differs from it is undeclared drift, and a pin that
+merely repeats it is redundant — it doubles bump churn and shields the
+overlay from external registry overrides. Only Helm `version` divergences
+can be exempted today: a Kustomize `tag` exemption is rejected because the
+BOM variants pipeline cannot yet represent it (extend `tools/bom/variants.go`
+first).
+
+External `--data` overlays are not scanned by this guard: at resolution an
+explicit pin always wins over the registry default, so external trees may
+pin without declaring anything or rebuilding AICR — see
+[data extension](data-extension.md#registryyaml-is-required).
+
+This split keeps external data trees composable: an external `--data`
+registry that overrides a component's registry default (`defaultVersion` /
+`defaultTag`) takes effect for every overlay that does not pin, while an
+explicit pin still wins. See
+issue [#1616](https://github.com/NVIDIA/aicr/issues/1616).
 
 ### Configuration Patterns
 
@@ -371,7 +420,7 @@ Base → ValuesFile → Overrides → CLI --set flags
 # Result: driver.version="580.13.01", driver.repository="nvcr.io/nvidia" (preserved)
 ```
 
-**Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is resolved from a snapshot (via `aicr recipe --snapshot` or `ResolveRecipeFromSnapshot`), AICR reads the sampled GPU node's `driver-loaded` measurement and injects `gpu-operator.overrides.driver.enabled=false` when the NVIDIA kernel module is already loaded on the node — as an Overrides entry, so it wins over base and provider values files. Explicit CLI `--set` flags retain higher precedence and can supersede the injection. The gate: injection only fires when the resolved overlay already declares the coordinated preinstalled-driver profile (`gpu-operator.driver.enabled=false` in the merged base+valuesFile) — that scopes auto-detect to overlays like GKE-COS and OKE, and skips bare AKS/EKS with a warning instead of leaving the Operator half-configured. Policy is only-false (never forces `true`), so recipes resolved without a snapshot fall back to today's static defaults. Capture the snapshot **before** deploying the GPU Operator: a snapshot taken after a prior AICR-managed driver install still reports `driver-loaded=true` and would flip a re-deploy toward driverless nodes; AICR emits a warning when both `driver-loaded=true` and a gpu-operator ClusterPolicy are present in the snapshot. See [Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
+**Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is resolved from a snapshot (via `aicr recipe --snapshot` or `ResolveRecipeFromSnapshot`), AICR reads the sampled GPU node's `driver-loaded` measurement and injects `gpu-operator.overrides.driver.enabled=false` when the NVIDIA kernel module is already loaded on the node — as an Overrides entry, so it wins over base and provider values files. Explicit CLI `--set` flags retain higher precedence and can supersede the injection. The gate: injection only fires when the resolved overlay already declares the coordinated preinstalled-driver profile (`gpu-operator.driver.enabled=false` in the merged base+valuesFile) — that scopes auto-detect to overlays like AKS, GKE-COS, and OKE, and skips bare EKS with a warning instead of leaving the Operator half-configured. Policy is only-false (never forces `true`), so recipes resolved without a snapshot fall back to today's static defaults. Capture the snapshot **before** deploying the GPU Operator: a snapshot taken after a prior AICR-managed driver install still reports `driver-loaded=true` and would flip a re-deploy toward driverless nodes; AICR emits a warning when both `driver-loaded=true` and a gpu-operator ClusterPolicy are present in the snapshot. See [Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
 
 ## Disable a Component in an Overlay
 
@@ -519,25 +568,25 @@ spec:
     intent: training
   componentRefs:
     - name: gpu-operator
-      version: v26.3.2
       valuesFile: components/gpu-operator/eks-gb200-training.yaml
 ```
 
 ### Updating Recipes
 
-**Updating versions:**
+**Updating versions:** bump the component's registry default in
+`recipes/registry.yaml` — overlays inherit it, so no overlay edit is needed
+(see [Chart Version Pinning](#chart-version-pinning)):
 ```yaml
-# Update component version
-componentRefs:
-  - name: gpu-operator
-    version: v26.3.2  # Changed from v26.3.1
+# recipes/registry.yaml
+- name: gpu-operator
+  helm:
+    defaultVersion: v26.3.2  # Changed from v26.3.1
 ```
 
 **Adding components:**
 ```yaml
 componentRefs:
   - name: new-component
-    version: v1.0.0
     valuesFile: components/new-component/values.yaml
     dependencyRefs: [existing-component]  # Optional
 ```

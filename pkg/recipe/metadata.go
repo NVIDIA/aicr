@@ -795,10 +795,10 @@ type RecipeResult struct {
 	// through finalizeRecipeResult from the originating MetadataStore so
 	// downstream consumers (e.g., GetValuesForComponent in Task 6) can
 	// route file lookups through the same provider — preserving per-tenant
-	// isolation even when the package-global DataProvider has since been
-	// swapped. Nil when the result was built against the package-global
-	// provider, in which case DataProvider() returns nil and callers fall
-	// back to GetDataProvider().
+	// isolation. Stamped by finalizeRecipeResult for every resolver-built
+	// result (defaultEmbeddedProvider for default/unbound builds); nil only
+	// for results constructed outside the builder path (e.g. decoded from
+	// an external source before BindDataProvider binds one).
 	provider DataProvider
 
 	// owner identifies the *Builder that produced this RecipeResult.
@@ -824,9 +824,12 @@ type RecipeResult struct {
 	owner *Builder
 }
 
-// DataProvider returns the DataProvider that produced this result, or nil
-// when the result was built against the package-global provider. Nil-safe
-// on the receiver so call sites can chain freely off a possibly-nil result.
+// DataProvider returns the DataProvider that produced this result. A
+// default/unbound build returns defaultEmbeddedProvider; nil is returned
+// only for a nil receiver or a result constructed outside the normal
+// builder path (e.g. decoded from an external source before
+// BindDataProvider). Nil-safe on the receiver so call sites can chain
+// freely off a possibly-nil result.
 func (r *RecipeResult) DataProvider() DataProvider {
 	if r == nil {
 		return nil
@@ -897,13 +900,17 @@ func (r *RecipeResult) AssertOwnedBy(b *Builder) error {
 }
 
 // BindDataProvider sets the DataProvider on a RecipeResult so downstream
-// value/manifest/data-file reads route through dp rather than the package
-// global. It is the exported binder the aicr.Client facade uses to adopt a
+// value/manifest/data-file reads route through dp rather than the embedded
+// default. It is the exported binder the aicr.Client facade uses to adopt a
 // RecipeResult decoded from an external source (e.g. a /v1/bundle POST body)
 // onto the Client's own provider — the in-process equivalent of the
 // rec.provider = dp binding loader.go performs for an already-hydrated file.
-// Nil-safe on the receiver. A nil dp leaves the result on the package-global
-// fallback (DataProvider() then returns nil), matching the pre-bind behavior.
+// Nil-safe on the receiver. The assignment is unconditional: passing a nil
+// dp clears any existing binding — including the defaultEmbeddedProvider
+// stamped on every builder-built result — after which DataProvider()
+// returns nil and reads fall back to the embedded catalog. Pass a real
+// provider; nil is only sensible for restoring a decoded result's pre-bind
+// state.
 func (r *RecipeResult) BindDataProvider(dp DataProvider) {
 	if r == nil {
 		return

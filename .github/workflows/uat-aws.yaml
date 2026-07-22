@@ -33,7 +33,7 @@ on:
         type: string
         default: ''
       intent:
-        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml).'
+        description: 'Recipe intent — selects the per-intent test config (<accelerator>-<intent>-config.yaml).'
         type: string
         default: training
       lifecycle:
@@ -48,6 +48,10 @@ on:
         description: 'Directory holding the AICRConfig test files (from infra/uat/reservations.yaml).'
         type: string
         required: true
+      accelerator:
+        description: 'GPU accelerator family (from the reservation); selects the test config <accelerator>-<intent>-config.yaml.'
+        type: string
+        default: h100
       skip_delete:
         description: 'Skip cluster teardown (manual runs only; the nightly batch always deletes).'
         type: boolean
@@ -77,8 +81,9 @@ jobs:
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
     # timeout cancels pending always() steps, so an undersized cap would skip
     # teardown and leak the GPU node / capacity reservation. 190 UAT + ~30 setup +
-    # ~40 teardown = ~260, so 270 leaves the teardown headroom on a worst-case run.
-    timeout-minutes: 270
+    # ~8 failure-path debug collection (Collect cluster debug bundle) + ~40
+    # teardown = ~268, so 280 leaves the teardown headroom on a worst-case run.
+    timeout-minutes: 280
     permissions:
       contents: read
       actions: read
@@ -89,7 +94,15 @@ jobs:
       # the ingest-evidence job below. Empty when no bundle was produced.
       bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
     env:
-      AWS_ACCOUNT_ID: "615299774277"
+      # AWS_ACCOUNT_ID (the tenancy the OIDC role is assumed into, and where the
+      # cluster + Terraform state live) is NOT set here and is NOT a caller
+      # input: it is the single-source-of-truth `.deployment.tenancy` from the
+      # cluster-config, exported to $GITHUB_ENV by the "Validate inputs" step
+      # below. Deriving it — rather than passing it in — makes it impossible to
+      # assume role in one account while provisioning/state land in another
+      # (which a separate `account` input could silently do). A cross-account
+      # reservation (e.g. a GB200 Capacity Block in a separate tenancy) is
+      # selected purely by its cluster-config's tenancy field.
       AWS_REGION: "us-east-1"
       GITHUB_ACTIONS_ROLE_NAME: "github-actions-role-aicr"
       # Cluster name (EKS actuator derives it from .deployment.id). The nightly
@@ -103,9 +116,10 @@ jobs:
         && format('aicr-uat-day-{0}', inputs.reservation)
         || format('aicr-uat-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
-      # DC2 selects the AICRConfig by intent; both intents drive the same
+      # The AICRConfig is selected by accelerator + intent
+      # (<accelerator>-<intent>-config.yaml); both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
-      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/${{ inputs.accelerator }}-${{ inputs.intent }}-config.yaml
       # v0.4.27 — required for node-group taints in the cluster-config schema
       # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
       # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
@@ -114,6 +128,16 @@ jobs:
       EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
+      # Target platform(s) for the main-cell image builds (snapshot-agent + the
+      # validators). h100 GPU workers (p5.48xlarge) are amd64; GB200 GPU workers
+      # (p6e-gb200.36xlarge) are Grace/arm64, and the agent + GPU-scheduled
+      # validators are pinned to that pool — so an amd64-only image cannot start
+      # there. GB200 therefore builds a multi-arch (amd64+arm64) manifest: amd64
+      # still covers the m7i system pool, arm64 covers the GPU pool. h100 stays
+      # single-arch so the common nightly path skips the slow QEMU arm64 cross
+      # build. Release cells are unaffected (they pull the already-multi-arch
+      # released images). Mirrors the release build's linux/amd64,linux/arm64.
+      BUILD_PLATFORMS: ${{ inputs.accelerator == 'gb200' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
       # Pin validator-image resolution for MAIN cells to this run's freshly
       # built+pushed validators (the `Build and push validator images` step
       # tags them `:uat-<run_id>`), mirroring how AICR_IMAGE pins the agent — so
@@ -128,7 +152,7 @@ jobs:
     steps:
       # Checkout
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -151,10 +175,32 @@ jobs:
             nightly|daytime-up|daytime-down) ;;
             *) echo "::error::unknown lifecycle '${LIFECYCLE}' (want nightly|daytime-up|daytime-down)"; exit 1 ;;
           esac
-          if [[ ! -f "${TEST_CONFIG}" ]]; then
+          # Derive + export the account FIRST, before any lifecycle-specific
+          # gate below can exit. The account the OIDC role is assumed into
+          # (AWS_ACCOUNT_ID) is the cluster-config's .deployment.tenancy — the
+          # single source of truth for which tenancy this run provisions + keeps
+          # state in. Deriving it here (rather than accepting it as an input)
+          # means the role can never be assumed into a different account than
+          # the one being provisioned; a cross-account reservation (e.g. a GB200
+          # Capacity Block in a separate tenancy) is selected purely by its
+          # cluster-config. Exporting it up front is load-bearing for teardown:
+          # daytime-down re-authenticates and builds the role ARN from
+          # AWS_ACCOUNT_ID, so a later early-exit here must not skip this — else
+          # teardown cannot assume the role and the cluster + Capacity Block
+          # leak. Uses the runner-preinstalled yq (Install tools runs later).
+          TENANCY=$(yq eval '.deployment.tenancy' "${CLUSTER_CONFIG}")
+          if [[ -z "${TENANCY}" || "${TENANCY}" == "null" ]]; then
+            echo "::error::${CLUSTER_CONFIG} has no .deployment.tenancy"; exit 1
+          fi
+          echo "AWS_ACCOUNT_ID=${TENANCY}" >> "${GITHUB_ENV}"
+          # The test config only matters for the run phases (nightly / daytime-up
+          # provision+deploy). daytime-down just tears the held cluster down and
+          # never reads it, so skip the existence check there — a missing sibling
+          # config must not block teardown and strand the Capacity Block.
+          if [[ "${LIFECYCLE}" != "daytime-down" && ! -f "${TEST_CONFIG}" ]]; then
             echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
           fi
-          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID}"
+          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID} account=${TENANCY}"
 
       # Versions
       - name: Load versions
@@ -166,7 +212,7 @@ jobs:
         # Main cells only: release cells install a prebuilt binary and must not
         # depend on the source Go toolchain (a broken Go pin shouldn't fail them).
         if: inputs.aicr_version == '' && inputs.skip_tests != true
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -226,6 +272,18 @@ jobs:
       - name: Authenticate to GHCR
         uses: ./.github/actions/ghcr-login
 
+      # QEMU registers binfmt handlers so the amd64 runner can build the arm64
+      # layer of a GB200 multi-arch image. Only needed when BUILD_PLATFORMS
+      # includes arm64 (GB200); h100 builds native amd64 and skips it, so the
+      # common nightly path pays no emulation cost. buildx (below) is always set
+      # up because the multi-platform build path uses `buildx build --push`.
+      - name: Set up QEMU
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down' && contains(env.BUILD_PLATFORMS, 'arm64')
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+      - name: Set up Docker Buildx
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
       # Main cell only: release cells use the released validator images the
       # released binary self-resolves to (skipped when aicr_version is set).
       - name: Build and push validator images
@@ -244,20 +302,27 @@ jobs:
           # until the job timeout (#1636). It uses a different Dockerfile path
           # and takes no GO_VERSION build-arg. Keep the phase set in sync with
           # VALIDATOR_PHASES in on-push.yaml / on-tag.yaml.
+          #
+          # buildx build --push emits a multi-arch manifest for GB200
+          # (BUILD_PLATFORMS=linux/amd64,linux/arm64) and a single-arch image
+          # for h100 (linux/amd64) through one code path. Multi-platform builds
+          # cannot be loaded into the local daemon, so we push directly (the
+          # GHCR login above authenticates the push).
           for phase in deployment performance conformance aiperf-bench; do
             IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
             case "${phase}" in
               aiperf-bench)
-                docker build -f validators/performance/aiperf-bench.Dockerfile \
-                  -t "${IMAGE}" .
+                docker buildx build --platform="${BUILD_PLATFORMS}" \
+                  -f validators/performance/aiperf-bench.Dockerfile \
+                  -t "${IMAGE}" --push .
                 ;;
               *)
-                docker build -f "validators/${phase}/Dockerfile" \
+                docker buildx build --platform="${BUILD_PLATFORMS}" \
+                  -f "validators/${phase}/Dockerfile" \
                   --build-arg "GO_VERSION=${GO_VERSION}" \
-                  -t "${IMAGE}" .
+                  -t "${IMAGE}" --push .
                 ;;
             esac
-            docker push "${IMAGE}"
           done
 
       # Auth
@@ -391,9 +456,13 @@ jobs:
       # build — so any artifact-schema change in the PR under test (e.g. an
       # apiVersion bump) produces a snapshot the freshly-built binary rejects.
       # Build the agent from the PR source and point AICR_IMAGE at it so the
-      # snapshot is stamped by the code under test, not a stale release. Single
-      # arch: the GPU worker (p5.48xlarge) is amd64. Lives in the aicr-validators
-      # namespace (not the release ghcr.io/nvidia/aicr repo); cleaned up below.
+      # snapshot is stamped by the code under test, not a stale release. Built
+      # for BUILD_PLATFORMS: amd64 for h100 (p5.48xlarge), amd64+arm64 for GB200
+      # (the snapshot agent is pinned to the arm64 p6e-gb200 GPU pool). ko
+      # cross-compiles Go natively — no QEMU — and emits a manifest list at the
+      # single tag, so the kubelet pulls the node's arch. Lives in the
+      # aicr-validators namespace (not the release ghcr.io/nvidia/aicr repo);
+      # cleaned up below.
       - name: Build and push snapshot-agent image
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
@@ -403,7 +472,7 @@ jobs:
           set -euo pipefail
           ko build ./cmd/aicr \
             --bare \
-            --platform=linux/amd64 \
+            --platform="${BUILD_PLATFORMS}" \
             --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
             --tags="${VALIDATOR_TAG}"
 
@@ -423,14 +492,14 @@ jobs:
         id: infra
         if: inputs.lifecycle != 'daytime-down'
         run: |
-          set -euox pipefail
-          docker run \
+          set -euo pipefail
+          /usr/bin/docker run \
             -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
             -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
             -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
             -e AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
-            "${EKS_IMAGE}" apply
+            ${{ env.EKS_IMAGE }} apply
 
       # Connect
       - name: Connect to Cluster
@@ -624,6 +693,35 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # Refresh the AWS session before collecting: a long tuning-race failure
+      # (exactly what this bundle targets) can outlast the 1h session minted before
+      # validate, which would leave every kubectl in the collector failing EKS
+      # exec-auth and the bundle silently empty. id-token: write is job-wide, so
+      # configure-aws-credentials can re-assume here.
+      - name: Refresh AWS credentials before debug collection
+        if: failure() && steps.prep.outcome != 'skipped'
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Debug
+
+      # Snapshot live cluster state on failure BEFORE teardown, while the
+      # cluster is still up. The runner-local artifacts above (report.json et al.)
+      # say WHAT check failed; this captures WHY — node conditions/taints, cluster
+      # events (reboots, pod evictions), the operator CRs (incl. Skyhook
+      # status.status the readiness gate keys off of), and operator/check-Job pod
+      # logs. Best-effort (the collector guards every kubectl call) and bounded so
+      # it never eats the teardown budget or leaks the GPU node.
+      - name: Collect cluster debug bundle
+        if: failure() && steps.prep.outcome != 'skipped'
+        timeout-minutes: 8
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/aws/run debug "${TEST_CONFIG}" || true
+
       - name: Upload failure debug
         if: failure() && steps.prep.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -638,6 +736,7 @@ jobs:
             evidence/pointer.yaml
             train-logs/**
             serve-logs/**
+            cluster-debug/**
           retention-days: 30
           if-no-files-found: ignore
 
@@ -691,10 +790,15 @@ jobs:
           # clutter. aiperf-bench is included so the tag pushed by the build
           # step above (#1636) does not leak.
           for phase in deployment performance conformance aiperf-bench agent; do
+            # gh api prints the raw error body to stdout on a 404 (a phase whose
+            # package was never pushed — e.g. agent, which the build loop above
+            # does not build) and skips --jq, so VERSION_ID can capture a JSON
+            # blob with control chars. Require a numeric id before deleting so
+            # the 404 body, the empty case, and multi-line output all fail closed.
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
-            if [[ -n "${VERSION_ID}" ]]; then
+            if [[ "${VERSION_ID}" =~ ^[0-9]+$ ]]; then
               gh api --method DELETE \
                 "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
             fi
@@ -784,20 +888,20 @@ jobs:
           )
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
           destroyed=false
           attempts=3
-          for attempt in $(seq 1 "${attempts}"); do
+          for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
-            if docker run \
+            if /usr/bin/docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
               -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
               -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
               -e AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
-              "${EKS_IMAGE}" apply; then
+              ${{ env.EKS_IMAGE }} apply; then
               echo "Cluster destroyed successfully"
               destroyed=true
               break
@@ -829,6 +933,7 @@ jobs:
       contents: read
       id-token: write  # WIF for the publish job
       packages: read   # GHCR pull for the verify job
+      actions: write   # dispatch the dashboard-publish refresh after publish
     uses: ./.github/workflows/evidence-ingest.yaml
     with:
       bundle_ref: ${{ needs.uat-aws.outputs.bundle_ref }}

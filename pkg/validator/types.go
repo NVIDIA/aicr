@@ -36,6 +36,11 @@ type Validator struct {
 	// dev-build validator images to SHA-tagged images pushed by on-push CI.
 	Commit string
 
+	// Kubeconfig is an optional, run-scoped path overriding the Kubernetes
+	// client configuration used for validation namespace, RBAC, ConfigMap, Job,
+	// and result operations. Empty uses the shared default client.
+	Kubeconfig string
+
 	// Namespace is the Kubernetes namespace for validation Jobs.
 	Namespace string
 
@@ -80,6 +85,10 @@ type Validator struct {
 	// dataProvider supplies the recipe data files used to load the validator
 	// catalog. When nil, catalog.Load falls back to the package-global provider.
 	dataProvider recipe.DataProvider
+
+	// kubeClientFactory is an internal test seam for explicit-path client
+	// creation. Production validators leave it nil and use BuildKubeClient.
+	kubeClientFactory kubeClientFactory
 }
 
 // PhaseResult is the outcome of running all validators in a single phase.

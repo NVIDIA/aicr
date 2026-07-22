@@ -487,10 +487,15 @@ test_recipe_from_snapshot() {
   # Test: Recipe from ConfigMap snapshot
   msg "--- Test: Recipe from snapshot (cm://...) ---"
   local snapshot_recipe="${recipe_dir}/from-snapshot.yaml"
-  echo -e "${DIM}  \$ aicr recipe --snapshot cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM} --intent training -o from-snapshot.yaml${NC}"
+  # NOTE: --intent inference, not training. The GPU-less Kind cluster cannot
+  # state an accelerator, and only kind-inference covers intent without one —
+  # training on kind exists only accelerator-qualified (h100-kind-training),
+  # so --intent training is rejected by the criteria-coverage post-condition
+  # (issue #1542) as an uncovered dimension.
+  echo -e "${DIM}  \$ aicr recipe --snapshot cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM} --intent inference -o from-snapshot.yaml${NC}"
   if "${AICR_BIN}" recipe \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-    --intent training \
+    --intent inference \
     --output "$snapshot_recipe" 2>&1; then
     if [ -f "$snapshot_recipe" ] && grep -q "kind: RecipeResult" "$snapshot_recipe"; then
       # Show detected criteria
@@ -538,11 +543,13 @@ test_validate() {
   local validate_dir="${OUTPUT_DIR}/validate-multiphase"
   mkdir -p "$validate_dir"
 
-  # Generate a recipe for testing
+  # Generate a recipe for testing.
+  # NOTE: --intent inference for coverage on the GPU-less Kind cluster —
+  # see the recipe-from-snapshot test above for the full rationale.
   local recipe_file="${validate_dir}/recipe.yaml"
   "${AICR_BIN}" recipe \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-    --intent training \
+    --intent inference \
     --output "$recipe_file" 2>&1 || true
 
   if [ ! -f "$recipe_file" ]; then

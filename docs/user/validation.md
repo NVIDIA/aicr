@@ -52,9 +52,12 @@ ones) that match the target fabric:
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
-`criteria`. A recipe whose criteria fall outside it can opt into one of these
-benchmarks explicitly — see
-[Opting external recipes into a benchmark profile](#opting-external-recipes-into-a-benchmark-profile).
+`criteria`. A recipe whose criteria fall outside it can still run these
+benchmarks explicitly — either by
+[borrowing an embedded benchmark profile](#opting-external-recipes-into-a-benchmark-profile)
+whose fabric matches its hardware, or, for a private service whose fabric
+matches no embedded template, by
+[supplying its own benchmark runtime](#supplying-a-benchmark-runtime-for-a-private-service).
 
 The `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
 (e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
@@ -179,6 +182,124 @@ it. A valid profile that doesn't implement a requested variant (e.g.
 check with a message naming the profile. When a profile is set it wins over
 criteria-derived applicability, and the pass/fail thresholds stay in the
 same-named check constraints as always.
+
+### Supplying a benchmark runtime for a private service
+
+A profile only helps when an **embedded** template already matches the
+cluster's hardware and fabric. A private service introduced entirely through
+`--data` — a `criteria.service` (and possibly `criteria.accelerator`) the
+validator ships no template for, with a fabric that reuses none of the
+embedded ones — has no compiled pair to point a profile at. Such a recipe
+supplies the benchmark itself: it ships a Kubeflow `TrainingRuntime` as a file
+in its `--data` tree and references it with the `nccl-benchmark-runtime-ref`
+performance constraint (a bare `{accelerator}/{service}` value). `aicr validate`
+reads that file and gates the benchmark keyed on the recipe's **own** criteria,
+with no compiled applicability entry required.
+
+Lay the runtime out **exactly where the embedded templates live**, so it is a
+drop-in for upstreaming later:
+
+```text
+mydata/                                   # your --data directory
+├── overlays/
+│   └── mycloud-training.yaml             # the recipe overlay (below)
+└── validators/performance/testdata/
+    └── gb200/mycloud/runtime.yaml        # the TrainingRuntime, real file
+```
+
+```yaml
+# overlays/mycloud-training.yaml
+validation:
+  performance:
+    checks:
+      - nccl-all-reduce-bw
+    constraints:
+      - name: nccl-all-reduce-bw
+        value: ">= 450"
+      - name: nccl-benchmark-runtime-ref
+        value: gb200/mycloud   # -> validators/performance/testdata/gb200/mycloud/runtime.yaml
+```
+
+```yaml
+# validators/performance/testdata/gb200/mycloud/runtime.yaml
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+spec:
+  template:
+    spec:
+      replicatedJobs:
+        - name: node          # required: the worker cohort
+          template:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: <your NCCL benchmark image>
+                      resources:
+                        limits:
+                          nvidia.com/gpu: "${GPU_COUNT_PER_NODE}"
+                      # ...command, fabric resources, sidecars...
+```
+
+```bash
+aicr validate -r recipe.yaml -s snapshot.yaml \
+              --data ./mydata --phase performance
+```
+
+The supplied runtime **owns its fabric wiring end to end**: because the recipe
+opted in explicitly, the validator bypasses the compiled applicability gate and
+skips every service-specific *setup* step — EFA/TCPXO/RDMA NIC discovery, the
+GB200-NVreg / GKE-TCPXO preflights, and NVLS/IMEX auto-provisioning. It renders
+the runtime, sizes it (against the runtime's own `nodeSelector` when it pins
+one, so `WorkerCount` matches placement), applies it alongside the shared
+`TrainJob`, and evaluates the bandwidth threshold from the launcher logs.
+Transport verification is **not** skipped: pairing the runtime with the `-net`
+or `-nvls` check still asserts that transport actually carried traffic (the NCCL
+markers are fabric-agnostic), so a named variant can't pass on bandwidth alone.
+What it must honor:
+
+- It must be a Kubeflow `TrainingRuntime` (`apiVersion:
+  trainer.kubeflow.org/v1alpha1`); any other kind/apiVersion is rejected. The
+  validator force-sets its name and namespace, so a recipe can supply a
+  `TrainingRuntime` and nothing else — never an arbitrary resource.
+- It must declare a `node` replicatedJob (the worker cohort the shared
+  `TrainJob` sizes and the validator injects scheduling into and reads logs
+  from), mirroring the embedded templates.
+- The generic template variables `${NAMESPACE}`, `${WORKER_COUNT}`,
+  `${GPU_COUNT_PER_NODE}`, `${GPU_COUNT}`, `${TEST_TYPE}`,
+  `${MIN_MESSAGE_SIZE}`, and `${MAX_MESSAGE_SIZE}` are substituted; the
+  service-specific ones (EFA/RDMA/GKE) are not, so the runtime must pin its own
+  fabric resources.
+- The runtime should pin its own worker `nodeSelector`/`tolerations`, or pass
+  `--node-selector` to `aicr validate`, so workers land on the intended GPU
+  nodes.
+
+`nccl-benchmark-runtime-ref` and `nccl-benchmark-profile` are mutually
+exclusive — a recipe supplies its own runtime **or** borrows an embedded one,
+never both. An absent or blank ref falls back to criteria/profile-derived
+applicability. A malformed ref, or a file missing from `--data`, is rejected by
+`aicr validate` **before any validator Job is deployed** (a resolution error on
+stderr). A resolved file that is not a `TrainingRuntime` with a `node`
+replicatedJob **fails the check itself** (in the pod). Either way it fails
+rather than silently skipping.
+
+> **Sizing note.** The worker cohort is sized against the runtime's own
+> `nodeSelector` when it pins one, but richer scheduling constraints
+> (`nodeAffinity`, un-tolerated node taints) are the Kubernetes scheduler's
+> job, not the validator's — a runtime that restricts placement below the sized
+> cohort surfaces as a launcher timeout, not a false pass. Pass an explicit
+> `--node-selector` when you want the sized and scheduled cohorts to match
+> exactly.
+
+**Upstreaming.** Because the file already sits at
+`validators/performance/testdata/{accelerator}/{service}/runtime.yaml`, adopting
+it into AICR is a copy: move the file into the repo, add the accelerator/service
+tuple to the compiled `supportedNCCLCombinations` matrix, and drop the
+`nccl-benchmark-runtime-ref` constraint — the benchmark then runs from the
+recipe's plain criteria like any other embedded one.
 
 ## Inference performance validation
 
@@ -776,8 +897,11 @@ Common reasons and their cause:
 | `no inference-throughput or inference-ttft-p99 constraint in recipe` | `stdout` | Check was invoked but recipe is missing the matching constraints | Re-generate the recipe or add the constraints |
 | `dynamo-platform not in recipe components` | `stdout` | Inference check selected but `dynamo-platform` absent from `componentRefs` | Use `--platform dynamo` when generating the recipe |
 | `DynamoGraphDeployment CRD not installed` | `stdout` | Recipe declares `dynamo-platform` but the operator is not deployed | Run `aicr bundle` + `./deploy.sh` first, or wait for bootstrap to complete |
-| `requires Service + Accelerator to be implemented` | `stdout` | The recipe's `criteria` are outside the NCCL benchmark's default applicability (e.g. a service registered via `--data`) | Add an `nccl-benchmark-profile` constraint — see [Opting external recipes into a benchmark profile](#opting-external-recipes-into-a-benchmark-profile) |
+| `requires Service + Accelerator to be implemented` | `stdout` | The recipe's `criteria` are outside the NCCL benchmark's default applicability (e.g. a service registered via `--data`) | Add an `nccl-benchmark-profile` constraint — see [Opting external recipes into a benchmark profile](#opting-external-recipes-into-a-benchmark-profile) — or, if no embedded template fits, an `nccl-benchmark-runtime-ref` constraint — see [Supplying a benchmark runtime for a private service](#supplying-a-benchmark-runtime-for-a-private-service) |
 | `benchmark profile … does not implement the … NCCL variant` | `stdout` | The declared `nccl-benchmark-profile` is valid but has no template for this check variant | Drop the non-applicable check from `validation.performance.checks`, or pick a profile that implements it |
+| `failed to resolve nccl-benchmark-runtime-ref=… expected … in the --data tree` | `stderr` | The referenced runtime file is missing from `--data` (or `--data` wasn't passed) | Place the `TrainingRuntime` at `validators/performance/testdata/{accelerator}/{service}/runtime.yaml` in your `--data` dir — see [Supplying a benchmark runtime for a private service](#supplying-a-benchmark-runtime-for-a-private-service) |
+| `nccl-benchmark-runtime … must be a … TrainingRuntime … must declare a "node" replicatedJob` | `stdout` | The referenced file is not a Kubeflow `trainer.kubeflow.org/v1alpha1` `TrainingRuntime`, or lacks the `node` replicatedJob | Fix the runtime file to be a valid `TrainingRuntime` with a `node` replicatedJob |
+| `nccl-benchmark-runtime and nccl-benchmark-profile are mutually exclusive` | `stdout` | The recipe declares both escape hatches at once | Keep only one: borrow an embedded profile **or** supply your own runtime |
 | `skipped - no-cluster mode` | `message` | `--no-cluster` was passed — the runner short-circuits every phase before dispatching any Job | Remove the flag to run behavioral checks |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 

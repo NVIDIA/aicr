@@ -315,6 +315,75 @@ reservations:
 			code:    errors.ErrCodeInvalidRequest,
 		},
 		{
+			// A min-version gate for an intent the reservation does not run is
+			// dead config / a typo — reject it.
+			name: "min-version for an unrun intent",
+			yaml: `
+reservations:
+  - name: azure-h100
+    cloud: azure
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intents: [training]
+    nightly-intent-min-versions:
+      inference: v0.18.0
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "min-version for an unknown intent",
+			yaml: `
+reservations:
+  - name: azure-h100
+    cloud: azure
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intents: [training, inference]
+    nightly-intent-min-versions:
+      serving: v0.18.0
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "min-version that is not semver",
+			yaml: `
+reservations:
+  - name: azure-h100
+    cloud: azure
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intents: [training, inference]
+    nightly-intent-min-versions:
+      inference: not-a-tag
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// A valid gate on a listed intent parses cleanly.
+			name: "valid nightly-intent-min-versions",
+			yaml: `
+reservations:
+  - name: azure-h100
+    cloud: azure
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intents: [training, inference]
+    nightly-intent-min-versions:
+      inference: v0.18.0
+`,
+		},
+		{
 			// Two daytime reservations on one cloud would contend for the same
 			// reservation (a cloud cannot hold both a held daytime cluster and the
 			// nightly batch at once), so Validate must reject it.
@@ -511,14 +580,15 @@ func TestDaytimeAssignmentsNone(t *testing.T) {
 }
 
 // TestCommittedRegistryValid guards the actual checked-in registry: it must
-// parse, validate, and carry the two launch reservations. A bad data edit
-// fails here before it can break the broker workflows.
+// parse, validate, and carry the launch reservations plus the aws-gb200
+// bring-up row. A bad data edit fails here before it can break the broker
+// workflows.
 func TestCommittedRegistryValid(t *testing.T) {
 	reg, err := LoadRegistryFile(filepath.Join("..", "..", "infra", "uat", "reservations.yaml"))
 	if err != nil {
 		t.Fatalf("committed reservations.yaml invalid: %v", err)
 	}
-	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure}
+	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure, "aws-gb200": CloudAWS, "kind-h100": CloudKind}
 	for name, cloud := range want {
 		res, err := reg.Lookup(name)
 		if err != nil {
@@ -566,9 +636,20 @@ func TestCommittedRegistryValid(t *testing.T) {
 		"aws-h100": {IntentTraining, IntentInference},
 		"gcp-h100": {IntentTraining, IntentInference},
 		// azure-h100 enrolled with [training] after the green manual
-		// acceptance run (29125390442); inference joins after a green
+		// acceptance run (29125390442); inference joined after a green
 		// manual intent=inference dispatch.
-		"azure-h100": {IntentTraining},
+		"azure-h100": {IntentTraining, IntentInference},
+		// aws-gb200 is OPTED OUT of the nightly batch during bring-up (explicit
+		// empty list). Locked here so an accidental edit to a bare
+		// `nightly-intents:` (which defaults to [training]) — provisioning real
+		// GB200 Capacity-Block capacity nightly — fails this guard instead.
+		"aws-gb200": {},
+		// kind-h100 (nvkind real-silicon lane, DC5 #1278) is OPTED OUT of the
+		// nightly batch during bring-up (explicit empty list). Locked here so an
+		// accidental edit to a bare `nightly-intents:` (which defaults to
+		// [training]) — scheduling unvalidated GPU-runner runs nightly — fails
+		// this guard. Enroll after a green manual H100 acceptance run.
+		"kind-h100": {},
 	}
 	for name, want := range wantNightly {
 		res, lookupErr := reg.Lookup(name)

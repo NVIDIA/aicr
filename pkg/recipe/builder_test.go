@@ -269,8 +269,8 @@ func TestWithAllowLists(t *testing.T) {
 }
 
 // TestNewBuilder_WithDataProvider verifies that WithDataProvider binds the
-// provided DataProvider to the Builder, isolating it from the package-global
-// provider at GetDataProvider().
+// provided DataProvider to the Builder, isolating it from the shared
+// embedded-catalog caches.
 func TestNewBuilder_WithDataProvider(t *testing.T) {
 	dp := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
 	b := NewBuilder(WithDataProvider(dp))
@@ -281,7 +281,8 @@ func TestNewBuilder_WithDataProvider(t *testing.T) {
 
 // TestNewBuilder_DataProviderNilFallback verifies that when WithDataProvider
 // is not set, Builder.DataProvider() returns nil so callers fall back to the
-// package-global DataProvider — preserving CLI and API server behavior.
+// embedded catalog (defaultEmbeddedProvider) — preserving CLI and API server
+// behavior.
 func TestNewBuilder_DataProviderNilFallback(t *testing.T) {
 	b := NewBuilder() // no option set
 	if b.DataProvider() != nil {

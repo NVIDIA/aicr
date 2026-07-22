@@ -1,0 +1,76 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AICRConfig consumed by `aicr {snapshot,recipe,bundle,validate} --config`.
+#
+# Drives the nvkind H100 inference UAT (DC5 #1278) — the `service: kind`
+# sibling of tests/uat/aws/tests/h100-inference-config.yaml, run on a
+# single-node, single-GPU nvkind cluster provisioned on a self-hosted GPU
+# runner (no cloud actuator). Same AICRConfig shape as the cloud lanes; the
+# differences are all single-node/nvkind scheduling (see the training sibling).
+#
+# As on the cloud lanes, the signed evidence bundle is emitted by the
+# conformance step (validate --phase all); the served-inference CUJ is not
+# executed here (vLLM is excluded from UAT), so evidence covers the deployed
+# stack.
+kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: kind-h100-inference-uat
+
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      tolerations:
+        - "*"
+
+  recipe:
+    criteria:
+      service: kind
+      accelerator: h100
+      os: ubuntu
+      intent: inference
+      platform: dynamo
+    output:
+      path: recipe.yaml
+
+  bundle:
+    input:
+      recipe: recipe.yaml
+    output:
+      target: ./bundle
+    deployment:
+      deployer: helmfile
+    scheduling:
+      acceleratedNodeTolerations:
+        - nvidia.com/gpu=present:NoSchedule
+      storageClass: ""
+
+  validate:
+    execution:
+      failFast: true
+    input:
+      recipe: recipe.yaml
+      snapshot: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      tolerations:
+        - "*"
+    evidence:
+      attestation:
+        out: ./evidence
+        push: ghcr.io/nvidia/aicr-evidence/h100-kind-ubuntu-inference-dynamo

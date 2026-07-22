@@ -77,9 +77,10 @@ jobs:
     # each = up to ~40m). Only one of train/serve runs per intent, so the budget
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
     # timeout cancels pending always() steps, so an undersized cap would skip
-    # teardown and leak the GPU node. 190 UAT + ~30 setup + ~40 teardown = ~260,
-    # so 270 leaves the teardown headroom even on a worst-case phase run.
-    timeout-minutes: 270
+    # teardown and leak the GPU node. 190 UAT + ~30 setup + ~8 failure-path debug
+    # collection (Collect cluster debug bundle) + ~40 teardown = ~268, so 280
+    # leaves the teardown headroom even on a worst-case phase run.
+    timeout-minutes: 280
     permissions:
       contents: read
       actions: read
@@ -138,7 +139,7 @@ jobs:
     steps:
       # Checkout
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -181,7 +182,7 @@ jobs:
         # Main cells only: release cells install a prebuilt binary and must not
         # depend on the source Go toolchain (a broken Go pin shouldn't fail them).
         if: inputs.aicr_version == '' && inputs.skip_tests != true
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -413,11 +414,11 @@ jobs:
           AZ_MOUNT=$(mktemp -d)
           cp -a "$HOME/.azure/." "$AZ_MOUNT/"
           chmod -R a+rwX "$AZ_MOUNT"
-          docker run \
+          /usr/bin/docker run \
             -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
             -v "$AZ_MOUNT:/home/builder/.azure" \
-            "${AKS_ACTUATOR_IMAGE}" apply
+            ${{ env.AKS_ACTUATOR_IMAGE }} apply
 
       # Fresh federated login before grant + connect. azure/login stores the
       # GitHub OIDC token as the session's client assertion, and that
@@ -698,6 +699,22 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # Snapshot live cluster state on failure BEFORE teardown, while the
+      # cluster is still up. The runner-local artifacts above say WHAT check
+      # failed; this captures WHY — node conditions/taints, cluster events
+      # (reboots, pod evictions), the operator CRs (incl. Skyhook status.status
+      # the readiness gate keys off of), and operator/check-Job pod logs.
+      # Best-effort (the collector guards every kubectl call) and bounded so it
+      # never eats the teardown budget or leaks the GPU node.
+      - name: Collect cluster debug bundle
+        if: failure() && steps.prep.outcome != 'skipped'
+        timeout-minutes: 8
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/azure/run debug "${TEST_CONFIG}" || true
+
       - name: Upload failure debug
         if: failure() && steps.prep.outcome != 'skipped'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -712,6 +729,7 @@ jobs:
             evidence/pointer.yaml
             train-logs/**
             serve-logs/**
+            cluster-debug/**
           retention-days: 30
           if-no-files-found: ignore
 
@@ -769,10 +787,15 @@ jobs:
           # clutter. aiperf-bench is included so the tag pushed by the build
           # step above (#1636) does not leak.
           for phase in deployment performance conformance aiperf-bench agent; do
+            # gh api prints the raw error body to stdout on a 404 (a phase whose
+            # package was never pushed — e.g. agent, which the build loop above
+            # does not build) and skips --jq, so VERSION_ID can capture a JSON
+            # blob with control chars. Require a numeric id before deleting so
+            # the 404 body, the empty case, and multi-line output all fail closed.
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
-            if [[ -n "${VERSION_ID}" ]]; then
+            if [[ "${VERSION_ID}" =~ ^[0-9]+$ ]]; then
               gh api --method DELETE \
                 "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
             fi
@@ -832,11 +855,11 @@ jobs:
             AZ_MOUNT=$(mktemp -d)
             cp -a "$HOME/.azure/." "$AZ_MOUNT/"
             chmod -R a+rwX "$AZ_MOUNT"
-            if docker run \
+            if /usr/bin/docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
               -v "$AZ_MOUNT:/home/builder/.azure" \
-              "${AKS_ACTUATOR_IMAGE}" apply; then
+              ${{ env.AKS_ACTUATOR_IMAGE }} apply; then
               echo "Cluster destroyed successfully"
               destroyed=true
               break
@@ -863,6 +886,7 @@ jobs:
       contents: read
       id-token: write  # WIF for the publish job
       packages: read   # GHCR pull for the verify job
+      actions: write   # dispatch the dashboard-publish refresh after publish
     uses: ./.github/workflows/evidence-ingest.yaml
     with:
       bundle_ref: ${{ needs.uat-azure.outputs.bundle_ref }}

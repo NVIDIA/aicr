@@ -19,11 +19,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -166,6 +168,59 @@ func TestBuild_RejectsCanceledContext(t *testing.T) {
 	})
 	if err == nil {
 		t.Errorf("expected error on canceled context")
+	}
+}
+
+func TestNormalizeManifestBuildError(t *testing.T) {
+	helperTimeout := apperrors.New(apperrors.ErrCodeTimeout, "manifest helper timed out")
+	tests := []struct {
+		name      string
+		ctx       func(t *testing.T) context.Context
+		wantCode  apperrors.ErrorCode
+		wantCause error
+		wantSame  bool
+	}{
+		{
+			name:     "live caller preserves helper timeout",
+			ctx:      func(*testing.T) context.Context { return context.Background() },
+			wantCode: apperrors.ErrCodeTimeout,
+			wantSame: true,
+		},
+		{
+			name: "caller cancellation becomes unavailable",
+			ctx: func(*testing.T) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			wantCode:  apperrors.ErrCodeUnavailable,
+			wantCause: context.Canceled,
+		},
+		{
+			name: "caller deadline becomes unavailable",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+				t.Cleanup(cancel)
+				return ctx
+			},
+			wantCode:  apperrors.ErrCodeUnavailable,
+			wantCause: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeManifestBuildError(tt.ctx(t), helperTimeout)
+			if !stderrors.Is(got, apperrors.New(tt.wantCode, "")) {
+				t.Fatalf("normalizeManifestBuildError() = %v, want code %s", got, tt.wantCode)
+			}
+			if tt.wantSame && got.Error() != helperTimeout.Error() {
+				t.Fatalf("normalizeManifestBuildError() = %v, want original %v", got, helperTimeout)
+			}
+			if tt.wantCause != nil && !stderrors.Is(got, tt.wantCause) {
+				t.Errorf("normalizeManifestBuildError() = %v, want cause %v", got, tt.wantCause)
+			}
+		})
 	}
 }
 

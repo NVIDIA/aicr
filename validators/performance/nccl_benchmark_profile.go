@@ -22,6 +22,7 @@ import (
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 )
 
@@ -43,7 +44,7 @@ import (
 // template family (the testdata/{accelerator}/{service} layout). Resolution
 // is recipe-only — there is deliberately no env tier, so a profile is always
 // recorded in the recipe that certified the cluster.
-const perfConstraintNCCLBenchmarkProfile = "nccl-benchmark-profile"
+const perfConstraintNCCLBenchmarkProfile = v1.PerfConstraintNCCLBenchmarkProfile
 
 // ncclBenchmarkTarget is the resolved (accelerator, service) pair an NCCL
 // check runs as. Template selection, service-specific fabric plumbing (EFA

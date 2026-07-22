@@ -506,7 +506,7 @@ func fromConfigMapWithKubeconfigContext[T any](ctx context.Context, namespace, n
 		k8sClient, _, err = client.GetKubeClient()
 	}
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get kubernetes client", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to get kubernetes client")
 	}
 
 	readCtx, cancel := context.WithTimeout(ctx, defaults.ConfigMapWriteTimeout)

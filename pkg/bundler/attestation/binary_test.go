@@ -15,10 +15,29 @@
 package attestation
 
 import (
+	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
+
+func TestBundleMetadataPaths(t *testing.T) {
+	t.Parallel()
+
+	want := []string{BundleAttestationFile, BinaryAttestationFile}
+	first := BundleMetadataPaths()
+	if !reflect.DeepEqual(first, want) {
+		t.Errorf("BundleMetadataPaths() = %#v, want %#v", first, want)
+	}
+	first[0] = "changed"
+	if got := BundleMetadataPaths(); !reflect.DeepEqual(got, want) {
+		t.Errorf("BundleMetadataPaths() returned shared state: %#v", got)
+	}
+}
 
 func TestFindBinaryAttestation(t *testing.T) {
 	// Create temp dir with a fake binary and attestation
@@ -65,6 +84,20 @@ func TestComputeFileDigest_NotFound(t *testing.T) {
 	_, err := ComputeFileDigest("/nonexistent/file")
 	if err == nil {
 		t.Error("ComputeFileDigest() should return error for nonexistent file")
+	}
+}
+
+func TestComputeFileDigestContext_Cancelled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "payload.txt")
+	if err := os.WriteFile(path, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := ComputeFileDigestContext(ctx, path)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("ComputeFileDigestContext() error = %v, want ErrCodeTimeout", err)
 	}
 }
 

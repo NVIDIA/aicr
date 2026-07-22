@@ -1,5 +1,12 @@
 # ADR-007: Verifiable Recipe Test Evidence
 
+> **Amended by [ADR-015](015-recipe-configuration-profiles.md).** For
+> profile-bearing recipes, evidence currentness requires both the recipe
+> digest and the canonical-descriptor identity in the signed predicate to
+> match, and profile-bearing evidence rides a new predicate type. Unprofiled
+> evidence keeps this ADR's digest-only currentness rule and the v1
+> predicate; the pointer layout and verification flow below are unchanged.
+
 ## Status
 
 **Accepted, partially implemented** — proposed 2026-05-08.

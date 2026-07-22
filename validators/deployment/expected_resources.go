@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/chainsaw"
@@ -57,6 +58,32 @@ const (
 	draKubeletPluginSuffix = "-kubelet-plugin"
 
 	nodewrightCompleteState = "complete"
+
+	// runtimeRequiredTaintKey / runtimeRequiredTaintValue identify the
+	// workload-gate taint the nodewright (skyhook) operator manages for Skyhook
+	// CRs with runtimeRequired: true (see tuning.yaml `runtimeRequired: true`).
+	//
+	// Why gate on this taint and not status.status: a GPU node joins carrying
+	// this NoSchedule taint, and the operator removes it once *all*
+	// runtime-required Skyhooks targeting that node are complete *on that node*
+	// (per-node, not per-package). Unlike status.status — an aggregate over
+	// (packages × matching nodes) that re-opens to in_progress on every package
+	// reboot and each newly-joined node — the taint is applied once and removed
+	// once as the monotone terminal step, so "taint absent" is a durable
+	// "done, won't reboot again" signal rather than a probabilistic settling
+	// heuristic (see issue #1775). Note the operator re-applies the taint across
+	// reboots only when configured with REAPPLY_ON_REBOOT/reapplyOnReboot=true
+	// (the gke-cos and bcm overlays); on those the taint flaps like the status
+	// and the stability window rides through it, so gating on the taint is never
+	// weaker than gating on the status.
+	//
+	// Values match the skyhook chart's default
+	// controllerManager.manager.env.runtimeRequiredTaint
+	// (skyhook.nvidia.com=runtime-required:NoSchedule), which AICR ships
+	// unchanged and the UAT GPU node pools pre-taint with verbatim
+	// (tests/uat/aws/cluster-config.yaml).
+	runtimeRequiredTaintKey   = "skyhook.nvidia.com"
+	runtimeRequiredTaintValue = "runtime-required"
 )
 
 var (
@@ -197,10 +224,25 @@ func checkExpectedResources(ctx *validators.Context) error {
 		default:
 		}
 		if ref.HealthCheckAsserts != "" {
-			chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
-				Name:       ref.Name,
-				AssertYAML: ref.HealthCheckAsserts,
-			})
+			// The registry-declared static assert cannot see value gates, so on a
+			// component whose effective values suppress the Skyhook CR the assert
+			// targets (e.g. tuningEnabled=false on a single-package tuning
+			// manifest) it would fail on a deliberately-untuned cluster. Skip it
+			// in that case, mirroring the render-aware Go readiness check. Only
+			// nodewright-customizations is subject to this; a render/read error
+			// propagates rather than silently skipping. See #1844.
+			suppressed, suppressErr := nodewrightHealthCheckSuppressed(ref)
+			if suppressErr != nil {
+				return suppressErr
+			}
+			if suppressed {
+				fmt.Printf("  [chainsaw] %s: skipped — effective values suppress the tuning Skyhook CR (see #1844)\n", ref.Name)
+			} else {
+				chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
+					Name:       ref.Name,
+					AssertYAML: ref.HealthCheckAsserts,
+				})
+			}
 		}
 		for _, er := range ref.ExpectedResources {
 			if err := helper.VerifyResource(ctx.Ctx, ctx.Clientset, er); err != nil {
@@ -406,13 +448,24 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		return err
 	}
 	if len(expectedNames) == 0 {
-		// The recipe enabled nodewright-customizations but declared no Nodewright
-		// manifests, so we cannot prove readiness. Fail closed rather than
-		// silently pass — treating this as a recipe misconfiguration that the
-		// user should see.
-		return errors.New(errors.ErrCodeNotFound,
-			fmt.Sprintf("no Nodewright CR names could be extracted from component %s manifestFiles=%v",
-				ref.Name, ref.ManifestFiles))
+		if len(ref.ManifestFiles) == 0 {
+			// The recipe enabled nodewright-customizations but declared no
+			// Nodewright manifests, so we cannot prove readiness. Fail closed
+			// rather than silently pass — a genuine recipe misconfiguration the
+			// user should see.
+			return errors.New(errors.ErrCodeNotFound,
+				fmt.Sprintf("no Nodewright CR names could be extracted from component %s manifestFiles=%v",
+					ref.Name, ref.ManifestFiles))
+		}
+		// Manifests are declared but the effective values suppress every Skyhook
+		// CR (e.g. tuningEnabled=false on a single-package tuning manifest, which
+		// gates out the whole tuning CR). There is nothing to verify — the CR is
+		// intentionally absent. This is NOT fail-open: expectedNodewrightNames
+		// renders with the effective values, so any CR those values keep would
+		// still be listed and asserted. See #1844.
+		fmt.Printf("  Nodewright: all Skyhook CRs suppressed by effective values (manifestFiles=%v); nothing to verify\n",
+			ref.ManifestFiles)
+		return nil
 	}
 
 	// Discovery-gate the CRD before attempting Get by name: CRD not
@@ -437,27 +490,66 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		return err
 	}
 
-	// Poll status.status until every expected Skyhook CR reports "complete"
-	// continuously for the stability window, or the budget elapses. status.status
-	// is non-monotonic during tuning: a reboot (or a newly-joined GPU node)
-	// re-opens it to in_progress, so a single sample is not terminal. Polling
-	// rides through the reboot flaps rather than failing the whole deployment
-	// phase on a transient in_progress. See pkg/defaults GPUReadiness* for sizing.
+	// Poll two signals until both hold continuously for the stability window, or
+	// the budget elapses:
+	//
+	//  1. Every expected Skyhook CR reports status.status == "complete".
+	//  2. No node still carries the runtime-required NoSchedule taint the
+	//     operator removes as its monotone terminal step.
+	//
+	// status.status alone is non-monotonic during tuning: a reboot (or a
+	// newly-joined GPU node) re-opens it to in_progress, and — worse — it can
+	// momentarily read "complete" in the lull between two package reboots while
+	// tuning is still in flight, which is exactly how the gate certified a
+	// cluster ready and then had tuning re-open post-gate (issue #1775). Adding
+	// the taint gate closes that hole: during such a lull the runtime-required
+	// taint is still present, so the probe stays unhealthy until tuning is truly
+	// done on every node. Polling rides through the reboot flaps rather than
+	// failing the deployment phase on a transient in_progress / re-taint. See
+	// pkg/defaults GPUReadiness* for sizing.
 	return pollUntilStable(ctx,
-		fmt.Sprintf("%d expected Nodewright(s)", len(expectedNames)),
+		fmt.Sprintf("%d expected Nodewright(s) + runtime-required taint clearance", len(expectedNames)),
 		func() error {
-			failures := nodewrightStatusFailures(ctx, dynClient, expectedNames)
+			// The Skyhook status Gets and the node-list taint scan are
+			// independent read-only calls, so fan them out (per repo CLAUDE.md
+			// "Sequential calls to N independent read-only K8s APIs → fan-out
+			// with errgroup") rather than paying both round-trips serially every
+			// poll iteration.
+			var statusFailures, taintFailures []string
+			var taintErr error
+			g := new(errgroup.Group)
+			g.Go(func() error {
+				statusFailures = nodewrightStatusFailures(ctx, dynClient, expectedNames)
+				return nil
+			})
+			g.Go(func() error {
+				taintFailures, taintErr = runtimeRequiredTaintFailures(ctx)
+				return nil
+			})
+			_ = g.Wait()
+
+			if taintErr != nil {
+				// A transient node-list failure (e.g. an apiserver hiccup while
+				// a GPU node reboots) must not be read as "taint absent". Return
+				// it so the poll resets the dwell and retries — fail closed.
+				return taintErr
+			}
+			failures := make([]string, 0, len(statusFailures)+len(taintFailures))
+			failures = append(failures, statusFailures...)
+			failures = append(failures, taintFailures...)
 			if len(failures) == 0 {
 				return nil
 			}
 			return errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("%d of %d expected Nodewright(s) not ready:\n  %s",
-					len(failures), len(expectedNames), strings.Join(failures, "\n  ")))
+				fmt.Sprintf("%d Nodewright readiness signal(s) not settled:\n  %s",
+					len(failures), strings.Join(failures, "\n  ")))
 		},
 		func() {
 			for _, name := range expectedNames {
 				fmt.Printf("  Nodewright %s: %s (stable ≥%s)\n", name, nodewrightCompleteState, gpuReadinessStabilityWindow)
 			}
+			fmt.Printf("  Nodewright runtime-required taint (%s=%s:%s): cleared from all nodes (stable ≥%s)\n",
+				runtimeRequiredTaintKey, runtimeRequiredTaintValue, corev1.TaintEffectNoSchedule, gpuReadinessStabilityWindow)
 		})
 }
 
@@ -515,11 +607,128 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 	return ""
 }
 
+// runtimeRequiredTaintFailures lists cluster nodes and returns a failure string
+// for each that still carries the nodewright (skyhook) runtime-required
+// NoSchedule taint — the durable "tuning not yet complete on this node" signal
+// (see runtimeRequiredTaintKey). An empty slice means the taint is cleared from
+// every node (or was never applied, e.g. a Skyhook without runtimeRequired:
+// true), so this gate is a no-op when the recipe does not opt into the feature.
+//
+// A List error (transient apiserver failure, RBAC gap) is returned so the
+// caller fails closed: "could not list nodes" must never be read as "taint
+// absent". The error rides through the poll's dwell reset like any other
+// unhealthy sample.
+func runtimeRequiredTaintFailures(ctx *validators.Context) ([]string, error) {
+	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	defer cancel()
+
+	nodes, err := ctx.Clientset.CoreV1().Nodes().List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to list nodes for the nodewright runtime-required taint gate", err)
+	}
+
+	var failures []string
+	for i := range nodes.Items {
+		// Honor cancellation while walking a potentially large node list, per
+		// repo CLAUDE.md "Always check ctx.Done() in long-running operations".
+		select {
+		case <-listCtx.Done():
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				"canceled while scanning nodes for the nodewright runtime-required taint gate", listCtx.Err())
+		default:
+		}
+		node := &nodes.Items[i]
+		for j := range node.Spec.Taints {
+			if isRuntimeRequiredTaint(&node.Spec.Taints[j]) {
+				failures = append(failures, fmt.Sprintf(
+					"node %s: still carries the runtime-required taint %s=%s:%s (nodewright tuning not complete on this node)",
+					node.Name, runtimeRequiredTaintKey, runtimeRequiredTaintValue, corev1.TaintEffectNoSchedule))
+				break
+			}
+		}
+	}
+	return failures, nil
+}
+
+// isRuntimeRequiredTaint reports whether t is the nodewright (skyhook)
+// runtime-required workload-gate taint. It matches on key+value and requires the
+// NoSchedule effect so an unrelated taint that happens to share the key cannot
+// mask an in-flight tuning.
+func isRuntimeRequiredTaint(t *corev1.Taint) bool {
+	return t.Key == runtimeRequiredTaintKey &&
+		t.Value == runtimeRequiredTaintValue &&
+		t.Effect == corev1.TaintEffectNoSchedule
+}
+
+// nodewrightHealthCheckSuppressed reports whether the registry-declared static
+// health-check assert for the nodewright-customizations component targets a
+// Skyhook CR that the component's effective values gate off. The static assert
+// (recipes/checks/nodewright-customizations/health-check.yaml) asserts the
+// tuning Skyhook reaches status.status: complete and cannot see value gates, so
+// it must be skipped when the CR is intentionally absent — otherwise it fails on
+// a deliberately-untuned cluster (issue #1844).
+//
+// It reuses the same render-aware extraction the Go readiness check uses: with
+// manifests declared but a zero rendered CR set, every Skyhook CR is gated off.
+// Only the nodewright-customizations component is subject to this; every other
+// component's assert queues unconditionally. Fail-closed: a render error
+// propagates so a broken template is never mistaken for "nothing to assert".
+func nodewrightHealthCheckSuppressed(ref recipe.ComponentRef) (bool, error) {
+	if ref.Name != nodewrightCustomizationsComponent {
+		return false, nil
+	}
+	if len(ref.ManifestFiles) == 0 {
+		// No manifests to render — leave the assert in place so its own failure
+		// (or the Go check's misconfiguration error) surfaces the problem.
+		return false, nil
+	}
+	names, err := expectedNodewrightNames(ref)
+	if err != nil {
+		return false, err
+	}
+	return len(names) == 0, nil
+}
+
 // expectedNodewrightNames derives the set of Nodewright CR names that this
 // component is expected to deploy, by reading each ManifestFile through the
-// recipe data provider and extracting the metadata.name of every Nodewright
-// resource declared in those files.
+// recipe data provider, rendering it with the component's effective Helm
+// values, and extracting the metadata.name of every Nodewright resource in the
+// rendered output.
+//
+// Rendering (not raw-template scanning) is what makes the check value-aware: a
+// CR that the effective values gate off — e.g. tuningEnabled=false suppressing
+// the whole tuning Skyhook on a single-package tuning manifest
+// (tuning-gke.yaml / tuning-generic.yaml) — drops out of the render and is
+// therefore not asserted on a deliberately-untuned cluster (issue #1844). This
+// stays fail-closed: the render reflects the effective values, so any CR those
+// values keep still appears here and is verified. A CR that is *expected* but
+// missing on the cluster still fails — only a CR the values deliberately
+// suppress is tolerated.
+//
+// Values are resolved from the ref alone (base values.yaml → ValuesFile →
+// inline Overrides) via the embedded data provider, mirroring how the bundler
+// renders these same manifests. Manifest reads use the package-global provider,
+// matching the pre-existing behavior of this check.
 func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
+	values, err := recipe.GetComponentValues(&ref)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to resolve effective values for component %s", ref.Name), err)
+	}
+
+	chartName := ref.Chart
+	if chartName == "" {
+		chartName = ref.Name
+	}
+	renderInput := manifest.RenderInput{
+		ComponentName: ref.Name,
+		Namespace:     ref.Namespace,
+		ChartName:     chartName,
+		ChartVersion:  ref.Version,
+		Values:        values,
+	}
+
 	seen := make(map[string]bool)
 	var names []string
 	for _, path := range ref.ManifestFiles {
@@ -528,7 +737,13 @@ func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to load manifest %s for component %s", path, ref.Name), err)
 		}
-		for _, name := range extractNodewrightNamesFromManifest(content) {
+		rendered, rerr := manifest.Render(content, renderInput)
+		if rerr != nil {
+			// Fail closed: a render error must not be read as "no CRs to verify".
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to render manifest %s for component %s with effective values", path, ref.Name), rerr)
+		}
+		for _, name := range extractNodewrightNamesFromManifest(rendered) {
 			if seen[name] {
 				continue
 			}
@@ -540,10 +755,12 @@ func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 }
 
 // nodewrightKindRE and nodewrightMetadataNameRE are narrow extractors for Nodewright
-// CR names out of a manifest file that may contain Helm template directives
-// ({{ ... }}). A full YAML parse is not an option: templated lines are not
-// valid YAML on their own, and evaluating Helm templates at validate time
-// would require chart values the validator does not have.
+// CR names out of a manifest that has been Helm-rendered by expectedNodewrightNames
+// (so value-gated CRs are already absent). Rendered output is concrete YAML, but
+// these line-oriented patterns are retained over a full YAML parse because the
+// rendered documents can still carry Helm-hook annotations and blank optional
+// blocks, and the templated-name guard below stays as defense in depth in case a
+// name ever fails to render to a literal.
 //
 // These patterns make three chart-shape assumptions that hold across every
 // manifest AICR ships today (tuning, no-op, tuning-gke in

@@ -26,14 +26,16 @@ import (
 	"github.com/sigstore/sigstore/pkg/signature/options"
 
 	// Blank-import the cosign-style KMS providers so their schemes
-	// (awskms:// | gcpkms:// | azurekms://) register with kms.Get via package
-	// init. Without these, kms.Get falls through to the plugin path and rejects
-	// every built-in scheme. HashiCorp Vault (hashivault://) is intentionally
-	// omitted: its client libraries are MPL-2.0, which this project's license
-	// policy disallows. See issue #407.
+	// (awskms:// | gcpkms:// | azurekms:// | hashivault://) register with
+	// kms.Get via package init. Without these, kms.Get falls through to the
+	// plugin path and rejects every built-in scheme. HashiCorp Vault
+	// (hashivault://) pulls MPL-2.0 client libraries; their use is approved
+	// under this project's license policy (see #1577), and the license-check
+	// target excludes those packages from allowlist enforcement by path.
 	_ "github.com/sigstore/sigstore/pkg/signature/kms/aws"
 	_ "github.com/sigstore/sigstore/pkg/signature/kms/azure"
 	_ "github.com/sigstore/sigstore/pkg/signature/kms/gcp"
+	_ "github.com/sigstore/sigstore/pkg/signature/kms/hashivault"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -46,14 +48,12 @@ const ctxKeySigningKey = "signingKey"
 // supports. It is the single source of truth shared by the signing side
 // (NewKMSIdentity / resolveKMSPublicKey) and the verifying side
 // (NewKeyVerificationIdentity), so the two cannot drift on what counts as a
-// "KMS URI". The set mirrors the blank-imported provider packages above;
-// HashiCorp Vault (hashivault://) is intentionally omitted (MPL-2.0 license,
-// see issue #407).
-var kmsURISchemes = []string{"awskms://", "gcpkms://", "azurekms://"}
+// "KMS URI". The set mirrors the blank-imported provider packages above.
+var kmsURISchemes = []string{"awskms://", "gcpkms://", "azurekms://", "hashivault://"}
 
 // isKMSURI reports whether ref names a supported cosign-style KMS key
-// (awskms:// | gcpkms:// | azurekms://) rather than a local PEM path. It is the
-// input-form discriminator both signing and verifying use; resolveKMSPublicKey
+// (awskms:// | gcpkms:// | azurekms:// | hashivault://) rather than a local PEM
+// path. It is the input-form discriminator both signing and verifying use; resolveKMSPublicKey
 // still classifies the precise kms.Get failure (unknown scheme vs provider
 // init) once a candidate is handed to the provider registry.
 //
@@ -76,9 +76,9 @@ func isKMSURI(ref string) bool {
 type kmsIdentity struct{ keyURI string }
 
 // NewKMSIdentity returns a SigningIdentity backed by the cosign-style KMS URI
-// (awskms:// | gcpkms:// | azurekms://). The provider and key are resolved
-// lazily on first Keypair() call so a bad URI or missing provider credentials
-// surface at sign time. HashiCorp Vault is unsupported (MPL-2.0 license).
+// (awskms:// | gcpkms:// | azurekms:// | hashivault://). The provider and key
+// are resolved lazily on first Keypair() call so a bad URI or missing provider
+// credentials surface at sign time.
 func NewKMSIdentity(keyURI string) SigningIdentity { return &kmsIdentity{keyURI: keyURI} }
 
 // Keypair resolves the KMS provider for the key URI, reads the public key, and

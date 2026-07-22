@@ -52,9 +52,13 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 
 The NCCL checks derive applicability from the recipe's `criteria` by default;
 a recipe outside the embedded service + accelerator matrix (e.g. registered
-via `--data`) opts in with the `nccl-benchmark-profile` performance
-constraint — see
-[Opting external recipes into a benchmark profile](../../docs/user/validation.md#opting-external-recipes-into-a-benchmark-profile).
+via `--data`) opts in with the `nccl-benchmark-profile` performance constraint
+(borrow an embedded template — see
+[Opting external recipes into a benchmark profile](../../docs/user/validation.md#opting-external-recipes-into-a-benchmark-profile))
+or, when its fabric matches no embedded template, with the
+`nccl-benchmark-runtime-ref` constraint (ship a Kubeflow `TrainingRuntime` as a
+`--data` file and reference it — see
+[Supplying a benchmark runtime for a private service](../../docs/user/validation.md#supplying-a-benchmark-runtime-for-a-private-service)).
 
 ### Conformance Phase
 
@@ -69,10 +73,23 @@ constraint — see
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify Dynamo operator controller and webhooks | 5m |
 | `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts) | 10m |
-| `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, and job submission health | 5m |
+| `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, and GPU container execution health | 5m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |
 | `platform-health` | Verify platform component health (conformance diagnostic) | 5m |
+
+ `slinky-slurm-health` expects a GPU-requesting NodeSet and fails
+if none is present; for `kind` or CPU-only recipes it runs CPU-only checks and
+skips the GPU container check.
+
+On GPU-backed NodeSets, `slinky-slurm-health` launches
+`docker.io/library/alpine:3.23.3` through Pyxis. The check rewrites only the
+registry prefix when `AICR_VALIDATOR_IMAGE_REGISTRY` is set, preserving the
+explicit Alpine tag. This is the same Alpine tag the slinky-slurm chart's
+initconf/logfile sidecars pin, so it is already covered by `aicr mirror list`
+via chart rendering. Mirroring alone does not redirect the dynamic `srun` pull,
+though — set `AICR_VALIDATOR_IMAGE_REGISTRY` so the runtime pull resolves from
+your mirror in air-gapped validation.
 
 ## Extending the Catalog
 

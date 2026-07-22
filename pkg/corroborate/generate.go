@@ -59,16 +59,19 @@ var rendererHTML []byte
 const platformNone = "(none)"
 
 // Facet axis keys, emitted in index.json's criteria map and each tab's coord.
+// Exported so external consumers that read a Tab.Coord map (e.g. pkg/testgrid)
+// share this single source of truth for the key spelling rather than
+// hand-writing string literals that could silently drift.
 const (
-	axisService     = "service"
-	axisAccelerator = "accelerator"
-	axisOS          = "os"
-	axisIntent      = "intent"
-	axisPlatform    = "platform"
+	AxisService     = "service"
+	AxisAccelerator = "accelerator"
+	AxisOS          = "os"
+	AxisIntent      = "intent"
+	AxisPlatform    = "platform"
 )
 
 // criteriaAxes is the fixed facet-axis order emitted in index.json.
-var criteriaAxes = []string{axisService, axisAccelerator, axisOS, axisIntent, axisPlatform}
+var criteriaAxes = []string{AxisService, AxisAccelerator, AxisOS, AxisIntent, AxisPlatform}
 
 // Options configures Generate.
 type Options struct {
@@ -556,10 +559,28 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 		})
 	}
 
+	// Cross-version "all versions" grid: fold each signer's single latest run
+	// (latestAny, version-blind) into one consensus grid. This is the dashboard's
+	// default view — it includes every source that has attested this recipe, even
+	// sources whose latest run predates the newest release (which the newest strict
+	// grid, tabVersions[0], omits — such a source stays visible in its own version
+	// grid). A throwaway grid-signer set keeps the series column set (built from the
+	// per-version grids above) unchanged: a signer's latest run also lands in its
+	// own version grid, so this adds no series column the per-version pass missed.
+	// Consensus here counts agreement ACROSS versions — weaker than same-version
+	// reproduction — which the renderer surfaces explicitly.
+	combinedRows, combinedStates := computeGrid(unionRows(latestAny), signerIDs, latestAny, map[string]struct{}{})
+	combined := &TabVersion{
+		AICRVer:     "",
+		PhaseRollup: phaseRollup(combinedStates),
+		Tests:       combinedRows,
+	}
+
 	tab := Tab{
 		Recipe:   agg.name,
 		Coord:    coordMap(agg.criteria),
 		Versions: tabVersions,
+		Combined: combined,
 	}
 	// The time-series spans every build/version, so its union test set must come
 	// from ALL runs (not just each signer's newest), or a test that ran only in an
@@ -720,7 +741,11 @@ func registerSource(sources map[string]Source, run *signerRun) {
 // identity's runs (newest-first), pre-reduced in buildRecipe so a signer that
 // submitted under two IDHashes contributes one column series, not two.
 func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowKey, runsByID map[string][]*signerRun) Series {
+	// rowKeys is the all-build union, already ordered by PhaseOrder then name.
+	// names drives the per-build Results maps; rows carries the phase-aware union
+	// the drilldown renders from (so older-build-only phases are still shown).
 	names := make([]string, 0, len(rowKeys))
+	rows := make([]SeriesRow, 0, len(rowKeys))
 	nameSeen := map[string]struct{}{}
 	for _, rk := range rowKeys {
 		if _, ok := nameSeen[rk.name]; ok {
@@ -728,6 +753,7 @@ func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowK
 		}
 		nameSeen[rk.name] = struct{}{}
 		names = append(names, rk.name)
+		rows = append(rows, SeriesRow{Name: rk.name, Phase: rk.phase})
 	}
 
 	builds := make(map[string][]SeriesBuild)
@@ -759,7 +785,7 @@ func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowK
 		health[id] = computeHealth(cols, names)
 	}
 
-	return Series{Recipe: agg.name, Builds: builds, Health: health}
+	return Series{Recipe: agg.name, Rows: rows, Builds: builds, Health: health}
 }
 
 // computeHealth derives a signer's run-health summary across its build columns.
@@ -826,7 +852,7 @@ func assembleGroups(builts []recipeTab) []Group {
 		}
 		da := groupMap[svc][dash]
 		if da == nil {
-			da = &dashAgg{accelerator: b.tab.Coord[axisAccelerator], os: b.tab.Coord[axisOS]}
+			da = &dashAgg{accelerator: b.tab.Coord[AxisAccelerator], os: b.tab.Coord[AxisOS]}
 			groupMap[svc][dash] = da
 		}
 		da.tabs = append(da.tabs, b.tab)
@@ -851,7 +877,7 @@ func assembleGroups(builts []recipeTab) []Group {
 		for _, dk := range dashKeys {
 			da := dashes[dk]
 			sort.Slice(da.tabs, func(i, j int) bool {
-				return da.tabs[i].Coord[axisIntent]+"-"+da.tabs[i].Coord[axisPlatform] < da.tabs[j].Coord[axisIntent]+"-"+da.tabs[j].Coord[axisPlatform]
+				return da.tabs[i].Coord[AxisIntent]+"-"+da.tabs[i].Coord[AxisPlatform] < da.tabs[j].Coord[AxisIntent]+"-"+da.tabs[j].Coord[AxisPlatform]
 			})
 			dashboards = append(dashboards, Dashboard{Accelerator: da.accelerator, OS: da.os, Tabs: da.tabs})
 		}
@@ -874,25 +900,25 @@ func phaseRollup(statesByPhase map[string][]State) map[string]string {
 // emitted as "" (the renderer treats it as the (none) facet).
 func coordMap(c recipe.Criteria) map[string]string {
 	return map[string]string{
-		axisService:     string(c.Service),
-		axisAccelerator: string(c.Accelerator),
-		axisOS:          string(c.OS),
-		axisIntent:      string(c.Intent),
-		axisPlatform:    string(c.Platform),
+		AxisService:     string(c.Service),
+		AxisAccelerator: string(c.Accelerator),
+		AxisOS:          string(c.OS),
+		AxisIntent:      string(c.Intent),
+		AxisPlatform:    string(c.Platform),
 	}
 }
 
 // recordPresent tracks which criteria values actually appear, for the facet
 // dropdowns.
 func recordPresent(present map[string]map[string]struct{}, c recipe.Criteria) {
-	present[axisService][string(c.Service)] = struct{}{}
-	present[axisAccelerator][string(c.Accelerator)] = struct{}{}
-	present[axisOS][string(c.OS)] = struct{}{}
-	present[axisIntent][string(c.Intent)] = struct{}{}
+	present[AxisService][string(c.Service)] = struct{}{}
+	present[AxisAccelerator][string(c.Accelerator)] = struct{}{}
+	present[AxisOS][string(c.OS)] = struct{}{}
+	present[AxisIntent][string(c.Intent)] = struct{}{}
 	if p := string(c.Platform); p != "" {
-		present[axisPlatform][p] = struct{}{}
+		present[AxisPlatform][p] = struct{}{}
 	} else {
-		present[axisPlatform][platformNone] = struct{}{}
+		present[AxisPlatform][platformNone] = struct{}{}
 	}
 }
 
@@ -904,11 +930,11 @@ func criteriaValues(present map[string]map[string]struct{}) map[string][]string 
 	platformVals := append([]string{}, recipe.GetCriteriaPlatformTypes()...)
 	platformVals = append(platformVals, platformNone)
 	canonical := map[string][]string{
-		axisService:     recipe.GetCriteriaServiceTypes(),
-		axisAccelerator: recipe.GetCriteriaAcceleratorTypes(),
-		axisOS:          recipe.GetCriteriaOSTypes(),
-		axisIntent:      recipe.GetCriteriaIntentTypes(),
-		axisPlatform:    platformVals,
+		AxisService:     recipe.GetCriteriaServiceTypes(),
+		AxisAccelerator: recipe.GetCriteriaAcceleratorTypes(),
+		AxisOS:          recipe.GetCriteriaOSTypes(),
+		AxisIntent:      recipe.GetCriteriaIntentTypes(),
+		AxisPlatform:    platformVals,
 	}
 	out := make(map[string][]string, len(criteriaAxes))
 	for _, axis := range criteriaAxes {

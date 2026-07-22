@@ -32,7 +32,7 @@ When `aicr bundle` resolves that recipe, the `os-talos` mixin:
 2. Attaches a per-component `manifests/talos-namespace.yaml` manifest (a
    Namespace resource with PSA-privileged labels) via the
    `preManifestFiles` field — so the bundler emits a `-pre` folder
-   at sync-wave N-1 ahead of the corresponding chart at wave N.
+   at a lower sync-wave than the corresponding chart.
 3. Adds a `OS.release.ID == talos` constraint to the recipe so the
    bundle won't silently install on a non-Talos cluster.
 
@@ -97,20 +97,23 @@ Background:
 For each affected component the bundle contains:
 
 ```text
-NNN-<component>-pre/   # Namespace + PSA labels (sync-wave N-1 in Argo CD)
-(NNN+1)-<component>/    # the chart (sync-wave N in Argo CD)
+NNN-<component>-pre/   # Namespace + PSA labels (lower sync-wave in Argo CD)
+(NNN+1)-<component>/    # the chart (higher sync-wave in Argo CD)
 ```
 
 The bundler emits the `-pre` folder ahead of the primary folder in
-the local directory layout, and Argo CD's sync-wave is the folder
-index, so:
+the local directory layout, and within a component the `-pre` phase
+always carries a strictly lower Argo CD sync-wave than the primary,
+so:
 
 - **Helm deployer:** the generated `install.sh` iterates folders in
   order, so `helm install` for the namespace happens before the
   chart install. No operator action needed.
-- **Argo CD deployer:** each folder becomes an Application with
-  `argocd.argoproj.io/sync-wave: "<index>"`. The pre-folder has the
-  lowest wave, so Argo applies it first. No operator action needed.
+- **Argo CD deployer:** each folder becomes an Application with an
+  `argocd.argoproj.io/sync-wave` annotation. Waves are assigned by
+  dependency depth (`level*4 + phase`), and the `-pre` phase sorts
+  before the primary within the component's band, so Argo applies the
+  namespace first. No operator action needed.
 
 ## What the mixin does NOT cover
 

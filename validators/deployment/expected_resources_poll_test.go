@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ import (
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -101,6 +103,101 @@ func TestVerifyNodewrightReady_Poll(t *testing.T) {
 				t.Fatalf("expected the poll to sample the CR at least %d times (through the reboot), got %d", tt.minGets, got)
 			}
 		})
+	}
+}
+
+// TestVerifyNodewrightReady_RidesThroughRuntimeRequiredTaint proves the taint
+// gate is polled, not sampled once: with every expected Skyhook CR already
+// "complete", the check still stays closed while a node carries the
+// runtime-required taint and only passes once the operator removes it (the
+// monotone terminal step). The last-observed taint is surfaced when it never
+// clears within the budget.
+func TestVerifyNodewrightReady_RidesThroughRuntimeRequiredTaint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		tainted    []bool // per-List: whether gpu-node-0 still carries the taint (last repeats)
+		wantErrSub string // "" => expect success
+		minLists   int
+	}{
+		{
+			name:     "rides through a lingering taint that clears",
+			tainted:  []bool{true, true, false},
+			minLists: 3,
+		},
+		{
+			name:       "times out while the taint persists",
+			tainted:    []bool{true},
+			wantErrSub: "node gpu-node-0: still carries the runtime-required taint",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ref := recipe.ComponentRef{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}
+			// Skyhook CR is always complete; the taint is the only gating signal.
+			dyn := newFlippingDynamicClient("tuning", []string{nodewrightCompleteState})
+			ctx := newDeploymentTestContextWithDynamic(t,
+				[]runtime.Object{activeNamespace("skyhook")}, dyn, []recipe.ComponentRef{ref})
+
+			taintSeq := tt.tainted
+			var lists int32
+			ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
+				idx := int(atomic.AddInt32(&lists, 1)) - 1
+				if idx >= len(taintSeq) {
+					idx = len(taintSeq) - 1
+				}
+				node := nodeWithTaints("gpu-node-0")
+				if taintSeq[idx] {
+					node = nodeWithRuntimeRequiredTaint("gpu-node-0")
+				}
+				return true, &corev1.NodeList{Items: []corev1.Node{*node}}, nil
+			})
+
+			err := verifyNodewrightReady(ctx, ref)
+			if tt.wantErrSub != "" {
+				if err == nil {
+					t.Fatalf("verifyNodewrightReady() error = nil, want error containing %q", tt.wantErrSub)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("verifyNodewrightReady() error = %v, want substring %q", err, tt.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("verifyNodewrightReady() error = %v, want nil (should ride through the lingering taint)", err)
+			}
+			if got := int(atomic.LoadInt32(&lists)); got < tt.minLists {
+				t.Fatalf("expected the poll to list nodes at least %d times (through the taint), got %d", tt.minLists, got)
+			}
+		})
+	}
+}
+
+// TestRuntimeRequiredTaintFailures_FailsClosedOnListError proves a node-list
+// failure is surfaced (not read as "taint absent"), so the poll fails closed and
+// retries rather than certifying readiness on missing data.
+func TestRuntimeRequiredTaintFailures_FailsClosedOnListError(t *testing.T) {
+	t.Parallel()
+
+	clientset := k8sfake.NewClientset()
+	clientset.PrependReactor("list", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("apiserver unavailable")
+	})
+	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+
+	failures, err := runtimeRequiredTaintFailures(ctx)
+	if err == nil {
+		t.Fatal("expected an error when listing nodes fails, got nil (must fail closed)")
+	}
+	if failures != nil {
+		t.Fatalf("expected nil failures on list error, got %v", failures)
+	}
+	if !strings.Contains(err.Error(), "failed to list nodes for the nodewright runtime-required taint gate") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

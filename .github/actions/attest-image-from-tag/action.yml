@@ -19,8 +19,11 @@ inputs:
   image_name:
     description: 'Full image name (without tag or digest), e.g. ghcr.io/org/image'
     required: true
-  tag:
-    description: 'Image tag to resolve (e.g. v1.2.3)'
+  candidate_tag:
+    description: 'Run-unique candidate tag to resolve'
+    required: true
+  expected_digest:
+    description: 'Authoritative digest that the candidate must resolve to'
     required: true
   crane_version:
     description: 'crane version to install (e.g. v0.20.6)'
@@ -36,17 +39,40 @@ runs:
   using: 'composite'
   steps:
     - name: Validate inputs
+      id: validate
       shell: bash
+      env:
+        INPUT_IMAGE_NAME: ${{ inputs.image_name }}
+        INPUT_CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        INPUT_EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+        INPUT_CRANE_VERSION: ${{ inputs.crane_version }}
       run: |
         set -euo pipefail
-        if [[ -z "${{ inputs.image_name }}" ]]; then
-          echo "::error::image_name is required"
+        # shellcheck source=.github/actions/release-input-validation.sh
+        source "${GITHUB_ACTION_PATH}/../release-input-validation.sh"
+        reject_newline image_name "${INPUT_IMAGE_NAME}"
+        reject_newline candidate_tag "${INPUT_CANDIDATE_TAG}"
+        reject_newline expected_digest "${INPUT_EXPECTED_DIGEST}"
+        reject_newline crane_version "${INPUT_CRANE_VERSION}"
+        require_release_image "${INPUT_IMAGE_NAME}"
+        if [[ ! "${INPUT_CANDIDATE_TAG}" =~ ^candidate-[0-9]+-[0-9]+$ ]]; then
+          echo "::error::candidate_tag must match candidate-RUN_ID-RUN_ATTEMPT"
           exit 1
         fi
-        if [[ -z "${{ inputs.tag }}" ]]; then
-          echo "::error::tag is required"
+        if [[ ! "${INPUT_EXPECTED_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          echo "::error::expected_digest is malformed"
           exit 1
         fi
+        if [[ ! "${INPUT_CRANE_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::crane_version must use vMAJOR.MINOR.PATCH"
+          exit 1
+        fi
+        {
+          echo "image_name=${INPUT_IMAGE_NAME}"
+          echo "candidate_tag=${INPUT_CANDIDATE_TAG}"
+          echo "expected_digest=${INPUT_EXPECTED_DIGEST}"
+          echo "crane_version=${INPUT_CRANE_VERSION}"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Authenticate to registry
       uses: ./.github/actions/ghcr-login
@@ -55,16 +81,24 @@ runs:
       uses: ./.github/actions/setup-build-tools
       with:
         install_crane: 'true'
-        crane_version: ${{ inputs.crane_version }}
+        crane_version: ${{ steps.validate.outputs.crane_version }}
 
     - name: Resolve image digest
       id: digest
       shell: bash
+      env:
+        IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
+        CANDIDATE_TAG: ${{ steps.validate.outputs.candidate_tag }}
+        EXPECTED_DIGEST: ${{ steps.validate.outputs.expected_digest }}
       run: |
         set -euo pipefail
-        DIGEST="$(crane digest "${{ inputs.image_name }}:${{ inputs.tag }}")"
+        DIGEST="$(timeout --foreground 120s crane digest "${IMAGE_NAME}:${CANDIDATE_TAG}")"
         if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
           echo "::error::unexpected digest format: $DIGEST"
+          exit 1
+        fi
+        if [[ "${DIGEST}" != "${EXPECTED_DIGEST}" ]]; then
+          echo "::error::resolved digest does not match expected digest"
           exit 1
         fi
         echo "image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
@@ -72,5 +106,5 @@ runs:
     - name: Generate SBOM and attestations
       uses: ./.github/actions/sbom-and-attest
       with:
-        image_name: ${{ inputs.image_name }}
-        image_digest: ${{ steps.digest.outputs.image_digest }}
+        image_name: ${{ steps.validate.outputs.image_name }}
+        image_digest: ${{ steps.validate.outputs.expected_digest }}

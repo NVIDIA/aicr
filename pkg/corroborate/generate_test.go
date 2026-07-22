@@ -100,6 +100,23 @@ func findRowAtVersion(t *testing.T, idx Index, recipe, aicrVer, phase, name stri
 	return Row{}
 }
 
+// findCombinedRow returns a row from the recipe's cross-version Combined grid
+// (the dashboard's default "all versions" view).
+func findCombinedRow(t *testing.T, idx Index, recipe, phase, name string) Row {
+	t.Helper()
+	tab := findTab(t, idx, recipe)
+	if tab.Combined == nil {
+		t.Fatalf("recipe %s has no combined grid", recipe)
+	}
+	for _, r := range tab.Combined.Tests {
+		if r.Phase == phase && r.Name == name {
+			return r
+		}
+	}
+	t.Fatalf("row not found in combined grid: %s %s/%s", recipe, phase, name)
+	return Row{}
+}
+
 func findTab(t *testing.T, idx Index, recipe string) Tab {
 	t.Helper()
 	for _, g := range idx.Groups {
@@ -211,6 +228,23 @@ func TestGenerateEndToEnd(t *testing.T) {
 	}
 	if got := findRowAtVersion(t, idx, recipeA, "v0.14.0", "deployment", "operator-health").Consensus; got != string(StateFailing) {
 		t.Errorf("operator-health @ v0.14.0 = %q, want FAILING (nvidia's isolated older run)", got)
+	}
+
+	// Combined ("all versions") grid: each source's single latest run folded into
+	// one grid, with an empty AICRVer because it spans versions. In this fixture
+	// every source's newest run is v1.0.0, so combined matches the newest grid —
+	// operator-health CONFIRMED with the rogue reported dot. (The cross-version
+	// case where combined diverges from the newest grid is in
+	// TestGenerateCombinedCrossVersion.)
+	if tabA.Combined == nil {
+		t.Fatal("recipeA has no combined grid")
+	}
+	if tabA.Combined.AICRVer != "" {
+		t.Errorf("combined AICRVer = %q, want empty (spans versions)", tabA.Combined.AICRVer)
+	}
+	coh := findCombinedRow(t, idx, recipeA, "deployment", "operator-health")
+	if coh.Consensus != string(StateConfirmed) || coh.Reported != 1 {
+		t.Errorf("combined operator-health = %q reported=%d, want CONFIRMED reported=1", coh.Consensus, coh.Reported)
 	}
 
 	// Recipe B: FAILING + SINGLE + bare-intent (empty platform).
@@ -340,6 +374,76 @@ func TestGenerateConsensusKeyedByVerifiedIdentityNotIDHash(t *testing.T) {
 	}
 }
 
+func TestGenerateCombinedCrossVersion(t *testing.T) {
+	// The combined ("all versions") grid folds each source's single latest run
+	// across versions, so two allowlisted sources whose latest runs are at
+	// DIFFERENT AICR versions still corroborate (CONFIRMED). The strict newest
+	// per-version grid does not: at the newest version only the source that ran it
+	// appears (SINGLE). This is the behavior the dashboard's default view relies on.
+	const issuer = "https://token.actions.githubusercontent.com"
+	dir := t.TempDir()
+	writeRun := func(identity, idHash, runID, aicrVer, when string) {
+		t.Helper()
+		runDir := filepath.Join(dir, "results", "eks", "h100-ubuntu", "training", idHash, runID)
+		if err := os.MkdirAll(filepath.Join(runDir, "ctrf"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		meta := fmt.Sprintf(`{"schemaVersion":"aicr-corroboration-meta/v1",`+
+			`"coordinate":{"group":"eks","dashboard":"h100-ubuntu","tab":"training"},`+
+			`"recipe":"h100-eks-ubuntu-training",`+
+			`"signer":{"idHash":%q,"identity":%q,"issuer":%q,"class":"community","allowlisted":true},`+
+			`"runId":%q,"aicrVersion":%q,"attestedAt":%q}`, idHash, identity, issuer, runID, aicrVer, when)
+		if err := os.WriteFile(filepath.Join(runDir, "meta.json"), []byte(meta), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctrf := `{"reportFormat":"CTRF","results":{"tool":{"name":"aicr"},"summary":{},` +
+			`"tests":[{"name":"operator-health","status":"passed"}]}}`
+		if err := os.WriteFile(filepath.Join(runDir, "ctrf", "deployment.json"), []byte(ctrf), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Source A's latest run is an OLDER release; source B's latest is the newest.
+	// Two DISTINCT verified identities, so they are two distinct signers.
+	writeRun("https://github.com/org-a/attest/.github/workflows/a.yaml@refs/heads/main", "aaa", "run-a", "v0.14.0", "2026-06-10T01:00:00Z")
+	writeRun("https://github.com/org-b/attest/.github/workflows/b.yaml@refs/heads/main", "bbb", "run-b", "v1.0.0", "2026-06-20T01:00:00Z")
+
+	out := t.TempDir()
+	if _, err := Generate(context.Background(), Options{InputDir: dir, OutputDir: out}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	idx := readIndex(t, filepath.Join(out, "data", "index.json"))
+	const recipe = "h100-eks-ubuntu-training"
+
+	// Newest version grid is v1.0.0; only source B ran it -> SINGLE.
+	tab := findTab(t, idx, recipe)
+	if len(tab.Versions) == 0 || tab.Versions[0].AICRVer != "v1.0.0" {
+		t.Fatalf("newest version = %+v, want v1.0.0 leading", tab.Versions)
+	}
+	if got := findRow(t, idx, recipe, "deployment", "operator-health").Consensus; got != string(StateSingle) {
+		t.Errorf("newest-version operator-health = %q, want SINGLE (only source B at v1.0.0)", got)
+	}
+
+	// Combined grid: both sources' latest runs pass -> CONFIRMED across versions,
+	// with both sources listed and their real per-run versions preserved.
+	if tab.Combined == nil || tab.Combined.AICRVer != "" {
+		t.Fatalf("combined grid = %+v, want present with empty AICRVer", tab.Combined)
+	}
+	comb := findCombinedRow(t, idx, recipe, "deployment", "operator-health")
+	if comb.Consensus != string(StateConfirmed) {
+		t.Errorf("combined operator-health = %q, want CONFIRMED (two sources, latest runs across versions)", comb.Consensus)
+	}
+	if len(comb.Signers) != 2 {
+		t.Fatalf("combined signers = %d, want 2 (both sources' latest runs)", len(comb.Signers))
+	}
+	gotVers := map[string]bool{}
+	for _, s := range comb.Signers {
+		gotVers[s.AICRVer] = true
+	}
+	if !gotVers["v0.14.0"] || !gotVers["v1.0.0"] {
+		t.Errorf("combined signer versions = %v, want both v0.14.0 and v1.0.0 (per-source run versions preserved)", gotVers)
+	}
+}
+
 func TestGenerateContextCanceled(t *testing.T) {
 	// An already-canceled context stops the walk/collect before any output is
 	// written and surfaces as an error rather than a partial dashboard.
@@ -433,6 +537,79 @@ func TestGenerateSeries(t *testing.T) {
 	if s.Health[srcNVIDIA].FlakePct != 100 {
 		t.Errorf("nvidia flakePct = %d, want 100", s.Health["a1nvidia"].FlakePct)
 	}
+
+	// Older-build-only phase: nvidia's OLDER build ran conformance/gpu-operator-
+	// conformance and no signer's latest run has a conformance row. The
+	// phase-aware all-build union (Series.Rows) must still carry it so the
+	// drilldown renders the historical row instead of hiding it / mislabeling the
+	// phase "not run".
+	var confRow *SeriesRow
+	for i := range s.Rows {
+		if s.Rows[i].Name == "gpu-operator-conformance" {
+			confRow = &s.Rows[i]
+			break
+		}
+	}
+	if confRow == nil {
+		t.Fatalf("series rows missing older-build-only conformance row; got %+v", s.Rows)
+	}
+	if confRow.Phase != "conformance" {
+		t.Errorf("older-build-only row phase = %q, want conformance", confRow.Phase)
+	}
+	// Its historical result survives on the older nvidia build; the newest build,
+	// which never ran conformance, reports not-run.
+	if got := nv[1].Results["gpu-operator-conformance"]; got != "pass" {
+		t.Errorf("older nvidia conformance = %q, want pass", got)
+	}
+	if got := nv[0].Results["gpu-operator-conformance"]; got != "not-run" {
+		t.Errorf("newest nvidia conformance = %q, want not-run", got)
+	}
+}
+
+// TestGenerateOlderOnlyPhaseAbsentFromCombinedGrid confirms an older-build-only
+// phase row is absent from the default combined (all-versions) grid the
+// drilldown would otherwise render from, while still appearing in the older
+// version's grid — the exact gap Series.Rows closes for the drilldown.
+func TestGenerateOlderOnlyPhaseAbsentFromCombinedGrid(t *testing.T) {
+	out, _ := generateInto(t, filepath.Join("testdata", "allowlist.yaml"))
+	data, err := os.ReadFile(filepath.Join(out, "data", "index.json"))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	var idx Index
+	if err := json.Unmarshal(data, &idx); err != nil {
+		t.Fatalf("parse index: %v", err)
+	}
+	tab := findTab(t, idx, "h100-eks-ubuntu-training-kubeflow")
+	if tab.Combined == nil {
+		t.Fatal("recipe has no combined grid")
+	}
+	if tabHasRow(tab.Combined, "gpu-operator-conformance") {
+		t.Error("combined all-versions grid unexpectedly contains older-build-only conformance row")
+	}
+	// It is present in the older version's strict grid, proving the fixture is a
+	// genuine older-build-only phase (not simply missing everywhere).
+	if !anyVersionHasRow(tab, "gpu-operator-conformance") {
+		t.Error("no per-version grid carries the older-build-only conformance row")
+	}
+}
+
+func tabHasRow(v *TabVersion, name string) bool {
+	for _, r := range v.Tests {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func anyVersionHasRow(tab Tab, name string) bool {
+	for i := range tab.Versions {
+		if tabHasRow(&tab.Versions[i], name) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompatibleMetaSchema(t *testing.T) {

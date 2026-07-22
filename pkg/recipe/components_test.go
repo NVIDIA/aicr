@@ -1121,7 +1121,7 @@ func TestEvictCachedRegistry_NilIsNoOp(t *testing.T) {
 }
 
 func TestGetComponentRegistryFor_NilProviderFallsBack(t *testing.T) {
-	// A nil provider routes through GetDataProvider(); the call should
+	// A nil provider falls back to defaultEmbeddedProvider; the call should
 	// succeed and return the embedded registry without panicking.
 	r, err := GetComponentRegistryFor(nil)
 	if err != nil {

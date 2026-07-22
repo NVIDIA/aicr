@@ -282,7 +282,13 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 // merge-and-log concern.
 //
 // Override events are logged at INFO so the resolved value is auditable.
-func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry) error {
+//
+// touched records which of the 5 coverage dimensions (service, accelerator,
+// intent, os, platform) this call set from config — i.e. explicitly
+// user-stated rather than snapshot-derived. Callers not tracking that
+// distinction (e.g. the no-snapshot criteria path) may pass nil; marks are
+// then no-ops.
+func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry, touched map[string]bool) error {
 	resolved, err := cfg.Recipe().ResolveCriteriaWithRegistry(reg)
 	if err != nil {
 		return err
@@ -290,22 +296,27 @@ func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, 
 	if resolved.Service != "" {
 		logCriteriaOverride(flagService, string(criteria.Service), string(resolved.Service))
 		criteria.Service = resolved.Service
+		markCriteriaTouched(touched, coverageDimService)
 	}
 	if resolved.Accelerator != "" {
 		logCriteriaOverride(flagAccelerator, string(criteria.Accelerator), string(resolved.Accelerator))
 		criteria.Accelerator = resolved.Accelerator
+		markCriteriaTouched(touched, coverageDimAccelerator)
 	}
 	if resolved.Intent != "" {
 		logCriteriaOverride(flagIntent, string(criteria.Intent), string(resolved.Intent))
 		criteria.Intent = resolved.Intent
+		markCriteriaTouched(touched, coverageDimIntent)
 	}
 	if resolved.OS != "" {
 		logCriteriaOverride(flagOS, string(criteria.OS), string(resolved.OS))
 		criteria.OS = resolved.OS
+		markCriteriaTouched(touched, coverageDimOS)
 	}
 	if resolved.Platform != "" {
 		logCriteriaOverride(flagPlatform, string(criteria.Platform), string(resolved.Platform))
 		criteria.Platform = resolved.Platform
+		markCriteriaTouched(touched, coverageDimPlatform)
 	}
 	if resolved.Nodes > 0 {
 		if criteria.Nodes > 0 && criteria.Nodes != resolved.Nodes {
@@ -315,6 +326,16 @@ func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, 
 		criteria.Nodes = resolved.Nodes
 	}
 	return nil
+}
+
+// markCriteriaTouched records that dim was explicitly set by config or a CLI
+// flag (as opposed to snapshot/fingerprint derivation). touched may be nil
+// for callers that don't need the distinction (e.g. the no-snapshot criteria
+// path); marking is then a no-op.
+func markCriteriaTouched(touched map[string]bool, dim string) {
+	if touched != nil {
+		touched[dim] = true
+	}
 }
 
 // logCriteriaOverride logs an INFO line when config replaces a non-default
@@ -334,10 +355,10 @@ func logCriteriaOverride(field, prior, override string) {
 // per-provider registry so a `--data` overlay's non-OSS values validate.
 func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
 	criteria := recipe.NewCriteria()
-	if err := applyCriteriaFromConfig(criteria, cfg, reg); err != nil {
+	if err := applyCriteriaFromConfig(criteria, cfg, reg, nil); err != nil {
 		return nil, err
 	}
-	if err := applyCriteriaOverrides(cmd, criteria, reg); err != nil {
+	if err := applyCriteriaOverrides(cmd, criteria, reg, nil); err != nil {
 		return nil, err
 	}
 	return criteria, nil
@@ -346,7 +367,11 @@ func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig, reg
 // applyCriteriaOverrides applies CLI flag overrides to criteria, resolving each
 // enum value against the supplied per-provider registry. Logs a warning when a
 // flag overrides a value detected from the snapshot.
-func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *recipe.CriteriaRegistry) error {
+//
+// touched records which of the 5 coverage dimensions this call set from a CLI
+// flag — see applyCriteriaFromConfig. Callers not tracking that distinction
+// may pass nil.
+func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *recipe.CriteriaRegistry, touched map[string]bool) error {
 	if s := cmd.String(flagService); s != "" {
 		parsed, err := reg.ParseService(s)
 		if err != nil {
@@ -359,6 +384,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.Service = parsed
+		markCriteriaTouched(touched, coverageDimService)
 	}
 	if s := cmd.String(flagAccelerator); s != "" {
 		parsed, err := reg.ParseAccelerator(s)
@@ -372,6 +398,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.Accelerator = parsed
+		markCriteriaTouched(touched, coverageDimAccelerator)
 	}
 	if s := cmd.String(flagIntent); s != "" {
 		parsed, err := reg.ParseIntent(s)
@@ -385,6 +412,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.Intent = parsed
+		markCriteriaTouched(touched, coverageDimIntent)
 	}
 	if s := cmd.String(flagOS); s != "" {
 		parsed, err := reg.ParseOS(s)
@@ -398,6 +426,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.OS = parsed
+		markCriteriaTouched(touched, coverageDimOS)
 	}
 	if s := cmd.String(flagPlatform); s != "" {
 		parsed, err := reg.ParsePlatform(s)
@@ -411,6 +440,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.Platform = parsed
+		markCriteriaTouched(touched, coverageDimPlatform)
 	}
 	if n := cmd.Int("nodes"); n > 0 {
 		if criteria.Nodes > 0 && criteria.Nodes != n {

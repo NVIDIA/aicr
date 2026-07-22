@@ -608,6 +608,17 @@ func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criter
 // shared resolve path: criteria outside the configured allowlist are rejected
 // before the recipe is built.
 //
+// The criteria-coverage post-condition (issue #1542) is STRICT here: every
+// stated criteria dimension must be honored by an applied overlay or
+// resolution fails with ErrCodeInvalidRequest carrying details.uncovered.
+// The CLI's `aicr recipe --snapshot` additionally relaxes dimensions that
+// were derived from the snapshot fingerprint (never user-stated ones) and
+// retries once — that relaxation is CLI-layer policy, implemented in pkg/cli
+// on top of this facade, because only the CLI knows which dimensions the
+// user explicitly stated. Callers replicating `--snapshot` behavior must
+// implement the same policy themselves (clear the uncovered dimensions they
+// derived rather than received, then retry).
+//
 // The same guards and synchronization as ResolveRecipeFromCriteria apply: nil
 // receiver, nil context, nil criteria, and nil snapshot are rejected with
 // ErrCodeInvalidRequest; a closed Client is rejected; a facade-level timeout
@@ -684,8 +695,11 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 	// has the NVIDIA kernel driver loaded AND the resolved overlay
 	// declares the coordinated preinstalled-driver profile, inject
 	// gpu-operator.driver.enabled=false so the Operator does not install
-	// a second driver on top. Bare AKS/EKS overlays get a warning
-	// instead of the injection (see gpu_driver_state.go).
+	// a second driver on top. Bare EKS overlays get a warning
+	// instead of the injection. The inverse mismatch — a
+	// preinstalled-driver overlay (e.g. the AKS driver-only default)
+	// resolved against a cluster with no driver on the sampled GPU node —
+	// warns with the bundle-time override set (see gpu_driver_state.go).
 	applyGPUDriverAutoOverride(ctx, internal, internalSnap)
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1196,10 +1210,11 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 // from unit tests so no Kubernetes resources are created and every
 // check reports as "skipped". WithValidationNamespace, WithValidationRunID,
 // WithValidationCleanup, WithValidationTolerations,
-// WithValidationNodeSelector, and WithValidationPhases cover the
-// production-controller knobs. The validator catalog loads through this
-// Client's own DataProvider, so a Client built from FilesystemSource
-// validates against that recipe source rather than the package global.
+// WithValidationNodeSelector, WithValidationKubeconfig, and
+// WithValidationPhases cover the production-controller knobs. The validator
+// catalog loads through this Client's own DataProvider, so a Client built from
+// FilesystemSource validates against that recipe source rather than the
+// package global.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, recipe, or snap is nil,

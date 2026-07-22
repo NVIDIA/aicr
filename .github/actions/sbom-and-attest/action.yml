@@ -26,68 +26,113 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Authenticate to registry
-      uses: ./.github/actions/ghcr-login
-
     - name: Validate inputs
+      id: validate
       shell: bash
+      env:
+        INPUT_IMAGE_NAME: ${{ inputs.image_name }}
+        INPUT_IMAGE_DIGEST: ${{ inputs.image_digest }}
       run: |
         set -euo pipefail
-        if [[ -z "${{ inputs.image_name }}" ]]; then
-          echo "::error::image_name is required"
-          exit 1
-        fi
-        if [[ ! "${{ inputs.image_digest }}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+        # shellcheck source=.github/actions/release-input-validation.sh
+        source "${GITHUB_ACTION_PATH}/../release-input-validation.sh"
+        reject_newline image_name "${INPUT_IMAGE_NAME}"
+        reject_newline image_digest "${INPUT_IMAGE_DIGEST}"
+        require_release_image "${INPUT_IMAGE_NAME}"
+        if [[ ! "${INPUT_IMAGE_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
           echo "::error::image_digest must be in the form sha256:<64 hex>"
           exit 1
         fi
+        {
+          echo "image_name=${INPUT_IMAGE_NAME}"
+          echo "image_digest=${INPUT_IMAGE_DIGEST}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Authenticate to registry
+      uses: ./.github/actions/ghcr-login
 
     - name: Derive safe filename
       id: name
       shell: bash
+      env:
+        IMAGE: ${{ steps.validate.outputs.image_name }}
       run: |
         set -euo pipefail
-        IMAGE="${{ inputs.image_name }}"
         SAFE="$(basename "${IMAGE%%:*}")"  # strip tag if present, then basename
         echo "safe=$SAFE" >> "$GITHUB_OUTPUT"
 
-    - name: Generate SBOM
+    - name: Generate amd64 SBOM
       uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+      env:
+        SYFT_PLATFORM: linux/amd64
       with:
-        image: "${{ inputs.image_name }}@${{ inputs.image_digest }}"
+        image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.image_digest }}"
         format: spdx-json
-        output-file: sbom-${{ steps.name.outputs.safe }}.spdx.json
+        artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-amd64-attempt-${{ github.run_attempt }}.spdx.json
+        output-file: sbom-${{ steps.name.outputs.safe }}-linux-amd64.spdx.json
         upload-artifact: true
-        upload-release-assets: auto
+        upload-release-assets: false
 
-    - name: Verify SBOM file
-      id: find-sbom
+    - name: Generate arm64 SBOM
+      uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+      env:
+        SYFT_PLATFORM: linux/arm64
+      with:
+        image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.image_digest }}"
+        format: spdx-json
+        artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-arm64-attempt-${{ github.run_attempt }}.spdx.json
+        output-file: sbom-${{ steps.name.outputs.safe }}-linux-arm64.spdx.json
+        upload-artifact: true
+        upload-release-assets: false
+
+    - name: Verify platform SBOM files
       shell: bash
+      env:
+        SAFE_NAME: ${{ steps.name.outputs.safe }}
       run: |
         set -euo pipefail
-        SBOM_FILE="sbom-${{ steps.name.outputs.safe }}.spdx.json"
-        if [ ! -f "$SBOM_FILE" ]; then
-          echo "::error::SBOM file not found: $SBOM_FILE"
-          exit 1
-        fi
-        echo "sbom_file=$SBOM_FILE" >> "$GITHUB_OUTPUT"
+        for platform in amd64 arm64; do
+          sbom_file="sbom-${SAFE_NAME}-linux-${platform}.spdx.json"
+          if [[ ! -s "${sbom_file}" ]]; then
+            echo "::error::SBOM file not found or empty: ${sbom_file}"
+            exit 1
+          fi
+        done
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
 
-    - name: Cosign SBOM attestation
+    - name: Cosign amd64 SBOM attestation
       shell: bash
+      env:
+        IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
+        IMAGE_DIGEST: ${{ steps.validate.outputs.image_digest }}
+        SAFE_NAME: ${{ steps.name.outputs.safe }}
       run: |
         set -euo pipefail
-        cosign attest \
+        timeout --foreground 120s cosign attest \
           --yes \
-          --predicate "${{ steps.find-sbom.outputs.sbom_file }}" \
+          --predicate "sbom-${SAFE_NAME}-linux-amd64.spdx.json" \
           --type spdxjson \
-          "${{ inputs.image_name }}@${{ inputs.image_digest }}"
+          "${IMAGE_NAME}@${IMAGE_DIGEST}"
+
+    - name: Cosign arm64 SBOM attestation
+      shell: bash
+      env:
+        IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
+        IMAGE_DIGEST: ${{ steps.validate.outputs.image_digest }}
+        SAFE_NAME: ${{ steps.name.outputs.safe }}
+      run: |
+        set -euo pipefail
+        timeout --foreground 120s cosign attest \
+          --yes \
+          --predicate "sbom-${SAFE_NAME}-linux-arm64.spdx.json" \
+          --type spdxjson \
+          "${IMAGE_NAME}@${IMAGE_DIGEST}"
 
     - name: Attest build provenance
       uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f  # v3.2.0
       with:
-        subject-name: ${{ inputs.image_name }}
-        subject-digest: ${{ inputs.image_digest }}
+        subject-name: ${{ steps.validate.outputs.image_name }}
+        subject-digest: ${{ steps.validate.outputs.image_digest }}
         push-to-registry: true

@@ -326,10 +326,80 @@ func TestCheckExpectedResources_IgnoresStaleUnrelatedNodewright(t *testing.T) {
 	}
 }
 
+// TestCheckExpectedResources_FailsWhenRuntimeRequiredTaintPresent proves the
+// readiness gate stays closed while a GPU node still carries the nodewright
+// runtime-required NoSchedule taint, even though every expected Skyhook CR
+// already reports status.status == "complete". This is the issue #1775 race:
+// status.status momentarily reads "complete" in the lull between two package
+// reboots, but the durable taint is still present because tuning is not truly
+// done on the node.
+func TestCheckExpectedResources_FailsWhenRuntimeRequiredTaintPresent(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t,
+		[]runtime.Object{
+			activeNamespace("skyhook"),
+			nodeWithRuntimeRequiredTaint("gpu-node-0"),
+		},
+		[]runtime.Object{
+			nodewrightWithStatus("tuning", nodewrightCompleteState),
+		},
+		[]recipe.ComponentRef{
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
+		},
+	)
+
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("expected error while a node still carries the runtime-required taint")
+		return
+	}
+	if !strings.Contains(err.Error(), "node gpu-node-0: still carries the runtime-required taint") {
+		t.Fatalf("expected runtime-required taint failure, got: %v", err)
+		return
+	}
+}
+
+// TestCheckExpectedResources_PassesWhenRuntimeRequiredTaintCleared proves the
+// gate opens once the taint is removed from every node — including nodes that
+// carry only unrelated taints, which must not gate.
+func TestCheckExpectedResources_PassesWhenRuntimeRequiredTaintCleared(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t,
+		[]runtime.Object{
+			activeNamespace("skyhook"),
+			// A GPU node whose tuning finished (taint removed) but still carries
+			// the workload dedication taint it was provisioned with.
+			nodeWithTaints("gpu-node-0", corev1.Taint{
+				Key: "dedicated", Value: "user-workload", Effect: corev1.TaintEffectNoSchedule,
+			}),
+			// A control-plane node with the standard master taint.
+			nodeWithTaints("control-plane-0", corev1.Taint{
+				Key: "node-role.kubernetes.io/control-plane", Effect: corev1.TaintEffectNoSchedule,
+			}),
+		},
+		[]runtime.Object{
+			nodewrightWithStatus("tuning", nodewrightCompleteState),
+		},
+		[]recipe.ComponentRef{
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
+		},
+	)
+
+	if err := checkExpectedResources(ctx); err != nil {
+		t.Fatalf("checkExpectedResources() error = %v, want nil once the runtime-required taint is cleared", err)
+		return
+	}
+}
+
 // TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames pins the
 // fail-closed behavior when an enabled nodewright-customizations ref declares
-// no manifest files (or the manifests contain no Nodewright CRs). Rather than
-// silently pass, the check must surface this as a recipe misconfiguration.
+// no manifest files. Rather than silently pass, the check must surface this as a
+// recipe misconfiguration. (Contrast with #1844: manifests that ARE declared but
+// render zero Skyhook CRs due to a value gate pass — see
+// TestVerifyNodewrightReady_TolerantWhenAllCRsSuppressed — because the render
+// reflects the effective values, so absence there is deliberate, not missing.)
 func TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames(t *testing.T) {
 	t.Parallel()
 
@@ -694,6 +764,200 @@ func TestExtractNodewrightNamesFromManifest_TuningGke(t *testing.T) {
 	}
 }
 
+// TestExpectedNodewrightNames_RenderAware pins the value-aware behavior added
+// for #1844: expectedNodewrightNames renders each manifest with the component's
+// effective values, so a CR gated off by those values drops out of the
+// extracted set. The `enabled: false` override exercises the same value-gate
+// mechanism the tuningEnabled=false gate will use on the single-package tuning
+// manifests — the whole Skyhook CR is suppressed, and the check tolerates its
+// absence rather than asserting a CR that was deliberately not rendered.
+func TestExpectedNodewrightNames_RenderAware(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		manifests []string
+		overrides map[string]any
+		want      []string
+	}{
+		{
+			name:      "tuning.yaml, default values → CR expected",
+			manifests: []string{"components/nodewright-customizations/manifests/tuning.yaml"},
+			overrides: nil,
+			want:      []string{"tuning"},
+		},
+		{
+			name:      "single-package tuning-generic.yaml, default values → CR expected",
+			manifests: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+			overrides: nil,
+			want:      []string{"tuning"},
+		},
+		{
+			name:      "value gate suppresses the whole CR → nothing expected",
+			manifests: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+			overrides: map[string]any{"enabled": false},
+			want:      nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ref := recipe.ComponentRef{
+				Name:          nodewrightCustomizationsComponent,
+				Namespace:     "skyhook",
+				ManifestFiles: tc.manifests,
+				Overrides:     tc.overrides,
+			}
+			got, err := expectedNodewrightNames(ref)
+			if err != nil {
+				t.Fatalf("expectedNodewrightNames() error = %v, want nil", err)
+				return
+			}
+			if !stringSlicesEqual(got, tc.want) {
+				t.Fatalf("expectedNodewrightNames() = %v, want %v", got, tc.want)
+				return
+			}
+		})
+	}
+}
+
+// TestNodewrightHealthCheckSuppressed pins the gate that skips the static
+// chainsaw health-check assert when the component's effective values suppress
+// the tuning Skyhook CR (#1844). Only the nodewright-customizations component is
+// subject to it; a component with a renderable CR or no manifests keeps its
+// assert; a render-empty component with manifests declared is suppressed.
+func TestNodewrightHealthCheckSuppressed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		ref  recipe.ComponentRef
+		want bool
+	}{
+		{
+			name: "other component is never suppressed",
+			ref: recipe.ComponentRef{
+				Name:          "gpu-operator",
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+				Overrides:     map[string]any{"enabled": false},
+			},
+			want: false,
+		},
+		{
+			name: "nodewright with a renderable CR keeps its assert",
+			ref: recipe.ComponentRef{
+				Name:          nodewrightCustomizationsComponent,
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+			},
+			want: false,
+		},
+		{
+			name: "nodewright with all CRs gated off is suppressed",
+			ref: recipe.ComponentRef{
+				Name:          nodewrightCustomizationsComponent,
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+				Overrides:     map[string]any{"enabled": false},
+			},
+			want: true,
+		},
+		{
+			name: "nodewright with no manifests keeps its assert (misconfig surfaces elsewhere)",
+			ref: recipe.ComponentRef{
+				Name: nodewrightCustomizationsComponent,
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := nodewrightHealthCheckSuppressed(tc.ref)
+			if err != nil {
+				t.Fatalf("nodewrightHealthCheckSuppressed() error = %v, want nil", err)
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("nodewrightHealthCheckSuppressed() = %v, want %v", got, tc.want)
+				return
+			}
+		})
+	}
+}
+
+// TestVerifyNodewrightReady_TolerantWhenAllCRsSuppressed pins the fail-closed
+// distinction added for #1844: when manifests are declared but the effective
+// values render zero Skyhook CRs, readiness passes (nothing to verify) — the CR
+// was deliberately suppressed. This is checked before the CRD-discovery gate, so
+// no cluster state is required. Contrast with the no-manifests case, which still
+// fails closed as a misconfiguration (TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames).
+func TestVerifyNodewrightReady_TolerantWhenAllCRsSuppressed(t *testing.T) {
+	t.Parallel()
+
+	// A ref that keeps the component enabled for the readiness check but whose
+	// manifest gate renders the whole Skyhook CR away. `enabled: false` drives
+	// the same value gate the tuningEnabled=false path uses; calling
+	// verifyNodewrightReady directly bypasses the upstream IsEnabled filter so we
+	// exercise the render-empty branch itself.
+	ref := recipe.ComponentRef{
+		Name:          nodewrightCustomizationsComponent,
+		Namespace:     "skyhook",
+		ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning-generic.yaml"},
+		Overrides:     map[string]any{"enabled": false},
+	}
+	ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")}, nil,
+		[]recipe.ComponentRef{ref})
+
+	if err := verifyNodewrightReady(ctx, ref); err != nil {
+		t.Fatalf("verifyNodewrightReady() error = %v, want nil (all CRs suppressed by effective values)", err)
+	}
+}
+
+// TestIsRuntimeRequiredTaint pins the matcher: only the exact key+value with the
+// NoSchedule effect gates. A taint that shares the key but differs in value or
+// effect must not be mistaken for an in-flight tuning (or the gate would block
+// forever on an unrelated taint).
+func TestIsRuntimeRequiredTaint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		taint corev1.Taint
+		want  bool
+	}{
+		{
+			name:  "exact runtime-required NoSchedule",
+			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: runtimeRequiredTaintValue, Effect: corev1.TaintEffectNoSchedule},
+			want:  true,
+		},
+		{
+			name:  "right key+value but NoExecute effect",
+			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: runtimeRequiredTaintValue, Effect: corev1.TaintEffectNoExecute},
+			want:  false,
+		},
+		{
+			name:  "right key but different value",
+			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: "something-else", Effect: corev1.TaintEffectNoSchedule},
+			want:  false,
+		},
+		{
+			name:  "unrelated dedication taint",
+			taint: corev1.Taint{Key: "dedicated", Value: "user-workload", Effect: corev1.TaintEffectNoSchedule},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isRuntimeRequiredTaint(&tt.taint); got != tt.want {
+				t.Errorf("isRuntimeRequiredTaint(%+v) = %v, want %v", tt.taint, got, tt.want)
+			}
+		})
+	}
+}
+
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -1051,6 +1315,24 @@ func unreadyDaemonSet(namespace, name string, desired, ready int32) *appsv1.Daem
 			NumberReady:            ready,
 		},
 	}
+}
+
+// nodeWithTaints builds a Node fixture carrying the given taints.
+func nodeWithTaints(name string, taints ...corev1.Taint) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       corev1.NodeSpec{Taints: taints},
+	}
+}
+
+// nodeWithRuntimeRequiredTaint builds a Node fixture carrying the nodewright
+// runtime-required NoSchedule taint the readiness gate blocks on.
+func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
+	return nodeWithTaints(name, corev1.Taint{
+		Key:    runtimeRequiredTaintKey,
+		Value:  runtimeRequiredTaintValue,
+		Effect: corev1.TaintEffectNoSchedule,
+	})
 }
 
 // nodewrightWithStatus builds a Nodewright fixture. Nodewright is a cluster-scoped CR,

@@ -71,6 +71,29 @@ spec:
               (contains($stdout, 'unverified')): true
               (contains($stdout, 'Checksums verified')): true
 
+    - name: verify-unmanaged-bundle
+      description: Verify rejects files outside the checksums inventory.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              rm -rf "${WORK}/bundle-unmanaged"
+              cp -R "${WORK}/bundle" "${WORK}/bundle-unmanaged"
+              mkdir -p "${WORK}/bundle-unmanaged/999-unmanaged"
+              printf '#!/bin/sh\n' > "${WORK}/bundle-unmanaged/999-unmanaged/install.sh"
+              set +e
+              OUTPUT=$(${AICR_BIN} verify "${WORK}/bundle-unmanaged" \
+                --format json --min-trust-level unknown 2>&1)
+              RC=$?
+              set -e
+              echo "$OUTPUT"
+              test "$RC" -ne 0
+              echo "$OUTPUT" | grep -q '"trustLevel": "unknown"'
+              ! echo "$OUTPUT" | grep -Eq '"trustLevel": "(unverified|attested|verified)"'
+            check:
+              ($error == null): true
+
     - name: verify-min-trust-level-unverified
       description: Verify with --min-trust-level unverified passes for unattested bundle.
       try:

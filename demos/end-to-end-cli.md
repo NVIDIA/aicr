@@ -7,7 +7,7 @@
 Clean up prior state:
 
 ```shell
-rm -rf ./bundle recipe.yaml /tmp/aicr-unpacked
+rm -rf ./bundle ./oci-refs recipe.yaml /tmp/aicr-unpacked
 ```
 
 ## Commands
@@ -140,7 +140,7 @@ curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=h100&intent
 Navigate into the bundle:
 
 ```shell
-cd ./bundle && tree .
+(cd ./bundle && tree .)
 ```
 
 ![data flow](images/data.png)
@@ -148,35 +148,48 @@ cd ./bundle && tree .
 Review the checksums:
 
 ```shell
-cat checksums.txt
+cat ./bundle/checksums.txt
 ```
 
-Verify content integrity:
+Verify the complete bundle before deployment:
 
 ```shell
-shasum -a 256 -c checksums.txt
+(cd ./bundle && aicr verify .)
 ```
+
+This is the full closed-world verification gate: it checks every regular
+payload file, including `recipe.yaml`, and rejects additional files or
+directories, symlinks, and other non-regular filesystem objects. Legacy bundles
+with incomplete manifests report `unknown` trust and must be regenerated.
 
 Deploy:
 
 ```shell
-chmod +x deploy.sh && ./deploy.sh
+(cd ./bundle && aicr verify . && chmod +x deploy.sh && ./deploy.sh)
 ```
 
 Bundle as an OCI image:
 
 ```shell
+mkdir -p ./oci-refs && chmod 0700 ./oci-refs
 aicr bundle \
   --recipe recipe.yaml \
   --output oci://ghcr.io/nvidia/aicr-bundle-example \
   --deployer argocd \
-  --image-refs .digest
+  --image-refs ./oci-refs/bundle.digest
 ```
+
+`--image-refs` is OCI-output-only. Its target must have an existing real parent
+directory and be outside, and not aliased to, the planned or completed bundle.
+AICR writes the reference file with mode `0600` and replaces its directory
+entry with an anchored same-directory rename. Validation plus rename is not an
+atomic identity-conditioned operation, so do not allow concurrent mutation of
+the parent directory.
 
 Review manifest:
 
 ```shell
-crane manifest "ghcr.io/nvidia/aicr-bundle-example@$(cat .digest)" | jq .
+crane manifest "ghcr.io/nvidia/aicr-bundle-example@$(cat ./oci-refs/bundle.digest)" | jq .
 ```
 
 ## Validate Cluster
@@ -191,7 +204,7 @@ aicr validate \
 ## Embedded Data
 
 ```shell
-cd ../ && tree -L 2 ./recipes/
+tree -L 2 ./recipes/
 ```
 
 ![data flow](images/workflow.png)
@@ -235,6 +248,7 @@ yq . recipe.yaml
 Now generate bundles:
 
 ```shell
+mkdir -p ./oci-refs && chmod 0700 ./oci-refs
 aicr bundle \
   --recipe recipe.yaml \
   --data ./my-data \
@@ -243,15 +257,15 @@ aicr bundle \
   --system-node-selector nodeGroup=system-pool \
   --accelerated-node-selector nodeGroup=customer-gpu \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
-  --image-refs .digest
+  --image-refs ./oci-refs/external-data-bundle.digest
 ```
 
 Unpack the image:
 
 ```shell
-skopeo copy "docker://ghcr.io/nvidia/aicr-bundle-example@$(cat .digest)" oci:image-oci
+skopeo copy "docker://ghcr.io/nvidia/aicr-bundle-example@$(cat ./oci-refs/external-data-bundle.digest)" oci:image-oci
 mkdir -p /tmp/aicr-unpacked
-oras pull --oci-layout "image-oci@$(cat .digest)" -o /tmp/aicr-unpacked
+oras pull --oci-layout "image-oci@$(cat ./oci-refs/external-data-bundle.digest)" -o /tmp/aicr-unpacked
 tree /tmp/aicr-unpacked
 ```
 

@@ -132,7 +132,7 @@
 //
 // WithDataProvider attaches a DataProvider to the Builder so the metadata
 // store, component registry, and per-component values files all resolve
-// through the bound provider rather than the package-global one. This is
+// through the bound provider rather than the embedded default. This is
 // the canonical pattern for any caller that constructs more than one Builder
 // per process (multi-tenant servers, library users, test harnesses):
 //

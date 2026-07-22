@@ -30,10 +30,9 @@ inputs:
   go_licenses_version:
     description: 'go-licenses version (from .settings.yaml)'
     required: true
-  homebrew_deploy_key:
-    description: 'SSH deploy key for pushing Homebrew formula'
-    required: false
-    default: ''
+  candidate_tag:
+    description: 'Run-unique candidate image tag'
+    required: true
 
 outputs:
   release_outcome:
@@ -43,19 +42,62 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Validate inputs
+      id: validate
+      shell: bash
+      env:
+        INPUT_REGISTRY: ${{ inputs.registry }}
+        INPUT_KO_VERSION: ${{ inputs.ko_version }}
+        INPUT_GORELEASER_VERSION: ${{ inputs.goreleaser_version }}
+        INPUT_GO_LICENSES_VERSION: ${{ inputs.go_licenses_version }}
+        INPUT_CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+      run: |
+        set -euo pipefail
+        # shellcheck source=.github/actions/release-input-validation.sh
+        source "${GITHUB_ACTION_PATH}/../release-input-validation.sh"
+        for pair in \
+          "registry:${INPUT_REGISTRY}" \
+          "ko_version:${INPUT_KO_VERSION}" \
+          "goreleaser_version:${INPUT_GORELEASER_VERSION}" \
+          "go_licenses_version:${INPUT_GO_LICENSES_VERSION}" \
+          "candidate_tag:${INPUT_CANDIDATE_TAG}"; do
+          reject_newline "${pair%%:*}" "${pair#*:}"
+        done
+        if [[ "${INPUT_REGISTRY}" != "ghcr.io" ]]; then
+          echo "::error::registry must be ghcr.io"
+          exit 1
+        fi
+        for version in "${INPUT_KO_VERSION}" "${INPUT_GORELEASER_VERSION}" "${INPUT_GO_LICENSES_VERSION}"; do
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tool versions must use vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+        done
+        if [[ ! "${INPUT_CANDIDATE_TAG}" =~ ^candidate-[0-9]+-[0-9]+$ ]]; then
+          echo "::error::candidate_tag must match candidate-RUN_ID-RUN_ATTEMPT"
+          exit 1
+        fi
+        {
+          echo "registry=${INPUT_REGISTRY}"
+          echo "ko_version=${INPUT_KO_VERSION}"
+          echo "goreleaser_version=${INPUT_GORELEASER_VERSION}"
+          echo "go_licenses_version=${INPUT_GO_LICENSES_VERSION}"
+          echo "candidate_tag=${INPUT_CANDIDATE_TAG}"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Setup build tools
       uses: ./.github/actions/setup-build-tools
       with:
         install_ko: 'true'
-        ko_version: ${{ inputs.ko_version }}
+        ko_version: ${{ steps.validate.outputs.ko_version }}
         install_syft: 'true'
         install_goreleaser: 'true'
-        goreleaser_version: ${{ inputs.goreleaser_version }}
+        goreleaser_version: ${{ steps.validate.outputs.goreleaser_version }}
 
     - name: Install go-licenses
       shell: bash
       env:
-        GO_LICENSES_VERSION: ${{ inputs.go_licenses_version }}
+        GO_LICENSES_VERSION: ${{ steps.validate.outputs.go_licenses_version }}
       run: |
         set -euo pipefail
         if [[ -z "${GO_LICENSES_VERSION}" ]]; then
@@ -73,11 +115,21 @@ runs:
     - name: Authenticate to registry
       uses: ./.github/actions/ghcr-login
       with:
-        registry: ${{ inputs.registry }}
+        registry: ${{ steps.validate.outputs.registry }}
 
     # Note: the Rekor v2 signing config (AICR_SIGNING_CONFIG) is fetched and
     # exported by the generate-slsa-predicate action, co-located with
     # SLSA_PREDICATE, so it is present here without a separate step. See #1650.
+
+    - name: Verify release target
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ github.ref_name }}
+        GITHUB_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        .github/scripts/release-images.sh release-target
 
     - name: Build and Release
       id: release
@@ -85,7 +137,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
         GOFLAGS: -mod=vendor
-        HOMEBREW_DEPLOY_KEY: ${{ inputs.homebrew_deploy_key }}
+        AICR_CANDIDATE_TAG: ${{ steps.validate.outputs.candidate_tag }}
         # Repository paths are fully specified in .goreleaser.yaml kos.repositories
       run: |
         set -euo pipefail

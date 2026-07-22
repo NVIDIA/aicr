@@ -89,6 +89,9 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
 
 # Extract the bundles
 unzip bundles.zip -d ./bundles
+
+# Verify the complete extracted inventory before deployment
+(cd ./bundles && aicr verify .)
 ```
 
 ## Endpoints
@@ -140,8 +143,8 @@ curl "http://localhost:8080/v1/recipe?accelerator=h100"
 # Full specification
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8"
 
-# Using gpu alias
-curl "http://localhost:8080/v1/recipe?gpu=gb200&service=gke"
+# Using gpu alias (os is required here: gb200 on gke has no OS-agnostic recipe)
+curl "http://localhost:8080/v1/recipe?gpu=gb200&service=gke&os=cos"
 
 # Pretty print with jq
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.'
@@ -218,7 +221,29 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 
 **Error Responses:**
 - `400 Bad Request` - Invalid criteria format, missing required fields, or invalid enum values
+- `400 Bad Request` - A stated criteria dimension is not honored by any applicable recipe overlay (uncovered dimension). This applies to both `GET /v1/recipe` and `POST /v1/recipe`: every dimension you state (`service`, `accelerator`, `intent`, `os`, `platform`) must be matched by at least one applied overlay, or the request fails instead of silently returning a recipe that ignores it. `nodes` is exempt — it is advisory and never required to be covered. The response's `details.uncovered` array names the offending dimension(s), the requested value, and any `validCompletions` (additional criteria that would make the request coverable). Snapshot-driven resolution (CLI `--snapshot` / Go SDK) may additionally attach `excludedOverlays` and `constraintWarnings` to the error; the HTTP API resolves from criteria only and never emits those two fields.
 - `405 Method Not Allowed` - Only GET and POST are supported
+
+**Uncovered-Dimension Error Example:**
+
+```json
+{
+  "code": "INVALID_REQUEST",
+  "message": "platform 'kubeflow' for criteria(service=eks, accelerator=h100, intent=training, platform=kubeflow) requires os (valid: ubuntu)",
+  "details": {
+    "uncovered": [
+      {
+        "dimension": "platform",
+        "requestedValue": "kubeflow",
+        "validCompletions": [{"os": "ubuntu"}]
+      }
+    ]
+  },
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-01-15T10:30:00Z",
+  "retryable": false
+}
+```
 
 **Response:**
 
@@ -311,6 +336,10 @@ All GET /v1/recipe parameters are supported, plus:
 - **Scalar values** (string, number, bool) are returned as plain JSON values
 - **Complex values** (maps, lists) are returned as JSON objects/arrays
 
+**Error Responses:**
+
+`GET /v1/query` and `POST /v1/query` resolve a recipe through the same engine as `/v1/recipe`, so a stated criteria dimension not honored by any applicable overlay fails the same way: `400 Bad Request` with the `details.uncovered` array described in the [POST /v1/recipe error responses](#post-v1recipe) above.
+
 **Examples:**
 
 ```shell
@@ -376,6 +405,7 @@ Generate deployment bundles from a recipe.
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH` and registry credentials configured for any private upstream repos (`HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` for HTTP(S); docker config for OCI). If prerequisites are missing the request fails with a structured error code (`SERVICE_UNAVAILABLE` / HTTP 503 for missing helm, `UNAUTHORIZED` / HTTP 401 for credentials). |
+| `serial` | bool | false | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `deployer=argocd`, `argocd-helm`, `flux`, and `helmfile` (`helm` is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply order. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. |
 | `deployer` | string | helm | Deployment method: `helm`, `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=flux`; ignored by `deployer=argocd-helm`) |
 | `app-name` | string | | Parent Argo Application name (default: `aicr-stack` for `deployer=argocd-helm`, `nvidia-stack` for `deployer=argocd`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `deployer=argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected with HTTP 400 on other deployers. |
@@ -498,17 +528,23 @@ curl -X POST "http://localhost:8080/v1/bundle" \
 |--------|-------------|---------|
 | `Content-Type` | Always `application/zip` | `application/zip` |
 | `Content-Disposition` | Download filename | `attachment; filename="bundles.zip"` |
-| `X-Bundle-Files` | Total files in archive | `10` |
-| `X-Bundle-Size` | Uncompressed size (bytes) | `45678` |
+| `X-Bundle-Files` | Number of verified regular files streamed into the archive | `10` |
+| `X-Bundle-Size` | Aggregate uncompressed bytes of those verified regular files | `45678` |
 | `X-Bundle-Duration` | Generation time | `1.234s` |
+
+Before writing the response, the server stages a private, revalidated
+closed-world inventory. The ZIP contains only the inventory-derived
+directories and regular files, including `recipe.yaml` when present;
+unverified entries are rejected rather than archived. `X-Bundle-Files` and
+`X-Bundle-Size` are derived from that same frozen inventory.
 
 #### Bundle Structure
 
-```
+```text
 bundles.zip
 ├── deploy.sh                    # root automation script (executable)
 ├── README.md                    # root deployment guide
-├── checksums.txt                # SHA256 checksums (always set for /v1/bundle)
+├── checksums.txt                # SHA256 for every regular payload file in the archive
 ├── recipe.yaml                  # canonical post-resolution recipe (helm deployer)
 ├── 001-<component>/             # per-component folder (NNN-prefixed)
 │   ├── install.sh               # component install script
@@ -523,7 +559,10 @@ bundles.zip
 
 Checksums are root-level only; component folders carry `install.sh` at their
 root (no `scripts/` subdirectory), and no `uninstall.sh`/`undeploy.sh` is
-generated.
+generated. After extraction, `aicr verify .` performs full closed-world
+verification: every manifest digest must match and every additional file or
+directory, symlink, or other non-regular object is rejected, except the exact
+allowed inventory metadata paths.
 
 ---
 
@@ -613,10 +652,10 @@ curl -s -X POST "http://localhost:8080/v1/bundle" \
 echo "Extracting bundles..."
 unzip -q bundles.zip -d ./deployment
 
-# Verify checksums (checksums.txt is at the bundle root, not per-component)
-echo "Verifying checksums..."
+# Verify the complete inventory (checksums.txt is at the bundle root)
+echo "Verifying bundle inventory..."
 cd deployment
-sha256sum -c checksums.txt
+aicr verify .
 
 # Step 4: Deploy (example)
 echo "Bundle ready for deployment:"

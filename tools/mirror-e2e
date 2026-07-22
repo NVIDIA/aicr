@@ -140,11 +140,12 @@ ensure_cluster() {
 
 generate_recipe() {
     msg "Generating recipe..."
+    # No --os: the Kind overlay tree is OS-agnostic, and a stated OS that no
+    # Kind overlay distinguishes fails criteria coverage (issue #1542).
     "$AICR_BIN" recipe \
         --service kind \
         --accelerator h100 \
         --intent training \
-        --os ubuntu \
         --output "${WORK}/recipe.yaml" 2>&1
 
     if [[ ! -f "${WORK}/recipe.yaml" ]]; then

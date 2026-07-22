@@ -116,10 +116,14 @@ type Dashboard struct {
 	Tabs        []Tab  `json:"tabs"`
 }
 
-// Tab is one recipe (intent[-platform]). Its consensus is split per AICR
-// version so that corroboration only counts agreement at the SAME version
-// (cross-version agreement is not reproduction). Versions are newest-first;
-// the overview/landing summarize the newest (Versions[0]).
+// Tab is one recipe (intent[-platform]). Its consensus is baked two ways: the
+// strict per-version Versions grids (corroboration only counts agreement at the
+// SAME version, because cross-version agreement is not reproduction) and the
+// relaxed Combined grid (each source's single latest run, version-blind). The
+// renderer defaults to Combined ("all versions") so every source that has ever
+// attested the recipe is visible, and switches to a per-version grid when a
+// specific AICR version is selected. Versions are newest-first; a per-version
+// overview summarizes the newest (Versions[0]).
 type Tab struct {
 	// Recipe is the overlay metadata.name (the series-file slug).
 	Recipe string `json:"recipe"`
@@ -131,11 +135,25 @@ type Tab struct {
 	// Versions holds one baked consensus grid per AICR version present in the
 	// evidence, newest-first.
 	Versions []TabVersion `json:"versions"`
+
+	// Combined is the cross-version "all versions" consensus grid: each distinct
+	// signer's single latest run (version-blind) folded into one grid. It is the
+	// dashboard's default (non-strict) view — it surfaces every source that has
+	// attested the recipe, including sources whose latest run predates the newest
+	// release (which the newest strict grid, Versions[0], omits — such a source
+	// stays visible in its own version's Versions grid). Its own AICRVer is empty
+	// because it spans versions; each row's per-signer Latest.AICRVer still carries
+	// that source's real run version. Consensus here counts agreement ACROSS
+	// versions, which is weaker than same-version reproduction — the renderer makes
+	// that trade-off explicit and the strict Versions grids remain available.
+	Combined *TabVersion `json:"combined,omitempty"`
 }
 
-// TabVersion is one recipe's baked consensus grid for a single AICR version.
+// TabVersion is one recipe's baked consensus grid for a single AICR version, or
+// (when it is a Tab's Combined grid) the cross-version fold with an empty AICRVer.
 type TabVersion struct {
-	// AICRVer is the AICR version this grid's consensus was computed at.
+	// AICRVer is the AICR version this grid's consensus was computed at, or empty
+	// for a cross-version Combined grid.
 	AICRVer string `json:"aicrVer"`
 
 	// PhaseRollup maps each phase to its worst-first rollup state.
@@ -189,11 +207,27 @@ type Series struct {
 	// Recipe is the overlay metadata.name.
 	Recipe string `json:"recipe"`
 
+	// Rows is the phase-aware union of every row across ALL builds, ordered by
+	// PhaseOrder then CTRF name. The drilldown renders its rows from this rather
+	// than the latest combined grid, so a phase whose rows ran only in older
+	// builds is still shown (with its historical result) instead of collapsing
+	// to a "not run" placeholder.
+	Rows []SeriesRow `json:"rows"`
+
 	// Builds maps each signer-id-hash to its build columns, newest first.
 	Builds map[string][]SeriesBuild `json:"builds"`
 
 	// Health maps each signer-id-hash to its derived run-health summary.
 	Health map[string]SeriesHealth `json:"health"`
+}
+
+// SeriesRow is one row of the all-build union: a CTRF name and the phase it
+// belongs to. Historical-only rows (present in older builds but dropped from
+// every signer's latest run) appear here even though they are absent from the
+// latest combined grid.
+type SeriesRow struct {
+	Name  string `json:"name"`
+	Phase string `json:"phase"`
 }
 
 // SeriesBuild is one signer run rendered as a build column.

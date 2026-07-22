@@ -19,6 +19,7 @@ metadata:
   appliedOverlays:
     - base
     - monitoring-hpa
+    - h100-any
     - aks
     - aks-training
     - h100-aks-training
@@ -53,14 +54,14 @@ componentRefs:
     source: https://helm.ngc.nvidia.com/nvidia
     version: v26.3.2
     valuesFile: components/gpu-operator/values-aks-training.yaml
-    overrides:
-      cdi:
-        enabled: true
-      gdrcopy:
-        enabled: true
     dependencyRefs:
+      - nfd
       - cert-manager
       - kube-prometheus-stack
+      - network-operator
+      - nodewright-customizations
+    manifestFiles:
+      - components/gpu-operator/manifests/nvidia-toolkit-hardening-aks.yaml
   - name: k8s-ephemeral-storage-metrics
     namespace: monitoring
     chart: k8s-ephemeral-storage-metrics
@@ -70,6 +71,7 @@ componentRefs:
     valuesFile: components/k8s-ephemeral-storage-metrics/values.yaml
     dependencyRefs:
       - kube-prometheus-stack
+      - prometheus-operator-crds
   - name: kai-scheduler
     namespace: kai-scheduler
     chart: kai-scheduler
@@ -79,13 +81,6 @@ componentRefs:
     valuesFile: components/kai-scheduler/values.yaml
     dependencyRefs:
       - gpu-operator
-  - name: prometheus-operator-crds
-    namespace: monitoring
-    chart: prometheus-operator-crds
-    type: Helm
-    source: https://prometheus-community.github.io/helm-charts
-    version: 28.0.1
-    valuesFile: components/prometheus-operator-crds/values.yaml
   - name: kube-prometheus-stack
     namespace: monitoring
     chart: kube-prometheus-stack
@@ -93,8 +88,6 @@ componentRefs:
     source: https://prometheus-community.github.io/helm-charts
     version: 83.7.0
     valuesFile: components/kube-prometheus-stack/values.yaml
-    dependencyRefs:
-      - prometheus-operator-crds
     overrides:
       prometheus:
         prometheusSpec:
@@ -107,7 +100,52 @@ componentRefs:
                 resources:
                   requests:
                     storage: 50Gi
-                storageClassName: managed-csi
+    dependencyRefs:
+      - prometheus-operator-crds
+  - name: network-operator
+    namespace: nvidia-network-operator
+    chart: network-operator
+    type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    version: 26.1.1
+    valuesFile: components/network-operator/values-aks.yaml
+    dependencyRefs:
+      - nfd
+      - cert-manager
+    manifestFiles:
+      - components/network-operator/manifests/nfd-network-rule.yaml
+      - components/network-operator/manifests/nic-cluster-policy-aks.yaml
+      - components/network-operator/manifests/nvidia-peermem-reloader.yaml
+  - name: nfd
+    namespace: node-feature-discovery
+    chart: node-feature-discovery
+    type: Helm
+    source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+    version: 0.19.0
+    valuesFile: components/nfd/values.yaml
+    overrides:
+      topologyUpdater:
+        enable: true
+  - name: nodewright-customizations
+    namespace: skyhook
+    type: Helm
+    source: ""
+    overrides:
+      accelerator: h100
+      intent: multiNodeTraining
+      service: aks
+      tuningEnabled: false
+    dependencyRefs:
+      - nodewright-operator
+    manifestFiles:
+      - components/nodewright-customizations/manifests/tuning.yaml
+  - name: nodewright-operator
+    namespace: skyhook
+    chart: nodewright
+    type: Helm
+    source: oci://ghcr.io/nvidia/nodewright/charts
+    version: v0.17.1
+    valuesFile: components/nodewright-operator/values.yaml
   - name: nvidia-dra-driver-gpu
     namespace: nvidia-dra-driver
     chart: dra-driver-nvidia-gpu
@@ -119,6 +157,7 @@ componentRefs:
       controller:
         affinity:
           nodeAffinity: null
+      nvidiaDriverRoot: /
     dependencyRefs:
       - gpu-operator
   - name: nvsentinel
@@ -131,6 +170,7 @@ componentRefs:
     dependencyRefs:
       - cert-manager
       - gpu-operator
+      - prometheus-operator-crds
   - name: prometheus-adapter
     namespace: monitoring
     chart: prometheus-adapter
@@ -140,15 +180,19 @@ componentRefs:
     valuesFile: components/prometheus-adapter/values.yaml
     dependencyRefs:
       - kube-prometheus-stack
-  - name: nodewright-operator
-    namespace: skyhook
-    chart: nodewright
+  - name: prometheus-operator-crds
+    namespace: monitoring
+    chart: prometheus-operator-crds
     type: Helm
-    source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.17.1
-    valuesFile: components/nodewright-operator/values.yaml
+    source: https://prometheus-community.github.io/helm-charts
+    version: 28.0.1
+    valuesFile: components/prometheus-operator-crds/values.yaml
 deploymentOrder:
   - cert-manager
+  - nfd
+  - network-operator
+  - nodewright-operator
+  - nodewright-customizations
   - prometheus-operator-crds
   - kube-prometheus-stack
   - gpu-operator
@@ -157,7 +201,6 @@ deploymentOrder:
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter
-  - nodewright-operator
 validation:
   deployment:
     constraints:
@@ -169,13 +212,11 @@ validation:
       - gpu-operator-version
       - check-nvidia-smi
   performance:
-    checks:
-      - nccl-all-reduce-bw
     constraints:
-      # Provisional floor pending calibration on an ND96isr_H100_v5 testbed —
-      # see recipes/overlays/h100-aks-training.yaml.
       - name: nccl-all-reduce-bw
         value: '>= 150'
+    checks:
+      - nccl-all-reduce-bw
   conformance:
     checks:
       - platform-health

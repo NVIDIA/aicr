@@ -43,8 +43,12 @@ spec:
 
     # Same tuning manifest as EKS: nvidia-setup 0.5.0 supports service: aks
     # (aks-h100), covering host IB RDMA + memlock setup that the
-    # ib-node-config-aks DaemonSet used to perform, and nvidia-tuned applies
-    # the aks-h100-inference profile.
+    # ib-node-config-aks DaemonSet used to perform. nvidia-tuned (which would
+    # apply the aks-h100-inference profile) is disabled by default under the
+    # Azure-managed driver profile — no nvidia-tuned-triggered reboot
+    # (nvidia-setup-full still reboots for host prep), and the tuned profile's
+    # isolcpus/hugepages measurably regressed inference TTFT on AKS H100.
+    # Re-enable with --set nodewrightcustomizations:tuningEnabled=true.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
@@ -53,6 +57,8 @@ spec:
         service: aks
         accelerator: h100
         intent: inference
+        # Azure-managed driver profile: skip the nvidia-tuned package.
+        tuningEnabled: false
       dependencyRefs:
         - nodewright-operator
 

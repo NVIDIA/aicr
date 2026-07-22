@@ -33,6 +33,33 @@ func TestKMSAttesterContract(t *testing.T) {
 	}
 }
 
+// TestKMSAttesterWithoutTransparencyLog verifies the functional option opts the
+// attester out of the Rekor upload: HasRekorEntry reports false, while a
+// default (no-option) attester still reports true. See #409.
+func TestKMSAttesterWithoutTransparencyLog(t *testing.T) {
+	const keyURI = "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k"
+
+	cases := []struct {
+		name      string
+		opts      []KMSAttesterOption
+		wantRekor bool
+	}{
+		{"default records a Rekor entry", nil, true},
+		{"WithoutTransparencyLog records no entry", []KMSAttesterOption{WithoutTransparencyLog()}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewKMSAttester(keyURI, SignOptions{UseTUFSigningConfig: true}, tc.opts...)
+			if a.HasRekorEntry() != tc.wantRekor {
+				t.Errorf("HasRekorEntry() = %v, want %v", a.HasRekorEntry(), tc.wantRekor)
+			}
+			if a.Identity() != keyURI {
+				t.Errorf("Identity = %q, want %q", a.Identity(), keyURI)
+			}
+		})
+	}
+}
+
 // TestKMSAttesterAttest exercises Attest end-to-end offline by injecting a
 // fake key-based identity (local ECDSA signer, no cert provider) and the
 // no-tlog policy, so no KMS provider or Rekor call is made. It asserts the
@@ -62,5 +89,11 @@ func TestKMSAttesterAttest(t *testing.T) {
 	}
 	if b.GetVerificationMaterial().GetPublicKey() == nil {
 		t.Error("want public-key verification material for KMS signing")
+	}
+	// The no-tlog policy must produce a bundle with no transparency-log entries:
+	// assert directly on Attest's output (HasRekorEntry only reports the policy
+	// choice, not the emitted bundle).
+	if got := len(b.GetVerificationMaterial().GetTlogEntries()); got != 0 {
+		t.Errorf("no-tlog KMS attestation carries %d tlog entries, want 0", got)
 	}
 }

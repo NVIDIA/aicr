@@ -16,6 +16,7 @@ package validator
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
@@ -30,6 +32,7 @@ import (
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/recipes"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 func TestNewDefaults(t *testing.T) {
@@ -47,6 +50,9 @@ func TestNewDefaults(t *testing.T) {
 	if v.NoCluster {
 		t.Error("NoCluster should default to false")
 	}
+	if v.Kubeconfig != "" {
+		t.Errorf("Kubeconfig = %q, want empty", v.Kubeconfig)
+	}
 	if len(v.Tolerations) != 1 || v.Tolerations[0].Operator != corev1.TolerationOpExists {
 		t.Errorf("Tolerations should default to tolerate-all, got %v", v.Tolerations)
 	}
@@ -59,6 +65,7 @@ func TestNewWithOptions(t *testing.T) {
 	v := New(
 		WithVersion("1.0.0"),
 		WithCommit("abc1234"),
+		WithKubeconfig("/path/to/kubeconfig"),
 		WithNamespace("custom-ns"),
 		WithRunID("test-run"),
 		WithCleanup(false),
@@ -72,6 +79,9 @@ func TestNewWithOptions(t *testing.T) {
 	}
 	if v.Commit != "abc1234" {
 		t.Errorf("Commit = %q, want %q", v.Commit, "abc1234")
+	}
+	if v.Kubeconfig != "/path/to/kubeconfig" {
+		t.Errorf("Kubeconfig = %q, want %q", v.Kubeconfig, "/path/to/kubeconfig")
 	}
 	if v.Namespace != "custom-ns" {
 		t.Errorf("Namespace = %q, want %q", v.Namespace, "custom-ns")
@@ -87,6 +97,84 @@ func TestNewWithOptions(t *testing.T) {
 	}
 	if len(v.ImagePullSecrets) != 1 || v.ImagePullSecrets[0] != "secret1" {
 		t.Errorf("ImagePullSecrets = %v", v.ImagePullSecrets)
+	}
+}
+
+// TestPrepareClusterPropagatesCustomKubeconfig verifies the run-scoped path
+// reaches cluster client creation without reading a kubeconfig file or
+// contacting Kubernetes. The injected factory fails before any cluster API
+// operation, keeping this regression test hermetic and fail-safe.
+func TestPrepareClusterPropagatesCustomKubeconfig(t *testing.T) {
+	t.Parallel()
+
+	const wantKubeconfig = "/path/to/target-kubeconfig"
+	wantErr := stderrors.New("stop before cluster access")
+	v := New(WithKubeconfig("  " + wantKubeconfig + "  "))
+
+	var gotKubeconfig string
+	v.kubeClientFactory = func(kubeconfig string) (kubernetes.Interface, error) {
+		gotKubeconfig = kubeconfig
+		return nil, wantErr
+	}
+
+	_, err := v.prepareCluster(t.Context(), nil, nil)
+	if !stderrors.Is(err, wantErr) {
+		t.Fatalf("prepareCluster() error = %v, want wrapped injected error", err)
+	}
+	if gotKubeconfig != wantKubeconfig {
+		t.Errorf("kubeconfig = %q, want %q", gotKubeconfig, wantKubeconfig)
+	}
+}
+
+// TestPrepareClusterEmptyKubeconfigUsesDefaultClient verifies that empty input
+// is routed through default discovery without consulting the explicit-path
+// client factory. The environment is cleared so default discovery fails before
+// any cluster access, keeping the test hermetic.
+func TestPrepareClusterEmptyKubeconfigUsesDefaultClient(t *testing.T) {
+	t.Setenv("KUBECONFIG", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "")
+
+	wantFactoryErr := stderrors.New("explicit-path factory called")
+	v := New(WithKubeconfig(" \t "))
+	factoryCalled := false
+	v.kubeClientFactory = func(string) (kubernetes.Interface, error) {
+		factoryCalled = true
+		return nil, wantFactoryErr
+	}
+
+	_, err := v.prepareCluster(t.Context(), nil, nil)
+	if err == nil {
+		t.Fatal("prepareCluster() error = nil, want default discovery error")
+	}
+	if factoryCalled {
+		t.Error("prepareCluster() called explicit-path factory for empty kubeconfig")
+	}
+	if stderrors.Is(err, wantFactoryErr) {
+		t.Errorf("prepareCluster() error = %v, want default discovery error", err)
+	}
+}
+
+// TestPrepareClusterRejectsMissingKubeconfig verifies that a typo in a
+// caller-supplied path is classified as invalid input before Kubernetes client
+// construction can relabel the filesystem error as an internal failure.
+func TestPrepareClusterRejectsMissingKubeconfig(t *testing.T) {
+	t.Parallel()
+
+	kubeconfig := filepath.Join(t.TempDir(), "missing-kubeconfig")
+	v := New(WithKubeconfig(kubeconfig))
+
+	_, err := v.prepareCluster(t.Context(), nil, nil)
+	if err == nil {
+		t.Fatal("prepareCluster() error = nil, want invalid request")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("prepareCluster() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !stderrors.Is(err, fs.ErrNotExist) {
+		t.Errorf("prepareCluster() error = %v, want wrapped fs.ErrNotExist", err)
 	}
 }
 

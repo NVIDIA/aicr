@@ -70,10 +70,22 @@ type ResolveOptions struct {
 
 	// SigningKey selects KMS-backed (key-based) signing instead of keyless OIDC.
 	// When non-empty it is a cosign-style KMS URI (awskms:// | gcpkms:// |
-	// azurekms://) and takes precedence over all OIDC source fields, which are
+	// azurekms:// | hashivault://) and takes precedence over all OIDC source fields, which are
 	// keyless-only. Mutual exclusivity with the keyless flags is enforced at the
 	// CLI boundary (pkg/cli). See issue #407.
 	SigningKey string
+
+	// DisableTLogUpload skips the Rekor transparency-log upload for KMS
+	// (SigningKey) signing, enabling fully offline / air-gapped bundle
+	// attestation (#409). The zero value (false) is the safe default: a caller
+	// constructing ResolveOptions without setting it still gets a Rekor entry.
+	//
+	// It affects ONLY the KMS path. Keyless (OIDC) signing ignores this field
+	// and always uploads to Rekor, because keyless needs Fulcio + Rekor network
+	// access to produce a verifiable certificate; that is a fail-safe. The CLI
+	// boundary (pkg/cli) rejects DisableTLogUpload without a SigningKey so a
+	// keyless caller cannot silently expect an offline signature.
+	DisableTLogUpload bool
 
 	// PromptWriter receives user-facing prompts emitted by the interactive
 	// and device-code flows (verification URL + short code). Pass os.Stderr
@@ -167,7 +179,11 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 		return NewNoOpAttester(), nil
 	}
 	if opts.SigningKey != "" {
-		return NewKMSAttester(opts.SigningKey, SignOptionsFromResolve("", opts)), nil
+		var kopts []KMSAttesterOption
+		if opts.DisableTLogUpload {
+			kopts = append(kopts, WithoutTransparencyLog())
+		}
+		return NewKMSAttester(opts.SigningKey, SignOptionsFromResolve("", opts), kopts...), nil
 	}
 	token, err := ResolveOIDCToken(ctx, opts)
 	if err != nil {
@@ -195,7 +211,11 @@ func ResolveAttesterLazy(_ context.Context, opts ResolveOptions) (Attester, erro
 		return NewNoOpAttester(), nil
 	}
 	if opts.SigningKey != "" {
-		return NewKMSAttester(opts.SigningKey, SignOptionsFromResolve("", opts)), nil
+		var kopts []KMSAttesterOption
+		if opts.DisableTLogUpload {
+			kopts = append(kopts, WithoutTransparencyLog())
+		}
+		return NewKMSAttester(opts.SigningKey, SignOptionsFromResolve("", opts), kopts...), nil
 	}
 	return NewLazyKeylessAttester(opts), nil
 }

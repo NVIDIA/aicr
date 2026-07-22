@@ -16,10 +16,12 @@ package oci
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -27,20 +29,23 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/opencontainers/go-digest"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	oras "oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -49,6 +54,15 @@ type testOCIResult struct {
 	Digest       string
 	LayoutDir    string
 	ManifestPath string
+}
+
+func validTestManifestDescriptor() ociv1.Descriptor {
+	return content.NewDescriptorFromBytes(ociv1.MediaTypeImageManifest, []byte("test-manifest"))
+}
+
+func storedTestManifestBytes(id string) []byte {
+	return []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"config":{"mediaType":%q,"digest":"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","size":2},"layers":[],"annotations":{"test.id":%q}}`,
+		ociv1.MediaTypeImageManifest, ociv1.MediaTypeImageConfig, id))
 }
 
 // extractFilesFromOCIArtifact reads an OCI layout and extracts the file list from the artifact layer.
@@ -204,7 +218,7 @@ func TestStripProtocol(t *testing.T) {
 
 func TestPushFromStore_EmptyTag(t *testing.T) {
 	// PushFromStore should fail when tag is empty
-	_, err := PushFromStore(context.Background(), "/nonexistent", PushOptions{
+	_, err := PushFromStore(context.Background(), "/nonexistent", validTestManifestDescriptor(), PushOptions{
 		Registry:   "localhost:5000",
 		Repository: "test/repo",
 		Tag:        "", // Empty tag should fail
@@ -222,7 +236,7 @@ func TestPushFromStore_EmptyTag(t *testing.T) {
 
 func TestPushFromStore_InvalidReference(t *testing.T) {
 	// PushFromStore should fail for invalid registry references
-	_, err := PushFromStore(context.Background(), "/nonexistent", PushOptions{
+	_, err := PushFromStore(context.Background(), "/nonexistent", validTestManifestDescriptor(), PushOptions{
 		Registry:   "invalid registry with spaces",
 		Repository: "test/repo",
 		Tag:        "v1.0.0",
@@ -689,266 +703,6 @@ func TestOCIReproducibleBuild(t *testing.T) {
 	}
 }
 
-// TestHardLinkDir tests the hardLinkDir function for various scenarios.
-func TestHardLinkDir(t *testing.T) {
-	t.Run("simple directory", func(t *testing.T) {
-		srcDir := t.TempDir()
-		dstDir := t.TempDir()
-
-		// Create test files in source
-		testFiles := map[string]string{
-			"file1.txt": "content 1",
-			"file2.txt": "content 2",
-		}
-		for name, content := range testFiles {
-			if err := os.WriteFile(filepath.Join(srcDir, name), []byte(content), 0o644); err != nil {
-				t.Fatalf("failed to create test file: %v", err)
-			}
-		}
-
-		dstPath := filepath.Join(dstDir, "linked")
-		if err := hardLinkDir(context.Background(), srcDir, dstPath); err != nil {
-			t.Fatalf("hardLinkDir() error = %v", err)
-		}
-
-		// Verify all files were linked
-		for name, expectedContent := range testFiles {
-			content, err := os.ReadFile(filepath.Join(dstPath, name))
-			if err != nil {
-				t.Errorf("failed to read linked file %s: %v", name, err)
-				continue
-			}
-			if string(content) != expectedContent {
-				t.Errorf("file %s content = %q, want %q", name, string(content), expectedContent)
-			}
-		}
-	})
-
-	t.Run("nested directories", func(t *testing.T) {
-		srcDir := t.TempDir()
-		dstDir := t.TempDir()
-
-		// Create nested structure
-		nestedDir := filepath.Join(srcDir, "level1", "level2")
-		if err := os.MkdirAll(nestedDir, 0o755); err != nil {
-			t.Fatalf("failed to create nested dirs: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(nestedDir, "deep.txt"), []byte("deep content"), 0o644); err != nil {
-			t.Fatalf("failed to create deep file: %v", err)
-		}
-
-		dstPath := filepath.Join(dstDir, "linked")
-		if err := hardLinkDir(context.Background(), srcDir, dstPath); err != nil {
-			t.Fatalf("hardLinkDir() error = %v", err)
-		}
-
-		// Verify nested file exists
-		content, err := os.ReadFile(filepath.Join(dstPath, "level1", "level2", "deep.txt"))
-		if err != nil {
-			t.Fatalf("failed to read nested file: %v", err)
-		}
-		if string(content) != "deep content" {
-			t.Errorf("nested file content = %q, want %q", string(content), "deep content")
-		}
-	})
-
-	t.Run("source not exist", func(t *testing.T) {
-		dstDir := t.TempDir()
-		err := hardLinkDir(context.Background(), "/nonexistent/path", filepath.Join(dstDir, "linked"))
-		if err == nil {
-			t.Error("hardLinkDir() expected error for nonexistent source, got nil")
-		}
-		if !strings.Contains(err.Error(), "failed to stat source directory") {
-			t.Errorf("hardLinkDir() error = %q, want to contain 'failed to stat source directory'", err.Error())
-		}
-	})
-
-	t.Run("empty directory", func(t *testing.T) {
-		srcDir := t.TempDir()
-		dstDir := t.TempDir()
-
-		dstPath := filepath.Join(dstDir, "linked")
-		if err := hardLinkDir(context.Background(), srcDir, dstPath); err != nil {
-			t.Fatalf("hardLinkDir() error = %v", err)
-		}
-
-		// Verify destination exists and is a directory
-		info, err := os.Stat(dstPath)
-		if err != nil {
-			t.Fatalf("failed to stat destination: %v", err)
-		}
-		if !info.IsDir() {
-			t.Error("destination should be a directory")
-		}
-	})
-
-	t.Run("verifies hard link (same inode)", func(t *testing.T) {
-		srcDir := t.TempDir()
-		dstDir := t.TempDir()
-
-		srcFile := filepath.Join(srcDir, "test.txt")
-		if err := os.WriteFile(srcFile, []byte("test content"), 0o644); err != nil {
-			t.Fatalf("failed to create test file: %v", err)
-		}
-
-		dstPath := filepath.Join(dstDir, "linked")
-		if err := hardLinkDir(context.Background(), srcDir, dstPath); err != nil {
-			t.Fatalf("hardLinkDir() error = %v", err)
-		}
-
-		// Get inode of source and destination files
-		srcInfo, err := os.Stat(srcFile)
-		if err != nil {
-			t.Fatalf("failed to stat source: %v", err)
-		}
-		dstInfo, err := os.Stat(filepath.Join(dstPath, "test.txt"))
-		if err != nil {
-			t.Fatalf("failed to stat destination: %v", err)
-		}
-
-		// On Unix systems, hard links share the same inode
-		if !os.SameFile(srcInfo, dstInfo) {
-			t.Error("source and destination should be hard links (same file)")
-		}
-	})
-}
-
-// snapshotDir returns a sorted list of "name=size" strings for every
-// regular file directly inside dir (non-recursive). Used to assert that
-// a directory's file set is unchanged across an operation.
-func snapshotDir(t *testing.T, dir string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("ReadDir %q: %v", dir, err)
-	}
-	out := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.Type().IsRegular() {
-			continue
-		}
-		info, statErr := e.Info()
-		if statErr != nil {
-			t.Fatalf("Info %q: %v", e.Name(), statErr)
-		}
-		out = append(out, e.Name()+"="+strconv.FormatInt(info.Size(), 10))
-	}
-	sort.Strings(out)
-	return out
-}
-
-// TestPreparePushDir tests the preparePushDir function.
-func TestPreparePushDir(t *testing.T) {
-	t.Run("no subdir hardlinks to temp dir, leaves source untouched", func(t *testing.T) {
-		// Regression: the no-subdir path used to return sourceDir
-		// directly, letting the oras file store write manifest blobs
-		// (named after the OCI title annotation, e.g., "AICR Recipe
-		// Evidence" with spaces) into the caller's bundle directory.
-		// preparePushDir must always return a tempdir so the file
-		// store is never rooted in user space.
-		srcDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(srcDir, "a.yaml"), []byte("a"), 0o644); err != nil {
-			t.Fatalf("seed file: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(srcDir, "b.json"), []byte("b"), 0o644); err != nil {
-			t.Fatalf("seed file: %v", err)
-		}
-		before := snapshotDir(t, srcDir)
-
-		result, cleanup, err := preparePushDir(context.Background(), srcDir, "")
-		if err != nil {
-			t.Fatalf("preparePushDir() error = %v", err)
-		}
-		if cleanup == nil {
-			t.Fatal("cleanup must always be non-nil (no shortcut return)")
-		}
-		defer cleanup()
-
-		if result == srcDir {
-			t.Fatalf("preparePushDir must not return sourceDir directly; got %q == srcDir", result)
-		}
-		after := snapshotDir(t, srcDir)
-		if !reflect.DeepEqual(before, after) {
-			t.Errorf("source directory was modified by preparePushDir; before=%v after=%v", before, after)
-		}
-		for _, name := range []string{"a.yaml", "b.json"} {
-			if _, statErr := os.Stat(filepath.Join(result, name)); statErr != nil {
-				t.Errorf("expected %q hard-linked into temp dir, got: %v", name, statErr)
-			}
-		}
-	})
-
-	t.Run("with subdir creates temp with links", func(t *testing.T) {
-		srcDir := t.TempDir()
-
-		// Create subdir with content
-		subDir := filepath.Join(srcDir, "mysubdir")
-		if err := os.MkdirAll(subDir, 0o755); err != nil {
-			t.Fatalf("failed to create subdir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("content"), 0o644); err != nil {
-			t.Fatalf("failed to create file: %v", err)
-		}
-
-		result, cleanup, err := preparePushDir(context.Background(), srcDir, "mysubdir")
-		if err != nil {
-			t.Fatalf("preparePushDir() error = %v", err)
-		}
-		if cleanup == nil {
-			t.Fatal("cleanup should not be nil when subdir specified")
-		}
-		defer cleanup()
-
-		// Verify the structure preserves the subdir path
-		expectedFile := filepath.Join(result, "mysubdir", "file.txt")
-		content, err := os.ReadFile(expectedFile)
-		if err != nil {
-			t.Fatalf("failed to read linked file: %v", err)
-		}
-		if string(content) != "content" {
-			t.Errorf("file content = %q, want %q", string(content), "content")
-		}
-	})
-
-	t.Run("cleanup removes temp directory", func(t *testing.T) {
-		srcDir := t.TempDir()
-
-		// Create subdir with content
-		subDir := filepath.Join(srcDir, "mysubdir")
-		if err := os.MkdirAll(subDir, 0o755); err != nil {
-			t.Fatalf("failed to create subdir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("content"), 0o644); err != nil {
-			t.Fatalf("failed to create file: %v", err)
-		}
-
-		result, cleanup, err := preparePushDir(context.Background(), srcDir, "mysubdir")
-		if err != nil {
-			t.Fatalf("preparePushDir() error = %v", err)
-		}
-
-		// Call cleanup
-		cleanup()
-
-		// Verify temp directory is gone
-		if _, err := os.Stat(result); !os.IsNotExist(err) {
-			t.Errorf("temp directory should be removed after cleanup, but still exists: %s", result)
-		}
-	})
-
-	t.Run("nonexistent subdir fails", func(t *testing.T) {
-		srcDir := t.TempDir()
-
-		_, cleanup, err := preparePushDir(context.Background(), srcDir, "nonexistent")
-		if err == nil {
-			if cleanup != nil {
-				cleanup()
-			}
-			t.Error("preparePushDir() expected error for nonexistent subdir, got nil")
-		}
-	})
-}
-
 // TestContextCancellation tests that operations respect context cancellation.
 func TestContextCancellation(t *testing.T) {
 	t.Run("Package respects canceled context", func(t *testing.T) {
@@ -975,7 +729,7 @@ func TestContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 
-		_, err := PushFromStore(ctx, "/nonexistent", PushOptions{
+		_, err := PushFromStore(ctx, "/nonexistent", validTestManifestDescriptor(), PushOptions{
 			Registry:   "localhost:5000",
 			Repository: "test/repo",
 			Tag:        "v1.0.0",
@@ -1030,12 +784,90 @@ func TestCreateAuthClient(t *testing.T) {
 	})
 }
 
+func TestNewPublicationTargetOwnsRegistryTransportCleanup(t *testing.T) {
+	target, err := newPublicationTarget(PushOptions{
+		Registry:   "ghcr.io",
+		Repository: "test/repo",
+	})
+	if err != nil {
+		t.Fatalf("newPublicationTarget() error = %v", err)
+	}
+	managed, ok := target.(*remotePublicationTarget)
+	if !ok {
+		t.Fatalf("newPublicationTarget() type = %T, want *remotePublicationTarget", target)
+	}
+	transport := &closeIdleCountingTransport{}
+	managed.client.Transport = transport
+	target.CloseIdleConnections()
+	if got := transport.calls.Load(); got != 1 {
+		t.Fatalf("transport CloseIdleConnections calls = %d, want 1", got)
+	}
+}
+
+type closeIdleCountingTransport struct {
+	calls atomic.Int32
+}
+
+func (t *closeIdleCountingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, stderrors.New("unexpected registry request")
+}
+
+func (t *closeIdleCountingTransport) CloseIdleConnections() {
+	t.calls.Add(1)
+}
+
+func TestPushReferrerClosesRegistryTransport(t *testing.T) {
+	subject := content.NewDescriptorFromBytes(ociv1.MediaTypeImageManifest, []byte("subject"))
+	opts := ReferrerOptions{
+		Registry:     "ghcr.io",
+		Repository:   "test/repo",
+		ArtifactType: "application/vnd.test.referrer",
+		LayerContent: []byte("payload"),
+		Subject:      subject,
+	}
+	for _, tt := range []struct {
+		name    string
+		copyErr error
+	}{
+		{name: "success"},
+		{name: "failure", copyErr: apperrors.New(apperrors.ErrCodeUnavailable, "copy failed")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			target := newTestPublicationTarget()
+			deps := defaultReferrerPushDependencies()
+			deps.newTarget = func(PushOptions) (publicationTarget, error) { return target, nil }
+			deps.copy = func(
+				context.Context,
+				oras.ReadOnlyTarget,
+				string,
+				oras.Target,
+				string,
+				oras.CopyOptions,
+			) (ociv1.Descriptor, error) {
+
+				return subject, tt.copyErr
+			}
+			result, err := pushReferrerWithDependencies(context.Background(), opts, deps)
+			if tt.copyErr != nil {
+				if err == nil || result != nil {
+					t.Fatalf("failed PushReferrer result=%+v error=%v", result, err)
+				}
+			} else if err != nil || result == nil {
+				t.Fatalf("PushReferrer result=%+v error=%v", result, err)
+			}
+			if got := target.idleCloses.Load(); got != 1 {
+				t.Fatalf("CloseIdleConnections calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
 // TestPushFromStore_MorePaths tests additional error paths in PushFromStore.
 func TestPushFromStore_MorePaths(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("invalid store path", func(t *testing.T) {
-		_, err := PushFromStore(ctx, "/nonexistent/path/to/store", PushOptions{
+		_, err := PushFromStore(ctx, "/nonexistent/path/to/store", validTestManifestDescriptor(), PushOptions{
 			Registry:   "localhost:5000",
 			Repository: "test/repo",
 			Tag:        "v1.0.0",
@@ -1060,7 +892,7 @@ func TestPushFromStore_MorePaths(t *testing.T) {
 			t.Fatalf("Failed to create blobs directory: %v", err)
 		}
 
-		_, err := PushFromStore(ctx, storeDir, PushOptions{
+		_, err := PushFromStore(ctx, storeDir, validTestManifestDescriptor(), PushOptions{
 			Registry:   "localhost:5000",
 			Repository: "test/repo",
 			Tag:        "v1.0.0",
@@ -1162,6 +994,59 @@ func TestCopyWithRetry_SucceedsOnFirstAttempt(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Errorf("copy attempts = %d, want 1", got)
+	}
+}
+
+func TestCopyWithRetry_CancellationWinsSuccessfulAttempt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	want := validTestManifestDescriptor()
+	var calls atomic.Int32
+	copy := func(
+		context.Context,
+		oras.ReadOnlyTarget,
+		string,
+		oras.Target,
+		string,
+		oras.CopyOptions,
+	) (ociv1.Descriptor, error) {
+
+		calls.Add(1)
+		cancel()
+		return want, nil
+	}
+
+	got, err := copyWithRetryConfig(ctx, nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, copy, 1, time.Millisecond, time.Second)
+	assertErrorCode(t, err, apperrors.ErrCodeTimeout)
+	if !reflect.DeepEqual(got, ociv1.Descriptor{}) {
+		t.Fatalf("copyWithRetryConfig() descriptor = %+v after cancellation, want zero", got)
+	}
+	if gotCalls := calls.Load(); gotCalls != 1 {
+		t.Fatalf("copy attempts = %d, want 1", gotCalls)
+	}
+}
+
+func TestCopyWithRetry_AttemptDeadlineWinsSuccessfulReturn(t *testing.T) {
+	want := validTestManifestDescriptor()
+	copy := func(
+		attemptCtx context.Context,
+		_ oras.ReadOnlyTarget,
+		_ string,
+		_ oras.Target,
+		_ string,
+		_ oras.CopyOptions,
+	) (ociv1.Descriptor, error) {
+
+		<-attemptCtx.Done()
+		return want, nil
+	}
+
+	got, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, copy, 1, time.Millisecond, time.Millisecond)
+	assertErrorCode(t, err, apperrors.ErrCodeTimeout)
+	if !reflect.DeepEqual(got, ociv1.Descriptor{}) {
+		t.Fatalf("copyWithRetryConfig() descriptor = %+v after attempt deadline, want zero", got)
 	}
 }
 
@@ -1370,97 +1255,6 @@ func TestIsTransientPushError(t *testing.T) {
 	}
 }
 
-// TestCopyDir_RecursiveContentAndModes verifies the EXDEV fallback path.
-// preparePushDir uses copyDir when hard links fail (e.g., $TMPDIR is on a
-// different filesystem from sourceDir, common in containers with tmpfs
-// /tmp). The fallback must reproduce the directory tree, file content,
-// and mode bits — anything less leaves the oras push pointing at an
-// incomplete bundle.
-func TestCopyDir_RecursiveContentAndModes(t *testing.T) {
-	src := t.TempDir()
-	dst := filepath.Join(t.TempDir(), "out")
-
-	// Tree: src/{a.txt, sub/b.txt}
-	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("alpha"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(src, "sub", "b.txt"), []byte("beta"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := copyDir(context.Background(), src, dst); err != nil {
-		t.Fatalf("copyDir: %v", err)
-	}
-
-	for path, want := range map[string]string{
-		filepath.Join(dst, "a.txt"):        "alpha",
-		filepath.Join(dst, "sub", "b.txt"): "beta",
-	} {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Errorf("read %s: %v", path, err)
-			continue
-		}
-		if string(body) != want {
-			t.Errorf("%s = %q, want %q", path, body, want)
-		}
-	}
-
-	// Modes must round-trip — the oras file store reads files via os.Open
-	// (mode-agnostic) but downstream consumers may rely on permission
-	// bits, so the EXDEV fallback must not silently downgrade them.
-	for path, want := range map[string]os.FileMode{
-		filepath.Join(dst, "a.txt"):        0o600,
-		filepath.Join(dst, "sub", "b.txt"): 0o644,
-		filepath.Join(dst, "sub"):          0o755,
-	} {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Errorf("stat %s: %v", path, err)
-			continue
-		}
-		if got := info.Mode().Perm(); got != want {
-			t.Errorf("%s perm = %o, want %o", path, got, want)
-		}
-	}
-}
-
-// TestCopyDir_RespectsCanceledContext locks in the contract that the
-// EXDEV-fallback walk surfaces context cancellation rather than running
-// to completion. A pre-canceled ctx must fail fast before any file I/O.
-func TestCopyDir_RespectsCanceledContext(t *testing.T) {
-	src := t.TempDir()
-	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if err := copyDir(ctx, src, filepath.Join(t.TempDir(), "out")); err == nil {
-		t.Fatalf("expected error for canceled context")
-	}
-}
-
-// TestHardLinkDir_RespectsCanceledContext mirrors the cancel test on the
-// hardlink path so both walks share the same cancellation guarantee.
-func TestHardLinkDir_RespectsCanceledContext(t *testing.T) {
-	src := t.TempDir()
-	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if err := hardLinkDir(ctx, src, filepath.Join(t.TempDir(), "out")); err == nil {
-		t.Fatalf("expected error for canceled context")
-	}
-}
-
 func TestJitterDuration(t *testing.T) {
 	t.Run("zero returns zero", func(t *testing.T) {
 		if got := jitterDuration(0); got != 0 {
@@ -1480,4 +1274,1132 @@ func TestJitterDuration(t *testing.T) {
 			}
 		}
 	})
+}
+
+type testPublicationTarget struct {
+	mu          sync.Mutex
+	blobs       map[digest.Digest][]byte
+	descriptors map[digest.Digest]ociv1.Descriptor
+	tags        map[string]ociv1.Descriptor
+	order       []string
+	resolve     func(context.Context, string) (ociv1.Descriptor, error)
+	tag         func(context.Context, ociv1.Descriptor, string) error
+	calls       atomic.Int32
+	idleCloses  atomic.Int32
+}
+
+func (t *testPublicationTarget) CloseIdleConnections() {
+	t.idleCloses.Add(1)
+}
+
+func newTestPublicationTarget() *testPublicationTarget {
+	return &testPublicationTarget{
+		blobs:       make(map[digest.Digest][]byte),
+		descriptors: make(map[digest.Digest]ociv1.Descriptor),
+		tags:        make(map[string]ociv1.Descriptor),
+	}
+}
+
+func (t *testPublicationTarget) record(value string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.order = append(t.order, value)
+	t.calls.Add(1)
+}
+
+func (t *testPublicationTarget) Exists(_ context.Context, desc ociv1.Descriptor) (bool, error) {
+	t.record("destination Exists")
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, ok := t.blobs[desc.Digest]
+	return ok, nil
+}
+
+func (t *testPublicationTarget) Fetch(_ context.Context, desc ociv1.Descriptor) (io.ReadCloser, error) {
+	t.record("destination Fetch")
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	data, ok := t.blobs[desc.Digest]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return io.NopCloser(bytes.NewReader(append([]byte(nil), data...))), nil
+}
+
+func (t *testPublicationTarget) Push(_ context.Context, desc ociv1.Descriptor, r io.Reader) error {
+	t.record("destination Push")
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	if digest.FromBytes(data) != desc.Digest || int64(len(data)) != desc.Size {
+		return stderrors.New("pushed bytes do not match descriptor")
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.blobs[desc.Digest] = append([]byte(nil), data...)
+	t.descriptors[desc.Digest] = desc
+	return nil
+}
+
+func (t *testPublicationTarget) Resolve(ctx context.Context, reference string) (ociv1.Descriptor, error) {
+	t.record("digest Resolve")
+	if t.resolve != nil {
+		return t.resolve(ctx, reference)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if desc, ok := t.tags[reference]; ok {
+		return desc, nil
+	}
+	parsed := digest.Digest(reference)
+	if desc, ok := t.descriptors[parsed]; ok {
+		return desc, nil
+	}
+	return ociv1.Descriptor{}, os.ErrNotExist
+}
+
+func (t *testPublicationTarget) Tag(ctx context.Context, desc ociv1.Descriptor, reference string) error {
+	t.record("Tag")
+	if t.tag != nil {
+		if err := t.tag(ctx, desc, reference); err != nil {
+			return err
+		}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.tags[reference] = desc
+	return nil
+}
+
+func (t *testPublicationTarget) snapshotOrder() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.order...)
+}
+
+func TestPackageOperationOwnsLayoutUntilCloseOrRelease(t *testing.T) {
+	source := t.TempDir()
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	safeOCITempRoot(t)
+	op, err := packageGenericOperation(context.Background(), PackageOptions{
+		SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	})
+	if err != nil {
+		t.Fatalf("packageGenericOperation() error = %v", err)
+	}
+	if op.layout == nil || op.store == nil || reflect.DeepEqual(op.manifest, ociv1.Descriptor{}) {
+		t.Fatalf("package operation did not retain owner/store/manifest: %+v", op)
+	}
+	if !content.Equal(op.manifest, op.result.Descriptor) {
+		t.Fatalf("operation manifest = %+v, result descriptor = %+v", op.manifest, op.result.Descriptor)
+	}
+	if op.manifest.Annotations != nil || op.manifest.URLs != nil || op.manifest.Data != nil || op.manifest.Platform != nil {
+		t.Fatalf("operation retained mutable/non-authoritative descriptor fields: %+v", op.manifest)
+	}
+	if op.result.Digest != op.manifest.Digest.String() ||
+		op.result.MediaType != op.manifest.MediaType || op.result.Size != op.manifest.Size {
+
+		t.Fatalf("PackageResult scalar fields do not mirror Descriptor: %+v", op.result)
+	}
+	layoutPath := op.layout.Path()
+	if _, statErr := os.Stat(layoutPath); statErr != nil {
+		t.Fatalf("owned layout missing before Close(): %v", statErr)
+	}
+	entries, err := os.ReadDir(layoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tar.gz") {
+			t.Fatalf("successful OCI layout retained plaintext archive %q", entry.Name())
+		}
+	}
+	if err := op.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := os.Lstat(layoutPath); !os.IsNotExist(err) {
+		t.Fatalf("owned layout remains after Close(): %v", err)
+	}
+	if err := op.Close(); err != nil {
+		t.Fatalf("repeated Close() error = %v", err)
+	}
+}
+
+func TestPackageOperationStandalonePackageReleasesLayout(t *testing.T) {
+	source := t.TempDir()
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	safeOCITempRoot(t)
+	result, err := Package(context.Background(), PackageOptions{
+		SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	})
+	if err != nil {
+		t.Fatalf("Package() error = %v", err)
+	}
+	if reflect.DeepEqual(result.Descriptor, ociv1.Descriptor{}) || result.StorePath == "" {
+		t.Fatalf("Package() result = %+v, want frozen descriptor and store path", result)
+	}
+	if _, err := os.Stat(result.StorePath); err != nil {
+		t.Fatalf("released StorePath missing: %v", err)
+	}
+	if filepath.Dir(result.StorePath) != output {
+		t.Fatalf("StorePath parent = %q, want output %q", filepath.Dir(result.StorePath), output)
+	}
+}
+
+func TestPackageOperationFailureRemovesStageAndPartialLayout(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		inject func(*genericPackageDependencies, error)
+	}{
+		{
+			name: "local blob push",
+			inject: func(deps *genericPackageDependencies, injected error) {
+				deps.pushFileBlob = func(
+					context.Context,
+					localOCIStore,
+					*ownedLayout,
+					ociv1.Descriptor,
+					string,
+				) error {
+
+					return injected
+				}
+			},
+		},
+		{
+			name: "archive removal",
+			inject: func(deps *genericPackageDependencies, injected error) {
+				deps.removeArchive = func(*ownedLayout, string) error { return injected }
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := t.TempDir()
+			output := t.TempDir()
+			if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			tempRoot := safeOCITempRoot(t)
+			injected := stderrors.New(tt.name + " failed")
+			deps := defaultGenericPackageDependencies()
+			tt.inject(&deps, injected)
+			op, err := packageGenericOperationWithDependencies(context.Background(), PackageOptions{
+				SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+				Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+			}, deps)
+			assertErrorCode(t, err, apperrors.ErrCodeInternal)
+			if !stderrors.Is(err, injected) {
+				t.Fatalf("error = %v, want cause %v", err, injected)
+			}
+			if op != nil {
+				t.Fatal("failed package returned an operation")
+			}
+			assertDirectoryEmpty(t, output)
+			assertDirectoryEmpty(t, tempRoot)
+		})
+	}
+}
+
+func TestPackageOperationPreservesStructuredNewStoreError(t *testing.T) {
+	tests := []struct {
+		name string
+		code apperrors.ErrorCode
+	}{
+		{name: "timeout", code: apperrors.ErrCodeTimeout},
+		{name: "invalid request", code: apperrors.ErrCodeInvalidRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := t.TempDir()
+			output := t.TempDir()
+			if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			tempRoot := safeOCITempRoot(t)
+			injected := apperrors.New(tt.code, "structured store creation failure")
+			deps := defaultGenericPackageDependencies()
+			deps.newStore = func(context.Context, *ownedLayout) (localOCIStore, error) {
+				return nil, injected
+			}
+
+			op, err := packageGenericOperationWithDependencies(context.Background(), PackageOptions{
+				SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+				Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+			}, deps)
+			if op != nil {
+				t.Fatalf("structured store creation failure returned operation: %+v", op)
+			}
+			assertErrorCode(t, err, tt.code)
+			var structured *apperrors.StructuredError
+			if !stderrors.As(err, &structured) || structured != injected {
+				t.Fatalf("error = %v, want original structured error %v", err, injected)
+			}
+			assertDirectoryEmpty(t, output)
+			assertDirectoryEmpty(t, tempRoot)
+		})
+	}
+}
+
+func TestPushFileBlobPreservesStructuredStoreError(t *testing.T) {
+	tests := []struct {
+		name string
+		code apperrors.ErrorCode
+	}{
+		{name: "timeout", code: apperrors.ErrCodeTimeout},
+		{name: "conflict", code: apperrors.ErrCodeConflict},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			layout, err := newOwnedLayout(context.Background(), t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if closeErr := layout.Close(); closeErr != nil {
+					t.Errorf("layout Close() error = %v", closeErr)
+				}
+			})
+			const archiveName = "bundle.tar.gz"
+			archive := []byte("archive")
+			if writeErr := layout.child.WriteFile(archiveName, archive, 0o600); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			descriptor := content.NewDescriptorFromBytes(ociv1.MediaTypeImageLayerGzip, archive)
+			injected := apperrors.New(tt.code, "structured local store push failure")
+			store := &plainFailureLocalStore{pushErr: injected}
+
+			err = pushFileBlob(context.Background(), store, layout, descriptor, archiveName)
+			assertErrorCode(t, err, tt.code)
+			var structured *apperrors.StructuredError
+			if !stderrors.As(err, &structured) || structured != injected {
+				t.Fatalf("error = %v, want original structured error %v", err, injected)
+			}
+		})
+	}
+}
+
+func TestPackageOperationPreparedCleanupFailureReturnsNoOwnedResult(t *testing.T) {
+	source := t.TempDir()
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	tempRoot := safeOCITempRoot(t)
+	injected := stderrors.New("prepared workspace cleanup failed")
+	deps := defaultGenericPackageDependencies()
+	deps.prepareSource = func(
+		ctx context.Context,
+		sourceDir, outputDir, subDir string,
+		sourceFiles []string,
+	) (*preparedSource, error) {
+
+		prepared, err := preparePackageSource(ctx, sourceDir, outputDir, subDir, sourceFiles)
+		if err != nil {
+			return nil, err
+		}
+		prepared.workspace.deps.removeAll = func(*os.Root, string) error { return injected }
+		return prepared, nil
+	}
+
+	op, err := packageGenericOperationWithDependencies(context.Background(), PackageOptions{
+		SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	}, deps)
+	assertErrorCode(t, err, apperrors.ErrCodeInternal)
+	if !stderrors.Is(err, injected) {
+		t.Fatalf("error = %v, want cause %v", err, injected)
+	}
+	if op != nil {
+		t.Fatalf("cleanup failure returned inaccessible operation: %+v", op)
+	}
+	assertDirectoryEmpty(t, output)
+	if entries, readErr := os.ReadDir(tempRoot); readErr != nil {
+		t.Fatal(readErr)
+	} else if len(entries) != 1 {
+		t.Fatalf("temp entries = %v, want only intentionally unremovable workspace", entries)
+	}
+}
+
+func TestPackageOperationRevalidatesCallerRootsBeforeLayoutMutation(t *testing.T) {
+	for _, swapped := range []string{"source", "output"} {
+		t.Run(swapped, func(t *testing.T) {
+			parent := t.TempDir()
+			source := filepath.Join(parent, "source")
+			output := filepath.Join(parent, "output")
+			if err := os.Mkdir(source, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(output, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			safeOCITempRoot(t)
+			deps := defaultGenericPackageDependencies()
+			deps.prepareSource = func(
+				ctx context.Context,
+				sourceDir, outputDir, subDir string,
+				files []string,
+			) (*preparedSource, error) {
+
+				prepared, err := preparePackageSource(ctx, sourceDir, outputDir, subDir, files)
+				if err != nil {
+					return nil, err
+				}
+				target := source
+				if swapped == "output" {
+					target = output
+				}
+				if err := os.Rename(target, target+"-moved"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(target, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(target, "sentinel"), []byte("replacement"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return prepared, nil
+			}
+			op, err := packageGenericOperationWithDependencies(context.Background(), PackageOptions{
+				SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+				Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+			}, deps)
+			if op != nil {
+				t.Fatalf("caller root swap returned operation: %+v", op)
+			}
+			assertErrorCode(t, err, apperrors.ErrCodeInvalidRequest)
+			target := source
+			if swapped == "output" {
+				target = output
+			}
+			if got := directoryEntryNames(t, target); !reflect.DeepEqual(got, []string{"sentinel"}) {
+				t.Fatalf("replacement mutated: %v", got)
+			}
+		})
+	}
+}
+
+func TestPackageOperationValidatesLayoutBeforeStoreOpen(t *testing.T) {
+	for _, swapped := range []string{"child", "parent"} {
+		t.Run(swapped, func(t *testing.T) {
+			source := t.TempDir()
+			output := t.TempDir()
+			if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			safeOCITempRoot(t)
+			deps := defaultGenericPackageDependencies()
+			var layout *ownedLayout
+			deps.newLayout = func(ctx context.Context, outputDir string) (*ownedLayout, error) {
+				created, err := newOwnedLayout(ctx, outputDir)
+				layout = created
+				return created, err
+			}
+			var replacement, moved string
+			deps.beforeStore = func() error {
+				if swapped == "child" {
+					moved = layout.Path() + "-moved"
+					if err := os.Rename(layout.Path(), moved); err != nil {
+						return err
+					}
+					if err := os.Mkdir(layout.Path(), 0o700); err != nil {
+						return err
+					}
+					replacement = layout.Path()
+				} else {
+					moved = layout.parentPath + "-moved"
+					if err := os.Rename(layout.parentPath, moved); err != nil {
+						return err
+					}
+					if err := os.Mkdir(layout.parentPath, 0o700); err != nil {
+						return err
+					}
+					replacement = filepath.Join(layout.parentPath, layout.childName)
+					if err := os.Mkdir(replacement, 0o700); err != nil {
+						return err
+					}
+				}
+				return os.WriteFile(filepath.Join(replacement, "sentinel"), []byte("replacement"), 0o600)
+			}
+			var storeCalled atomic.Bool
+			deps.newStore = func(ctx context.Context, owned *ownedLayout) (localOCIStore, error) {
+				storeCalled.Store(true)
+				return newRootOCIStore(ctx, owned)
+			}
+			op, err := packageGenericOperationWithDependencies(context.Background(), PackageOptions{
+				SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+				Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+			}, deps)
+			if op != nil {
+				t.Fatalf("swapped layout returned operation: %+v", op)
+			}
+			assertErrorCode(t, err, apperrors.ErrCodeInternal)
+			if storeCalled.Load() {
+				t.Fatal("OCI store opened after retained layout swap")
+			}
+			if got := directoryEntryNames(t, replacement); !reflect.DeepEqual(got, []string{"sentinel"}) {
+				t.Fatalf("replacement mutated: %v", got)
+			}
+			if removeErr := os.RemoveAll(replacement); removeErr != nil {
+				t.Error(removeErr)
+			}
+			if removeErr := os.RemoveAll(moved); removeErr != nil {
+				t.Error(removeErr)
+			}
+		})
+	}
+}
+
+func TestPackageOperationValidatesLayoutAfterStoreOpen(t *testing.T) {
+	source := t.TempDir()
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	safeOCITempRoot(t)
+	deps := defaultGenericPackageDependencies()
+	var layout *ownedLayout
+	deps.newLayout = func(ctx context.Context, outputDir string) (*ownedLayout, error) {
+		created, err := newOwnedLayout(ctx, outputDir)
+		layout = created
+		return created, err
+	}
+	var replacement, moved string
+	deps.afterStore = func() error {
+		moved = layout.Path() + "-moved"
+		if err := os.Rename(layout.Path(), moved); err != nil {
+			return err
+		}
+		if err := os.Mkdir(layout.Path(), 0o700); err != nil {
+			return err
+		}
+		replacement = layout.Path()
+		return os.WriteFile(filepath.Join(replacement, "sentinel"), []byte("replacement"), 0o600)
+	}
+	op, err := packageGenericOperationWithDependencies(context.Background(), PackageOptions{
+		SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	}, deps)
+	if op != nil {
+		t.Fatalf("post-open layout swap returned operation: %+v", op)
+	}
+	assertErrorCode(t, err, apperrors.ErrCodeInternal)
+	if got := directoryEntryNames(t, replacement); !reflect.DeepEqual(got, []string{"sentinel"}) {
+		t.Fatalf("replacement mutated: %v", got)
+	}
+	if removeErr := os.RemoveAll(replacement); removeErr != nil {
+		t.Error(removeErr)
+	}
+	if removeErr := os.RemoveAll(moved); removeErr != nil {
+		t.Error(removeErr)
+	}
+}
+
+func TestPackageAndPushOwnershipCleanupAndRelease(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		pushErr error
+	}{
+		{name: "remote failure removes owned layout", pushErr: apperrors.New(apperrors.ErrCodeUnavailable, "remote failed")},
+		{name: "remote success releases only after push"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := t.TempDir()
+			output := t.TempDir()
+			if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			safeOCITempRoot(t)
+			deps := defaultPackageAndPushDependencies()
+			var pushedPath string
+			deps.pushOperation = func(_ context.Context, op *packageOperation, _ PushOptions) (*PushResult, error) {
+				pushedPath = op.layout.Path()
+				if _, err := os.Stat(pushedPath); err != nil {
+					t.Fatalf("layout not retained through push: %v", err)
+				}
+				if tt.pushErr != nil {
+					return nil, tt.pushErr
+				}
+				return &PushResult{
+					Digest: op.manifest.Digest.String(), MediaType: op.manifest.MediaType,
+					Size: op.manifest.Size, Reference: "ghcr.io/test/repo:v1",
+				}, nil
+			}
+			result, err := packageAndPushWithDependencies(context.Background(), OutputConfig{
+				SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+				Reference: &Reference{IsOCI: true, Registry: "ghcr.io", Repository: "test/repo", Tag: "v1"},
+			}, deps)
+			if tt.pushErr != nil {
+				if !stderrors.Is(err, tt.pushErr) {
+					t.Fatalf("error = %v, want %v", err, tt.pushErr)
+				}
+				if result != nil {
+					t.Fatalf("result = %+v on error", result)
+				}
+				if _, statErr := os.Lstat(pushedPath); !os.IsNotExist(statErr) {
+					t.Fatalf("failed push left layout: %v", statErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("packageAndPushWithDependencies() error = %v", err)
+			}
+			if result.StorePath != pushedPath {
+				t.Fatalf("StorePath = %q, want %q", result.StorePath, pushedPath)
+			}
+			if _, statErr := os.Stat(pushedPath); statErr != nil {
+				t.Fatalf("released layout missing: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestPackageAndPushPathSwapStopsBeforeRegistryIO(t *testing.T) {
+	source := t.TempDir()
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	safeOCITempRoot(t)
+	deps := defaultPackageAndPushDependencies()
+	var replacement string
+	deps.beforePush = func(op *packageOperation) error {
+		original := op.layout.Path()
+		if err := os.Rename(original, original+"-moved"); err != nil {
+			return err
+		}
+		if err := os.Mkdir(original, 0o700); err != nil {
+			return err
+		}
+		replacement = original
+		return os.WriteFile(filepath.Join(original, "sentinel"), []byte("replacement"), 0o600)
+	}
+	var registryCalled atomic.Bool
+	deps.pushOperation = func(context.Context, *packageOperation, PushOptions) (*PushResult, error) {
+		registryCalled.Store(true)
+		return nil, stderrors.New("unexpected registry call")
+	}
+	result, err := packageAndPushWithDependencies(context.Background(), OutputConfig{
+		SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+		Reference: &Reference{IsOCI: true, Registry: "ghcr.io", Repository: "test/repo", Tag: "v1"},
+	}, deps)
+	assertErrorCode(t, err, apperrors.ErrCodeInternal)
+	if result != nil {
+		t.Fatalf("result = %+v on path swap", result)
+	}
+	if registryCalled.Load() {
+		t.Fatal("registry called after package-to-push path swap")
+	}
+	data, readErr := os.ReadFile(filepath.Join(replacement, "sentinel"))
+	if readErr != nil || string(data) != "replacement" {
+		t.Fatalf("replacement changed: data=%q err=%v", data, readErr)
+	}
+}
+
+func TestPackageAndPushDigestCopyGraphAndTagRetry(t *testing.T) {
+	source := t.TempDir()
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	safeOCITempRoot(t)
+	op, err := packageGenericOperation(context.Background(), PackageOptions{
+		SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = op.Close() })
+
+	target := newTestPublicationTarget()
+	target.resolve = func(_ context.Context, ref string) (ociv1.Descriptor, error) {
+		if ref != op.manifest.Digest.String() {
+			t.Fatalf("Resolve reference = %q, want immutable digest %q", ref, op.manifest.Digest.String())
+		}
+		return op.manifest, nil
+	}
+	var tagCalls atomic.Int32
+	target.tag = func(_ context.Context, desc ociv1.Descriptor, rawTag string) error {
+		if !content.Equal(desc, op.manifest) || rawTag != "v1" {
+			t.Fatalf("Tag(%+v, %q), want frozen descriptor and raw tag", desc, rawTag)
+		}
+		if tagCalls.Add(1) == 1 {
+			return fakeNetTimeoutErr{}
+		}
+		return nil
+	}
+	deps := defaultPushOperationDependencies()
+	deps.newTarget = func(PushOptions) (publicationTarget, error) { return target, nil }
+	deps.maxAttempts = 2
+	deps.initialBackoff = 0
+	deps.perAttemptTimeout = time.Second
+	var graphCalls atomic.Int32
+	deps.copyGraph = func(_ context.Context, src content.ReadOnlyStorage, dst content.Storage, root ociv1.Descriptor, _ oras.CopyGraphOptions) error {
+		if _, ok := any(src).(content.Resolver); ok {
+			t.Fatal("copy source exposes resolver")
+		}
+		if _, ok := any(dst).(content.Tagger); ok {
+			t.Fatal("copy destination exposes tagger")
+		}
+		if !content.Equal(root, op.manifest) {
+			t.Fatalf("CopyGraph root = %+v, want %+v", root, op.manifest)
+		}
+		graphCalls.Add(1)
+		return nil
+	}
+	deps.beforeAttempt = func(attempt int) error {
+		// Mutating the local tag/index between attempts must not change authority.
+		otherBytes := storedTestManifestBytes("retagged")
+		other := content.NewDescriptorFromBytes(ociv1.MediaTypeImageManifest, otherBytes)
+		if pushErr := op.store.Push(context.Background(), other, bytes.NewReader(otherBytes)); pushErr != nil && !strings.Contains(pushErr.Error(), "already exists") {
+			return pushErr
+		}
+		return op.store.Tag(context.Background(), other, "v1")
+	}
+	result, err := pushPackageOperationWithDependencies(context.Background(), op, PushOptions{
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	}, deps)
+	if err != nil {
+		t.Fatalf("pushPackageOperationWithDependencies() error = %v", err)
+	}
+	if result.Digest != op.manifest.Digest.String() || result.MediaType != op.manifest.MediaType || result.Size != op.manifest.Size {
+		t.Fatalf("PushResult = %+v, want frozen descriptor %+v", result, op.manifest)
+	}
+	if graphCalls.Load() != 2 || tagCalls.Load() != 2 {
+		t.Fatalf("whole-operation retry counts graph=%d tag=%d, want 2/2", graphCalls.Load(), tagCalls.Load())
+	}
+}
+
+func TestPackageAndPushDigestMismatchStopsTagAndCleans(t *testing.T) {
+	source := t.TempDir()
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("alpha"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	safeOCITempRoot(t)
+	op, err := packageGenericOperation(context.Background(), PackageOptions{
+		SourceDir: source, OutputDir: output, SourceFiles: []string{"a.txt"},
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	layoutPath := op.layout.Path()
+	target := newTestPublicationTarget()
+	target.resolve = func(context.Context, string) (ociv1.Descriptor, error) {
+		return content.NewDescriptorFromBytes(ociv1.MediaTypeImageManifest, []byte("mismatch")), nil
+	}
+	deps := defaultPushOperationDependencies()
+	deps.newTarget = func(PushOptions) (publicationTarget, error) { return target, nil }
+	deps.maxAttempts = 1
+	deps.copyGraph = func(context.Context, content.ReadOnlyStorage, content.Storage, ociv1.Descriptor, oras.CopyGraphOptions) error {
+		return nil
+	}
+	_, err = pushPackageOperationWithDependencies(context.Background(), op, PushOptions{
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	}, deps)
+	assertErrorCode(t, err, apperrors.ErrCodeInternal)
+	if strings.Contains(strings.Join(target.snapshotOrder(), ","), "Tag") {
+		t.Fatal("Tag called after digest mismatch")
+	}
+	if closeErr := op.Close(); closeErr != nil {
+		t.Fatalf("operation cleanup = %v", closeErr)
+	}
+	if _, statErr := os.Lstat(layoutPath); !os.IsNotExist(statErr) {
+		t.Fatalf("layout remains: %v", statErr)
+	}
+}
+
+func TestPushFromStoreDescriptorValidation(t *testing.T) {
+	validDigest := digest.FromBytes([]byte("manifest"))
+	for _, tt := range []struct {
+		name string
+		desc ociv1.Descriptor
+	}{
+		{name: "zero"},
+		{name: "missing media type", desc: ociv1.Descriptor{Digest: validDigest, Size: 8}},
+		{name: "malformed digest", desc: ociv1.Descriptor{MediaType: ociv1.MediaTypeImageManifest, Digest: "sha256:nope", Size: 8}},
+		{name: "zero size", desc: ociv1.Descriptor{MediaType: ociv1.MediaTypeImageManifest, Digest: validDigest}},
+		{name: "unsupported root media type", desc: ociv1.Descriptor{MediaType: "application/octet-stream", Digest: validDigest, Size: 8}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := PushFromStore(context.Background(), t.TempDir(), tt.desc, PushOptions{
+				Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+			})
+			assertErrorCode(t, err, apperrors.ErrCodeInvalidRequest)
+			if result != nil {
+				t.Fatalf("result = %+v on malformed descriptor", result)
+			}
+		})
+	}
+}
+
+func TestPushFromStoreDigestIgnoresMutableLocalTag(t *testing.T) {
+	storePath, store, expected := createFrozenTestStore(t)
+	otherBytes := storedTestManifestBytes("other")
+	other := content.NewDescriptorFromBytes(ociv1.MediaTypeImageManifest, otherBytes)
+	if err := store.Push(context.Background(), other, bytes.NewReader(otherBytes)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Tag(context.Background(), other, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	target := newTestPublicationTarget()
+	target.resolve = func(_ context.Context, ref string) (ociv1.Descriptor, error) {
+		if ref != expected.Digest.String() {
+			t.Fatalf("Resolve(%q), want %q", ref, expected.Digest.String())
+		}
+		return expected, nil
+	}
+	deps := defaultPushOperationDependencies()
+	deps.newTarget = func(PushOptions) (publicationTarget, error) { return target, nil }
+	deps.maxAttempts = 1
+	deps.copyGraph = func(context.Context, content.ReadOnlyStorage, content.Storage, ociv1.Descriptor, oras.CopyGraphOptions) error {
+		return nil
+	}
+	result, err := pushFromStoreWithDependencies(context.Background(), storePath, expected, PushOptions{
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	}, deps)
+	if err != nil {
+		t.Fatalf("pushFromStoreWithDependencies() error = %v", err)
+	}
+	if result.Digest != expected.Digest.String() || result.MediaType != expected.MediaType || result.Size != expected.Size {
+		t.Fatalf("result = %+v, want expected descriptor %+v", result, expected)
+	}
+}
+
+func TestPushFromStoreChecksRetainedRootClose(t *testing.T) {
+	storePath, _, expected := createFrozenTestStore(t)
+	target := newTestPublicationTarget()
+	target.resolve = func(context.Context, string) (ociv1.Descriptor, error) { return expected, nil }
+	injected := stderrors.New("public store root close failed")
+	deps := defaultPushOperationDependencies()
+	deps.newTarget = func(PushOptions) (publicationTarget, error) { return target, nil }
+	deps.maxAttempts = 1
+	deps.copyGraph = func(
+		context.Context,
+		content.ReadOnlyStorage,
+		content.Storage,
+		ociv1.Descriptor,
+		oras.CopyGraphOptions,
+	) error {
+
+		return nil
+	}
+	deps.closeStoreRoot = func(root *os.Root) error {
+		return stderrors.Join(root.Close(), injected)
+	}
+
+	result, err := pushFromStoreWithDependencies(context.Background(), storePath, expected, PushOptions{
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	}, deps)
+	if result != nil {
+		t.Fatalf("root close failure returned result: %+v", result)
+	}
+	assertErrorCode(t, err, apperrors.ErrCodeInternal)
+	if !stderrors.Is(err, injected) {
+		t.Fatalf("error = %v, want %v", err, injected)
+	}
+}
+
+func TestPushFromStoreValidatesPathAroundStoreOpen(t *testing.T) {
+	for _, phase := range []string{"before", "after"} {
+		t.Run(phase, func(t *testing.T) {
+			storePath, _, expected := createFrozenTestStore(t)
+			moved := storePath + "-moved"
+			var replacement string
+			swap := func() error {
+				if err := os.Rename(storePath, moved); err != nil {
+					return err
+				}
+				if err := os.Mkdir(storePath, 0o700); err != nil {
+					return err
+				}
+				replacement = storePath
+				return os.WriteFile(filepath.Join(storePath, "sentinel"), []byte("replacement"), 0o600)
+			}
+			deps := defaultPushOperationDependencies()
+			if phase == "before" {
+				deps.beforeStoreOpen = swap
+			} else {
+				deps.afterStoreOpen = swap
+			}
+			result, err := pushFromStoreWithDependencies(context.Background(), storePath, expected, PushOptions{
+				Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+			}, deps)
+			if result != nil {
+				t.Fatalf("swapped store returned result: %+v", result)
+			}
+			assertErrorCode(t, err, apperrors.ErrCodeInvalidRequest)
+			if got := directoryEntryNames(t, replacement); !reflect.DeepEqual(got, []string{"sentinel"}) {
+				t.Fatalf("replacement mutated: %v", got)
+			}
+			if removeErr := os.RemoveAll(replacement); removeErr != nil {
+				t.Error(removeErr)
+			}
+			if removeErr := os.RemoveAll(moved); removeErr != nil {
+				t.Error(removeErr)
+			}
+		})
+	}
+}
+
+func TestPushFromStorePathSwapDuringFetchReadsRetainedRoot(t *testing.T) {
+	storePath, _, expected := createFrozenTestStore(t)
+	moved := storePath + "-moved"
+	replacementBytes := bytes.Repeat([]byte("x"), int(expected.Size))
+	var swapOnce sync.Once
+	var swapErr error
+	swap := func() {
+		swapOnce.Do(func() {
+			if err := os.Rename(storePath, moved); err != nil {
+				swapErr = err
+				return
+			}
+			blobDir := filepath.Join(storePath, "blobs", expected.Digest.Algorithm().String())
+			if err := os.MkdirAll(blobDir, 0o700); err != nil {
+				swapErr = err
+				return
+			}
+			swapErr = os.WriteFile(
+				filepath.Join(blobDir, expected.Digest.Encoded()), replacementBytes, 0o600)
+		})
+	}
+
+	target := newTestPublicationTarget()
+	target.resolve = func(context.Context, string) (ociv1.Descriptor, error) { return expected, nil }
+	deps := defaultPushOperationDependencies()
+	deps.newTarget = func(PushOptions) (publicationTarget, error) { return target, nil }
+	deps.maxAttempts = 1
+	deps.source = func(source content.ReadOnlyStorage) content.ReadOnlyStorage {
+		return &testReadOnlyStorage{
+			exists: source.Exists,
+			fetch: func(ctx context.Context, desc ociv1.Descriptor) (io.ReadCloser, error) {
+				swap()
+				if swapErr != nil {
+					return nil, swapErr
+				}
+				return source.Fetch(ctx, desc)
+			},
+		}
+	}
+	deps.copyGraph = func(
+		context.Context,
+		content.ReadOnlyStorage,
+		content.Storage,
+		ociv1.Descriptor,
+		oras.CopyGraphOptions,
+	) error {
+
+		return nil
+	}
+
+	result, err := pushFromStoreWithDependencies(context.Background(), storePath, expected, PushOptions{
+		Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+	}, deps)
+	if err != nil {
+		t.Fatalf("PushFromStore() error = %v", err)
+	}
+	if result == nil || result.Digest != expected.Digest.String() {
+		t.Fatalf("PushFromStore() result = %+v, want retained-root descriptor", result)
+	}
+	visibleBlob, err := os.ReadFile(filepath.Join(
+		storePath, "blobs", expected.Digest.Algorithm().String(), expected.Digest.Encoded()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(visibleBlob, replacementBytes) {
+		t.Fatalf("replacement blob mutated: %q", visibleBlob)
+	}
+	if err := os.RemoveAll(storePath); err != nil {
+		t.Error(err)
+	}
+	if err := os.RemoveAll(moved); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestPushFromStoreLocalRootRequiredEvenWhenRemoteAlreadyHasRoot(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		corrupt bool
+	}{
+		{name: "missing"},
+		{name: "corrupt", corrupt: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			storePath := t.TempDir()
+			store, err := oci.NewWithContext(context.Background(), storePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expectedBytes := storedTestManifestBytes("expected")
+			expected := content.NewDescriptorFromBytes(ociv1.MediaTypeImageManifest, expectedBytes)
+			if tt.corrupt {
+				if err := store.Push(context.Background(), expected, bytes.NewReader(expectedBytes)); err != nil {
+					t.Fatal(err)
+				}
+				blobPath := filepath.Join(storePath, "blobs", "sha256", expected.Digest.Encoded())
+				if err := os.Chmod(blobPath, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(blobPath, []byte("corrupt"), 0o400); err != nil {
+					t.Fatal(err)
+				}
+			}
+			target := newTestPublicationTarget()
+			target.blobs[expected.Digest] = append([]byte(nil), expectedBytes...)
+			target.descriptors[expected.Digest] = expected
+			deps := defaultPushOperationDependencies()
+			deps.newTarget = func(PushOptions) (publicationTarget, error) { return target, nil }
+			var copyCalled atomic.Bool
+			deps.copyGraph = func(context.Context, content.ReadOnlyStorage, content.Storage, ociv1.Descriptor, oras.CopyGraphOptions) error {
+				copyCalled.Store(true)
+				return nil
+			}
+			result, pushErr := pushFromStoreWithDependencies(context.Background(), storePath, expected, PushOptions{
+				Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+			}, deps)
+			assertErrorCode(t, pushErr, apperrors.ErrCodeInvalidRequest)
+			if result != nil {
+				t.Fatalf("result = %+v on missing/corrupt root", result)
+			}
+			if copyCalled.Load() || target.calls.Load() != 0 {
+				t.Fatalf("remote presence bypassed local verification: copy=%v targetCalls=%d", copyCalled.Load(), target.calls.Load())
+			}
+		})
+	}
+}
+
+func TestPackageAndPushContextStorageAndPushFromStoreContextStorage(t *testing.T) {
+	rootBytes := storedTestManifestBytes("context-root")
+	configBytes := []byte("config")
+	root := content.NewDescriptorFromBytes(ociv1.MediaTypeImageManifest, rootBytes)
+	config := content.NewDescriptorFromBytes(ociv1.MediaTypeImageConfig, configBytes)
+	for _, tt := range []struct {
+		name    string
+		prepare func(*testing.T) func(context.Context, pushOperationDependencies) error
+	}{
+		{
+			name: "generated operation",
+			prepare: func(t *testing.T) func(context.Context, pushOperationDependencies) error {
+				source := t.TempDir()
+				output := t.TempDir()
+				if err := os.WriteFile(filepath.Join(source, "a"), []byte("a"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				safeOCITempRoot(t)
+				op, err := packageGenericOperation(context.Background(), PackageOptions{
+					SourceDir: source, OutputDir: output, SourceFiles: []string{"a"},
+					Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if closeErr := op.Close(); closeErr != nil {
+						t.Errorf("package operation Close() error = %v", closeErr)
+					}
+				})
+				op.manifest = root
+				return func(ctx context.Context, deps pushOperationDependencies) error {
+					result, pushErr := pushPackageOperationWithDependencies(ctx, op, PushOptions{
+						Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+					}, deps)
+					if result != nil {
+						return stderrors.New("unexpected result")
+					}
+					return pushErr
+				}
+			},
+		},
+		{
+			name: "public store",
+			prepare: func(t *testing.T) func(context.Context, pushOperationDependencies) error {
+				storePath, _, _ := createFrozenTestStore(t)
+				return func(ctx context.Context, deps pushOperationDependencies) error {
+					result, pushErr := pushFromStoreWithDependencies(ctx, storePath, root, PushOptions{
+						Registry: "ghcr.io", Repository: "test/repo", Tag: "v1",
+					}, deps)
+					if result != nil {
+						return stderrors.New("unexpected result")
+					}
+					return pushErr
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			run := tt.prepare(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			blocking := newCloseUnblockedReader(nil)
+			fakeSource := &testReadOnlyStorage{
+				fetch: func(_ context.Context, desc ociv1.Descriptor) (io.ReadCloser, error) {
+					if desc.Digest == root.Digest {
+						return io.NopCloser(bytes.NewReader(rootBytes)), nil
+					}
+					return blocking, nil
+				},
+			}
+			target := newTestPublicationTarget()
+			deps := defaultPushOperationDependencies()
+			deps.source = func(content.ReadOnlyStorage) content.ReadOnlyStorage { return fakeSource }
+			deps.newTarget = func(PushOptions) (publicationTarget, error) { return target, nil }
+			deps.maxAttempts = 1
+			deps.copyGraph = func(_ context.Context, src content.ReadOnlyStorage, _ content.Storage, _ ociv1.Descriptor, _ oras.CopyGraphOptions) error {
+				reader, err := src.Fetch(ctx, config)
+				if err != nil {
+					return err
+				}
+				_, err = reader.Read(make([]byte, 1))
+				return err
+			}
+			done := make(chan error, 1)
+			go func() { done <- run(ctx, deps) }()
+			<-blocking.started
+			cancel()
+			err := <-done
+			assertErrorCode(t, err, apperrors.ErrCodeTimeout)
+			select {
+			case <-blocking.closed:
+			default:
+				t.Fatal("attempt cancellation did not close blocked reader")
+			}
+			if target.calls.Load() != 0 {
+				t.Fatalf("destination/resolve/tag called after source cancellation: %v", target.snapshotOrder())
+			}
+		})
+	}
+}
+
+func createFrozenTestStore(t *testing.T) (string, *oci.Store, ociv1.Descriptor) {
+	t.Helper()
+	storePath := t.TempDir()
+	store, err := oci.NewWithContext(context.Background(), storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestBytes := storedTestManifestBytes("frozen")
+	desc := content.NewDescriptorFromBytes(ociv1.MediaTypeImageManifest, manifestBytes)
+	if err := store.Push(context.Background(), desc, bytes.NewReader(manifestBytes)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Tag(context.Background(), desc, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	return storePath, store, desc
 }

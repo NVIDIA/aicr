@@ -30,7 +30,7 @@ The numbered walkthrough (the enterprise / own-stack path) covers:
 * **An attested `aicr` binary.** `aicr bundle --attest` verifies the binary's *own* attestation against **public** Sigstore before it will sign anything, so even a fully private signing flow needs a release-archive binary (which ships the `aicr-attestation.sigstore.json` sidecar) plus a matching `--certificate-identity-regexp`. A local `go build` is not attested and stops at the bundle step. This is deliberate: it anchors "which CLI built this" to NVIDIA CI regardless of where the bundle itself is signed.
 * **A private Sigstore store** (Fulcio + Rekor + CTLog + Trillian) for modes 1 and 3 — your own, or the throwaway one the runner stands up (see [Bring up a private Sigstore store](#bring-up-a-private-sigstore-store)).
 * **`cosign`, `curl`, `yq`** to assemble and inspect the private trusted root.
-* For mode 2: a reachable KMS key (`awskms://` | `gcpkms://` | `azurekms://`).
+* For mode 2: a reachable KMS key (`awskms://` | `gcpkms://` | `azurekms://` | `hashivault://`).
 
 Throughout, `$FULCIO_URL`, `$REKOR_URL`, and `$CTFE_URL` are your stack's endpoints (Fulcio CA, Rekor log, and CTLog/CTFE respectively — some deployments co-locate CTFE with Fulcio, but treat it as a distinct service), and `$IDENTITY` is the `--certificate-identity-regexp` matching your binary's attestation (for an RC built by `on-tag.yaml`: `https://github.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*`).
 

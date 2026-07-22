@@ -23,7 +23,9 @@ All UAT runs go through one entry point, `uat-run.yaml` — the shared dispatch 
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100
 ```
 
-`uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, or `uat-azure.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
+`uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, `uat-azure.yaml`, or — for the `service: kind` real-silicon lane — `uat-kind.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
+
+The **nvkind lane** (`cloud: kind`, DC5 #1278) is a full sibling of the cloud lanes — same `uat-run` dispatch, same reservation lease, same nightly batch, same phase-by-phase runner (`tests/uat/kind/run`, sharing `tests/uat/lib/collect-debug.sh`), and the same signed-evidence emit → verify → ingest. It differs only in provisioning: instead of a `github.com/mchmarny/cluster` actuator it stands up a **single-node, single-GPU nvkind cluster on a self-hosted GPU runner** (`.github/actions/gpu-cluster-setup`) and tears it down with `.github/actions/gpu-test-cleanup` — no cloud credentials, no capacity reservation (the runner *is* the lease). Validator/agent images resolve to the runner-local `ko.local` registry for `main` cells; release cells install the released `aicr` and pull released images. Scope is honestly H100 ×1, single-GPU.
 
 Two further inputs shape the run (both default to the nightly-batch behavior, so the cron needs neither):
 
@@ -56,19 +58,32 @@ In both cases the signed evidence bundle is emitted by the earlier conformance s
 
 An unrecognized `intent` (or a missing sibling config) fails closed in the pipeline's `Validate inputs` step before any provisioning.
 
-### Nightly intent cadence (both intents, both clouds)
+### Nightly intent cadence (both intents, all three clouds)
 
-The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both intents on every nightly-enrolled reservation**, so training *and* inference are exercised nightly on AWS and GCP, and training on Azure (`azure-h100` enrolls `[training]` only until a manual inference run goes green — see the table below). (Note: an inference cell currently provisions and validates the inference platform; the `phase_serve` serving-CUJ step itself remains disabled in both cloud workflows pending #1644, so nightly runs do not yet execute the serving request path.) The set of intents per reservation is data — the `nightly-intents` list in `infra/uat/reservations.yaml` (absent defaults to `[training]`; an explicit empty list `[]` opts the reservation out of the nightly batch entirely — bring-up mode, manual dispatch only):
+The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both intents on every nightly-enrolled reservation**, so training *and* inference are exercised nightly on AWS, GCP, and Azure (see the table below). (Note: an inference cell currently provisions and validates the inference platform; the `phase_serve` serving-CUJ step itself remains disabled in both cloud workflows pending #1644, so nightly runs do not yet execute the serving request path.) The set of intents per reservation is data — the `nightly-intents` list in `infra/uat/reservations.yaml` (absent defaults to `[training]`; an explicit empty list `[]` opts the reservation out of the nightly batch entirely — bring-up mode, manual dispatch only):
 
 | Reservation | Cloud | `nightly-intents` | Nightly CUJs |
 |-------------|-------|-------------------|--------------|
 | `aws-h100` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
 | `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
-| `azure-h100` | Azure | `[training]` | `phase_train` (inference joins after a green manual `intent=inference` run) |
+| `azure-h100` | Azure | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644); inference gated to `>= v0.18.0` via `nightly-intent-min-versions` (see **Cost / tuning** below) |
+
+The `kind-h100` (nvkind) reservation is **opted out of the nightly batch** (`nightly-intents: []`) during bring-up — manually dispatchable via `uat-run.yaml`, enrolled after a green manual H100 acceptance run — so it is not listed above.
 
 **How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown cell (inference cells currently run provision→validate→teardown; the serve CUJ is disabled pending #1644), waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
 
 **Cost / tuning.** Listing both intents roughly **doubles a reservation's nightly cell count** (each version now runs two full cluster lifecycles). If the batch [time-box](#the-version-matrix) is exceeded the oldest cells are dropped first, so `main`+freshest always land; tune `previous_n` (fewer release versions) or `deadline_offset_hours` to fit the window. A released version that predates a platform (e.g. `dynamo`) fails its inference cell's recipe resolution as a genuine regression signal — drop `previous_n` if that coverage is premature. Changing which intents a reservation runs is a registry edit — no workflow change; the `uatbroker` committed-registry test pins the launch set.
+
+**Gating an intent to a minimum release — `nightly-intent-min-versions`.** When an intent only became *supported* on a reservation at a particular release — a fix or platform that older releases lack — running it on the pre-support releases produces a permanently-red cell, not a regression signal. Express the floor per intent in the registry row:
+
+```yaml
+- name: azure-h100
+  nightly-intents: [training, inference]
+  nightly-intent-min-versions:
+    inference: v0.18.0   # first release that carries the AKS perf fix (#1767)
+```
+
+Semantics: **`main` is never gated** (it is built from source and carries the newest fixes, so it always runs every listed intent); a **release** cell drops any intent whose minimum version is newer than the tag (semver; a tag `>=` the minimum runs). The gate lives in the schedule (`uat-broker schedule` attaches each cell's eligible `intents`), so the controller simply never dispatches a gated `(version × intent)` — no per-version workflow logic. Pointing the floor at a **not-yet-tagged** release is intentional and self-resolving: until that release ships, the intent runs on **`main` only** (green, continuous coverage of the fix), and the release enrolls automatically once it exists. `Validate` rejects a floor for an intent the row does not run, or a non-semver value. Bump the floor if the real first-fixed tag differs — an over-low floor surfaces as a visible red (safe), an over-high floor silently skips a good release (bump down).
 
 ## Cluster lifecycles
 

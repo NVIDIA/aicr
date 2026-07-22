@@ -83,6 +83,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
@@ -167,6 +168,11 @@ type Generator struct {
 	// does not exist in the registry. See issue #1019.
 	ChartName string
 
+	// BundleChartVersion is the strict SemVer written into Chart.yaml when set.
+	// Empty preserves the normalized recipe-version default. OCI callers pass
+	// the semantic form decoded from the raw Distribution tag, never the raw tag.
+	BundleChartVersion string
+
 	// AppName overrides the parent Argo Application's `metadata.name`.
 	// When empty, the rendered chart falls back to DefaultAppName
 	// ("aicr-stack") via `{{ .Values.appName | default ... }}`. When set,
@@ -248,6 +254,13 @@ type Generator struct {
 	// bundle time so the resulting artifact is air-gap deployable.
 	// Forwarded to the delegated argocd.Generator. Off by default.
 	VendorCharts bool
+
+	// Serial forces the delegated argocd.Generator to assign linear
+	// per-folder sync-waves (one component at a time) instead of the
+	// dependency-depth bands. Forwarded verbatim; the sync-wave annotation
+	// survives the application.yaml -> chart template transform. Off by
+	// default. Wired from --serial. See argocd.Generator.Serial.
+	Serial bool
 }
 
 // Generate creates a Helm chart app-of-apps by:
@@ -258,6 +271,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	if g.RecipeResult == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
+	}
+	if g.BundleChartVersion != "" {
+		if _, err := semver.StrictNewVersion(g.BundleChartVersion); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("bundle chart version %q is not strict semantic versioning", g.BundleChartVersion), err)
+		}
 	}
 
 	// Defense-in-depth: validate AppName at the deployer boundary so a
@@ -298,10 +317,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// `helm push` would produce — without that, child Apps would point at
 	// "main" (the upstream argocd deployer's git-shaped default) and fail
 	// to resolve against the published chart.
-	targetRevision := g.TargetRevision
-	if targetRevision == "" {
-		targetRevision = deployer.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version)
-	}
+	targetRevision := g.targetRevision()
 
 	argocdGen := &argocd.Generator{
 		RecipeResult:           g.RecipeResult,
@@ -319,6 +335,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// parent chart level via writeStaticValuesAndBuildStubs.
 		AllowDynamicValueSplit: true,
 		VendorCharts:           g.VendorCharts,
+		Serial:                 g.Serial,
 		// Forward the effective parent name so the inner generator's
 		// parent-collision check tests against THIS deployer's parent
 		// ("aicr-stack" or --app-name), not argocd's own "nvidia-stack"
@@ -347,8 +364,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	// Write Chart.yaml
 	chartName := g.chartName()
-	chartPath, chartSize, err := writeChartYAML(outputDir, chartName,
-		deployer.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version))
+	chartPath, chartSize, err := writeChartYAML(outputDir, chartName, g.chartVersion())
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write Chart.yaml", err)
 	}
@@ -1534,6 +1550,20 @@ func (g *Generator) chartName() string {
 		return DefaultChartName
 	}
 	return g.ChartName
+}
+
+func (g *Generator) chartVersion() string {
+	if g.BundleChartVersion != "" {
+		return g.BundleChartVersion
+	}
+	return deployer.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version)
+}
+
+func (g *Generator) targetRevision() string {
+	if g.TargetRevision != "" {
+		return g.TargetRevision
+	}
+	return g.chartVersion()
 }
 
 func (g *Generator) writeReadme(outputDir string) (string, int64, error) {

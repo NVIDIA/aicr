@@ -124,24 +124,40 @@ spec:
             check:
               ($error == null): true
 
-    - name: depends-on-ordering
+    - name: serial-flux-bundle
       description: >
-        First component has no dependsOn; every other component has dependsOn
-        referencing exactly its immediate predecessor in the deployment chain.
+        --serial generates a flux bundle whose HelmRelease dependsOn form a
+        single linear chain (one component at a time) instead of the default
+        declared-dependency DAG.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-flux"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/serial" \
+                --deployer flux --serial
+              test -f "${WORK}/serial/kustomization.yaml"
+            check:
+              ($error == null): true
+
+    - name: depends-on-serial-chain
+      description: >
+        With --serial, exactly one component is the chain root and every other
+        component depends on its immediate predecessor in deployment order.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-flux"
-              # Build a file mapping each component to its dependsOn target.
-              # Format: "component:dep" (dep is empty for the chain root).
+              # Build a file mapping each component to its single dependsOn
+              # target. Format: "component:dep" (dep is empty for the root).
               MAP=$(mktemp)
               trap 'rm -f "$MAP"' EXIT
               no_dep_count=0
               first_comp=""
               count=0
-              for dir in "${WORK}"/basic/*/; do
+              for dir in "${WORK}"/serial/*/; do
                 comp="$(basename "$dir")"
-                [ "$comp" = "sources" ] && continue
+                case "$comp" in sources|namespaces) continue;; esac
                 hr="${dir}helmrelease.yaml"
                 [ -f "$hr" ] || continue
                 count=$((count + 1))
@@ -156,9 +172,9 @@ spec:
               [ "$count" -ge 2 ] \
                 || { echo "need at least 2 components, got $count" >&2; exit 1; }
 
-              # Exactly one component must have no dependsOn (the chain root).
+              # A single linear chain has exactly one root under --serial.
               [ "$no_dep_count" -eq 1 ] \
-                || { echo "expected 1 root component, got $no_dep_count" >&2; exit 1; }
+                || { echo "expected 1 root component under --serial, got $no_dep_count" >&2; exit 1; }
 
               # Every non-root component must depend on an existing component.
               while IFS=: read -r comp dep; do
@@ -182,7 +198,86 @@ spec:
                 done
               done < "$MAP"
 
-              echo "dependsOn chain valid: $count components, root=$first_comp"
+              echo "serial dependsOn chain valid: $count components, root=$first_comp"
+            check:
+              ($error == null): true
+
+    - name: depends-on-dag
+      description: >
+        The default (parallel) flux bundle projects each component's declared
+        dependencyRefs onto its dependsOn: independent components carry no
+        dependsOn (so the graph has MULTIPLE roots), every dependsOn target is
+        an existing release, and the graph is acyclic.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              # RELEASES: one release name per line.
+              # EDGES: "component dep" per dependsOn edge (0..N per component).
+              RELEASES=$(mktemp)
+              EDGES=$(mktemp)
+              trap 'rm -f "$RELEASES" "$EDGES"' EXIT
+              count=0
+              for dir in "${WORK}"/basic/*/; do
+                comp="$(basename "$dir")"
+                case "$comp" in sources|namespaces) continue;; esac
+                hr="${dir}helmrelease.yaml"
+                [ -f "$hr" ] || continue
+                count=$((count + 1))
+                echo "$comp" >> "$RELEASES"
+                # Extract every name: under the dependsOn block (all edges, not
+                # just the first) by scanning until the next spec-level key.
+                awk '/^  dependsOn:/{f=1;next} f&&/^  [^[:space:]]/{f=0} f&&/name:/{print $NF}' "$hr" \
+                  | while read -r d; do echo "${comp} ${d}" >> "$EDGES"; done
+              done
+              [ "$count" -ge 2 ] \
+                || { echo "need at least 2 components, got $count" >&2; exit 1; }
+
+              # Parallel mode: independent components have no dependsOn, so a
+              # real recipe DAG has multiple roots (contrast the single root
+              # under --serial). This is what proves the parallel rollout.
+              roots=0
+              while read -r comp; do
+                grep -q "^${comp} " "$EDGES" || roots=$((roots + 1))
+              done < "$RELEASES"
+              [ "$roots" -ge 2 ] \
+                || { echo "expected multiple roots in parallel mode, got $roots" >&2; exit 1; }
+
+              # Every dependsOn target must reference an existing release.
+              if [ -s "$EDGES" ]; then
+                while read -r comp dep; do
+                  grep -qx "$dep" "$RELEASES" \
+                    || { echo "$comp depends on '$dep' which is not a release" >&2; exit 1; }
+                done < "$EDGES"
+              fi
+
+              # Acyclicity via Kahn's algorithm: repeatedly drop releases whose
+              # dependencies are all already dropped; a non-empty remainder
+              # means a cycle.
+              remaining=$(cat "$RELEASES")
+              changed=1
+              dropped=""
+              while [ -n "$remaining" ] && [ "$changed" = "1" ]; do
+                changed=0
+                next=""
+                for comp in $remaining; do
+                  unmet=0
+                  for dep in $(awk -v c="$comp" '$1==c{print $2}' "$EDGES"); do
+                    case " $dropped " in *" $dep "*) ;; *) unmet=1;; esac
+                  done
+                  if [ "$unmet" = "0" ]; then
+                    dropped="$dropped $comp"
+                    changed=1
+                  else
+                    next="$next $comp"
+                  fi
+                done
+                remaining="$next"
+              done
+              [ -z "$(echo $remaining)" ] \
+                || { echo "cycle among: $remaining" >&2; exit 1; }
+
+              echo "parallel dependsOn DAG valid: $count releases, $roots roots"
             check:
               ($error == null): true
 

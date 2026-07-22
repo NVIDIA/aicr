@@ -83,7 +83,7 @@ jobs:
       matrix: ${{ steps.list.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Resolve action
@@ -117,7 +117,7 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
       - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -163,7 +163,7 @@ jobs:
       actions: write  # dispatch uat-run.yaml and watch the dispatched run
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Dispatch and watch the daytime run
@@ -189,8 +189,9 @@ jobs:
           dispatch_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RESERVATION}-${ACTION}"
           # aicr_version is left empty (daytime always runs main/tip), so
           # uat-run.yaml's run-name renders '@ main'; the dispatch_key suffix
-          # makes the title globally unique.
-          title="UAT ${RESERVATION} @ main #${dispatch_key}"
+          # makes the title globally unique. MUST match uat-run.yaml's run-name
+          # exactly (now includes intent).
+          title="UAT ${RESERVATION} ${INTENT} @ main #${dispatch_key}"
           echo "::group::${title}"
 
           gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" \

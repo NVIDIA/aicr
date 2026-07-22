@@ -112,9 +112,12 @@ if err != nil {
 }
 
 // ValidateState runs the validation phases against the resolved recipe +
-// observed snapshot. With no WithValidationPhases option it runs all three
+// observed snapshot. Pass the same kubeconfig you used for snapshot collection
+// so that namespace, RBAC, ConfigMap, validator Job, and result operations all
+// target that cluster. With no WithValidationPhases option it runs all three
 // phases (Deployment, Conformance, Performance) in canonical order.
-results, err := client.ValidateState(ctx, result, snap)
+results, err := client.ValidateState(ctx, result, snap,
+	aicr.WithValidationKubeconfig("/path/to/target-kubeconfig"))
 if err != nil {
 	log.Fatalf("validate state: %v", err)
 }
@@ -122,6 +125,13 @@ for _, r := range results {
 	log.Printf("phase=%s status=%s duration=%s", r.Phase, r.Status, r.Duration)
 }
 ```
+
+When `WithValidationKubeconfig` is omitted or passed an empty string,
+`ValidateState` uses the shared default Kubernetes client and its standard
+discovery chain: `KUBECONFIG`, `~/.kube/config`, then in-cluster configuration.
+When an explicit path is provided, the SDK reloads that kubeconfig and creates a
+fresh client for each validation run. The run reuses that client for all of its
+Kubernetes operations.
 
 The `recipe` argument to `ValidateState` MUST be the `*RecipeResult`
 returned by the same Client's `ResolveRecipe` (or `LoadRecipe`) call —
@@ -169,8 +179,8 @@ reports as "skipped - no-cluster mode" and no Kubernetes resources
 are created. Other facade options
 (`WithValidationNamespace`, `WithValidationRunID`,
 `WithValidationCleanup`, `WithValidationImagePullSecrets`,
-`WithValidationTolerations`, `WithValidationNodeSelector`) cover the
-production-controller knobs.
+`WithValidationTolerations`, `WithValidationNodeSelector`,
+`WithValidationKubeconfig`) cover the production-controller knobs.
 
 ## Recipe sources
 

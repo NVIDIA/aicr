@@ -14,15 +14,21 @@
 
 package uatbroker
 
-// Recognized cloud values for a reservation row.
+// Recognized cloud values for a reservation row. "kind" is not a cloud but a
+// self-hosted GPU-runner lane (nvkind on real silicon, DC5 #1278): it slots
+// into the same reservation → uat-run → uat-<cloud> dispatch model so it rides
+// the nightly batch and shares tests/uat/<cloud>/run + tests/uat/lib exactly
+// like the cloud lanes. Its "reservation" is the single self-hosted GPU runner
+// (an Actions concurrency lease), not a cloud capacity reservation.
 const (
 	CloudAWS   = "aws"
 	CloudGCP   = "gcp"
 	CloudAzure = "azure"
+	CloudKind  = "kind"
 )
 
 // validClouds is the set of accepted Reservation.Cloud values.
-var validClouds = map[string]bool{CloudAWS: true, CloudGCP: true, CloudAzure: true}
+var validClouds = map[string]bool{CloudAWS: true, CloudGCP: true, CloudAzure: true, CloudKind: true}
 
 // Recognized recipe-intent values. The daytime human-access rotation (#1281,
 // DC8) picks one flavor per reservation via Reservation.DaytimeIntent; these
@@ -72,6 +78,25 @@ type Reservation struct {
 	// GPU capacity. KnownFields cannot catch this (the key is valid);
 	// TestParseRegistryBareNullNightlyIntents locks the behavior.
 	NightlyIntents []string `yaml:"nightly-intents"`
+	// NightlyIntentMinVersions gates RELEASE cells of the nightly version matrix
+	// by a per-intent minimum AICR release: intent -> minimum version (a semver
+	// tag like "v0.18.0"). It expresses "the first released version known to
+	// support this intent on this reservation", so a released version that
+	// predates a fix or platform is not run for that intent and does not
+	// contribute a predictably-red cell.
+	//
+	// Only RELEASE cells are gated. The tip-of-main cell (Cell.IsMain) always
+	// runs every listed intent — it is built from source and carries the newest
+	// fixes — so a min-version pointing at a not-yet-tagged release (the fix is
+	// on main but unreleased) correctly runs the intent on main-only until that
+	// release ships, then enrolls it automatically. A release tag >= the min
+	// runs; a tag below it is dropped for that intent only.
+	//
+	// OPTIONAL: absent or empty means no gate (every listed intent runs on every
+	// cell — the pre-#1789 behavior). Validate requires each key to be an intent
+	// this reservation actually lists in NightlyIntents (a min-version for an
+	// unrun intent is dead config / a typo) and each value to parse as semver.
+	NightlyIntentMinVersions map[string]string `yaml:"nightly-intent-min-versions"`
 	// DaytimeIntent opts this reservation into the daytime human-access
 	// rotation (#1281, DC8) and picks the flavor stood up on it during the
 	// working day: "training" or "inference". Empty means the reservation is
@@ -121,4 +146,10 @@ type Cell struct {
 	Reservation string `json:"reservation"`
 	AICRVersion string `json:"aicr_version"`
 	IsMain      bool   `json:"is_main"`
+	// Intents are the nightly intents eligible at this cell's version, in
+	// registry order (see EligibleNightlyIntents). The main cell carries every
+	// listed intent; a release cell drops any intent gated off by
+	// nightly-intent-min-versions. The controller dispatches one run per entry,
+	// so an empty list means the cell dispatches nothing.
+	Intents []string `json:"intents"`
 }

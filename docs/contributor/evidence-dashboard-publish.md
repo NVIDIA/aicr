@@ -1,13 +1,19 @@
 # Evidence Dashboard Publish (GP5)
 
 The dashboard-publish pipeline is the repo's **first GitHub Pages** surface.
-On every merge to `main` (and on demand) it regenerates the interim-evidence
-dashboard from the source-keyed evidence tree in GCS and deploys the static
-site to GitHub Pages. It is the consumer end of the chain whose producer is
-[evidence-ingest (GP2)](evidence-ingest.md): ingest writes the tree, publish
-renders and serves it. (For the full `GPn` stage map of the
-evidence-corroboration pipeline, see
+On every merge to `main`, on demand, and after every successful
+[evidence-ingest (GP2)](evidence-ingest.md) run (its `trigger-dashboard` job
+dispatches this workflow), it regenerates the interim-evidence dashboard from
+the source-keyed evidence tree in GCS and deploys the static site to GitHub
+Pages. It is the consumer end of the chain whose producer is evidence-ingest:
+ingest writes the tree, publish renders and serves it. (For the full `GPn`
+stage map of the evidence-corroboration pipeline, see
 [evidence-ingest.md](evidence-ingest.md).)
+
+The `pages` concurrency group (`cancel-in-progress: false`) serializes to one
+running build plus one queued build, the newest dispatch superseding the
+queued one — so the burst of ingests from a multi-cell nightly UAT batch
+coalesces into a single rebuild instead of a backlog.
 
 Fern publishes the product docs to docs.nvidia.com via `publish-fern-docs.yml`;
 that is a separate surface. This workflow is the only one that deploys to

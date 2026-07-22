@@ -205,7 +205,7 @@ spec:
     input:
       recipe: %s
     output:
-      target: %s
+      target: oci://registry.example.com/team/aicr-bundle:dev
       imageRefs: %s/refs.txt
     deployment:
       deployer: argocd
@@ -237,12 +237,16 @@ spec:
     registry:
       insecureTLS: true
       plainHTTP: true
-`, recipePath, tmp, tmp)
+`, recipePath, tmp)
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	opts := captureBundleOpts(t, []string{"--config", cfgPath})
+	outputTarget := ""
+	if opts.ociRef != nil {
+		outputTarget = opts.ociRef.String()
+	}
 
 	checks := []struct {
 		name string
@@ -250,6 +254,7 @@ spec:
 		want any
 	}{
 		{"recipeFilePath", opts.recipeFilePath, recipePath},
+		{"outputTarget", outputTarget, "oci://registry.example.com/team/aicr-bundle:dev"},
 		{"repoURL", opts.repoURL, "https://example.git/charts"},
 		{"deployer", opts.deployer, config.DeployerArgoCD},
 		{"valueOverrides count", len(opts.valueOverrides), 2},
@@ -275,6 +280,113 @@ spec:
 	}
 	if opts.workloadGateTaint == nil {
 		t.Errorf("workloadGateTaint should be parsed from workloadGate")
+	}
+}
+
+// TestBundleCmd_SigningKeyFromConfig verifies the KMS --signing-key is
+// config-driven: a config-sourced spec.bundle.attestation.signingKey lands on
+// the resolved options, the CLI flag wins over the config value, and a
+// config-sourced signingKey combined with a config-sourced keyless input
+// (fulcioURL) is rejected by the mutual-exclusion guard through the resolved
+// layer (cmd.IsSet is false for both, so only resolved opts catch it). See #1566.
+func TestBundleCmd_SigningKeyFromConfig(t *testing.T) {
+	const configKey = "awskms://alias/aicr-signing"
+	const flagKey = "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k"
+
+	writeConfig := func(t *testing.T, attestation string) string {
+		t.Helper()
+		tmp := t.TempDir()
+		recipePath := filepath.Join(tmp, "recipe.yaml")
+		if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+			t.Fatalf("write recipe: %v", err)
+		}
+		cfgPath := filepath.Join(tmp, "config.yaml")
+		cfg := fmt.Sprintf(`kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+spec:
+  bundle:
+    input:
+      recipe: %s
+    attestation:
+      enabled: true
+%s`, recipePath, attestation)
+		if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		return cfgPath
+	}
+
+	// Success cases: how a config-sourced signingKey resolves onto opts,
+	// including CLI precedence and whitespace trimming.
+	successTests := []struct {
+		name        string
+		attestation string
+		extraArgs   []string
+		want        string
+	}{
+		{
+			name:        "config-sourced signingKey flows to opts",
+			attestation: "      signingKey: " + configKey + "\n",
+			want:        configKey,
+		},
+		{
+			name:        "CLI flag wins over config signingKey",
+			attestation: "      signingKey: " + configKey + "\n",
+			extraArgs:   []string{"--signing-key", flagKey},
+			want:        flagKey,
+		},
+		{
+			name:        "config signingKey surrounding whitespace is trimmed",
+			attestation: "      signingKey: \"  " + configKey + "  \"\n",
+			want:        configKey,
+		},
+	}
+	for _, tt := range successTests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfgPath := writeConfig(t, tt.attestation)
+			opts := captureBundleOpts(t, append([]string{"--config", cfgPath}, tt.extraArgs...))
+			if opts.signingKey != tt.want {
+				t.Errorf("signingKey = %q, want %q", opts.signingKey, tt.want)
+			}
+		})
+	}
+
+	// Rejection cases: a config-sourced signingKey that conflicts with a
+	// config-sourced keyless input must be caught through the resolved layer
+	// (cmd.IsSet is false for both), and a blank config signingKey must fail
+	// fast rather than reaching the KMS resolver. See #1566.
+	rejectTests := []struct {
+		name        string
+		attestation string
+		wantErrSub  string
+	}{
+		{
+			name:        "config signingKey with config fulcioURL is rejected",
+			attestation: "      signingKey: " + configKey + "\n      fulcioURL: https://fulcio.internal.example.com\n",
+			wantErrSub:  "mutually exclusive",
+		},
+		{
+			name:        "config signingKey with config oidcDeviceFlow is rejected",
+			attestation: "      signingKey: " + configKey + "\n      oidcDeviceFlow: true\n",
+			wantErrSub:  "mutually exclusive",
+		},
+		{
+			name:        "blank config signingKey is rejected",
+			attestation: "      signingKey: \"   \"\n",
+			wantErrSub:  "must not be blank",
+		},
+	}
+	for _, tt := range rejectTests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfgPath := writeConfig(t, tt.attestation)
+			_, err := tryCaptureBundleOpts(t, []string{"--config", cfgPath})
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Errorf("error %q must contain %q", err.Error(), tt.wantErrSub)
+			}
+		})
 	}
 }
 
