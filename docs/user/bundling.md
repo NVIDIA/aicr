@@ -115,6 +115,18 @@ aicr bundle --recipe recipe.yaml --vendor-charts --output ./bundles
 > may still require network access. For full air-gapped operation, also mirror
 > images; see [Air-Gap Mirror](air-gap-mirror.md).
 
+> Second trade-off: recipe-side manifests of mixed components (AICR-authored
+> manifests shipped alongside a vendored upstream chart — for example the
+> network-operator NicClusterPolicy or the AKS `nvidia-peermem-reloader`
+> DaemonSet) are injected into the vendored chart as `helm.sh/hook:
+> post-install` resources. Helm does not manage hook resources as part of the
+> release: they are not re-applied on `helm upgrade` (unless the manifest
+> declares a `post-upgrade` hook itself) and are left behind by
+> `helm uninstall`. Remove them manually after uninstalling a vendored bundle
+> (`kubectl delete -f <bundle>/<NNN>-<component>/templates/`). The default
+> (non-vendored) path wraps the same manifests in a normal `<component>-post`
+> Helm release with full upgrade and uninstall lifecycle.
+
 ## Gate on component readiness
 
 `--readiness-hooks` emits a standalone readiness-gate chart for each component

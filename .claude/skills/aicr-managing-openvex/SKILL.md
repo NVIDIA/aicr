@@ -159,14 +159,36 @@ tar -xzf /tmp/grype.tgz -C /tmp grype && mv /tmp/grype /tmp/grype-vex
 jq '[.matches[] | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")
      | {id: .vulnerability.id, pkg: .artifact.name}]' /tmp/scan.json
 
-# 5. Confirm the suppression landed
-jq '[.ignoredMatches[]? | select(.match.vulnerability.severity == "High" or .match.vulnerability.severity == "Critical")
-     | {id: .match.vulnerability.id, rules: .appliedIgnoreRules}]' /tmp/scan.json
+# 5. Confirm the suppression landed. NOTE: ignoredMatches entries carry
+#    `vulnerability` at the top level (NOT under `.match`) in grype 0.110.
+jq '[.ignoredMatches[]? | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")
+     | {id: .vulnerability.id, rules: .appliedIgnoreRules}]' /tmp/scan.json
 ```
 
 A new statement is correct **only** when step 4 returns `[]` for the
 vulnerability it targets and step 5 lists it under `appliedIgnoreRules`
 with `namespace = "vex"`.
+
+### Shortcut: scan CI's exact images instead of building
+
+The scan workflow builds and pushes every image with tag
+`scan-<full-head-sha>` before scanning. Those tags stay on GHCR, so you
+can scan the **exact bytes CI scanned** — all seven matrix images, not
+just aiperf-bench — without a local docker build:
+
+```bash
+SHA=$(gh run list -R NVIDIA/aicr --workflow vuln-scan-images.yaml \
+      --limit 1 --json headSha --jq '.[0].headSha')
+/tmp/grype-vex "ghcr.io/nvidia/aicr-validators/aiperf-bench:scan-${SHA}" \
+  --only-fixed --vex .openvex.json -c .grype.yaml -o json --file /tmp/scan.json
+```
+
+Use this for triage and the stale audit (it covers `aicr-gate` and
+`aicr`, which have no local Dockerfile build path). Use the docker-build
+recipe above only when validating a Dockerfile change before it is
+pushed. Caveat: a local grype DB newer than this morning's CI run can
+surface advisories CI hasn't seen yet — treat those as *incoming*
+findings, not discrepancies.
 
 ## Triage a new finding from the scan workflow
 
@@ -200,28 +222,58 @@ For each ID:
    correct primary ID (see invariant 2), a v0.2.0 justification (see
    invariant 3), and concrete evidence (see invariant 4).
 4. **Reproduce locally**, confirm step-4 returns `[]` for the new ID.
-5. **Commit and dispatch the workflow** to confirm CI matches local.
+5. **Run the stale audit** (next section) — every edit to the file MUST
+   include it, so dead statements never accumulate alongside new ones.
+6. **Commit and dispatch the workflow** to confirm CI matches local.
    Run `gh workflow run "Daily Image Vulnerability Scan" --repo
    NVIDIA/aicr --ref main`, watch with `gh run watch <id> --exit-status`,
    inspect the aiperf-bench scan-result artifact.
 
-## Drop a stale statement
+## Stale audit (MANDATORY on every edit)
 
-Statements rot. Drop them when any of these hold:
+Statements rot: dependencies get upgraded past fixes, advisories get
+withdrawn, components leave the image. A stale statement is invisible —
+it applies to nothing, silently — so the audit runs on **every** change
+to the file, not just before releases. (The audit that introduced this
+rule found 12 dead statements out of 70.)
 
-- The package has been upgraded past the fixed version. Grype's
-  `--only-fixed` means the finding disappears, so the VEX statement is
-  dead weight. Verify with: `jq '.statements[] | select(.vulnerability.name ==
-  "<id>") | .impact_statement'` and cross-check the pinned dependency
-  version in the image.
-- Upstream withdrew or downgraded the advisory.
-- The component was removed from the image (e.g., base image swap).
+Scan every image the document has product entries for (currently
+`aiperf-bench`, `aicr-gate`, `aicr`) using the `scan-<sha>` shortcut
+above, then diff declared statements against applied rules:
 
-To check which statements are still *applied* in the latest scan,
-diff the VEX statement names against the `appliedIgnoreRules` in
-`.ignoredMatches[]` of a fresh scan JSON. A statement that produces
-zero applied rules across a full scan is a candidate for removal —
-but confirm it's not because of a PURL/ID typo before deleting.
+```bash
+# Applied: unique vuln IDs suppressed via the vex namespace
+jq -r '[.ignoredMatches[]? | select((.appliedIgnoreRules//[]) | any(.namespace=="vex"))
+        | .vulnerability.id] | unique[]' /tmp/scan-<image>.json | sort > /tmp/applied.txt
+
+# Declared: statement names scoped to that image's product PURL
+jq -r '.statements[] | select([.products[]["@id"]] | any(test("<image>")))
+       | .vulnerability.name' .openvex.json | sort > /tmp/declared.txt
+
+comm -23 /tmp/declared.txt /tmp/applied.txt   # stale candidates
+```
+
+For each candidate, classify before deleting — three distinct cases:
+
+1. **Gone entirely** (`grep <id> /tmp/scan-<image>.json` → 0 hits,
+   including aliases): the finding no longer exists (package upgraded
+   past the fix, advisory withdrawn). **Delete.**
+2. **Present but ignored by `fix-state: wont-fix`** (appears in
+   `.ignoredMatches[]` with `appliedIgnoreRules[].namespace == ""`):
+   `--only-fixed` already hides it, so the VEX statement never applies.
+   **Delete** — do not keep it "just in case": if the distro ships a
+   fix, the daily image rebuild absorbs it automatically, and until it
+   does the finding must surface rather than be pre-suppressed (a fix
+   that becomes reachable means bump, not VEX).
+3. **Present in `.matches[]` under a different primary ID** (a CVE
+   statement while grype emits the GHSA, or vice versa): NOT stale — a
+   name mismatch. Fix `vulnerability.name` per invariant 2.
+
+After deleting, re-run the scans for **all** covered images and confirm
+the vex-suppressed counts still match the latest CI run for the
+statements that remain (deleting must be count-neutral).
+
+Bump the document `version` and refresh `timestamp` in the same edit.
 
 ## Anti-patterns
 

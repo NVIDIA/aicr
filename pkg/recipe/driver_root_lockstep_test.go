@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"context"
+	"path"
 	"testing"
 )
 
@@ -122,7 +123,16 @@ func TestDriverRootLockstep(t *testing.T) {
 			// below — otherwise a gpu-operator-only overlay (DRA absent or
 			// disabled) could set driverInstallDir: "/" and slip past unchecked.
 			if op != nil {
-				if opInstallDir := stringAtPath(opValues, "hostPaths", "driverInstallDir"); opInstallDir == "/" {
+				// Normalize BEFORE the hard check so an equivalent spelling
+				// ("//", "/./") cannot dodge it — gpu-operator-only overlays
+				// exit via the DRA-presence skips below and would never reach
+				// the later normalization.
+				rawInstallDir := stringAtPath(opValues, "hostPaths", "driverInstallDir")
+				cleanedInstallDir := rawInstallDir
+				if cleanedInstallDir != "" {
+					cleanedInstallDir = path.Clean(cleanedInstallDir)
+				}
+				if opInstallDir := rawInstallDir; cleanedInstallDir == "/" {
 					t.Errorf(
 						"overlay %q: gpu-operator.hostPaths.driverInstallDir = %q is invalid.\n"+
 							"  driverInstallDir is bind-mounted as the driver-validation container's rootfs target;\n"+
@@ -156,14 +166,42 @@ func TestDriverRootLockstep(t *testing.T) {
 
 			draRoot, _ := draValues["nvidiaDriverRoot"].(string)
 			opInstallDir := stringAtPath(opValues, "hostPaths", "driverInstallDir")
+			// Compare normalized paths so a semantically equivalent
+			// spelling (e.g. a trailing slash) cannot dodge the
+			// container-root rejection or the lockstep equality below.
+			// "" is preserved — it means "unset", which the checks below
+			// treat differently from any real path.
+			if draRoot != "" {
+				draRoot = path.Clean(draRoot)
+			}
+			if opInstallDir != "" {
+				opInstallDir = path.Clean(opInstallDir)
+			}
 
 			// The nvidiaDriverRoot == driverInstallDir lockstep only applies
 			// when the operator installs the driver. With driver.enabled false
 			// (host-installed drivers), the operator manages no driver, so the
 			// DRA userspace root and the validator mount target are independent
 			// and may legitimately differ (e.g. kind/oke: "/" vs
-			// /run/nvidia/driver).
+			// /run/nvidia/driver). The DRA root must still point at the
+			// host-installed driver, though: /run/nvidia/driver is populated
+			// BY the operator's driver container, so inheriting the base
+			// default in a preinstalled-driver profile aims the DRA kubelet
+			// plugin at an empty directory and CDI spec generation fails
+			// (caught the AKS driver-only flip; AKS/OKE/kind use "/",
+			// GKE-COS uses /home/kubernetes/bin/nvidia).
 			if !boolAtPath(opValues, true, "driver", "enabled") {
+				if draRoot == "" || draRoot == "/run/nvidia/driver" {
+					t.Errorf(
+						"overlay %q: gpu-operator has driver.enabled=false (preinstalled-driver profile)\n"+
+							"  but nvidia-dra-driver-gpu.nvidiaDriverRoot = %q.\n"+
+							"  /run/nvidia/driver is populated by the operator's driver container, which this\n"+
+							"  profile disables — the DRA kubelet plugin would read an empty driver root.\n"+
+							"  Set nvidiaDriverRoot to the host driver location (\"/\" for drivers installed\n"+
+							"  at the host root; GKE-COS uses /home/kubernetes/bin/nvidia).",
+						name, draRoot)
+					return
+				}
 				t.Skipf("lockstep N/A: gpu-operator manages no driver (driver.enabled=false); "+
 					"nvidiaDriverRoot=%q and driverInstallDir=%q are independent", draRoot, opInstallDir)
 			}

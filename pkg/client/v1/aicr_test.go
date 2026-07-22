@@ -884,18 +884,30 @@ func gpuOperatorDriverEnabled(t *testing.T, rec *aicr.RecipeResult) (bool, bool)
 // new test function.
 //
 // Post-M1 behavior matrix:
-//   - AKS + Preinstalled → SKIPPED. The bare AKS overlay carries no
-//     preinstalled-driver marker (values-aks.yaml leaves
-//     driver.enabled at chart default true), so the gate refuses to
-//     land a lone driver.enabled=false and logs a warning instead.
-//     The bug fix waits on a full AKS driver-only-install overlay.
-//   - EKS + Preinstalled → SKIPPED for the same reason (base
-//     values.yaml has driver.enabled=true).
+//   - AKS + Preinstalled → INJECTED. This test asserts only the
+//     driver.enabled=false injection. The rest of the coordinated AKS
+//     driver-only profile (toolkit.enabled=false, operator.runtimeClass=
+//     nvidia-container-runtime, gdrcopy.enabled=false) is pinned by
+//     TestAKSDriverOnlyProfileTuple in pkg/recipe, and the DRA driver-root
+//     half by TestDriverRootLockstep — the override is semantically
+//     idempotent and safe because those values already declare the profile.
+//   - EKS + Preinstalled → SKIPPED. The bare EKS overlay carries no
+//     preinstalled-driver marker (base values.yaml has
+//     driver.enabled=true), so the gate refuses to land a lone
+//     driver.enabled=false and logs a warning instead. The bug fix
+//     waits on a full EKS preinstalled-driver overlay.
 //   - GKE-COS + Preinstalled → INJECTED. The GKE-COS values file
 //     already declares driver.enabled=false plus the coordinated
 //     toolkit / driverInstallDir settings, so the override is
 //     semantically idempotent and safe.
-//   - Any provider + Absent → no override (only-false policy).
+//   - Preinstalled-profile overlay (AKS, GKE-COS) + Absent → no
+//     override; a warning names the bundle-time GPU-Operator-managed
+//     override set. The recipe assumes a platform-provided driver the
+//     cluster does not have (e.g. an AKS pool created with
+//     --gpu-driver none); resolution itself cannot fail because `aicr
+//     recipe` has no --set escape hatch (a blocking bundle-time
+//     coherence validation is tracked in #1757).
+//   - EKS (operator installs the driver) + Absent → no override.
 //   - Any provider + Unknown (k8s-only snapshot) → no override.
 func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 	t.Parallel()
@@ -908,13 +920,13 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 		wantInjected bool
 	}{
 		{
-			name:         "aks bare + preinstalled snapshot skips (no profile gate)",
+			name:         "aks + preinstalled snapshot injects (profile gate satisfied)",
 			service:      "aks",
 			snap:         gpuHardwareSnapshot(true),
-			wantInjected: false,
+			wantInjected: true,
 		},
 		{
-			name:         "aks + absent snapshot leaves defaults alone",
+			name:         "aks + absent snapshot warns, leaves defaults alone",
 			service:      "aks",
 			snap:         gpuHardwareSnapshot(false),
 			wantInjected: false,
@@ -926,6 +938,12 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 			wantInjected: false,
 		},
 		{
+			name:         "eks + absent snapshot leaves defaults alone (operator installs the driver)",
+			service:      "eks",
+			snap:         gpuHardwareSnapshot(false),
+			wantInjected: false,
+		},
+		{
 			name:         "gke-cos + preinstalled snapshot injects (profile gate satisfied)",
 			service:      "gke",
 			os:           "cos",
@@ -933,7 +951,7 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 			wantInjected: true,
 		},
 		{
-			name:         "gke-cos + absent snapshot leaves defaults alone",
+			name:         "gke-cos + absent snapshot warns, leaves defaults alone",
 			service:      "gke",
 			os:           "cos",
 			snap:         gpuHardwareSnapshot(false),
@@ -1020,7 +1038,7 @@ func TestBundleComponents_GPUDriverAutoDetect_RendersInHelmValues(t *testing.T) 
 	// GKE-COS is the current fixture whose valuesFile already declares
 	// driver.enabled=false, so the auto-detect gate lets the injection
 	// through and we can prove it beats the base values.yaml default in
-	// the rendered Helm values. Bare AKS/EKS overlays are gated out
+	// the rendered Helm values. Bare EKS overlays are gated out
 	// pending a full preinstalled-driver profile.
 	crit, err := recipe.BuildCriteriaWithRegistry(nil,
 		recipe.WithServiceRegistry("gke"),

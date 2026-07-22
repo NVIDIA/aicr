@@ -40,7 +40,8 @@ metadata:
 spec:
   runtimeRequired: true
   # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
-  autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
+  {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
+  autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
   # Dynamic: Supports --accelerated-node-toleration CLI flag
   additionalTolerations:
     {{- if $cust.acceleratedTolerations }}

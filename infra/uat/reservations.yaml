@@ -122,8 +122,18 @@ reservations:
     # nightly (green); older releases are skipped instead of running red, and
     # the gated release enrolls automatically once it ships. Bump this when the
     # actual first-fixed tag differs.
+    #
+    # Training is gated to the same release for a different reason: the AKS
+    # driver-only default flip changed cluster-config.yaml to
+    # gpuDriverInstall: true, and release cells provision from main's config
+    # while running the released binary. v0.17.0 and older embed the
+    # pre-flip AKS profile (GPU-Operator-managed driver + toolkit), so on a
+    # pool with the Azure-managed driver they would deploy a second driver
+    # stack on top — an invalid compatibility cell, not a real regression
+    # signal. v0.18.0 is the first release that carries the flipped profile.
     nightly-intent-min-versions:
       inference: v0.18.0
+      training: v0.18.0
   - name: aws-gb200
     cloud: aws
     # CROSS-ACCOUNT: the GB200 Capacity Block lives in a SEPARATE tenancy
