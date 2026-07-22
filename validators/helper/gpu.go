@@ -28,6 +28,24 @@ import (
 // GpuResourceName is the Kubernetes resource name for NVIDIA GPUs.
 const GpuResourceName = "nvidia.com/gpu"
 
+// AKSRdmaSharedResource is the extended resource the network operator's
+// rdma-shared-device-plugin publishes on Mellanox RDMA nodes. Its name is pinned
+// by recipes/components/network-operator/manifests/nic-cluster-policy-aks.yaml
+// (resourceName hca_shared_devices_a). The resource is transport-agnostic — the
+// same pool backs InfiniBand and RoCE — so nothing keyed off it is IB-specific.
+// Both the deployment-phase RDMA fabric readiness gate and the NCCL performance
+// consumer key off this exact resource, so it lives here as the single source of
+// truth rather than a duplicated literal in each validator binary.
+const AKSRdmaSharedResource = "rdma/hca_shared_devices_a"
+
+// PCIMellanoxPresentLabel is the NFD feature label marking nodes with a Mellanox
+// (PCI vendor 15b3) NIC — the vendor NFD detects for any ConnectX card, whether
+// it runs InfiniBand or RoCE, so this is an RDMA-capability marker, not an IB
+// one. It is the nodeAffinity the AKS NicClusterPolicy uses to place the RDMA
+// fabric (nic-cluster-policy-aks.yaml), so it identifies exactly the nodes that
+// can ever advertise AKSRdmaSharedResource.
+const PCIMellanoxPresentLabel = "feature.node.kubernetes.io/pci-15b3.present"
+
 // FindSchedulableGpuNodes finds nodes that are schedulable and have allocatable GPU resources.
 func FindSchedulableGpuNodes(ctx context.Context, clientset kubernetes.Interface) ([]v1.Node, error) {
 	nodeList, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
