@@ -1,8 +1,9 @@
 # rekor-monitor: AICR release-signer transparency-log monitor (Rekor v2)
 
 Watches the Rekor **v2** transparency log for AICR's release supply chain. On
-each run it does two checks and exits non-zero if either is unhappy (so the
-calling workflow can alert):
+each run it does two checks and, if either is unhappy, exits non-zero and prints
+a `CLASSIFICATION=` line so the calling workflow can alert and branch on
+severity (see "Exit status and classification" below):
 
 - **Consistency**: proves the log stayed append-only from the last checkpoint
   to the current tree head (an O(log n) tile proof). Its main job here is to
@@ -12,8 +13,12 @@ calling workflow can alert):
   standard append-only tamper check, though ecosystem witnesses are the primary
   guarantee of that.
 - **Identity**: scans the entries added since the last checkpoint for AICR's
-  release signing identity. An entry under that identity that no release
-  produced signals OIDC/key compromise. This is the AICR-specific check.
+  release signing identity. An entry under that identity for a tag with no
+  corresponding release signals OIDC/key compromise. This is the AICR-specific
+  check. Matches whose `@refs/tags/<tag>` is a known release are suppressed as
+  expected signings (see `--known-tags-file`), so a legitimate release does not
+  alert; an unknown tag, a malformed SAN, or a missing allowlist still alert
+  (fail closed).
 
 It is run hourly by `.github/workflows/rekor-monitor.yaml`.
 
@@ -63,7 +68,8 @@ go run ./tools/rekor-monitor \
   --file checkpoint_v2.txt \
   --restore-zip checkpoint.zip \
   --cert-subject '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*$' \
-  --cert-issuer '^https://token\.actions\.githubusercontent\.com$'
+  --cert-issuer '^https://token\.actions\.githubusercontent\.com$' \
+  --known-tags-file known-tags.txt
 ```
 
 | Flag | Purpose |
@@ -72,7 +78,19 @@ go run ./tools/rekor-monitor \
 | `--restore-zip` | Optional GitHub-artifact zip to seed `--file` from before monitoring. Missing file = first run. |
 | `--cert-subject` | Regex for the monitored certificate SAN. Empty = consistency-only (no identity scan). |
 | `--cert-issuer` | Regex for the monitored certificate issuer (requires `--cert-subject`). |
+| `--known-tags-file` | Optional file of newline-separated known release tags. Identity matches whose `@refs/tags/<tag>` is listed are suppressed as expected releases; empty/omitted disables suppression (all matches alert). |
 | `--user-agent` | User-Agent for requests to the log. |
 
-Exit status: `0` clean; non-zero on a consistency break, a scan error, or an
-identity match.
+## Exit status and classification
+
+The process prints a final `CLASSIFICATION=<value>` line to stdout and exits:
+
+| Exit | Classification | Meaning |
+|------|----------------|---------|
+| `0` | `clean` | Consistency verified and no unexpected identity entry; the cursor advanced. |
+| `1` | `tamper` | The consistency (Merkle) proof failed: the log did not verify as append-only. |
+| `1` | `identity` | An entry under the release identity for a tag with no corresponding release (or an entry that failed verification). |
+| `3` | `operational` | Could not complete the check (Sigstore/Rekor/TUF/network trouble, or a timeout). Operational errors are retried a few times before this is returned. |
+| `2` | (none) | Invalid arguments. |
+
+Only `tamper` and `identity` are security signals; the calling workflow pages maintainers on those and treats `operational` as infrastructure noise.

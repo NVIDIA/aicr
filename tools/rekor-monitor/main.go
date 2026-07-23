@@ -16,13 +16,17 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/transparency-dev/merkle/proof"
 )
 
 // defaultTimeout bounds a single monitor pass (TUF fetch, shard discovery,
@@ -55,6 +59,15 @@ type options struct {
 	// means "first run" (no prior artifact); a present-but-unusable zip is an
 	// error, so we never silently reset the cursor and stop scanning identity.
 	restoreZip string
+	// knownTagsFile, when set, is a file of newline-separated release tags that
+	// legitimately signed under the monitored identity. Identity-scan matches
+	// whose SAN tag is in this set are expected releases and are suppressed;
+	// everything else still alerts. Empty disables suppression (all matches
+	// alert). See #1887.
+	knownTagsFile string
+	// knownTags is the resolved allowlist (loaded from knownTagsFile in realMain,
+	// before the retry loop). Nil/empty disables suppression.
+	knownTags map[string]bool
 }
 
 func parseFlags(args []string) (options, error) {
@@ -66,6 +79,7 @@ func parseFlags(args []string) (options, error) {
 	fs.StringVar(&opts.userAgent, "user-agent", "aicr-rekor-v2-monitor", "User-Agent for requests to the log")
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "maximum duration for the whole monitor pass")
 	fs.StringVar(&opts.restoreZip, "restore-zip", "", "path to a GitHub-artifact zip to extract the prior checkpoint from before monitoring (missing file = first run)")
+	fs.StringVar(&opts.knownTagsFile, "known-tags-file", "", "path to a newline-separated file of known release tags; identity matches for these tags are suppressed as expected releases (empty disables suppression)")
 	if err := fs.Parse(args); err != nil {
 		return options{}, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse flags", err)
 	}
@@ -78,6 +92,41 @@ func parseFlags(args []string) (options, error) {
 		return options{}, errors.New(errors.ErrCodeInvalidRequest, "--timeout must be positive")
 	}
 	return opts, nil
+}
+
+// maxKnownTagsFileBytes bounds the known-tags file read. Even a decade of
+// releases is a few KiB; this simply prevents a pathological or
+// attacker-influenced path from ballooning memory.
+const maxKnownTagsFileBytes = 1 << 20 // 1 MiB
+
+// loadKnownTags reads a newline-separated file of release tags into a set. An
+// empty path returns an empty (non-nil) set, disabling suppression. Blank lines
+// and surrounding whitespace are ignored. A set path that cannot be read is an
+// error: the workflow always writes the file, so a missing one is a real
+// failure, not a silent "suppress nothing".
+func loadKnownTags(path string) (map[string]bool, error) {
+	known := map[string]bool{}
+	if path == "" {
+		return known, nil
+	}
+	f, err := os.Open(path) //nolint:gosec // path is a workflow-controlled argument
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to open known-tags file", err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxKnownTagsFileBytes+1))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read known-tags file", err)
+	}
+	if int64(len(data)) > maxKnownTagsFileBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "known-tags file exceeds size limit")
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if tag := strings.TrimSpace(line); tag != "" {
+			known[tag] = true
+		}
+	}
+	return known, nil
 }
 
 // run performs one monitor pass: it wires up the checkpoint store and the
@@ -94,7 +143,7 @@ func run(ctx context.Context, opts options, w io.Writer) error {
 	}
 	defer mon.cleanup() // remove the temp Fulcio CA files
 
-	return observe(ctx, mon, store, w)
+	return observe(ctx, mon, store, opts.knownTags, w)
 }
 
 // observe runs one consistency + identity pass and persists the cursor. It takes
@@ -103,7 +152,7 @@ func run(ctx context.Context, opts options, w io.Writer) error {
 // unit-testable without network access. It returns a non-nil error on a
 // consistency break, a scan error, or an identity finding, so the caller exits
 // non-zero and the workflow alerts.
-func observe(ctx context.Context, mon monitorChecks, store checkpointStore, w io.Writer) error {
+func observe(ctx context.Context, mon monitorChecks, store checkpointStore, knownTags map[string]bool, w io.Writer) error {
 	prev, err := store.read()
 	if err != nil {
 		return err
@@ -135,6 +184,7 @@ func observe(ctx context.Context, mon monitorChecks, store checkpointStore, w io
 				// The window is unverified; return before advancing.
 				return scanErr
 			}
+			found = filterKnownReleases(found, knownTags)
 			out.scanned = true
 			out.from, out.to = start+1, end // inclusive range actually covered
 			out.found, out.failed = found, failed
@@ -158,29 +208,113 @@ func observe(ctx context.Context, mon monitorChecks, store checkpointStore, w io
 	return nil
 }
 
+// classification labels a terminal monitor error by whether it is a genuine
+// security signal (tamper or a positive finding) or an operational failure that
+// a retry could clear. The workflow branches its alerting on this.
+type classification string
+
+const (
+	classClean       classification = "clean"
+	classTamper      classification = "tamper"
+	classIdentity    classification = "identity"
+	classOperational classification = "operational"
+)
+
+// classify maps a non-nil terminal error to its classification. Only the two
+// unambiguous compromise signals are security-classified: a consistency break
+// (tamper) and a positive finding via ErrCodeConflict (identity match or an
+// entry that failed verification). Everything else (transport, setup, timeout,
+// and even a malformed-but-not-mismatch consistency proof) is operational, so an
+// infrastructure blip never pages maintainers. A real log rewrite manifests as
+// proof.RootMismatchError, which stays reachable through the wrap chain via
+// Unwrap.
+func classify(err error) classification {
+	var mismatch proof.RootMismatchError
+	if stderrors.As(err, &mismatch) {
+		return classTamper
+	}
+	if stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+		return classIdentity
+	}
+	return classOperational
+}
+
 // runFunc is the signature of the monitor pass; injectable so realMain's
 // flag/timeout/exit-code handling is testable without the network-backed run.
 type runFunc func(context.Context, options, io.Writer) error
 
 func main() {
-	os.Exit(realMain(os.Args[1:], run))
+	os.Exit(realMain(os.Args[1:], run, os.Stdout))
 }
 
-// realMain parses args, bounds the pass with a timeout, runs it, and returns the
-// process exit code. Keeping os.Exit out of the body lets the deferred cancel()
-// run (os.Exit would skip it); taking runFn makes the wrapper testable.
-func realMain(args []string, runFn runFunc) int {
+// realMain parses args, bounds the pass with a timeout, runs it (retrying
+// operational failures via runWithRetry), and returns the process exit code:
+// 0 clean, 1 security (tamper/identity), 3 operational, 2 bad args. It prints a
+// machine-readable CLASSIFICATION=<value> line to w so the workflow can branch
+// its alerting without re-deriving intent from a stack trace.
+func realMain(args []string, runFn runFunc, w io.Writer) int {
 	opts, err := parseFlags(args)
 	if err != nil {
 		slog.Error("invalid arguments", "error", err)
 		return 2
 	}
+	tags, err := loadKnownTags(opts.knownTagsFile)
+	if err != nil {
+		slog.Error("invalid known-tags file", "error", err)
+		return 2
+	}
+	opts.knownTags = tags
 	ctx, cancel := context.WithTimeout(context.Background(), opts.timeout)
 	defer cancel()
-	if err := runFn(ctx, opts, os.Stdout); err != nil {
-		slog.Error("rekor v2 monitor detected an issue or failed", "error", err)
-		return 1
+
+	runErr := runWithRetry(ctx, opts, w, runFn)
+	if runErr == nil {
+		fmt.Fprintf(w, "CLASSIFICATION=%s\n", classClean)
+		slog.Info("rekor v2 monitor completed cleanly")
+		return 0
 	}
-	slog.Info("rekor v2 monitor completed cleanly")
-	return 0
+	class := classify(runErr)
+	fmt.Fprintf(w, "CLASSIFICATION=%s\n", class)
+	slog.Error("rekor v2 monitor detected an issue or failed", "classification", class, "error", runErr)
+	if class == classOperational {
+		return 3
+	}
+	return 1
+}
+
+const (
+	// maxPassAttempts bounds how many times a single monitor invocation retries
+	// an operational (transient) failure before giving up. A security
+	// classification is never retried — it is deterministic, and retrying only
+	// delays the maintainer page.
+	maxPassAttempts = 3
+	// retryBackoff is the fixed delay between operational retries. Kept modest
+	// relative to the pass timeout so three attempts cannot approach the
+	// deadline; a stalled network call is bounded by the context, not this sleep.
+	retryBackoff = 100 * time.Millisecond
+)
+
+// runWithRetry runs the monitor pass, retrying only operational failures up to
+// maxPassAttempts. It is safe to re-run a pass because observe() advances the
+// checkpoint cursor solely on a fully clean pass, so a failed attempt leaves no
+// partial state. The last error is returned for the caller to classify.
+func runWithRetry(ctx context.Context, opts options, w io.Writer, runFn runFunc) error {
+	var lastErr error
+	for attempt := 1; attempt <= maxPassAttempts; attempt++ {
+		lastErr = runFn(ctx, opts, w)
+		if lastErr == nil || classify(lastErr) != classOperational {
+			return lastErr
+		}
+		if attempt == maxPassAttempts {
+			break
+		}
+		slog.Warn("operational failure; retrying monitor pass",
+			"attempt", attempt, "maxAttempts", maxPassAttempts, "error", lastErr)
+		select {
+		case <-ctx.Done():
+			return errors.Wrap(errors.ErrCodeTimeout, "monitor retry cancelled", ctx.Err())
+		case <-time.After(retryBackoff):
+		}
+	}
+	return lastErr
 }
