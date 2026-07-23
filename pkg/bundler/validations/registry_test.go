@@ -287,3 +287,61 @@ func TestRunValidations(t *testing.T) {
 		})
 	}
 }
+
+// TestRunComponentValidations covers the shared component preflight used by
+// both DefaultBundler.Make and Client.BundleComponents: registry-declared
+// validations run for every component in the recipe, severity:error results
+// block (first error returned), and a nil bundler config — the SDK path,
+// which has no bundle-time overrides — still arms recipe-only rules such as
+// the driver-ownership Rule 1.
+func TestRunComponentValidations(t *testing.T) {
+	driverlessAKS := func(driverEnabled bool) *recipe.RecipeResult {
+		r := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{
+				Name: "gpu-operator",
+				Overrides: map[string]any{
+					"driver": map[string]any{"enabled": driverEnabled},
+				},
+			}},
+			Criteria: &recipe.Criteria{Service: recipe.CriteriaServiceAKS},
+		}
+		r.Metadata.GPUDriverState = recipe.GPUDriverStateAbsent
+		return r
+	}
+
+	t.Run("nil recipe result → no-op", func(t *testing.T) {
+		warnings, err := RunComponentValidations(context.Background(), nil, nil)
+		if err != nil || len(warnings) != 0 {
+			t.Fatalf("RunComponentValidations(nil) = (%v, %v), want (nil, nil)", warnings, err)
+		}
+	})
+
+	t.Run("driverless recipe + nil config → blocking error", func(t *testing.T) {
+		_, err := RunComponentValidations(context.Background(), driverlessAKS(false), nil)
+		if err == nil {
+			t.Fatal("expected blocking error for driver.enabled=false on a driverless cluster, got nil")
+		}
+		if !strings.Contains(err.Error(), "driverless") {
+			t.Errorf("error missing driver-ownership context: %v", err)
+		}
+	})
+
+	t.Run("coherent recipe + nil config → passes", func(t *testing.T) {
+		warnings, err := RunComponentValidations(context.Background(), driverlessAKS(true), nil)
+		if err != nil {
+			t.Fatalf("RunComponentValidations = %v, want nil", err)
+		}
+		for _, w := range warnings {
+			t.Logf("warning: %s", w)
+		}
+	})
+
+	t.Run("cancelled context → timeout error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := RunComponentValidations(ctx, driverlessAKS(true), nil)
+		if err == nil {
+			t.Fatal("expected context-cancellation error, got nil")
+		}
+	})
+}

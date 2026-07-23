@@ -439,6 +439,97 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			wantDRAConstraint: true,
 		},
 		{
+			name: "rtx-pro-6000-eks-training",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.Intent = CriteriaIntentTraining
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: false,
+		},
+		{
+			name: "rtx-pro-6000-eks-ubuntu-training",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: false,
+		},
+		{
+			name: "rtx-pro-6000-eks-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"kubeflow-trainer",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: false,
+		},
+		{
 			name: "h100-gke-cos-inference-dynamo",
 			criteria: func() *Criteria {
 				c := NewCriteria()

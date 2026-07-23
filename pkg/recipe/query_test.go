@@ -297,6 +297,43 @@ func TestHydrateResult(t *testing.T) {
 		}
 	})
 
+	t.Run("gpuDriverState projected when recorded, omitted when empty", func(t *testing.T) {
+		// metadata.gpuDriverState is omitempty in the recipe schema; the
+		// hand-built hydrated projection must match the recipe YAML and
+		// the OpenAPI schema so `aicr query` can select it.
+		result := &RecipeResult{
+			Kind:            "RecipeResult",
+			APIVersion:      "aicr.run/v1alpha2",
+			DeploymentOrder: []string{},
+		}
+		result.Metadata.GPUDriverState = GPUDriverStateAbsent
+
+		hydrated, err := HydrateResult(result)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		metadata, ok := hydrated["metadata"].(map[string]any)
+		if !ok {
+			t.Fatal("metadata is not a map")
+		}
+		if got := metadata["gpuDriverState"]; got != GPUDriverStateAbsent {
+			t.Errorf("gpuDriverState = %v, want %q", got, GPUDriverStateAbsent)
+		}
+
+		result.Metadata.GPUDriverState = ""
+		hydrated, err = HydrateResult(result)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		metadata, ok = hydrated["metadata"].(map[string]any)
+		if !ok {
+			t.Fatal("metadata is not a map")
+		}
+		if _, exists := metadata["gpuDriverState"]; exists {
+			t.Errorf("gpuDriverState = %v, want absent (omitempty contract)", metadata["gpuDriverState"])
+		}
+	})
+
 	t.Run("excluded overlays include reasons", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:            "RecipeResult",
