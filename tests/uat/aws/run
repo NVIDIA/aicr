@@ -57,9 +57,12 @@ aws_sts_federated_refresh() {
     # Outside CI (local dev) this hook is expected to no-op quietly. INSIDE CI,
     # missing identifiers are a misconfiguration (e.g. id-token: write dropped, or
     # AWS_ACCOUNT_ID unset) that would silently degrade to the non-refreshing
-    # session and re-introduce #1861 with no diagnostic — surface it loudly.
-    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    # session and re-introduce #1861 — warn AND return non-zero so the gate does
+    # not record the missed refresh as a success (advancing its refresh timer);
+    # a failure keeps the gate warning and retrying instead.
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
       echo "::warning::AWS STS mid-gate refresh skipped — OIDC/role identifiers missing in CI; the gate will run on a non-refreshing 1h session (see #1861)" >&2
+      return 1
     fi
     return 0
   fi
