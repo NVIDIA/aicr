@@ -39,7 +39,7 @@ func TestObserveShardRotation(t *testing.T) {
 	f := &fakeMonitor{watch: true, cur: &tlog.Checkpoint{Origin: "log2026-1", Size: 5, Hash: make([]byte, 32)}}
 
 	var buf bytes.Buffer
-	if err := observe(context.Background(), f, store, &buf); err != nil {
+	if err := observe(context.Background(), f, store, nil, &buf); err != nil {
 		t.Fatalf("observe() error = %v", err)
 	}
 	if f.scanned {
@@ -115,6 +115,7 @@ func TestObserve(t *testing.T) {
 		name      string
 		seedPrev  uint64 // 0 => first run (no prior checkpoint)
 		fake      fakeMonitor
+		knownTags map[string]bool // nil => suppression disabled (passthrough)
 		wantErr   bool
 		wantScan  bool   // whether scanIdentity should have run
 		wantAdvTo uint64 // checkpoint size expected on disk after the pass (0 => unchanged/absent)
@@ -149,6 +150,26 @@ func TestObserve(t *testing.T) {
 			wantAdvTo: 100, // must not advance past a finding (sticky until triaged)
 		},
 		{
+			name:     "known release match suppressed -> clean pass advances",
+			seedPrev: 100,
+			fake: fakeMonitor{watch: true, cur: testCheckpoint(150), found: []identity.MonitoredIdentity{
+				{FoundIdentityEntries: []identity.LogEntry{{CertSubject: "https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v0.18.0-rc1"}}}}},
+			knownTags: map[string]bool{"v0.18.0-rc1": true},
+			wantErr:   false,
+			wantScan:  true,
+			wantAdvTo: 150,
+		},
+		{
+			name:     "unknown tag match -> finding does not advance",
+			seedPrev: 100,
+			fake: fakeMonitor{watch: true, cur: testCheckpoint(150), found: []identity.MonitoredIdentity{
+				{FoundIdentityEntries: []identity.LogEntry{{CertSubject: "https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v9.9.9-attacker"}}}}},
+			knownTags: map[string]bool{"v0.18.0-rc1": true},
+			wantErr:   true,
+			wantScan:  true,
+			wantAdvTo: 100,
+		},
+		{
 			name:      "consistency break does not advance",
 			seedPrev:  100,
 			fake:      fakeMonitor{watch: true, consErr: boom},
@@ -173,7 +194,7 @@ func TestObserve(t *testing.T) {
 			}
 			f := tt.fake // copy so scanned is per-subtest
 
-			err := observe(context.Background(), &f, store, os.Stdout)
+			err := observe(context.Background(), &f, store, tt.knownTags, os.Stdout)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("observe() error = %v, wantErr %v", err, tt.wantErr)
 			}
