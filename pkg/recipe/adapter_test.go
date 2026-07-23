@@ -783,7 +783,7 @@ spec:
 // buildProviderWithManifest returns an inMemoryDataProvider seeded with a
 // single manifest file at the supplied path. Used to verify that
 // GetManifestContentWithProvider reads from the supplied provider rather
-// than the package-global.
+// than the embedded default.
 func buildProviderWithManifest(t *testing.T, path string, content []byte) DataProvider {
 	t.Helper()
 	files := map[string][]byte{
@@ -795,8 +795,8 @@ func buildProviderWithManifest(t *testing.T, path string, content []byte) DataPr
 // TestRecipeResult_GetValuesForComponent_HonorsBoundProvider verifies that
 // when a RecipeResult was built from a Builder bound via WithDataProvider,
 // GetValuesForComponent reads the component's valuesFile from that bound
-// provider — not from the package-global DataProvider. This closes the
-// silent-fallback-to-global path flagged in reviewer feedback on Tasks 4/5.
+// provider — not from the embedded default. This closes the
+// silent-fallback path flagged in reviewer feedback on Tasks 4/5.
 func TestRecipeResult_GetValuesForComponent_HonorsBoundProvider(t *testing.T) {
 	t.Cleanup(ResetMetadataStoreForTesting)
 	t.Cleanup(ResetComponentRegistryForTesting)
@@ -810,9 +810,9 @@ func TestRecipeResult_GetValuesForComponent_HonorsBoundProvider(t *testing.T) {
 		t.Fatalf("BuildFromCriteria: %v", err)
 	}
 
-	// values.yaml exists in the BOUND provider only; the package-global
-	// embedded values.yaml has different content (no driver.version key at
-	// all). If GetValuesForComponent reaches for the global, the type
+	// values.yaml exists in the BOUND provider only; the default embedded
+	// values.yaml has different content (no driver.version key at
+	// all). If GetValuesForComponent reaches for the embedded default, the type
 	// assertion below will fail.
 	vals, err := result.GetValuesForComponent("gpu-operator")
 	if err != nil {
@@ -828,14 +828,8 @@ func TestRecipeResult_GetValuesForComponent_HonorsBoundProvider(t *testing.T) {
 	}
 }
 
-// TestRecipeResult_GetValuesForComponent_BoundProviderSurvivesGlobalSwap
-// pins the invariant that RecipeResult.provider defeats post-build mutations
-// of the package-global DataProvider. After building a recipe against dpA,
-// swapping the global to dpB (with different values content) must not change
-// what GetValuesForComponent returns — the bound provider wins.
-
 // TestGetManifestContentWithProvider verifies the explicit-provider variant
-// reads from the supplied DataProvider rather than the package-global.
+// reads from the supplied DataProvider rather than the embedded default.
 func TestGetManifestContentWithProvider(t *testing.T) {
 	dp := buildProviderWithManifest(t, "components/x/manifests/special.yaml", []byte("from-bound\n"))
 	got, err := GetManifestContentWithProvider(dp, "components/x/manifests/special.yaml")
@@ -848,8 +842,9 @@ func TestGetManifestContentWithProvider(t *testing.T) {
 }
 
 // TestGetManifestContentWithProvider_NilFallback verifies that passing a nil
-// DataProvider falls back to the package-global provider — preserving
-// back-compat for callers that don't have a RecipeResult-bound provider.
+// DataProvider falls back to the embedded catalog (defaultEmbeddedProvider) —
+// preserving back-compat for callers that don't have a RecipeResult-bound
+// provider.
 func TestGetManifestContentWithProvider_NilFallback(t *testing.T) {
 	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/nfd-network-rule.yaml")
 	if err != nil {

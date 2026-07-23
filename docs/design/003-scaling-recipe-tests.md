@@ -2,12 +2,11 @@
 
 ## Status
 
-**Accepted, implemented** — 2026-03-18
+**Accepted** — 2026-03-18 | **Updated** — 2026-06-29 (workflow consolidation, #1172)
 
-The tiered KWOK scaling strategy has shipped: tier discovery and per-overlay
-parallel jobs run in `.github/workflows/kwok-recipes.yaml`, with the Tier 3
-shard lane in `.github/workflows/kwok-tier3-shard.yaml`, backed by the
-`kwok/scripts/` and `kwok/profiles/` machinery.
+The tiered KWOK scaling strategy has shipped. The shared runner workflow lives in
+`.github/workflows/kwok-test-run.yaml`,
+serving all three tiers.
 
 ## Scope
 
@@ -150,7 +149,7 @@ To stay under the limit without sacrificing coverage, the `discover` job builds
 the `{recipe, deployer}` pairs and chunks them into batches of `TIER3_BATCH_SIZE`
 (200, with headroom under 256), emitting a `tier3_batches` output of
 `{id, pairs}` objects. `test-tier3` is a thin matrix over those batches that fans
-each one out to the **`kwok-tier3-shard.yaml`** reusable workflow, which expands
+each one out to the **`kwok-test-run.yaml`** shared reusable workflow, which expands
 its batch as its own (≤ 256) matrix. Batch count grows automatically as overlays
 are added — no manual job duplication. A fail-closed guard in `discover` errors
 loudly if `TIER3_BATCH_SIZE` is ever raised past 256, rather than resurfacing
@@ -159,27 +158,39 @@ GitHub's opaque rejection mid-fan-out.
 ### Workflow structure
 
 The `kwok-recipes.yaml` workflow splits into a discovery job, three test tiers,
-and a summary. Tier 3 fans out to a reusable shard workflow (see above):
+and a summary. All three tiers call the single shared **`kwok-test-run.yaml`**
+reusable workflow. Tier 3 additionally fans across batches to stay under
+GitHub's 256-configuration cap:
 
-```
+```text
 discover
-├── tier1: [eks, aks, gke, kind, ...]               # generic only
-├── tier2: [h100-eks-ubuntu-training, ...]           # diff-affected only
-├── tier3: [all 72+]                                 # full overlay set
-└── tier3_batches: [{id, pairs:[{recipe,deployer}]}] # cross-product, chunked ≤256
+├── tier1_pairs: [{recipe,deployer}]                 # generic overlays × all deployers
+├── tier2_pairs: [{recipe, deployer:"helm"}]         # diff-affected overlays, helm-only
+└── tier3_batches: [{id, pairs:[{recipe,deployer}]}] # all overlays × all deployers, chunked ≤256
 
 test-tier1  (PR + push to main)
-  matrix: tier1 × deployer
+  uses kwok-test-run.yaml  pairs=tier1_pairs
 
 test-tier2  (PR only, skip if empty)
-  matrix: tier2 × deployer
+  uses kwok-test-run.yaml  pairs=tier2_pairs  [helm-only]
 
 test-tier3  (push to main + schedule, skip on PR)
-  matrix: tier3_batches → uses kwok-tier3-shard.yaml (matrix: pairs)
+  matrix: tier3_batches → uses kwok-test-run.yaml (matrix: pairs)
 
 summary
   needs: [test-tier1, test-tier2, test-tier3]
 ```
+
+### Tier 2 deployer coverage
+
+Tier 2 is **helm-only** by deliberate policy (#1172). The old Tier 2 passed no
+deployer argument to the action, which already defaulted to `helm` — this makes
+that behavior explicit. Full deployer coverage (all deployers × all overlays)
+runs in Tier 3 on every push to `main` and on the nightly schedule.
+
+To add full deployer coverage to Tier 2, change `tier2_pairs` in the `discover`
+classify step to cross the recipe list with the full `DEPLOYERS` array (same
+pattern as `tier1_pairs`).
 
 ### Required checks
 
@@ -187,7 +198,8 @@ Branch protection requires a **stable aggregate check**, not individual matrix j
 names (which drift as overlays are added or removed). The `summary` job serves this
 role — it already aggregates results from all tiers.
 
-- **Required check:** `KWOK Test Summary` (the `summary` job)
+- **Required check:** `KWOK Test Summary` (the `summary` job) — must be added to
+  the repository branch ruleset so the aggregate result gates merges.
 - **Not required:** Individual `KWOK (recipe-name)` matrix jobs
 
 The `summary` job gates on Tier 1 and Tier 2 for PRs, and on all three tiers for

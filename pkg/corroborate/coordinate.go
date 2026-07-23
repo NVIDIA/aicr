@@ -31,7 +31,9 @@ import (
 // so no recipe resolution or metadata.name parsing is needed.
 //
 // It splits the dashboard on a known OS suffix and the tab on a known intent
-// prefix (both drawn from the criteria registry, never a closed enum), then
+// prefix (both drawn from the criteria registry, never a closed enum) — an
+// os-agnostic recipe's "<accelerator>-any" segment inverts to OS=any via the
+// same fallback, since the os loop skips the "any" wildcard — then
 // proves the inversion by round-tripping through the shared
 // recipe.CoordinateFor — a mismatch means the on-disk coordinate is
 // inconsistent and fails closed.
@@ -71,8 +73,9 @@ func criteriaFromCoordinate(co recipe.Coordinate) (recipe.Criteria, error) {
 // OS suffix from the registry (so a multi-token accelerator like "rtx-pro-6000"
 // stays intact), and falls back to the last hyphen for an unknown-but-
 // well-formed OS — the taxonomy is open, not a closed enum, so a future or
-// community OS must still invert. The caller's round-trip through CoordinateFor
-// validates the split.
+// community OS must still invert. An os-agnostic recipe's "<accelerator>-any"
+// takes the fallback too (the loop skips the "any" wildcard) and yields
+// OS="any". The caller's round-trip through CoordinateFor validates the split.
 func splitDashboard(dashboard string) (accel, osName string, err error) {
 	best := ""
 	for _, os := range recipe.GetCriteriaOSTypes() {

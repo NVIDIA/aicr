@@ -423,6 +423,39 @@ phase_conformance() {
   # check skips gracefully (skip != fail) rather than failing.
   # Evidence is rendered/attested from the merged multi-phase report, so the
   # signed bundle covers all phases.
+
+  # First-party platform sanity check. The emitted bundle's TestGrid tab
+  # coordinate is derived from the recipe's author-declared `platform`
+  # (inference→dynamo, training→kubeflow) and is NOT captured by the
+  # fingerprint — pkg/fingerprint/match.go treats the platform dimension as
+  # uncaptured — so a mis-declared platform would silently route evidence to
+  # the wrong tab. Cross-check that the platform operator's workload CRD is
+  # actually installed on the cluster the bundle deployed, so the declared
+  # coordinate matches the deployed component set. Unknown/other platforms are
+  # skipped (no false failure), a known platform whose CRD is absent fails closed.
+  # Runs BEFORE `validate --phase all` emits + pushes the signed bundle: a
+  # mis-declared platform must fail the leg before any incorrectly-routed
+  # evidence is published to the wrong TestGrid tab, not after.
+  echo "::group::Platform coordinate sanity check"
+  local platform crd
+  platform="$(yq -r '.criteria.platform // ""' recipe.yaml)"
+  case "${platform}" in
+    dynamo)   crd="dynamographdeployments.nvidia.com" ;;
+    kubeflow) crd="trainjobs.trainer.kubeflow.org" ;;
+    *)        crd="" ;;  # unknown/other platform: no cross-check wired
+  esac
+  if [[ -z "${crd}" ]]; then
+    echo "recipe declares platform '${platform}': no workload-CRD cross-check wired for it (skipping)"
+  elif ! kubectl get crd "${crd}" >/dev/null 2>&1; then
+    echo "::error::recipe declares platform=${platform} but its workload CRD ${crd} is not installed — the emitted evidence would map to the wrong TestGrid tab" >&2
+    kubectl get crd 2>&1 | head -50 >&2 || true
+    echo "::endgroup::"
+    exit 1
+  else
+    echo "platform=${platform}: workload CRD ${crd} present"
+  fi
+  echo "::endgroup::"
+
   echo "::group::Validate (all phases) + emit signed evidence"
   # Capture the exit code rather than letting `set -e` abort: on a validate
   # failure we snapshot the skyhook CR + node reboot fingerprint INLINE — seconds
@@ -447,35 +480,6 @@ phase_conformance() {
   fi
   echo "evidence pointer:"
   cat ./evidence/pointer.yaml
-
-  # First-party platform sanity check. The emitted bundle's TestGrid tab
-  # coordinate is derived from the recipe's author-declared `platform`
-  # (inference→dynamo, training→kubeflow) and is NOT captured by the
-  # fingerprint — pkg/fingerprint/match.go treats the platform dimension as
-  # uncaptured — so a mis-declared platform would silently route evidence to
-  # the wrong tab. Cross-check that the platform operator's workload CRD is
-  # actually installed on the cluster the bundle deployed, so the declared
-  # coordinate matches the deployed component set. Unknown/other platforms are
-  # skipped (no false failure), a known platform whose CRD is absent fails closed.
-  echo "::group::Platform coordinate sanity check"
-  local platform crd
-  platform="$(yq -r '.criteria.platform // ""' recipe.yaml)"
-  case "${platform}" in
-    dynamo)   crd="dynamographdeployments.nvidia.com" ;;
-    kubeflow) crd="trainjobs.trainer.kubeflow.org" ;;
-    *)
-      echo "recipe declares platform '${platform}': no workload-CRD cross-check wired for it (skipping)"
-      echo "::endgroup::"
-      return 0
-      ;;
-  esac
-  if ! kubectl get crd "${crd}" >/dev/null 2>&1; then
-    echo "::error::recipe declares platform=${platform} but its workload CRD ${crd} is not installed — the emitted evidence would map to the wrong TestGrid tab" >&2
-    kubectl get crd 2>&1 | head -50 >&2 || true
-    exit 1
-  fi
-  echo "platform=${platform}: workload CRD ${crd} present"
-  echo "::endgroup::"
 }
 
 phase_train() {
@@ -652,6 +656,28 @@ EOF
   echo "::endgroup::"
 
   echo "::group::Wait for DynamoGraphDeployment readiness (timeout ${SERVE_READY_TIMEOUT_SECONDS}s)"
+  # Expected pod count = sum of replicas across the graph's components (Frontend +
+  # decode Worker = 2 here). Gating on "all pods Ready" alone races: the Frontend
+  # pod is created and goes Ready seconds before the Dynamo operator materializes
+  # the Worker, so `total == ready_count` is briefly true with only the Frontend
+  # present — the readiness gate would pass, then serve traffic with no worker.
+  # Require at least the declared component count of pods before certifying ready.
+  local expected_pods
+  # The `|| expected_pods=""` is load-bearing: this runs under `set -euo
+  # pipefail`, so without it a transient kubectl/jq failure (API hiccup, CRD
+  # registration lag) makes the pipeline non-zero, the assignment propagates it,
+  # and errexit would kill the whole leg — with both stderr streams sent to
+  # /dev/null — before the `expected_pods=2` fallback below could run. Tolerate
+  # the read failure here so the fallback stays reachable.
+  expected_pods="$(kubectl get dynamographdeployments.nvidia.com "${SERVE_NAME}" -n "${SERVE_NAMESPACE}" \
+    -o json 2>/dev/null | jq '[.spec.components[]?.replicas // 1] | add // 0' 2>/dev/null)" || expected_pods=""
+  # Fall back to the known-minimum (Frontend + Worker) on any read failure or an
+  # under-count, so a transient hiccup can never relax the gate below two
+  # components (fail-safe: the gate only ever tightens, never loosens).
+  if [[ -z "${expected_pods}" || "${expected_pods}" -lt 2 ]]; then
+    expected_pods=2
+  fi
+  echo "expecting ${expected_pods} workload pod(s) (sum of component replicas)"
   local deadline=$(( SECONDS + SERVE_READY_TIMEOUT_SECONDS ))
   local ready=false pods_json total ready_count
   while (( SECONDS < deadline )); do
@@ -675,14 +701,16 @@ EOF
       echo "a workload pod is unrecoverable (${bad}); not waiting out the readiness budget" >&2
       break
     fi
-    # Ready when at least one pod exists and every pod reports Ready=True.
+    # Ready when all expected component pods exist and every pod reports
+    # Ready=True. Gating on expected_pods (not just total>0) closes the race
+    # where the Frontend is Ready before the Worker pod is even created.
     total="$(echo "${pods_json}" | jq '[.items[]?] | length')"
     ready_count="$(echo "${pods_json}" | jq '[.items[]? | select(.status.conditions[]? | select(.type=="Ready" and .status=="True"))] | length')"
-    if [[ "${total}" -gt 0 && "${total}" == "${ready_count}" ]]; then
+    if [[ "${total}" -ge "${expected_pods}" && "${total}" == "${ready_count}" ]]; then
       ready=true
       break
     fi
-    echo "workload not ready (${ready_count}/${total} pods Ready); retrying in 15s..."
+    echo "workload not ready (${ready_count}/${total} pods Ready, need ${expected_pods}); retrying in 15s..."
     sleep 15
   done
   echo "::endgroup::"
@@ -773,8 +801,19 @@ phase_verify() {
   args+=(-o evidence-result.json -t json)
 
   echo "::group::Verify signed evidence bundle"
-  "${AICR_BIN}" "${args[@]}"
+  # Capture the exit code instead of letting `set -e` abort here: on a
+  # verification failure the binary exits non-zero, which would kill the script
+  # before the diagnostic `cat evidence-result.json` below ever ran and would
+  # leave the ::group:: unclosed. Print the result, then propagate the status.
+  local vrc=0
+  "${AICR_BIN}" "${args[@]}" || vrc=$?
   echo "::endgroup::"
+
+  if (( vrc != 0 )); then
+    echo "::error::evidence verify exited ${vrc}" >&2
+    cat evidence-result.json 2>/dev/null || true
+    exit "${vrc}"
+  fi
 
   local exit_code
   exit_code="$(jq -r '.exit' evidence-result.json)"

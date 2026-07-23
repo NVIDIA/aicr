@@ -16,8 +16,15 @@
 # UAT runner (AWS/EKS). Thin shim over tests/uat/lib/phases.sh, which holds the
 # cloud-agnostic phase implementations and the phase dispatcher. Invoked
 # phase-by-phase from .github/workflows/uat-aws.yaml so per-phase failures
-# surface in the GitHub Actions UI. AWS needs no cloud-specific overrides: the
-# EKS session outlasts each phase, and the workflow refreshes it before teardown.
+# surface in the GitHub Actions UI.
+#
+# AWS-specific: the STS session minted by configure-aws-credentials is a fixed
+# ~1h (the role's default MaxSessionDuration) with no refresh token, so the
+# install phase's readiness gate (90m budget on a slow GB200) can outlive the
+# token minted at the install step and every EKS `aws eks get-token` then fails
+# ExpiredToken -> Unauthorized (issue #1861). So this runner wires the shared
+# cloud_refresh_credentials hook to re-mint the session mid-gate, mirroring
+# Azure's federated relogin.
 #
 # Usage:
 #   AICR_BIN=./aicr RUN_ID=12345 ./run <phase> <test-config.yaml>
@@ -27,5 +34,98 @@ set -euo pipefail
 
 # shellcheck source=../lib/phases.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/phases.sh"
+
+# How often the readiness gate re-mints the STS session. The token minted at the
+# install step is spent partly by the helmfile apply before the gate even starts,
+# so the interval must land the first re-mint well inside the ~1h session: 20m
+# keeps every cached token comfortably in-lifetime with margin for a slow apply
+# and a slow validate attempt.
+AWS_STS_REFRESH_INTERVAL_SECONDS="${AWS_STS_REFRESH_INTERVAL_SECONDS:-1200}" # 20 min
+
+# Re-mint the federated STS session in place. The CI session cannot self-refresh
+# (no refresh token), and once it expires kubectl / `aicr validate` EKS calls
+# fail ExpiredToken -> Unauthorized with no recovery from retrying — a fresh
+# GitHub OIDC assertion must be redeemed. GitHub permits minting ID tokens
+# repeatedly, so mint a fresh assertion and exchange it via
+# AssumeRoleWithWebIdentity (an UNSIGNED call — the web-identity token is the
+# auth — so it works even after the current session has expired), then export the
+# new credentials so the subsequent same-shell `aicr validate` / kubectl
+# get-token sign with them. No-op outside CI or when the identifiers are absent.
+aws_sts_federated_refresh() {
+  if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" \
+    || -z "${AWS_ACCOUNT_ID:-}" || -z "${GITHUB_ACTIONS_ROLE_NAME:-}" ]]; then
+    # Outside CI (local dev) this hook is expected to no-op quietly. INSIDE CI,
+    # missing identifiers are a misconfiguration (e.g. id-token: write dropped, or
+    # AWS_ACCOUNT_ID unset) that would silently degrade to the non-refreshing
+    # session and re-introduce #1861 — warn AND return non-zero so the gate does
+    # not record the missed refresh as a success (advancing its refresh timer);
+    # a failure keeps the gate warning and retrying instead.
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+      echo "::warning::AWS STS mid-gate refresh skipped — OIDC/role identifiers missing in CI; the gate will run on a non-refreshing 1h session (see #1861)" >&2
+      return 1
+    fi
+    return 0
+  fi
+  local role_arn oidc_token creds ak sk st rc=0 xtrace=
+  role_arn="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${GITHUB_ACTIONS_ROLE_NAME}"
+
+  # Keep the OIDC assertion and the minted STS secret keys out of any `set -x`
+  # trace — they would otherwise land in the public-repo job log. Force xtrace
+  # off for the whole secret-handling section and restore the caller's setting at
+  # the single exit below; steps thread `rc` (not early `return`) so that restore
+  # always runs. ::add-mask:: registers each value with the runner as defense in
+  # depth: unlike configure-aws-credentials (which auto-masks the creds it
+  # exports), these are hand-minted, so a future accidental echo stays redacted.
+  case "$-" in *x*) xtrace=1 ;; esac
+  set +x
+
+  oidc_token="$(curl -fsSL --retry 3 --max-time 30 \
+    -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r .value)" || rc=1
+  if (( rc == 0 )) && [[ -z "${oidc_token}" || "${oidc_token}" == "null" ]]; then
+    echo "AWS STS refresh: token endpoint returned no value" >&2
+    rc=1
+  fi
+  [[ "${rc}" -eq 0 ]] && echo "::add-mask::${oidc_token}"
+  if (( rc == 0 )); then
+    # env -u strips the (possibly expired) ambient credentials so the CLI makes
+    # this call UNSIGNED — the web-identity token is the sole authenticator, so it
+    # works even after the current session has expired.
+    creds="$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+      aws sts assume-role-with-web-identity \
+      --role-arn "${role_arn}" \
+      --role-session-name "GitHubActions-UAT-AICR-GateRefresh" \
+      --web-identity-token "${oidc_token}" \
+      --duration-seconds 3600 \
+      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+      --output text)" || rc=1
+  fi
+  if (( rc == 0 )); then
+    IFS=$'\t' read -r ak sk st <<<"${creds}"
+    if [[ -z "${ak}" || -z "${sk}" || -z "${st}" ]]; then
+      echo "AWS STS refresh: assume-role returned incomplete credentials" >&2
+      rc=1
+    fi
+  fi
+  if (( rc == 0 )); then
+    echo "::add-mask::${ak}"
+    echo "::add-mask::${sk}"
+    echo "::add-mask::${st}"
+    export AWS_ACCESS_KEY_ID="${ak}"
+    export AWS_SECRET_ACCESS_KEY="${sk}"
+    export AWS_SESSION_TOKEN="${st}"
+    echo "AWS STS session refreshed (AssumeRoleWithWebIdentity, 1h)"
+  fi
+
+  if [[ -n "${xtrace}" ]]; then set -x; fi
+  return "${rc}"
+}
+
+# Wire the refresh into the shared hook. The readiness gate calls this every
+# CLOUD_REFRESH_INTERVAL_SECONDS. CLOUD_REFRESH_INTERVAL_SECONDS is read by
+# phase_install in the shared lib.
+# shellcheck disable=SC2034  # used in tests/uat/lib/phases.sh
+CLOUD_REFRESH_INTERVAL_SECONDS="${AWS_STS_REFRESH_INTERVAL_SECONDS}"
+cloud_refresh_credentials() { aws_sts_federated_refresh; }
 
 uat_main "$@"

@@ -50,9 +50,12 @@ spec:
 
   recipe:
     criteria:
+      # No os: the h100-kind-* overlays are os-agnostic (nvkind runs on whatever
+      # the runner has), so specifying an os fails resolution ("no recipe
+      # provides os 'ubuntu'"). The cloud lanes pin os because their overlays
+      # declare one (ubuntu/cos); the kind overlays deliberately do not.
       service: kind
       accelerator: h100
-      os: ubuntu
       intent: training
       platform: kubeflow
     output:
@@ -94,4 +97,4 @@ spec:
         # repo; ../run appends a `:run-${RUN_ID}` tag for per-run isolation.
         # Must fall under a trusted registry (ghcr.io/nvidia) for ingest.
         out: ./evidence
-        push: ghcr.io/nvidia/aicr-evidence/h100-kind-ubuntu-training-kubeflow
+        push: ghcr.io/nvidia/aicr-evidence/h100-kind-training-kubeflow

@@ -39,9 +39,13 @@ on:
         type: string
         default: '1'
       deadline_offset_hours:
-        description: 'Time-box: hours after batch start to stop dispatching new cells. Keep below the drive job timeout (GitHub caps a hosted job at 6h) so the graceful drop-oldest is reachable.'
+        description: 'Time-box: hours after batch start to stop dispatching cells. Secondary cap — the drive also refuses any cell that cannot finish before its own timeout (see max_cell_minutes).'
         type: string
         default: '5'
+      max_cell_minutes:
+        description: 'Wall-clock a dispatched cell may need. The drive stops dispatching once fewer minutes than this remain before its timeout, so the last cell finishes cleanly.'
+        type: string
+        default: '150'
 
 permissions:
   contents: read
@@ -108,9 +112,11 @@ jobs:
     runs-on: ubuntu-latest
     # The controller blocks on `gh run watch` per cell sequentially, so this job
     # runs as long as the batch. GitHub hard-caps a hosted job at 6h; set an
-    # explicit timeout just under that so the job ends cleanly, and keep
-    # deadline_offset_hours below it so the graceful drop-oldest fires first —
-    # otherwise the job is killed mid-cell and the leg hard-fails.
+    # explicit timeout just under that so the job ends cleanly. The dispatch loop
+    # is budget-aware: it stops dispatching once fewer than `max_cell_minutes`
+    # remain before this timeout, so the last cell always finishes and the leg
+    # drops-oldest gracefully instead of being killed mid-cell (issue #1778).
+    # DRIVE_JOB_TIMEOUT_MINUTES in the run step below MUST equal this literal.
     timeout-minutes: 350
     strategy:
       fail-fast: false
@@ -145,9 +151,29 @@ jobs:
           RESERVATION: ${{ matrix.reservation }}
           PREVIOUS_N: ${{ inputs.previous_n || '1' }}
           DEADLINE_OFFSET_HOURS: ${{ inputs.deadline_offset_hours || '5' }}
+          MAX_CELL_MINUTES: ${{ inputs.max_cell_minutes || '150' }}
+          # MUST equal the drive job's timeout-minutes literal above. Used to
+          # derive the budget-aware dispatch cutoff so the last cell finishes
+          # before GitHub kills this job (issue #1778).
+          DRIVE_JOB_TIMEOUT_MINUTES: '350'
           BATCH_START: ${{ needs.enumerate.outputs.batch_start }}
         run: |
           set -euo pipefail
+          # Approximate this drive job's start (its timeout-minutes clock anchor).
+          # Captured at the top of the first substantive step; the checkout/setup
+          # steps before it already consumed a few minutes of the timeout budget,
+          # so the real GitHub kill is slightly EARLIER than DRIVE_START + timeout.
+          # SETUP_SLACK_MINUTES absorbs that skew (plus gh dispatch/watch latency)
+          # so the budget-aware cutoff holds even for a full-length cell. It must
+          # exceed this job's pre-`run` setup — a heavier-than-usual `fetch-depth:
+          # 0` checkout + setup-go — or the mid-cell kill this guards against
+          # returns; 10m gives ample margin over that few-minute setup. If setup
+          # ever grows past it, switch DRIVE_START to the job's exact start_at:
+          #   gh api "repos/${REPO}/actions/runs/${GITHUB_RUN_ID}/jobs" \
+          #     --jq '.jobs[] | select(.name|endswith("('"${RESERVATION}"')")) | .started_at'
+          # (leaving the slack to cover only dispatch/watch latency).
+          DRIVE_START=$(date +%s)
+          SETUP_SLACK_MINUTES=10
           # Poll budget for finding a dispatched run (gh workflow run returns no
           # run id): POLL_MAX_ATTEMPTS x POLL_INTERVAL_SECONDS seconds.
           POLL_MAX_ATTEMPTS=24
@@ -203,11 +229,40 @@ jobs:
             echo "::error::deadline_offset_hours must be a non-negative integer; got '${DEADLINE_OFFSET_HOURS}'." >&2
             exit 1
           fi
+          # Same guard for max_cell_minutes (free-form workflow_dispatch string):
+          # a non-integer or 0 would mis-shape the budget-aware cutoff below.
+          if [[ ! "$MAX_CELL_MINUTES" =~ ^[0-9]+$ || "$MAX_CELL_MINUTES" -eq 0 ]]; then
+            echo "::error::max_cell_minutes must be a positive integer; got '${MAX_CELL_MINUTES}'." >&2
+            exit 1
+          fi
+          # A cell reserve that leaves no room before the drive-job timeout would
+          # drop every cell immediately (an empty, silently-green batch). Reject
+          # it: the operator must lower max_cell_minutes or the job needs a longer
+          # timeout-minutes (bounded by GitHub's 6h hosted-job cap).
+          if (( MAX_CELL_MINUTES + SETUP_SLACK_MINUTES >= DRIVE_JOB_TIMEOUT_MINUTES )); then
+            echo "::error::max_cell_minutes+slack (${MAX_CELL_MINUTES}+${SETUP_SLACK_MINUTES}) must be < drive-job timeout (${DRIVE_JOB_TIMEOUT_MINUTES}m); no cell could dispatch." >&2
+            exit 1
+          fi
 
-          # Anchor the time-box to the single batch-start timestamp (captured
-          # once in the enumerate job) so every reservation leg shares one cutoff
-          # regardless of when its runner started.
-          deadline=$(( BATCH_START + DEADLINE_OFFSET_HOURS * 3600 ))
+          # Effective dispatch cutoff = the EARLIER of two deadlines:
+          #   (1) the user time-box, anchored to the single batch-start timestamp
+          #       (captured once in enumerate) so every reservation leg shares one
+          #       cutoff regardless of when its runner started; and
+          #   (2) the budget-aware cutoff: stop dispatching once fewer than
+          #       MAX_CELL_MINUTES remain before THIS drive job's own
+          #       timeout-minutes kill (anchored to DRIVE_START). This guarantees
+          #       the last cell dispatched has a full cell budget to finish before
+          #       GitHub cancels the job, so an overrun sheds the oldest remaining
+          #       cell gracefully instead of hard-failing the leg mid-cell (#1778).
+          # (2) is per-leg (DRIVE_START differs across matrix legs); (1) is shared.
+          offset_deadline=$(( BATCH_START + DEADLINE_OFFSET_HOURS * 3600 ))
+          budget_deadline=$(( DRIVE_START + (DRIVE_JOB_TIMEOUT_MINUTES - MAX_CELL_MINUTES - SETUP_SLACK_MINUTES) * 60 ))
+          deadline=$(( offset_deadline < budget_deadline ? offset_deadline : budget_deadline ))
+          if (( budget_deadline < offset_deadline )); then
+            echo "Dispatch cutoff: budget-aware (${MAX_CELL_MINUTES}m cell reserve before the ${DRIVE_JOB_TIMEOUT_MINUTES}m drive-job timeout), $(( (deadline - DRIVE_START) / 60 ))m into this leg."
+          else
+            echo "Dispatch cutoff: user time-box (deadline_offset_hours=${DEADLINE_OFFSET_HOURS}), $(( (deadline - BATCH_START) / 60 ))m after batch start."
+          fi
           cell=0
           leg_failed=""
           # Version outer-loop, intent inner-loop: `main` runs every intent
@@ -229,7 +284,7 @@ jobs:
             (( ${#cell_intents[@]} == 0 )) && continue
             for intent in "${cell_intents[@]}"; do
               if (( $(date +%s) >= deadline )); then
-                echo "::notice::Time-box reached — dropping remaining cells for ${RESERVATION} (oldest release first)."
+                echo "::notice::Dispatch cutoff reached (time-box or drive-job budget) — dropping remaining cells for ${RESERVATION} (oldest release first)."
                 break 2
               fi
               cell=$((cell + 1))

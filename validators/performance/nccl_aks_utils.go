@@ -18,18 +18,17 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
 )
 
-// aksRdmaSharedResource is the extended resource published by the network
-// operator's rdma-shared-device-plugin on AICR AKS clusters (selector
-// vendors=15b3 drivers=mlx5_core). The resource name hca_shared_devices_a is
-// pinned by recipes/components/network-operator/manifests/
-// nic-cluster-policy-aks.yaml for workload compatibility — keep the two in
-// sync. It is a *shared* device pool: a pod that requests one unit is granted
-// access to every InfiniBand HCA on the node (/dev/infiniband/*), so NCCL
-// workers request exactly 1 regardless of the HCA count.
-const aksRdmaSharedResource = "rdma/hca_shared_devices_a"
+// The shared RDMA resource name (helper.AKSRdmaSharedResource) is a *shared*
+// device pool: a pod that requests one unit is granted access to every
+// InfiniBand HCA on the node (/dev/infiniband/*), so NCCL workers request
+// exactly 1 regardless of the HCA count. The name is defined once in
+// validators/helper so this consumer and the deployment-phase readiness gate
+// cannot drift (both must key off the same resource the
+// nic-cluster-policy-aks.yaml manifest pins).
 
 // applyAKSTemplateData populates the AKS-specific runtime template variables:
 // the ${RDMA_RESOURCE_LIMITS}/${RDMA_RESOURCE_REQUESTS} worker resource lines
@@ -45,7 +44,7 @@ const aksRdmaSharedResource = "rdma/hca_shared_devices_a"
 // closed rather than sizing every worker from the first node.
 func applyAKSTemplateData(config *gpuConfiguration, templateData map[string]string) error {
 	warnIfHeterogeneousNodes(config.Nodes)
-	rdmaCount, err := uniformFabricResourceCount(config.Nodes, v1.ResourceName(aksRdmaSharedResource))
+	rdmaCount, err := uniformFabricResourceCount(config.Nodes, v1.ResourceName(helper.AKSRdmaSharedResource))
 	if err != nil {
 		return err
 	}
@@ -56,9 +55,9 @@ func applyAKSTemplateData(config *gpuConfiguration, templateData map[string]stri
 	if rdmaCount == 0 {
 		templateData["MAX_MESSAGE_SIZE"] = maxMessageSizeTCP
 		slog.Warn("No shared RDMA devices found — NCCL will use TCP (reduced bandwidth)",
-			"resource", aksRdmaSharedResource, "maxMessageSize", maxMessageSizeTCP)
+			"resource", helper.AKSRdmaSharedResource, "maxMessageSize", maxMessageSizeTCP)
 	} else {
-		slog.Info("Discovered AKS shared RDMA device pool", "resource", aksRdmaSharedResource, "allocatable", rdmaCount)
+		slog.Info("Discovered AKS shared RDMA device pool", "resource", helper.AKSRdmaSharedResource, "allocatable", rdmaCount)
 	}
 	return nil
 }
@@ -73,5 +72,5 @@ func buildAKSRdmaResourceLine(rdmaCount int, indent string) string {
 	if rdmaCount == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s%s: \"1\"", indent, aksRdmaSharedResource)
+	return fmt.Sprintf("%s%s: \"1\"", indent, helper.AKSRdmaSharedResource)
 }

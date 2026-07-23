@@ -88,15 +88,12 @@ job_timeout_sync() {
     done < "${file}"
 }
 
-kwok_recipes_out=$(job_timeout_sync "${REPO_ROOT}/.github/workflows/kwok-recipes.yaml")
-check "kwok-recipes-tier1-job-timeout-in-sync" 0 "test-tier1:jtm=18,tm=18" \
-    0 "$(echo "${kwok_recipes_out}" | grep '^test-tier1:')"
-check "kwok-recipes-tier2-job-timeout-in-sync" 0 "test-tier2:jtm=18,tm=18" \
-    0 "$(echo "${kwok_recipes_out}" | grep '^test-tier2:')"
-
-tier3_shard_out=$(job_timeout_sync "${REPO_ROOT}/.github/workflows/kwok-tier3-shard.yaml")
-check "kwok-tier3-shard-job-timeout-in-sync" 0 "test:jtm=18,tm=18" \
-    0 "$(echo "${tier3_shard_out}" | grep '^test:')"
+# All three tiers (kwok-recipes.yaml) call the single shared kwok-test-run.yaml
+# reusable workflow (#1172), which owns the only "test" job / job_timeout_minutes
+# wiring left to check.
+test_run_out=$(job_timeout_sync "${REPO_ROOT}/.github/workflows/kwok-test-run.yaml")
+check "kwok-test-run-job-timeout-in-sync" 0 "test:jtm=20,tm=20" \
+    0 "$(echo "${test_run_out}" | grep '^test:')"
 
 # 10-11. Margin-floor guard in the "Derive sync-gate deadline" step
 # (action.yml): job_timeout_minutes must leave >= SYNC_BUDGET_FLOOR_SECONDS
@@ -144,4 +141,4 @@ if (( fails > 0 )); then
     echo "${fails} test(s) failed"
     exit 1
 fi
-echo "All 11 tests passed"
+echo "All 9 tests passed"

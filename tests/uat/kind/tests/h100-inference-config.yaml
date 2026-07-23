@@ -40,9 +40,11 @@ spec:
 
   recipe:
     criteria:
+      # No os: the h100-kind-* overlays are os-agnostic (nvkind runs on whatever
+      # the runner has), so specifying an os fails resolution. See the training
+      # sibling.
       service: kind
       accelerator: h100
-      os: ubuntu
       intent: inference
       platform: dynamo
     output:
@@ -73,4 +75,4 @@ spec:
     evidence:
       attestation:
         out: ./evidence
-        push: ghcr.io/nvidia/aicr-evidence/h100-kind-ubuntu-inference-dynamo
+        push: ghcr.io/nvidia/aicr-evidence/h100-kind-inference-dynamo

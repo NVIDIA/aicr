@@ -61,6 +61,15 @@ func TestCriteriaFromCoordinate(t *testing.T) {
 				Intent: "training", Platform: ""},
 		},
 		{
+			// os-agnostic recipe (nvkind): the "-any" segment inverts to OS=any
+			// via the last-hyphen fallback (the os loop skips the "any" wildcard)
+			// and round-trips through CoordinateFor.
+			name:  "os-agnostic (any) inverts and round-trips",
+			coord: recipe.Coordinate{Group: "kind", Dashboard: "h100-any", Tab: "training-kubeflow"},
+			want: recipe.Criteria{Service: "kind", Accelerator: "h100", OS: "any",
+				Intent: "training", Platform: "kubeflow"},
+		},
+		{
 			name:  "unknown but well-formed intent inverts via the first-hyphen fallback",
 			coord: recipe.Coordinate{Group: "eks", Dashboard: "h100-ubuntu", Tab: "benchmark-suite"},
 			want: recipe.Criteria{Service: "eks", Accelerator: "h100", OS: "ubuntu",

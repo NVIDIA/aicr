@@ -832,7 +832,7 @@ aicr validate [flags]
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
 | `--fail-fast` | | bool | false | Stop after the first phase that fails. By default all phases run and produce results. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
-| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (used when `--recipe`, `--snapshot`, or `--output` is a ConfigMap URI) |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file selecting the target cluster for **every** Kubernetes operation in the invocation: `cm://` recipe/snapshot/output I/O, snapshot-agent deployment, validation namespace and RBAC, validator Jobs, and cleanup. One invocation targets one cluster. When omitted, default discovery applies (`KUBECONFIG` env, then `~/.kube/config`, then in-cluster). An invalid path fails any run that performs Kubernetes operations; `--no-cluster` dry-runs over local files do not load it. **Changed in v0.18:** validator-engine operations, including validator Jobs, now honor this flag instead of using the default cluster. |
 | `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for validation Job |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
@@ -948,7 +948,8 @@ aicr validate \
   --snapshot snapshot.yaml \
   --phase performance
 
-# With custom kubeconfig
+# With custom kubeconfig — selects the cluster for the whole run:
+# cm:// I/O, agent deployment, validator Jobs, and cleanup (#1787)
 aicr validate \
   --recipe recipe.yaml \
   --snapshot cm://gpu-operator/aicr-snapshot \

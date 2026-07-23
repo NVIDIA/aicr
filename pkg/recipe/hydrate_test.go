@@ -96,7 +96,7 @@ func TestHydrateHealthCheckAsserts(t *testing.T) {
 }
 
 // TestHydrateHealthCheckAsserts_NilProvider verifies hydration falls back
-// to the package-global embedded provider when nil is passed, matching the
+// to the embedded default provider when nil is passed, matching the
 // nil-fallback contract documented on applyRegistryDefaults.
 func TestHydrateHealthCheckAsserts_NilProvider(t *testing.T) {
 	registry, err := GetComponentRegistry()
