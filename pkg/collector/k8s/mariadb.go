@@ -139,7 +139,7 @@ func (k *Collector) collectMariaDBOperator(
 
 	mariaDBs, err := dynamicClient.Resource(*gvr).
 		Namespace(metav1.NamespaceAll).
-		List(ctx, metav1.ListOptions{})
+		List(ctx, metav1.ListOptions{Limit: 1})
 	if err != nil {
 		slog.Warn("failed to list official MariaDB custom resources",
 			slog.String("apiVersion", gvr.Version),

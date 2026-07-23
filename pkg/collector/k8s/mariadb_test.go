@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
@@ -100,7 +101,7 @@ func TestCollectMariaDBOperator_StateMatrix(t *testing.T) {
 				},
 			),
 			mariaDBs: []*unstructured.Unstructured{
-				newMariaDB("v1alpha1", "slurm", "accounting"),
+				newMariaDB("slurm", "accounting"),
 			},
 			want: map[string]any{
 				mariaDBKeyCollectionState: mariaDBStateCRsDetected,
@@ -117,8 +118,8 @@ func TestCollectMariaDBOperator_StateMatrix(t *testing.T) {
 				},
 			),
 			mariaDBs: []*unstructured.Unstructured{
-				newMariaDB("v1alpha1", "slurm-a", "accounting-a"),
-				newMariaDB("v1alpha1", "slurm-b", "accounting-b"),
+				newMariaDB("slurm-a", "accounting-a"),
+				newMariaDB("slurm-b", "accounting-b"),
 			},
 			want: map[string]any{
 				mariaDBKeyCollectionState: mariaDBStateCRsDetected,
@@ -316,6 +317,62 @@ func TestCollectMariaDBOperator_CanceledContextIsUnknown(t *testing.T) {
 	assert.Len(t, subtype.Data, 1)
 }
 
+func TestCollectMariaDBOperator_LimitsPresenceQuery(t *testing.T) {
+	t.Parallel()
+
+	dynamicClient := &listOptionsCapturingDynamicClient{
+		resources: &unstructured.UnstructuredList{
+			Items: []unstructured.Unstructured{
+				*newMariaDB("slurm", "accounting"),
+			},
+		},
+	}
+	collector := &Collector{
+		ClientSet:     fakeclient.NewClientset(),
+		DynamicClient: dynamicClient,
+		mariaDBDiscovery: newMariaDBDiscovery(
+			mariaDBGroup("v1alpha1", "v1alpha1"),
+			map[string]*metav1.APIResourceList{
+				mariaDBAPIGroup + "/v1alpha1": mariaDBExactResourceList("v1alpha1"),
+			},
+		),
+	}
+
+	subtype := collector.collectMariaDBOperator(context.Background(), nil)
+
+	assert.Equal(t, mariaDBStateCRsDetected, subtype.Data[mariaDBKeyCollectionState].Any())
+	assert.Equal(t, int64(1), dynamicClient.listOptions.Limit)
+}
+
+type listOptionsCapturingDynamicClient struct {
+	dynamic.NamespaceableResourceInterface
+	resources   *unstructured.UnstructuredList
+	listOptions metav1.ListOptions
+}
+
+func (c *listOptionsCapturingDynamicClient) Resource(
+	schema.GroupVersionResource,
+) dynamic.NamespaceableResourceInterface {
+
+	return c
+}
+
+func (c *listOptionsCapturingDynamicClient) Namespace(
+	string,
+) dynamic.ResourceInterface {
+
+	return c
+}
+
+func (c *listOptionsCapturingDynamicClient) List(
+	_ context.Context,
+	options metav1.ListOptions,
+) (*unstructured.UnstructuredList, error) {
+
+	c.listOptions = options
+	return c.resources.DeepCopy(), nil
+}
+
 func newMariaDBDiscovery(
 	groups *metav1.APIGroupList,
 	resources map[string]*metav1.APIResourceList,
@@ -367,9 +424,9 @@ func mariaDBExactResourceList(version string) *metav1.APIResourceList {
 	})
 }
 
-func newMariaDB(version string, namespace string, name string) *unstructured.Unstructured {
+func newMariaDB(namespace string, name string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": mariaDBAPIGroup + "/" + version,
+		"apiVersion": mariaDBAPIGroup + "/v1alpha1",
 		"kind":       mariaDBKind,
 		"metadata": map[string]any{
 			"namespace": namespace,

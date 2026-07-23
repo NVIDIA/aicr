@@ -607,7 +607,7 @@ func newSlinkyItem(
 	data map[string]measurement.Reading,
 ) measurement.ItemEntry {
 
-	context := map[string]string{
+	itemContext := map[string]string{
 		slinkyContextID:         slinkyItemID(kind, namespace, name),
 		slinkyContextKind:       kind,
 		slinkyContextNamespace:  namespace,
@@ -615,9 +615,9 @@ func newSlinkyItem(
 		slinkyContextAPIVersion: apiVersion,
 	}
 	if controllerID != "" {
-		context[slinkyContextControllerID] = controllerID
+		itemContext[slinkyContextControllerID] = controllerID
 	}
-	return measurement.ItemEntry{Context: context, Data: data}
+	return measurement.ItemEntry{Context: itemContext, Data: data}
 }
 
 func slinkyItemID(kind string, namespace string, name string) string {
