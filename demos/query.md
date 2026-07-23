@@ -38,7 +38,7 @@ aicr query \
   --selector components.gpu-operator.values.driver.version
 ```
 
-> `580.105.08`
+> `580.173.02`
 
 Subtree — full driver block:
 
@@ -52,9 +52,9 @@ aicr query \
 enabled: true
 maxParallelUpgrades: 5
 rdma:
-    enabled: true
+  enabled: false
 useOpenKernelModules: true
-version: 580.105.08
+version: 580.173.02
 ```
 
 ## Differentiation: Same Selector, Different Criteria
@@ -62,18 +62,21 @@ version: 580.105.08
 The interesting part is asking the *same* question against different
 criteria and watching values diverge.
 
-### Driver version differs by accelerator
+### Driver config differs by accelerator
+
+The driver *version* is a single global pin, but GB200 loads custom kernel
+module parameters that H100 doesn't need:
 
 ```shell
 for gpu in h100 gb200; do
-  echo -n "$gpu: "
-  aicr query --service eks --accelerator $gpu --intent training --os ubuntu \
-    --selector components.gpu-operator.values.driver.version 2>/dev/null
+  v=$(aicr query --service eks --accelerator $gpu --intent training --os ubuntu \
+    --selector components.gpu-operator.values.driver.kernelModuleConfig.name 2>/dev/null || echo "unset")
+  echo "$gpu: $v"
 done
 ```
 
-> `h100: 580.105.08`
-> `gb200: 580.173.02`
+> `h100: unset`
+> `gb200: nvidia-kernel-module-params`
 
 ### Constraints diverge by service + OS
 
@@ -107,10 +110,10 @@ aicr query --service gke --accelerator h100 --intent training --os cos \
   value: '>= 1.32'
 ```
 
-L40 relaxes K8s further (older accelerators run on older clusters):
+L40S (on OKE) relaxes K8s further (older accelerators run on older clusters):
 
 ```shell
-aicr query --service eks --accelerator l40 --intent training --os ubuntu \
+aicr query --service oke --accelerator l40s --intent training \
   --selector constraints
 ```
 
@@ -172,7 +175,7 @@ SELECTOR="components.gpu-operator.values.driver.version"
 
 printf "%-8s %-10s %-10s %-8s %s\n" SERVICE ACCEL INTENT OS DRIVER
 for service in eks gke; do
-  for accel in h100 gb200 l40; do
+  for accel in h100 gb200 l40s; do
     for intent in training inference; do
       os=ubuntu; [ "$service" = "gke" ] && os=cos
       v=$(aicr query \
@@ -205,7 +208,7 @@ claude
 
 > What driver version would deploy in EKS with H100 in Ubuntu for training?
 
-> Compare GPU operator driver versions between H100 and GB200 on EKS
+> Compare GPU Operator driver config between H100 and GB200 on EKS
 
 > List all components that ship in EKS H100 inference but not training
 

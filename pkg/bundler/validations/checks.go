@@ -410,7 +410,7 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"driver: provision the GPU node pools with the GKE-managed " +
 				"driver install (node pool gpu-driver-version) instead."
 		case recipe.CriteriaOSUbuntu:
-			// The pinned GPU Operator (v26.3.2) supports driver management
+			// The pinned GPU Operator (v26.3.3) supports driver management
 			// on GKE only on Ubuntu node images with containerd.
 			return "On GKE Ubuntu node images the GPU Operator can manage " +
 				"the driver: bundle in GPU-Operator-managed mode: " +
@@ -593,11 +593,11 @@ func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeRe
 // path.Clean'd (trailing-slash spellings compare equal, mirroring
 // pkg/recipe/driver_root_lockstep_test.go), declared empty string →
 // the default (the operator's own transformForDriverInstallDir treats
-// "" identically to the default, gpu-operator v26.3.2). An explicitly
+// "" identically to the default, gpu-operator v26.3.3). An explicitly
 // null or non-map hostPaths section is rejected with a blocking
 // message: Helm null-coalescing deletes a null key together with its
 // chart defaults, so the chart's unconditional .Values.hostPaths.rootFS
-// access (clusterpolicy.yaml, v26.3.2) fails at install. A declared
+// access (clusterpolicy.yaml, v26.3.3) fails at install. A declared
 // value that cleans to a relative path is rejected too — host-path
 // mounts require absolute paths.
 func resolveInstallDir(values map[string]any, componentName string) (string, bool, []string) {
@@ -630,7 +630,7 @@ func resolveInstallDir(values map[string]any, componentName string) (string, boo
 		// rejected rather than silently defaulted: the emitted values
 		// would carry it verbatim, and the pinned ClusterPolicy CRD
 		// types hostPaths.driverInstallDir as a string (gpu-operator
-		// v26.3.2 nvidia.com_clusterpolicies.yaml), so the install
+		// v26.3.3 nvidia.com_clusterpolicies.yaml), so the install
 		// fails while a defaulted check would have validated against
 		// /run/nvidia/driver instead.
 		return installDir, false, []string{fmt.Sprintf(
@@ -643,7 +643,7 @@ func resolveInstallDir(values map[string]any, componentName string) (string, boo
 	if dir == "" {
 		// Intentionally default-equivalent: the operator's own
 		// transformForDriverInstallDir early-returns on "" exactly like
-		// the default (gpu-operator v26.3.2, controllers/object_controls.go).
+		// the default (gpu-operator v26.3.3, controllers/object_controls.go).
 		return installDir, false, nil
 	}
 	cleaned := path.Clean(dir)
@@ -767,7 +767,7 @@ func dynamicOwnershipViolations(bundlerConfig *config.Config, componentName stri
 //     null-coalescing deletes the key together with its chart defaults,
 //     so .Values.<section> is nil at render time and the gpu-operator
 //     templates fail on unconditional field access (e.g.
-//     .Values.driver.manager.repository in _helpers.tpl, v26.3.2) —
+//     .Values.driver.manager.repository in _helpers.tpl, v26.3.3) —
 //     ownership cannot be verified and the install would fail anyway.
 //     A non-boolean toggle is rejected because the chart renders the
 //     value unquoted, so YAML re-typing at install time can flip it to a

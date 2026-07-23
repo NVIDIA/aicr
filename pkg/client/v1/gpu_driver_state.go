@@ -83,7 +83,7 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"driver: provision the GPU node pools with the GKE-managed " +
 				"driver install (node pool gpu-driver-version) instead."
 		case recipe.CriteriaOSUbuntu:
-			// The pinned GPU Operator (v26.3.2) supports driver management
+			// The pinned GPU Operator (v26.3.3) supports driver management
 			// on GKE only on Ubuntu node images with containerd.
 			return "On GKE Ubuntu node images the GPU Operator can manage " +
 				"the driver: bundle in GPU-Operator-managed mode: " +
