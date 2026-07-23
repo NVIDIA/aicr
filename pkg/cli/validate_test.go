@@ -387,3 +387,78 @@ func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateCmd_KubeconfigSelectsValidationCluster is the #1787 regression
+// test: an explicit --kubeconfig must select the cluster for the validator
+// engine itself, not only for cm:// artifact I/O. With local recipe/snapshot
+// files and a nonexistent --kubeconfig path, the run must fail fast on the
+// explicit path — before the fix, the engine silently fell back to default
+// discovery (KUBECONFIG env → ~/.kube/config → in-cluster), so the error
+// (if any) never mentioned the flag path. KUBECONFIG is pinned to a
+// nonexistent temp path so neither branch can ever reach a real cluster.
+//
+// A hydrated RecipeMetadata would fail readiness checks against this minimal
+// snapshot before client construction. This criteria-less RecipeResult keeps
+// readiness a no-op while its inline gpu-operator override supplies the
+// whole-GPU advertiser required by validation-input construction.
+func TestValidateCmd_KubeconfigSelectsValidationCluster(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KUBECONFIG", filepath.Join(tmp, "env-default.kubeconfig"))
+
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	recipeYAML := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n  - name: gpu-operator\n    type: Helm\n    source: https://helm.ngc.nvidia.com/nvidia\n    version: v25.10.0\n    overrides:\n      devicePlugin:\n        enabled: true\n"
+	if err := os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
+		t.Fatalf("failed to write test recipe file: %v", err)
+	}
+	snapshotPath := filepath.Join(tmp, "snapshot.yaml")
+	if err := os.WriteFile(snapshotPath, []byte("metadata:\n  version: test\n"), 0o600); err != nil {
+		t.Fatalf("failed to write test snapshot file: %v", err)
+	}
+
+	flagPath := filepath.Join(tmp, "explicit-flag.kubeconfig") // intentionally not created
+
+	cmd := validateCmd()
+	err := cmd.Run(t.Context(), []string{"validate",
+		"--recipe", recipePath,
+		"--snapshot", snapshotPath,
+		"--kubeconfig", flagPath,
+	})
+	if err == nil {
+		t.Fatal("expected error for nonexistent --kubeconfig, got nil")
+	}
+	if !strings.Contains(err.Error(), flagPath) {
+		t.Errorf("error must fail on the explicit --kubeconfig path %q, got:\n%v", flagPath, err)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+	}
+}
+
+// TestDeployAgentForValidation_ExplicitKubeconfigFailsFast covers the #1787
+// live-snapshot path: the preliminary namespace creation must use the same
+// explicit kubeconfig the snapshot agent deploys with — not the process
+// default. A nonexistent explicit path must fail before any cluster contact.
+// KUBECONFIG is pinned to a nonexistent temp path so the pre-fix fallback to
+// default discovery can never reach a real cluster either.
+func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KUBECONFIG", filepath.Join(tmp, "env-default.kubeconfig"))
+
+	flagPath := filepath.Join(tmp, "explicit-flag.kubeconfig") // intentionally not created
+	cfg := &validateAgentConfig{
+		kubeconfig: flagPath,
+		namespace:  "aicr-validation-test",
+		jobName:    "aicr-validate-test",
+	}
+
+	_, err := deployAgentForValidation(t.Context(), cfg)
+	if err == nil {
+		t.Fatal("expected error for nonexistent explicit kubeconfig, got nil")
+	}
+	if !strings.Contains(err.Error(), flagPath) {
+		t.Errorf("error must fail on the explicit kubeconfig path %q, got:\n%v", flagPath, err)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+	}
+}
