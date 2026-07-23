@@ -53,6 +53,24 @@ func fullSnapshot() *snapshotter.Snapshot {
 				SetString("kernel-version", "5.10.0-26").
 				SetString("operating-system", "linux").
 				SetString("os-image", "Amazon Linux 2")).
+			WithSubtype(measurement.Subtype{
+				Name: "slinky-slurm",
+				Data: map[string]measurement.Reading{
+					"collection-state": measurement.Str("detected"),
+				},
+				Items: []measurement.ItemEntry{{
+					Context: map[string]string{
+						"id":   "controller/slurm/cluster",
+						"name": "internal-cluster-name",
+					},
+				}},
+			}).
+			WithSubtype(measurement.Subtype{
+				Name: "mariadb-operator",
+				Data: map[string]measurement.Reading{
+					"collection-state": measurement.Str("crs-detected"),
+				},
+			}).
 			Build(),
 		measurement.NewMeasurement(measurement.TypeGPU).
 			WithSubtypeBuilder(measurement.NewSubtypeBuilder("hardware").
@@ -159,6 +177,11 @@ func TestSnapshotKeepsAllowlistedSubtypesAndKeys(t *testing.T) {
 	// SystemD measurement dropped entirely.
 	if findMeasurement(out, measurement.TypeSystemD) != nil {
 		t.Errorf("SystemD measurement must be dropped entirely")
+	}
+	for _, sub := range []string{"slinky-slurm", "mariadb-operator"} {
+		if findSubtype(out, measurement.TypeK8s, sub) != nil {
+			t.Errorf("K8s.%s must be dropped from minimal evidence", sub)
+		}
 	}
 }
 

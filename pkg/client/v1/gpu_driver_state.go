@@ -31,6 +31,81 @@ import (
 // component that owns the driver.enabled Helm value.
 const gpuOperatorComponentName = "gpu-operator"
 
+// gpuOperatorManagedOverrideSet is the documented bundle-time override
+// tuple that flips a preinstalled-driver recipe to GPU-Operator-managed
+// mode: the operator installs the driver and toolkit, the runtimeClass
+// follows the toolkit's handler, and the DRA kubelet plugin reads the
+// operator install dir. Kept as one string so the resolution-time
+// warning names the identical flag set the bundle-time
+// CheckDriverOwnershipCoherence validation accepts.
+//
+// A private sibling of this constant (and of driverAbsentRemedy below)
+// lives in pkg/bundler/validations: that package cannot import
+// pkg/client/v1 (dependency cycle through pkg/bundler), and a shared
+// package for two small helpers was rejected — the duplication is the
+// agreed disposition. Keep both copies in sync.
+const gpuOperatorManagedOverrideSet = "--set gpuoperator:driver.enabled=true " +
+	"--set gpuoperator:toolkit.enabled=true " +
+	"--set gpuoperator:operator.runtimeClass=nvidia " +
+	"--set dradriver:nvidiaDriverRoot=/run/nvidia/driver"
+
+// gkeGPUOperatorManagedOverrideSet extends the override tuple for GKE
+// remedies. GKE preinstalled-driver profiles (Google driver installer,
+// documented for both COS and Ubuntu node images) pin
+// hostPaths.driverInstallDir to /home/kubernetes/bin/nvidia, so a flip
+// to operator-managed mode must move BOTH driver roots to the operator
+// container root — otherwise the DRA lockstep rule blocks the exact
+// bundle this remedy recommends.
+const gkeGPUOperatorManagedOverrideSet = gpuOperatorManagedOverrideSet +
+	" --set gpuoperator:hostPaths.driverInstallDir=/run/nvidia/driver"
+
+// driverAbsentRemedy returns the provider-appropriate remedy wording for
+// the "preinstalled-driver recipe on a driverless cluster" mismatch,
+// derived from the resolved criteria service and OS. AKS pools created
+// with `--gpu-driver none` are fixed by recreating them without the flag
+// (or the override set); GKE+COS gets the COS-only wording (the GPU
+// Operator cannot install the driver on COS), GKE+Ubuntu gets the
+// operator-managed remedy (the pinned operator supports GKE driver
+// management only on Ubuntu node images), and any other GKE OS —
+// unknown, any, or one GKE does not offer — keeps the combined wording;
+// anything else gets the generic reprovision wording plus the override
+// set.
+func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType) string {
+	switch service { //nolint:exhaustive // only AKS and GKE have provider-specific wording; every other service takes the generic default
+	case recipe.CriteriaServiceAKS:
+		return "Either recreate the GPU node pools without --gpu-driver none " +
+			"(AKS installs the NVIDIA driver by default), or bundle in " +
+			"GPU-Operator-managed mode: " + gpuOperatorManagedOverrideSet + "."
+	case recipe.CriteriaServiceGKE:
+		switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
+		case recipe.CriteriaOSCOS:
+			return "On GKE COS node images the GPU Operator cannot install the " +
+				"driver: provision the GPU node pools with the GKE-managed " +
+				"driver install (node pool gpu-driver-version) instead."
+		case recipe.CriteriaOSUbuntu:
+			// The pinned GPU Operator (v26.3.2) supports driver management
+			// on GKE only on Ubuntu node images with containerd.
+			return "On GKE Ubuntu node images the GPU Operator can manage " +
+				"the driver: bundle in GPU-Operator-managed mode: " +
+				gkeGPUOperatorManagedOverrideSet + "."
+		default:
+			// Unknown/any OS, or an OS GKE does not offer as a node image —
+			// present both supported GKE paths without asserting the
+			// recipe's OS supports either.
+			return "On GKE COS node images the GPU Operator cannot install the " +
+				"driver: provision the GPU node pools with the GKE-managed " +
+				"driver install (node pool gpu-driver-version) instead. On " +
+				"GKE Ubuntu node images the GPU Operator can manage the " +
+				"driver, so those may bundle in GPU-Operator-managed mode: " +
+				gkeGPUOperatorManagedOverrideSet + "."
+		}
+	default:
+		return "Either reprovision the GPU nodes with a platform-installed " +
+			"NVIDIA driver, or bundle in GPU-Operator-managed mode: " +
+			gpuOperatorManagedOverrideSet + "."
+	}
+}
+
 // gpuHardwareSubtypeName is the subtype name emitted by
 // pkg/collector/gpu when writing the driver-loaded reading (see the
 // subtypeHardware constant there). Re-declared locally so this file
@@ -86,10 +161,11 @@ const (
 	// GKE-COS, OKE carry driver.enabled=false statically) the recipe
 	// assumes a platform-provided driver the cluster does not have, so
 	// the deployed bundle would leave GPU nodes driverless. Resolution
-	// warns with the bundle-time GPU-Operator-managed override set (a
-	// blocking bundle-time coherence validation is tracked in #1757).
-	// Overlays whose operator installs the driver (base, inherited by
-	// EKS) proceed unchanged.
+	// warns and records the state in Metadata.GPUDriverState; the
+	// bundle-time CheckDriverOwnershipCoherence validation fails the
+	// bundle unless the GPU-Operator-managed --set overrides are
+	// supplied. Overlays whose operator installs the driver (base,
+	// inherited by EKS) proceed unchanged.
 	gpuDriverAbsent
 )
 
@@ -344,21 +420,18 @@ func hasPreinstalledDriverProfile(ctx context.Context, r *recipe.RecipeResult) b
 // knows to add a proper preinstalled overlay before the deploy will do
 // the right thing.
 //
-// The inverse mismatch — the sampled GPU node has NO driver loaded but
-// the resolved overlay declares the preinstalled-driver profile (e.g.
-// the AKS driver-only default on a cluster whose GPU pools were created
-// with `--gpu-driver none`) — emits a slog.Warn. On AKS the warning
-// names the bundle-time GPU-Operator-managed override set; on other
-// preinstalled-profile platforms (GKE-COS, OKE) it gives generic
-// reprovisioning guidance instead, because the AKS override tuple is
-// incoherent there (GKE-COS keeps hostPaths.driverInstallDir pointed at
-// the host driver root, which driver.enabled=true would desynchronize
-// from the DRA driver root, and COS's read-only root cannot take an
-// operator-managed driver install at all). It cannot hard-fail here:
-// `aicr recipe` has no `--set`, so erroring at resolution would leave
-// supported GPU-Operator-managed clusters with no way to reach the
-// bundle-time overrides intended for them. A blocking bundle-time
-// ownership-coherence validation is tracked in issue #1757.
+// The inverse mismatch is enforced at bundle generation: the observed
+// driver state is recorded in the result's Metadata.GPUDriverState, and
+// when the sampled GPU node has NO driver loaded but the resolved
+// overlay declares the preinstalled-driver profile (e.g. the AKS
+// driver-only default on a cluster whose GPU pools were created with
+// `--gpu-driver none`) this function emits a slog.Warn here and the
+// bundle-time CheckDriverOwnershipCoherence validation (severity
+// error, recipes/registry.yaml) fails the bundle unless the
+// GPU-Operator-managed `--set` overrides are supplied. The check cannot
+// hard-fail at resolution: `aicr recipe` has no `--set`, so erroring
+// here would leave supported GPU-Operator-managed clusters with no way
+// to reach the bundle-time overrides intended for them.
 //
 // Merge precedence for the final Helm values is
 // base values.yaml → ValuesFile → Overrides (see pkg/recipe/adapter.go).
@@ -370,28 +443,37 @@ func applyGPUDriverAutoOverride(ctx context.Context, r *recipe.RecipeResult, sna
 			"state", state.String())
 		return
 	}
+	// Record the observation on the result (and thus in the emitted
+	// recipe YAML) so bundle-time validations can enforce ownership
+	// coherence once --set overrides are known. Reset first so the field
+	// always reflects THIS snapshot: unknown/not-observed leave it empty
+	// (an older-schema or GPU-less snapshot must not trip the bundle gate),
+	// and re-resolving a result previously marked "absent" against a later
+	// unusable snapshot must not retain the stale bundle-blocking state.
+	r.Metadata.GPUDriverState = ""
+	switch state {
+	case gpuDriverPreinstalled:
+		r.Metadata.GPUDriverState = recipe.GPUDriverStatePreinstalled
+	case gpuDriverAbsent:
+		r.Metadata.GPUDriverState = recipe.GPUDriverStateAbsent
+	case gpuDriverUnknown, gpuDriverNotObserved:
+		// No usable driver signal — leave the field empty so the
+		// bundle-time gate stays disarmed.
+	}
 	if state == gpuDriverAbsent && hasPreinstalledDriverProfile(ctx, r) {
-		// The GPU-Operator-managed override tuple is only coherent for
-		// AKS (see the function comment); other preinstalled-profile
-		// platforms get generic reprovisioning guidance.
-		remediation := "reprovision the GPU node pools with the " +
-			"platform's default NVIDIA driver install (see the " +
-			"platform's GPU setup guide under docs/integrator/)"
-		if r.Criteria != nil && r.Criteria.Service == recipe.CriteriaServiceAKS {
-			remediation = "either reprovision the GPU node pools with " +
-				"the platform's default driver install (AKS: omit " +
-				"--gpu-driver none), or bundle in GPU-Operator-managed " +
-				"mode: --set gpuoperator:driver.enabled=true " +
-				"--set gpuoperator:toolkit.enabled=true " +
-				"--set gpuoperator:operator.runtimeClass=nvidia " +
-				"--set dradriver:nvidiaDriverRoot=/run/nvidia/driver"
+		var service recipe.CriteriaServiceType
+		var osCriteria recipe.CriteriaOSType
+		if r.Criteria != nil {
+			service = r.Criteria.Service
+			osCriteria = r.Criteria.OS
 		}
 		slog.Warn("gpu-operator driver mismatch: the resolved recipe assumes a "+
 			"platform-preinstalled NVIDIA driver and container toolkit "+
 			"(gpu-operator driver.enabled=false — e.g. the AKS driver-only "+
 			"default), but the sampled GPU node reports no NVIDIA kernel "+
 			"driver loaded. Deploying this configuration would leave GPU "+
-			"nodes driverless. Remediation: "+remediation,
+			"nodes driverless, so `aicr bundle` will fail for this recipe "+
+			"(CheckDriverOwnershipCoherence). "+driverAbsentRemedy(service, osCriteria),
 			"component", gpuOperatorComponentName,
 			"state", state.String())
 		return

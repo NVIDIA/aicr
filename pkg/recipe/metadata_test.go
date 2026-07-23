@@ -2321,8 +2321,11 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"b200-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
 		{"b200-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// RTX Pro 6000 EKS variants
+		{"rtx-pro-6000-eks-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentTraining, ""}, true},
 		{"rtx-pro-6000-eks-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentInference, ""}, true},
+		{"rtx-pro-6000-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorRTXPro6000, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"rtx-pro-6000-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorRTXPro6000, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
+		{"rtx-pro-6000-eks-ubuntu-training-kubeflow", criteria{CriteriaServiceEKS, CriteriaAcceleratorRTXPro6000, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
 		{"rtx-pro-6000-eks-ubuntu-inference-dynamo", criteria{CriteriaServiceEKS, CriteriaAcceleratorRTXPro6000, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		{"rtx-pro-6000-eks-ubuntu-inference-nim", criteria{CriteriaServiceEKS, CriteriaAcceleratorRTXPro6000, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformNIM}, true},
 		// Kind-chain — TU must be OFF (KWOK/kind has no kubelet podResources socket)

@@ -26,12 +26,7 @@ func TestToValidationInput(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
 		APIVersion: header.GroupVersion,
 		Kind:       "RecipeResult",
-		Metadata: struct {
-			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
-			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
-			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
-		}{
+		Metadata: recipe.RecipeResultMetadata{
 			Version:         "1.0.0",
 			AppliedOverlays: []string{"base", "eks"},
 		},

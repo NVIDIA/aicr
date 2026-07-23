@@ -18,7 +18,15 @@
 # OKE pre-installs NVIDIA drivers and container toolkit on GPU bare-metal
 # shapes (BM.GPU.B200, BM.GPU.H100, etc.). Disable both to avoid conflicts.
 # To use GPU Operator-managed drivers instead, provision GPU nodes without
-# the Oracle-managed GPU driver and set driver.enabled to true.
+# the Oracle-managed GPU driver and set driver.enabled=true,
+# toolkit.enabled=true, AND dradriver:nvidiaDriverRoot=/run/nvidia/driver —
+# the Oracle GPU image bundles the driver and the container toolkit together,
+# so a node provisioned without it has neither. The DRA root must move too:
+# the OKE DRA base pins nvidiaDriverRoot: / for the host-installed driver, but
+# once gpu-operator manages the driver, Rule 2 of the bundle-time
+# driver-ownership coherence check requires nvidiaDriverRoot to equal
+# hostPaths.driverInstallDir (/run/nvidia/driver). The same check also rejects
+# a driver-only flip on a cluster whose snapshot recorded no NVIDIA driver.
 
 # hostPaths.driverInstallDir is intentionally left at the gpu-operator base
 # default /run/nvidia/driver: it is the host path the operator-validator

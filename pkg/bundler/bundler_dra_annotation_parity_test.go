@@ -100,6 +100,14 @@ func TestMake_DRAChartVersionAnnotation_GeneratedArtifactParity(t *testing.T) {
 						Version: "25.12.0",
 						Type:    "helm",
 						Source:  "https://helm.ngc.nvidia.com/nvidia",
+						// Keep the fixture coherent with the driver-root
+						// lockstep enforced by CheckDriverOwnershipCoherence:
+						// the operator manages the driver here (chart default
+						// driver.enabled=true), so DRA must read the operator
+						// install dir.
+						Overrides: map[string]any{
+							"nvidiaDriverRoot": "/run/nvidia/driver",
+						},
 					},
 				},
 				DeploymentOrder: []string{gpuOperatorComponentName, draComponentName},
@@ -196,6 +204,11 @@ func TestMake_DRAChartVersionAnnotation_AllDeployersCarryAnnotation(t *testing.T
 						Version: "25.12.0",
 						Type:    recipe.ComponentTypeHelm,
 						Source:  "https://helm.ngc.nvidia.com/nvidia",
+						// See the parity test above: keep the fixture
+						// coherent with the driver-root lockstep.
+						Overrides: map[string]any{
+							"nvidiaDriverRoot": "/run/nvidia/driver",
+						},
 					},
 				},
 				DeploymentOrder: []string{gpuOperatorComponentName, draComponentName},

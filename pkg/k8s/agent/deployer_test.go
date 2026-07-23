@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -153,9 +155,60 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 			t.Fatalf("ClusterRole not found: %v", err)
 		}
 
-		// Default: 3 rules (nodes, pods, clusterpolicies)
-		if len(cr.Rules) != 3 {
-			t.Errorf("expected 3 rules, got %d", len(cr.Rules))
+		// Default: nodes, pods, clusterpolicies, read-only Slinky CRs, and
+		// official MariaDB CRs.
+		if len(cr.Rules) != 5 {
+			t.Errorf("expected 5 rules, got %d", len(cr.Rules))
+		}
+		ruleTests := []struct {
+			name      string
+			apiGroups []string
+			resources []string
+			verbs     []string
+		}{
+			{
+				name:      "Slinky",
+				apiGroups: []string{slinkyAPIGroup},
+				resources: []string{
+					slinkyControllerResource,
+					slinkyNodeSetResource,
+					slinkyLoginSetResource,
+					slinkyRestAPIResource,
+					slinkyAccountingResource,
+				},
+				verbs: []string{verbList},
+			},
+			{
+				name:      "MariaDB",
+				apiGroups: []string{mariaDBAPIGroup},
+				resources: []string{mariaDBResource},
+				verbs:     []string{verbList},
+			},
+		}
+		for _, tt := range ruleTests {
+			t.Run(tt.name, func(t *testing.T) {
+				var actual *rbacv1.PolicyRule
+				for i := range cr.Rules {
+					rule := &cr.Rules[i]
+					if slices.Equal(rule.APIGroups, tt.apiGroups) &&
+						slices.Equal(rule.Resources, tt.resources) {
+
+						actual = rule
+						break
+					}
+				}
+				if actual == nil {
+					t.Fatalf(
+						"expected %s resource list rule with API groups %v and resources %v",
+						tt.name,
+						tt.apiGroups,
+						tt.resources,
+					)
+				}
+				if !slices.Equal(actual.Verbs, tt.verbs) {
+					t.Errorf("%s verbs = %v, want %v", tt.name, actual.Verbs, tt.verbs)
+				}
+			})
 		}
 	})
 

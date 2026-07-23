@@ -520,6 +520,95 @@ func TestConstraintPath_ExtractValue_ItemSelector(t *testing.T) {
 	}
 }
 
+func TestConstraintPath_ExtractValue_SlinkySlurmSummary(t *testing.T) {
+	t.Parallel()
+
+	snap := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeK8s,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "slinky-slurm",
+						Data: map[string]measurement.Reading{
+							"detected":         measurement.Bool(true),
+							"collection-state": measurement.Str("detected"),
+						},
+						Items: []measurement.ItemEntry{
+							{
+								Context: map[string]string{
+									"id":            "nodeset/slurm/workers",
+									"kind":          "NodeSet",
+									"controller-id": "controller/slurm/cluster",
+								},
+								Data: map[string]measurement.Reading{
+									"partition-enabled": measurement.Bool(true),
+								},
+							},
+						},
+					},
+					{
+						Name: "mariadb-operator",
+						Data: map[string]measurement.Reading{
+							"collection-state": measurement.Str("absent"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "detected",
+			path: "K8s.slinky-slurm.detected",
+			want: "true",
+		},
+		{
+			name: "collection state",
+			path: "K8s.slinky-slurm.collection-state",
+			want: "detected",
+		},
+		{
+			name: "item data by canonical id",
+			path: "K8s.slinky-slurm[id=nodeset/slurm/workers].partition-enabled",
+			want: "true",
+		},
+		{
+			name: "item context by kind",
+			path: "K8s.slinky-slurm[kind=NodeSet].controller-id",
+			want: "controller/slurm/cluster",
+		},
+		{
+			name: "MariaDB collection state",
+			path: "K8s.mariadb-operator.collection-state",
+			want: "absent",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path, err := ParseConstraintPath(tt.path)
+			if err != nil {
+				t.Fatalf("ParseConstraintPath(%q) error = %v", tt.path, err)
+			}
+			got, err := path.ExtractValue(snap)
+			if err != nil {
+				t.Fatalf("ExtractValue() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("ExtractValue() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConstraintPath_ExtractValue_PredicateAmbiguous(t *testing.T) {
 	t.Parallel()
 

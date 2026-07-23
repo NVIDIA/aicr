@@ -180,7 +180,34 @@ From `K8s.policy`: Flattened GPU Operator ClusterPolicy spec (dot-notation).
 | `psa.enabled` | Pod Security Admission |
 | `vfioManager.enabled` | VFIO passthrough |
 
-### Step 7: Check SystemD Services
+### Step 7: Extract Slinky and MariaDB Conflict Signals
+
+From `K8s.slinky-slurm`, report:
+
+- `collection-state`: `absent`, `detected`, `unsupported-multicluster`, or
+  `unknown`
+- Controller count and projected NodeSet/LoginSet/RestApi/Accounting counts
+- Item identities and Controller associations; include only the allowlisted
+  item data already present in the snapshot
+
+`detected` means a Controller declaration exists, not that Slurm or its
+operator is healthy. Child items and counts are emitted only after all required
+APIs and references are collected conclusively; their absence is otherwise not
+confirmed absence. Never infer `platform: slurm` from this subtype.
+
+From `K8s.mariadb-operator`, report `collection-state` as official
+MariaDB-operator API conflict evidence:
+
+- `absent`: official API group conclusively absent
+- `api-detected`: official API footprint present without observed MariaDB CRs
+- `crs-detected`: one or more official MariaDB CRs observed
+- `unknown`: discovery or List was inconclusive
+
+These states do not prove database availability, operator health, or the
+existence of an external database such as RDS. Never infer
+`accounting.databaseSource`.
+
+### Step 8: Check SystemD Services
 
 From `SystemD.containerd.service`, `SystemD.kubelet.service`, `SystemD.docker.service`:
 

@@ -21,6 +21,16 @@ const (
 	verbGet    = "get"
 	resourceCM = "configmaps"
 
+	slinkyAPIGroup           = "slinky.slurm.net"
+	slinkyControllerResource = "controllers"
+	slinkyNodeSetResource    = "nodesets"
+	slinkyLoginSetResource   = "loginsets"
+	slinkyRestAPIResource    = "restapis"
+	slinkyAccountingResource = "accountings"
+
+	mariaDBAPIGroup = "k8s.mariadb.com"
+	mariaDBResource = "mariadbs"
+
 	// rbacAPIGroup is the API group RoleRef / ClusterRoleRef values bind
 	// against, and that PolicyRules use when permitting Role / RoleBinding
 	// / ClusterRole / ClusterRoleBinding resources.

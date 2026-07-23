@@ -170,6 +170,14 @@ Client's own data provider and returns a Client-owned `*RecipeResult`
 ready for `ValidateState` / `BundleComponents` — it passes the same
 ownership check as a `ResolveRecipe` result. An already-hydrated
 `RecipeResult` file is returned with its provider bound to the Client.
+Note that bundle generation runs blocking preflight validations (for
+example `CheckDriverOwnershipCoherence`, which rejects a recipe whose
+snapshot recorded `gpuDriverState: absent` under a preinstalled-driver
+profile); the remedies those checks print are `--set` override flags,
+and the override-capable SDK surface is `MakeBundle` with
+`BundleOptions.Config` — `BundleComponents` takes no overrides, so a
+blocked recipe must be bundled through `MakeBundle` (or regenerated)
+rather than retried on the same call.
 The kubeconfig argument (third parameter) is only needed when the recipe
 path (first argument) is a `cm://` ConfigMap URI.
 
