@@ -33,10 +33,13 @@
 #     classification): no page. Only after three consecutive failed scheduled runs
 #     does it open a low-urgency "degraded" issue; a single blip stays quiet.
 # The job still goes red on every failure. A later clean run closes both the
-# security and degraded issues. Known release tags are fetched first and passed to
-# the tool (--known-tags-file) so an entry under the release identity that a real
-# tag produced is not flagged. Note: a workflow that fails to *start*
-# (startup_failure) cannot alert on itself, so an external liveness check
+# security and degraded issues. The tags a real release actually signed are fetched
+# first from the RELEASE_WORKFLOW_FILE (on-tag.yaml) run history and passed to the
+# tool (--known-tags-file), so an entry under the release identity that a real
+# release produced is not flagged. Run history is used rather than the repo's
+# current tags/releases because those are deleted for ephemeral release candidates
+# (NVIDIA/aicr#1902) while run history persists. Note: a workflow that fails to
+# *start* (startup_failure) cannot alert on itself, so an external liveness check
 # (dead-man's-switch) is tracked as a follow-up.
 #
 # Why our own tool, not upstream sigstore/rekor-monitor (NVIDIA/aicr#1623).
@@ -107,6 +110,12 @@ env:
   # the workflow so it is the auditable source of truth for what is monitored.
   CERT_SUBJECT: '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*$'
   CERT_ISSUER: '^https://token\.actions\.githubusercontent\.com$'
+  # The release signing workflow whose run history is the correlation source for
+  # "which tags a real release actually signed" (see the "Fetch signed release
+  # tags" step). MUST name the same workflow as CERT_SUBJECT above: the cert SAN
+  # is <this-workflow>@refs/tags/<tag>, so its run history is the authoritative,
+  # deletion-proof record of legitimate signings. Change both together.
+  RELEASE_WORKFLOW_FILE: on-tag.yaml
 
 jobs:
   monitor:
@@ -175,18 +184,35 @@ jobs:
           .github/scripts/gh-api-retry.sh checkpoint.zip "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip"
           echo "Fetched checkpoint artifact ${id}."
 
-      - name: Fetch known release tags
+      - name: Fetch signed release tags
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # All tags in this repo. The identity SAN references @refs/tags/<tag>,
-          # so a tag's existence is the correlation key for "a release produced
-          # this entry". One tag per line. Retry via the shared helper (see the
-          # checkpoint-fetch step and .github/scripts/gh-api-retry.sh).
-          .github/scripts/gh-api-retry.sh tags.json --paginate "repos/${GITHUB_REPOSITORY}/tags?per_page=100"
-          jq -rs '[.[][].name] | .[]' tags.json > known-tags.txt
-          echo "Fetched $(wc -l < known-tags.txt) known release tags."
+          # The correlation source is the RELEASE_WORKFLOW_FILE run history, NOT
+          # the repo's current tags. The identity SAN is <workflow>@refs/tags/<tag>,
+          # so a tag-push run of that workflow is the authoritative proof that a
+          # real release signed <tag>. Unlike /tags or /releases, run history
+          # PERSISTS after a tag/release is deleted, so an ephemeral release
+          # candidate (e.g. vX.Y.Z-rc1, whose tag+release are cleaned up once the
+          # final ships) is still recognised and does not trip the identity alarm
+          # (NVIDIA/aicr#1902). head_branch is the tag for a tag-push run. We
+          # require status=completed (an in-progress run may not have reached the
+          # sign step yet) but take any *conclusion*: signing happens mid-run, so a
+          # real release whose later step flakes concludes "failure" while still
+          # having produced a legitimate entry (e.g. v0.18.0 itself). Gating on
+          # conclusion=success would therefore re-create the #1902 false positive
+          # on genuine releases. Per-signing-step correlation would be tighter but
+          # needs per-run job inspection; see the maintaining.md residual note.
+          # De-duplicate. The reusable retry is already factored into the shared
+          # gh-api-retry.sh; this fetch+jq is specific to this monitor's
+          # correlation, so it stays inline (a composite action for one call site
+          # would add indirection without reuse).
+          .github/scripts/gh-api-retry.sh runs.json --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${RELEASE_WORKFLOW_FILE}/runs?event=push&status=completed&per_page=100"
+          jq -rs '[.[].workflow_runs[] | select(.head_branch != null) | .head_branch] | unique | .[]' \
+            runs.json > known-tags.txt
+          echo "Fetched $(wc -l < known-tags.txt) signed release tags from ${RELEASE_WORKFLOW_FILE} run history."
 
       - name: Monitor Rekor v2 (consistency + identity)
         id: monitor
