@@ -154,16 +154,19 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
 // Creates the namespace if it does not exist.
-func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, string, error) {
-	// Ensure namespace exists before deploying the agent Job.
-	clientset, _, err := k8sclient.GetKubeClient()
+func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, error) {
+	// Ensure namespace exists before deploying the agent Job. Build the
+	// client from the same explicit kubeconfig the agent deploy below uses
+	// (#1787) — empty delegates to default discovery, so the default path
+	// is unchanged.
+	clientset, _, err := k8sclient.GetKubeClientWithConfig(cfg.kubeconfig)
 	if err != nil {
-		return nil, "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to create kubernetes client")
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to create kubernetes client")
 	}
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.namespace}}
 	if _, nsErr := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); nsErr != nil {
 		if !apierrors.IsAlreadyExists(nsErr) {
-			return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", nsErr)
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", nsErr)
 		}
 	}
 
@@ -185,11 +188,10 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 
 	snap, err := snapshotter.DeployAndGetSnapshot(ctx, agentConfig)
 	if err != nil {
-		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to capture snapshot", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to capture snapshot", err)
 	}
 
-	source := fmt.Sprintf("agent:%s/%s", cfg.namespace, cfg.jobName)
-	return snap, source, nil
+	return snap, nil
 }
 
 // validationConfig holds all parameters for a validation run.
@@ -261,6 +263,12 @@ func runValidation(
 	// validator.With* calls); the image/commit overrides are passed verbatim
 	// (empty string is the validator's "unset" sentinel).
 	opts := []aicr.ValidateOption{
+		// Thread the CLI's resolved kubeconfig so every validator-engine
+		// operation (namespace, RBAC, input/result ConfigMaps, validator
+		// Jobs, watches, cleanup) targets the same cluster as artifact I/O
+		// (#1787). Empty keeps default discovery — the facade skips the
+		// option entirely on "".
+		aicr.WithValidationKubeconfig(cfg.kubeconfig),
 		aicr.WithValidationNamespace(cfg.validationNamespace),
 		aicr.WithValidationRunID(runID),
 		aicr.WithValidationCleanup(cfg.cleanup),
@@ -757,7 +765,7 @@ Run validation without failing on check errors (informational mode):
 				agentCfg := parseValidateAgentConfig(cmd, resolved, shared)
 
 				var deployErr error
-				snap, _, deployErr = deployAgentForValidation(ctx, agentCfg)
+				snap, deployErr = deployAgentForValidation(ctx, agentCfg)
 				if deployErr != nil {
 					return deployErr
 				}
