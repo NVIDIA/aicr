@@ -113,7 +113,7 @@ aicr query --service gke --accelerator h100 --intent training --os cos \
 L40S (on OKE) relaxes K8s further (older accelerators run on older clusters):
 
 ```shell
-aicr query --service oke --accelerator l40s --intent training \
+aicr query --service oke --accelerator l40s --intent training --os ol \
   --selector constraints
 ```
 
