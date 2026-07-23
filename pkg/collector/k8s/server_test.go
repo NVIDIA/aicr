@@ -16,10 +16,12 @@ package k8s
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"testing"
 	"time"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/stretchr/testify/assert"
 )
@@ -34,8 +36,8 @@ func TestKubernetesCollector_Collect(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// Should have 4 subtypes: server, image, policy, node
-	assert.Len(t, m.Subtypes, 4)
+	// Should have 6 subtypes: server, image, policy, node, Slinky, and MariaDB.
+	assert.Len(t, m.Subtypes, 6)
 
 	// Find the server subtype
 	var serverSubtype *measurement.Subtype
@@ -61,6 +63,42 @@ func TestKubernetesCollector_Collect(t *testing.T) {
 			assert.Equal(t, "go1.20.7", reading.Any())
 		}
 	}
+}
+
+func TestKubernetesCollector_CustomResourceFailuresAreIsolated(t *testing.T) {
+	t.Setenv("NODE_NAME", "test-node")
+
+	collector := createTestCollector()
+	collector.slinkyDiscovery = &stubSlinkyDiscovery{
+		groupsErr: stderrors.New("Slinky discovery unavailable"),
+	}
+	collector.mariaDBDiscovery = &stubSlinkyDiscovery{
+		groupsErr: stderrors.New("MariaDB discovery unavailable"),
+	}
+
+	m, err := collector.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+
+	server := m.GetSubtype("server")
+	if !assert.NotNil(t, server) {
+		return
+	}
+	assert.Equal(t, "v1.28.0", server.Data[measurement.KeyVersion].Any())
+	assert.NotNil(t, m.GetSubtype(SubtypeImage))
+	assert.NotNil(t, m.GetSubtype("policy"))
+	assert.NotNil(t, m.GetSubtype("node"))
+	assert.Equal(
+		t,
+		slinkyStateUnknown,
+		m.GetSubtype(SubtypeSlinkySlurm).Data[slinkyKeyCollectionState].Any(),
+	)
+	assert.Equal(
+		t,
+		mariaDBStateUnknown,
+		m.GetSubtype(SubtypeMariaDBOperator).Data[mariaDBKeyCollectionState].Any(),
+	)
 }
 
 func TestKubernetesCollector_CollectWithCanceledContext(t *testing.T) {
@@ -92,6 +130,54 @@ func TestKubernetesCollector_CollectWithTimeout(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
+func TestCollectSafe(t *testing.T) {
+	tests := []struct {
+		name     string
+		collect  func() (map[string]measurement.Reading, error)
+		wantData map[string]measurement.Reading
+		wantErr  bool
+	}{
+		{
+			name: "successful collection",
+			collect: func() (map[string]measurement.Reading, error) {
+				return map[string]measurement.Reading{"value": measurement.Str("ok")}, nil
+			},
+			wantData: map[string]measurement.Reading{"value": measurement.Str("ok")},
+		},
+		{
+			name: "deterministic failure is isolated",
+			collect: func() (map[string]measurement.Reading, error) {
+				return nil, aicrerrors.New(aicrerrors.ErrCodeInternal, "collector failed")
+			},
+			wantData: map[string]measurement.Reading{},
+		},
+		{
+			name: "timeout propagates",
+			collect: func() (map[string]measurement.Reading, error) {
+				return nil, aicrerrors.Wrap(
+					aicrerrors.ErrCodeTimeout,
+					"collector timed out",
+					context.DeadlineExceeded,
+				)
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := collectSafe("test", tt.collect)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, data)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantData, data)
+		})
+	}
+}
+
 func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 	// Match the client package's discovery-isolation pattern so this test
 	// cannot select a real workstation kubeconfig.
@@ -117,8 +203,22 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// All subtypes should be present but with empty data
-	assert.Len(t, m.Subtypes, 4)
+	// All standard subtypes should be present; custom-resource detection is unknown.
+	assert.Len(t, m.Subtypes, 6)
+	foundSlinky := false
+	foundMariaDB := false
+	for _, subtype := range m.Subtypes {
+		if subtype.Name == SubtypeSlinkySlurm {
+			assert.Equal(t, slinkyStateUnknown, subtype.Data[slinkyKeyCollectionState].Any())
+			foundSlinky = true
+		}
+		if subtype.Name == SubtypeMariaDBOperator {
+			assert.Equal(t, mariaDBStateUnknown, subtype.Data[mariaDBKeyCollectionState].Any())
+			foundMariaDB = true
+		}
+	}
+	assert.True(t, foundSlinky, "expected slinky-slurm subtype")
+	assert.True(t, foundMariaDB, "expected mariadb-operator subtype")
 }
 
 // Helper function defined in image_test.go

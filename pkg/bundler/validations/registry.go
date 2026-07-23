@@ -94,8 +94,8 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 				aicrerrors.ErrCodeInvalidRequest,
 				"unknown validation function",
 				map[string]any{
-					"component": componentName,
-					"function":  validation.Function,
+					logKeyComponent: componentName,
+					"function":      validation.Function,
 				}))
 			continue
 		}
@@ -133,11 +133,11 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 				if validation.Message != "" {
 					msg = warning + ". " + validation.Message
 				}
-				slog.Info(msg, "component", componentName)
+				slog.Info(msg, logKeyComponent, componentName)
 			}
 			for _, err := range checkErrors {
 				slog.Info("validation check reported error",
-					"component", componentName,
+					logKeyComponent, componentName,
 					"function", validation.Function,
 					"message", validation.Message,
 					"error", err,
@@ -164,4 +164,55 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 	}
 
 	return warnings, errors
+}
+
+// RunComponentValidations executes every registry-declared validation for
+// each component present in recipeResult, in ComponentRefs order. It is the
+// shared component preflight behind DefaultBundler.Make (which passes its
+// bundle config so --set/--set-json overrides participate) and
+// Client.BundleComponents (which passes a nil config — that path has no
+// bundle-time overrides, and every validation that acts solely on
+// bundle-time flags no-ops on a nil config). Returns the accumulated
+// non-blocking warnings and the first blocking error; warnings gathered
+// before a blocking error are still returned so the caller can surface
+// them alongside it.
+func RunComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config) ([]string, error) {
+	if recipeResult == nil {
+		return nil, nil
+	}
+
+	// A registry-load failure would produce an unvalidated bundle — the
+	// opposite of what the preflight promises; surface it.
+	componentRegistry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
+	if err != nil {
+		return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal,
+			"failed to load component registry for validations")
+	}
+
+	var allWarnings []string
+	for _, ref := range recipeResult.ComponentRefs {
+		if err := ctx.Err(); err != nil {
+			return allWarnings, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context cancelled during validation", err)
+		}
+
+		comp := componentRegistry.Get(ref.Name)
+		if comp == nil {
+			continue // Unknown component, skip
+		}
+
+		componentValidations := comp.GetValidations()
+		if len(componentValidations) == 0 {
+			continue // No validations configured
+		}
+
+		warnings, validationErrors := RunValidations(ctx, ref.Name, componentValidations, recipeResult, bundlerConfig)
+		allWarnings = append(allWarnings, warnings...)
+
+		// First error is blocking, matching the bundler's historical behavior.
+		if len(validationErrors) > 0 {
+			return allWarnings, validationErrors[0]
+		}
+	}
+
+	return allWarnings, nil
 }

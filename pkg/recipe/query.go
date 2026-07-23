@@ -45,15 +45,23 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe result is nil")
 	}
 
+	metadata := map[string]any{
+		"version":            result.Metadata.Version,
+		"appliedOverlays":    result.Metadata.AppliedOverlays,
+		"excludedOverlays":   result.Metadata.ExcludedOverlays,
+		"constraintWarnings": result.Metadata.ConstraintWarnings,
+	}
+	// GPUDriverState is omitempty in the recipe schema: project it only
+	// when recorded so `aicr query` output matches the recipe YAML and
+	// the OpenAPI schema.
+	if result.Metadata.GPUDriverState != "" {
+		metadata["gpuDriverState"] = result.Metadata.GPUDriverState
+	}
+
 	hydrated := map[string]any{
-		"kind":       result.Kind,
-		"apiVersion": result.APIVersion,
-		"metadata": map[string]any{
-			"version":            result.Metadata.Version,
-			"appliedOverlays":    result.Metadata.AppliedOverlays,
-			"excludedOverlays":   result.Metadata.ExcludedOverlays,
-			"constraintWarnings": result.Metadata.ConstraintWarnings,
-		},
+		"kind":            result.Kind,
+		"apiVersion":      result.APIVersion,
+		"metadata":        metadata,
 		"deploymentOrder": result.DeploymentOrder,
 	}
 

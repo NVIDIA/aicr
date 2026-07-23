@@ -1004,8 +1004,8 @@ func clearTuningEnvs(t *testing.T) {
 	for _, e := range []string{
 		envConcurrencyPerGPU, envWarmupPerConcurrency, envMinRequests,
 		envRequestsPerConcurrency, envInputTokensMean, envOutputTokensMean,
-		envModel, envWorkloadReadyTimeout, envHealthTimeout, envModelCacheSize,
-		envRouterMode,
+		envModel, envWorkloadReadyTimeout, envModelCachePopulateTimeout,
+		envHealthTimeout, envModelCacheSize, envRouterMode,
 	} {
 		t.Setenv(e, "")
 	}
@@ -1163,6 +1163,17 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		err := validatePerfTuningEnvs()
 		if err == nil {
 			t.Fatal("expected an error for a malformed duration knob")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+	t.Run("malformed model-cache populate-timeout knob → ErrCodeInvalidRequest", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envModelCachePopulateTimeout, "soon") // not a Go duration
+		err := validatePerfTuningEnvs()
+		if err == nil {
+			t.Fatal("expected an error for a malformed populate-timeout knob")
 		}
 		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)

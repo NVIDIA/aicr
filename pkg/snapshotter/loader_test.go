@@ -22,6 +22,9 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 func TestLoadFromFile(t *testing.T) {
@@ -92,5 +95,72 @@ func TestLoadFromFile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoadFromFile_CustomResourceDetectionRoundTrip(t *testing.T) {
+	snapshot := NewSnapshot()
+	snapshot.Kind = header.KindSnapshot
+	snapshot.APIVersion = header.GroupVersion
+	snapshot.Measurements = []*measurement.Measurement{{
+		Type: measurement.TypeK8s,
+		Subtypes: []measurement.Subtype{
+			{
+				Name: "slinky-slurm",
+				Data: map[string]measurement.Reading{
+					"collection-state": measurement.Str("detected"),
+				},
+				Items: []measurement.ItemEntry{{
+					Context: map[string]string{
+						"id":   "controller/slurm/cluster",
+						"kind": "Controller",
+					},
+					Data: map[string]measurement.Reading{
+						"cluster-name": measurement.Str("cluster"),
+					},
+				}},
+			},
+			{
+				Name: "mariadb-operator",
+				Data: map[string]measurement.Reading{
+					"collection-state": measurement.Str("absent"),
+				},
+			},
+		},
+	}}
+
+	body, err := serializer.MarshalYAMLDeterministic(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "snapshot.yaml")
+	if writeErr := os.WriteFile(path, body, 0o600); writeErr != nil {
+		t.Fatalf("write snapshot: %v", writeErr)
+	}
+
+	loaded, err := LoadFromFile(t.Context(), path)
+	if err != nil {
+		t.Fatalf("LoadFromFile() error = %v", err)
+	}
+	var k8s *measurement.Measurement
+	for _, candidate := range loaded.Measurements {
+		if candidate.Type == measurement.TypeK8s {
+			k8s = candidate
+			break
+		}
+	}
+	if k8s == nil {
+		t.Fatal("K8s measurement missing after round-trip")
+	}
+	slinky := k8s.GetSubtype("slinky-slurm")
+	if slinky == nil || len(slinky.Items) != 1 {
+		t.Fatalf("Slinky items after round-trip = %+v", slinky)
+	}
+	if got := slinky.Items[0].Context["id"]; got != "controller/slurm/cluster" {
+		t.Errorf("Slinky item id = %q, want canonical id", got)
+	}
+	mariaDB := k8s.GetSubtype("mariadb-operator")
+	if mariaDB == nil || mariaDB.Data["collection-state"].Any() != "absent" {
+		t.Fatalf("MariaDB subtype after round-trip = %+v", mariaDB)
 	}
 }

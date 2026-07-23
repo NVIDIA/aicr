@@ -1,8 +1,12 @@
 # AICR - Critical User Journey (CUJ) 1 — Slinky Slurm
 
-End-to-end walkthrough: **generate recipe (Query Mode) → bundle → deploy → validate → `srun` smoke job**.
+End-to-end walkthrough: **generate recipe → bundle → deploy → validate → `srun` smoke job**.
 
-Slurm leaves are built from criteria flags (`--service`, `--platform slurm`, …), not from `aicr snapshot` — snapshot intake for Slurm is not supported today. See [Query Mode](../docs/user/cli-reference.md#aicr-recipe) in the CLI reference.
+Use either direct criteria flags or a cluster snapshot plus explicit
+`--intent training --platform slurm`. Tier-1 snapshots detect declared Slinky
+Controller presence but do not infer the platform or reconstruct installed
+Helm values. See [aicr recipe](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#aicr-recipe) in the
+CLI reference.
 
 ## Assumptions
 
@@ -15,18 +19,18 @@ Slurm leaves are built from criteria flags (`--service`, `--platform slurm`, …
 
 ```text
   aicr recipe          aicr bundle        ./deploy.sh       aicr validate       srun smoke
-  (Query Mode)    ──▶  (scheduling)  ──▶  (install)    ──▶  (phases)       ──▶  (manual)
+  (query/snapshot) ──▶ (scheduling)  ──▶  (install)    ──▶  (phases)       ──▶  (manual)
 ```
 
-1. **Generate recipe (Query Mode)** — `aicr recipe --service … --platform slurm` resolves a slurm leaf overlay to `recipe.yaml`.
+1. **Generate recipe** — direct criteria or snapshot-derived infrastructure criteria plus `--platform slurm` resolve a Slurm leaf overlay to `recipe.yaml`.
 2. **Generate bundle** — apply `--system-*` / `--accelerated-*` scheduling and optional `--set` / `--set-json` on `slinkyslurm`.
 3. **Install** — run `deploy.sh`; cert-manager and Slinky operator come up, then the cluster chart in `slurm`.
 4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (`slinky-slurm-health` from the login pod). **Performance validation is not supported yet** on slurm leaves.
 5. **Smoke job** — `kubectl exec` into the login pod and run `srun` to confirm scheduling.
 
-## Generate Recipe (Query Mode)
+## Generate Recipe
 
-Pick the row that matches your cluster. Each resolves to a slurm leaf with at least three inline Slinky components: `slinky-slurm-operator-crds`, `slinky-slurm-operator`, and `slinky-slurm`. The GKE and Kind leaves also include `slinky-topograph` (topology-aware scheduling) — GKE with the `gcp` provider, Kind with the `test` provider and a fixed topology fixture. The EKS leaf does not include it today; see [Slinky Slurm Inline Components](../docs/integrator/recipe-development.md#slinky-slurm-inline-components) to add it to another leaf.
+Pick the row that matches your cluster. Each resolves to a slurm leaf with at least three inline Slinky components: `slinky-slurm-operator-crds`, `slinky-slurm-operator`, and `slinky-slurm`. The GKE and Kind leaves also include `slinky-topograph` (topology-aware scheduling) — GKE with the `gcp` provider, Kind with the `test` provider and a fixed topology fixture. The EKS leaf does not include it today; see [Slinky Slurm Inline Components](https://github.com/NVIDIA/aicr/blob/main/docs/integrator/recipe-development.md#slinky-slurm-inline-components) to add it to another leaf.
 
 
 | Cloud    | Command                                                                                                      | Leaf overlay                                               |
@@ -38,6 +42,27 @@ Pick the row that matches your cluster. Each resolves to a slurm leaf with at le
 
 
 H100 cloud leaves bake in `Gres=gpu:h100:8` and matching `nvidia.com/gpu: 8` slurmd limits so `srun --gres=gpu:N` works after deploy.
+
+### Hybrid snapshot mode
+
+For an existing cluster, capture infrastructure criteria and resolve the Slurm
+leaf while keeping workload intent explicit:
+
+```shell
+aicr snapshot -o system.yaml
+aicr recipe \
+  --snapshot system.yaml \
+  --intent training \
+  --platform slurm \
+  -o recipe.yaml
+```
+
+The `K8s.slinky-slurm` summary distinguishes absent, detected,
+unsupported-multicluster, and unknown outcomes. It does not prove operator/runtime
+health and does not reconstruct the current Slinky chart values. Review and
+apply any required `slinkyslurm` overrides during bundle generation. Snapshots
+created before this subtype existed continue to work with the same explicit
+intent and platform flags.
 
 ## Generate Bundle
 

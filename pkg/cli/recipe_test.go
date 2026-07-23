@@ -360,6 +360,41 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 			},
 		},
 		{
+			name: "Slinky subtype does not infer platform",
+			snapshot: &snapshotter.Snapshot{
+				Measurements: []*measurement.Measurement{
+					{
+						Type: measurement.TypeK8s,
+						Subtypes: []measurement.Subtype{
+							{
+								Name: "slinky-slurm",
+								Data: map[string]measurement.Reading{
+									"detected":         measurement.Bool(true),
+									"collection-state": measurement.Str("detected"),
+								},
+								Items: []measurement.ItemEntry{{
+									Context: map[string]string{
+										"id": "controller/slurm/cluster",
+									},
+								}},
+							},
+							{
+								Name: "mariadb-operator",
+								Data: map[string]measurement.Reading{
+									"collection-state": measurement.Str("crs-detected"),
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if string(c.Platform) != recipe.CriteriaAnyValue {
+					t.Errorf("Platform = %q, want unstated (%q)", c.Platform, recipe.CriteriaAnyValue)
+				}
+			},
+		},
+		{
 			name: "complete snapshot",
 			snapshot: &snapshotter.Snapshot{
 				Measurements: []*measurement.Measurement{

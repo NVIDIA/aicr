@@ -134,7 +134,7 @@ aicr snapshot \
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the `aicr-node-reader` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, and ClusterPolicy CRDs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the `aicr-node-reader` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, and official MariaDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
 - `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
 - `--require-gpu`: Fail the snapshot if no GPU is found. In agent mode also requests an `nvidia.com/gpu` resource for the pod (required in CDI environments).
 - `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
@@ -329,6 +329,18 @@ Check RBAC permissions:
 ```shell
 kubectl auth can-i get nodes --as=system:serviceaccount:gpu-operator:aicr
 kubectl auth can-i get pods --as=system:serviceaccount:gpu-operator:aicr
+kubectl auth can-i list controllers.slinky.slurm.net --all-namespaces \
+  --as=system:serviceaccount:gpu-operator:aicr
+kubectl auth can-i list nodesets.slinky.slurm.net --all-namespaces \
+  --as=system:serviceaccount:gpu-operator:aicr
+kubectl auth can-i list loginsets.slinky.slurm.net --all-namespaces \
+  --as=system:serviceaccount:gpu-operator:aicr
+kubectl auth can-i list restapis.slinky.slurm.net --all-namespaces \
+  --as=system:serviceaccount:gpu-operator:aicr
+kubectl auth can-i list accountings.slinky.slurm.net --all-namespaces \
+  --as=system:serviceaccount:gpu-operator:aicr
+kubectl auth can-i list mariadbs.k8s.mariadb.com --all-namespaces \
+  --as=system:serviceaccount:gpu-operator:aicr
 ```
 
 ### Job Pending
@@ -382,10 +394,15 @@ kubectl get serviceaccount aicr -n gpu-operator
 ### RBAC Permissions
 
 The agent requires these permissions (created automatically by the CLI):
-- **ClusterRole** (`aicr-node-reader`): Read access to nodes, pods, and ClusterPolicy CRDs (nvidia.com)
+- **ClusterRole** (`aicr-node-reader`): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); and cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`)
 - **Role** (`aicr`): Create/update ConfigMaps and list pods in the deployment namespace
 
-The baseline ClusterRole above is read-only (`get`/`list` only).
+The baseline ClusterRole above is read-only (`get`/`list` only). Slinky
+detection projects only allowlisted identity, association, and boolean fields;
+it omits free-form configuration, status, pod templates, and Secret/ConfigMap
+references or contents. MariaDB detection records only official API-group and
+CR presence; it does not inspect database configuration, Services, operator
+Deployments, pods, or external databases.
 
 **Additional privileges with `--discover-network`.** When `--discover-network`
 is set, the CLI appends a set of **cluster-scoped mutating** rules to the

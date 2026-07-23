@@ -479,14 +479,14 @@ const (
 	// The ceiling is set by the cold-start inference benchmark, which runs
 	// the following phases serially under the parent ctx:
 	//   InferenceNamespaceTerminationWait ( 5m, prior run's namespace drain)
-	// + InferenceWorkloadReadyTimeout     (10m, model-cache populate download —
-	//                                           the cache is on by default)
+	// + ModelCachePopulateTimeout         (13m, model-cache populate: cold image
+	//                                           pull + download — on by default)
 	// + InferenceWorkloadReadyTimeout     (10m, image pull + worker model load)
 	// + InferenceHealthTimeout            ( 5m, endpoint readiness probe)
 	// + InferencePerfPodTimeout           ( 5m, AIPerf pod scheduling)
 	// + InferencePerfJobTimeout           (15m, AIPerf benchmark runtime)
 	// ──────────────────────────────────────
-	// = 50m worst-case phase sum; 55m ceiling gives 5m headroom for slow
+	// = 53m worst-case phase sum; 55m ceiling gives 2m headroom for slow
 	//   image registries and slog/K8s API round-trips between phases.
 	// This is the fallback for a standalone validator invocation; normal runs
 	// use the larger inference-perf catalog `timeout` (AICR_CHECK_TIMEOUT, 65m),
@@ -618,6 +618,18 @@ const (
 	// DynamoGraphDeployment to reach the "successful" state. Includes image
 	// pull, model loading, and health check readiness for all workers.
 	InferenceWorkloadReadyTimeout = 10 * time.Minute
+
+	// ModelCachePopulateTimeout bounds the one-time model-cache populate Job (a
+	// cold vLLM/cache image pull plus the first-ever Hugging Face snapshot
+	// download into the PVC). It is deliberately larger than, and separate from,
+	// InferenceWorkloadReadyTimeout: the populate Job pays a cold image pull *and*
+	// a multi-GB anonymous download, so sharing the 10m workload-ready budget made
+	// it flake on slow-pull / throttled-download nights (issue #1859). Providing
+	// the optional HF token (already wired into the populate Job) removes the
+	// anonymous-download throttling; this larger budget covers the pull + download
+	// even without it. Sized to keep the inference sequential worst case under
+	// CheckExecutionTimeout (asserted in timeouts_test.go).
+	ModelCachePopulateTimeout = 13 * time.Minute
 
 	// InferenceNamespaceTerminationWait is the maximum time to wait for a
 	// prior run's benchmark namespace to finish terminating before a new run

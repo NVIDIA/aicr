@@ -120,6 +120,29 @@ components:
           service:
             - aks
         message: "network-operator disabled: keep driver.rdma.useHostMofed=false (the AKS default); set true only with host-preinstalled MOFED."
+      # Blocking: driver-ownership coherence on the FINAL effective values
+      # (recipe merge + --set/--set-json overrides, resolved under canonical
+      # component names and registry aliases). Rule 1: a preinstalled-driver
+      # recipe (driver.enabled=false) bundled for a cluster whose snapshot
+      # observed no NVIDIA driver on the sampled GPU node
+      # (metadata.gpuDriverState=absent, recorded only by snapshot-driven
+      # resolution) would deploy driverless GPU nodes; cleared when the
+      # effective values have driver.enabled=true and toolkit.enabled not
+      # explicitly false. operator.runtimeClass is NOT validated: the
+      # toolkit derives its containerd handler name from it, so any
+      # consistent value works — the documented override tuple sets it to
+      # nvidia by convention only. Rule 2 (metadata-independent, enforced
+      # separately from Rule 1): when gpu-operator manages the driver,
+      # nvidia-dra-driver-gpu.nvidiaDriverRoot must equal gpu-operator
+      # hostPaths.driverInstallDir. With a preinstalled driver, the DRA root
+      # must avoid the unpopulated operator container root and may intentionally
+      # differ from hostPaths.driverInstallDir (issue #1087). This also catches
+      # legacy pre-flip recipes that carry no recorded state. Independently,
+      # an explicit
+      # hostPaths.driverInstallDir of "/" is always rejected (the #1106
+      # regression: runc refuses a bind-mount destination of "/").
+      - function: CheckDriverOwnershipCoherence
+        severity: error
 
   - name: network-operator
     displayName: network-operator

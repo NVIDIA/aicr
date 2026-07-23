@@ -181,6 +181,22 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 			Resources: []string{"clusterpolicies"},
 			Verbs:     []string{verbGet, verbList},
 		},
+		{
+			APIGroups: []string{slinkyAPIGroup},
+			Resources: []string{
+				slinkyControllerResource,
+				slinkyNodeSetResource,
+				slinkyLoginSetResource,
+				slinkyRestAPIResource,
+				slinkyAccountingResource,
+			},
+			Verbs: []string{verbList},
+		},
+		{
+			APIGroups: []string{mariaDBAPIGroup},
+			Resources: []string{mariaDBResource},
+			Verbs:     []string{verbList},
+		},
 	}
 
 	// Live l8k network discovery stands up a nic-configuration-daemon
