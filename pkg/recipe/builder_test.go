@@ -647,11 +647,22 @@ func TestRecipeResult_DeepCopy_DropsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildFromCriteria: %v", err)
 	}
+	r.Metadata.GPUDriverState = GPUDriverStateAbsent
 	copy := r.DeepCopy()
 	if copy.Owner() != nil {
 		t.Errorf("DeepCopy.Owner() = %v, want nil", copy.Owner())
 	}
 	if err := copy.AssertOwnedBy(b); err == nil {
 		t.Error("AssertOwnedBy on deep-copied result returned nil; expected rejection (no provenance)")
+	}
+	// Metadata.GPUDriverState must survive the copy (the bundle-time
+	// driver-ownership gate reads it from adopted recipes too).
+	if copy.Metadata.GPUDriverState != GPUDriverStateAbsent {
+		t.Errorf("DeepCopy.Metadata.GPUDriverState = %q, want %q",
+			copy.Metadata.GPUDriverState, GPUDriverStateAbsent)
+	}
+	copy.Metadata.GPUDriverState = GPUDriverStatePreinstalled
+	if r.Metadata.GPUDriverState != GPUDriverStateAbsent {
+		t.Error("mutating the copy's Metadata.GPUDriverState leaked into the original")
 	}
 }

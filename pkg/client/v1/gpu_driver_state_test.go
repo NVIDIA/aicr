@@ -376,11 +376,16 @@ func TestApplyGPUDriverAutoOverride_UnitCases(t *testing.T) {
 		return recipe.ComponentRef{Name: gpuOperatorComponentName, Overrides: overrides}
 	}
 
+	notObservedSnap := gpuHardwareSnapshotWith(func(b *measurement.SubtypeBuilder) {
+		b.SetBool(measurement.KeyGPUPresent, false)
+	})
+
 	tests := []struct {
 		name         string
 		result       *recipe.RecipeResult
 		snap         *snapshotter.Snapshot
 		wantInjected bool
+		wantState    string // expected Metadata.GPUDriverState ("" = not recorded)
 	}{
 		{
 			name:         "nil result is a no-op",
@@ -389,26 +394,48 @@ func TestApplyGPUDriverAutoOverride_UnitCases(t *testing.T) {
 			wantInjected: false,
 		},
 		{
-			name:         "state=Absent never injects",
+			name:         "state=Absent never injects, records state for the bundle gate",
 			result:       makeResult(gpuOp(nil)),
 			snap:         absentSnap,
 			wantInjected: false,
+			wantState:    recipe.GPUDriverStateAbsent,
 		},
 		{
 			// The gate needs GetValuesForComponent to resolve — this stub
 			// result has no data provider, so hasPreinstalledDriverProfile
 			// returns false. That is the "bare EKS" behavior: warn +
-			// skip, never leave the Operator half-configured.
+			// skip, never leave the Operator half-configured. The observed
+			// state is still recorded for auditability.
 			name:         "preinstalled snapshot without a preinstalled-profile overlay is skipped",
 			result:       makeResult(gpuOp(nil)),
 			snap:         preinstalledSnap,
 			wantInjected: false,
+			wantState:    recipe.GPUDriverStatePreinstalled,
 		},
 		{
-			name:         "no gpu-operator ref is a no-op",
+			name:         "no gpu-operator ref is a no-op, state still recorded",
 			result:       makeResult(recipe.ComponentRef{Name: "nvsentinel"}),
 			snap:         preinstalledSnap,
 			wantInjected: false,
+			wantState:    recipe.GPUDriverStatePreinstalled,
+		},
+		{
+			// No GPU on the sampled node: distinct from "no driver" — the
+			// bundle-time gate must stay disarmed (empty state).
+			name:         "state=NotObserved records nothing",
+			result:       makeResult(gpuOp(nil)),
+			snap:         notObservedSnap,
+			wantInjected: false,
+			wantState:    "",
+		},
+		{
+			// No snapshot at all: Unknown — the bundle-time gate must stay
+			// disarmed (empty state).
+			name:         "state=Unknown records nothing",
+			result:       makeResult(gpuOp(nil)),
+			snap:         nil,
+			wantInjected: false,
+			wantState:    "",
 		},
 	}
 
@@ -419,6 +446,9 @@ func TestApplyGPUDriverAutoOverride_UnitCases(t *testing.T) {
 
 			if tt.result == nil {
 				return
+			}
+			if got := tt.result.Metadata.GPUDriverState; got != tt.wantState {
+				t.Errorf("Metadata.GPUDriverState = %q, want %q", got, tt.wantState)
 			}
 			var got any
 			for _, ref := range tt.result.ComponentRefs {

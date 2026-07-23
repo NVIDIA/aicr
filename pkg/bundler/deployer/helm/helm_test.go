@@ -1103,12 +1103,7 @@ func TestBundleGolden_ManifestOnly(t *testing.T) {
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
 			APIVersion: "aicr.run/v1alpha2",
-			Metadata: struct {
-				Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
-				AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-				ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
-				ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
-			}{Version: "v0.1.0"},
+			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 			ComponentRefs: []recipe.ComponentRef{
 				{Name: "skyhook-customizations", Namespace: "skyhook"},
 			},
@@ -1186,12 +1181,7 @@ func TestBundleGolden_KaiSchedulerPresent(t *testing.T) {
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
 			APIVersion: "aicr.run/v1alpha2",
-			Metadata: struct {
-				Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
-				AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-				ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
-				ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
-			}{Version: "v0.1.0"},
+			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 			ComponentRefs: []recipe.ComponentRef{
 				{
 					Name:      "kai-scheduler",
@@ -1287,12 +1277,7 @@ func singleComponentRecipe(name, namespace, chart, version, source string) *reci
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
 		APIVersion: "aicr.run/v1alpha2",
-		Metadata: struct {
-			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
-			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
-			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
-		}{Version: "v0.1.0"},
+		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: name, Namespace: namespace, Chart: chart, Version: version, Source: source},
 		},
@@ -1304,12 +1289,7 @@ func createTestRecipeResult() *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
 		APIVersion: "aicr.run/v1alpha2",
-		Metadata: struct {
-			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
-			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
-			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
-		}{Version: "v0.1.0"},
+		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
 			Accelerator: "h100",

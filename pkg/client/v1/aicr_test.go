@@ -19,6 +19,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -901,14 +902,18 @@ func gpuOperatorDriverEnabled(t *testing.T, rec *aicr.RecipeResult) (bool, bool)
 //     toolkit / driverInstallDir settings, so the override is
 //     semantically idempotent and safe.
 //   - Preinstalled-profile overlay (AKS, GKE-COS) + Absent → no
-//     override; a warning names the bundle-time GPU-Operator-managed
-//     override set. The recipe assumes a platform-provided driver the
+//     override, but metadata.gpuDriverState=absent is recorded and a
+//     warning logged. The recipe assumes a platform-provided driver the
 //     cluster does not have (e.g. an AKS pool created with
-//     --gpu-driver none); resolution itself cannot fail because `aicr
-//     recipe` has no --set escape hatch (a blocking bundle-time
-//     coherence validation is tracked in #1757).
-//   - EKS (operator installs the driver) + Absent → no override.
-//   - Any provider + Unknown (k8s-only snapshot) → no override.
+//     --gpu-driver none); the recorded state makes the bundle-time
+//     CheckDriverOwnershipCoherence validation fail closed unless the
+//     GPU-Operator-managed --set overrides are supplied (resolution
+//     itself cannot fail: `aicr recipe` has no --set escape hatch).
+//   - EKS (operator installs the driver) + Absent → no override; state
+//     recorded for auditability, bundle gate self-disarms because the
+//     operator installs the driver.
+//   - Any provider + Unknown (k8s-only snapshot) → no override, no
+//     recorded state.
 func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 	t.Parallel()
 
@@ -918,30 +923,33 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 		os           string // "" leaves criteria OS unset
 		snap         *aicr.Snapshot
 		wantInjected bool
+		wantState    string // expected Metadata.GPUDriverState ("" = not recorded)
 	}{
 		{
 			name:         "aks + preinstalled snapshot injects (profile gate satisfied)",
 			service:      "aks",
 			snap:         gpuHardwareSnapshot(true),
 			wantInjected: true,
+			wantState:    recipe.GPUDriverStatePreinstalled,
 		},
 		{
-			name:         "aks + absent snapshot warns, leaves defaults alone",
-			service:      "aks",
-			snap:         gpuHardwareSnapshot(false),
-			wantInjected: false,
+			name:      "aks + absent snapshot records state for the bundle-time gate",
+			service:   "aks",
+			snap:      gpuHardwareSnapshot(false),
+			wantState: recipe.GPUDriverStateAbsent,
 		},
 		{
 			name:         "eks bare + preinstalled snapshot skips (no profile gate)",
 			service:      "eks",
 			snap:         gpuHardwareSnapshot(true),
 			wantInjected: false,
+			wantState:    recipe.GPUDriverStatePreinstalled,
 		},
 		{
-			name:         "eks + absent snapshot leaves defaults alone (operator installs the driver)",
-			service:      "eks",
-			snap:         gpuHardwareSnapshot(false),
-			wantInjected: false,
+			name:      "eks + absent snapshot leaves defaults alone (operator installs the driver)",
+			service:   "eks",
+			snap:      gpuHardwareSnapshot(false),
+			wantState: recipe.GPUDriverStateAbsent,
 		},
 		{
 			name:         "gke-cos + preinstalled snapshot injects (profile gate satisfied)",
@@ -949,13 +957,14 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 			os:           "cos",
 			snap:         gpuHardwareSnapshot(true),
 			wantInjected: true,
+			wantState:    recipe.GPUDriverStatePreinstalled,
 		},
 		{
-			name:         "gke-cos + absent snapshot warns, leaves defaults alone",
-			service:      "gke",
-			os:           "cos",
-			snap:         gpuHardwareSnapshot(false),
-			wantInjected: false,
+			name:      "gke-cos + absent snapshot records state for the bundle-time gate",
+			service:   "gke",
+			os:        "cos",
+			snap:      gpuHardwareSnapshot(false),
+			wantState: recipe.GPUDriverStateAbsent,
 		},
 		{
 			name:         "aks + k8s-only snapshot is Unknown → no override",
@@ -998,6 +1007,10 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 			rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), tt.snap)
 			if err != nil {
 				t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+			}
+
+			if got := rec.Resolved().Metadata.GPUDriverState; got != tt.wantState {
+				t.Errorf("Metadata.GPUDriverState = %q, want %q", got, tt.wantState)
 			}
 
 			enabled, present := gpuOperatorDriverEnabled(t, rec)
@@ -1871,4 +1884,77 @@ func TestClient_LoadCatalogGuards(t *testing.T) {
 	if err := client.LoadCatalog(t.Context()); err == nil {
 		t.Error("LoadCatalog on a closed Client must be rejected")
 	}
+}
+
+// TestBundleComponents_DriverOwnershipPreflight proves the SDK bundle path
+// runs the same component preflight as DefaultBundler.Make: resolving a
+// recipe from a snapshot that observed NO NVIDIA kernel driver on the
+// sampled GPU node (an AKS pool created with --gpu-driver none) and then
+// bundling it must fail with ErrCodeInvalidRequest — the AKS profile's
+// preinstalled-driver values (driver.enabled=false) would deploy driverless
+// GPU nodes. Before the preflight, BundleComponents returned those values
+// with a nil error. The preinstalled-driver control case proves the gate
+// does not overblock the supported profile.
+func TestBundleComponents_DriverOwnershipPreflight(t *testing.T) {
+	t.Parallel()
+
+	newAKSRecipe := func(t *testing.T, snap *aicr.Snapshot) (*aicr.Client, *aicr.RecipeResult) {
+		t.Helper()
+		c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+
+		crit, err := recipe.BuildCriteriaWithRegistry(nil,
+			recipe.WithServiceRegistry("aks"),
+			recipe.WithAcceleratorRegistry("h100"),
+			recipe.WithIntentRegistry("training"),
+		)
+		if err != nil {
+			t.Fatalf("BuildCriteria: %v", err)
+		}
+		rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), snap)
+		if err != nil {
+			t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+		}
+		return c, rec
+	}
+
+	t.Run("absent driver → BundleComponents blocked", func(t *testing.T) {
+		t.Parallel()
+		c, rec := newAKSRecipe(t, gpuHardwareSnapshot(false))
+
+		if got := rec.Resolved().Metadata.GPUDriverState; got != recipe.GPUDriverStateAbsent {
+			t.Fatalf("precondition: GPUDriverState = %q, want %q", got, recipe.GPUDriverStateAbsent)
+		}
+
+		bundles, err := c.BundleComponents(t.Context(), rec)
+		if err == nil {
+			t.Fatalf("BundleComponents = nil error, want driver-ownership preflight failure (bundles: %d)", len(bundles))
+		}
+		var se *aicrerrors.StructuredError
+		if !errors.As(err, &se) {
+			t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+		}
+		if se.Code != aicrerrors.ErrCodeInvalidRequest {
+			t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+		}
+		if !strings.Contains(err.Error(), "driverless") {
+			t.Errorf("error missing driver-ownership context: %v", err)
+		}
+	})
+
+	t.Run("preinstalled driver → BundleComponents passes", func(t *testing.T) {
+		t.Parallel()
+		c, rec := newAKSRecipe(t, gpuHardwareSnapshot(true))
+
+		bundles, err := c.BundleComponents(t.Context(), rec)
+		if err != nil {
+			t.Fatalf("BundleComponents: %v", err)
+		}
+		if len(bundles) == 0 {
+			t.Fatal("BundleComponents returned no bundles")
+		}
+	})
 }
