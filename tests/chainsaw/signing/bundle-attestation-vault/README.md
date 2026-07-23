@@ -120,6 +120,18 @@ AICR_BIN=/path/to/aicr \
     --selector 'requires=openbao'
 ```
 
+> **Scrub inherited `VAULT_*` env when driving the suite by hand.** The key is
+> provisioned in the root namespace, but the `vault/api` client inside `aicr` and
+> `cosign` auto-reads a family of `VAULT_*` / `BAO_*` vars from the environment.
+> The common trap is `VAULT_NAMESPACE` (e.g. from a real-Vault config): it sends
+> an `X-Vault-Namespace` header, the key read resolves in a non-existent
+> namespace, and namespace-aware OpenBAO returns 404 — surfacing as the
+> misleading `could not read data from transit key path`. A stray `VAULT_CACERT`,
+> proxy, or `BAO_ADDR` can misdirect the connection the same way. `run.sh` clears
+> all of these for you (keeping only `VAULT_ADDR` / `VAULT_TOKEN` /
+> `VAULT_KMS_KEY`); the raw `chainsaw test` invocation above does not, so unset
+> them first — at minimum `unset VAULT_NAMESPACE BAO_NAMESPACE`.
+
 ## CI
 
 Workflow: `.github/workflows/vault-kms-e2e.yaml`
