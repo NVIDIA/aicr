@@ -57,13 +57,40 @@ transparency log (where AICR release signing writes since
 [#1650](https://github.com/NVIDIA/aicr/issues/1650)). In one job it checks two
 things: that the log stays append-only (consistency), and that no entry appears
 under AICR's release signing identity that a release did not produce (identity).
-On any failure it opens a tracking issue; a later clean run closes it.
+
+The monitor classifies every failure and the workflow branches on it, so infra
+flakiness never pages like a security event. A tamper (consistency break) or
+identity failure opens a security tracking issue that mentions the maintainers
+and posts a Slack page. An operational failure (Sigstore/Rekor/TUF/GitHub-API
+trouble) pages no one: a single red hourly job with no issue is a transient blip
+that self-heals, and only after three consecutive failed runs does a calm
+`area/ci` "degraded" issue open. The job still goes red on any failure, and a
+later clean run closes both the security and degraded issues.
 
 This protects the trust root every AICR consumer depends on: the release
 binaries, the signed recipe catalog, and the container images all chain to that
-one identity. When the workflow files an issue, follow the triage steps in the
-workflow file's header comment; an unrecognized identity hit should be treated
-as potential OIDC/key compromise.
+one identity. When the workflow files a security issue, follow the triage steps
+in the workflow file's header comment; an unrecognized identity hit should be
+treated as potential OIDC/key compromise.
+
+### Known-release correlation (why a release no longer pages)
+
+The identity scan matches every entry under the release SAN, which includes
+every legitimate release: each real release signs an entry under exactly that
+identity, so a naive scan would page on every tag. To separate real releases
+from an attacker, the workflow first fetches the repo's release tags and passes
+them to the tool via `--known-tags-file`. The tool then suppresses any identity
+match whose certificate SAN carries an `@refs/tags/<tag>` that is a known
+release, so only an entry for a tag with **no corresponding release** alerts.
+
+The suppression is fail-closed: an unknown tag or a malformed SAN still alerts,
+an *empty* allowlist file disables suppression (so every match alerts), and a
+*missing* allowlist file is a hard error that fails the run (exit 2, surfaced as
+operational). A broken correlation input can never silently silence a real hit. One residual gap is accepted: an attacker who
+re-signs an *existing* release tag is suppressed, because that tag is on the
+allowlist. Closing it needs a per-tag entry-count or provenance check (how many
+entries a known tag is expected to have), tracked as a follow-up in
+[#1887](https://github.com/NVIDIA/aicr/issues/1887).
 
 ### Why v2, and why identity monitoring is feasible now
 
