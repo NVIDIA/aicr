@@ -51,7 +51,10 @@
 // workflow can distinguish a security signal from infrastructure noise: 0 clean,
 // 1 security (tamper = a failed consistency proof, or identity = an entry under
 // the release identity for a tag with no corresponding release), 3 operational
-// (transport/timeout/setup, retried a few times first), 2 invalid arguments. It
-// also prints a CLASSIFICATION=<value> line for the workflow to branch on.
-// Identity matches for known release tags are suppressed via --known-tags-file.
+// (transport/timeout/setup, retried a few times first), 2 a pre-run input error
+// (invalid arguments or an unreadable --known-tags-file). On a completed run
+// (exit 0/1/3) it prints a CLASSIFICATION=<value> line for the workflow to
+// branch on; a pre-run input error (exit 2) returns before the run and prints
+// none. Identity matches for known release tags are suppressed via
+// --known-tags-file.
 package main

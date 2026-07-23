@@ -78,12 +78,15 @@ go run ./tools/rekor-monitor \
 | `--restore-zip` | Optional GitHub-artifact zip to seed `--file` from before monitoring. Missing file = first run. |
 | `--cert-subject` | Regex for the monitored certificate SAN. Empty = consistency-only (no identity scan). |
 | `--cert-issuer` | Regex for the monitored certificate issuer (requires `--cert-subject`). |
-| `--known-tags-file` | Optional file of newline-separated known release tags. Identity matches whose `@refs/tags/<tag>` is listed are suppressed as expected releases; empty/omitted disables suppression (all matches alert). |
+| `--known-tags-file` | Optional file of newline-separated known release tags. Identity matches whose `@refs/tags/<tag>` is listed are suppressed as expected releases. Omitting the flag or pointing it at an existing empty file disables suppression (all matches alert); a set-but-missing or unreadable file is a hard error (exit `2`), so a broken correlation input fails the run rather than silently alerting on everything. |
 | `--user-agent` | User-Agent for requests to the log. |
 
 ## Exit status and classification
 
-The process prints a final `CLASSIFICATION=<value>` line to stdout and exits:
+On a completed run the process prints a final `CLASSIFICATION=<value>` line to
+stdout and exits with the matching code below. A pre-run input error is the
+exception: invalid arguments or an unreadable `--known-tags-file` exit `2`
+before the run starts and print no classification line.
 
 | Exit | Classification | Meaning |
 |------|----------------|---------|
@@ -91,6 +94,6 @@ The process prints a final `CLASSIFICATION=<value>` line to stdout and exits:
 | `1` | `tamper` | The consistency (Merkle) proof failed: the log did not verify as append-only. |
 | `1` | `identity` | An entry under the release identity for a tag with no corresponding release (or an entry that failed verification). |
 | `3` | `operational` | Could not complete the check (Sigstore/Rekor/TUF/network trouble, or a timeout). Operational errors are retried a few times before this is returned. |
-| `2` | (none) | Invalid arguments. |
+| `2` | (none) | A pre-run input error: invalid arguments, or a set-but-unreadable `--known-tags-file`. |
 
 Only `tamper` and `identity` are security signals; the calling workflow pages maintainers on those and treats `operational` as infrastructure noise.

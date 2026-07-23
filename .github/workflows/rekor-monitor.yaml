@@ -112,9 +112,17 @@ jobs:
   monitor:
     name: AICR release identity + log consistency (Rekor v2)
     runs-on: ubuntu-latest
-    # Backstop the per-pass context timeout in the tool: the job is killed if a
-    # network stall somehow outlives it.
-    timeout-minutes: 20
+    # Backstop the per-pass context timeout in the tool (defaultTimeout, 45m):
+    # the job is killed if a network stall somehow outlives it. Sized so the
+    # tool's own 45m deadline (which classifies as operational) fires first, and
+    # so the post-monitor notification steps still have room, rather than a hard
+    # job kill. Paranoid worst case: three gh-api-retry fetches each exhausting
+    # 3 x 180s attempts (~27m), the 45m monitor pass, checkout/setup-go (~3m), and
+    # the post-monitor issue/Slack/degraded steps (~a few min of gh/curl). Note
+    # the fetch-outage (~27m) and backlog-scan (45m) worst cases do not actually
+    # stack (an outage that slows fetches also makes the monitor fail fast), so
+    # 90m leaves generous headroom for the realistic large-backlog case.
+    timeout-minutes: 90
     permissions:
       contents: read  # checkout to build tools/rekor-monitor
       actions: read   # read the prior checkpoint artifact via the Actions API
@@ -149,26 +157,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Writes each attempt to OUTFILE.part and publishes it only on success,
-          # so a failed attempt's HTTP-error body never leaks downstream and a
-          # binary payload (the artifact zip) round-trips intact. Recovers 5xx/429
-          # and connection failures alike.
-          gh_api_retry() {  # usage: gh_api_retry OUTFILE api-args...
-            local out="$1"; shift
-            local attempt
-            for attempt in 1 2 3; do
-              if gh api "$@" > "${out}.part"; then
-                mv "${out}.part" "${out}"
-                return 0
-              fi
-              echo "::warning::gh api failed (attempt ${attempt}/3): $*"
-              sleep $(( attempt * 3 ))
-            done
-            rm -f "${out}.part"
-            echo "::error::gh api failed after 3 attempts: $*"
-            return 1
-          }
-          gh_api_retry artifacts.json --paginate \
+          # .github/scripts/gh-api-retry.sh writes each attempt to OUTFILE.part and
+          # publishes it only on success (recovers 5xx/429, round-trips the binary
+          # zip, never leaks a failed attempt's error body). A total failure aborts
+          # the step (operational, never a security signal).
+          .github/scripts/gh-api-retry.sh artifacts.json --paginate \
             "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${ARTIFACT_NAME}&per_page=100"
           id="$(jq -rs '[.[].artifacts[]
                 | select(.expired == false)
@@ -179,7 +172,7 @@ jobs:
             echo "No prior checkpoint artifact from this repository on main; treating this as the first run."
             exit 0
           fi
-          gh_api_retry checkpoint.zip "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip"
+          .github/scripts/gh-api-retry.sh checkpoint.zip "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip"
           echo "Fetched checkpoint artifact ${id}."
 
       - name: Fetch known release tags
@@ -187,25 +180,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh_api_retry() {  # usage: gh_api_retry OUTFILE api-args...
-            local out="$1"; shift
-            local attempt
-            for attempt in 1 2 3; do
-              if gh api "$@" > "${out}.part"; then
-                mv "${out}.part" "${out}"
-                return 0
-              fi
-              echo "::warning::gh api failed (attempt ${attempt}/3): $*"
-              sleep $(( attempt * 3 ))
-            done
-            rm -f "${out}.part"
-            echo "::error::gh api failed after 3 attempts: $*"
-            return 1
-          }
           # All tags in this repo. The identity SAN references @refs/tags/<tag>,
           # so a tag's existence is the correlation key for "a release produced
-          # this entry". One tag per line.
-          gh_api_retry tags.json --paginate "repos/${GITHUB_REPOSITORY}/tags?per_page=100"
+          # this entry". One tag per line. Retry via the shared helper (see the
+          # checkpoint-fetch step and .github/scripts/gh-api-retry.sh).
+          .github/scripts/gh-api-retry.sh tags.json --paginate "repos/${GITHUB_REPOSITORY}/tags?per_page=100"
           jq -rs '[.[][].name] | .[]' tags.json > known-tags.txt
           echo "Fetched $(wc -l < known-tags.txt) known release tags."
 
