@@ -263,30 +263,43 @@ func TestPopulateJobTimeout(t *testing.T) {
 func TestWrapPopulateJobError(t *testing.T) {
 	const timeout = 13 * time.Minute
 
-	t.Run("timeout carries remediation and stays timeout-coded", func(t *testing.T) {
-		got := wrapPopulateJobError(errors.New(errors.ErrCodeTimeout, "context deadline exceeded"), timeout)
-		if !stderrors.Is(got, errors.New(errors.ErrCodeTimeout, "")) {
-			t.Fatalf("want ErrCodeTimeout, got %v", got)
-		}
-		for _, want := range []string{"13m0s", "HF-token", envModelCachePopulateTimeout} {
-			if !strings.Contains(got.Error(), want) {
-				t.Errorf("timeout error %q missing %q", got.Error(), want)
+	tests := []struct {
+		name            string
+		input           error
+		wantCode        error
+		wantRemediation bool // timeout path must add the HF-token/env remediation
+		wantText        []string
+	}{
+		{
+			name:            "timeout carries remediation and stays timeout-coded",
+			input:           errors.New(errors.ErrCodeTimeout, "context deadline exceeded"),
+			wantCode:        errors.New(errors.ErrCodeTimeout, ""),
+			wantRemediation: true,
+			wantText:        []string{"13m0s", "HF-token", envModelCachePopulateTimeout},
+		},
+		{
+			name:     "non-timeout coded error propagates unchanged (no remediation)",
+			input:    errors.New(errors.ErrCodeUnavailable, "watch closed unexpectedly"),
+			wantCode: errors.New(errors.ErrCodeUnavailable, ""),
+			wantText: []string{"watch closed unexpectedly"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrapPopulateJobError(tt.input, timeout)
+			if !stderrors.Is(got, tt.wantCode) {
+				t.Fatalf("want code %v, got %v", tt.wantCode, got)
 			}
-		}
-	})
-
-	t.Run("non-timeout coded error propagates unchanged (no remediation)", func(t *testing.T) {
-		got := wrapPopulateJobError(errors.New(errors.ErrCodeUnavailable, "watch closed unexpectedly"), timeout)
-		if !stderrors.Is(got, errors.New(errors.ErrCodeUnavailable, "")) {
-			t.Fatalf("want ErrCodeUnavailable propagated, got %v", got)
-		}
-		if strings.Contains(got.Error(), "HF-token") {
-			t.Errorf("remediation must not be added to non-timeout errors: %q", got.Error())
-		}
-		if !strings.Contains(got.Error(), "watch closed unexpectedly") {
-			t.Errorf("original message lost: %q", got.Error())
-		}
-	})
+			for _, want := range tt.wantText {
+				if !strings.Contains(got.Error(), want) {
+					t.Errorf("error %q missing %q", got.Error(), want)
+				}
+			}
+			if hasRemediation := strings.Contains(got.Error(), "HF-token"); hasRemediation != tt.wantRemediation {
+				t.Errorf("remediation present = %v, want %v: %q", hasRemediation, tt.wantRemediation, got.Error())
+			}
+		})
+	}
 }
 
 // TestEnsureModelCache_DisabledNoop verifies that with the cache disabled no PVC
