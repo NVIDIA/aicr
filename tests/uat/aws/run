@@ -54,6 +54,13 @@ AWS_STS_REFRESH_INTERVAL_SECONDS="${AWS_STS_REFRESH_INTERVAL_SECONDS:-1200}" # 2
 aws_sts_federated_refresh() {
   if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" \
     || -z "${AWS_ACCOUNT_ID:-}" || -z "${GITHUB_ACTIONS_ROLE_NAME:-}" ]]; then
+    # Outside CI (local dev) this hook is expected to no-op quietly. INSIDE CI,
+    # missing identifiers are a misconfiguration (e.g. id-token: write dropped, or
+    # AWS_ACCOUNT_ID unset) that would silently degrade to the non-refreshing
+    # session and re-introduce #1861 with no diagnostic — surface it loudly.
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+      echo "::warning::AWS STS mid-gate refresh skipped — OIDC/role identifiers missing in CI; the gate will run on a non-refreshing 1h session (see #1861)" >&2
+    fi
     return 0
   fi
   local role_arn oidc_token creds ak sk st rc=0 xtrace=
