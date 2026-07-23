@@ -35,8 +35,14 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 		name               string
 		criteria           func() *Criteria
 		requiredComponents []string
-		requiredChecks     []string
-		wantDRAConstraint  bool // K8s >= 1.34 required for DRA GA
+		// requiredManifestComponents lists components that must carry
+		// manifestFiles in the resolved recipe. The bundler wraps a
+		// component's manifest files into its "<name>-post" helmfile
+		// release (e.g. kubeflow-trainer-post), so a dropped manifest
+		// file silently removes that release from generated bundles.
+		requiredManifestComponents []string
+		requiredChecks             []string
+		wantDRAConstraint          bool // K8s >= 1.34 required for DRA GA
 	}{
 		{
 			name: "h100-kind-inference",
@@ -157,6 +163,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"kai-scheduler",
 				"kubeflow-trainer",
 			},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
 			requiredChecks: []string{
 				"platform-health",
 				"gpu-operator-health",
@@ -517,6 +524,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"kai-scheduler",
 				"kubeflow-trainer",
 			},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
 			requiredChecks: []string{
 				"platform-health",
 				"gpu-operator-health",
@@ -587,6 +595,19 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			for _, name := range tt.requiredComponents {
 				if comp := result.GetComponentRef(name); comp == nil {
 					t.Errorf("Required component %q not found in resolved recipe", name)
+				}
+			}
+
+			// 1b. Manifest-carrying components keep their manifest files
+			// (source of the bundler's "<name>-post" release)
+			for _, name := range tt.requiredManifestComponents {
+				comp := result.GetComponentRef(name)
+				if comp == nil {
+					t.Errorf("Required manifest component %q not found in resolved recipe", name)
+					continue
+				}
+				if len(comp.ManifestFiles) == 0 {
+					t.Errorf("Component %q has no manifestFiles; its %s-post bundle release would be dropped", name, name)
 				}
 			}
 
