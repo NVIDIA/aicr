@@ -67,13 +67,30 @@ func TestCoordinateFor(t *testing.T) {
 				OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining},
 			want: "eks/h100-ubuntu/training",
 		},
+		{
+			// os is optional: an os-agnostic recipe (nvkind) yields "-any".
+			name: "os-agnostic (any) -> -any dashboard",
+			c: &Criteria{Service: CriteriaServiceKind, Accelerator: CriteriaAcceleratorH100,
+				OS: CriteriaOSAny, Intent: CriteriaIntentTraining, Platform: CriteriaPlatformKubeflow},
+			want: "kind/h100-any/training-kubeflow",
+		},
+		{
+			// os empty normalizes to "-any" (same os-agnostic segment).
+			name: "os empty -> -any dashboard",
+			c: &Criteria{Service: CriteriaServiceKind, Accelerator: CriteriaAcceleratorH100,
+				Intent: CriteriaIntentInference, Platform: CriteriaPlatformDynamo},
+			want: "kind/h100-any/inference-dynamo",
+		},
 		{name: "nil criteria", c: nil, wantErr: true},
 		{name: "service any", c: &Criteria{Service: CriteriaServiceAny, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining}, wantErr: true},
 		{name: "service empty", c: &Criteria{Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining}, wantErr: true},
 		{name: "accelerator any", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorAny, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining}, wantErr: true},
-		{name: "os any", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSAny, Intent: CriteriaIntentTraining}, wantErr: true},
 		{name: "intent any", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentAny}, wantErr: true},
 		{name: "service contains slash", c: &Criteria{Service: CriteriaServiceType("acme/ncp"), Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining}, wantErr: true},
+		// os is optional now, but a concrete os with a "/" must still fail closed:
+		// it would inject a spurious coordinate-path segment (the same invariant
+		// requireConcrete enforced before os became optional).
+		{name: "os contains slash", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSType("a/b"), Intent: CriteriaIntentTraining}, wantErr: true},
 		{name: "platform contains slash", c: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining, Platform: CriteriaPlatformType("a/b")}, wantErr: true},
 	}
 	for _, tt := range tests {

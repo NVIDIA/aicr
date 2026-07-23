@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -29,7 +30,7 @@ func TestApplyAKSTemplateData(t *testing.T) {
 	aksNode := func(rdma string) v1.Node {
 		alloc := v1.ResourceList{v1.ResourceName("nvidia.com/gpu"): resource.MustParse("8")}
 		if rdma != "" {
-			alloc[v1.ResourceName(aksRdmaSharedResource)] = resource.MustParse(rdma)
+			alloc[v1.ResourceName(helper.AKSRdmaSharedResource)] = resource.MustParse(rdma)
 		}
 		return v1.Node{Status: v1.NodeStatus{Allocatable: alloc}}
 	}

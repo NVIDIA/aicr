@@ -321,19 +321,25 @@ the resulting bundle is incoherent. **Regenerate pre-flip AKS recipes**
 (`aicr recipe ...`) before bundling with this AICR version, or supply the
 complete GPU Operator-managed override set (all four `--set` flags from the
 alternative profile below) if the cluster's GPU pools were created with
-`--gpu-driver none`. A bundle-time coherence check that catches this
-automatically is tracked in
-[#1757](https://github.com/NVIDIA/aicr/issues/1757).
+`--gpu-driver none`. `aicr bundle` now fails closed on this combination:
+the `CheckDriverOwnershipCoherence` validation detects the incoherent
+driver root (`driver.enabled=false` with the DRA driver root still at the
+operator container path) on the final effective values and blocks the
+bundle until the recipe is regenerated or the full override set is
+supplied ([#1757](https://github.com/NVIDIA/aicr/issues/1757)).
 
 **Mismatch warning:** resolving an AKS recipe from a snapshot
 (`aicr recipe --snapshot`) warns when the sampled GPU node reports no NVIDIA
 driver loaded — the signature of a `--gpu-driver none` pool resolved against
 the driver-only recipe defaults. Deploying that combination would leave GPU
 nodes driverless (nothing on the node provides a driver and the recipe does
-not install one). Either flip the bundle to GPU Operator-managed mode with
-the overrides below, or reprovision the pool with the AKS default driver
-install and re-snapshot. Criteria-only resolves
-(`aicr recipe --service aks ...`) have no cluster signal and are not warned —
+not install one). The observation is also recorded in the recipe
+(`metadata.gpuDriverState: absent`), and `aicr bundle` fails closed on it
+(`CheckDriverOwnershipCoherence`) unless the bundle is flipped to GPU
+Operator-managed mode with the complete override set below. Either supply
+those overrides at bundle time, or reprovision the pool with the AKS default
+driver install and re-snapshot. Criteria-only resolves
+(`aicr recipe --service aks ...`) have no cluster signal and record no state —
 the deployment-phase `gpu-operator-health` validation is the backstop.
 
 `Standard_ND96isr_H100_v5` is the 8-GPU ND H100 v5 SKU. The AKS Dynamo

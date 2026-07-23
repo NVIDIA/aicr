@@ -1005,6 +1005,124 @@ func TestMake_BundlersFilter(t *testing.T) {
 	}
 }
 
+// TestFilterEnabledComponents_ExcludedDriverInstallerWarning pins the
+// driverless-cluster hazard warning: excluding gpu-operator (any path —
+// --set disable, recipe disable, bundlers filter) from a bundle whose
+// recipe recorded metadata.gpuDriverState=absent bypasses
+// CheckDriverOwnershipCoherence by design (a disabled component is
+// satisfied externally), so the bundler surfaces a warning at the point
+// of exclusion instead of blocking.
+func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
+	t.Parallel()
+
+	gpuOp := func(overrides map[string]any) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "gpu-operator", Version: "v25.3.3", Type: "helm",
+			Source: "https://helm.ngc.nvidia.com/nvidia", Overrides: overrides}
+	}
+	csi := recipe.ComponentRef{Name: "aws-ebs-csi-driver", Version: "2.55.0", Type: "helm",
+		Source: "https://kubernetes-sigs.github.io/aws-ebs-csi-driver"}
+
+	tests := []struct {
+		name        string
+		state       string
+		refs        []recipe.ComponentRef
+		cfgOpts     []config.Option
+		wantWarning string // substring expected in b.warnings; "" = no warning
+	}{
+		{
+			name:  "disabled via --set + absent state → warning",
+			state: recipe.GPUDriverStateAbsent,
+			refs:  []recipe.ComponentRef{gpuOp(nil), csi},
+			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"gpuoperator": {"enabled": "false"},
+			})},
+			wantWarning: "disabled via --set",
+		},
+		{
+			name:        "disabled by recipe + absent state → warning",
+			state:       recipe.GPUDriverStateAbsent,
+			refs:        []recipe.ComponentRef{gpuOp(map[string]any{"enabled": false}), csi},
+			wantWarning: "disabled by the recipe",
+		},
+		{
+			name:        "excluded by bundlers filter + absent state → warning",
+			state:       recipe.GPUDriverStateAbsent,
+			refs:        []recipe.ComponentRef{gpuOp(nil), csi},
+			cfgOpts:     []config.Option{config.WithBundlers([]string{"aws-ebs-csi-driver"})},
+			wantWarning: "excluded by the bundlers filter",
+		},
+		{
+			name:  "disabled via --set + no recorded state → no warning",
+			state: "",
+			refs:  []recipe.ComponentRef{gpuOp(nil), csi},
+			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"gpuoperator": {"enabled": "false"},
+			})},
+		},
+		{
+			name:  "disabled via --set + preinstalled state → no warning",
+			state: recipe.GPUDriverStatePreinstalled,
+			refs:  []recipe.ComponentRef{gpuOp(nil), csi},
+			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"gpuoperator": {"enabled": "false"},
+			})},
+		},
+		{
+			name:  "gpu-operator kept + absent state → no warning",
+			state: recipe.GPUDriverStateAbsent,
+			refs:  []recipe.ComponentRef{gpuOp(nil), csi},
+		},
+		{
+			name:  "other component disabled + absent state → no warning",
+			state: recipe.GPUDriverStateAbsent,
+			refs:  []recipe.ComponentRef{gpuOp(nil), csi},
+			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"aws-ebs-csi-driver": {"enabled": "false"},
+			})},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var bundlerOpts []Option
+			if len(tt.cfgOpts) > 0 {
+				bundlerOpts = append(bundlerOpts, WithConfig(config.NewConfig(tt.cfgOpts...)))
+			}
+			b, err := New(bundlerOpts...)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			recipeResult := &recipe.RecipeResult{
+				APIVersion:    "aicr.run/v1alpha2",
+				Kind:          "Recipe",
+				Criteria:      &recipe.Criteria{Service: "aks", Accelerator: "h100", Intent: "inference"},
+				ComponentRefs: tt.refs,
+			}
+			recipeResult.Metadata.GPUDriverState = tt.state
+
+			if _, _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
+				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
+			}
+
+			if tt.wantWarning == "" {
+				if len(b.warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", b.warnings)
+				}
+				return
+			}
+			joined := strings.Join(b.warnings, "\n")
+			for _, want := range []string{tt.wantWarning, "driverless", "gpu-operator"} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
+				}
+			}
+		})
+	}
+}
+
 // TestMake_BundlersFilterDependencyPruned verifies that a dependency edge
 // pointing at an enabled-but-filtered-out component is pruned exactly like a
 // disabled one: the helmfile deployer (the only path that recomputes ordering
@@ -3625,6 +3743,63 @@ func TestMake_PreservesTimeoutFromExtractValues(t *testing.T) {
 	if se.Code != errors.ErrCodeTimeout {
 		t.Errorf("expected error code %s, got %s (error: %v)",
 			errors.ErrCodeTimeout, se.Code, err)
+	}
+}
+
+// TestExtractComponentValues_FailsClosedOnValueReadError verifies that a
+// recipe-value resolution failure blocks bundling instead of silently
+// rendering the component from an empty values map. The driver-ownership
+// coherence gate can only trust a bundle whose values were actually resolved.
+func TestExtractComponentValues_FailsClosedOnValueReadError(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recipeResult := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{
+		Name:       "gpu-operator",
+		Type:       recipe.ComponentTypeHelm,
+		ValuesFile: "components/gpu-operator/does-not-exist.yaml",
+	}}}
+
+	_, err = bundler.extractComponentValues(context.Background(), recipeResult)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Fatalf("extractComponentValues() error = %v, want ErrCodeInternal", err)
+	}
+}
+
+// TestComponentValidationError_PreservesStructuredCode verifies that an
+// already-coded validation failure keeps its code, while a plain error falls
+// back to ErrCodeInvalidRequest.
+func TestComponentValidationError_PreservesStructuredCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    error
+		wantCode errors.ErrorCode
+	}{
+		{
+			name:     "timeout",
+			input:    errors.New(errors.ErrCodeTimeout, "validation timed out"),
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name:     "internal",
+			input:    errors.New(errors.ErrCodeInternal, "registry unavailable"),
+			wantCode: errors.ErrCodeInternal,
+		},
+		{
+			name:     "plain error uses invalid request fallback",
+			input:    stderrors.New("invalid ownership configuration"),
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := componentValidationError(tt.input)
+			if !stderrors.Is(got, errors.New(tt.wantCode, "")) {
+				t.Fatalf("componentValidationError() = %v, want code %s", got, tt.wantCode)
+			}
+		})
 	}
 }
 

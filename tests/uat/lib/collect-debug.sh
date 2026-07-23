@@ -44,6 +44,12 @@
 # PUBLIC repo (downloadable per the repo's artifact access) — treat it as
 # sensitive. Redaction is deliberately not attempted (fragile); the namespace
 # allowlist is the primary mitigation.
+#
+# On a GPU-count shortfall the bundle also carries driver-level state obtained by
+# `kubectl exec` (read-only) into the on-node nvidia-dcgm pod: GPU UUIDs, PCI bus
+# IDs, board serial numbers, and NVIDIA-driver `dmesg` (NVRM/Xid) lines. These
+# are hardware identifiers / driver diagnostics — no Secrets, and intentionally
+# captured for RMA (issue #1860) — but treated as sensitive like the rest.
 
 # Directory the bundle is written into (relative to $PWD, matching serve-logs/
 # and train-logs/); the workflow adds `cluster-debug/**` to the upload artifact.
@@ -81,6 +87,20 @@ CLUSTER_DEBUG_CLUSTER_RESOURCES="${CLUSTER_DEBUG_CLUSTER_RESOURCES:-skyhooks.sky
 # logs). 30s is generous for a single Get/describe.
 CLUSTER_DEBUG_CMD_TIMEOUT="${CLUSTER_DEBUG_CMD_TIMEOUT:-30}"
 
+# Extended resource used to identify GPU nodes and their advertised GPU count in
+# the GPU driver-state capture. Overridable for a non-standard device plugin.
+CLUSTER_DEBUG_GPU_RESOURCE="${CLUSTER_DEBUG_GPU_RESOURCE:-nvidia.com/gpu}"
+
+# Namespace whose on-node nvidia-dcgm pod the shortfall capture exec's for
+# nvidia-smi/dmesg. Overridable for a non-standard GPU-operator install.
+CLUSTER_DEBUG_GPU_NAMESPACE="${CLUSTER_DEBUG_GPU_NAMESPACE:-gpu-operator}"
+
+# Cap on how many short GPU nodes get the (bounded, per-node) driver-level exec
+# capture, so the section cannot starve the later per-namespace log collection on
+# a pathological large-pool shortfall. UAT pools are 2 nodes today (≤1 can be
+# short), so this is defensive headroom; the always-emitted census is uncapped.
+CLUSTER_DEBUG_GPU_MAX_NODES="${CLUSTER_DEBUG_GPU_MAX_NODES:-3}"
+
 # _cd_bounded runs an EXTERNAL command under CLUSTER_DEBUG_CMD_TIMEOUT when the
 # coreutils `timeout` is present (Linux CI runners), else runs it directly so the
 # collector stays portable to macOS dev boxes that lack `timeout`. Only wrap
@@ -114,29 +134,140 @@ _cd_node_reboot_fingerprint() {
 # may have re-converged to complete and hidden the flip. Best-effort; never fails
 # the run. $1 is a short label distinguishing multiple captures.
 capture_skyhook_snapshot() {
-  local label="${1:-snapshot}"
-  command -v kubectl >/dev/null 2>&1 || return 0
-  mkdir -p "${CLUSTER_DEBUG_DIR}"
-  local out="${CLUSTER_DEBUG_DIR}/skyhook-at-failure-${label}.txt"
-  echo "::group::Capture skyhook snapshot at failure (${label})"
-  {
-    echo "##### skyhook snapshot (${label}) @ $(date -u +%Y-%m-%dT%H:%M:%SZ) #####"
-    echo "# Captured inline seconds after the failure — status.status here is the"
-    echo "# state at (or nearest to) the moment the check failed, not a re-converged"
-    echo "# teardown-time reading."
-    echo
-    echo "----- Skyhook CRs (full YAML: per-package/per-node status) -----"
-    _cd_bounded kubectl get skyhooks.skyhook.nvidia.com -A -o yaml 2>&1 || true
-    echo
-    echo "----- node reboot fingerprint (bootID / kernel / Ready transition / taints) -----"
-    _cd_node_reboot_fingerprint
-    echo
-    echo "----- skyhook namespace pods (tuning package pods) -----"
-    _cd_bounded kubectl get pods -n skyhook -o wide 2>&1 || true
-    echo "----- skyhook namespace events (by time) -----"
-    _cd_bounded kubectl get events -n skyhook --sort-by=.lastTimestamp 2>&1 || true
-  } | tee "${out}"
-  echo "::endgroup::"
+  # Immune to the caller's errexit: the run scripts source this under
+  # `set -euo pipefail`, and a best-effort snapshot must never abort the caller.
+  # A `| tee` whose upstream exits non-zero would otherwise kill the run
+  # mid-collection. Running the body in a subshell with `set +e` isolates the
+  # errexit change to this collector (auto-discarded when the subshell exits) and
+  # is portable to every bash the run scripts may use — `local` and positional
+  # params work in a subshell, unlike `local -` which is fatal on bash < 4.4
+  # (e.g. macOS system bash 3.2, per this file's portability note). Always
+  # returns 0: a best-effort snapshot never fails the run.
+  (
+    set +e
+    local label="${1:-snapshot}"
+    command -v kubectl >/dev/null 2>&1 || exit 0
+    mkdir -p "${CLUSTER_DEBUG_DIR}"
+    local out="${CLUSTER_DEBUG_DIR}/skyhook-at-failure-${label}.txt"
+    echo "::group::Capture skyhook snapshot at failure (${label})"
+    {
+      echo "##### skyhook snapshot (${label}) @ $(date -u +%Y-%m-%dT%H:%M:%SZ) #####"
+      echo "# Captured inline seconds after the failure — status.status here is the"
+      echo "# state at (or nearest to) the moment the check failed, not a re-converged"
+      echo "# teardown-time reading."
+      echo
+      echo "----- Skyhook CRs (full YAML: per-package/per-node status) -----"
+      _cd_bounded kubectl get skyhooks.skyhook.nvidia.com -A -o yaml 2>&1 || true
+      echo
+      echo "----- node reboot fingerprint (bootID / kernel / Ready transition / taints) -----"
+      _cd_node_reboot_fingerprint
+      echo
+      echo "----- skyhook namespace pods (tuning package pods) -----"
+      _cd_bounded kubectl get pods -n skyhook -o wide 2>&1 || true
+      echo "----- skyhook namespace events (by time) -----"
+      _cd_bounded kubectl get events -n skyhook --sort-by=.lastTimestamp 2>&1 || true
+    } | tee "${out}"
+    echo "::endgroup::"
+    exit 0
+  )
+  return 0
+}
+
+# _cd_gpu_driver_state writes a per-GPU-node census of advertised GPUs and, when
+# any GPU node advertises fewer than the cohort max (a capacity shortfall — e.g.
+# an H100 node enumerating 7 of 8 GPUs), captures DRIVER-LEVEL state on each short
+# node: nvidia-smi -L, per-GPU PCI/serial, the host NVIDIA PCI census, and dmesg
+# NVRM/Xid lines. The Kubernetes API only shows the *symptom* (allocatable count);
+# this exec-based capture — via the privileged on-node nvidia-dcgm pod — is what
+# turns "one GPU missing, cause unknown" into "GPU at PCI 000a failed driver
+# probe", diagnosable after the cluster is gone. The expensive exec path runs
+# ONLY on a detected shortfall; the census itself is always emitted. A
+# gpu-shortfall.txt marker is written on shortfall so the condition is greppable.
+# Best-effort, self-bounding; never fails the run. Requires jq (already a hard
+# dep of this collector).
+_cd_gpu_driver_state() {
+  # Subshell + `set +e` isolates errexit from the caller (same rationale as
+  # capture_skyhook_snapshot); all `local`s are declared here at the top, not
+  # inside the piped `{ … } | tee` block (whose subshell context is portable-safe
+  # for reads but not for declarations on every bash).
+  (
+    set +e
+    command -v kubectl >/dev/null 2>&1 || exit 0
+    command -v jq >/dev/null 2>&1 || exit 0
+    mkdir -p "${CLUSTER_DEBUG_DIR}"
+    local out="${CLUSTER_DEBUG_DIR}/gpu-driver-state.txt"
+    local res="${CLUSTER_DEBUG_GPU_RESOURCE}"
+    local census maxc short node pod
+
+    local ns="${CLUSTER_DEBUG_GPU_NAMESPACE}"
+    census="$(_cd_bounded kubectl get nodes -o json 2>/dev/null \
+      | jq -r --arg r "${res}" '.items[]
+          | select(.status.allocatable[$r] != null)
+          | "\(.metadata.name) \(.status.allocatable[$r])"' 2>/dev/null)"
+    # NOTE: "cohort max" is computed across ALL GPU nodes, with no per-product /
+    # per-pool segmentation. Correct for UAT's homogeneous single-SKU GPU pools;
+    # a heterogeneous pool (e.g. a 1-GPU utility node beside 8-GPU workers) would
+    # false-flag the smaller node as short. Best-effort diagnostics, so the only
+    # cost of a false positive is one extra bounded exec + a marker.
+    maxc="$(printf '%s\n' "${census}" | awk '{if($2+0>m)m=$2+0}END{print m+0}')"
+    short="$(printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print $1}')"
+
+    local captured=0
+    echo "::group::Collect GPU driver state"
+    {
+      echo "##### GPU driver state @ $(date -u +%Y-%m-%dT%H:%M:%SZ) #####"
+      echo "----- GPU census (node  allocatable ${res}) -----"
+      if [[ -z "${census}" ]]; then
+        echo "(no nodes advertise ${res})"
+      else
+        printf '%s\n' "${census}"
+      fi
+      echo
+      if [[ -n "${short}" ]]; then
+        echo "----- GPU-count SHORTFALL: node(s) below cohort max ${maxc} -----"
+        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print "  "$1" advertises "$2"/"m}'
+        echo
+        # shellcheck disable=SC2086 # intentional word-split of the node list
+        for node in ${short}; do
+          if [[ "${captured}" -ge "${CLUSTER_DEBUG_GPU_MAX_NODES}" ]]; then
+            echo "(reached CLUSTER_DEBUG_GPU_MAX_NODES=${CLUSTER_DEBUG_GPU_MAX_NODES}; remaining short nodes not exec'd)"
+            break
+          fi
+          captured=$((captured + 1))
+          pod="$(_cd_bounded kubectl get pods -n "${ns}" --field-selector "spec.nodeName=${node}" -o name 2>/dev/null | grep -E 'nvidia-dcgm' | grep -v exporter | head -1)"
+          [[ -z "${pod}" ]] && pod="$(_cd_bounded kubectl get pods -n "${ns}" --field-selector "spec.nodeName=${node}" -o name 2>/dev/null | grep -E 'nvidia-dcgm-exporter' | head -1)"
+          pod="${pod#pod/}"
+          echo "===== driver-level state: node ${node} (short) ====="
+          if [[ -z "${pod}" ]]; then
+            echo "(no on-node nvidia-dcgm pod in ${ns} ns; cannot exec nvidia-smi/dmesg)"
+          else
+            echo "# via pod/${pod} (ns ${ns})"
+            echo "----- nvidia-smi -L -----"
+            _cd_bounded kubectl exec -n "${ns}" "${pod}" -- nvidia-smi -L 2>&1 || true
+            echo "----- nvidia-smi --query-gpu=index,pci.bus_id,serial,uuid (csv) -----"
+            _cd_bounded kubectl exec -n "${ns}" "${pod}" -- nvidia-smi --query-gpu=index,pci.bus_id,serial,uuid --format=csv 2>&1 || true
+            echo "----- host NVIDIA PCI functions (vendor 0x10de) -----"
+            # shellcheck disable=SC2016 # $f must expand in the remote pod's shell, not here
+            _cd_bounded kubectl exec -n "${ns}" "${pod}" -- sh -c 'for f in /sys/bus/pci/devices/*/vendor; do grep -q 0x10de "$f" 2>/dev/null && dirname "$f"; done' 2>&1 || true
+            echo "----- dmesg NVRM/Xid (tail 40) -----"
+            _cd_bounded kubectl exec -n "${ns}" "${pod}" -- sh -c 'dmesg 2>/dev/null | grep -iE "NVRM|Xid" | tail -40' 2>&1 || true
+          fi
+          echo
+        done
+      elif [[ -n "${census}" ]]; then
+        echo "----- No GPU-count shortfall (all GPU nodes advertise ${maxc}) -----"
+      fi
+    } | tee "${out}"
+    echo "::endgroup::"
+
+    if [[ -n "${short}" ]]; then
+      {
+        echo "GPU-count shortfall @ $(date -u +%Y-%m-%dT%H:%M:%SZ); cohort max=${maxc}"
+        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print $1" "$2"/"m}'
+      } > "${CLUSTER_DEBUG_DIR}/gpu-shortfall.txt" 2>/dev/null || true
+    fi
+    exit 0
+  )
   return 0
 }
 
@@ -159,6 +290,19 @@ _cd_section() {
 # collect_cluster_debug snapshots live cluster state into CLUSTER_DEBUG_DIR.
 # Best-effort and self-bounding: safe to call from an `if: failure()` step.
 collect_cluster_debug() {
+  # Immune to the caller's errexit: the run scripts source this under
+  # `set -euo pipefail`. The MANIFEST block below ends with a `for snap in glob`
+  # loop whose final `[[ -f ]]` test returns 1 when the glob matches nothing
+  # (e.g. an install-phase failure with no inline skyhook-at-failure-*.txt),
+  # which under `pipefail` makes the `{ … } | tee` pipeline exit 1 and, under
+  # `set -e`, would abort this function BEFORE any kubectl runs — truncating the
+  # bundle to a partial MANIFEST. Running the body in a subshell with `set +e`
+  # isolates the errexit change (auto-discarded when the subshell exits) and is
+  # portable to every bash the run scripts may use, unlike `local -` (fatal on
+  # bash < 4.4). The body is intentionally not re-indented to keep the diff
+  # reviewable. Always returns 0: a best-effort collector never fails the run.
+  (
+  set +e
   mkdir -p "${CLUSTER_DEBUG_DIR}"
   echo "::group::Collect cluster debug bundle -> ${CLUSTER_DEBUG_DIR}/"
 
@@ -188,6 +332,9 @@ collect_cluster_debug() {
     # the readiness-gate status.status progression (written during phase_install)
     # and any inline skyhook-at-failure snapshot(s).
     [[ -f "${CLUSTER_DEBUG_GATE_LOG}" ]] && echo "readinessGateSeries: $(basename "${CLUSTER_DEBUG_GATE_LOG}")"
+    # GPU census is always emitted below; gpu-shortfall.txt appears only when a
+    # node is short of its peers (driver-level nvidia-smi/dmesg capture follows).
+    echo "gpuDriverState: gpu-driver-state.txt (gpu-shortfall.txt present iff a GPU-count shortfall was detected)"
     local snap
     for snap in "${CLUSTER_DEBUG_DIR}"/skyhook-at-failure-*.txt; do
       [[ -f "${snap}" ]] && echo "skyhookAtFailure: $(basename "${snap}")"
@@ -198,7 +345,7 @@ collect_cluster_debug() {
     echo "kubectl not on PATH; skipping live cluster collection" \
       | tee -a "${CLUSTER_DEBUG_DIR}/MANIFEST.yaml"
     echo "::endgroup::"
-    return 0
+    exit 0
   fi
 
   # --- Tier 1: cluster-wide state -------------------------------------------
@@ -218,6 +365,11 @@ collect_cluster_debug() {
     _cd_node_reboot_fingerprint
     echo
   } | tee -a "${CLUSTER_DEBUG_DIR}/node-reboot-fingerprint.txt"
+  # GPU census + driver-level capture on a capacity shortfall (a node short of
+  # its peers). Routed directly (a shell function `timeout` cannot invoke); it
+  # bounds its own kubectl/exec internally and only pays the exec cost when a
+  # shortfall is present.
+  _cd_gpu_driver_state
   # Events across all namespaces: node Reboot/NotReady, pod evictions (the run-2
   # "pod for job not found" cause), FailedScheduling, etc.
   _cd_section "events (all namespaces, by time)" events.txt \
@@ -280,5 +432,7 @@ collect_cluster_debug() {
 
   echo "cluster debug bundle written to ${CLUSTER_DEBUG_DIR}/ ($(du -sh "${CLUSTER_DEBUG_DIR}" 2>/dev/null | cut -f1))"
   echo "::endgroup::"
+  exit 0
+  )
   return 0
 }

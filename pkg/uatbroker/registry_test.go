@@ -16,6 +16,7 @@ package uatbroker
 
 import (
 	stderrors "errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -644,12 +645,12 @@ func TestCommittedRegistryValid(t *testing.T) {
 		// `nightly-intents:` (which defaults to [training]) — provisioning real
 		// GB200 Capacity-Block capacity nightly — fails this guard instead.
 		"aws-gb200": {},
-		// kind-h100 (nvkind real-silicon lane, DC5 #1278) is OPTED OUT of the
-		// nightly batch during bring-up (explicit empty list). Locked here so an
-		// accidental edit to a bare `nightly-intents:` (which defaults to
-		// [training]) — scheduling unvalidated GPU-runner runs nightly — fails
-		// this guard. Enroll after a green manual H100 acceptance run.
-		"kind-h100": {},
+		// kind-h100 (nvkind real-silicon lane, DC5 #1278) enrolled with both
+		// intents after green manual H100 acceptance runs (training 29954092703,
+		// inference 29965464868). Release cells are gated to v0.18.0 via
+		// nightly-intent-min-versions (the lane + os-agnostic coordinate fix
+		// #1851 postdate v0.17.0), so only `main` runs nvkind nightly for now.
+		"kind-h100": {IntentTraining, IntentInference},
 	}
 	for name, want := range wantNightly {
 		res, lookupErr := reg.Lookup(name)
@@ -660,6 +661,27 @@ func TestCommittedRegistryValid(t *testing.T) {
 		got := res.NightlyIntentsOrDefault()
 		if !slices.Equal(got, want) {
 			t.Errorf("committed registry nightly-intents[%q] = %v, want %v", name, got, want)
+		}
+	}
+
+	// The release-cell min-version gates (nightly-intent-min-versions). Locked so
+	// a future edit cannot silently drop a gate — which would let a release cell
+	// run a pre-fix aicr and emit failing/unusable evidence. azure-h100 gates its
+	// AKS perf + driver-only fixes; kind-h100 gates the uat-kind lane + the
+	// os-agnostic coordinate fix (#1851). Both landed post-v0.17.0.
+	wantMinVersions := map[string]map[string]string{
+		"azure-h100": {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
+		"kind-h100":  {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
+	}
+	for name, want := range wantMinVersions {
+		res, lookupErr := reg.Lookup(name)
+		if lookupErr != nil {
+			t.Errorf("committed registry missing %q: %v", name, lookupErr)
+			continue
+		}
+		if !maps.Equal(res.NightlyIntentMinVersions, want) {
+			t.Errorf("committed registry nightly-intent-min-versions[%q] = %v, want %v",
+				name, res.NightlyIntentMinVersions, want)
 		}
 	}
 }

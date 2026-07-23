@@ -1609,6 +1609,15 @@ components:
                   reason:
                     type: string
                     description: Human-readable explanation of the failure
+            gpuDriverState:
+              type: string
+              description: >
+                Snapshot-observed NVIDIA kernel driver state on the sampled GPU
+                node, recorded only by snapshot-driven resolution. Omitted when
+                the snapshot carried no usable driver-loaded reading (or no
+                snapshot was provided). Consumed by the bundle-time
+                CheckDriverOwnershipCoherence validation.
+              enum: [preinstalled, absent]
         criteria:
           $ref: "#/components/schemas/Criteria"
           description: Original criteria parameters

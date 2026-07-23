@@ -30,7 +30,8 @@ type Coordinate struct {
 	// Group is the service dimension (e.g. "eks").
 	Group string
 
-	// Dashboard is the accelerator-os pair (e.g. "h100-ubuntu").
+	// Dashboard is the accelerator-os pair (e.g. "h100-ubuntu"), or
+	// "<accelerator>-any" for an os-agnostic recipe (e.g. "h100-any" for nvkind).
 	Dashboard string
 
 	// Tab is the intent, optionally suffixed with the platform when one
@@ -57,11 +58,21 @@ func (co Coordinate) String() string {
 // The function is pure: no clock, no maps, no registry, no I/O — the same
 // Criteria always yields the same Coordinate.
 //
-// The service, accelerator, os, and intent dimensions are required and
-// must be concrete; a nil Criteria, an empty value, or the "any" wildcard
-// fails closed with ErrCodeInvalidRequest naming the offending dimension.
-// The platform dimension is optional: an empty or "any" platform yields a
-// bare intent tab, otherwise the tab is "<intent>-<platform>".
+// The service, accelerator, and intent dimensions are required and must be
+// concrete; a nil Criteria, an empty value, or the "any" wildcard fails closed
+// with ErrCodeInvalidRequest naming the offending dimension.
+//
+// The os dimension is OPTIONAL: an os-agnostic recipe (empty or the "any"
+// wildcard) yields the literal "-any" suffix, so the dashboard segment stays a
+// well-formed "<accelerator>-<os>" pair (e.g. "h100-any") that splitDashboard
+// inverts via its fallback, and the renderer's "<accelerator>-<os>" grouping
+// stays aligned with the coordinate path. A concrete os yields
+// "<accelerator>-<os>" (e.g. "h100-ubuntu"). nvkind (service: kind) is the
+// os-agnostic case: it runs on whatever OS the runner physically has, so its
+// overlays declare no os.
+//
+// The platform dimension is likewise optional: an empty or "any" platform
+// yields a bare intent tab, otherwise the tab is "<intent>-<platform>".
 func CoordinateFor(c *Criteria) (Coordinate, error) {
 	if c == nil {
 		return Coordinate{}, errors.New(errors.ErrCodeInvalidRequest, "criteria is nil")
@@ -75,12 +86,20 @@ func CoordinateFor(c *Criteria) (Coordinate, error) {
 	if err != nil {
 		return Coordinate{}, err
 	}
-	os, err := requireConcrete("os", string(c.OS))
+	intent, err := requireConcrete("intent", string(c.Intent))
 	if err != nil {
 		return Coordinate{}, err
 	}
-	intent, err := requireConcrete("intent", string(c.Intent))
-	if err != nil {
+
+	// os is optional. Normalize empty to the "any" wildcard so an os-agnostic
+	// recipe still produces a well-formed "<accelerator>-any" dashboard segment
+	// rather than a trailing-hyphen "<accelerator>-". Still reject a "/" so a
+	// "--data"-seeded os cannot inject a spurious path segment.
+	osName := string(c.OS)
+	if osName == "" {
+		osName = CriteriaAnyValue
+	}
+	if _, err := rejectPathSeparator("os", osName); err != nil {
 		return Coordinate{}, err
 	}
 
@@ -94,7 +113,7 @@ func CoordinateFor(c *Criteria) (Coordinate, error) {
 
 	return Coordinate{
 		Group:     service,
-		Dashboard: accelerator + "-" + os,
+		Dashboard: accelerator + "-" + osName,
 		Tab:       tab,
 	}, nil
 }

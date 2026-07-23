@@ -39,6 +39,21 @@ const RecipeResultKind = "RecipeResult"
 // It aliases the canonical header.GroupVersion (single source of truth).
 const RecipeAPIVersion = header.GroupVersion
 
+// GPUDriverState values recorded in RecipeResult.Metadata.GPUDriverState
+// by snapshot-driven resolution (see pkg/client/v1 gpu_driver_state.go).
+// An empty field means the snapshot carried no usable driver-loaded
+// reading (or no snapshot was provided).
+const (
+	// GPUDriverStatePreinstalled: the sampled GPU node had the NVIDIA
+	// kernel driver loaded when the snapshot was captured.
+	GPUDriverStatePreinstalled = "preinstalled"
+
+	// GPUDriverStateAbsent: the sampled GPU node had no NVIDIA kernel
+	// driver loaded (e.g. an AKS `--gpu-driver none` pool before any
+	// driver install).
+	GPUDriverStateAbsent = "absent"
+)
+
 // ComponentType represents the type of component deployment.
 type ComponentType string
 
@@ -747,6 +762,37 @@ func (e *ExcludedOverlay) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// RecipeResultMetadata is the metadata block of a RecipeResult. Named
+// (rather than an anonymous struct field) so tests and external
+// constructors can build it without re-declaring the full field list —
+// which silently breaks on every field addition.
+type RecipeResultMetadata struct {
+	// Version is the recipe version (CLI version that generated this recipe).
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+
+	// AppliedOverlays lists the overlay names in order of application.
+	AppliedOverlays []string `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
+
+	// ExcludedOverlays lists overlays that matched criteria but were excluded
+	// from the final recipe, along with the machine-readable exclusion reason.
+	// Only populated when a snapshot is provided during recipe generation.
+	ExcludedOverlays []ExcludedOverlay `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+
+	// ConstraintWarnings contains details about why specific overlays were excluded.
+	// Helps users understand why certain environment-specific configurations
+	// were not applied and what would need to change to include them.
+	ConstraintWarnings []ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
+
+	// GPUDriverState records the snapshot-observed NVIDIA kernel driver
+	// state on the sampled GPU node (GPUDriverStatePreinstalled or
+	// GPUDriverStateAbsent). Only populated when the recipe was resolved
+	// from a snapshot whose GPU hardware measurement carries a usable
+	// driver-loaded reading; empty means unknown. Consumed by the
+	// bundle-time CheckDriverOwnershipCoherence validation to enforce
+	// driver-ownership coherence once --set overrides are known.
+	GPUDriverState string `json:"gpuDriverState,omitempty" yaml:"gpuDriverState,omitempty"`
+}
+
 // RecipeResult represents the final merged recipe output.
 type RecipeResult struct {
 	// Kind is always "RecipeResult".
@@ -756,23 +802,7 @@ type RecipeResult struct {
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains result metadata.
-	Metadata struct {
-		// Version is the recipe version (CLI version that generated this recipe).
-		Version string `json:"version,omitempty" yaml:"version,omitempty"`
-
-		// AppliedOverlays lists the overlay names in order of application.
-		AppliedOverlays []string `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-
-		// ExcludedOverlays lists overlays that matched criteria but were excluded
-		// from the final recipe, along with the machine-readable exclusion reason.
-		// Only populated when a snapshot is provided during recipe generation.
-		ExcludedOverlays []ExcludedOverlay `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
-
-		// ConstraintWarnings contains details about why specific overlays were excluded.
-		// Helps users understand why certain environment-specific configurations
-		// were not applied and what would need to change to include them.
-		ConstraintWarnings []ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
-	} `json:"metadata" yaml:"metadata"`
+	Metadata RecipeResultMetadata `json:"metadata" yaml:"metadata"`
 
 	// Criteria is the input criteria used to generate this result.
 	Criteria *Criteria `json:"criteria" yaml:"criteria"`
@@ -943,8 +973,9 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// read but not consumed via ownership-checked entry points.
 	}
 
-	// Metadata: scalar Version plus three slices.
+	// Metadata: scalar Version and GPUDriverState plus three slices.
 	out.Metadata.Version = r.Metadata.Version
+	out.Metadata.GPUDriverState = r.Metadata.GPUDriverState
 	if r.Metadata.AppliedOverlays != nil {
 		out.Metadata.AppliedOverlays = make([]string, len(r.Metadata.AppliedOverlays))
 		copy(out.Metadata.AppliedOverlays, r.Metadata.AppliedOverlays)
