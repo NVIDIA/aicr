@@ -214,7 +214,7 @@ spec:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
       chart: gpu-operator
-      targetRevision: v26.3.2
+      targetRevision: v26.3.3
       helm:
         valueFiles:
           # Values live under the numbered bundle dir (NNN-<component>/)
