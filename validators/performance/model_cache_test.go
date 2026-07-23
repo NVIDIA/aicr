@@ -268,6 +268,7 @@ func TestWrapPopulateJobError(t *testing.T) {
 		input           error
 		wantCode        error
 		wantRemediation bool // timeout path must add the HF-token/env remediation
+		wantUnchanged   bool // non-timeout path must return the exact input instance
 		wantText        []string
 	}{
 		{
@@ -278,10 +279,11 @@ func TestWrapPopulateJobError(t *testing.T) {
 			wantText:        []string{"13m0s", "HF-token", envModelCachePopulateTimeout},
 		},
 		{
-			name:     "non-timeout coded error propagates unchanged (no remediation)",
-			input:    errors.New(errors.ErrCodeUnavailable, "watch closed unexpectedly"),
-			wantCode: errors.New(errors.ErrCodeUnavailable, ""),
-			wantText: []string{"watch closed unexpectedly"},
+			name:          "non-timeout coded error propagates unchanged (no remediation)",
+			input:         errors.New(errors.ErrCodeUnavailable, "watch closed unexpectedly"),
+			wantCode:      errors.New(errors.ErrCodeUnavailable, ""),
+			wantUnchanged: true,
+			wantText:      []string{"watch closed unexpectedly"},
 		},
 	}
 	for _, tt := range tests {
@@ -289,6 +291,12 @@ func TestWrapPopulateJobError(t *testing.T) {
 			got := wrapPopulateJobError(tt.input, timeout)
 			if !stderrors.Is(got, tt.wantCode) {
 				t.Fatalf("want code %v, got %v", tt.wantCode, got)
+			}
+			// A coded non-timeout error must be returned as the same instance,
+			// not re-wrapped — the code+substring checks alone would still pass
+			// if wrapPopulateJobError rewrapped it in a fresh coded error.
+			if tt.wantUnchanged && got != tt.input { //nolint:errorlint // identity check: verify the exact instance is propagated unchanged
+				t.Errorf("non-timeout error should be returned unchanged, got %#v", got)
 			}
 			for _, want := range tt.wantText {
 				if !strings.Contains(got.Error(), want) {
