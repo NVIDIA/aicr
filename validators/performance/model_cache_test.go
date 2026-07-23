@@ -208,39 +208,57 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 	}
 }
 
-// TestEnsureModelCache_DisabledNoop verifies that with the cache disabled no PVC
-// or Job is created — the default behavior is unchanged.
 // TestPopulateJobTimeout guards the #1859 decoupling: the model-cache populate
 // wait uses the dedicated ModelCachePopulateTimeout, NOT the DynamoGraphDeployment
 // workload-ready budget. A regression swapping the constant/env back would be
 // caught here.
 func TestPopulateJobTimeout(t *testing.T) {
-	// Default: the dedicated populate budget, distinct from workload-ready.
-	t.Setenv(envModelCachePopulateTimeout, "")
-	t.Setenv(envWorkloadReadyTimeout, "")
-	got, err := populateJobTimeout()
-	if err != nil {
-		t.Fatalf("populateJobTimeout() default error = %v", err)
-	}
-	if got != defaults.ModelCachePopulateTimeout {
-		t.Fatalf("default = %v, want ModelCachePopulateTimeout (%v)", got, defaults.ModelCachePopulateTimeout)
-	}
-	if got == defaults.InferenceWorkloadReadyTimeout {
+	// The decoupling is meaningful only if the two budgets differ; guard it once
+	// for every case below.
+	if defaults.ModelCachePopulateTimeout == defaults.InferenceWorkloadReadyTimeout {
 		t.Fatal("populate budget must be decoupled from InferenceWorkloadReadyTimeout")
 	}
 
-	// Widening the workload-ready knob must NOT change the populate budget.
-	t.Setenv(envWorkloadReadyTimeout, "59m")
-	if got, err = populateJobTimeout(); err != nil || got != defaults.ModelCachePopulateTimeout {
-		t.Fatalf("workload-ready env leaked into populate budget: got %v err %v", got, err)
+	tests := []struct {
+		name        string
+		populateEnv string // AICR_INFERENCE_PERF_MODEL_CACHE_POPULATE_TIMEOUT
+		workloadEnv string // AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT
+		want        time.Duration
+	}{
+		{
+			name: "default is the dedicated populate budget",
+			want: defaults.ModelCachePopulateTimeout,
+		},
+		{
+			name:        "widening workload-ready does not leak into the populate budget",
+			workloadEnv: "59m",
+			want:        defaults.ModelCachePopulateTimeout,
+		},
+		{
+			name:        "dedicated populate knob overrides",
+			populateEnv: "20m",
+			workloadEnv: "59m",
+			want:        20 * time.Minute,
+		},
 	}
 
-	// The dedicated populate knob overrides.
-	t.Setenv(envModelCachePopulateTimeout, "20m")
-	if got, err = populateJobTimeout(); err != nil || got != 20*time.Minute {
-		t.Fatalf("populate override not honored: got %v err %v", got, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envModelCachePopulateTimeout, tt.populateEnv)
+			t.Setenv(envWorkloadReadyTimeout, tt.workloadEnv)
+			got, err := populateJobTimeout()
+			if err != nil {
+				t.Fatalf("populateJobTimeout() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("populateJobTimeout() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
+
+// TestEnsureModelCache_DisabledNoop verifies that with the cache disabled no PVC
+// or Job is created — the default behavior is unchanged.
 
 func TestEnsureModelCache_DisabledNoop(t *testing.T) {
 	client := fake.NewClientset()
