@@ -73,21 +73,20 @@ spec:
 
   # Validation checks for RTX PRO 6000 on EKS training workloads.
   # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
-  #
   # The deployment-phase floor (4 standard checks + Deployment.gpu-operator.version
   # >= v25.10.0) is contributed by the rtx-pro-6000-any.yaml wildcard overlay via
   # criteria-wildcard match and is not duplicated here, matching the
-  # rtx-pro-6000-eks-inference / l40s-oke-training pattern.
+  # rtx-pro-6000-eks-inference pattern.
   #
-  # Performance gating (NCCL all-reduce) is intentionally omitted. RTX PRO 6000
-  # is a single-GPU workstation card with no NVLink — see the same rationale
-  # already recorded in rtx-pro-6000-lke-training.yaml and l40s-oke-training.yaml
-  # — and it is not among the (service, accelerator) pairs in the compiled
-  # supportedNCCLCombinations matrix (validators/performance/nccl_all_reduce_bw_constraint.go),
-  # so there is neither a calibrated bandwidth floor nor a runtime testdata
-  # template for it today. Forcing the generic nccl-all-reduce-bw check here
-  # would either no-op or false-fail in the same way tracked for single-GPU-
-  # per-node H100 shapes in NVIDIA/aicr#1256.
+  # Performance gating (NCCL all-reduce) is intentionally omitted — not because
+  # this accelerator lacks NVLink (g7e nodes run 8x RTX PRO 6000 with an
+  # inter-node fabric, which is exactly what this check targets), but because
+  # rtx-pro-6000 has no entry in the compiled supportedNCCLCombinations matrix
+  # (validators/performance/nccl_all_reduce_bw_constraint.go), no testdata
+  # runtime template, and no empirically-calibrated bandwidth floor. Enabling
+  # the check today would false-fail rather than validate anything real.
+  # Tracked for follow-up: hardware calibration + matrix/testdata support for
+  # rtx-pro-6000 on EKS.
   validation:
     conformance:
       checks:
