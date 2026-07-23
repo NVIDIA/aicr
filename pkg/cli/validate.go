@@ -406,9 +406,11 @@ func validateCmdFlags() []cli.Flag {
 			Category: catValidationControl,
 		},
 		&cli.BoolFlag{
-			Name:     "fail-on-error",
-			Value:    true,
-			Usage:    "Exit with non-zero status if any check fails validation",
+			Name:  "fail-on-error",
+			Value: true,
+			Usage: "Exit with non-zero status if any phase check reports failed or other " +
+				"(crash/OOM/timeout). Does not affect the readiness pre-flight, which always " +
+				"fails closed with exit 2 when a prerequisite constraint (e.g. K8s version) is not met",
 			Category: catValidationControl,
 		},
 		&cli.BoolFlag{
@@ -600,7 +602,9 @@ Run specific phases:
 Save CTRF report to file:
   aicr validate -r recipe.yaml -s snapshot.yaml --output report.json
 
-Run validation without failing on check errors (informational mode):
+Run validation without failing on phase check errors (informational mode).
+Note: the readiness pre-flight still fails closed with exit 2 if a prerequisite
+constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase checks:
   aicr validate -r recipe.yaml -s snapshot.yaml --fail-on-error=false
 `,
 		Flags: validateCmdFlags(),
