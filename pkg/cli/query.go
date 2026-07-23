@@ -188,6 +188,22 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 			return nil, applyErr
 		}
 
+		// Fail closed when the snapshot (plus any config/CLI criteria) yields no
+		// recognizable dimension. A criteria(any) here means the measurements
+		// identify nothing to specialize on — resolving it would silently emit
+		// the generic fallback recipe with exit 0 (issue #1888). This mirrors
+		// the Specificity guard on the non-snapshot path below and is the
+		// semantic backstop for measurements that pass the loader's structural
+		// gate but carry no usable signal (unknown/empty measurement type, or a
+		// recognized type with no criteria-relevant content).
+		if criteria.Specificity() == 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("snapshot %q yielded no recognizable criteria (criteria(any)); its measurements "+
+					"identify no service, accelerator, intent, os, or platform — recapture with \"aicr snapshot\", "+
+					"or state criteria explicitly via --service/--accelerator/--intent/--os/--platform/--nodes or --config",
+					snapFilePath))
+		}
+
 		slog.Info("building recipe from snapshot", "criteria", criteria.String())
 		// ResolveRecipeFromSnapshot builds the constraint evaluator
 		// internally (constraints.Evaluate against snap), mirroring the

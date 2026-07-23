@@ -430,7 +430,8 @@ func writeMinimalSnapshot(t *testing.T, dir, name string) string {
 	content := `kind: Snapshot
 apiVersion: aicr.run/v1alpha2
 metadata: {}
-measurements: []
+measurements:
+  - type: K8s
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write snapshot: %v", err)

@@ -44,12 +44,12 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "supported apiVersion loads",
-			yamlContent: "kind: Snapshot\napiVersion: " + FullAPIVersion + "\nmeasurements: []\n",
+			yamlContent: "kind: Snapshot\napiVersion: " + FullAPIVersion + "\nmeasurements:\n  - type: K8s\n",
 			wantErr:     false,
 		},
 		{
 			name:        "empty apiVersion allowed for backward compat",
-			yamlContent: "kind: Snapshot\nmeasurements: []\n",
+			yamlContent: "kind: Snapshot\nmeasurements:\n  - type: K8s\n",
 			wantErr:     false,
 		},
 		{
@@ -65,6 +65,46 @@ func TestLoadFromFile(t *testing.T) {
 			wantErr:     true,
 			errContain:  `apiVersion "aicr.run/v1alpha1"`,
 			wantCode:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "wrong kind rejected",
+			yamlContent: "kind: AICRConfig\napiVersion: " + FullAPIVersion + "\nspec:\n  foo: bar\n",
+			wantErr:     true,
+			errContain:  `has kind "AICRConfig"`,
+			wantCode:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "arbitrary YAML with no kind and no measurements rejected",
+			yamlContent: "foo: bar\n",
+			wantErr:     true,
+			errContain:  "no usable measurements",
+			wantCode:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "kind Snapshot with empty measurements rejected",
+			yamlContent: "kind: Snapshot\napiVersion: " + FullAPIVersion + "\nmeasurements: []\n",
+			wantErr:     true,
+			errContain:  "no usable measurements",
+			wantCode:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "snapshot with only a nil measurement entry rejected",
+			yamlContent: "kind: Snapshot\nmeasurements:\n  - null\n",
+			wantErr:     true,
+			errContain:  "no usable measurements",
+			wantCode:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "snapshot with only a typeless measurement object rejected",
+			yamlContent: "kind: Snapshot\nmeasurements:\n  - {}\n",
+			wantErr:     true,
+			errContain:  "no usable measurements",
+			wantCode:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "kind-less snapshot with measurements allowed for backward compat",
+			yamlContent: "measurements:\n  - type: K8s\n",
+			wantErr:     false,
 		},
 	}
 

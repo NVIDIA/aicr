@@ -16,6 +16,8 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -687,6 +689,69 @@ func TestRecipeCmd_NoCriteriaValidation(t *testing.T) {
 	expectedMsg := "no criteria provided"
 	if !strings.Contains(err.Error(), expectedMsg) {
 		t.Errorf("error = %v, want error containing %q", err, expectedMsg)
+	}
+}
+
+// TestRecipeCmd_UnusableSnapshotRejected covers issue #1888: a snapshot that
+// passes the loader's structural gate but whose measurements identify no
+// criteria dimension must fail closed with INVALID_REQUEST, not silently emit
+// the generic criteria(any) fallback recipe with exit 0. The Specificity guard
+// in buildRecipeFromCmdWithConfig is the semantic backstop for measurements
+// with an unknown type, a whitespace-only type, or a recognized type carrying
+// no criteria-relevant content.
+func TestRecipeCmd_UnusableSnapshotRejected(t *testing.T) {
+	tests := []struct {
+		name        string
+		yamlContent string
+	}{
+		{"unknown measurement type", "kind: Snapshot\nmeasurements:\n  - type: Bogus\n"},
+		{"whitespace-only measurement type", "kind: Snapshot\nmeasurements:\n  - type: \"  \"\n"},
+		{"recognized type without content", "kind: Snapshot\nmeasurements:\n  - type: K8s\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			snapFile := filepath.Join(dir, "snapshot.yaml")
+			if err := os.WriteFile(snapFile, []byte(tt.yamlContent), 0o600); err != nil {
+				t.Fatalf("failed to write test snapshot file: %v", err)
+			}
+
+			err := recipeCmd().Run(context.Background(), []string{"recipe", "--snapshot", snapFile})
+			if err == nil {
+				t.Fatal("expected error for unusable snapshot, got nil")
+			}
+			if !strings.Contains(err.Error(), "no recognizable criteria") {
+				t.Errorf("error = %v, want error containing %q", err, "no recognizable criteria")
+			}
+			if !strings.Contains(err.Error(), "criteria(any)") {
+				t.Errorf("error = %v, want error containing %q", err, "criteria(any)")
+			}
+		})
+	}
+}
+
+// TestRecipeCmd_UnusableSnapshotWithOverrideProceeds confirms the criteria(any)
+// guard runs AFTER config/CLI criteria are applied (issue #1888): an explicit
+// override supplies specificity, so the same otherwise-unusable snapshot is no
+// longer rejected by the guard. Resolution may still fail on its own merits
+// (e.g. the empty snapshot failing an overlay constraint), but never with the
+// criteria(any) guard — that is the boundary this test locks in.
+func TestRecipeCmd_UnusableSnapshotWithOverrideProceeds(t *testing.T) {
+	dir := t.TempDir()
+	snapFile := filepath.Join(dir, "snapshot.yaml")
+	// A recognized-but-empty K8s measurement yields criteria(any) on its own.
+	if err := os.WriteFile(snapFile, []byte("kind: Snapshot\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
+		t.Fatalf("failed to write test snapshot file: %v", err)
+	}
+
+	err := recipeCmd().Run(context.Background(), []string{
+		"recipe", "--snapshot", snapFile,
+		"--service", "eks", "--accelerator", "h100", "--intent", "training",
+		"--os", "ubuntu", "--platform", "kubeflow",
+	})
+	if err != nil && strings.Contains(err.Error(), "no recognizable criteria") {
+		t.Errorf("criteria(any) guard fired despite explicit criteria override: %v", err)
 	}
 }
 

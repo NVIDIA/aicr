@@ -411,7 +411,7 @@ func TestValidateCmd_KubeconfigSelectsValidationCluster(t *testing.T) {
 		t.Fatalf("failed to write test recipe file: %v", err)
 	}
 	snapshotPath := filepath.Join(tmp, "snapshot.yaml")
-	if err := os.WriteFile(snapshotPath, []byte("metadata:\n  version: test\n"), 0o600); err != nil {
+	if err := os.WriteFile(snapshotPath, []byte("kind: Snapshot\nmetadata:\n  version: test\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
 		t.Fatalf("failed to write test snapshot file: %v", err)
 	}
 
