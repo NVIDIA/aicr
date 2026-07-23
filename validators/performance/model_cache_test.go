@@ -257,6 +257,38 @@ func TestPopulateJobTimeout(t *testing.T) {
 	}
 }
 
+// TestWrapPopulateJobError verifies the populate-Job failure classifier carries
+// the actionable remediation on the timeout path (the case #1859 targets) while
+// propagating other coded failures unchanged.
+func TestWrapPopulateJobError(t *testing.T) {
+	const timeout = 13 * time.Minute
+
+	t.Run("timeout carries remediation and stays timeout-coded", func(t *testing.T) {
+		got := wrapPopulateJobError(errors.New(errors.ErrCodeTimeout, "context deadline exceeded"), timeout)
+		if !stderrors.Is(got, errors.New(errors.ErrCodeTimeout, "")) {
+			t.Fatalf("want ErrCodeTimeout, got %v", got)
+		}
+		for _, want := range []string{"13m0s", "HF-token", envModelCachePopulateTimeout} {
+			if !strings.Contains(got.Error(), want) {
+				t.Errorf("timeout error %q missing %q", got.Error(), want)
+			}
+		}
+	})
+
+	t.Run("non-timeout coded error propagates unchanged (no remediation)", func(t *testing.T) {
+		got := wrapPopulateJobError(errors.New(errors.ErrCodeUnavailable, "watch closed unexpectedly"), timeout)
+		if !stderrors.Is(got, errors.New(errors.ErrCodeUnavailable, "")) {
+			t.Fatalf("want ErrCodeUnavailable propagated, got %v", got)
+		}
+		if strings.Contains(got.Error(), "HF-token") {
+			t.Errorf("remediation must not be added to non-timeout errors: %q", got.Error())
+		}
+		if !strings.Contains(got.Error(), "watch closed unexpectedly") {
+			t.Errorf("original message lost: %q", got.Error())
+		}
+	})
+}
+
 // TestEnsureModelCache_DisabledNoop verifies that with the cache disabled no PVC
 // or Job is created — the default behavior is unchanged.
 

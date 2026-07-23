@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -252,21 +253,32 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 		return terr
 	}
 	if werr := pod.WaitForJobCompletion(ctx.Ctx, ctx.Clientset, config.namespace, jobName, populateTimeout); werr != nil {
-		// WaitForJobCompletion returns coded errors (ErrCodeTimeout on the ready
-		// deadline, ErrCodeUnavailable when the watch closes). Preserve that
-		// classification instead of flattening every failure to ErrCodeInternal.
-		// On a timeout, surface the durable remedies in-band (an operator
-		// triaging a red run won't be reading the env-var reference): the
-		// download is likely throttled anonymously — provide the HF-token secret
-		// — or the model is large enough to need a bigger budget.
-		return errors.PropagateOrWrap(werr, errors.ErrCodeInternal,
-			fmt.Sprintf("model-cache populate Job did not complete within %s "+
-				"(provide the optional HF-token secret to remove anonymous-download throttling, "+
-				"or raise %s / the catalog timeout for very large models)",
-				populateTimeout, envModelCachePopulateTimeout))
+		return wrapPopulateJobError(werr, populateTimeout)
 	}
 	slog.Info("Model cache populated", "pvc", modelCachePVCName)
 	return nil
+}
+
+// wrapPopulateJobError classifies a WaitForJobCompletion failure for the model-
+// cache populate Job. WaitForJobCompletion returns coded errors (ErrCodeTimeout
+// on the deadline, ErrCodeUnavailable when the watch closes), and
+// errors.PropagateOrWrap keeps those codes — but on the timeout path (the exact
+// case #1859 targets) that would discard the actionable remediation. So on a
+// timeout, return a fresh ErrCodeTimeout error that carries the remedy in-band
+// (an operator triaging a red run won't be reading the env-var reference: the
+// download is likely throttled anonymously — provide the HF-token secret — or
+// the model needs a bigger budget), wrapping the original; every other coded
+// failure propagates unchanged.
+func wrapPopulateJobError(werr error, populateTimeout time.Duration) error {
+	if stderrors.Is(werr, errors.New(errors.ErrCodeTimeout, "")) {
+		return errors.Wrap(errors.ErrCodeTimeout,
+			fmt.Sprintf("model-cache populate Job did not complete within %s "+
+				"(provide the optional HF-token secret to remove anonymous-download throttling, "+
+				"or raise %s / the catalog timeout for very large models)",
+				populateTimeout, envModelCachePopulateTimeout),
+			werr)
+	}
+	return errors.PropagateOrWrap(werr, errors.ErrCodeInternal, "model-cache populate Job did not complete")
 }
 
 // buildModelCachePVC builds the RWO cache PVC. A non-empty storageClass is set
