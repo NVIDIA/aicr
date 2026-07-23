@@ -146,6 +146,7 @@ tags
 .claude/settings.local.json
 .claude/worktrees/
 docs/plans
+docs/superpowers/
 .worktrees/
 
 # Per-clone local agent overlay (see AGENTS.md "Local Overlay" section)
