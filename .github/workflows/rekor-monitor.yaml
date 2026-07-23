@@ -64,8 +64,8 @@
 name: Rekor Monitor
 
 on:
-  schedule:
-    - cron: "17 * * * *"  # hourly, offset off the top of the hour
+  # schedule:
+  #  - cron: "17 * * * *"  # hourly, offset off the top of the hour
   workflow_dispatch: {}
 
 permissions: {}
