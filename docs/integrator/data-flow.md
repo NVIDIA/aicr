@@ -367,11 +367,17 @@ aicr validate \
 Results are emitted in [CTRF](https://ctrf.io/) (Common Test Report Format)
 JSON: a top-level `summary` (test counts and start/stop timestamps) plus a
 `tests` array where each entry carries a `name`, `status`
-(passed/failed/skipped), `suite` (the phase — readiness, deployment,
-performance, conformance), and `stdout` lines with the per-check evidence. For
-a worked example of the full report and how performance checks such as
-`inference-perf` surface their measured values, see
+(passed/failed/skipped/other), `suite` (the phase — deployment, performance,
+conformance), and `stdout` lines with the per-check evidence. For a worked
+example of the full report and how performance checks such as `inference-perf`
+surface their measured values, see
 [Emitting recipe evidence for a PR](../user/validation.md#emitting-recipe-evidence).
+
+The readiness pre-flight is not a CTRF suite. It runs before any phase or report
+is constructed, so a readiness failure exits 2 (see below) and produces **no
+CTRF output**. Once phases run, the report carries an entry for every requested
+phase — including phases reported `skipped` (for example, all of them under
+`--no-cluster`, or phases after the first failure under `--fail-fast`).
 
 ### CI/CD Integration
 
@@ -383,9 +389,12 @@ aicr validate \
     --recipe recipe.yaml \
     --snapshot cm://gpu-operator/aicr-snapshot
 
-# Exit code: 0 = all passed; 8 (ExitInternal, from ErrCodeInternal) when
-#   one or more phases did not pass
-# Use --fail-on-error=false for informational mode without failing
+# Exit code: 0 = all phases passed or were skipped; 8 (ExitInternal, from
+#   ErrCodeInternal) when one or more phases reported failed or other;
+#   2 (ExitInvalidInput) when a readiness pre-flight constraint is not met
+#   (always fails closed, see below)
+# Use --fail-on-error=false for informational mode without failing on phase
+#   checks. The readiness pre-flight still exits 2 regardless of the flag.
 ```
 
 ## Stage 4: Bundle (Data Packaging)

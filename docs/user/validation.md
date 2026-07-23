@@ -518,8 +518,9 @@ The inference validator has three explicit skip guards so it never runs where
 it can't succeed. Each produces a `status: skipped` CTRF entry with a specific
 reason. Skipped checks are **not** failures: the validator container exits
 with code 2 internally (mapped to CTRF `skipped`), but `aicr validate` itself
-exits **0** for skipped/passed/other phases — a skipped inference check never
-drives a non-zero CLI exit on its own.
+exits **0** for a skipped or passed phase — a skipped inference check never
+drives a non-zero CLI exit on its own. (A phase that reports `failed` or `other`
+exits 8 by default, and is informational only under `--fail-on-error=false`.)
 
 | Guard | Trigger | Skip message |
 |-------|---------|--------------|
@@ -819,7 +820,9 @@ without needing cluster access.
 
 ## CI/CD integration
 
-`aicr validate` exits non-zero when any phase fails. CTRF JSON is emitted to
+By default `aicr validate` exits non-zero when any phase reports `failed` or
+`other` (set `--fail-on-error=false` to report those results and exit 0 anyway;
+the readiness pre-flight still exits 2 regardless). CTRF JSON is emitted to
 stdout (or to `--output <file>`), so a pipeline can gate promotion on both the
 exit code and the structured report:
 
@@ -835,14 +838,14 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 
 | Code | Meaning |
 |------|---------|
-| `0` | All phases reported status `passed`, `skipped`, or `other` |
-| `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, or a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction) |
+| `0` | All phases reported status `passed` or `skipped` |
+| `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction), or a **readiness pre-flight** constraint not met. The readiness gate always fails closed with this code, even under `--fail-on-error=false` |
 | `5` | CLI-layer timeout *before* a check runs — snapshot-agent Job never completes within `--timeout`, or the validator Job as a whole exceeds its wait deadline |
-| `8` | One or more phases reported status `failed`, **including per-check internal timeouts** (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`) |
+| `8` | One or more phases reported status `failed` **or** `other` (a check that crashed, hit an OOM, or exceeded `activeDeadlineSeconds`), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false` |
 
-> **Important:** two quirks to be aware of when gating a pipeline on exit code:
+> **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
-> 1. Only phase status `failed` drives a non-zero exit. A phase whose status is `other` (check crashed, pod OOM, `activeDeadlineSeconds` exceeded) **still produces exit 0**. Pipelines that need to catch those outcomes must inspect the CTRF report and look at per-phase status or the `summary.other` count, not rely on exit code alone.
+> 1. Both `failed` and `other` are blocking. A phase whose status is `other` (check crashed, pod OOM, `activeDeadlineSeconds` exceeded) drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`.
 > 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. Only timeouts at the CLI-to-cluster layer (snapshot-agent wait, validator-Job wait) retain their `ErrCodeTimeout` classification all the way through to exit 5.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
@@ -855,6 +858,15 @@ For informational-only runs (report results without failing the build):
 aicr validate ... --fail-on-error=false
 ```
 
+`--fail-on-error=false` scopes to **phase check results**: a deployment,
+performance, or conformance phase that reports `failed` or `other` is recorded
+in the CTRF report and the run exits 0. It does not relax the readiness
+pre-flight — if a readiness constraint
+(K8s version, OS, kernel) is not met, the run still fails closed with exit 2
+before any phase executes. In `--no-cluster` mode this is the dominant path,
+since all phase checks report `skipped` and readiness is the only inline
+constraint evaluation.
+
 ## Troubleshooting
 
 ### Readiness pre-flight fails
@@ -864,6 +876,10 @@ The CLI logs each readiness constraint comparison before any phase runs:
 ```text
 readiness constraint failed: name=K8s.server.version expected=">= 1.34" actual=v1.33.0-eks-abc
 ```
+
+The run stops before deploying any Jobs and exits 2 (`INVALID_REQUEST`). This is
+intentional fail-closed behavior: readiness gates whether the validators can run
+at all, so it is terminal regardless of `--fail-on-error` (see above).
 
 Fix: upgrade the cluster, or pick a recipe whose readiness constraints match
 the cluster's actual versions.

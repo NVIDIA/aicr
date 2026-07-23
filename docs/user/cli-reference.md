@@ -844,7 +844,7 @@ aicr validate [flags]
 | `--snapshot` | `-s` | string | | Path/URI to snapshot file containing measurements (omit to capture live) |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
-| `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
+| `--fail-on-error` | | bool | true | Exit with non-zero status if any phase check reports `failed` or `other` (crash/OOM/timeout). Scopes to phase checks only — the readiness pre-flight always fails closed with exit 2 regardless of this flag (see the readiness note under [Validation Phases](#validation-phases)). |
 | `--fail-fast` | | bool | false | Stop after the first phase that fails. By default all phases run and produce results. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file selecting the target cluster for **every** Kubernetes operation in the invocation: `cm://` recipe/snapshot/output I/O, snapshot-agent deployment, validation namespace and RBAC, validator Jobs, and cleanup. One invocation targets one cluster. When omitted, default discovery applies (`KUBECONFIG` env, then `~/.kube/config`, then in-cluster). An invalid path fails any run that performs Kubernetes operations; `--no-cluster` dry-runs over local files do not load it. **Changed in v0.18:** validator-engine operations, including validator Jobs, now honor this flag instead of using the default cluster. |
@@ -890,7 +890,7 @@ Validation can be run in different phases to validate different aspects of the d
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
 | `all` | Runs all phases sequentially; results collected regardless of failures | Complete end-to-end validation |
 
-> **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
+> **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs and exits 2 (`INVALID_REQUEST`). This gate always fails closed — `--fail-on-error=false` scopes to phase check results and does not downgrade a readiness failure.
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
@@ -1050,7 +1050,7 @@ spec:
       requireGpu: true
     execution:
       phases: [deployment, conformance]
-      failOnError: true                  # default true; set false to report only
+      failOnError: true                  # default; false = don't fail on phase-check results (readiness pre-flight still exits 2)
       noCluster: false
       noCleanup: false
       timeout: 10m
@@ -1175,10 +1175,10 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 **Exit Codes:**
 | Code | Description |
 |------|-------------|
-| `0` | All checks passed |
-| `2` | Invalid input (bad flags, missing recipe) |
+| `0` | All phases passed or were skipped (also returned under `--fail-on-error=false` even when phases report `failed`/`other`) |
+| `2` | Invalid input (bad flags, missing recipe), or a readiness pre-flight constraint not met — the readiness gate always fails closed here regardless of `--fail-on-error` |
 | `5` | Timeout (validator section or context deadline exceeded) |
-| `8` | One or more checks failed (when `--fail-on-error` is set) |
+| `8` | One or more phase checks reported `failed` or `other` (crash/OOM/deadline) — when `--fail-on-error` is set |
 
 ---
 
