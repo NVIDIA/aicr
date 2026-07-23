@@ -265,7 +265,7 @@ func TestHasGPUOperatorClusterPolicy(t *testing.T) {
 		{
 			name: "policy subtype with clusterpolicy spec keys",
 			snap: policySnapshotWith(map[string]measurement.Reading{
-				"driver.version":  measurement.Str("580.126.20"),
+				"driver.version":  measurement.Str("580.173.02"),
 				"toolkit.enabled": measurement.Str("true"),
 			}),
 			want: true,

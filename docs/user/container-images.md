@@ -39,7 +39,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.3.2 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.3.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
@@ -135,9 +135,9 @@ _No images extracted._
 - `nvcr.io/nvidia/cloud-native/nvidia-fs:2.27.3`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.3`
 - `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.4.2`
-- `nvcr.io/nvidia/driver:580.126.20`
-- `nvcr.io/nvidia/gpu-operator:v26.3.2`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.19.2`
+- `nvcr.io/nvidia/driver:580.173.02`
+- `nvcr.io/nvidia/gpu-operator:v26.3.3`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.19.3`
 - `nvcr.io/nvidia/k8s/container-toolkit:v1.19.1`
 - `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless`
 - `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.5.0`
@@ -248,6 +248,8 @@ _No images extracted._
 - `registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0`
 
 ### prometheus-operator-crds
+
+> Warning: [INTERNAL] helm template failed: signal: killed
 
 _No images extracted._
 

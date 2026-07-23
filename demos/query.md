@@ -73,7 +73,7 @@ done
 ```
 
 > `h100: 580.105.08`
-> `gb200: 580.126.20`
+> `gb200: 580.173.02`
 
 ### Constraints diverge by service + OS
 

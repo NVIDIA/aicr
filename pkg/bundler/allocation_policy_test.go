@@ -106,7 +106,7 @@ func TestEnforceAllocationPolicyOverrides(t *testing.T) {
 		{
 			name: "static overrides on unrelated paths stay silent",
 			opts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
-				"gpuoperator": {"driver.version": "580.126.20"},
+				"gpuoperator": {"driver.version": "580.173.02"},
 			})},
 		},
 		{

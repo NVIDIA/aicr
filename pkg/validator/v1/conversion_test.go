@@ -121,7 +121,7 @@ func TestToValidationInputYAMLRoundTrip(t *testing.T) {
 		Validation: &recipe.ValidationConfig{
 			Deployment: &recipe.ValidationPhase{
 				Constraints: []recipe.Constraint{
-					{Name: "Deployment.gpu-operator.version", Value: "580.126.20"},
+					{Name: "Deployment.gpu-operator.version", Value: "580.173.02"},
 				},
 				Checks: []string{"gpu-operator-version"},
 			},
@@ -150,8 +150,8 @@ func TestToValidationInputYAMLRoundTrip(t *testing.T) {
 	deploy := findConstraint(got.Config.Deployment, "Deployment.gpu-operator.version")
 	if deploy == nil {
 		t.Errorf("Deployment.gpu-operator.version constraint lost after YAML round trip\npayload:\n%s", data)
-	} else if deploy.Value != "580.126.20" {
-		t.Errorf("Deployment constraint value = %q, want %q", deploy.Value, "580.126.20")
+	} else if deploy.Value != "580.173.02" {
+		t.Errorf("Deployment constraint value = %q, want %q", deploy.Value, "580.173.02")
 	}
 
 	// Performance constraints must survive — the bug surfaced here as
