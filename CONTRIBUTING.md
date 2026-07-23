@@ -72,7 +72,7 @@ This creates three files with TODOs guiding implementation:
 3. Run `make test` - registration validation ensures completeness
 4. Submit PR - CI enforces all requirements
 
-**See [docs/contributor/validator.md](docs/contributor/validator.md) for complete guide with examples, architecture overview, and troubleshooting.**
+**See [docs/contributor/validator.md](docs/contributor/validator.md) for a complete guide with examples, architecture overview, and troubleshooting.**
 
 #### Adding a Component
 
