@@ -30,11 +30,17 @@ import (
 )
 
 // defaultTimeout bounds a single monitor pass (TUF fetch, shard discovery,
-// consistency proof, and identity scan). It is generous relative to the observed
-// few-seconds runtime so a real scan never trips it, while still capping a
-// stalled network request rather than hanging the CI job. Kept local so this
+// consistency proof, and identity scan). The steady-state hourly window scans in
+// minutes, but the identity scan is linear in the window size, and the window
+// can balloon when the checkpoint has not advanced for a while: a multi-hour
+// Sigstore/TUF outage, or a finding that a maintainer has not yet triaged (the
+// cursor deliberately holds until then). A window of several hundred thousand
+// entries is realistic in those cases, so this is sized to scan that backlog in
+// one pass rather than timing out every run and never catching up. It still caps
+// a genuinely stalled request rather than hanging the CI job (the workflow's
+// job-level timeout-minutes is the outer backstop). Kept local so this
 // standalone tool does not import the shared pkg/defaults for one constant.
-const defaultTimeout = 15 * time.Minute
+const defaultTimeout = 45 * time.Minute
 
 // options are the tool's inputs. The monitored identity is passed by the caller
 // (the workflow) rather than hardcoded so the workflow stays the auditable
