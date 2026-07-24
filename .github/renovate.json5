@@ -318,6 +318,19 @@
         executionMode: "update",
       },
     },
+
+    // ---- aiperf-bench base image is capped below python 3.14 ----
+    // aiperf's transitive deps (pyzmq, uvloop) publish no cp314 wheels yet, so
+    // on 3.14 pip falls back to a source build that needs a C toolchain the
+    // -slim image deliberately omits — breaking the performance validator image
+    // build. PR #1906 bumped this to 3.14 and broke the UAT image build; this
+    // cap stops the re-bump. Raise/drop it once upstream ships cp314 wheels.
+    {
+      matchManagers: ["dockerfile"],
+      matchFileNames: ["validators/performance/aiperf-bench.Dockerfile"],
+      matchDepNames: ["python"],
+      allowedVersions: "<3.14",
+    },
   ],
 
   // Vendor-curated GPU networking images that Renovate cannot crawl without
