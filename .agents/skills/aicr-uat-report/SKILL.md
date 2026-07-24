@@ -55,7 +55,7 @@ marks those rows "(intent derived)".
 ### Step 1 — Run the report script
 
 ```bash
-python3 .claude/skills/aicr-uat-report/uat_report.py --days 3
+python3 .agents/skills/aicr-uat-report/uat_report.py --days 3
 ```
 
 It prints, per version, a Markdown table (`Service | GPU | Intent | Pass |
