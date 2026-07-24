@@ -1,7 +1,10 @@
 # Claude Skills
 
-AICR ships a set of **Claude skills** under
-[`.claude/skills/`](https://github.com/NVIDIA/aicr/tree/main/.claude/skills).
+AICR ships a set of **agent skills** under
+[`.agents/skills/`](https://github.com/NVIDIA/aicr/tree/main/.agents/skills)
+(`.claude/skills` is a symlink to it, so Claude Code discovers the same
+skills; other agents such as Codex and Cursor read `.agents/skills`
+directly).
 A skill is a self-contained, model-invocable procedure: a `SKILL.md` with
 YAML frontmatter (`name`, `description`) plus any supporting files
 (templates, skeletons). When a request matches a skill's description,
@@ -18,12 +21,13 @@ tree. They complement — they do not replace — the coding rules in
 
 | Skill | Use it when you want to... |
 |-------|----------------------------|
-| [`aicr-analyzing-snapshots`](https://github.com/NVIDIA/aicr/blob/main/.claude/skills/aicr-analyzing-snapshots/SKILL.md) | Analyze a snapshot YAML — cluster identity, provider characteristics, GPU/network topology, node health, software stack — and produce a structured assessment report. |
-| [`aicr-auditing-docs`](https://github.com/NVIDIA/aicr/blob/main/.claude/skills/aicr-auditing-docs/SKILL.md) | Audit the Markdown docs for duplication, drift, bloat, and gaps, producing a prioritized findings report (research, not edits) across README, `docs/`, demos, and governance files. |
-| [`aicr-creating-guided-demos`](https://github.com/NVIDIA/aicr/blob/main/.claude/skills/aicr-creating-guided-demos/SKILL.md) | Scaffold an interactive guided demo script (`demos/*.sh`) — live or self-paced — using the Frame → Tell → Show → Close narrative pattern. |
-| [`aicr-creating-slide-decks`](https://github.com/NVIDIA/aicr/blob/main/.claude/skills/aicr-creating-slide-decks/SKILL.md) | Build a self-contained HTML slide deck (`demos/*.html`) — inline CSS/SVG, no build step — to present or teach a concept full-screen or projected. |
-| [`aicr-managing-openvex`](https://github.com/NVIDIA/aicr/blob/main/.claude/skills/aicr-managing-openvex/SKILL.md) | Add, update, or remove CVE/GHSA suppressions in `.openvex.json`, the OpenVEX document consumed by the daily image vulnerability scan. |
-| [`aicr-release-notes`](https://github.com/NVIDIA/aicr/blob/main/.claude/skills/aicr-release-notes/SKILL.md) | Draft the human-readable GitHub release-notes summary for an upcoming release by grouping commits since the last tag into thematic highlights. |
+| [`aicr-analyzing-snapshots`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-analyzing-snapshots/SKILL.md) | Analyze a snapshot YAML — cluster identity, provider characteristics, GPU/network topology, node health, software stack — and produce a structured assessment report. |
+| [`aicr-auditing-docs`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-auditing-docs/SKILL.md) | Audit the Markdown docs for duplication, drift, bloat, and gaps, producing a prioritized findings report (research, not edits) across README, `docs/`, demos, and governance files. |
+| [`aicr-creating-guided-demos`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-creating-guided-demos/SKILL.md) | Scaffold an interactive guided demo script (`demos/*.sh`) — live or self-paced — using the Frame → Tell → Show → Close narrative pattern. |
+| [`aicr-creating-slide-decks`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-creating-slide-decks/SKILL.md) | Build a self-contained HTML slide deck (`demos/*.html`) — inline CSS/SVG, no build step — to present or teach a concept full-screen or projected. |
+| [`aicr-managing-openvex`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-managing-openvex/SKILL.md) | Add, update, or remove CVE/GHSA suppressions in `.openvex.json`, the OpenVEX document consumed by the daily image vulnerability scan. |
+| [`aicr-release-notes`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-release-notes/SKILL.md) | Draft the human-readable GitHub release-notes summary for an upcoming release by grouping commits since the last tag into thematic highlights. |
+| [`aicr-uat-report`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-uat-report/SKILL.md) | Report UAT health across service x GPU x intent combinations from the UAT Run workflow, classifying failures as product vs infra signal. |
 
 ## How Skills Are Invoked
 
@@ -42,7 +46,7 @@ so its supporting files and conventions load as intended.
 
 ## Adding a Skill
 
-1. Create `.claude/skills/<skill-name>/SKILL.md` with `name` and
+1. Create `.agents/skills/<skill-name>/SKILL.md` with `name` and
    `description` frontmatter. The `name` must match the directory.
 2. Write the `description` for matching: enumerate the triggers (phrases,
    file paths, intents) that should activate it. This is the single most
