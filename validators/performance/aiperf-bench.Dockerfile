@@ -20,7 +20,11 @@
 # to roll forward. Consumers pin to a specific aiperf-bench:<semver> tag or
 # let :latest track the CLI version via catalog.Load rewriting.
 
-FROM python:3.14-slim
+# renovate: pinned to 3.13 — do NOT bump to 3.14 until aiperf's pyzmq/uvloop
+# ship cp314 wheels. On 3.14 pip has no prebuilt wheels for them and falls back
+# to a source build, which needs a C toolchain this -slim image deliberately
+# omits, so the build fails.
+FROM python:3.13-slim
 
 ARG AIPERF_VERSION=0.7.0
 
