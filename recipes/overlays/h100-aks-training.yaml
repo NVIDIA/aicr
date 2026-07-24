@@ -30,7 +30,7 @@ spec:
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
-      value: ">= 1.32.4"
+      value: ">= 1.34"
 
   componentRefs:
     # GPU Operator dependency ordering (inherits valuesFile from aks-training;

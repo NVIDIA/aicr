@@ -2700,6 +2700,13 @@ func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 			},
 			wantK8sFloor: ">= 1.34",
 		},
+		{name: "h100 aks training preserves >= 1.34 floor", criteria: &Criteria{Service: CriteriaServiceAKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining}, wantK8sFloor: ">= 1.34"},
+		{name: "h100 aks ubuntu training preserves >= 1.34 floor", criteria: &Criteria{Service: CriteriaServiceAKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSUbuntu}, wantK8sFloor: ">= 1.34"},
+		{name: "h100 aks ubuntu kubeflow training preserves >= 1.34 floor", criteria: &Criteria{Service: CriteriaServiceAKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSUbuntu, Platform: CriteriaPlatformKubeflow}, wantK8sFloor: ">= 1.34"},
+		{name: "a100 aks training preserves >= 1.34 floor", criteria: &Criteria{Service: CriteriaServiceAKS, Accelerator: CriteriaAcceleratorA100, Intent: CriteriaIntentTraining}, wantK8sFloor: ">= 1.34"},
+		{name: "a100 aks ubuntu training preserves >= 1.34 floor", criteria: &Criteria{Service: CriteriaServiceAKS, Accelerator: CriteriaAcceleratorA100, Intent: CriteriaIntentTraining, OS: CriteriaOSUbuntu}, wantK8sFloor: ">= 1.34"},
+		{name: "a100 aks ubuntu kubeflow training preserves >= 1.34 floor", criteria: &Criteria{Service: CriteriaServiceAKS, Accelerator: CriteriaAcceleratorA100, Intent: CriteriaIntentTraining, OS: CriteriaOSUbuntu, Platform: CriteriaPlatformKubeflow}, wantK8sFloor: ">= 1.34"},
+		{name: "aks training (accelerator-generic) preserves >= 1.34 floor", criteria: &Criteria{Service: CriteriaServiceAKS, Intent: CriteriaIntentTraining}, wantK8sFloor: ">= 1.34"},
 	}
 
 	for _, tt := range tests {
