@@ -27,7 +27,7 @@ tree. They complement — they do not replace — the coding rules in
 | [`aicr-creating-slide-decks`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-creating-slide-decks/SKILL.md) | Build a self-contained HTML slide deck (`demos/*.html`) — inline CSS/SVG, no build step — to present or teach a concept full-screen or projected. |
 | [`aicr-managing-openvex`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-managing-openvex/SKILL.md) | Add, update, or remove CVE/GHSA suppressions in `.openvex.json`, the OpenVEX document consumed by the daily image vulnerability scan. |
 | [`aicr-release-notes`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-release-notes/SKILL.md) | Draft the human-readable GitHub release-notes summary for an upcoming release by grouping commits since the last tag into thematic highlights. |
-| [`aicr-uat-report`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-uat-report/SKILL.md) | Report UAT health across service x GPU x intent combinations from the UAT Run workflow, classifying failures as product vs infra signal. |
+| [`aicr-uat-report`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-uat-report/SKILL.md) | Report UAT health across service x GPU x intent combinations from the UAT Run workflow, classifying failures as product vs infra signal, and download the per-run cluster debug bundles to triage them. |
 
 ## How Skills Are Invoked
 
