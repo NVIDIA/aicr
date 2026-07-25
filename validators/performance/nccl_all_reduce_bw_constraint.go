@@ -62,6 +62,8 @@ const (
 	// ncclTrainingRuntimeName is the name of the TrainingRuntime resource.
 	// Must stay in sync with runtime.yaml.
 	ncclTrainingRuntimeName = "nccl-all-reduce-runtime"
+
+	skipMsgNCCLFewNodes = "skipped - requires at least 2 GPU nodes for EW fabric test"
 )
 
 // Package-level GVR definitions for Kubeflow Trainer CRDs used by both
@@ -371,9 +373,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// NCCL all-reduce tests EW (East-West) fabric between nodes and requires at least
 	// two GPU nodes. Skip gracefully rather than fail when only one node is available.
 	if gpuConfig.WorkerCount < 2 {
-		slog.Info("Skipping NCCL All Reduce bandwidth validation: requires at least 2 GPU nodes for EW fabric test",
+		slog.Info("Skipping NCCL All Reduce bandwidth validation: "+skipMsgNCCLFewNodes,
 			"nodes", gpuConfig.WorkerCount)
-		return "skipped - requires at least 2 GPU nodes for EW fabric test", true, nil
+		return skipMsgNCCLFewNodes, true, nil
 	}
 
 	// Preflight cluster-side prerequisites before spending TrainJob time.
