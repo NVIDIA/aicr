@@ -94,7 +94,7 @@ func renderTable(heading string, m Matrix, kind Kind) string {
 		}
 		note := r.Note
 		if note == "" {
-			note = "—"
+			note = emDash
 		}
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s | %s |\n",
 			r.Item, exercisedBy(r.Harnesses), r.Hardware, r.Cadence, r.Status, note)
@@ -112,7 +112,7 @@ func exercisedBy(h map[Harness]bool) string {
 		}
 	}
 	if len(parts) == 0 {
-		return "—"
+		return emDash
 	}
 	return strings.Join(parts, ", ")
 }
