@@ -304,3 +304,65 @@ func TestPrepareAndValidate_RejectsReservedDeployerName(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareAndValidate_RejectsDuplicateNames(t *testing.T) {
+	tests := []struct {
+		name    string
+		refs    []ComponentRef
+		wantErr bool
+	}{
+		{
+			"adjacent duplicate",
+			[]ComponentRef{
+				{Name: "gpu-operator", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "gpu-operator", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			},
+			true,
+		},
+		{
+			"non-adjacent duplicate",
+			[]ComponentRef{
+				{Name: "a", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "b", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "a", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			},
+			true,
+		},
+		{
+			"disabled duplicate still rejected",
+			[]ComponentRef{
+				{Name: "a", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{
+					Name:      "a",
+					Overrides: map[string]any{"enabled": false},
+				},
+			},
+			true,
+		},
+		{
+			"empty names not flagged",
+			[]ComponentRef{
+				{Name: "", Overrides: map[string]any{"enabled": false}},
+				{Name: "", Overrides: map[string]any{"enabled": false}},
+			},
+			false,
+		},
+		{
+			"unique names ok",
+			[]ComponentRef{
+				{Name: "a", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "b", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &RecipeResult{ComponentRefs: tt.refs}
+			err := r.PrepareAndValidate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("PrepareAndValidate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

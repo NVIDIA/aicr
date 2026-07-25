@@ -1368,3 +1368,31 @@ func TestFacadeResultFromInternal_ChartProjection(t *testing.T) {
 		}
 	}
 }
+
+// TestFacadeResultFromInternal_OmitsDisabledComponents pins the facade
+// contract: only deployable (enabled) components appear in the SDK
+// facade result. See #1874.
+func TestFacadeResultFromInternal_OmitsDisabledComponents(t *testing.T) {
+	t.Parallel()
+
+	internal := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "enabled-a", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			{
+				Name:      "disabled-b",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://charts.example.com",
+				Version:   "1.0.0",
+				Overrides: map[string]any{"enabled": false},
+			},
+		},
+	}
+
+	out := facadeResultFromInternal(internal, "test")
+	if len(out.Components) != 1 {
+		t.Fatalf("components = %d, want 1", len(out.Components))
+	}
+	if out.Components[0].Name != "enabled-a" {
+		t.Errorf("got component %q, want enabled-a", out.Components[0].Name)
+	}
+}

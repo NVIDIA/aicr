@@ -857,6 +857,9 @@ func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult
 		internal:     r,
 	}
 	for _, c := range r.ComponentRefs {
+		if !c.IsEnabled() {
+			continue
+		}
 		// Project the chart the component actually deploys: a source-only
 		// Helm ref falls back to the component name (the deployers'
 		// EffectiveChart rule), so SDK consumers never see an empty chart

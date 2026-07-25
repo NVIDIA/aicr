@@ -563,6 +563,20 @@ func (r *RecipeResult) PrepareAndValidate() error {
 				fmt.Sprintf("recipe component %q uses the reserved deployer override key as its name; %q is reserved for --set deployer:<key> Argo deployer options", r.ComponentRefs[i].Name, ReservedDeployerKey))
 		}
 	}
+	// Reject duplicate component-ref names (enabled or disabled) BEFORE
+	// registry back-fill. See #1874.
+	seen := make(map[string]bool, len(r.ComponentRefs))
+	for i := range r.ComponentRefs {
+		name := r.ComponentRefs[i].Name
+		if name == "" {
+			continue
+		}
+		if seen[name] {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("recipe has duplicate component ref name %q", name))
+		}
+		seen[name] = true
+	}
 	if err := r.backfillComponentTypes(); err != nil {
 		return err
 	}
