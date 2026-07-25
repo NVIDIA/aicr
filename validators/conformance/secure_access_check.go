@@ -65,7 +65,8 @@ const (
 	gpuClaimPrefix   = "gpu-claim-"
 	// noAllocProbePrefix names the standalone probe pod that is granted no
 	// GPU at all (no ResourceClaims, no nvidia.com/gpu limits).
-	noAllocProbePrefix = "no-alloc-probe-"
+	noAllocProbePrefix       = "no-alloc-probe-"
+	allocationModeExactCount = "ExactCount"
 
 	// cudaTestImage runs the in-container GPU visibility verification.
 	cudaTestImage = "nvidia/cuda:12.9.0-base-ubuntu24.04"
@@ -1587,12 +1588,12 @@ func buildResourceClaim(run *gpuTestRun, version string) *unstructured.Unstructu
 	}
 	if version == versionV1beta1 {
 		request["deviceClassName"] = draDriverGPU
-		request["allocationMode"] = "ExactCount"
+		request["allocationMode"] = allocationModeExactCount
 		request["count"] = int64(1)
 	} else {
 		request["exactly"] = map[string]interface{}{
 			"deviceClassName": draDriverGPU,
-			"allocationMode":  "ExactCount",
+			"allocationMode":  allocationModeExactCount,
 			"count":           int64(1),
 		}
 	}
