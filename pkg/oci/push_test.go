@@ -106,7 +106,7 @@ func extractFilesFromOCIArtifact(t *testing.T, ociLayoutDir, digest string) map[
 	tr := tar.NewReader(gzr)
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if stderrors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
