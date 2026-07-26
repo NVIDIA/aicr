@@ -15,11 +15,14 @@
 # Kueue Health Check
 #
 # Validates that Kueue is running and healthy in the kueue-system
-# namespace, and that the default quota CRs shipped with the component
-# (ResourceFlavor default-flavor, ClusterQueue cluster-queue, LocalQueue
-# default/default) were admitted and reconciled to Active — a functional
-# proof (CRDs installed, controller reconciling, and flavor/queue resolution)
-# within the assert/error-only allowlist.
+# namespace. Asserts resourceflavors / clusterqueues /
+# localqueues.kueue.x-k8s.io are Established=True (verified against
+# chart 0.18.2; re-verify on defaultVersion bump), and that the default
+# quota CRs shipped with the component (ResourceFlavor default-flavor,
+# ClusterQueue cluster-queue, LocalQueue default/default) were admitted
+# and reconciled to Active — a functional proof (CRDs installed,
+# controller reconciling, and flavor/queue resolution) within the
+# assert/error-only allowlist.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -28,6 +31,39 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-crds-established
+      try:
+        # kueue.x-k8s.io group verified in-tree: the manifests this
+        # component ships (recipes/components/kueue/manifests/*.yaml)
+        # use apiVersion kueue.x-k8s.io/v1beta2 for ResourceFlavor,
+        # ClusterQueue, and LocalQueue. Chart 0.18.2 (recipes/registry.yaml).
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: resourceflavors.kueue.x-k8s.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clusterqueues.kueue.x-k8s.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: localqueues.kueue.x-k8s.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-deployment-exists
       try:
         # Guard against vacuous pass on empty namespace: verify the

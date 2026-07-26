@@ -15,10 +15,14 @@
 # Gatekeeper Health Check
 #
 # Validates that gatekeeper-controller-manager and gatekeeper-audit are
-# running and healthy in the gatekeeper-system namespace. Guards against
-# vacuous pass on empty namespace by asserting both Deployments exist with
-# at least one available replica, then asserts no pods are stuck in
-# Pending, Failed, or Unknown phases.
+# running and healthy in the gatekeeper-system namespace. Also asserts
+# the two CRDs the chart installs unconditionally in crds/ —
+# constrainttemplates.templates.gatekeeper.sh and
+# configs.config.gatekeeper.sh — are Established=True (verified against
+# chart 3.22.2; re-verify on defaultVersion bump). Guards against
+# vacuous pass on empty namespace by asserting both Deployments exist
+# with at least one available replica, then asserts no pods are stuck
+# in Pending, Failed, or Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -27,6 +31,34 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-crds-established
+      # Verified against chart 3.22.2 (recipes/registry.yaml): rendered
+      # `helm template gatekeeper/gatekeeper --version 3.22.2 --include-crds`
+      # and confirmed both constrainttemplates.templates.gatekeeper.sh and
+      # configs.config.gatekeeper.sh are present (17 CRDs total; the
+      # feature-conditional mutation/expansion/external-data CRDs also
+      # render under default values, confirming these two unconditional
+      # core CRDs are the correct minimal assertion set). Re-verify on
+      # defaultVersion bump — tracked systemically in #1948.
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: constrainttemplates.templates.gatekeeper.sh
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: configs.config.gatekeeper.sh
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-controller-manager-deployment
       try:
         - assert:

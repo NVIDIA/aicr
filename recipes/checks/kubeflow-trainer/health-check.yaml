@@ -14,10 +14,17 @@
 
 # Kubeflow Trainer Health Check
 #
-# Validates that the Kubeflow Trainer is running and healthy in the kubeflow
-# namespace. Checks that the kubeflow-trainer-controller-manager deployment has at least one
-# available replica and that no pods in the namespace are stuck in Pending,
-# Failed, or Unknown phases.
+# Validates that the Kubeflow Trainer is running and healthy in the
+# kubeflow namespace. Also asserts trainjobs.trainer.kubeflow.org,
+# trainingruntimes.trainer.kubeflow.org, and
+# clustertrainingruntimes.trainer.kubeflow.org are Established=True
+# (verified against chart 2.2.0; re-verify on defaultVersion bump) —
+# clustertrainingruntimes is load-bearing because platform-kubeflow.yaml
+# applies a ClusterTrainingRuntime CR
+# (torch-distributed-cluster-training-runtime.yaml) via manifestFiles.
+# Checks that the kubeflow-trainer-controller-manager deployment has at
+# least one available replica and that no pods in the namespace are
+# stuck in Pending, Failed, or Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -26,6 +33,40 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-crds-established
+      # trainjobs + trainingruntimes + clustertrainingruntimes verified
+      # against chart 2.2.0 (recipes/registry.yaml). clustertrainingruntimes
+      # is the CRD platform-kubeflow.yaml actually instantiates a CR
+      # against — see the kubeflow-trainer entry's manifestFiles block
+      # in registry.yaml.
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: trainjobs.trainer.kubeflow.org
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clustertrainingruntimes.trainer.kubeflow.org
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: trainingruntimes.trainer.kubeflow.org
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-deployment-exists
       try:
         # Guard against vacuous pass on empty namespace: verify the
