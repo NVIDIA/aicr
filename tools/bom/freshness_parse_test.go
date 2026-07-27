@@ -80,11 +80,11 @@ func TestParseBOMVersionTable(t *testing.T) {
 		{
 			name: "parses rows and resolves columns by header",
 			section: header +
-				"| gpu-operator | helm | gpu-operator | v26.3.2 | 9 |\n" +
+				"| gpu-operator | helm | gpu-operator | v26.3.3 | 9 |\n" +
 				"| some-kustomize | kustomize | — | v1.2.3 | 2 |\n" +
 				"| a-manifest | manifest | — | — | 1 |\n",
 			want: map[string]string{
-				"gpu-operator":   "v26.3.2",
+				"gpu-operator":   "v26.3.3",
 				"some-kustomize": "v1.2.3",
 				"a-manifest":     "—",
 			},
@@ -92,7 +92,7 @@ func TestParseBOMVersionTable(t *testing.T) {
 		{
 			name: "rejects duplicate component rows",
 			section: header +
-				"| gpu-operator | helm | gpu-operator | v26.3.2 | 9 |\n" +
+				"| gpu-operator | helm | gpu-operator | v26.3.3 | 9 |\n" +
 				"| gpu-operator | helm | gpu-operator | v0.0.1 | 9 |\n",
 			wantErr: true,
 		},
@@ -100,8 +100,8 @@ func TestParseBOMVersionTable(t *testing.T) {
 			name: "ignores an unrelated pipe table before the components table",
 			section: "| Other | Column |\n|-------|--------|\n| foo | bar |\n\n" +
 				header +
-				"| gpu-operator | helm | gpu-operator | v26.3.2 | 9 |\n",
-			want: map[string]string{"gpu-operator": "v26.3.2"},
+				"| gpu-operator | helm | gpu-operator | v26.3.3 | 9 |\n",
+			want: map[string]string{"gpu-operator": "v26.3.3"},
 		},
 		{
 			name:    "returns empty for a section with no components table",

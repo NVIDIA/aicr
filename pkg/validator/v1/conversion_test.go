@@ -26,12 +26,7 @@ func TestToValidationInput(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
 		APIVersion: header.GroupVersion,
 		Kind:       "RecipeResult",
-		Metadata: struct {
-			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
-			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
-			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
-		}{
+		Metadata: recipe.RecipeResultMetadata{
 			Version:         "1.0.0",
 			AppliedOverlays: []string{"base", "eks"},
 		},
@@ -121,7 +116,7 @@ func TestToValidationInputYAMLRoundTrip(t *testing.T) {
 		Validation: &recipe.ValidationConfig{
 			Deployment: &recipe.ValidationPhase{
 				Constraints: []recipe.Constraint{
-					{Name: "Deployment.gpu-operator.version", Value: "580.126.20"},
+					{Name: "Deployment.gpu-operator.version", Value: "580.173.02"},
 				},
 				Checks: []string{"gpu-operator-version"},
 			},
@@ -150,8 +145,8 @@ func TestToValidationInputYAMLRoundTrip(t *testing.T) {
 	deploy := findConstraint(got.Config.Deployment, "Deployment.gpu-operator.version")
 	if deploy == nil {
 		t.Errorf("Deployment.gpu-operator.version constraint lost after YAML round trip\npayload:\n%s", data)
-	} else if deploy.Value != "580.126.20" {
-		t.Errorf("Deployment constraint value = %q, want %q", deploy.Value, "580.126.20")
+	} else if deploy.Value != "580.173.02" {
+		t.Errorf("Deployment constraint value = %q, want %q", deploy.Value, "580.173.02")
 	}
 
 	// Performance constraints must survive — the bug surfaced here as

@@ -94,6 +94,27 @@ VAULT_ADDR="http://127.0.0.1:${OPENBAO_PORT}"
 # work). Exported so the provider inside the aicr binary and the chainsaw suite
 # reach the same server.
 export VAULT_ADDR VAULT_TOKEN
+
+# Scrub any inherited Vault client configuration from a developer's real-Vault
+# setup, keeping only the addr/token/key this runner manages. The HashiCorp
+# vault/api client baked into aicr and cosign auto-reads a family of VAULT_* /
+# BAO_* env vars (VAULT_NAMESPACE, VAULT_CACERT, VAULT_CLIENT_CERT,
+# VAULT_SKIP_VERIFY, VAULT_*_PROXY, timeouts, and the BAO_* aliases). Against
+# this dev-mode OpenBAO those quietly break the run: VAULT_NAMESPACE=dgx-devops,
+# say, makes the key read resolve in a non-existent namespace and namespace-aware
+# OpenBAO returns 404 — surfacing as the misleading "could not read data from
+# transit key path" (real HashiCorp Vault OSS ignores namespaces and CI sets
+# none, so only a local run is affected); a stray VAULT_CACERT/BAO_ADDR can
+# redirect or fail the connection the same way. Transit is provisioned over the
+# root namespace via curl (which ignores these), so pin the client to match by
+# clearing everything except VAULT_ADDR / VAULT_TOKEN / VAULT_KMS_KEY.
+for _vault_env in $(env | sed -n 's/^\(VAULT_[A-Z0-9_]*\)=.*/\1/p; s/^\(BAO_[A-Z0-9_]*\)=.*/\1/p'); do
+  case "${_vault_env}" in
+    VAULT_ADDR | VAULT_TOKEN | VAULT_KMS_KEY) ;;
+    *) unset "${_vault_env}" ;;
+  esac
+done
+unset _vault_env
 # Transit key name; the KMS URI is hashivault://<key>.
 VAULT_KMS_KEY="${VAULT_KMS_KEY:-aicr}"
 export VAULT_KMS_KEY

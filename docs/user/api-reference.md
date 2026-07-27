@@ -317,6 +317,8 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 
 `metadata.excludedOverlays` is optional. When present, each entry includes the overlay `name` and a machine-readable `reason` such as `constraint-failed` or `mixin-constraint-failed`.
 
+`metadata.gpuDriverState` is optional and appears only for snapshot-driven recipes. It records the NVIDIA kernel driver state observed on the sampled GPU node — `preinstalled` or `absent` — and is omitted when no snapshot was provided or the snapshot carried no usable driver-loaded reading. The bundle-time `CheckDriverOwnershipCoherence` validation consumes it: a recipe whose snapshot observed no driver (`absent`) is blocked from bundling with the preinstalled-driver assumption, since that would leave GPU nodes driverless.
+
 ---
 
 ### GET /v1/query
@@ -514,7 +516,7 @@ curl -X POST "http://localhost:8080/v1/bundle" \
     "apiVersion": "aicr.run/v1alpha2",
     "kind": "RecipeResult",
     "componentRefs": [
-      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.3.2", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
+      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.3.3", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
       {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.1.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
     ],
     "deploymentOrder": ["gpu-operator", "network-operator"]

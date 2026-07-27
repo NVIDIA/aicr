@@ -15,12 +15,13 @@
 // Package k8s collects Kubernetes cluster configuration data.
 //
 // This collector gathers comprehensive cluster information including node
-// details, server version, deployed container images, and GPU Operator
-// ClusterPolicy configuration.
+// details, server version, deployed container images, GPU Operator
+// ClusterPolicy configuration, Slinky Slurm declarations, and official
+// MariaDB Operator API conflict evidence.
 //
 // # Collected Data
 //
-// The collector returns a measurement with 4 subtypes:
+// The collector returns a measurement with 6 subtypes:
 //
 // 1. node - Node information:
 //   - provider: Cloud provider (EKS, GKE, AKS, etc.) detected from node labels
@@ -49,6 +50,16 @@
 //   - DCGM exporter configuration
 //   - MIG manager settings (mode, strategy)
 //   - Node feature discovery configuration
+//
+// 5. slinky-slurm - Slinky Slurm declared topology:
+//   - Fail-closed Controller presence state
+//   - Secret-safe, single-Controller projection of associated resources
+//   - No runtime health, free-form configuration, or Secret references
+//
+// 6. mariadb-operator - Official MariaDB Operator conflict evidence:
+//   - API-group and exact-resource availability
+//   - Presence of one or more official MariaDB custom resources
+//   - No database availability, operator health, or external database inference
 //
 // # Usage
 //
@@ -100,9 +111,12 @@
 // # Error Handling
 //
 // The collector continues on non-critical errors:
-//   - No ClusterPolicy found: Omits policy subtype
+//   - No ClusterPolicy found: Emits an empty policy subtype
 //   - No nodes found: Returns error
-//   - API server unreachable: Returns error
+//   - API server unavailable during initialization: Returns an empty K8s
+//     measurement with custom-resource detection marked unknown
+//   - Slinky or MariaDB discovery/List failure: Preserves other subtypes and
+//     reports unknown or partial state
 //
 // Partial data is returned when possible.
 //
@@ -134,6 +148,12 @@
 //	- apiGroups: ["nvidia.com"]
 //	  resources: ["clusterpolicies"]
 //	  verbs: ["get", "list"]
+//	- apiGroups: ["slinky.slurm.net"]
+//	  resources: ["controllers", "nodesets", "loginsets", "restapis", "accountings"]
+//	  verbs: ["list"]
+//	- apiGroups: ["k8s.mariadb.com"]
+//	  resources: ["mariadbs"]
+//	  verbs: ["list"]
 //
 // # Use in Recipes
 //

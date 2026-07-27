@@ -39,6 +39,21 @@ func snapshotWithSensitiveData() *snapshotter.Snapshot {
 				SetString("source-node", "ip-10-0-248-107.ec2.internal").
 				SetString("provider-id", "aws:///us-west-2a/i-0123456789abcdef0").
 				SetString("provider", "eks")).
+			WithSubtype(measurement.Subtype{
+				Name: "slinky-slurm",
+				Data: map[string]measurement.Reading{
+					"collection-state": measurement.Str("detected"),
+				},
+				Items: []measurement.ItemEntry{{
+					Context: map[string]string{"id": "controller/slurm/cluster"},
+				}},
+			}).
+			WithSubtype(measurement.Subtype{
+				Name: "mariadb-operator",
+				Data: map[string]measurement.Reading{
+					"collection-state": measurement.Str("crs-detected"),
+				},
+			}).
 			Build(),
 		measurement.NewMeasurement(measurement.TypeGPU).
 			WithSubtypeBuilder(measurement.NewSubtypeBuilder("hardware").
@@ -88,7 +103,11 @@ func TestEmit_MinimalByDefault_RedactsSnapshotAndRecordsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read snapshot.yaml: %v", err)
 	}
-	for _, secret := range []string{"source-node", "provider-id", "i-0123456789abcdef0", "custom-cost-center", "acct-99887766"} {
+	for _, secret := range []string{
+		"source-node", "provider-id", "i-0123456789abcdef0",
+		"custom-cost-center", "acct-99887766", "slinky-slurm",
+		"mariadb-operator", "controller/slurm/cluster",
+	} {
 		if strings.Contains(string(body), secret) {
 			t.Errorf("redacted snapshot.yaml still contains %q:\n%s", secret, body)
 		}
@@ -125,7 +144,11 @@ func TestEmit_FullKeepsRawSnapshotAndNoRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read snapshot.yaml: %v", err)
 	}
-	if !strings.Contains(string(body), "provider-id") || !strings.Contains(string(body), "custom-cost-center") {
+	if !strings.Contains(string(body), "provider-id") ||
+		!strings.Contains(string(body), "custom-cost-center") ||
+		!strings.Contains(string(body), "slinky-slurm") ||
+		!strings.Contains(string(body), "mariadb-operator") {
+
 		t.Errorf("full bundle must retain raw snapshot detail:\n%s", body)
 	}
 	if res.Bundle.Predicate.Redaction != nil {

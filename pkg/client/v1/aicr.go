@@ -100,6 +100,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -696,10 +697,13 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 	// declares the coordinated preinstalled-driver profile, inject
 	// gpu-operator.driver.enabled=false so the Operator does not install
 	// a second driver on top. Bare EKS overlays get a warning
-	// instead of the injection. The inverse mismatch — a
+	// instead of the injection. The observed driver state is also
+	// recorded in Metadata.GPUDriverState so the inverse mismatch — a
 	// preinstalled-driver overlay (e.g. the AKS driver-only default)
 	// resolved against a cluster with no driver on the sampled GPU node —
-	// warns with the bundle-time override set (see gpu_driver_state.go).
+	// warns here and fails closed at bundle generation, where --set
+	// overrides are known (see gpu_driver_state.go and
+	// pkg/bundler/validations CheckDriverOwnershipCoherence).
 	applyGPUDriverAutoOverride(ctx, internal, internalSnap)
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1032,6 +1036,23 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	// disk-bound) values reads.
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled before bundling", err)
+	}
+
+	// Component preflight: run the registry-declared component validations
+	// before handing back component values. DefaultBundler.Make runs the
+	// same gate (runComponentValidations) before writing a bundle; without
+	// it here the SDK path would return values the bundle path refuses to
+	// render — e.g. the gpu-operator driver-ownership coherence check
+	// (severity: error) on a recipe resolved from a snapshot that observed
+	// no NVIDIA kernel driver. This path has no bundle-time --set
+	// overrides, so the bundler config is nil; validations that act solely
+	// on bundle-time flags no-op on a nil config.
+	preflightWarnings, preflightErr := validations.RunComponentValidations(ctx, r.internal, nil)
+	for _, warning := range preflightWarnings {
+		slog.Warn(warning, "source", "component-validation")
+	}
+	if preflightErr != nil {
+		return nil, preflightErr
 	}
 
 	bundles := make([]ComponentBundle, 0, len(r.Components))

@@ -38,6 +38,10 @@ Each stage transforms input data into a different format:
 - **server**: Version info from `/version` endpoint
 - **image**: Container images from all pods across namespaces
 - **policy**: GPU Operator ClusterPolicy custom resource
+- **slinky-slurm**: Controller presence plus a secret-safe, single-Controller
+  projection of associated NodeSet, LoginSet, RestApi, and Accounting CRs
+- **mariadb-operator**: Official `k8s.mariadb.com/mariadbs` API conflict
+  evidence (not database availability or health)
 
 **GPU Hardware:**
 - Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
@@ -64,8 +68,11 @@ Each stage transforms input data into a different format:
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
 │   ├─ K8s                                                │
-│   │   └─ subtypes: [server, image, policy]              │
-│   │       └─ data: map[string]Reading                   │
+│   │   └─ subtypes: [server, image, policy, node,        │
+│   │                 slinky-slurm, mariadb-operator]      │
+│   │       ├─ data: map[string]Reading                   │
+│   │       └─ slinky-slurm.items: []ItemEntry            │
+│   │             (allowlisted resource context + data)   │
 │   │                                                     │
 │   ├─ GPU                                                │
 │   │   └─ subtypes: [hardware]                           │
@@ -170,6 +177,9 @@ aicr recipe --os ubuntu --accelerator h100 --service eks --intent training --pla
 ```bash
 aicr snapshot --output system.yaml
 aicr recipe --snapshot system.yaml --intent training --platform kubeflow
+
+# Slinky Slurm remains an explicit platform choice
+aicr recipe --snapshot system.yaml --intent training --platform slurm
 ```
 
 **Snapshot Mode (ConfigMap)** - Read from Kubernetes:
@@ -210,6 +220,15 @@ count**. Intent and platform are recipe-author choices the cluster cannot
 reveal, so they always resolve to `any` and must be supplied via CLI flags.
 Other snapshot fields (K8s server version, OS version, kernel) are captured as
 measurements and become constraint *targets*, not recipe criteria.
+
+`K8s.slinky-slurm` records whether a Slinky Controller declaration was
+observed, but does not infer `platform: slurm`. Slinky can coexist with other
+training or inference stacks, and its resource projection does not reconstruct
+Helm values. `K8s.mariadb-operator` likewise records only official API/CR
+conflict evidence and never infers accounting intent or database source.
+Hybrid resolution therefore combines snapshot-derived infrastructure criteria
+with explicit intent and platform, as in the Slurm command above. Older
+snapshots without either subtype remain valid inputs.
 
 ### Recipe Generation
 
@@ -348,11 +367,17 @@ aicr validate \
 Results are emitted in [CTRF](https://ctrf.io/) (Common Test Report Format)
 JSON: a top-level `summary` (test counts and start/stop timestamps) plus a
 `tests` array where each entry carries a `name`, `status`
-(passed/failed/skipped), `suite` (the phase — readiness, deployment,
-performance, conformance), and `stdout` lines with the per-check evidence. For
-a worked example of the full report and how performance checks such as
-`inference-perf` surface their measured values, see
+(passed/failed/skipped/other), `suite` (the phase — deployment, performance,
+conformance), and `stdout` lines with the per-check evidence. For a worked
+example of the full report and how performance checks such as `inference-perf`
+surface their measured values, see
 [Emitting recipe evidence for a PR](../user/validation.md#emitting-recipe-evidence).
+
+The readiness pre-flight is not a CTRF suite. It runs before any phase or report
+is constructed, so a readiness failure exits 2 (see below) and produces **no
+CTRF output**. Once phases run, the report carries an entry for every requested
+phase — including phases reported `skipped` (for example, all of them under
+`--no-cluster`, or phases after the first failure under `--fail-fast`).
 
 ### CI/CD Integration
 
@@ -364,9 +389,12 @@ aicr validate \
     --recipe recipe.yaml \
     --snapshot cm://gpu-operator/aicr-snapshot
 
-# Exit code: 0 = all passed; 8 (ExitInternal, from ErrCodeInternal) when
-#   one or more phases did not pass
-# Use --fail-on-error=false for informational mode without failing
+# Exit code: 0 = all phases passed or were skipped; 8 (ExitInternal, from
+#   ErrCodeInternal) when one or more phases reported failed or other;
+#   2 (ExitInvalidInput) when a readiness pre-flight constraint is not met
+#   (always fails closed, see below)
+# Use --fail-on-error=false for informational mode without failing on phase
+#   checks. The readiness pre-flight still exits 2 regardless of the flag.
 ```
 
 ## Stage 4: Bundle (Data Packaging)
@@ -570,7 +598,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v26.3.2
+      targetRevision: v26.3.3
       chart: gpu-operator
       helm:
         valueFiles:

@@ -196,6 +196,7 @@ func TestCheckExecutionTimeoutRelationships(t *testing.T) {
 		{"InferencePerfJobTimeout", InferencePerfJobTimeout},
 		{"InferencePerfPodTimeout", InferencePerfPodTimeout},
 		{"InferenceWorkloadReadyTimeout", InferenceWorkloadReadyTimeout},
+		{"ModelCachePopulateTimeout", ModelCachePopulateTimeout},
 	}
 	for _, c := range childTimeouts {
 		if c.timeout >= CheckExecutionTimeout {
@@ -209,18 +210,18 @@ func TestCheckExecutionTimeoutRelationships(t *testing.T) {
 	// worst-case happy path inside validateInferencePerf:
 	//
 	//   InferenceNamespaceTerminationWait (5m)  — prior run's ns drain
-	//   + InferenceWorkloadReadyTimeout   (10m) — model-cache populate (on by default)
+	//   + ModelCachePopulateTimeout       (13m) — model-cache populate (on by default)
 	//   + InferenceWorkloadReadyTimeout   (10m) — DynamoGraphDeployment ready
 	//   + InferenceHealthTimeout          (5m)  — /v1/chat/completions readiness probe
 	//   + InferencePerfPodTimeout         (5m)  — AIPerf pod scheduling
 	//   + InferencePerfJobTimeout         (15m) — AIPerf benchmark runtime
 	//
-	// The cache-populate phase reuses the workload-ready budget (see
+	// The cache-populate phase has its own budget (ModelCachePopulateTimeout, see
 	// model_cache.go) and is serial when the cache is enabled (the default).
 	// Cleanup (K8sCleanupTimeout) uses a fresh context.Background and does
 	// not consume this budget — documented via the separate assertion below.
 	inferenceSequential := InferenceNamespaceTerminationWait +
-		InferenceWorkloadReadyTimeout + // model-cache populate
+		ModelCachePopulateTimeout + // model-cache populate
 		InferenceWorkloadReadyTimeout + // DynamoGraphDeployment ready
 		InferenceHealthTimeout +
 		InferencePerfPodTimeout +

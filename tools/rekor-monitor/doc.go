@@ -47,6 +47,14 @@
 //
 // run() (main.go) is the orchestration: restore -> resolve -> read ->
 // consistency -> identity -> persist -> report. It is a single-shot job (run
-// once, exit): exit 0 on a clean run, non-zero on a consistency break, a scan
-// error, or an identity match, so the calling workflow can alert.
+// once, exit). realMain classifies a failure and maps it to an exit code so the
+// workflow can distinguish a security signal from infrastructure noise: 0 clean,
+// 1 security (tamper = a failed consistency proof, or identity = an entry under
+// the release identity for a tag with no corresponding release), 3 operational
+// (transport/timeout/setup, retried a few times first), 2 a pre-run input error
+// (invalid arguments or an unreadable --known-tags-file). On a completed run
+// (exit 0/1/3) it prints a CLASSIFICATION=<value> line for the workflow to
+// branch on; a pre-run input error (exit 2) returns before the run and prints
+// none. Identity matches for known release tags are suppressed via
+// --known-tags-file.
 package main

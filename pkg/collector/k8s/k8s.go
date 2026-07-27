@@ -42,6 +42,13 @@ type Collector struct {
 	// constructed lazily from RestConfig on first use.
 	DynamicClient dynamic.Interface
 
+	// slinkyDiscovery is the narrow test seam used by Slinky API discovery.
+	// Production falls back to ClientSet.Discovery().
+	slinkyDiscovery slinkyDiscovery
+	// mariaDBDiscovery is the narrow test seam used by official MariaDB
+	// Operator API discovery. Production falls back to ClientSet.Discovery().
+	mariaDBDiscovery apiResourceDiscovery
+
 	dynamicOnce sync.Once
 	dynamicErr  error
 }
@@ -76,14 +83,25 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		images   map[string]measurement.Reading
 		policies map[string]measurement.Reading
 		node     map[string]measurement.Reading
+		slinky   measurement.Subtype
+		mariaDB  measurement.Subtype
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
+	discoveryClient, err := collectorDiscovery(gctx, k.ClientSet.Discovery(), k.RestConfig)
+	if err != nil {
+		if errors.IsTransient(err) {
+			return nil, err
+		}
+		slog.Warn("Kubernetes discovery client unavailable - returning empty K8s measurement",
+			slog.String("error", err.Error()))
+		return emptyK8sMeasurement(), nil
+	}
 
 	g.Go(func() error {
 		var err error
 		versions, err = collectSafe("server", func() (map[string]measurement.Reading, error) {
-			return k.collectServer(gctx)
+			return k.collectServer(gctx, discoveryClient)
 		})
 		return err
 	})
@@ -99,7 +117,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	g.Go(func() error {
 		var err error
 		policies, err = collectSafe("policy", func() (map[string]measurement.Reading, error) {
-			return k.collectClusterPolicies(gctx)
+			return k.collectClusterPolicies(gctx, discoveryClient)
 		})
 		return err
 	})
@@ -110,6 +128,22 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 			return k.collectNode(gctx)
 		})
 		return err
+	})
+
+	g.Go(func() error {
+		slinky = k.collectSlinkySlurm(gctx, discoveryClient)
+		if err := gctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "Slinky Slurm collection cancelled", err)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		mariaDB = k.collectMariaDBOperator(gctx, discoveryClient)
+		if err := gctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "MariaDB Operator collection cancelled", err)
+		}
+		return nil
 	})
 
 	// A timeout/cancellation surfaces here; deterministic sub-collector failures
@@ -127,6 +161,8 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		WithSubtype(measurement.Subtype{Name: SubtypeImage, Data: images}).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: policies}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: node}).
+		WithSubtype(slinky).
+		WithSubtype(mariaDB).
 		Build()
 
 	return res, nil
@@ -151,7 +187,9 @@ func collectSafe(name string, fn func() (map[string]measurement.Reading, error))
 	return data, nil
 }
 
-// emptyK8sMeasurement returns a K8s measurement with all subtypes empty.
+// emptyK8sMeasurement returns a K8s measurement with the standard subtypes
+// empty and custom-resource detection explicitly unknown because no API
+// inspection occurred.
 func emptyK8sMeasurement() *measurement.Measurement {
 	empty := make(map[string]measurement.Reading)
 	return measurement.NewMeasurement(measurement.TypeK8s).
@@ -159,6 +197,8 @@ func emptyK8sMeasurement() *measurement.Measurement {
 		WithSubtype(measurement.Subtype{Name: SubtypeImage, Data: empty}).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: empty}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: empty}).
+		WithSubtype(unknownSlinkySubtype()).
+		WithSubtype(unknownMariaDBSubtype()).
 		Build()
 }
 

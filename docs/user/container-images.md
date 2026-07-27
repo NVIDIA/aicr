@@ -39,7 +39,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.3.2 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.3.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
@@ -126,7 +126,7 @@ _No images extracted._
 
 ### gpu-operator
 
-- `docker.io/library/busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028`
+- `docker.io/library/busybox:1.38.0@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d`
 - `nvcr.io/nvidia/cloud-native/dcgm:4.5.2-1-ubuntu22.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.5.2`
 - `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.0`
@@ -135,9 +135,9 @@ _No images extracted._
 - `nvcr.io/nvidia/cloud-native/nvidia-fs:2.27.3`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.3`
 - `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.4.2`
-- `nvcr.io/nvidia/driver:580.126.20`
-- `nvcr.io/nvidia/gpu-operator:v26.3.2`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.19.2`
+- `nvcr.io/nvidia/driver:580.173.02`
+- `nvcr.io/nvidia/gpu-operator:v26.3.3`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.19.3`
 - `nvcr.io/nvidia/k8s/container-toolkit:v1.19.1`
 - `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless`
 - `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.5.0`
@@ -190,7 +190,7 @@ _No images extracted._
 
 ### network-operator
 
-- `docker.io/library/busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028`
+- `docker.io/library/busybox:1.38.0@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.1.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`

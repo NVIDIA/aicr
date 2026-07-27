@@ -301,8 +301,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 
 	// Run component-specific validations
 	if validationErr := b.runComponentValidations(ctx, recipeResult); validationErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"component validation failed", validationErr)
+		return nil, componentValidationError(validationErr)
 	}
 
 	// Copy external data files before deployer construction so the file list
@@ -703,11 +702,8 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// Get base values from recipe
 		values, err := recipeResult.GetValuesForComponentWithContext(ctx, ref.Name)
 		if err != nil {
-			slog.Warn("failed to get values for component, using empty map",
-				"component", ref.Name,
-				"error", err,
-			)
-			values = make(map[string]any)
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				fmt.Sprintf("failed to resolve values for component %q", ref.Name))
 		}
 
 		// Apply user value overrides from --set flags.
@@ -916,11 +912,13 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 			}
 			if !setEnabled {
 				slog.Info("skipping component disabled via --set", "component", ref.Name)
+				b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
 				continue
 			}
 			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
 		} else if !recipeEnabled {
 			slog.Info("skipping disabled component", "component", ref.Name)
+			b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
 			continue
 		}
 		enabledRefs = append(enabledRefs, ref)
@@ -958,6 +956,7 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 			for _, ref := range enabledRefs {
 				if _, ok := requestedSet[ref.Name]; !ok {
 					slog.Info("skipping component excluded by bundlers filter", "component", ref.Name)
+					b.warnExcludedDriverInstaller(recipeResult, ref.Name, "excluded by the bundlers filter")
 					delete(enabledSet, ref.Name)
 					continue
 				}
@@ -1010,6 +1009,36 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 	}
 
 	return enabledRefs, filteredOrder, nil
+}
+
+// warnExcludedDriverInstaller surfaces a driverless-cluster hazard when
+// gpu-operator is left out of the bundle on a cluster whose snapshot
+// recorded no NVIDIA kernel driver (metadata.gpuDriverState=absent).
+// Exclusion is deliberate, not incoherent — a declared-but-disabled
+// component is "satisfied externally" by design (see the dependency-edge
+// pruning in filterEnabledComponents) and subset bundles via the
+// bundlers filter are first-class (#1531) — so unlike
+// CheckDriverOwnershipCoherence's Rule 1 this cannot be a blocking
+// error: the excluded component contributes nothing to the artifact for
+// the gate to verify. But nothing else in the bundle installs a driver
+// either, so an exclusion made by mistake (or to dodge a Rule 1
+// rejection) turns into late, opaque scheduling failures on driverless
+// GPU nodes. Warn at the point of exclusion instead.
+func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.RecipeResult, componentName, how string) {
+	if componentName != gpuOperatorComponentName {
+		return
+	}
+	if recipeResult.Metadata.GPUDriverState != recipe.GPUDriverStateAbsent {
+		return
+	}
+	warning := fmt.Sprintf(
+		"%s is excluded from this bundle (%s), but the snapshot that produced this "+
+			"recipe observed no NVIDIA kernel driver on the sampled GPU node — nothing in "+
+			"this bundle installs one, so deploying it alone leaves GPU nodes driverless. "+
+			"This is expected only when the driver stack is provided out-of-band or by a "+
+			"separate bundle that includes %s.", componentName, how, componentName)
+	slog.Warn(warning, "component", componentName)
+	b.appendWarning(warning)
 }
 
 // getSetEnabledOverride checks if --set overrides contain an "enabled" key
@@ -1610,60 +1639,33 @@ func (b *DefaultBundler) appendWarning(warning string) {
 }
 
 // runComponentValidations executes all component-specific validations registered in the registry.
-// Collects warnings and errors based on validation severity.
+// Collects warnings and errors based on validation severity. The iteration
+// itself lives in validations.RunComponentValidations so the SDK bundle path
+// (Client.BundleComponents) runs the identical preflight.
 func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult) error {
 	if b.Config == nil {
 		return nil
 	}
 
-	// Get component registry — required to know which validations to run.
-	// A registry-load failure produces an unvalidated bundle, which is the
-	// opposite of what this tool promises; surface the failure to the user.
-	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
-			"failed to load component registry for validations")
+	warnings, err := validations.RunComponentValidations(ctx, recipeResult, b.Config)
+
+	// Collect warnings (prepend "Warning: " if not already present) —
+	// including any gathered before a blocking error.
+	for _, warning := range warnings {
+		b.appendWarning(warning)
 	}
 
-	// Iterate through components in recipe
-	for _, ref := range recipeResult.ComponentRefs {
-		if err := ctx.Err(); err != nil {
-			return errors.Wrap(errors.ErrCodeTimeout, "context cancelled during validation", err)
-		}
+	return err
+}
 
-		// Get component config from registry
-		comp := registry.Get(ref.Name)
-		if comp == nil {
-			continue // Unknown component, skip
-		}
-
-		// Get validations for this component
-		componentValidations := comp.GetValidations()
-		if len(componentValidations) == 0 {
-			continue // No validations configured
-		}
-
-		// Run validations
-		warnings, validationErrors := validations.RunValidations(
-			ctx,
-			ref.Name,
-			componentValidations,
-			recipeResult,
-			b.Config,
-		)
-
-		// Collect warnings (prepend "Warning: " if not already present)
-		for _, warning := range warnings {
-			b.appendWarning(warning)
-		}
-
-		// Return first error (errors are blocking)
-		if len(validationErrors) > 0 {
-			return validationErrors[0]
-		}
-	}
-
-	return nil
+// componentValidationError preserves an already-coded validation failure
+// (e.g. ErrCodeTimeout, ErrCodeInternal) instead of flattening every failure to
+// ErrCodeInvalidRequest. A plain, uncoded error falls back to
+// ErrCodeInvalidRequest — a component-validation failure is, by default, a
+// problem with the request's effective values.
+func componentValidationError(err error) error {
+	return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+		"component validation failed")
 }
 
 // copyDataFiles copies external data files from the --data directory into the bundle.

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/sigstore/rekor-monitor/pkg/identity"
 	rekorv2 "github.com/sigstore/rekor-monitor/pkg/rekor/v2"
@@ -153,6 +154,53 @@ func buildMonitoredValues(certSubject, certIssuer string) (identity.MonitoredVal
 		return identity.MonitoredValues{}, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid monitored identity", err)
 	}
 	return identity.MonitoredValues{certID}, nil
+}
+
+// tagRefMarker separates the workflow-identity prefix of a release-signer SAN
+// from the git tag it signed, e.g.
+// ".../on-tag.yaml@refs/tags/v0.18.0-rc1" -> "v0.18.0-rc1".
+const tagRefMarker = "@refs/tags/"
+
+// extractTag returns the tag ref embedded in a release-signer certificate SAN.
+// ok is false when the SAN has no @refs/tags/ segment OR the tag is empty — both
+// unexpected shapes the caller must NOT suppress.
+func extractTag(certSubject string) (tag string, ok bool) {
+	i := strings.Index(certSubject, tagRefMarker)
+	if i < 0 {
+		return "", false
+	}
+	tag = certSubject[i+len(tagRefMarker):]
+	if tag == "" {
+		return "", false // empty tag ref is an unexpected shape; do not suppress
+	}
+	return tag, true
+}
+
+// filterKnownReleases drops identity-scan matches that correspond to a known
+// release tag, returning only the unexpected residual matches that warrant an
+// alert. An entry whose tag is not in known — or whose SAN has no @refs/tags/
+// segment — is kept (fail closed). A MonitoredIdentity left with no entries is
+// omitted. An empty known set is a pass-through (suppression disabled), so a
+// missing allowlist can never silently hide a real finding. See #1887.
+func filterKnownReleases(found []identity.MonitoredIdentity, known map[string]bool) []identity.MonitoredIdentity {
+	if len(known) == 0 {
+		return found
+	}
+	var residual []identity.MonitoredIdentity
+	for _, mi := range found {
+		var kept []identity.LogEntry
+		for _, e := range mi.FoundIdentityEntries {
+			if tag, ok := extractTag(e.CertSubject); ok && known[tag] {
+				continue // expected release signature
+			}
+			kept = append(kept, e)
+		}
+		if len(kept) > 0 {
+			mi.FoundIdentityEntries = kept
+			residual = append(residual, mi)
+		}
+	}
+	return residual
 }
 
 // scanWindow computes the [start, end] entry-index window to scan between the

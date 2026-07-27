@@ -20,18 +20,22 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"k8s.io/client-go/discovery"
 )
 
 // Collect retrieves Kubernetes cluster version information from the API server.
 // This provides cluster version details for comparison across environments.
-func (k *Collector) collectServer(ctx context.Context) (map[string]measurement.Reading, error) {
+func (k *Collector) collectServer(
+	ctx context.Context,
+	discoveryClient discovery.DiscoveryInterface,
+) (map[string]measurement.Reading, error) {
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "server collection cancelled", err)
 	}
 
 	// Server Version
-	serverVersion, err := k.ClientSet.Discovery().ServerVersion()
+	serverVersion, err := discoveryClient.ServerVersion()
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get kubernetes version", err)
 	}

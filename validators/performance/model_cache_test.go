@@ -20,7 +20,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	v1 "k8s.io/api/core/v1"
@@ -206,8 +208,111 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 	}
 }
 
+// TestPopulateJobTimeout guards the #1859 decoupling: the model-cache populate
+// wait uses the dedicated ModelCachePopulateTimeout, NOT the DynamoGraphDeployment
+// workload-ready budget. A regression swapping the constant/env back would be
+// caught here.
+func TestPopulateJobTimeout(t *testing.T) {
+	// The decoupling is meaningful only if the two budgets differ; guard it once
+	// for every case below.
+	if defaults.ModelCachePopulateTimeout == defaults.InferenceWorkloadReadyTimeout {
+		t.Fatal("populate budget must be decoupled from InferenceWorkloadReadyTimeout")
+	}
+
+	tests := []struct {
+		name        string
+		populateEnv string // AICR_INFERENCE_PERF_MODEL_CACHE_POPULATE_TIMEOUT
+		workloadEnv string // AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT
+		want        time.Duration
+	}{
+		{
+			name: "default is the dedicated populate budget",
+			want: defaults.ModelCachePopulateTimeout,
+		},
+		{
+			name:        "widening workload-ready does not leak into the populate budget",
+			workloadEnv: "59m",
+			want:        defaults.ModelCachePopulateTimeout,
+		},
+		{
+			name:        "dedicated populate knob overrides",
+			populateEnv: "20m",
+			workloadEnv: "59m",
+			want:        20 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envModelCachePopulateTimeout, tt.populateEnv)
+			t.Setenv(envWorkloadReadyTimeout, tt.workloadEnv)
+			got, err := populateJobTimeout()
+			if err != nil {
+				t.Fatalf("populateJobTimeout() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("populateJobTimeout() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWrapPopulateJobError verifies the populate-Job failure classifier carries
+// the actionable remediation on the timeout path (the case #1859 targets) while
+// propagating other coded failures unchanged.
+func TestWrapPopulateJobError(t *testing.T) {
+	const timeout = 13 * time.Minute
+
+	tests := []struct {
+		name            string
+		input           error
+		wantCode        error
+		wantRemediation bool // timeout path must add the HF-token/env remediation
+		wantUnchanged   bool // non-timeout path must return the exact input instance
+		wantText        []string
+	}{
+		{
+			name:            "timeout carries remediation and stays timeout-coded",
+			input:           errors.New(errors.ErrCodeTimeout, "context deadline exceeded"),
+			wantCode:        errors.New(errors.ErrCodeTimeout, ""),
+			wantRemediation: true,
+			wantText:        []string{"13m0s", "HF-token", envModelCachePopulateTimeout},
+		},
+		{
+			name:          "non-timeout coded error propagates unchanged (no remediation)",
+			input:         errors.New(errors.ErrCodeUnavailable, "watch closed unexpectedly"),
+			wantCode:      errors.New(errors.ErrCodeUnavailable, ""),
+			wantUnchanged: true,
+			wantText:      []string{"watch closed unexpectedly"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrapPopulateJobError(tt.input, timeout)
+			if !stderrors.Is(got, tt.wantCode) {
+				t.Fatalf("want code %v, got %v", tt.wantCode, got)
+			}
+			// A coded non-timeout error must be returned as the same instance,
+			// not re-wrapped — the code+substring checks alone would still pass
+			// if wrapPopulateJobError rewrapped it in a fresh coded error.
+			if tt.wantUnchanged && got != tt.input { //nolint:errorlint // identity check: verify the exact instance is propagated unchanged
+				t.Errorf("non-timeout error should be returned unchanged, got %#v", got)
+			}
+			for _, want := range tt.wantText {
+				if !strings.Contains(got.Error(), want) {
+					t.Errorf("error %q missing %q", got.Error(), want)
+				}
+			}
+			if hasRemediation := strings.Contains(got.Error(), "HF-token"); hasRemediation != tt.wantRemediation {
+				t.Errorf("remediation present = %v, want %v: %q", hasRemediation, tt.wantRemediation, got.Error())
+			}
+		})
+	}
+}
+
 // TestEnsureModelCache_DisabledNoop verifies that with the cache disabled no PVC
 // or Job is created — the default behavior is unchanged.
+
 func TestEnsureModelCache_DisabledNoop(t *testing.T) {
 	client := fake.NewClientset()
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: client}

@@ -74,6 +74,172 @@ Each `ItemEntry` mirrors a Subtype's scalar contract: `data` holds `Reading`
 scalars; `context` holds string-typed descriptive fields. `ItemEntry` does
 NOT support nested `items` — the scalar Reading model is preserved.
 
+## K8s slinky-slurm shape
+
+When a `K8s` measurement is emitted, it includes a `slinky-slurm` subtype that
+summarizes whether a Slinky `Controller` custom resource was observed. The
+summary detects declared installation presence, not operator, webhook, pod, or
+Slurm control-plane health. When exactly one Controller is conclusively
+observed, the collector also projects a small, secret-safe resource topology.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: slinky-slurm
+    data:
+      api-available: true
+      detected: true
+      collection-state: detected
+      api-version: v1beta1
+      controller-count: 1
+      nodeset-count: 1
+      loginset-count: 1
+      restapi-count: 1
+      accounting-count: 1
+    items:
+      - context:
+          id: controller/slurm/slinky-slurm
+          kind: Controller
+          namespace: slurm
+          name: slinky-slurm
+          api-version: v1beta1
+        data:
+          cluster-name: slinky
+          external: false
+          accounting-ref-present: true
+      - context:
+          id: nodeset/slurm/slinky-slurm-worker-slinky
+          kind: NodeSet
+          namespace: slurm
+          name: slinky-slurm-worker-slinky
+          api-version: v1beta1
+          controller-id: controller/slurm/slinky-slurm
+        data:
+          partition-enabled: true
+      - context:
+          id: loginset/slurm/slinky-slurm-login-slinky
+          kind: LoginSet
+          namespace: slurm
+          name: slinky-slurm-login-slinky
+          api-version: v1beta1
+          controller-id: controller/slurm/slinky-slurm
+      - context:
+          id: restapi/slurm/slinky-slurm
+          kind: RestApi
+          namespace: slurm
+          name: slinky-slurm
+          api-version: v1beta1
+          controller-id: controller/slurm/slinky-slurm
+      - context:
+          id: accounting/slurm/slinky-slurm-accounting
+          kind: Accounting
+          namespace: slurm
+          name: slinky-slurm-accounting
+          api-version: v1beta1
+          controller-id: controller/slurm/slinky-slurm
+        data:
+          external: false
+```
+
+The summary fields are:
+
+- `api-available` (`bool`) — whether discovery conclusively found the exact
+  `slinky.slurm.net` `controllers` API. Omitted when discovery could not
+  determine availability.
+- `detected` (`bool`) — whether at least one `Controller` was observed.
+  Emitted only after presence or absence was conclusively determined.
+- `collection-state` (`string`) — always one of `absent`, `detected`,
+  `unsupported-multicluster`, or `unknown`.
+- `api-version` (`string`) — the actual served API version selected by
+  discovery. Emitted after the Controller API is found.
+- `controller-count` (`int`) — emitted only after a successful cluster-wide
+  List.
+- `nodeset-count`, `loginset-count`, `restapi-count`, and `accounting-count`
+  (`int`) — counts derived from projected items. They are emitted only when
+  every child API and reference needed for the projection was collected
+  conclusively; otherwise all child counts are omitted.
+
+State interpretation is fail-closed:
+
+- `absent` means successful discovery found no Controller API, or a successful
+  List returned zero Controllers.
+- `detected` means exactly one Controller was listed.
+- `unsupported-multicluster` means more than one Controller was listed. The
+  snapshot retains the count instead of silently selecting one.
+- `unknown` means authorization, timeout, network, malformed-discovery, or
+  other ambiguous failure prevented a conclusive result. Failed Lists never
+  masquerade as a zero count.
+
+Every item uses context keys `id`, `kind`, `namespace`, `name`, and
+`api-version`; associated children also carry `controller-id`. The canonical
+ID is `<kind-lower>/<namespace>/<name>`. Slinky v1.2.0 `v1beta1` references are
+same-namespace `LocalObjectReference`s; compatible served versions are handled
+dynamically. If a child API or reference is missing or inconclusive, the
+collector retains only the Controller item and omits child items and counts.
+
+The data allowlist is intentionally narrow: Controller projects
+`cluster-name`, `external`, and `accounting-ref-present`; NodeSet projects
+`partition-enabled`; Accounting projects `external`; LoginSet and RestApi
+project identity and association only. The collector never serializes
+`extraConf`, replicas, images, pod templates, status, storage connection
+fields, Secret/ConfigMap references or contents, JWT/Slurm keys, SSH keys, or
+arbitrary container and volume configuration.
+
+Summary fields use ordinary non-item constraint paths, for example
+`K8s.slinky-slurm.detected` and
+`K8s.slinky-slurm.collection-state`.
+
+Item constraints use the canonical ID, for example:
+
+```text
+K8s.slinky-slurm[id=nodeset/slurm/slinky-slurm-worker-slinky].partition-enabled
+```
+
+## K8s mariadb-operator shape
+
+`K8s.mariadb-operator` records conflict evidence for the official MariaDB
+Operator API only: API group `k8s.mariadb.com`, resource `mariadbs`, Kind
+`MariaDB`. It does not inspect Deployments, pods, Services, Secrets,
+StatefulSets, or external databases such as RDS.
+
+```yaml
+- subtype: mariadb-operator
+  data:
+    collection-state: crs-detected
+    api-available: true
+    api-version: v1alpha1
+```
+
+The fields are:
+
+- `collection-state` — one of `absent`, `api-detected`, `crs-detected`, or
+  `unknown`.
+- `api-available` — whether discovery conclusively found the exact
+  `k8s.mariadb.com` `mariadbs` API. Omitted when discovery could not
+  determine availability.
+- `api-version` — the dynamically discovered served version, emitted when the
+  exact API is available.
+
+`absent` means the official API group was conclusively not found.
+`api-detected` has two disambiguated cases: the official group was discovered
+but the exact `k8s.mariadb.com/mariadbs` resource was not served
+(`api-available: false`), or that exact resource was served and a successful
+List returned zero MariaDB CRs (`api-available: true`).
+`crs-detected` means a successful List returned one or more MariaDB CRs;
+multiple CRs are valid and use the same state. `unknown` means discovery or
+List was inconclusive. No state proves that an operator is running or a
+database is healthy, reachable, or customer-provided.
+
+This subtype never selects `accounting.databaseSource`. A future
+`aicr-provided` installation may require
+`K8s.mariadb-operator.collection-state == absent` as a fresh fail-closed
+preflight; `absent` is permission to proceed, not installation intent.
+
+Both `slinky-slurm` and `mariadb-operator` remain in raw snapshots and
+`--full` evidence. The default minimal evidence policy drops both subtypes,
+including all Slinky items. Constraint evaluation consumes the raw snapshot
+before evidence packaging.
+
 ## NetworkTopology shape
 
 `TypeNetworkTopology` describes one hardware group's network layout (PFs,

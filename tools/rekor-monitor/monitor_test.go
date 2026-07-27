@@ -117,6 +117,60 @@ func TestScanWindow(t *testing.T) {
 	}
 }
 
+func TestFilterKnownReleases(t *testing.T) {
+	san := func(tag string) string {
+		return "https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/" + tag
+	}
+	mk := func(subjects ...string) []identity.MonitoredIdentity {
+		entries := make([]identity.LogEntry, 0, len(subjects))
+		for _, s := range subjects {
+			entries = append(entries, identity.LogEntry{CertSubject: s})
+		}
+		return []identity.MonitoredIdentity{{FoundIdentityEntries: entries}}
+	}
+	known := map[string]bool{"v0.18.0-rc1": true}
+
+	t.Run("known release suppressed -> no residual", func(t *testing.T) {
+		got := filterKnownReleases(mk(san("v0.18.0-rc1"), san("v0.18.0-rc1")), known)
+		if len(got) != 0 {
+			t.Errorf("residual = %v, want empty", got)
+		}
+	})
+	t.Run("unknown tag kept", func(t *testing.T) {
+		got := filterKnownReleases(mk(san("v9.9.9-attacker")), known)
+		if len(got) != 1 || len(got[0].FoundIdentityEntries) != 1 {
+			t.Errorf("residual = %v, want 1 entry", got)
+		}
+	})
+	t.Run("malformed SAN kept (fail closed)", func(t *testing.T) {
+		got := filterKnownReleases(mk("no-tag-ref-here"), known)
+		if len(got) != 1 {
+			t.Errorf("residual = %v, want kept", got)
+		}
+	})
+	t.Run("mixed: only unknown survives", func(t *testing.T) {
+		got := filterKnownReleases(mk(san("v0.18.0-rc1"), san("v9.9.9-attacker")), known)
+		ok := len(got) == 1 && len(got[0].FoundIdentityEntries) == 1 &&
+			got[0].FoundIdentityEntries[0].CertSubject == san("v9.9.9-attacker")
+		if !ok {
+			t.Errorf("residual = %v, want only the attacker entry", got)
+		}
+	})
+	t.Run("empty tag ref kept (fail closed)", func(t *testing.T) {
+		got := filterKnownReleases(mk(san("")), map[string]bool{"": true, "v0.18.0-rc1": true})
+		if len(got) != 1 {
+			t.Errorf("residual = %v, want kept (empty tag must not be suppressed even if \"\" is in the set)", got)
+		}
+	})
+	t.Run("empty known set -> passthrough", func(t *testing.T) {
+		in := mk(san("v0.18.0-rc1"))
+		got := filterKnownReleases(in, map[string]bool{})
+		if len(got) != 1 {
+			t.Errorf("residual = %v, want passthrough", got)
+		}
+	})
+}
+
 func TestOutcomeHasFindings(t *testing.T) {
 	tests := []struct {
 		name   string

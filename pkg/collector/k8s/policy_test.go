@@ -17,6 +17,7 @@ package k8s
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -24,14 +25,18 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
 	fakediscovery "k8s.io/client-go/discovery/fake"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
+	ktesting "k8s.io/client-go/testing"
 )
 
-// Helper to create a mock ClusterPolicy
-func createMockClusterPolicy(name, namespace string) *unstructured.Unstructured {
+// createMockClusterPolicy creates a cluster-scoped ClusterPolicy test object.
+func createMockClusterPolicy(name string) *unstructured.Unstructured {
 	policy := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "nvidia.com/v1",
@@ -49,9 +54,6 @@ func createMockClusterPolicy(name, namespace string) *unstructured.Unstructured 
 				},
 			},
 		},
-	}
-	if namespace != "" {
-		policy.SetNamespace(namespace)
 	}
 	return policy
 }
@@ -101,6 +103,45 @@ func createTestPolicyCollector() *Collector {
 	}
 }
 
+type preferredResourceDiscovery struct {
+	*fakediscovery.FakeDiscovery
+	resources []*metav1.APIResourceList
+	cancel    context.CancelFunc
+	err       error
+}
+
+func (d *preferredResourceDiscovery) ServerPreferredResources() ([]*metav1.APIResourceList, error) {
+	if d.cancel != nil {
+		d.cancel()
+	}
+	return d.resources, d.err
+}
+
+func clusterPolicyResourceList(groupVersion string) *metav1.APIResourceList {
+	return &metav1.APIResourceList{
+		GroupVersion: groupVersion,
+		APIResources: []metav1.APIResource{
+			{
+				Name: "clusterpolicies",
+				Kind: "ClusterPolicy",
+			},
+		},
+	}
+}
+
+func policyTestCollector(objects ...runtime.Object) *Collector {
+	return &Collector{
+		DynamicClient: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+			runtime.NewScheme(),
+			map[schema.GroupVersionResource]string{
+				{Group: "nvidia.com", Version: "v1", Resource: "clusterpolicies"}:   "ClusterPolicyList",
+				{Group: "example.test", Version: "v1", Resource: "clusterpolicies"}: "ClusterPolicyList",
+			},
+			objects...,
+		),
+	}
+}
+
 func TestPolicyCollector_Collect(t *testing.T) {
 	t.Setenv("NODE_NAME", "test-node")
 
@@ -135,7 +176,7 @@ func TestPolicyCollector_EmptyCluster(t *testing.T) {
 
 	collector := createTestPolicyCollector()
 
-	policies, err := collector.collectClusterPolicies(ctx)
+	policies, err := collector.collectClusterPolicies(ctx, collector.ClientSet.Discovery())
 	assert.NoError(t, err)
 	assert.NotNil(t, policies)
 	assert.Empty(t, policies, "Expected no policies in empty cluster")
@@ -153,9 +194,120 @@ func TestPolicyCollector_WithCanceledContext(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
+func TestPolicyCollector_CollectsDiscoveredClusterPolicy(t *testing.T) {
+	policy := createMockClusterPolicy("gpu-operator")
+	policyDiscovery := &preferredResourceDiscovery{
+		FakeDiscovery: &fakediscovery.FakeDiscovery{},
+		resources: []*metav1.APIResourceList{
+			clusterPolicyResourceList("nvidia.com/v1"),
+		},
+	}
+	collector := policyTestCollector(policy)
+
+	data, err := collector.collectClusterPolicies(context.Background(), policyDiscovery)
+	if err != nil {
+		t.Fatalf("collectClusterPolicies() error = %v", err)
+	}
+
+	assert.Equal(t, "containerd", data["operator.defaultRuntime"].Any())
+	assert.Equal(t, "true", data["driver.enabled"].Any())
+	assert.Equal(t, "550.54.15", data["driver.version"].Any())
+}
+
+func TestPolicyCollector_PartialDiscoveryListFailureKeepsSuccessfulData(t *testing.T) {
+	policy := createMockClusterPolicy("gpu-operator")
+	policyDiscovery := &preferredResourceDiscovery{
+		FakeDiscovery: &fakediscovery.FakeDiscovery{},
+		resources: []*metav1.APIResourceList{
+			clusterPolicyResourceList("nvidia.com/v1"),
+			clusterPolicyResourceList("example.test/v1"),
+		},
+	}
+	collector := policyTestCollector(policy)
+	collector.DynamicClient.(*dynamicfake.FakeDynamicClient).PrependReactor(
+		"list",
+		"clusterpolicies",
+		func(action ktesting.Action) (bool, runtime.Object, error) {
+			if action.GetResource().Group == "example.test" {
+				return true, nil, stderrors.New("temporary list failure")
+			}
+			return false, nil, nil
+		},
+	)
+
+	data, err := collector.collectClusterPolicies(context.Background(), policyDiscovery)
+	if err != nil {
+		t.Fatalf("collectClusterPolicies() error = %v", err)
+	}
+
+	assert.Equal(t, "containerd", data["operator.defaultRuntime"].Any())
+	assert.Equal(t, "true", data["driver.enabled"].Any())
+}
+
+func TestPolicyCollector_DiscoveryCancellationPropagates(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	policyDiscovery := &preferredResourceDiscovery{
+		FakeDiscovery: &fakediscovery.FakeDiscovery{},
+		cancel:        cancel,
+		err:           context.DeadlineExceeded,
+	}
+	collector := policyTestCollector()
+
+	_, err := collector.collectClusterPolicies(ctx, policyDiscovery)
+	if err == nil {
+		t.Fatal("collectClusterPolicies() error = nil, want timeout")
+	}
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestPolicyCollector_DiscoveryFailureWithoutResourcesIsIgnored(t *testing.T) {
+	policyDiscovery := &preferredResourceDiscovery{
+		FakeDiscovery: &fakediscovery.FakeDiscovery{},
+		err:           stderrors.New("discovery unavailable"),
+	}
+	collector := policyTestCollector()
+
+	data, err := collector.collectClusterPolicies(context.Background(), policyDiscovery)
+	if err != nil {
+		t.Fatalf("collectClusterPolicies() error = %v", err)
+	}
+	assert.Empty(t, data)
+}
+
+func TestPolicyCollector_MalformedDiscoveryAndPolicyAreSkipped(t *testing.T) {
+	policy := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "nvidia.com/v1",
+			"kind":       "ClusterPolicy",
+			"metadata":   map[string]any{"name": "incomplete"},
+		},
+	}
+	policyDiscovery := &preferredResourceDiscovery{
+		FakeDiscovery: &fakediscovery.FakeDiscovery{},
+		resources: []*metav1.APIResourceList{
+			{GroupVersion: "not a group version"},
+			{
+				GroupVersion: "nvidia.com/v1",
+				APIResources: []metav1.APIResource{
+					{Name: "clusterpolicies/status", Kind: "ClusterPolicy"},
+					{Name: "other", Kind: "Other"},
+					{Name: "clusterpolicies", Kind: "ClusterPolicy"},
+				},
+			},
+		},
+	}
+	collector := policyTestCollector(policy)
+
+	data, err := collector.collectClusterPolicies(context.Background(), policyDiscovery)
+	if err != nil {
+		t.Fatalf("collectClusterPolicies() error = %v", err)
+	}
+	assert.Empty(t, data)
+}
+
 func TestPolicyCollector_ParsesClusterPolicySpec(t *testing.T) {
 	// Test the spec parsing logic in isolation
-	policy := createMockClusterPolicy("test-policy", "")
+	policy := createMockClusterPolicy("test-policy")
 
 	// Extract spec
 	spec, found, err := unstructured.NestedMap(policy.Object, "spec")
@@ -307,7 +459,7 @@ func TestFlattenSpec(t *testing.T) {
 
 func TestPolicyCollector_SpecSerialization(t *testing.T) {
 	// Test that spec can be properly serialized to JSON
-	policy := createMockClusterPolicy("test-policy", "")
+	policy := createMockClusterPolicy("test-policy")
 
 	spec, found, err := unstructured.NestedMap(policy.Object, "spec")
 	assert.NoError(t, err)
