@@ -39,7 +39,13 @@
 //
 // The work splits into three cohesive pieces:
 //   - checkpointStore (checkpoint.go) owns the cursor: restore it from the
-//     fetched artifact zip, read the last checkpoint, write the new one.
+//     fetched artifact zip, read the last checkpoint, write the new one. It also
+//     persists a scan-progress companion so a large identity-scan backlog is
+//     caught up in bounded slices across several runs (observe advances the
+//     signed checkpoint only once the scan reaches head) instead of re-scanning
+//     and timing out on the whole window every pass, plus a scan-trend companion
+//     so a catch-up that never converges (the log outpacing the scan) degrades
+//     loudly rather than reporting clean forever.
 //   - monitor (monitor.go) owns the resolved v2 shards and the watched identity,
 //     and exposes the two checks: checkConsistency and scanIdentity.
 //   - outcome (monitor.go) carries the result of one pass so run() can report it

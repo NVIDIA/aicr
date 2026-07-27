@@ -22,7 +22,11 @@
 #     `rekor-v2-checkpoint` artifact between runs.
 #   - Identity: scan entries added since the last checkpoint for AICR's release
 #     signing identity. An entry under that identity that a release did not
-#     produce signals OIDC/key compromise.
+#     produce signals OIDC/key compromise. The scan is resumable: a large backlog
+#     window (from a multi-hour outage or a held cursor) is scanned in bounded
+#     slices across several runs, persisting progress in a checkpoint companion,
+#     rather than re-scanning (and timing out on) the whole window every pass. The
+#     signed checkpoint advances only once the scan has caught up to head.
 # The monitor exits non-zero on any failure and prints a CLASSIFICATION line, and
 # this workflow branches notifications on it so infra flakiness never pages like a
 # security event:
@@ -30,8 +34,10 @@
 #     open a security tracking issue (mentioning the maintainers group) and post a
 #     Slack alert (via the SLACK_SERVICE webhook).
 #   - operational (Sigstore/Rekor/TUF/GitHub-API trouble, or a crash before any
-#     classification): no page. Only after three consecutive failed scheduled runs
-#     does it open a low-urgency "degraded" issue; a single blip stays quiet.
+#     classification) or degraded (the identity catch-up is not converging: the
+#     log is outpacing the bounded per-run scan, so `remaining` is not shrinking):
+#     no page. Only after three consecutive failed scheduled runs does it open a
+#     low-urgency "degraded" issue; a single blip stays quiet.
 # The job still goes red on every failure. A later clean run closes both the
 # security and degraded issues. The tags a real release actually signed are fetched
 # first from the RELEASE_WORKFLOW_FILE (on-tag.yaml) run history and passed to the
@@ -86,8 +92,8 @@
 name: Rekor Monitor
 
 on:
-  # schedule:
-  #   - cron: "17 * * * *"  # hourly, offset off the top of the hour
+  schedule:
+    - cron: "17 * * * *"  # hourly, offset off the top of the hour
   workflow_dispatch: {}
 
 permissions: {}
@@ -238,7 +244,21 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.CHECKPOINT_FILE }}
+          # The signed checkpoint plus its two companions (<file>.scan and
+          # <file>.stall): the tool advances the checkpoint only once the identity
+          # scan has caught up to head, persists partial progress in .scan so a
+          # large backlog is scanned across several runs, and tracks catch-up
+          # convergence in .stall so a diverging (non-converging) catch-up can page.
+          # All must travel in the artifact so the next run resumes and the trend
+          # continues. Every advance path writes .scan (advanceCheckpoint resets it
+          # to 0) and clears .stall, so the files are absent only when the run fails
+          # before it can advance the cursor or save a chunk (e.g. a first run whose
+          # consistency check errors); if-no-files-found: ignore covers that so a
+          # pre-advance failure does not fail the upload.
+          path: |
+            ${{ env.CHECKPOINT_FILE }}
+            ${{ env.CHECKPOINT_FILE }}.scan
+            ${{ env.CHECKPOINT_FILE }}.stall
           # Must exceed the hourly cadence so the cursor never expires between
           # runs; wide enough to survive a brief scheduling pause.
           retention-days: 30

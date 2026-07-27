@@ -246,3 +246,55 @@ func TestExtractCheckpointFromZipCanceled(t *testing.T) {
 		t.Error("expected a cancellation error")
 	}
 }
+
+// TestCheckpointStoreRestoreProgress verifies the scan-progress companion round
+// trips through the artifact zip: when present it is restored (so the next run
+// resumes), and when absent restore is a no-op (progress reads as 0).
+func TestCheckpointStoreRestoreProgress(t *testing.T) {
+	t.Run("companion present is restored", func(t *testing.T) {
+		dir := t.TempDir()
+		dest := filepath.Join(dir, "restored.txt")
+		zp := filepath.Join(dir, "artifact.zip")
+		writeZip(t, zp, map[string]string{
+			"restored.txt":       "origin\n7\nh\n",
+			"restored.txt.scan":  "424242\n",
+			"restored.txt.stall": "5000 2\n",
+		})
+		s := checkpointStore{path: dest, restoreZip: zp}
+		if err := s.restore(context.Background()); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		n, err := s.readProgress()
+		if err != nil {
+			t.Fatalf("readProgress: %v", err)
+		}
+		if n != 424242 {
+			t.Errorf("restored progress = %d, want 424242", n)
+		}
+		remaining, stall, err := s.readScanTrend()
+		if err != nil {
+			t.Fatalf("readScanTrend: %v", err)
+		}
+		if remaining != 5000 || stall != 2 {
+			t.Errorf("restored trend = (%d, %d), want (5000, 2)", remaining, stall)
+		}
+	})
+
+	t.Run("companion absent leaves progress at 0", func(t *testing.T) {
+		dir := t.TempDir()
+		dest := filepath.Join(dir, "restored.txt")
+		zp := filepath.Join(dir, "artifact.zip")
+		writeZip(t, zp, map[string]string{"restored.txt": "origin\n7\nh\n"})
+		s := checkpointStore{path: dest, restoreZip: zp}
+		if err := s.restore(context.Background()); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		n, err := s.readProgress()
+		if err != nil {
+			t.Fatalf("readProgress: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("progress = %d, want 0 (no companion)", n)
+		}
+	})
+}

@@ -174,6 +174,43 @@ the identity scan; every run after that scans only the newly-added window.
 Entries predating the baseline are covered by release-time verification (the
 `aicr verify` path), not by this monitor.
 
+### Catching up across runs (large backlog windows)
+
+The identity scan is linear in the window size, so a window that has not
+advanced for a while (a multi-hour Sigstore/TUF outage, or a finding that
+deliberately holds the cursor) can grow past what one run can scan inside the
+pass deadline. Rather than re-scan (and time out on) the whole window every run,
+the scan is **resumable**: each run scans (in `scanChunkSize` chunks) whatever
+fits before a **soft time budget** expires -- it stops once the pass deadline is
+within `scanBudgetHeadroom` -- and persists how far it got in a `<checkpoint>.scan`
+companion carried in the same artifact. The time budget is the primary bound, so
+catch-up adapts to scan speed (a slow run covers fewer entries, a fast run more)
+and never overruns the deadline; `maxScanEntriesPerRun` is only an outer safety
+ceiling on a single run. On a same-shard window the signed checkpoint advances
+(and the companion resets) only once the scan reaches head; the other advance
+paths (first-run baseline, an empty window, and a shard rotation) re-baseline and
+are reported as such. So a large backlog is caught up over several hourly runs
+while each run stays within budget, with no coverage gap for a same-shard window.
+A partial catch-up run is a clean (exit 0) pass; its log line reads `catching up,
+N entr(y/ies) remaining`. A finding halts catch-up at that chunk (it is
+re-detected until triaged), so a partial-clean same-shard pass never coexists with
+an open finding alert; the one exception is a shard rotation, which re-baselines
+past any held finding (rare, yearly) and reports the abandoned prior-shard count.
+This is what unblocks a backlog like the ~1.2M-entry window that followed the
+[#1902](https://github.com/NVIDIA/aicr/issues/1902) correlation fix, where the
+earlier single-pass scan timed out every run and never advanced.
+
+A catch-up is only healthy if it converges. Each partial pass records its
+`remaining` count in a second `<checkpoint>.stall` companion; if `remaining`
+fails to decrease for `maxCatchUpStallRuns` consecutive passes (the log is growing
+faster than the per-run scan), the run returns a `degraded` classification instead
+of `clean`. That is a non-security failure, so it never pages like a compromise,
+but it makes the run go red and — after the workflow's usual consecutive-failure
+streak — opens the low-urgency degraded issue. The stall trend resets on any
+checkpoint advance, so once catch-up resumes (or the log growth slows) the monitor
+returns to `clean` on its own. This closes the gap where a permanently-behind
+catch-up would otherwise report green indefinitely.
+
 ### Shard rotation (and what the operator sees)
 
 Shard rotation (`log2025-1` -> `log2026-1` -> ...) needs no config change here:
