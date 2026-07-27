@@ -27,6 +27,7 @@ tree. They complement — they do not replace — the coding rules in
 | [`aicr-creating-slide-decks`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-creating-slide-decks/SKILL.md) | Build a self-contained HTML slide deck (`demos/*.html`) — inline CSS/SVG, no build step — to present or teach a concept full-screen or projected. |
 | [`aicr-managing-openvex`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-managing-openvex/SKILL.md) | Add, update, or remove CVE/GHSA suppressions in `.openvex.json`, the OpenVEX document consumed by the daily image vulnerability scan. |
 | [`aicr-release-notes`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-release-notes/SKILL.md) | Draft the human-readable GitHub release-notes summary for an upcoming release by grouping commits since the last tag into thematic highlights. |
+| [`aicr-triage`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-triage/SKILL.md) | Triage the NVIDIA AICR project board (project 248): classify new issues, promote P2→P1, demote Ready→Backlog, and propose closures — with per-bucket confirmation before applying. |
 | [`aicr-uat-report`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-uat-report/SKILL.md) | Report UAT health across service x GPU x intent combinations from the UAT Run workflow, classifying failures as product vs infra signal, and download the per-run cluster debug bundles to triage them. |
 
 ## How Skills Are Invoked
@@ -38,8 +39,9 @@ paths:
   loads the skill before responding. The `description` field is the
   matcher — it lists the phrases and intents that should activate the
   skill, so write it for recall.
-- **Explicit.** A contributor can name a skill directly (for example,
-  `/aicr-auditing-docs`) to force its use.
+- **Explicit.** A contributor can name a skill directly to force its use. The
+  syntax differs by agent: Claude Code uses `/skill-name` (for example,
+  `/aicr-triage`); Codex uses `$skill-name` (for example, `$aicr-triage`).
 
 Never read a `SKILL.md` with a plain file read to "follow it" — invoke it
 so its supporting files and conventions load as intended.

@@ -90,11 +90,11 @@ excluded (their license is covered by the Go distribution).
 | `github.com/go-openapi/swag/cmdutils` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/cmdutils/LICENSE |
 | `github.com/go-openapi/swag/conv` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/conv/LICENSE |
 | `github.com/go-openapi/swag/fileutils` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/fileutils/LICENSE |
-| `github.com/go-openapi/swag/jsonname` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/jsonname/LICENSE |
 | `github.com/go-openapi/swag/jsonutils` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/jsonutils/LICENSE |
 | `github.com/go-openapi/swag/loading` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/loading/LICENSE |
 | `github.com/go-openapi/swag/mangling` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/mangling/LICENSE |
 | `github.com/go-openapi/swag/netutils` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/netutils/LICENSE |
+| `github.com/go-openapi/swag/pools` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/pools/LICENSE |
 | `github.com/go-openapi/swag/stringutils` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/stringutils/LICENSE |
 | `github.com/go-openapi/swag/typeutils` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/typeutils/LICENSE |
 | `github.com/go-openapi/swag/yamlutils` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/yamlutils/LICENSE |
@@ -11673,220 +11673,6 @@ THE SOFTWARE.
 ```
 
 
-### github.com/go-openapi/swag/jsonname
-
-* License: Apache-2.0
-* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/jsonname/LICENSE
-
-#### LICENSE
-
-```text
-
-                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
-
-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-   1. Definitions.
-
-      "License" shall mean the terms and conditions for use, reproduction,
-      and distribution as defined by Sections 1 through 9 of this document.
-
-      "Licensor" shall mean the copyright owner or entity authorized by
-      the copyright owner that is granting the License.
-
-      "Legal Entity" shall mean the union of the acting entity and all
-      other entities that control, are controlled by, or are under common
-      control with that entity. For the purposes of this definition,
-      "control" means (i) the power, direct or indirect, to cause the
-      direction or management of such entity, whether by contract or
-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
-      outstanding shares, or (iii) beneficial ownership of such entity.
-
-      "You" (or "Your") shall mean an individual or Legal Entity
-      exercising permissions granted by this License.
-
-      "Source" form shall mean the preferred form for making modifications,
-      including but not limited to software source code, documentation
-      source, and configuration files.
-
-      "Object" form shall mean any form resulting from mechanical
-      transformation or translation of a Source form, including but
-      not limited to compiled object code, generated documentation,
-      and conversions to other media types.
-
-      "Work" shall mean the work of authorship, whether in Source or
-      Object form, made available under the License, as indicated by a
-      copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
-
-      "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
-      editorial revisions, annotations, elaborations, or other modifications
-      represent, as a whole, an original work of authorship. For the purposes
-      of this License, Derivative Works shall not include works that remain
-      separable from, or merely link (or bind by name) to the interfaces of,
-      the Work and Derivative Works thereof.
-
-      "Contribution" shall mean any work of authorship, including
-      the original version of the Work and any modifications or additions
-      to that Work or Derivative Works thereof, that is intentionally
-      submitted to Licensor for inclusion in the Work by the copyright owner
-      or by an individual or Legal Entity authorized to submit on behalf of
-      the copyright owner. For the purposes of this definition, "submitted"
-      means any form of electronic, verbal, or written communication sent
-      to the Licensor or its representatives, including but not limited to
-      communication on electronic mailing lists, source code control systems,
-      and issue tracking systems that are managed by, or on behalf of, the
-      Licensor for the purpose of discussing and improving the Work, but
-      excluding communication that is conspicuously marked or otherwise
-      designated in writing by the copyright owner as "Not a Contribution."
-
-      "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by Licensor and
-      subsequently incorporated within the Work.
-
-   2. Grant of Copyright License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      copyright license to reproduce, prepare Derivative Works of,
-      publicly display, publicly perform, sublicense, and distribute the
-      Work and such Derivative Works in Source or Object form.
-
-   3. Grant of Patent License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      (except as stated in this section) patent license to make, have made,
-      use, offer to sell, sell, import, and otherwise transfer the Work,
-      where such license applies only to those patent claims licensable
-      by such Contributor that are necessarily infringed by their
-      Contribution(s) alone or by combination of their Contribution(s)
-      with the Work to which such Contribution(s) was submitted. If You
-      institute patent litigation against any entity (including a
-      cross-claim or counterclaim in a lawsuit) alleging that the Work
-      or a Contribution incorporated within the Work constitutes direct
-      or contributory patent infringement, then any patent licenses
-      granted to You under this License for that Work shall terminate
-      as of the date such litigation is filed.
-
-   4. Redistribution. You may reproduce and distribute copies of the
-      Work or Derivative Works thereof in any medium, with or without
-      modifications, and in Source or Object form, provided that You
-      meet the following conditions:
-
-      (a) You must give any other recipients of the Work or
-          Derivative Works a copy of this License; and
-
-      (b) You must cause any modified files to carry prominent notices
-          stating that You changed the files; and
-
-      (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, patent, trademark, and
-          attribution notices from the Source form of the Work,
-          excluding those notices that do not pertain to any part of
-          the Derivative Works; and
-
-      (d) If the Work includes a "NOTICE" text file as part of its
-          distribution, then any Derivative Works that You distribute must
-          include a readable copy of the attribution notices contained
-          within such NOTICE file, excluding those notices that do not
-          pertain to any part of the Derivative Works, in at least one
-          of the following places: within a NOTICE text file distributed
-          as part of the Derivative Works; within the Source form or
-          documentation, if provided along with the Derivative Works; or,
-          within a display generated by the Derivative Works, if and
-          wherever such third-party notices normally appear. The contents
-          of the NOTICE file are for informational purposes only and
-          do not modify the License. You may add Your own attribution
-          notices within Derivative Works that You distribute, alongside
-          or as an addendum to the NOTICE text from the Work, provided
-          that such additional attribution notices cannot be construed
-          as modifying the License.
-
-      You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
-
-   5. Submission of Contributions. Unless You explicitly state otherwise,
-      any Contribution intentionally submitted for inclusion in the Work
-      by You to the Licensor shall be under the terms and conditions of
-      this License, without any additional terms or conditions.
-      Notwithstanding the above, nothing herein shall supersede or modify
-      the terms of any separate license agreement you may have executed
-      with Licensor regarding such Contributions.
-
-   6. Trademarks. This License does not grant permission to use the trade
-      names, trademarks, service marks, or product names of the Licensor,
-      except as required for reasonable and customary use in describing the
-      origin of the Work and reproducing the content of the NOTICE file.
-
-   7. Disclaimer of Warranty. Unless required by applicable law or
-      agreed to in writing, Licensor provides the Work (and each
-      Contributor provides its Contributions) on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-      implied, including, without limitation, any warranties or conditions
-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-      PARTICULAR PURPOSE. You are solely responsible for determining the
-      appropriateness of using or redistributing the Work and assume any
-      risks associated with Your exercise of permissions under this License.
-
-   8. Limitation of Liability. In no event and under no legal theory,
-      whether in tort (including negligence), contract, or otherwise,
-      unless required by applicable law (such as deliberate and grossly
-      negligent acts) or agreed to in writing, shall any Contributor be
-      liable to You for damages, including any direct, indirect, special,
-      incidental, or consequential damages of any character arising as a
-      result of this License or out of the use or inability to use the
-      Work (including but not limited to damages for loss of goodwill,
-      work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor
-      has been advised of the possibility of such damages.
-
-   9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, You may choose to offer,
-      and charge a fee for, acceptance of support, warranty, indemnity,
-      or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, You may act only
-      on Your own behalf and on Your sole responsibility, not on behalf
-      of any other Contributor, and only if You agree to indemnify,
-      defend, and hold each Contributor harmless for any liability
-      incurred by, or claims asserted against, such Contributor by reason
-      of your accepting any such warranty or additional liability.
-
-   END OF TERMS AND CONDITIONS
-
-   APPENDIX: How to apply the Apache License to your work.
-
-      To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
-      replaced with your own identifying information. (Don't include
-      the brackets!)  The text should be enclosed in the appropriate
-      comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
-      same "printed page" as the copyright notice for easier
-      identification within third-party archives.
-
-   Copyright [yyyy] [name of copyright owner]
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-
-```
-
-
 ### github.com/go-openapi/swag/jsonutils
 
 * License: Apache-2.0
@@ -12533,6 +12319,220 @@ THE SOFTWARE.
 
 * License: Apache-2.0
 * Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/netutils/LICENSE
+
+#### LICENSE
+
+```text
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+```
+
+
+### github.com/go-openapi/swag/pools
+
+* License: Apache-2.0
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/go-openapi/swag/pools/LICENSE
 
 #### LICENSE
 
@@ -28664,7 +28664,7 @@ project {
 #### LICENSE
 
 ```text
-Copyright (c) 2015 HashiCorp, Inc.
+Copyright IBM Corp. 2016, 2025
 
 Mozilla Public License, version 2.0
 
@@ -29049,7 +29049,7 @@ For a step-by-step walkthrough on using these client libraries, see the [develop
 #### auth.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -29170,7 +29170,7 @@ func (a *Auth) checkAndSetToken(s *Secret) (*Secret, error) {
 #### auth_token.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -29553,7 +29553,7 @@ type TokenCreateRequest struct {
 #### client.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -31503,7 +31503,7 @@ func validateToken(t string) error {
 #### hcl_dup_attr_deprecation.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -31556,7 +31556,7 @@ func parseAndCheckForDuplicateHclAttributes(input string) (res *ast.File, duplic
 #### help.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -31602,7 +31602,7 @@ type Help struct {
 #### kv.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -31667,7 +31667,7 @@ func (c *Client) KVv2(mountPath string) *KVv2 {
 #### kv_v1.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -31733,7 +31733,7 @@ func (kv *KVv1) Delete(ctx context.Context, secretPath string) error {
 #### kv_v2.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -32520,7 +32520,7 @@ func toMetadataMap(patchInput KVMetadataPatchInput) (map[string]interface{}, err
 #### lifetime_watcher.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -32957,7 +32957,7 @@ type (
 #### logical.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -33259,6 +33259,18 @@ func (c *Logical) addExtraHeaders(r *Request, headers http.Header) error {
 	return nil
 }
 
+func (c *Logical) PatchRaw(path string, data []byte) (*Response, error) {
+	return c.PatchRawWithContext(context.Background(), path, data)
+}
+
+func (c *Logical) PatchRawWithContext(ctx context.Context, path string, data []byte) (*Response, error) {
+	r := c.c.NewRequest(http.MethodPatch, "/v1/"+path)
+	r.Headers.Set("Content-Type", "application/scim+json")
+	r.BodyBytes = data
+
+	return c.writeRaw(ctx, r)
+}
+
 // Recover recovers the data at the given Vault path from a loaded snapshot.
 // The snapshotID parameter is the ID of the loaded snapshot
 func (c *Logical) Recover(ctx context.Context, path string, snapshotID string) (*Secret, error) {
@@ -33338,6 +33350,15 @@ func (c *Logical) Delete(path string) (*Secret, error) {
 
 func (c *Logical) DeleteWithContext(ctx context.Context, path string) (*Secret, error) {
 	return c.DeleteWithDataWithContext(ctx, path, nil)
+}
+
+func (c *Logical) DeleteRaw(path string) (*Response, error) {
+	return c.DeleteRawWithContext(context.Background(), path)
+}
+
+func (c *Logical) DeleteRawWithContext(ctx context.Context, path string) (*Response, error) {
+	r := c.c.NewRequest(http.MethodDelete, "/v1/"+path)
+	return c.c.RawRequestWithContext(ctx, r)
 }
 
 func (c *Logical) DeleteWithData(path string, data map[string][]string) (*Secret, error) {
@@ -33487,7 +33508,7 @@ func (c *Logical) UnwrapWithContext(ctx context.Context, wrappingToken string) (
 #### logical_requests.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -33612,7 +33633,7 @@ func (r *defaultLogicalRequest) Values() url.Values {
 #### output_policy.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -33717,7 +33738,7 @@ func formatOutputPolicy(path string, capabilities []string) string {
 #### output_string.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -33825,7 +33846,7 @@ func (d *OutputStringError) buildCurlString() (string, error) {
 #### plugin_helpers.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -34050,7 +34071,7 @@ func VaultPluginTLSProviderContext(ctx context.Context, apiTLSConfig *TLSConfig)
 #### plugin_runtime_types.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -34086,7 +34107,7 @@ func ParsePluginRuntimeType(PluginRuntimeType string) (PluginRuntimeType, error)
 #### plugin_types.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -34303,7 +34324,7 @@ func (i RenewBehavior) IsARenewBehavior() bool {
 #### replication_status.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -34442,7 +34463,7 @@ func (c *Sys) ReplicationStatusWithContext(ctx context.Context, path string) (*R
 #### request.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -34603,7 +34624,7 @@ func (r *Request) toRetryableHTTP() (*retryablehttp.Request, error) {
 #### response.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -34746,7 +34767,7 @@ func (r *ResponseError) Error() string {
 #### secret.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -35151,7 +35172,7 @@ func ParseSecret(r io.Reader) (*Secret, error) {
 #### ssh.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -35235,7 +35256,7 @@ func (c *SSH) SignKeyWithContext(ctx context.Context, role string, data map[stri
 #### ssh_agent.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -35519,7 +35540,7 @@ func (c *SSHHelper) VerifyWithContext(ctx context.Context, otp string) (*SSHVeri
 #### sudo_paths.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -35577,6 +35598,7 @@ var sudoPaths = map[string]*regexp.Regexp{
 	"/sys/replication/reindex":                             regexp.MustCompile(`^/sys/replication/reindex$`),
 	"/sys/storage/raft/snapshot-auto/config":               regexp.MustCompile(`^/sys/storage/raft/snapshot-auto/config/?$`),
 	"/sys/storage/raft/snapshot-auto/config/{name}":        regexp.MustCompile(`^/sys/storage/raft/snapshot-auto/config/[^/]+$`),
+	"/sys/reporting/scan":                                  regexp.MustCompile(`^/sys/reporting/scan$`),
 }
 
 func SudoPaths() map[string]*regexp.Regexp {
@@ -35613,7 +35635,7 @@ func IsSudoPath(path string) bool {
 #### sys.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -35633,7 +35655,7 @@ func (c *Client) Sys() *Sys {
 #### sys_audit.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -35798,7 +35820,7 @@ type Audit struct {
 #### sys_auth.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -35937,10 +35959,86 @@ type (
 
 ```
 
+#### sys_billing.go
+
+```text
+// Copyright IBM Corp. 2016, 2025
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+// BillingOverview returns billing metrics for the current and previous month.
+// If updateCounts is true, the current month's counts will be updated before returning.
+// This is an expensive operation that holds locks and should be used sparingly.
+func (c *Sys) BillingOverview(updateCounts bool) (*BillingOverviewResponse, error) {
+	return c.BillingOverviewWithContext(context.Background(), updateCounts)
+}
+
+// BillingOverviewWithContext returns billing metrics for the current and previous month.
+func (c *Sys) BillingOverviewWithContext(ctx context.Context, updateCounts bool) (*BillingOverviewResponse, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodGet, "/v1/sys/billing/overview")
+	if updateCounts {
+		r.Params.Set("refresh_data", "true")
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result BillingOverviewResponse
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// BillingOverviewResponse represents the response from the billing overview endpoint.
+type BillingOverviewResponse struct {
+	Months []BillingMonth `json:"months" mapstructure:"months"`
+}
+
+// BillingMonth represents billing data for a single month.
+type BillingMonth struct {
+	Month        string        `json:"month" mapstructure:"month"`
+	UpdatedAt    string        `json:"updated_at" mapstructure:"updated_at"`
+	UsageMetrics []UsageMetric `json:"usage_metrics" mapstructure:"usage_metrics"`
+}
+
+// UsageMetric represents a single usage metric with its data.
+type UsageMetric struct {
+	MetricName string                 `json:"metric_name" mapstructure:"metric_name"`
+	MetricData map[string]interface{} `json:"metric_data" mapstructure:"metric_data"`
+}
+
+```
+
 #### sys_capabilities.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36079,7 +36177,7 @@ func (c *Sys) CapabilitiesAccessorWithContext(ctx context.Context, accessor, pat
 #### sys_config_cors.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36179,7 +36277,7 @@ type CORSResponse struct {
 #### sys_generate_root.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36383,7 +36481,7 @@ type GenerateRootStatusResponse struct {
 #### sys_hastatus.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36438,7 +36536,7 @@ type HANode struct {
 #### sys_health.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36505,7 +36603,7 @@ type HealthResponse struct {
 #### sys_init.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36588,7 +36686,7 @@ type InitResponse struct {
 #### sys_leader.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36638,7 +36736,7 @@ type LeaderResponse struct {
 #### sys_leases.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36810,7 +36908,7 @@ type RevokeOptions struct {
 #### sys_mfa.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36864,7 +36962,7 @@ func (c *Sys) MFAValidateWithContext(ctx context.Context, requestID string, payl
 #### sys_monitor.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -36944,7 +37042,7 @@ func (c *Sys) Monitor(ctx context.Context, logLevel string, logFormat string) (c
 #### sys_mounts.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -37184,6 +37282,7 @@ type TuneMountConfigInput struct {
 	TokenType                  *string                     `json:"token_type,omitempty" mapstructure:"token_type"`
 	AllowedManagedKeys         *[]string                   `json:"allowed_managed_keys,omitempty" mapstructure:"allowed_managed_keys"`
 	PluginVersion              *string                     `json:"plugin_version,omitempty"`
+	OverridePinnedVersion      *bool                       `json:"override_pinned_version,omitempty" mapstructure:"override_pinned_version"`
 	UserLockoutConfig          *TuneUserLockoutConfigInput `json:"user_lockout_config,omitempty"`
 	DelegatedAuthAccessors     *[]string                   `json:"delegated_auth_accessors,omitempty" mapstructure:"delegated_auth_accessors"`
 	IdentityTokenKey           *string                     `json:"identity_token_key,omitempty" mapstructure:"identity_token_key"`
@@ -37266,6 +37365,8 @@ func (c *Sys) TuneMountWithContext(ctx context.Context, path string, config Moun
 	if config.PluginVersion != "" { // Because omitempty in the JSON
 		tuneConfig.PluginVersion = &config.PluginVersion
 	}
+
+	tuneConfig.OverridePinnedVersion = config.OverridePinnedVersion
 
 	if config.UserLockoutConfig != nil {
 		userLockoutConfig := TuneUserLockoutConfigInput{}
@@ -37362,6 +37463,7 @@ type MountConfigInput struct {
 	TokenType                  string                  `json:"token_type,omitempty" mapstructure:"token_type"`
 	AllowedManagedKeys         []string                `json:"allowed_managed_keys,omitempty" mapstructure:"allowed_managed_keys"`
 	PluginVersion              string                  `json:"plugin_version,omitempty"`
+	OverridePinnedVersion      *bool                   `json:"override_pinned_version,omitempty" mapstructure:"override_pinned_version"`
 	UserLockoutConfig          *UserLockoutConfigInput `json:"user_lockout_config,omitempty"`
 	DelegatedAuthAccessors     []string                `json:"delegated_auth_accessors,omitempty" mapstructure:"delegated_auth_accessors"`
 	IdentityTokenKey           string                  `json:"identity_token_key,omitempty" mapstructure:"identity_token_key"`
@@ -37401,6 +37503,7 @@ type MountConfigOutput struct {
 	DelegatedAuthAccessors     []string                 `json:"delegated_auth_accessors,omitempty" mapstructure:"delegated_auth_accessors"`
 	IdentityTokenKey           string                   `json:"identity_token_key,omitempty" mapstructure:"identity_token_key"`
 	TrimRequestTrailingSlashes bool                     `json:"trim_request_trailing_slashes,omitempty" mapstructure:"trim_request_trailing_slashes"`
+	OverridePinnedVersion      bool                     `json:"override_pinned_version,omitempty" mapstructure:"override_pinned_version"`
 
 	// Deprecated: This field will always be blank for newer server responses.
 	PluginName string `json:"plugin_name,omitempty" mapstructure:"plugin_name"`
@@ -37440,7 +37543,7 @@ type MountMigrationStatusInfo struct {
 #### sys_plugins.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -37484,6 +37587,7 @@ type PluginDetails struct {
 	Version           string `json:"version,omitempty"`
 	Builtin           bool   `json:"builtin"`
 	DeprecationStatus string `json:"deprecation_status,omitempty" mapstructure:"deprecation_status"`
+	SHA256            string `json:"sha256,omitempty"`
 }
 
 // ListPlugins wraps ListPluginsWithContext using context.Background.
@@ -37926,7 +38030,7 @@ func catalogPathByType(pluginType PluginType, name string) string {
 #### sys_plugins_runtimes.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -38122,7 +38226,7 @@ func pluginRuntimeCatalogPathByType(runtimeType PluginRuntimeType, name string) 
 #### sys_policy.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -38265,7 +38369,7 @@ type listPoliciesResp struct {
 #### sys_raft.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -38806,7 +38910,7 @@ func (c *Sys) raftUnloadSnapshotWithContext(ctx context.Context, snapID string, 
 #### sys_rekey.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -39325,10 +39429,75 @@ type RekeyVerificationUpdateResponse struct {
 
 ```
 
+#### sys_reporting_scan.go
+
+```text
+// Copyright IBM Corp. 2016, 2025
+// SPDX-License-Identifier: MPL-2.0
+
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/mitchellh/mapstructure"
+)
+
+func (c *Sys) ReportingScan(opts *ReportingScanRequest) (*ReportingScanOutput, error) {
+	return c.ReportingScanWithContext(context.Background(), opts)
+}
+
+func (c *Sys) ReportingScanWithContext(ctx context.Context, opts *ReportingScanRequest) (*ReportingScanOutput, error) {
+	ctx, cancelFunc := c.c.withConfiguredTimeout(ctx)
+	defer cancelFunc()
+
+	r := c.c.NewRequest(http.MethodPost, "/v1/sys/reporting/scan")
+
+	if err := r.SetJSONBody(opts); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.rawRequestWithContext(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	secret, err := ParseSecret(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, errors.New("data from server response is empty")
+	}
+
+	var result ReportingScanOutput
+	err = mapstructure.Decode(secret.Data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+// ReportingScanRequest represents the parameters consumed by the reporting scan API
+type ReportingScanRequest struct {
+	Async bool `json:"async"`
+}
+
+type ReportingScanOutput struct {
+	Timestamp         string `json:"timestamp" structs:"timestamp" mapstructure:"timestamp"`
+	FullDirectoryPath string `json:"full_directory_path" structs:"full_directory_path" mapstructure:"full_directory_path"`
+}
+
+```
+
 #### sys_rotate.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -39439,7 +39608,7 @@ type KeyStatus struct {
 #### sys_seal.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -39569,7 +39738,7 @@ type UnsealOpts struct {
 #### sys_stepdown.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -39601,7 +39770,7 @@ func (c *Sys) StepDownWithContext(ctx context.Context) error {
 #### sys_ui_custom_message.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
@@ -39888,7 +40057,7 @@ func (l *uiCustomMessageLink) UnmarshalJSON(b []byte) error {
 #### sys_utilization_report.go
 
 ```text
-// Copyright (c) HashiCorp, Inc.
+// Copyright IBM Corp. 2016, 2025
 // SPDX-License-Identifier: MPL-2.0
 
 package api
