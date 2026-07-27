@@ -320,11 +320,13 @@
     },
 
     // ---- aiperf-bench base image is capped below python 3.14 ----
-    // aiperf's transitive deps (pyzmq, uvloop) publish no cp314 wheels yet, so
-    // on 3.14 pip falls back to a source build that needs a C toolchain the
-    // -slim image deliberately omits — breaking the performance validator image
-    // build. PR #1906 bumped this to 3.14 and broke the UAT image build; this
-    // cap stops the re-bump. Raise/drop it once upstream ships cp314 wheels.
+    // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
+    // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage
+    // image had no toolchain to compile them). Even with the current
+    // multi-stage toolchain, aiperf 0.11.0 declares requires-python <3.14, so
+    // pip refuses to install on 3.14 — the 3.14 move is blocked upstream until
+    // aiperf supports it. This cap mirrors that constraint; #1910 tracks
+    // lifting it.
     {
       matchManagers: ["dockerfile"],
       matchFileNames: ["validators/performance/aiperf-bench.Dockerfile"],
