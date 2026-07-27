@@ -97,7 +97,7 @@ Use in shell scripts:
     --selector components.gpu-operator.values.driver.version)`,
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "config", "format", "selector"); err != nil {
+			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", flagProfile, "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 
@@ -166,6 +166,7 @@ Use in shell scripts:
 // is seeded.
 func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
 	reg := client.CriteriaRegistry()
+	profile := stringFlagOrConfig(cmd, flagProfile, cfg.Recipe().ProfileSelection())
 
 	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.Recipe().SnapshotPath())
 
@@ -208,7 +209,9 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		// ResolveRecipeFromSnapshot builds the constraint evaluator
 		// internally (constraints.Evaluate against snap), mirroring the
 		// pre-facade BuildFromCriteriaWithEvaluator path.
-		result, err := client.ResolveRecipeFromSnapshot(ctx, aicr.WrapCriteria(criteria), aicr.WrapSnapshot(snap))
+		result, err := client.ResolveRecipeFromSnapshotWithProfile(
+			ctx, aicr.WrapCriteria(criteria), aicr.WrapSnapshot(snap), profile,
+		)
 		if err == nil {
 			return result, nil
 		}
@@ -219,7 +222,9 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		}
 
 		slog.Info("retrying recipe resolution with snapshot-derived criteria relaxed", "criteria", relaxed.String())
-		return client.ResolveRecipeFromSnapshot(ctx, aicr.WrapCriteria(relaxed), aicr.WrapSnapshot(snap))
+		return client.ResolveRecipeFromSnapshotWithProfile(
+			ctx, aicr.WrapCriteria(relaxed), aicr.WrapSnapshot(snap), profile,
+		)
 	}
 
 	criteria, err := mergeCriteriaFromCmdAndConfig(cmd, cfg, reg)
@@ -233,7 +238,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 	}
 
 	slog.Info("building recipe from criteria", "criteria", criteria.String())
-	return client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
+	return client.ResolveRecipeFromCriteriaWithProfile(ctx, aicr.WrapCriteria(criteria), profile)
 }
 
 // relaxSnapshotDerivedCoverage inspects a recipe-resolution error for the

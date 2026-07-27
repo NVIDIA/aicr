@@ -39,10 +39,11 @@ info:
 
     - **Interactive Sigstore attestation** (`aicr bundle --attest` with browser-based OIDC):
       the interactive, user-authenticated signing flow is CLI-only. The API server instead
-      offers non-interactive server-side attestation: `POST /v1/bundle?attest=true` returns a
+      offers non-interactive server-side attestation: `POST /v1/bundle?attest=true`
+      or `POST /v2/bundle?attest=true` returns a
       signed bundle, with the server signing as itself using its operator-configured KMS key or
       private-Sigstore keyless identity. No signing identity is ever taken from the request.
-      See the `attest` query parameter on POST /v1/bundle.
+      See the `attest` query parameter on POST /v1/bundle and POST /v2/bundle.
 
     - **OCI registry push** (`aicr bundle --output oci://...`) — pushes bundle artifacts to
       a container registry.
@@ -91,7 +92,13 @@ paths:
                     type: array
                     items:
                       type: string
-                    example: ["/v1/recipe", "/v1/bundle"]
+                    example:
+                      - /v1/recipe
+                      - /v1/query
+                      - /v1/bundle
+                      - /v2/recipe
+                      - /v2/query
+                      - /v2/bundle
 
   /v1/recipe:
     get:
@@ -187,7 +194,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RecipeResponse"
+                $ref: "#/components/schemas/LegacyRecipeResponse"
               examples:
                 basic:
                   summary: Basic recipe request
@@ -228,19 +235,21 @@ paths:
                         source: https://helm.ngc.nvidia.com/nvidia
                         chart: network-operator
                     constraints:
-                      driver:
-                        version: "580.82.07"
-                        cudaVersion: "13.1"
+                      - name: GPU.driver.version
+                        value: "580.82.07"
+                      - name: GPU.driver.cudaVersion
+                        value: "13.1"
         "400":
           description: >
-            Invalid request: malformed criteria, allowlist violation, or — new —
-            a stated criteria dimension not honored by any applicable recipe
-            overlay (uncovered dimension). Uncovered-dimension errors carry a
-            machine-readable `details.uncovered` array (dimension,
-            requestedValue, validCompletions). Snapshot-driven resolution
-            (CLI `--snapshot` / Go SDK) may additionally attach
-            `excludedOverlays` / `constraintWarnings`; this HTTP API resolves
-            from criteria only and never emits those fields.
+            Invalid request: malformed criteria, allowlist violation, a resolved
+            profile (which requires `/v2/recipe`), or a stated criteria dimension
+            not honored by any applicable recipe overlay (uncovered dimension).
+            Uncovered-dimension errors carry a machine-readable
+            `details.uncovered` array (dimension, requestedValue,
+            validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
+            SDK) may additionally attach `excludedOverlays` /
+            `constraintWarnings`; this HTTP API resolves from criteria only and
+            never emits those fields.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -417,17 +426,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RecipeResponse"
+                $ref: "#/components/schemas/LegacyRecipeResponse"
         "400":
           description: >
-            Invalid request: malformed criteria, allowlist violation, or — new —
-            a stated criteria dimension not honored by any applicable recipe
-            overlay (uncovered dimension). Uncovered-dimension errors carry a
-            machine-readable `details.uncovered` array (dimension,
-            requestedValue, validCompletions). Snapshot-driven resolution
-            (CLI `--snapshot` / Go SDK) may additionally attach
-            `excludedOverlays` / `constraintWarnings`; this HTTP API resolves
-            from criteria only and never emits those fields.
+            Invalid request: malformed criteria, allowlist violation, a resolved
+            profile (which requires `/v2/recipe`), or a stated criteria dimension
+            not honored by any applicable recipe overlay (uncovered dimension).
+            Uncovered-dimension errors carry a machine-readable
+            `details.uncovered` array (dimension, requestedValue,
+            validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
+            SDK) may additionally attach `excludedOverlays` /
+            `constraintWarnings`; this HTTP API resolves from criteria only and
+            never emits those fields.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -636,14 +646,15 @@ paths:
                     useOpenKernelModules: true
         "400":
           description: >
-            Invalid request: malformed criteria, allowlist violation, or — new —
-            a stated criteria dimension not honored by any applicable recipe
-            overlay (uncovered dimension). Uncovered-dimension errors carry a
-            machine-readable `details.uncovered` array (dimension,
-            requestedValue, validCompletions). Snapshot-driven resolution
-            (CLI `--snapshot` / Go SDK) may additionally attach
-            `excludedOverlays` / `constraintWarnings`; this HTTP API resolves
-            from criteria only and never emits those fields.
+            Invalid request: malformed criteria, allowlist violation, a resolved
+            profile (which requires `/v2/query`), or a stated criteria dimension
+            not honored by any applicable recipe overlay (uncovered dimension).
+            Uncovered-dimension errors carry a machine-readable
+            `details.uncovered` array (dimension, requestedValue,
+            validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
+            SDK) may additionally attach `excludedOverlays` /
+            `constraintWarnings`; this HTTP API resolves from criteria only and
+            never emits those fields.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -770,14 +781,15 @@ paths:
                 description: The value at the selector path (scalar, object, or array)
         "400":
           description: >
-            Invalid request: malformed criteria, allowlist violation, or — new —
-            a stated criteria dimension not honored by any applicable recipe
-            overlay (uncovered dimension). Uncovered-dimension errors carry a
-            machine-readable `details.uncovered` array (dimension,
-            requestedValue, validCompletions). Snapshot-driven resolution
-            (CLI `--snapshot` / Go SDK) may additionally attach
-            `excludedOverlays` / `constraintWarnings`; this HTTP API resolves
-            from criteria only and never emits those fields.
+            Invalid request: malformed criteria, allowlist violation, a resolved
+            profile (which requires `/v2/query`), or a stated criteria dimension
+            not honored by any applicable recipe overlay (uncovered dimension).
+            Uncovered-dimension errors carry a machine-readable
+            `details.uncovered` array (dimension, requestedValue,
+            validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
+            SDK) may additionally attach `excludedOverlays` /
+            `constraintWarnings`; this HTTP API resolves from criteria only and
+            never emits those fields.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -829,6 +841,529 @@ paths:
               schema:
                 type: integer
               description: Seconds until retry allowed
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v2/recipe:
+    get:
+      tags: [Recipes]
+      summary: Resolve a profile-aware recipe
+      operationId: getRecipeV2
+      description: >
+        Resolves criteria with an optional name=value profile selection. An
+        omitted profile applies the declaration's required default. Unknown
+        query parameters and conflicting repeated profile values are rejected.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Accelerator"
+        - $ref: "#/components/parameters/GPUAlias"
+        - $ref: "#/components/parameters/Intent"
+        - $ref: "#/components/parameters/OS"
+        - $ref: "#/components/parameters/Platform"
+        - $ref: "#/components/parameters/Nodes"
+        - $ref: "#/components/parameters/ProfileSelection"
+      responses:
+        "200":
+          description: Resolved legacy or profile-bearing recipe
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecipeResponse"
+        "400":
+          description: Invalid criteria, profile selection, or query parameter
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until retry allowed
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "504":
+          description: Recipe resolution or an upstream operation timed out
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags: [Recipes]
+      summary: Resolve a profile-aware recipe from a strict envelope
+      operationId: createRecipeV2
+      description: >
+        Accepts a strict criteria/profile envelope and an optional profile
+        query parameter. Matching query and envelope selections are accepted;
+        conflicting selections, unknown fields, unknown query parameters, and
+        trailing JSON or YAML documents are rejected. Content-Type must be
+        application/json or application/x-yaml.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ProfileSelection"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecipeV2Request"
+          application/x-yaml:
+            schema:
+              $ref: "#/components/schemas/RecipeV2Request"
+      responses:
+        "200":
+          description: Resolved legacy or profile-bearing recipe
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecipeResponse"
+        "400":
+          description: Invalid request envelope, criteria, or profile selection
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body exceeds the maximum allowed size
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until retry allowed
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "504":
+          description: Recipe resolution or an upstream operation timed out
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v2/query:
+    get:
+      tags: [Recipes]
+      summary: Query a profile-aware hydrated recipe
+      operationId: getQueryV2
+      description: >
+        Resolves criteria and an optional profile, hydrates the recipe, and
+        returns the value at selector. Unknown query parameters are rejected.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Accelerator"
+        - $ref: "#/components/parameters/GPUAlias"
+        - $ref: "#/components/parameters/Intent"
+        - $ref: "#/components/parameters/OS"
+        - $ref: "#/components/parameters/Platform"
+        - $ref: "#/components/parameters/Nodes"
+        - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/Selector"
+      responses:
+        "200":
+          description: Selected scalar, object, or array
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                description: The value at the selector path
+        "400":
+          description: Invalid criteria, profile selection, or query parameter
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Selector path not found
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until retry allowed
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "504":
+          description: Recipe resolution or an upstream operation timed out
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags: [Recipes]
+      summary: Query a profile-aware recipe from a strict envelope
+      operationId: createQueryV2
+      description: >
+        Accepts a strict criteria/profile/selector envelope and an optional
+        profile query parameter. Matching query and envelope selections are
+        accepted; conflicting selections, unknown fields, unknown query
+        parameters, and trailing JSON or YAML documents are rejected.
+        Content-Type must be application/json or application/x-yaml.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ProfileSelection"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueryV2Request"
+          application/x-yaml:
+            schema:
+              $ref: "#/components/schemas/QueryV2Request"
+      responses:
+        "200":
+          description: Selected scalar, object, or array
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                description: The value at the selector path
+        "400":
+          description: Invalid request envelope, criteria, or profile selection
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body exceeds the maximum allowed size
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Selector path not found
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until retry allowed
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "504":
+          description: Recipe resolution or an upstream operation timed out
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v2/bundle:
+    post:
+      tags: [Bundles]
+      summary: Generate a bundle from a legacy or profiled recipe
+      operationId: createBundleV2
+      description: >
+        Uses the same query parameters and ZIP response as POST /v1/bundle.
+        The body is an already-selected RecipeResult, so this route has no
+        profile-selection field. Legacy recipes stamped aicr.run/v1alpha2 or
+        omitting apiVersion are accepted; v1alpha3 profile recipes are decoded
+        strictly. Content-Type must be application/json or application/x-yaml.
+        Query parameter details are documented on POST /v1/bundle.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/BundleComponents"
+        - $ref: "#/components/parameters/BundleSet"
+        - $ref: "#/components/parameters/BundleDynamic"
+        - $ref: "#/components/parameters/SystemNodeSelector"
+        - $ref: "#/components/parameters/SystemNodeToleration"
+        - $ref: "#/components/parameters/AcceleratedNodeSelector"
+        - $ref: "#/components/parameters/AcceleratedNodeToleration"
+        - $ref: "#/components/parameters/BundleDeployer"
+        - $ref: "#/components/parameters/BundleRepo"
+        - $ref: "#/components/parameters/WorkloadGate"
+        - $ref: "#/components/parameters/WorkloadSelector"
+        - $ref: "#/components/parameters/BundleNodes"
+        - $ref: "#/components/parameters/VendorCharts"
+        - $ref: "#/components/parameters/Serial"
+        - $ref: "#/components/parameters/AppName"
+        - $ref: "#/components/parameters/Attest"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BundleRecipeV2Request"
+          application/x-yaml:
+            schema:
+              $ref: "#/components/schemas/BundleRecipeV2Request"
+      responses:
+        "200":
+          description: ZIP archive containing generated bundle artifacts
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="bundles.zip"'
+              description: Indicates the response should be downloaded as a file
+            X-Bundle-Files:
+              schema:
+                type: integer
+              description: Total number of files in the bundle
+              example: 12
+            X-Bundle-Size:
+              schema:
+                type: integer
+              description: Total size of all files in bytes (uncompressed)
+              example: 45678
+            X-Bundle-Duration:
+              schema:
+                type: string
+              description: Time taken to generate bundles
+              example: "1.234s"
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid Content-Type, recipe, profile lock violation, or bundle option
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication failed while pulling a vendored chart
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: A requested vendored chart was not found
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body exceeds the maximum allowed size
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until retry allowed
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: A required bundling dependency or upstream service is unavailable
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "504":
+          description: Bundle generation or an upstream operation timed out
+          headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
           content:
@@ -1385,6 +1920,249 @@ components:
       description: Unix timestamp when quota resets
       example: 1705318200
 
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: Client-provided request ID for tracing.
+      schema:
+        type: string
+        format: uuid
+    Service:
+      name: service
+      in: query
+      required: false
+      description: Kubernetes service/environment type.
+      schema:
+        type: string
+        enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
+        default: any
+    Accelerator:
+      name: accelerator
+      in: query
+      required: false
+      description: GPU/accelerator type.
+      schema:
+        type: string
+        enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
+        default: any
+    GPUAlias:
+      name: gpu
+      in: query
+      required: false
+      description: Backward-compatible alias for accelerator.
+      schema:
+        type: string
+        enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
+        default: any
+    Intent:
+      name: intent
+      in: query
+      required: false
+      description: Workload intent.
+      schema:
+        type: string
+        enum: [training, inference, any]
+        default: any
+    OS:
+      name: os
+      in: query
+      required: false
+      description: GPU node operating system.
+      schema:
+        type: string
+        enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
+        default: any
+    Platform:
+      name: platform
+      in: query
+      required: false
+      description: Platform/framework type.
+      schema:
+        type: string
+        enum: [dynamo, kubeflow, nim, runai, slurm, any]
+        default: any
+    Nodes:
+      name: nodes
+      in: query
+      required: false
+      description: Number of GPU nodes (0 means unspecified).
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    ProfileSelection:
+      name: profile
+      in: query
+      required: false
+      description: >
+        Configuration profile selection in exact name=value form. Omission
+        applies the declaration's required default.
+      schema:
+        type: string
+        pattern: "^$|^[A-Za-z0-9._-]+=[A-Za-z0-9._-]+$"
+    Selector:
+      name: selector
+      in: query
+      required: true
+      description: Dot-delimited path; empty returns the hydrated recipe.
+      schema:
+        type: string
+    BundleComponents:
+      name: bundlers
+      in: query
+      required: false
+      description: Comma-delimited enabled component names to include.
+      schema:
+        type: string
+    BundleSet:
+      name: set
+      in: query
+      required: false
+      description: Repeatable component:path=value override.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+    BundleDynamic:
+      name: dynamic
+      in: query
+      required: false
+      description: Repeatable install-time component:path declaration.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+    SystemNodeSelector:
+      name: system-node-selector
+      in: query
+      required: false
+      description: Repeatable key=value selector for system components.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+    SystemNodeToleration:
+      name: system-node-toleration
+      in: query
+      required: false
+      description: Repeatable key=value:effect toleration for system components.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+    AcceleratedNodeSelector:
+      name: accelerated-node-selector
+      in: query
+      required: false
+      description: Repeatable key=value selector for accelerated components.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+    AcceleratedNodeToleration:
+      name: accelerated-node-toleration
+      in: query
+      required: false
+      description: Repeatable key=value:effect toleration for accelerated components.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+    BundleDeployer:
+      name: deployer
+      in: query
+      required: false
+      description: Bundle deployment method.
+      schema:
+        type: string
+        enum: [helm, argocd, argocd-helm, flux, helmfile]
+        default: helm
+    BundleRepo:
+      name: repo
+      in: query
+      required: false
+      description: Git repository URL for supported GitOps deployers.
+      schema:
+        type: string
+        format: uri
+    WorkloadGate:
+      name: workload-gate
+      in: query
+      required: false
+      description: >
+        Taint for nodewright-operator workload gating (format:
+        key=value:effect or key:effect).
+      schema:
+        type: string
+      example: "skyhook.nvidia.com/runtime=required:NoSchedule"
+    WorkloadSelector:
+      name: workload-selector
+      in: query
+      required: false
+      description: Repeatable key=value selector for workload-gate classification.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+    BundleNodes:
+      name: nodes
+      in: query
+      required: false
+      description: Estimated GPU node count for bundle-time injections.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    VendorCharts:
+      name: vendor-charts
+      in: query
+      required: false
+      description: Include upstream chart bytes in the generated bundle.
+      schema:
+        type: boolean
+        default: false
+    Serial:
+      name: serial
+      in: query
+      required: false
+      description: Sequence components strictly in deployment order.
+      schema:
+        type: boolean
+        default: false
+    AppName:
+      name: app-name
+      in: query
+      required: false
+      description: Parent Argo CD Application name.
+      schema:
+        type: string
+        pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
+        maxLength: 253
+    Attest:
+      name: attest
+      in: query
+      required: false
+      description: Return a server-signed bundle.
+      schema:
+        type: boolean
+        default: false
+
   schemas:
     Error:
       type: object
@@ -1449,6 +2227,42 @@ components:
     Criteria:
       type: object
       description: Recipe criteria specification
+      properties:
+        service:
+          type: string
+          description: Kubernetes service type
+          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
+          example: eks
+        accelerator:
+          type: string
+          description: GPU/accelerator type
+          enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
+          example: h100
+        intent:
+          type: string
+          description: Workload intent
+          enum: [training, inference, any]
+          example: training
+        os:
+          type: string
+          description: Operating system family
+          enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
+          example: ubuntu
+        platform:
+          type: string
+          description: Platform/framework type
+          enum: [dynamo, kubeflow, nim, runai, slurm, any]
+          example: kubeflow
+        nodes:
+          type: integer
+          description: Number of GPU nodes (0 = any)
+          minimum: 0
+          default: 0
+
+    CriteriaV2:
+      type: object
+      description: Strict recipe criteria specification for v2 request bodies
+      additionalProperties: false
       properties:
         service:
           type: string
@@ -1567,6 +2381,39 @@ components:
             $ref: "#/components/schemas/Subtype"
           description: List of configuration subtypes within this measurement
 
+    RecipeV2Request:
+      type: object
+      description: >
+        Strict profile-aware recipe-resolution envelope. Unknown fields are
+        rejected both at this envelope level and inside criteria.
+      required: [criteria]
+      additionalProperties: false
+      properties:
+        criteria:
+          $ref: "#/components/schemas/CriteriaV2"
+        profile:
+          type: string
+          description: Optional configuration profile selection in name=value form
+          pattern: "^$|^[A-Za-z0-9._-]+=[A-Za-z0-9._-]+$"
+
+    QueryV2Request:
+      type: object
+      description: >
+        Strict profile-aware query envelope. Unknown fields are rejected both
+        at this envelope level and inside criteria.
+      required: [criteria, selector]
+      additionalProperties: false
+      properties:
+        criteria:
+          $ref: "#/components/schemas/CriteriaV2"
+        profile:
+          type: string
+          description: Optional configuration profile selection in name=value form
+          pattern: "^$|^[A-Za-z0-9._-]+=[A-Za-z0-9._-]+$"
+        selector:
+          type: string
+          description: Dot-delimited path; empty returns the hydrated recipe
+
     RecipeResponseBase:
       type: object
       description: >
@@ -1604,19 +2451,23 @@ components:
               type: array
               description: Optional list of matching overlays excluded from the final recipe
               items:
-                type: object
-                required: [name]
-                properties:
-                  name:
-                    type: string
-                    description: Name of the excluded overlay
-                  reason:
-                    type: string
-                    description: >
-                      Machine-readable reason for exclusion. API-generated responses
-                      populate this field; legacy stored recipes accepted for backward
-                      compatibility may omit it when deserialized.
-                    enum: [constraint-failed, mixin-constraint-failed]
+                oneOf:
+                  - type: string
+                    description: Legacy excluded-overlay name
+                  - type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                        description: Name of the excluded overlay
+                      reason:
+                        type: string
+                        description: >
+                          Machine-readable reason for exclusion. API-generated responses
+                          populate this field; legacy stored recipes accepted for backward
+                          compatibility may omit it when deserialized.
+                        enum: [constraint-failed, mixin-constraint-failed]
             constraintWarnings:
               type: array
               description: Optional details about failed constraint evaluations for excluded overlays
@@ -1648,6 +2499,38 @@ components:
                 snapshot was provided). Consumed by the bundle-time
                 CheckDriverOwnershipCoherence validation.
               enum: [preinstalled, absent]
+            selectedProfile:
+              type: object
+              description: >
+                Selected profile identity and declaration-wide lock surface.
+                Present only when apiVersion is aicr.run/v1alpha3.
+              not:
+                required: [advertiser]
+              required: [name, value, ownedPaths]
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  pattern: "^[A-Za-z0-9._-]+$"
+                value:
+                  type: string
+                  pattern: "^[A-Za-z0-9._-]+$"
+                advertiser:
+                  type: string
+                  enum: [external]
+                  description: >
+                    Reserved for the future GKE allocation-policy extension.
+                    This field must be absent in the current version; any
+                    non-empty value, including external, is rejected.
+                ownedPaths:
+                  type: object
+                  description: >
+                    Canonical component names mapped to sorted owned dotted
+                    paths. Every listed component includes synthetic "enabled".
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
         criteria:
           $ref: "#/components/schemas/Criteria"
           description: Original criteria parameters
@@ -1664,6 +2547,9 @@ components:
                   both enabled and disabled refs) when non-empty; a duplicate
                   non-empty name is rejected with 400. Refs with an empty
                   name are exempt from the uniqueness check.
+              namespace:
+                type: string
+                description: Kubernetes namespace for the component
               type:
                 type: string
                 enum: [Helm, Kustomize]
@@ -1719,6 +2605,13 @@ components:
                   on a source-backed ref. Values with surrounding whitespace
                   are rejected with 400. A chart without a source is rejected
                   (nothing to pull from).
+              valuesFile:
+                type: string
+                description: Path to component values relative to the data directory
+              overrides:
+                type: object
+                description: Inline component values, merged after valuesFile
+                additionalProperties: true
               path:
                 type: string
                 description: Path within the source to the kustomization (Kustomize)
@@ -1751,6 +2644,33 @@ components:
                   an enabled ref that sets `patches` is rejected with 400 rather
                   than silently producing an unpatched bundle. Do not set. See
                   issue #1588.
+              dependencyRefs:
+                type: array
+                items:
+                  type: string
+                description: Component names that must be deployed first
+              cleanup:
+                type: boolean
+                description: Whether validation infrastructure is removed after use
+              expectedResources:
+                type: array
+                description: Kubernetes resources expected after deployment
+                items:
+                  type: object
+                  required: [kind, name]
+                  properties:
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+              healthCheckAsserts:
+                type: string
+                description: Hydrated Chainsaw-style health-check assertions
+              healthCheckSkip:
+                type: boolean
+                description: Whether registry health-check assertion hydration is skipped
           description: >-
             List of component references. Deployment order is not per-ref; it is
             the top-level `deploymentOrder` array.
@@ -1763,12 +2683,27 @@ components:
             Preserve this on a GET→POST round trip (POST /v1/bundle accepts this
             same shape) — dropping it changes deployment sequencing.
         constraints:
-          type: object
-          description: Deployment constraints (driver versions, etc.)
-          additionalProperties: true
+          type: array
+          description: Deployment constraints and assumptions
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+              severity:
+                type: string
+              remediation:
+                type: string
+              unit:
+                type: string
 
     RecipeResponse:
-      description: Complete recipe response with metadata and component references
+      description: >
+        Complete legacy or profile-aware recipe response with metadata and
+        component references.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
@@ -1776,20 +2711,221 @@ components:
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha2]
+              enum: [aicr.run/v1alpha2, aicr.run/v1alpha3]
               example: aicr.run/v1alpha2
             kind:
               type: string
               enum: [RecipeResult]
               example: RecipeResult
 
+    ProfileRecipeResponse:
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponse"
+        - type: object
+          description: >
+            Closed aicr.run/v1alpha3 RecipeResult shape. Unknown fields are
+            rejected at its typed object boundaries.
+          required: [metadata, componentRefs]
+          additionalProperties: false
+          properties:
+            apiVersion:
+              type: string
+              enum: [aicr.run/v1alpha3]
+            kind:
+              type: string
+              enum: [RecipeResult]
+            metadata:
+              type: object
+              required: [selectedProfile]
+              propertyNames:
+                enum:
+                  - version
+                  - appliedOverlays
+                  - excludedOverlays
+                  - constraintWarnings
+                  - gpuDriverState
+                  - selectedProfile
+              properties:
+                excludedOverlays:
+                  type: array
+                  items:
+                    type: object
+                    required: [name]
+                    propertyNames:
+                      enum: [name, reason]
+                constraintWarnings:
+                  type: array
+                  items:
+                    type: object
+                    required: [overlay, constraint, expected, reason]
+                    propertyNames:
+                      enum: [overlay, constraint, expected, actual, reason]
+                selectedProfile:
+                  type: object
+                  not:
+                    required: [advertiser]
+            criteria:
+              $ref: "#/components/schemas/CriteriaV2"
+            constraints:
+              type: array
+              items:
+                type: object
+                required: [name, value]
+                propertyNames:
+                  enum: [name, value, severity, remediation, unit]
+            componentRefs:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [name]
+                propertyNames:
+                  enum:
+                    - name
+                    - namespace
+                    - chart
+                    - type
+                    - source
+                    - version
+                    - tag
+                    - valuesFile
+                    - overrides
+                    - patches
+                    - dependencyRefs
+                    - manifestFiles
+                    - preManifestFiles
+                    - path
+                    - cleanup
+                    - expectedResources
+                    - healthCheckAsserts
+                    - healthCheckSkip
+                properties:
+                  expectedResources:
+                    type: array
+                    items:
+                      type: object
+                      required: [kind, name]
+                      additionalProperties: false
+                      properties:
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+            deploymentOrder:
+              type: array
+              items:
+                type: string
+            validation:
+              type: object
+              propertyNames:
+                enum: [readiness, deployment, performance, conformance]
+              additionalProperties:
+                type: object
+                propertyNames:
+                  enum: [timeout, constraints, checks, nodeSelection, infrastructure]
+                properties:
+                  timeout:
+                    type: string
+                  constraints:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, value]
+                      propertyNames:
+                        enum: [name, value, severity, remediation, unit]
+                  checks:
+                    type: array
+                    items:
+                      type: string
+                  nodeSelection:
+                    type: object
+                    propertyNames:
+                      enum: [selector, maxNodes, excludeNodes]
+                    properties:
+                      selector:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      maxNodes:
+                        type: integer
+                      excludeNodes:
+                        type: array
+                        items:
+                          type: string
+                  infrastructure:
+                    type: string
+
+    LegacyRecipeResponse:
+      description: >
+        Additive legacy recipe shape. Unknown fields remain accepted for
+        compatibility, but metadata.selectedProfile is reserved for v1alpha3.
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponse"
+        - type: object
+          properties:
+            apiVersion:
+              type: string
+              enum: [aicr.run/v1alpha2]
+            metadata:
+              type: object
+              not:
+                required: [selectedProfile]
+
+    LegacyBundleRecipeV2Request:
+      description: >
+        Additive legacy RecipeResult accepted by POST /v2/bundle: any
+        combination of apiVersion absent, empty, or aicr.run/v1alpha2 with
+        kind absent, empty, or RecipeResult. One branch covers the whole
+        legacy square because DecodeRecipeResult accepts every cell of it —
+        kind is enforced only when non-empty, and only v1alpha3 requires it —
+        and /v1/bundle's BundleRecipeRequest admits the same shapes, so any
+        narrower branch leaves /v2/bundle stricter than its own server
+        (previously true for the empty-header round trip, then again for
+        apiVersion v1alpha2 with kind absent). The legacy kind Recipe is
+        v1-only: the strict v2 decode path rejects it.
+        metadata.selectedProfile remains reserved for v1alpha3.
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponseBase"
+        - type: object
+          properties:
+            apiVersion:
+              type: string
+              description: >
+                aicr.run/v1alpha2, absent, or empty after a legacy struct
+                round trip
+              enum: ["", aicr.run/v1alpha2]
+            kind:
+              type: string
+              description: >
+                RecipeResult, absent, or empty for a round-tripped artifact
+              enum: ["", RecipeResult]
+              example: RecipeResult
+            metadata:
+              type: object
+              not:
+                required: [selectedProfile]
+    BundleRecipeV2Request:
+      description: >
+        Version-partitioned RecipeResult accepted by POST /v2/bundle.
+        Legacy input with apiVersion aicr.run/v1alpha2 or no apiVersion remains
+        additive; v1alpha3 input is closed and requires
+        metadata.selectedProfile. The branches are disjoint on apiVersion:
+        the legacy branch admits only absent/empty/v1alpha2 and prohibits
+        selectedProfile, while the profile branch requires v1alpha3.
+      oneOf:
+        - $ref: "#/components/schemas/LegacyBundleRecipeV2Request"
+        - $ref: "#/components/schemas/ProfileRecipeResponse"
+
     BundleRecipeRequest:
       description: >
         RecipeResult accepted by POST /v1/bundle. Current aicr.run/v1alpha2
         artifacts and legacy artifacts with absent or empty header fields are
         accepted. The kind value Recipe is also accepted: it was the value this
-        contract published through v0.18.0, and the handler performs no header
+        contract published through v0.18.0, and the handler performs no kind
         validation, so clients written against that spec must keep working.
+        apiVersion is the one validated header field — see below.
 
         A legacy kind is echoed into the generated bundle's recipe.yaml rather
         than normalized, and the CLI file loader accepts an absent or empty kind
@@ -1800,10 +2936,14 @@ components:
         apiVersion deliberately has no equivalent legacy window. The artifact
         group/version bump is a hard break with no transition period (see
         docs/design/011-artifact-apiversion-policy.md), so an artifact stamped
-        with a prior group/version should be regenerated rather than sent. That
-        is a client-contract rule rather than an enforced one: this endpoint
-        validates no header field, so a prior apiVersion is ignored rather than
-        rejected. The CLI file-load path does enforce it.
+        with a prior group/version must be regenerated rather than sent. This
+        rule is enforced: the shared artifact gate rejects any apiVersion
+        outside aicr.run/v1alpha2 and aicr.run/v1alpha3 with a 400, here and on
+        the CLI file-load path alike. An absent or empty apiVersion is still
+        admitted as the legacy shape.
+
+        metadata.selectedProfile remains reserved for aicr.run/v1alpha3 and
+        is rejected on this route.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
@@ -1821,6 +2961,10 @@ components:
                 RecipeResult, the legacy Recipe value published through
                 v0.18.0, or empty for a legacy artifact
               enum: ["", Recipe, RecipeResult]
+            metadata:
+              type: object
+              not:
+                required: [selectedProfile]
 
     QueryRequest:
       type: object

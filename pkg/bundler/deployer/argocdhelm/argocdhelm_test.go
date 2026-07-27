@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -256,6 +257,270 @@ func TestGenerate(t *testing.T) {
 				tt.assert(t, outputDir, output)
 			}
 		})
+	}
+}
+
+func TestGenerate_ProfileLockTemplate(t *testing.T) {
+	t.Run("unprofiled bundle emits no guard", func(t *testing.T) {
+		outputDir := t.TempDir()
+		g := &Generator{
+			RecipeResult: newRecipeResult("v1.0.0", []recipe.ComponentRef{{
+				Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+				Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+				Source: "https://helm.ngc.nvidia.com/nvidia",
+			}}),
+			ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+			Version:         "v0.0.0-test",
+		}
+		if _, err := g.Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(outputDir, "templates", "aicr-profile-lock.yaml")); !os.IsNotExist(err) {
+			t.Fatalf("unprofiled guard stat error = %v, want not-exist", err)
+		}
+	})
+
+	t.Run("profiled guard rejects structural intersections", func(t *testing.T) {
+		requireHelm(t)
+
+		outputDir := t.TempDir()
+		result := newRecipeResult("v1.0.0", []recipe.ComponentRef{{
+			Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+			Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+			Source: "https://helm.ngc.nvidia.com/nvidia",
+		}})
+		result.APIVersion = recipe.RecipeProfileAPIVersion
+		result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+			Name:  "gpuStack",
+			Value: "driver-installed",
+			OwnedPaths: map[string][]string{
+				"gpu-operator": {"driver.enabled", "enabled"},
+			},
+		}
+		g := &Generator{
+			RecipeResult: result,
+			ComponentValues: map[string]map[string]any{
+				"gpu-operator": {"driver": map[string]any{"enabled": false}},
+			},
+			Version: "v0.0.0-test",
+		}
+		if _, err := g.Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if _, err := g.Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("second Generate() into the same output directory error = %v", err)
+		}
+		guardPath := filepath.Join(outputDir, "templates", "aicr-profile-lock.yaml")
+		guard, err := os.ReadFile(guardPath)
+		if err != nil {
+			t.Fatalf("read profile lock guard: %v", err)
+		}
+		if !strings.Contains(string(guard), "gpu-operator.driver.enabled") {
+			t.Fatalf("profile lock guard does not name owned path:\n%s", guard)
+		}
+
+		tests := []struct {
+			name      string
+			extraArgs []string
+			wantErr   bool
+		}{
+			{name: "no component override"},
+			{
+				name:      "unrelated sibling",
+				extraArgs: []string{"--set", "gpuoperator.driver.version=580"},
+			},
+			{
+				name:      "exact false still intersects",
+				extraArgs: []string{"--set", "gpuoperator.driver.enabled=false"},
+				wantErr:   true,
+			},
+			{
+				name:      "explicit null still intersects",
+				extraArgs: []string{"--set-json", "gpuoperator.driver.enabled=null"},
+				wantErr:   true,
+			},
+			{
+				name:      "empty list still intersects",
+				extraArgs: []string{"--set-json", "gpuoperator.driver.enabled=[]"},
+				wantErr:   true,
+			},
+			{
+				name:      "non-map ancestor intersects",
+				extraArgs: []string{"--set-string", "gpuoperator.driver=blocked"},
+				wantErr:   true,
+			},
+			{
+				name:      "synthetic presence intersects",
+				extraArgs: []string{"--set", "gpuoperator.enabled=true"},
+				wantErr:   true,
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cmdCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+				defer cancel()
+				args := []string{
+					"template", "test-release", outputDir,
+					"--set", "repoURL=oci://example.test/aicr",
+				}
+				args = append(args, tt.extraArgs...)
+				cmd := exec.CommandContext(cmdCtx, "helm", args...) //nolint:gosec // controlled test arguments
+				out, err := cmd.CombinedOutput()
+				if (err != nil) != tt.wantErr {
+					t.Fatalf("helm template error = %v, wantErr %v\noutput:\n%s", err, tt.wantErr, out)
+				}
+				if tt.wantErr && !strings.Contains(string(out), "intersects profile-owned path") {
+					t.Fatalf("helm template error does not name profile intersection:\n%s", out)
+				}
+			})
+		}
+	})
+
+	t.Run("profiled to unprofiled regeneration removes guard", func(t *testing.T) {
+		outputDir := t.TempDir()
+		result := newRecipeResult("v1.0.0", []recipe.ComponentRef{{
+			Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+			Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+			Source: "https://helm.ngc.nvidia.com/nvidia",
+		}})
+		result.APIVersion = recipe.RecipeProfileAPIVersion
+		result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+			Name:  "gpuStack",
+			Value: "driver-installed",
+			OwnedPaths: map[string][]string{
+				"gpu-operator": {"driver.enabled", "enabled"},
+			},
+		}
+		g := &Generator{
+			RecipeResult: result,
+			ComponentValues: map[string]map[string]any{
+				"gpu-operator": {"driver": map[string]any{"enabled": false}},
+			},
+			Version: "v0.0.0-test",
+		}
+		if _, err := g.Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("profiled Generate() error = %v", err)
+		}
+		guardPath := filepath.Join(outputDir, "templates", "aicr-profile-lock.yaml")
+		if _, err := os.Stat(guardPath); err != nil {
+			t.Fatalf("profile guard stat error = %v", err)
+		}
+
+		result.APIVersion = recipe.RecipeAPIVersion
+		result.Metadata.SelectedProfile = nil
+		if _, err := g.Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("unprofiled regeneration error = %v", err)
+		}
+		if _, err := os.Stat(guardPath); !os.IsNotExist(err) {
+			t.Fatalf("stale profile guard stat error = %v, want not-exist", err)
+		}
+	})
+}
+
+func TestHasGeneratedProfileLockHeader_BoundedRead(t *testing.T) {
+	readPastHeader := errors.New("read past profile lock header")
+	reader := io.MultiReader(
+		strings.NewReader(profileLockTemplateHeader),
+		iotest.ErrReader(readPastHeader),
+	)
+
+	generated, err := hasGeneratedProfileLockHeader(reader)
+	if err != nil {
+		t.Fatalf("hasGeneratedProfileLockHeader() error = %v", err)
+	}
+	if !generated {
+		t.Fatal("hasGeneratedProfileLockHeader() = false, want true")
+	}
+}
+
+func TestWriteProfileLockTemplateRejectsUnownedExistingFile(t *testing.T) {
+	templatesDir := t.TempDir()
+	guardPath := filepath.Join(templatesDir, profileLockTemplateName+".yaml")
+	const sentinel = "user-owned template\n"
+	if err := os.WriteFile(guardPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatalf("write user-owned profile lock template: %v", err)
+	}
+
+	g := &Generator{RecipeResult: &recipe.RecipeResult{
+		Metadata: recipe.RecipeResultMetadata{
+			SelectedProfile: &recipe.SelectedProfile{
+				Name:  "gpuStack",
+				Value: "driver-installed",
+				OwnedPaths: map[string][]string{
+					"gpu-operator": {"driver.enabled", "enabled"},
+				},
+			},
+		},
+	}}
+	_, _, err := g.writeProfileLockTemplate(templatesDir)
+	if err == nil {
+		t.Fatal("writeProfileLockTemplate() accepted a user-owned template collision")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("writeProfileLockTemplate() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	got, readErr := os.ReadFile(guardPath)
+	if readErr != nil {
+		t.Fatalf("read user-owned profile lock template: %v", readErr)
+	}
+	if string(got) != sentinel {
+		t.Fatalf("user-owned profile lock template = %q, want unchanged %q", got, sentinel)
+	}
+}
+
+func TestTransformApplicationRejectsDeployerTemplateCollision(t *testing.T) {
+	srcDir := t.TempDir()
+	templatesDir := t.TempDir()
+	const (
+		folderName    = "001-aicr-profile-lock"
+		componentName = "aicr-profile-lock"
+		sentinel      = "profile lock must survive"
+	)
+
+	componentDir := filepath.Join(srcDir, folderName)
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("create component directory: %v", err)
+	}
+	app := `apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aicr-profile-lock
+spec:
+  destination:
+    namespace: argocd
+    server: https://kubernetes.default.svc
+  source:
+    repoURL: https://example.test/repository
+    path: 001-aicr-profile-lock
+    targetRevision: main
+`
+	if err := os.WriteFile(filepath.Join(componentDir, "application.yaml"), []byte(app), 0o600); err != nil {
+		t.Fatalf("write source application: %v", err)
+	}
+
+	lockPath := filepath.Join(templatesDir, componentName+".yaml")
+	if err := os.WriteFile(lockPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatalf("write deployer-owned template: %v", err)
+	}
+
+	_, _, err := transformApplication(
+		srcDir, templatesDir, folderName, componentName, "profilelock", true,
+	)
+	if err == nil {
+		t.Fatal("transformApplication() error = nil, want collision rejection")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "collides with a deployer-owned template") {
+		t.Fatalf("error = %v, want collision message", err)
+	}
+	got, readErr := os.ReadFile(lockPath)
+	if readErr != nil {
+		t.Fatalf("read deployer-owned template: %v", readErr)
+	}
+	if string(got) != sentinel {
+		t.Fatalf("deployer-owned template was overwritten: %q", got)
 	}
 }
 

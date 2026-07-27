@@ -333,6 +333,17 @@ aicr recipe   -s cm://default/snapshot --intent training
 
 When both a snapshot and explicit criteria are given, the explicit values win (e.g. `--snapshot … --service gke` overrides the detected service).
 
+**Configuration profiles:** an overlay composition may declare one named
+configuration choice. Select a non-default value with
+`--profile name=value`; omitting the flag applies the declaration's required
+default. A selection against a composition with no declaration, a wrong name,
+or an unknown value fails closed. Profile-bearing output records
+`metadata.selectedProfile`, uses recipe apiVersion `aicr.run/v1alpha3`, and
+locks every declared owned path against divergent bundle, mirror, and
+argocd-helm install-time overrides. The core mechanism ships without an
+embedded cloud adopter; a profile can initially be exercised through a
+versioned external overlay.
+
 **Every stated criteria dimension must be honored:** for `service`, `accelerator`, `intent`, `os`, and `platform`, resolution now enforces a coverage post-condition — if you state a value for one of these dimensions, at least one applied overlay must carry that exact value, or the request fails with an actionable `INVALID_REQUEST` error instead of silently returning a recipe that ignores what you asked for. The error names the uncovered dimension and, where possible, the additional criteria that would make the request resolvable (e.g. `platform 'kubeflow' ... requires os (valid: ubuntu)`). `--nodes` is exempt from this check — it is advisory only, since no overlay gates on node count, and stating it never requires matching node-count-specific recipe content to exist.
 
 **Snapshot-detected dimensions are advisory, not strict:** on the `--snapshot` path, `service`, `accelerator`, and `os` can be auto-detected from the cluster fingerprint rather than stated by you. If the coverage post-condition above fails and every uncovered dimension came from that detection (none of them were set via a CLI flag or `--config`), AICR relaxes those dimensions back to unstated and retries resolution once, logging a warning that names each relaxed dimension and its detected value — this handles overlay trees that are deliberately agnostic to a dimension the snapshot still reports (e.g. an OS-agnostic Kind overlay tree observing `os=ubuntu` on the node). Dimensions you passed explicitly via a flag are never relaxed: if any uncovered dimension was explicitly stated, the error still fails the request.
@@ -372,6 +383,15 @@ spec:
 
 Individual CLI flags always override config file values. For slice/map flags, presence on the CLI replaces the file's value (no append).
 
+For a composition that declares a profile, the equivalent config field is
+`spec.recipe.profile`. The CLI flag takes precedence:
+
+```yaml
+spec:
+  recipe:
+    profile: gpuStack=driver-installed
+```
+
 ```shell
 # Load criteria from config file
 aicr recipe --config config.yaml
@@ -400,6 +420,7 @@ Generate recipes using direct system parameters:
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
+| `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -455,6 +476,7 @@ compatible.
 | `--snapshot` | `-s` | string | Path/URI to snapshot (file path, URL, or cm://namespace/name) |
 | `--intent` | | string | Workload intent: training, inference |
 | `--platform` | | string | Explicit platform/framework type, including slurm |
+| `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
@@ -524,6 +546,24 @@ constraints:
     value: "<cuda-version>"       # illustrative
 ```
 
+A profiled result applies the selected value's constraints and component
+overrides to the normal recipe fields. It also uses a profile-aware recipe
+apiVersion and records the selected identity and declaration-wide lock
+surface:
+
+```yaml
+apiVersion: aicr.run/v1alpha3
+kind: RecipeResult
+metadata:
+  selectedProfile:
+    name: gpuStack
+    value: driver-installed
+    ownedPaths:
+      gpu-operator:
+        - driver.enabled
+        - enabled
+```
+
 ---
 
 ### aicr recipe list
@@ -567,6 +607,7 @@ with AND.
 | `criteria` | The full criteria dimensions the overlay targets |
 | `is_leaf` | `true` when the overlay is a leaf — no other overlay inherits from it |
 | `source` | Data provenance: `embedded` (built-in) or `external` (from `--data`) |
+| `profile` | Effective inherited profile summary (`name`, `description`, `default`, sorted `values`); structured output only and omitted when none is declared |
 | `health.status` | Rolled-up structural verdict for the leaf overlay: `pass`, `warn`, `fail`, or `unknown` (omitted for non-leaf overlays) |
 | `health.dimensions` | Per-dimension status map (e.g. `resolves`, `chart_pinned`) feeding the rollup |
 | `health.coverage` | Declared validation coverage per phase (`readiness`, `deployment`, `performance`, `conformance`): the named checks and phase-level constraint count each declares |
@@ -733,6 +774,7 @@ Uses dot-delimited paths consistent with Helm `--set` and `yq`:
 | `components.<name>.chart` | Component metadata field |
 | `components.<name>` | Entire hydrated component block |
 | `criteria.<field>` | Recipe criteria field |
+| `metadata.selectedProfile` | Selected profile identity and lock surface; present only on profiled recipes |
 | `deploymentOrder` | Component deployment order list |
 | `constraints` | Merged constraint list |
 | `.` or empty | Entire hydrated recipe |
@@ -894,7 +936,7 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** Snapshots and recipes also carry a schema `apiVersion` (currently `aicr.run/v1alpha2`). Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
+> **apiVersion gate:** Snapshots and legacy recipe results use `aicr.run/v1alpha2`. Recipe results with a selected configuration profile use `aicr.run/v1alpha3`. Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
 
@@ -1457,11 +1499,11 @@ The `--deployer` flag controls how deployment artifacts are generated:
 |--------|-------------|
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
 | `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
-| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
+| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths. |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 | `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
 
-> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
+> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all non-profile-owned values are overridable at install time (a profiled recipe ships a lock template that rejects install-time values on profile-owned paths).
 
 > **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
 
@@ -1491,6 +1533,12 @@ Override any value in the generated bundle files using dot notation:
 
 **Behavior:**
 - **Duplicate keys**: When the same `bundler:path` is specified multiple times, the **last value wins**
+- **Overlapping scalar paths**: Scalar paths are applied shallowest-first. If
+  one `--set` assigns a non-map parent and another assigns one of its
+  descendants (for example, `comp:driver=true` plus
+  `comp:driver.enabled=false`), the request is rejected regardless of flag
+  order. Use one coherent object through `--set-json` / `--set-file` when a
+  parent and its nested keys must be supplied together.
 - **Array values**: Individual array elements cannot be overridden (no `[0]` index syntax). `--set` is **scalar-only** — pointing it at a list/object field writes a bare string and produces type-invalid output. To replace an entire array or object from the CLI, use [`--set-json` / `--set-file`](#list-and-object-value-overrides); recipe-level overrides in `componentRefs[].overrides` are the alternative.
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
 - **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes a component the recipe enabled. A component the recipe **disabled** (`overrides.enabled: false`) cannot be re-enabled this way — `--set <component>:enabled=true` on such a component is rejected, since re-enabling a platform-provided component would install a conflicting second copy. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
@@ -1844,7 +1892,7 @@ Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
 **Argo CD deployer behavior:**
 
-The `--deployer argocd-helm` generates a Helm chart app-of-apps where all values are overridable at install time. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
+The `--deployer argocd-helm` generates a Helm chart app-of-apps where all non-profile-owned values are overridable at install time. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
 
 ```shell
 helm install aicr-bundle ./bundle \
@@ -1871,13 +1919,13 @@ aicr bundle -r recipe.yaml \
   --dynamic alloy:clusterName \
   -o ./bundles
 
-# Argo CD Helm chart: all values overridable, --dynamic pre-populates specific paths
+# Argo CD Helm chart: all non-profile-owned values overridable, --dynamic pre-populates specific paths
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   --dynamic alloy:clusterName \
   -o ./bundles
 
-# Argo CD Helm chart: without --dynamic, still fully overridable via helm --set
+# Argo CD Helm chart: without --dynamic, non-profile-owned values still overridable via helm --set
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   -o ./bundles
@@ -2648,6 +2696,7 @@ aicr mirror list [flags]
 | `--intent` | | string | | Workload intent (`training` or `inference`). Alternative to `--recipe`. |
 | `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
 | `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
+| `--profile` | | string | | Profile selection in exact `name=value` form when resolving from criteria. Cannot be combined with `--recipe`. |
 | `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
 | `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |

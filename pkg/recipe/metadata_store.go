@@ -19,6 +19,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"path/filepath"
@@ -85,6 +86,8 @@ type pendingRegistryEntry struct {
 	criteria *Criteria
 	source   string
 }
+
+const constraintContextKey = "constraint"
 
 // LoadMetadataStoreFor loads (and caches) the metadata store for the supplied
 // DataProvider. Concurrent callers with the same provider observe the same
@@ -263,15 +266,54 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read %s", path), readErr)
 		}
 
+		var metadataHeader RecipeMetadataHeader
+		if parseErr := yaml.Unmarshal(content, &metadataHeader); parseErr != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse header for %s", path), parseErr)
+		}
+		if metadataHeader.APIVersion == RecipeProfileAPIVersion &&
+			metadataHeader.Kind != RecipeMetadataKind {
+
+			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("profile catalog file %s requires kind %q, got %q",
+					path, RecipeMetadataKind, metadataHeader.Kind))
+		}
+		// Skip files with a different kind (e.g., ValidatorCatalog) only
+		// after the profile apiVersion has been gated. A misspelled kind on a
+		// v1alpha3 profile overlay must not silently remove the declaration.
+		if metadataHeader.Kind != "" && metadataHeader.Kind != RecipeMetadataKind {
+			slog.Debug("skipping non-recipe YAML", "path", path, "kind", metadataHeader.Kind)
+			return nil
+		}
+
 		var metadata RecipeMetadata
-		if parseErr := yaml.Unmarshal(content, &metadata); parseErr != nil {
+		if metadataHeader.APIVersion == RecipeProfileAPIVersion {
+			decoder := yaml.NewDecoder(bytes.NewReader(content))
+			decoder.KnownFields(true)
+			if parseErr := decoder.Decode(&metadata); parseErr != nil {
+				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("failed to parse %s as strict %s RecipeMetadata", path, RecipeProfileAPIVersion),
+					parseErr)
+			}
+			var trailing any
+			if parseErr := decoder.Decode(&trailing); !stderrors.Is(parseErr, io.EOF) {
+				if parseErr == nil {
+					return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+						fmt.Sprintf("profile RecipeMetadata %s contains multiple YAML documents", path))
+				}
+				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("failed to check trailing content in %s", path), parseErr)
+			}
+		} else if parseErr := yaml.Unmarshal(content, &metadata); parseErr != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse %s", path), parseErr)
 		}
 
-		// Skip files with a different kind (e.g., ValidatorCatalog).
-		if metadata.Kind != "" && metadata.Kind != RecipeMetadataKind {
-			slog.Debug("skipping non-recipe YAML", "path", path, "kind", metadata.Kind)
-			return nil
+		if profileErr := ValidateRecipeMetadataProfile(&metadata); profileErr != nil {
+			return aicrerrors.PropagateOrWrap(profileErr, aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid profile declaration in %s", path))
+		}
+		if metadata.APIVersion == RecipeProfileAPIVersion && metadata.Metadata.Name == "" {
+			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("profile RecipeMetadata %s requires metadata.name", path))
 		}
 
 		// Categorize as base or overlay
@@ -761,6 +803,9 @@ func (s *MetadataStore) evaluateMixinConstraints(
 		if !mixinConstraintNames[constraint.Name] {
 			continue // already evaluated per-overlay
 		}
+		if constraintErr := validateConstraintWarningSource(constraint); constraintErr != nil {
+			return mixinEvalResult{}, constraintErr
+		}
 		result := evaluator(constraint)
 		if result.Error != nil && !isNotFoundEvalError(result.Error) {
 			// Fail closed on non-NotFound evaluation errors (design 5.2).
@@ -776,8 +821,8 @@ func (s *MetadataStore) evaluateMixinConstraints(
 					aicrerrors.ErrCodeInternal,
 					"failed to map mixin constraint to candidate chain",
 					map[string]any{
-						"constraint":      constraint.Name,
-						"candidate_count": len(candidateOverlays),
+						constraintContextKey: constraint.Name,
+						"candidate_count":    len(candidateOverlays),
 					},
 				)
 			}
@@ -848,6 +893,18 @@ func buildMixinConstraintWarningReason(constraint Constraint, result ConstraintE
 		return fmt.Sprintf("mixin-constraint-failed: %s", result.Error.Error())
 	}
 	return fmt.Sprintf("mixin-constraint-failed: expected %s, got %s", constraint.Value, result.Actual)
+}
+
+func validateConstraintWarningSource(constraint Constraint) error {
+	if constraint.Name == "" {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			"constraint name is required for snapshot evaluation")
+	}
+	if constraint.Value == "" {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("constraint %q value is required for snapshot evaluation", constraint.Name))
+	}
+	return nil
 }
 
 // buildMixinConstraintCandidateIndex maps mixin-contributed constraint names to
@@ -997,6 +1054,13 @@ func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec 
 // Each matching overlay is resolved through its inheritance chain before merging.
 // This enables multi-level inheritance: base → intermediate → overlay.
 func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteria) (*RecipeResult, error) {
+	return s.BuildRecipeResultWithProfile(ctx, criteria, "")
+}
+
+// BuildRecipeResultWithProfile builds a RecipeResult and applies an explicit
+// name=value profile selection, or the declaration's default when selection is
+// empty.
+func (s *MetadataStore) BuildRecipeResultWithProfile(ctx context.Context, criteria *Criteria, selection string) (*RecipeResult, error) {
 	select {
 	case <-ctx.Done():
 		return nil, aicrerrors.WrapWithContext(
@@ -1013,25 +1077,29 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 	if err := s.requireOSIfNeeded(criteria, overlays); err != nil {
 		return nil, err
 	}
+	effectiveProfile, err := s.resolveProfileDeclaration(overlays)
+	if err != nil {
+		return nil, err
+	}
 
 	mergedSpec, appliedOverlays := s.initBaseMergedSpec()
 
-	appliedOverlays, err := s.mergeOverlayChains(overlays, &mergedSpec, appliedOverlays)
+	appliedOverlays, err = s.mergeOverlayChains(overlays, &mergedSpec, appliedOverlays)
 	if err != nil {
 		return nil, err
 	}
 
 	// Merge mixin fragments referenced by overlays in the chain
-	if _, err := s.mergeMixins(&mergedSpec); err != nil {
-		return nil, err
+	if _, mixinErr := s.mergeMixins(&mergedSpec); mixinErr != nil {
+		return nil, mixinErr
 	}
 
 	// Post-condition (issue #1542): every stated criteria dimension must be
 	// honored by the final applied set. Runs after mergeOverlayChains so
 	// ancestor-supplied coverage counts; mixins carry no criteria and cannot
 	// change coverage.
-	if err := s.verifyCriteriaCoverage(criteria, appliedOverlays, nil, nil); err != nil {
-		return nil, err
+	if coverageErr := s.verifyCriteriaCoverage(criteria, appliedOverlays, nil, nil); coverageErr != nil {
+		return nil, coverageErr
 	}
 
 	if len(appliedOverlays) <= 1 {
@@ -1040,7 +1108,23 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 			"hint", "recipe may not be optimized for your environment")
 	}
 
-	return finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays) //nolint:contextcheck // finalizeRecipeResult routes registry lookups through GetComponentRegistryFor, which is sync.Once-cached and bounds first-load I/O via an internal bounded background context (loadComponentRegistryFor). Threading ctx here is tracked separately if/when the cascade needs caller-driven cancellation.
+	selected, err := applyEffectiveProfile(&mergedSpec, effectiveProfile, selection, nil)
+	if err != nil {
+		return nil, err
+	}
+	result, err := finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays) //nolint:contextcheck // finalizeRecipeResult routes registry lookups through GetComponentRegistryFor, which is sync.Once-cached and bounds first-load I/O via an internal bounded background context (loadComponentRegistryFor). Threading ctx here is tracked separately if/when the cascade needs caller-driven cancellation.
+	if err != nil {
+		return nil, err
+	}
+	if selected == nil {
+		return result, nil
+	}
+	result.APIVersion = RecipeProfileAPIVersion
+	result.Metadata.SelectedProfile = selected
+	if err := result.ValidateProfileValuesWithContext(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // BuildRecipeResultWithEvaluator builds a RecipeResult by merging base with matching overlays,
@@ -1054,8 +1138,20 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 // The evaluator function is called for each constraint in each matching overlay.
 // If evaluator is nil, this method behaves identically to BuildRecipeResult.
 func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, criteria *Criteria, evaluator ConstraintEvaluatorFunc) (*RecipeResult, error) {
+	return s.BuildRecipeResultWithEvaluatorAndProfile(ctx, criteria, evaluator, "")
+}
+
+// BuildRecipeResultWithEvaluatorAndProfile is the snapshot-filtered profile
+// resolution path.
+func (s *MetadataStore) BuildRecipeResultWithEvaluatorAndProfile(
+	ctx context.Context,
+	criteria *Criteria,
+	evaluator ConstraintEvaluatorFunc,
+	selection string,
+) (*RecipeResult, error) {
+
 	if evaluator == nil {
-		return s.BuildRecipeResult(ctx, criteria)
+		return s.BuildRecipeResultWithProfile(ctx, criteria, selection)
 	}
 
 	select {
@@ -1073,6 +1169,10 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 	overlays := s.FindMatchingOverlays(criteria)
 
 	if err := s.requireOSIfNeeded(criteria, overlays); err != nil {
+		return nil, err
+	}
+	effectiveProfile, err := s.resolveProfileDeclaration(overlays)
+	if err != nil {
 		return nil, err
 	}
 
@@ -1107,7 +1207,7 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 
 	mergedSpec, appliedOverlays := s.initBaseMergedSpec()
 
-	appliedOverlays, err := s.mergeOverlayChains(filteredOverlays, &mergedSpec, appliedOverlays)
+	appliedOverlays, err = s.mergeOverlayChains(filteredOverlays, &mergedSpec, appliedOverlays)
 	if err != nil {
 		return nil, err
 	}
@@ -1138,6 +1238,16 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 		appliedOverlays = mixinResult.AppliedOverlays
 	}
 
+	survivingProfile, err := s.resolveAppliedProfileDeclaration(appliedOverlays)
+	if err != nil {
+		return nil, err
+	}
+	if survivalErr := ensureProfileDeclarationSurvived(
+		effectiveProfile, survivingProfile, excludedOverlays, constraintWarnings,
+	); survivalErr != nil {
+		return nil, survivalErr
+	}
+
 	// Post-condition (issue #1542): runs against the FINAL applied set —
 	// after per-overlay constraint exclusion AND the mixin-failure fallback
 	// rebuild — so a stated dimension whose only coverage was excluded
@@ -1165,9 +1275,20 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 		}
 	}
 
+	selected, err := applyEffectiveProfile(&mergedSpec, effectiveProfile, selection, evaluator)
+	if err != nil {
+		return nil, err
+	}
 	result, err := finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays) //nolint:contextcheck // see BuildRecipeResult: registry I/O is sync.Once-cached + bounded inside loadComponentRegistryFor.
 	if err != nil {
 		return nil, err
+	}
+	if selected != nil {
+		result.APIVersion = RecipeProfileAPIVersion
+		result.Metadata.SelectedProfile = selected
+		if err := result.ValidateProfileValuesWithContext(ctx); err != nil {
+			return nil, err
+		}
 	}
 	result.Metadata.ExcludedOverlays = excludedOverlays
 	result.Metadata.ConstraintWarnings = constraintWarnings
@@ -1194,6 +1315,9 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 	allPassed := true
 
 	for _, constraint := range overlay.Spec.Constraints {
+		if err := validateConstraintWarningSource(constraint); err != nil {
+			return false, nil, err
+		}
 		result := evaluator(constraint)
 
 		switch {
@@ -1217,7 +1341,7 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 			allPassed = false
 			slog.Debug("constraint evaluation error",
 				"overlay", overlay.Metadata.Name,
-				"constraint", constraint.Name,
+				constraintContextKey, constraint.Name,
 				"error", result.Error)
 		case !result.Passed:
 			warnings = append(warnings, ConstraintWarning{
@@ -1230,13 +1354,13 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 			allPassed = false
 			slog.Debug("constraint failed",
 				"overlay", overlay.Metadata.Name,
-				"constraint", constraint.Name,
+				constraintContextKey, constraint.Name,
 				"expected", constraint.Value,
 				"actual", result.Actual)
 		default:
 			slog.Debug("constraint passed",
 				"overlay", overlay.Metadata.Name,
-				"constraint", constraint.Name,
+				constraintContextKey, constraint.Name,
 				"expected", constraint.Value,
 				"actual", result.Actual)
 		}

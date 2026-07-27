@@ -198,6 +198,56 @@ to walking from the root spec down to this node. Leaf is a role, not a
 distinct `kind` — every overlay is a `RecipeMetadata`; "leaf" just
 names the ones at the end of a chain.
 
+### Configuration Profile Contract
+
+`RecipeMetadata.Spec.Profile` declares one overlay-scoped enum for qualified
+configuration ownership modes. A declaration requires recipe apiVersion
+`aicr.run/v1alpha3`; that version without a declaration, or a declaration on
+the legacy version, is rejected. Profile-version metadata and recipe
+artifacts are strictly decoded so an unknown field cannot silently disappear.
+
+The core `ProfileValue` contract is closed to `constraints` and
+`componentRefs{name,overrides}`. It rejects `valuesFile`, component
+identity/deployment fields, root `overrides.enabled`, literal dotted keys,
+nested empty maps, and allocation-policy selector paths. The `advertiser`
+wire field is reserved for the later GKE extension and is rejected by the
+core validator. Value-bearing ownership is limited to Helm components;
+Kustomize components do not consume values overrides and support only a
+valueless reference for presence locking.
+
+Resolution enforces these invariants:
+
+1. Before snapshot filtering, collect declarations from every matching
+   candidate chain. Deduplicate one declaring source reached through multiple
+   chains; reject independently authored declarations.
+2. Snapshot filtering may not remove the declaring source and fall back to an
+   unprofiled composition.
+3. Apply an explicit `name=value` selection or the required default after
+   overlays and mixins. Every referenced component across all values must
+   already be enabled in the surviving composition.
+4. Every value has the same flattened override-path set. Apply the selected
+   fragment at the highest recipe precedence and reject constraint-name
+   collisions.
+5. Evaluate selected profile constraints fail closed. A missing reading has a
+   distinct invalid-request diagnostic; other evaluator failures propagate.
+6. Stamp the result `aicr.run/v1alpha3` and persist
+   `metadata.selectedProfile`. Its sorted `ownedPaths` is the
+   declaration-wide path union plus synthetic `enabled` for each referenced
+   component.
+
+The shared raw-artifact gate checks version/profile coupling and hydrates
+profile-owned values. Bundle and mirror compare final candidate state with the
+hydrated recipe before creating output. Exact, ancestor, or descendant dynamic
+paths reject unconditionally; static writes reject only when the effective
+three-state observation (present bytes, absent, or blocked) diverges.
+Argocd-helm emits the corresponding structural template-time guard. Other
+deployers have no supported install-time value surface.
+
+Unprofiled compositions retain the legacy apiVersion and byte shape.
+Generation-side driver auto-detection skips a path owned by the selected
+profile. Evidence projection also rejects profiled artifacts until generic
+per-value evidence support lands with the first adopter.
+
 ## Mixin Composition
 
 Inheritance is single-parent, which means cross-cutting concerns (OS
@@ -308,7 +358,7 @@ The resolver lives in `pkg/recipe/metadata_store.go`. The merge
 proceeds in this temporal order:
 
 ```text
-base chain (root → leaf) → mixins → registry defaults → CLI/API --set
+base chain (root → leaf) → mixins → selected profile → registry defaults → CLI/API --set
 ```
 
 The base inheritance chain is merged first (root → leaf, later
@@ -335,12 +385,16 @@ Implementation notes:
    the leaf, loads each from `recipes/mixins/`, and appends.
    `mixinComponentRefSafeForMerge` rejects mixin componentRefs that
    touch identity/sourcing fields.
-4. **Registry defaults.** `applyRegistryDefaults(provider, refs)`
+4. **Profile specialization.** When the pre-filter composition found one
+   declaration and that source survived filtering, apply the selected value
+   after the chain and mixins. The fragment supersedes earlier assignments
+   only on its closed override surface. Unprofiled resolution skips this step.
+5. **Registry defaults.** `applyRegistryDefaults(provider, refs)`
    fills in chart/version/namespace/source/tag/path defaults for any
    `ComponentRef` field still empty after the chain merge. Failure to
    load the registry is propagated, not swallowed — partial refs
    would fail downstream far from the root cause.
-5. **Topological sort.** `TopologicalSort()` orders components by
+6. **Topological sort.** `TopologicalSort()` orders components by
    `dependencyRefs` for the final `DeploymentOrder`. Cycles produce
    `ErrCodeInvalidRequest`. Components disabled via
    `overrides.enabled: false` (`ComponentRef.IsEnabled()`) are excluded

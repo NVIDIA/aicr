@@ -41,7 +41,11 @@
 //  3. Build a root values.yaml with ONLY dynamic paths (recipe defaults when
 //     available, empty strings otherwise). Static values stay in chart files.
 //  4. Write Chart.yaml + templates/ + values.yaml as a valid Helm chart,
-//     plus static/ when any component contributes a values file to it.
+//     plus static/ when any component contributes a values file to it, and
+//     templates/aicr-profile-lock.yaml when the recipe carries a selected
+//     profile. That template fails the install if a value is supplied for a
+//     profile-owned path, so the lock survives helm install/upgrade rather
+//     than holding only at bundle generation.
 //
 // This approach means changes to the Argo CD deployer (new component types,
 // sync policies, etc.) automatically flow through without duplication.
@@ -50,7 +54,9 @@
 //
 // The bundler routes here when --deployer argocd-helm is specified.
 // The --dynamic flag is optional — it pre-populates specific paths in the
-// root values.yaml, but all values are overridable regardless.
+// root values.yaml, but all non-profile-owned values are overridable
+// regardless. Profile-owned paths are the exception: the lock template
+// above rejects install-time values for them.
 //
 // # Deployment requires a chart-source backend (git or OCI)
 //
@@ -75,7 +81,9 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -96,10 +104,18 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// yamlStringTag is the YAML resolved-tag for explicit scalar strings, used
-// when emitting nodes that must serialize as quoted strings (e.g. Helm
-// template placeholders that would otherwise be misparsed).
-const yamlStringTag = "!!str"
+const (
+	// yamlStringTag is the YAML resolved-tag for explicit scalar strings, used
+	// when emitting nodes that must serialize as quoted strings (e.g. Helm
+	// template placeholders that would otherwise be misparsed).
+	yamlStringTag = "!!str"
+
+	// profileLockTemplateName is reserved only when a profiled recipe emits
+	// the deployer-owned install-time guard of the same name.
+	profileLockTemplateName = "aicr-profile-lock"
+
+	profileLockTemplateHeader = "{{- /* AICR profile install-time ownership guard. */ -}}\n"
+)
 
 // DefaultChartName is the Helm chart name used when ChartName is not set
 // (typically when --output is a local directory). When --output is an OCI
@@ -389,6 +405,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if mkdirErr := os.MkdirAll(templatesDir, 0755); mkdirErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create templates directory", mkdirErr)
 	}
+	lockPath, lockSize, lockErr := g.writeProfileLockTemplate(templatesDir)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	if lockPath != "" {
+		output.Files = append(output.Files, lockPath)
+		output.TotalSize += lockSize
+	}
 
 	if processErr := g.processFolders(ctx, tmpDir, outputDir, templatesDir, output); processErr != nil {
 		return nil, processErr
@@ -432,6 +456,155 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	)
 
 	return output, nil
+}
+
+// writeProfileLockTemplate emits a Helm-render-time guard for profiled
+// bundles. ArgoCD-Helm deliberately exposes component values through the
+// parent chart's .Values; the guard rejects any install-time key whose path
+// equals, contains, or is contained by a profile-owned path. Key existence is
+// used throughout, so false, null, empty maps, and empty lists cannot bypass
+// the lock. Unprofiled bundles emit no file and remain byte-identical.
+func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64, error) {
+	if g.RecipeResult == nil || g.RecipeResult.Metadata.SelectedProfile == nil {
+		if err := removeGeneratedProfileLockTemplate(templatesDir); err != nil {
+			return "", 0, err
+		}
+		return "", 0, nil
+	}
+
+	components := make([]string, 0, len(g.RecipeResult.Metadata.SelectedProfile.OwnedPaths))
+	for component := range g.RecipeResult.Metadata.SelectedProfile.OwnedPaths {
+		components = append(components, component)
+	}
+	sort.Strings(components)
+
+	var buf strings.Builder
+	buf.WriteString(profileLockTemplateHeader)
+	for componentIndex, componentName := range components {
+		overrideKey, err := resolveOverrideKey(componentName, g.RecipeResult.DataProvider())
+		if err != nil {
+			return "", 0, err
+		}
+		for pathIndex, lockedPath := range g.RecipeResult.Metadata.SelectedProfile.OwnedPaths[componentName] {
+			segments := strings.Split(lockedPath, ".")
+			writeProfilePathGuard(
+				&buf,
+				".Values",
+				append([]string{overrideKey}, segments...),
+				fmt.Sprintf("aicrProfile%d_%d", componentIndex, pathIndex),
+				componentName+"."+lockedPath,
+			)
+		}
+	}
+
+	outputPath, err := deployer.SafeJoin(templatesDir, profileLockTemplateName+".yaml")
+	if err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			"failed to resolve profile lock template path", err)
+	}
+	exists, generated, err := inspectProfileLockTemplate(outputPath)
+	if err != nil {
+		return "", 0, err
+	}
+	if exists && !generated {
+		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("refusing to overwrite non-AICR profile lock template %q", outputPath))
+	}
+	content := []byte(buf.String())
+	if err := os.WriteFile(outputPath, content, 0600); err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			"failed to write profile lock template", err)
+	}
+	return outputPath, int64(len(content)), nil
+}
+
+// removeGeneratedProfileLockTemplate removes only a guard recognizable as
+// AICR-owned output from a prior profiled generation. An unrelated preexisting
+// file with the same name is left untouched so unprofiled generation retains
+// its legacy collision behavior.
+func removeGeneratedProfileLockTemplate(templatesDir string) error {
+	outputPath, err := deployer.SafeJoin(templatesDir, profileLockTemplateName+".yaml")
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to resolve stale profile lock template path", err)
+	}
+	exists, generated, err := inspectProfileLockTemplate(outputPath)
+	if err != nil {
+		return err
+	}
+	if !exists || !generated {
+		return nil
+	}
+	if err := os.Remove(outputPath); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to remove stale profile lock template", err)
+	}
+	return nil
+}
+
+func inspectProfileLockTemplate(outputPath string) (bool, bool, error) {
+	file, err := os.Open(outputPath)
+	if os.IsNotExist(err) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect profile lock template", err)
+	}
+	generated, inspectErr := hasGeneratedProfileLockHeader(file)
+	closeErr := file.Close()
+	if inspectErr != nil {
+		return false, false, errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect profile lock template", inspectErr)
+	}
+	if closeErr != nil {
+		return false, false, errors.Wrap(errors.ErrCodeInternal,
+			"failed to close profile lock template", closeErr)
+	}
+	return true, generated, nil
+}
+
+func hasGeneratedProfileLockHeader(reader io.Reader) (bool, error) {
+	prefix := make([]byte, len(profileLockTemplateHeader))
+	n, err := io.ReadFull(reader, prefix)
+	if err != nil {
+		if stderrors.Is(err, io.EOF) || stderrors.Is(err, io.ErrUnexpectedEOF) {
+			return false, nil
+		}
+		return false, err
+	}
+	return n == len(prefix) && string(prefix) == profileLockTemplateHeader, nil
+}
+
+func writeProfilePathGuard(
+	buf *strings.Builder,
+	parent string,
+	segments []string,
+	varPrefix string,
+	displayPath string,
+) {
+
+	if len(segments) == 0 {
+		return
+	}
+	key := segments[0]
+	fmt.Fprintf(buf, "{{- if hasKey %s %q -}}\n", parent, key)
+	if len(segments) == 1 {
+		fmt.Fprintf(buf, "{{- fail %q -}}\n",
+			"install-time value intersects profile-owned path "+displayPath)
+		buf.WriteString("{{- end -}}\n")
+		return
+	}
+
+	current := fmt.Sprintf("$%s_%d", varPrefix, len(segments))
+	fmt.Fprintf(buf, "{{- %s := index %s %q -}}\n", current, parent, key)
+	fmt.Fprintf(buf, "{{- if kindIs \"map\" %s -}}\n", current)
+	writeProfilePathGuard(buf, current, segments[1:], varPrefix, displayPath)
+	buf.WriteString("{{- else -}}\n")
+	fmt.Fprintf(buf, "{{- fail %q -}}\n",
+		"install-time value intersects profile-owned path "+displayPath)
+	buf.WriteString("{{- end -}}\n")
+	buf.WriteString("{{- end -}}\n")
 }
 
 // writeValuesFiles writes the chart's value surfaces: per-component
@@ -1053,6 +1226,8 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 	if readErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to list argocd output", readErr)
 	}
+	profileLockReserved := g.RecipeResult != nil &&
+		g.RecipeResult.Metadata.SelectedProfile != nil
 	for _, e := range folderEntries {
 		select {
 		case <-ctx.Done():
@@ -1143,7 +1318,9 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 		if keyErr != nil {
 			return keyErr
 		}
-		tmplPath, tmplSize, transformErr := transformApplication(tmpDir, templatesDir, folderName, folderComponent, overrideKey)
+		tmplPath, tmplSize, transformErr := transformApplication(
+			tmpDir, templatesDir, folderName, folderComponent, overrideKey, profileLockReserved,
+		)
 		if transformErr != nil {
 			return transformErr
 		}
@@ -1164,7 +1341,11 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 //   - spec.source (single-source path-based): inject helm.values that exposes
 //     just the dynamic .Values.<overrideKey> overrides; the wrapped chart at
 //     the path provides its own values.yaml as the static layer.
-func transformApplication(srcDir, templatesDir, folderName, componentName, overrideKey string) (string, int64, error) {
+func transformApplication(
+	srcDir, templatesDir, folderName, componentName, overrideKey string,
+	profileLockReserved bool,
+) (string, int64, error) {
+
 	if !deployer.IsSafePathComponent(componentName) {
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", componentName))
@@ -1172,6 +1353,10 @@ func transformApplication(srcDir, templatesDir, folderName, componentName, overr
 	if !deployer.IsSafePathComponent(folderName) {
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid folder name %q: must not contain path separators or parent directory references", folderName))
+	}
+	if profileLockReserved && componentName == profileLockTemplateName {
+		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q template collides with a deployer-owned template", componentName))
 	}
 	componentDir, joinErr := deployer.SafeJoin(srcDir, folderName)
 	if joinErr != nil {
@@ -1561,8 +1746,9 @@ func copyFolderContent(srcDir, outputDir, folderName string, skip ...string) ([]
 // replacing the multi-source "sources" block with a single "source" that
 // loads static values from a chart file and merges dynamic overrides.
 //
-// All Helm components use the merge pattern — every value is overridable
-// at install time via --set, not just paths declared with --dynamic.
+// All Helm components use the merge pattern — every non-profile-owned value
+// is overridable at install time via --set, not just paths declared with
+// --dynamic. Profile-owned paths are rejected by the lock template, not here.
 func convertToSingleSourceWithValues(app map[string]any, componentName, overrideKey string) error {
 	spec, ok := app["spec"].(map[string]any)
 	if !ok {

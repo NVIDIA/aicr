@@ -211,6 +211,17 @@ func TestParseBundleConfig_Serial(t *testing.T) {
 	}
 }
 
+func TestSupportedBundleQueryParametersReturnsDefensiveCopy(t *testing.T) {
+	t.Parallel()
+
+	parameters := SupportedBundleQueryParameters()
+	delete(parameters, bundleQuerySet)
+
+	if _, ok := SupportedBundleQueryParameters()[bundleQuerySet]; !ok {
+		t.Errorf("deleting %q from returned map mutated the supported parameter set", bundleQuerySet)
+	}
+}
+
 func TestStreamZipResponseContext_VerifiedInventory(t *testing.T) {
 	dir, inventory := writeVerifiedZipBundle(t, true)
 	output := &result.Output{

@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -103,6 +104,10 @@ func (r *RecipeSpec) validate() error {
 	}
 	if _, err := r.ResolveCriteriaWithRegistry(nil); err != nil {
 		return err
+	}
+	if _, err := recipe.ParseProfileSelection(r.Profile); err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"invalid spec.recipe.profile")
 	}
 	if r.Output != nil && r.Output.Format != "" {
 		if serializer.Format(r.Output.Format).IsUnknown() {

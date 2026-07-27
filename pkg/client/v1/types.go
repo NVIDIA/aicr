@@ -240,6 +240,10 @@ type RecipeRequest struct {
 	// "kubeflow", "nim".
 	Platform string
 
+	// Profile is an optional name=value configuration profile selection.
+	// Empty applies the resolved declaration's mandatory default.
+	Profile string
+
 	// PinnedName reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable; set the criteria
 	// fields above instead.
@@ -273,6 +277,10 @@ type RecipeResult struct {
 	// the full underlying ComponentRefs (enabled and disabled).
 	Components []ComponentRef
 
+	// SelectedProfile is present when the resolved composition declares a
+	// configuration profile.
+	SelectedProfile *SelectedProfile
+
 	// internal holds the upstream pkg/recipe.RecipeResult so
 	// BundleComponents can call its GetValuesForComponent /
 	// component-ref helpers without re-resolving the recipe.
@@ -298,9 +306,35 @@ type RecipeResult struct {
 	owner *Client
 }
 
+// SelectedProfile is the stable facade projection of a recipe profile.
+// It is populated only for aicr.run/v1alpha3 results; an unprofiled
+// composition leaves it nil.
+type SelectedProfile struct {
+	// Name is the declaration this selection came from, e.g. "gpuStack".
+	Name string
+
+	// Value is the selected value within that declaration.
+	Value string
+
+	// Advertiser is reserved for the future GKE allocation-policy
+	// extension and is always empty in this version — a declaration
+	// carrying one is rejected at catalog load, so no result reaches a
+	// caller with it set. Do not branch on it.
+	Advertiser string
+
+	// OwnedPaths maps each locked component to its sorted dotted value
+	// paths, and is the union across every value of the declaration rather
+	// than only the selected one. Every listed component carries the
+	// synthetic "enabled" path recording that the profile owns its
+	// presence. Overriding any listed path is rejected at bundle time
+	// unless the override agrees with the selected value.
+	OwnedPaths map[string][]string
+}
+
 // Resolved returns the complete underlying recipe (the full
 // pkg/recipe.RecipeResult) that this result wraps. The facade RecipeResult
-// exposes only Name/Version/Components; callers that need constraints,
+// exposes only Name/Version/TranslatedAt/Components/SelectedProfile;
+// callers that need constraints,
 // validation config, deployment order, or metadata (e.g. evidence emission)
 // use this. Returns nil if the result was not produced by the Client.
 //
@@ -387,6 +421,18 @@ type CatalogEntry struct {
 
 	// Source is the data provenance: "embedded" or "external".
 	Source string `json:"source" yaml:"source"`
+
+	// Profile is the effective declaration after inheritance and co-match
+	// resolution. It is nil for an unprofiled catalog entry.
+	Profile *ProfileSummary `json:"profile,omitempty" yaml:"profile,omitempty"`
+}
+
+// ProfileSummary is the compact catalog discovery shape.
+type ProfileSummary struct {
+	Name        string   `json:"name" yaml:"name"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+	Default     string   `json:"default" yaml:"default"`
+	Values      []string `json:"values" yaml:"values"`
 }
 
 // ComponentRef identifies a deployable recipe component.

@@ -322,15 +322,21 @@ func (c *Client) LoadCatalog(ctx context.Context) error {
 // catalog is fully populated before calling this.
 //
 // Each entry carries the overlay name, its criteria, whether it is a leaf
-// (IsLeaf=true means no other overlay inherits from it), and its data
-// provenance ("embedded" or "external"). Entries are returned in ascending
-// name order for deterministic output.
+// (IsLeaf=true means no other overlay inherits from it), its data provenance
+// ("embedded" or "external"), and its effective configuration profile — the
+// declaration reachable from that overlay after inheritance and co-match
+// resolution, nil when the overlay reaches none. Entries are returned in
+// ascending name order for deterministic output.
 //
 // When filter is non-nil, only overlays whose criteria carry the exact values
 // specified in each non-empty/non-"any" filter dimension are returned. Setting
 // a filter dimension to "" or "any" places no constraint on that dimension.
 //
-// Returns ErrCodeInvalidRequest on a nil or closed Client, and propagates
+// Returns ErrCodeInvalidRequest on a nil or closed Client, or when an overlay
+// reachable from the filtered set declares an invalid profile — profile
+// declarations are validated during projection, so a malformed declaration
+// fails the whole call rather than yielding a partial catalog. Returns
+// ErrCodeTimeout if ctx is canceled during projection, and propagates
 // ErrCodeInternal if the underlying metadata store cannot be loaded.
 func (c *Client) ListCatalog(ctx context.Context, filter *Criteria) ([]CatalogEntry, error) {
 	if c == nil {
@@ -358,9 +364,15 @@ func (c *Client) ListCatalog(ctx context.Context, filter *Criteria) ([]CatalogEn
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load recipe catalog")
 	}
 
-	raw := store.ListCatalog(toInternalCriteria(filter))
+	raw, err := store.ListCatalogWithProfiles(ctx, toInternalCriteria(filter))
+	if err != nil {
+		return nil, err
+	}
 	entries := make([]CatalogEntry, len(raw))
 	for i, e := range raw {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "catalog response conversion canceled", ctxErr)
+		}
 		var crit Criteria
 		if wrapped := WrapCriteria(e.Criteria); wrapped != nil {
 			crit = *wrapped
@@ -371,6 +383,17 @@ func (c *Client) ListCatalog(ctx context.Context, filter *Criteria) ([]CatalogEn
 			IsLeaf:   e.IsLeaf,
 			Source:   e.Source,
 		}
+		if e.Profile != nil {
+			entries[i].Profile = &ProfileSummary{
+				Name:        e.Profile.Name,
+				Description: e.Profile.Description,
+				Default:     e.Profile.Default,
+				Values:      append([]string(nil), e.Profile.Values...),
+			}
+		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "catalog response conversion canceled", ctxErr)
 	}
 	return entries, nil
 }
@@ -500,7 +523,7 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		return nil, err
 	}
 
-	internal, err := c.resolveCriteria(ctx, builder, criteria)
+	internal, err := c.resolveCriteria(ctx, builder, criteria, req.Profile)
 	if err != nil {
 		// Don't re-wrap with ErrCodeInternal — the builder already
 		// returns a structured error with the appropriate code
@@ -529,11 +552,17 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 // vs-lossless projection and owner stamping. The criteria parameter is the
 // upstream pkg/recipe.Criteria shape — facade entry points translate via
 // toInternalCriteria before reaching here.
-func (c *Client) resolveCriteria(ctx context.Context, builder *recipe.Builder, criteria *recipe.Criteria) (*recipe.RecipeResult, error) {
+func (c *Client) resolveCriteria(
+	ctx context.Context,
+	builder *recipe.Builder,
+	criteria *recipe.Criteria,
+	profile string,
+) (*recipe.RecipeResult, error) {
+
 	if err := c.enforceAllowLists(criteria); err != nil {
 		return nil, err
 	}
-	return builder.BuildFromCriteria(ctx, criteria)
+	return builder.BuildFromCriteriaWithProfile(ctx, criteria, profile)
 }
 
 // ResolveRecipeFromCriteria resolves a facade Criteria into a facade
@@ -553,6 +582,17 @@ func (c *Client) resolveCriteria(ctx context.Context, builder *recipe.Builder, c
 // nil context, and nil criteria are rejected with ErrCodeInvalidRequest; a
 // closed Client is rejected; a facade-level timeout bounds the resolve.
 func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criteria) (*RecipeResult, error) {
+	return c.ResolveRecipeFromCriteriaWithProfile(ctx, criteria, "")
+}
+
+// ResolveRecipeFromCriteriaWithProfile resolves criteria with an optional
+// name=value profile selection.
+func (c *Client) ResolveRecipeFromCriteriaWithProfile(
+	ctx context.Context,
+	criteria *Criteria,
+	profile string,
+) (*RecipeResult, error) {
+
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}
@@ -579,7 +619,7 @@ func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criter
 	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
 	defer cancel()
 
-	internal, err := c.resolveCriteria(ctx, builder, toInternalCriteria(criteria))
+	internal, err := c.resolveCriteria(ctx, builder, toInternalCriteria(criteria), profile)
 	if err != nil {
 		return nil, err
 	}
@@ -626,6 +666,18 @@ func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criter
 // bounds the resolve. Builder errors propagate as-is (they already carry the
 // appropriate pkg/errors code) rather than being re-wrapped.
 func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criteria, snap *Snapshot) (*RecipeResult, error) {
+	return c.ResolveRecipeFromSnapshotWithProfile(ctx, criteria, snap, "")
+}
+
+// ResolveRecipeFromSnapshotWithProfile is the snapshot-filtered profile
+// resolution path.
+func (c *Client) ResolveRecipeFromSnapshotWithProfile(
+	ctx context.Context,
+	criteria *Criteria,
+	snap *Snapshot,
+	profile string,
+) (*RecipeResult, error) {
+
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}
@@ -688,7 +740,7 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 	// Don't re-wrap the builder's error — it already returns a structured
 	// error with the appropriate code (ErrCodeInvalidRequest for bad
 	// criteria, ErrCodeTimeout for context expiry, etc.).
-	internal, err := builder.BuildFromCriteriaWithEvaluator(ctx, internalCriteria, evaluator)
+	internal, err := builder.BuildFromCriteriaWithEvaluatorAndProfile(ctx, internalCriteria, evaluator, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -855,6 +907,17 @@ func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult
 		Version:      r.Metadata.Version,
 		TranslatedAt: time.Now(),
 		internal:     r,
+	}
+	if r.Metadata.SelectedProfile != nil {
+		out.SelectedProfile = &SelectedProfile{
+			Name:       r.Metadata.SelectedProfile.Name,
+			Value:      r.Metadata.SelectedProfile.Value,
+			Advertiser: r.Metadata.SelectedProfile.Advertiser,
+			OwnedPaths: make(map[string][]string, len(r.Metadata.SelectedProfile.OwnedPaths)),
+		}
+		for component, paths := range r.Metadata.SelectedProfile.OwnedPaths {
+			out.SelectedProfile.OwnedPaths[component] = append([]string(nil), paths...)
+		}
 	}
 	for _, c := range r.ComponentRefs {
 		if !c.IsEnabled() {

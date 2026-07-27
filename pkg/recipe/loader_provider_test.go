@@ -112,6 +112,117 @@ func TestLoadFromFileWithProvider(t *testing.T) {
 		}
 	})
 
+	t.Run("profile overlay in active catalog applies its default", func(t *testing.T) {
+		externalDir := t.TempDir()
+		registry := `apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components: []
+`
+		if err := os.WriteFile(filepath.Join(externalDir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+			t.Fatalf("write registry.yaml: %v", err)
+		}
+		overlaysDir := filepath.Join(externalDir, "overlays")
+		if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
+			t.Fatalf("create overlays directory: %v", err)
+		}
+		path := filepath.Join(overlaysDir, "direct-profile.yaml")
+		content := `kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha3
+metadata:
+  name: direct-profile
+spec:
+  criteria:
+    service: eks
+    accelerator: h100
+    intent: training
+  profile:
+    name: gpuStack
+    default: operator-managed
+    values:
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+              replicas: 1
+`
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write profile overlay: %v", err)
+		}
+		alternate := `kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha3
+metadata:
+  name: alternate-profile
+spec:
+  criteria:
+    service: aks
+    accelerator: h100
+    intent: training
+  profile:
+    name: gpuStack
+    default: operator-managed
+    values:
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: false
+              replicas: 2
+`
+		if err := os.WriteFile(
+			filepath.Join(overlaysDir, "alternate-profile.yaml"),
+			[]byte(alternate),
+			0o600,
+		); err != nil {
+			t.Fatalf("write alternate profile overlay: %v", err)
+		}
+		layered, err := NewLayeredDataProvider(
+			NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
+			LayeredProviderConfig{ExternalDir: externalDir},
+		)
+		if err != nil {
+			t.Fatalf("NewLayeredDataProvider: %v", err)
+		}
+		t.Cleanup(func() {
+			EvictCachedStore(layered)
+			EvictCachedRegistry(layered)
+			EvictCachedCriteriaRegistry(layered)
+		})
+
+		rec, err := LoadFromFileWithProvider(t.Context(), path, "", "vtest", layered)
+		if err != nil {
+			t.Fatalf("LoadFromFileWithProvider() error: %v", err)
+		}
+		if rec.Metadata.SelectedProfile == nil {
+			t.Fatal("SelectedProfile = nil, want applied default")
+		}
+		if got := rec.Metadata.SelectedProfile.Name + "=" + rec.Metadata.SelectedProfile.Value; got != "gpuStack=operator-managed" {
+			t.Errorf("SelectedProfile = %q, want %q", got, "gpuStack=operator-managed")
+		}
+
+		renamedPath := filepath.Join(t.TempDir(), "renamed-profile.yaml")
+		renamed := strings.Replace(content, "name: direct-profile", "name: renamed-profile", 1)
+		if err := os.WriteFile(renamedPath, []byte(renamed), 0o600); err != nil {
+			t.Fatalf("write renamed profile overlay: %v", err)
+		}
+		if _, err := LoadFromFileWithProvider(t.Context(), renamedPath, "", "vtest", layered); err != nil {
+			t.Fatalf("renamed equivalent overlay error: %v", err)
+		}
+
+		stalePath := filepath.Join(t.TempDir(), "stale-profile.yaml")
+		stale := strings.Replace(content, "service: eks", "service: aks", 1)
+		if err := os.WriteFile(stalePath, []byte(stale), 0o600); err != nil {
+			t.Fatalf("write stale profile overlay: %v", err)
+		}
+		if _, err := LoadFromFileWithProvider(t.Context(), stalePath, "", "vtest", layered); err == nil ||
+			!strings.Contains(err.Error(), "was not applied") {
+
+			t.Fatalf("stale overlay error = %v, want declaration mismatch", err)
+		}
+	})
+
 	t.Run("nil provider behaves like LoadFromFile", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "recipe.yaml")

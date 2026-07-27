@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"gopkg.in/yaml.v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -86,6 +88,14 @@ func WithStrict() ReaderOption {
 	}
 }
 
+func applyReaderOptions(r *Reader, opts ...ReaderOption) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(r)
+		}
+	}
+}
+
 // NewReader creates a new Reader for deserializing data from an io.Reader source.
 //
 // Parameters:
@@ -106,7 +116,7 @@ func WithStrict() ReaderOption {
 //	if err != nil { panic(err) }
 //	var data map[string]string
 //	err = reader.Deserialize(&data)
-func NewReader(format Format, input io.Reader) (*Reader, error) {
+func NewReader(format Format, input io.Reader, opts ...ReaderOption) (*Reader, error) {
 	if format.IsUnknown() {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unknown format: %s", format))
 	}
@@ -119,6 +129,7 @@ func NewReader(format Format, input io.Reader) (*Reader, error) {
 		format: format,
 		input:  input,
 	}
+	applyReaderOptions(r, opts...)
 
 	// Store closer if input implements it
 	if closer, ok := input.(io.Closer); ok {
@@ -153,20 +164,20 @@ func NewReader(format Format, input io.Reader) (*Reader, error) {
 //	reader, err := NewFileReader(FormatJSON, "/path/to/config.json")
 //	if err != nil { panic(err) }
 //	defer reader.Close()
-func NewFileReader(format Format, filePath string) (*Reader, error) {
+func NewFileReader(format Format, filePath string, opts ...ReaderOption) (*Reader, error) {
 	// Bound the read with FileReadTimeout so a hung filesystem (network
 	// mount, FUSE, /proc anomaly) cannot stall the caller indefinitely.
 	// Callers that need a different bound should use NewFileReaderWithContext.
 	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
 	defer cancel()
-	return NewFileReaderWithContext(ctx, format, filePath)
+	return NewFileReaderWithContext(ctx, format, filePath, opts...)
 }
 
 // NewFileReaderWithContext is the context-aware variant of NewFileReader.
 // The context bounds both the URL-download path and the local read: the local
 // content is read fully (up to MaxSpecFileBytes) so the size cap is enforced
 // and a hung filesystem cannot outlive the deadline.
-func NewFileReaderWithContext(ctx context.Context, format Format, filePath string) (*Reader, error) {
+func NewFileReaderWithContext(ctx context.Context, format Format, filePath string, opts ...ReaderOption) (*Reader, error) {
 	if format.IsUnknown() {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unknown format: %s", format))
 	}
@@ -239,11 +250,13 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 			fmt.Sprintf("file exceeds maximum allowed size of %d bytes", defaults.MaxSpecFileBytes))
 	}
 
-	return &Reader{
+	r := &Reader{
 		format: format,
 		input:  bytes.NewReader(data),
 		closer: file,
-	}, nil
+	}
+	applyReaderOptions(r, opts...)
+	return r, nil
 }
 
 // readAllBounded reads up to limit bytes from r, returning early if ctx is
@@ -316,6 +329,17 @@ func (r *Reader) Deserialize(v any) error {
 		if err := decoder.Decode(v); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode JSON", err)
 		}
+		if r.strict {
+			var trailing any
+			if err := decoder.Decode(&trailing); !stderrors.Is(err, io.EOF) {
+				if err == nil {
+					return errors.New(errors.ErrCodeInvalidRequest,
+						"strict JSON input contains a trailing document")
+				}
+				return errors.Wrap(errors.ErrCodeInvalidRequest,
+					"failed to validate trailing JSON input", err)
+			}
+		}
 		return nil
 
 	case FormatYAML:
@@ -325,6 +349,17 @@ func (r *Reader) Deserialize(v any) error {
 		}
 		if err := decoder.Decode(v); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode YAML", err)
+		}
+		if r.strict {
+			var trailing any
+			if err := decoder.Decode(&trailing); !stderrors.Is(err, io.EOF) {
+				if err == nil {
+					return errors.New(errors.ErrCodeInvalidRequest,
+						"strict YAML input contains a trailing document")
+				}
+				return errors.Wrap(errors.ErrCodeInvalidRequest,
+					"failed to validate trailing YAML input", err)
+			}
 		}
 		return nil
 
@@ -414,8 +449,8 @@ func (r *Reader) Close() error {
 // Example:
 //
 //	snap, err := FromFile[Snapshot]("cm://gpu-operator/aicr-snapshot")
-func FromFile[T any](path string) (*T, error) {
-	return FromFileWithKubeconfig[T](path, "")
+func FromFile[T any](path string, opts ...ReaderOption) (*T, error) {
+	return FromFileWithKubeconfig[T](path, "", opts...)
 }
 
 // FromFileContext is the context-aware variant of FromFile. The provided
@@ -423,8 +458,8 @@ func FromFile[T any](path string) (*T, error) {
 // into NewFileReaderWithContext for plain file and HTTP reads. Prefer this
 // variant in CLI/handler call sites that already hold a request-scoped
 // context.
-func FromFileContext[T any](ctx context.Context, path string) (*T, error) {
-	return FromFileWithKubeconfigContext[T](ctx, path, "")
+func FromFileContext[T any](ctx context.Context, path string, opts ...ReaderOption) (*T, error) {
+	return FromFileWithKubeconfigContext[T](ctx, path, "", opts...)
 }
 
 // FromFileWithKubeconfig reads and deserializes data from a file path, HTTP URL, or ConfigMap URI with custom kubeconfig.
@@ -439,21 +474,60 @@ func FromFileContext[T any](ctx context.Context, path string) (*T, error) {
 // Example:
 //
 //	snap, err := FromFileWithKubeconfig[Snapshot]("cm://gpu-operator/aicr-snapshot", "/custom/kubeconfig")
-func FromFileWithKubeconfig[T any](path, kubeconfig string) (*T, error) {
-	return FromFileWithKubeconfigContext[T](context.Background(), path, kubeconfig)
+func FromFileWithKubeconfig[T any](path, kubeconfig string, opts ...ReaderOption) (*T, error) {
+	return FromFileWithKubeconfigContext[T](context.Background(), path, kubeconfig, opts...)
+}
+
+// ReadFileBytesWithKubeconfigContext reads one supported file, URL, or
+// ConfigMap source and returns its bounded raw bytes together with the detected
+// format. Callers that need multiple decoding passes over one immutable input
+// should use this helper so remote sources are fetched exactly once.
+func ReadFileBytesWithKubeconfigContext(
+	ctx context.Context,
+	path, kubeconfig string,
+) ([]byte, Format, error) {
+
+	if strings.HasPrefix(path, ConfigMapURIScheme) {
+		namespace, name, err := pod.ParseConfigMapURI(path)
+		if err != nil {
+			return nil, Format(""), errors.Wrap(errors.ErrCodeInvalidRequest, "invalid ConfigMap URI", err)
+		}
+		return readConfigMapDataWithKubeconfigContext(ctx, namespace, name, kubeconfig)
+	}
+
+	format := FormatFromPath(path)
+	reader, err := NewFileReaderWithContext(ctx, format, path)
+	if err != nil {
+		return nil, Format(""), errors.PropagateOrWrap(
+			err, errors.ErrCodeInternal, fmt.Sprintf("failed to create serializer for %q", path))
+	}
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			slog.Warn("failed to close serializer", "error", closeErr)
+		}
+	}()
+
+	// NewFileReaderWithContext has already fully buffered and size-bounded
+	// reader.input.
+	data, err := io.ReadAll(reader.input)
+	if err != nil {
+		return nil, Format(""), errors.Wrap(
+			errors.ErrCodeInternal, fmt.Sprintf("failed to read serialized data from %q", path), err)
+	}
+	return data, format, nil
 }
 
 // FromFileWithKubeconfigContext is the context-aware variant of
 // FromFileWithKubeconfig. The context bounds the ConfigMap read when path is
 // a cm:// URI.
-func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig string) (*T, error) {
+func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig string, opts ...ReaderOption) (*T, error) {
 	// Check for ConfigMap URI
 	if strings.HasPrefix(path, ConfigMapURIScheme) {
 		namespace, name, err := pod.ParseConfigMapURI(path)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid ConfigMap URI", err)
 		}
-		return fromConfigMapWithKubeconfigContext[T](ctx, namespace, name, kubeconfig)
+		return fromConfigMapWithKubeconfigContext[T](ctx, namespace, name, kubeconfig, opts...)
 	}
 
 	fileFormat := FormatFromPath(path)
@@ -462,7 +536,7 @@ func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 		slog.String("format", string(fileFormat)),
 	)
 
-	ser, err := NewFileReaderWithContext(ctx, fileFormat, path)
+	ser, err := NewFileReaderWithContext(ctx, fileFormat, path, opts...)
 	if err != nil {
 		slog.Error("failed to create file reader", "error", err, "path", path, "format", fileFormat)
 		// Preserve the reader's structured code (NotFound / InvalidRequest /
@@ -483,7 +557,8 @@ func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 
 	var r T
 	if err := ser.Deserialize(&r); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to deserialize object from %q", path), err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			fmt.Sprintf("failed to deserialize object from %q", path))
 	}
 
 	slog.Debug("successfully loaded object from file",
@@ -496,7 +571,37 @@ func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 // fromConfigMapWithKubeconfigContext reads and deserializes data from a Kubernetes ConfigMap.
 // The provided context is wrapped with defaults.ConfigMapWriteTimeout so the read is bounded
 // even when the caller passes context.Background().
-func fromConfigMapWithKubeconfigContext[T any](ctx context.Context, namespace, name, kubeconfig string) (*T, error) {
+func fromConfigMapWithKubeconfigContext[T any](
+	ctx context.Context,
+	namespace, name, kubeconfig string,
+	opts ...ReaderOption,
+) (*T, error) {
+
+	data, format, err := readConfigMapDataWithKubeconfigContext(ctx, namespace, name, kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+
+	reader, err := NewReader(format, bytes.NewReader(data), opts...)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to create reader for ConfigMap data")
+	}
+
+	var result T
+	if err := reader.Deserialize(&result); err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to deserialize ConfigMap data")
+	}
+
+	return &result, nil
+}
+
+func readConfigMapDataWithKubeconfigContext(
+	ctx context.Context,
+	namespace, name, kubeconfig string,
+) ([]byte, Format, error) {
+
 	var k8sClient client.Interface
 	var err error
 
@@ -506,14 +611,15 @@ func fromConfigMapWithKubeconfigContext[T any](ctx context.Context, namespace, n
 		k8sClient, _, err = client.GetKubeClient()
 	}
 	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to get kubernetes client")
+		return nil, Format(""), errors.PropagateOrWrap(
+			err, errors.ErrCodeInternal, "failed to get kubernetes client")
 	}
 
 	readCtx, cancel := context.WithTimeout(ctx, defaults.ConfigMapWriteTimeout)
 	defer cancel()
 	cm, err := k8sClient.CoreV1().ConfigMaps(namespace).Get(readCtx, name, metav1.GetOptions{})
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("failed to get ConfigMap %s/%s", namespace, name), err)
+		return nil, Format(""), classifyConfigMapGetError(namespace, name, err)
 	}
 
 	// Try to get format from ConfigMap metadata
@@ -537,7 +643,8 @@ func fromConfigMapWithKubeconfigContext[T any](ctx context.Context, namespace, n
 			}
 		}
 		if content == "" {
-			return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("ConfigMap %s/%s has no snapshot data", namespace, name))
+			return nil, Format(""), errors.New(
+				errors.ErrCodeNotFound, fmt.Sprintf("ConfigMap %s/%s has no snapshot data", namespace, name))
 		}
 	}
 
@@ -547,16 +654,33 @@ func fromConfigMapWithKubeconfigContext[T any](ctx context.Context, namespace, n
 		"format", format,
 		"size", len(content))
 
-	// Deserialize content
-	reader, err := NewReader(format, strings.NewReader(content))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create reader for ConfigMap data", err)
+	if int64(len(content)) > defaults.MaxSpecFileBytes {
+		return nil, Format(""), errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("ConfigMap data exceeds maximum allowed size of %d bytes", defaults.MaxSpecFileBytes))
 	}
+	return []byte(content), format, nil
+}
 
-	var result T
-	if err := reader.Deserialize(&result); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to deserialize ConfigMap data", err)
+func classifyConfigMapGetError(namespace, name string, err error) error {
+	switch {
+	case stderrors.Is(err, context.DeadlineExceeded),
+		stderrors.Is(err, context.Canceled),
+		apierrors.IsTimeout(err),
+		apierrors.IsServerTimeout(err):
+
+		return errors.Wrap(
+			errors.ErrCodeTimeout, fmt.Sprintf("timed out getting ConfigMap %s/%s", namespace, name), err)
+	case apierrors.IsNotFound(err):
+		return errors.Wrap(
+			errors.ErrCodeNotFound, fmt.Sprintf("ConfigMap %s/%s not found", namespace, name), err)
+	case apierrors.IsForbidden(err), apierrors.IsUnauthorized(err):
+		return errors.Wrap(
+			errors.ErrCodeUnauthorized,
+			fmt.Sprintf("not authorized to get ConfigMap %s/%s", namespace, name),
+			err,
+		)
+	default:
+		return errors.Wrap(
+			errors.ErrCodeUnavailable, fmt.Sprintf("failed to get ConfigMap %s/%s", namespace, name), err)
 	}
-
-	return &result, nil
 }

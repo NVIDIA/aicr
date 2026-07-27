@@ -26,10 +26,10 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 
 | Feature | API | CLI |
 |---------|-----|-----|
-| Recipe generation | ✅ GET /v1/recipe | ✅ `aicr recipe` |
-| Value query | ✅ GET /v1/query | ✅ `aicr query` |
-| Bundle creation | ✅ POST /v1/bundle | ✅ `aicr bundle` |
-| Bundle attestation | ✅ POST /v1/bundle?attest=true (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
+| Recipe generation | ✅ GET `/v1/recipe`; profile-aware GET/POST `/v2/recipe` | ✅ `aicr recipe` |
+| Value query | ✅ GET `/v1/query`; profile-aware GET/POST `/v2/query` | ✅ `aicr query` |
+| Bundle creation | ✅ POST `/v1/bundle`; profile-aware POST `/v2/bundle` | ✅ `aicr bundle` |
+| Bundle attestation | ✅ POST `/v1/bundle?attest=true`; profile-aware POST `/v2/bundle?attest=true` (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
 | Snapshot capture | ❌ Use CLI | ✅ `aicr snapshot` |
 | ConfigMap I/O | ❌ Use CLI | ✅ `cm://` URIs |
 | Agent deployment | ❌ Use CLI | ✅ `aicr snapshot` |
@@ -110,7 +110,10 @@ curl "http://localhost:8080/"
 {
   "service": "aicrd",
   "version": "v0.14.0",
-  "routes": ["/v1/recipe", "/v1/query", "/v1/bundle"]
+  "routes": [
+    "/v1/recipe", "/v1/query", "/v1/bundle",
+    "/v2/recipe", "/v2/query", "/v2/bundle"
+  ]
 }
 ```
 
@@ -391,6 +394,92 @@ The response format matches `GET /v1/query`: scalar values are returned as plain
 
 ---
 
+### Profile-aware v2 endpoints
+
+`v2` in the route and `apiVersion` in a recipe document are independent
+version axes. The route segment versions the transient HTTP contract;
+`aicr.run/v1alpha2` and `aicr.run/v1alpha3` identify persisted recipe schemas.
+Therefore, `/v2/recipe` can return either artifact version and `/v2/bundle`
+accepts both, plus versionless legacy artifacts. Whether resolution selects a
+profile explicitly or through a declared default—not the route number—
+determines whether the artifact uses `v1alpha3`.
+
+`/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the profile-aware HTTP
+contract. The core mechanism exposes these routes before any embedded cloud
+recipe declares a profile, so existing `/v1` workflows remain unchanged.
+
+**GET `/v2/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
+optional `profile=name=value`. Omission applies the resolved declaration's
+required default. The v2 route rejects unknown query parameters and
+conflicting repeated profile values.
+
+```shell
+# Contract example; substitute a family after its profile adopter lands.
+curl "http://localhost:8080/v2/recipe?service=SERVICE&profile=NAME=VALUE"
+```
+
+**POST `/v2/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
+the plain criteria object, not a `RecipeCriteria` resource. Profile selection
+may be supplied in the envelope, as the `profile` query parameter, or in both
+places when the values agree. Conflicting selections are rejected:
+
+```yaml
+criteria:
+  service: aks
+  accelerator: h100
+  intent: training
+profile: gpuStack=driver-only
+```
+
+Unknown fields, duplicate or trailing documents, malformed selections, and
+selections against an unprofiled composition fail with `400
+INVALID_REQUEST`. POST envelopes require `Content-Type: application/json` or
+`Content-Type: application/x-yaml`; missing, aliased, or unsupported media
+types are rejected.
+
+**GET and POST `/v2/query`.** GET accepts the v2 recipe parameters plus
+`selector`. POST accepts the same strict envelope with a required selector.
+POST profile selection follows the same query/envelope agreement rule as
+`/v2/recipe`:
+
+```yaml
+criteria:
+  service: aks
+  accelerator: h100
+profile: gpuStack=driver-only
+selector: metadata.selectedProfile
+```
+
+**POST `/v2/bundle`.** Uses the same query parameters and ZIP response as
+`POST /v1/bundle`. It carries no profile-selection field because its body is
+an already-selected `RecipeResult`. It accepts legacy
+`aicr.run/v1alpha2` recipes, including older artifacts that omit
+`apiVersion`, and strictly decodes profiled `aicr.run/v1alpha3` recipes. The
+request requires `Content-Type: application/json` or `Content-Type:
+application/x-yaml`; missing, aliased, or unsupported media types are
+rejected.
+
+```shell
+# Contract example; substitute a family after its profile adopter lands.
+curl -s \
+  "http://localhost:8080/v2/recipe?service=SERVICE&profile=NAME=VALUE" |
+  curl -X POST "http://localhost:8080/v2/bundle" \
+    -H "Content-Type: application/json" -d @- -o bundles.zip
+```
+
+Profile-bearing responses record `metadata.selectedProfile` and use recipe
+apiVersion `aicr.run/v1alpha3`. Their owned paths are immutable across AICR's
+supported override surfaces: divergent static values, intersecting dynamic
+paths, owned-component removal, and argocd-helm install-time values fail
+closed before output.
+
+The `/v1` routes remain the legacy contract. Explicit profile input is
+rejected, `/v1/recipe` and `/v1/query` reject a composition after it adopts a
+profile even when the request omits selection, and `/v1/bundle` rejects a
+profile-bearing body. Migrate a converted recipe family to v2 as one cut-over.
+
+---
+
 ### POST /v1/bundle
 
 Generate deployment bundles from a recipe.
@@ -426,17 +515,18 @@ For backward compatibility, the endpoint also accepts:
   strings after a decode/remarshal round trip.
 - The `kind: Recipe` value this contract published through v0.18.0.
 
-The handler does not validate these header fields, so all three shapes reach the
-bundler identically.
+The handler does not validate `kind`, so all three shapes reach the bundler
+identically. `apiVersion` is the exception, validated as described next.
 
 `apiVersion` has no equivalent legacy window on purpose. An artifact
 group/version bump is a hard break with no transition period, so a recipe
 stamped with a prior group/version should be regenerated rather than sent.
 
-That is a client-contract rule, not an enforced one. As above, this endpoint
-validates no header field: a prior `apiVersion` is ignored rather than rejected,
-so such a request still succeeds. The CLI file-load path does enforce it and
-rejects an unsupported `apiVersion` outright.
+This one is enforced. The shared artifact gate rejects any `apiVersion` outside
+`aicr.run/v1alpha2` and `aicr.run/v1alpha3` with a 400, on this endpoint as well
+as on the CLI file-load path, so a prior group/version fails rather than being
+silently accepted. An absent or empty `apiVersion` is still admitted as the
+legacy shape.
 
 **Round-trip caveat for `kind: Recipe`.** The header is copied into the
 generated bundle's `recipe.yaml` rather than normalized. The CLI file loader
@@ -444,6 +534,11 @@ tolerates an absent or empty `kind` but rejects `Recipe`, so a bundle generated
 from a `kind: Recipe` body cannot be fed back through `aicr bundle -r` or
 `aicr validate -r`. Send `kind: RecipeResult` if you need the emitted artifact
 to remain reloadable.
+
+The same limit reaches the tooling that reads a bundle's `recipe.yaml`, so
+TestGrid publication and evidence synthesis also reject such a bundle. Only
+bundles generated from a `kind: Recipe` HTTP body are affected; the CLI always
+writes `RecipeResult`.
 
 #### Components
 
@@ -848,7 +943,9 @@ Allowlists are configured via environment variables when starting the server:
 - If an environment variable is **not set**, all values for that criteria are allowed
 - If an environment variable is **set**, only the specified values are permitted
 - The `any` value is always allowed regardless of allowlist configuration
-- Allowlists apply to both `/v1/recipe` and `/v1/bundle` endpoints
+- Allowlists apply to the recipe, query, and bundle endpoints on both routes —
+  `/v1/recipe`, `/v1/query`, `/v1/bundle`, `/v2/recipe`, `/v2/query`, and
+  `/v2/bundle`
 
 ### Example Configuration
 

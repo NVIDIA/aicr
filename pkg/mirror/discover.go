@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -32,6 +33,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+const logKeyComponent = "component"
 
 // Option configures a Lister.
 type Option func(*Lister)
@@ -89,6 +92,16 @@ type componentResult struct {
 	chart  *ChartRef
 }
 
+// mirrorCandidate is the one effective component/value model shared by
+// profile-lock validation and discovery. Profile-owned values are hydrated and
+// overridden once, validated, then passed unchanged to Helm rendering so the
+// two boundaries cannot disagree about alias precedence or overlapping paths.
+type mirrorCandidate struct {
+	refs          []recipe.ComponentRef
+	overrides     map[string]map[string]string
+	profileValues map[string]map[string]any
+}
+
 // Discover takes a loaded RecipeResult and returns a MirrorList by
 // rendering each component's chart and extracting images.
 //
@@ -101,23 +114,29 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 	if rec == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe is required")
 	}
+	validated := *rec
+	validated.ComponentRefs = append([]recipe.ComponentRef(nil), rec.ComponentRefs...)
+	if err := validated.PrepareAndValidateWithContext(ctx); err != nil {
+		return nil, err
+	}
+	rec = &validated
 
 	// Build override lookup: component → path → value.
 	overrideLookup := buildOverrideLookup(l.valueOverrides)
+	candidate, err := prepareMirrorCandidate(ctx, rec, overrideLookup)
+	if err != nil {
+		return nil, err
+	}
 
 	var (
 		mu      sync.Mutex
-		results = make([]componentResult, 0, len(rec.ComponentRefs))
+		results = make([]componentResult, 0, len(candidate.refs))
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(defaults.MirrorDiscoveryConcurrency)
 
-	for i, compRef := range rec.ComponentRefs {
-		if !compRef.IsEnabled() {
-			continue
-		}
-
+	for i, compRef := range candidate.refs {
 		g.Go(func() error {
 			// Bail early if context is already canceled.
 			if gctx.Err() != nil {
@@ -137,20 +156,31 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 			// below, so invoking Helm with a fabricated chart name would only
 			// produce a spurious warning.
 			if compRef.Type == recipe.ComponentTypeHelm && compRef.HasExternalChart() {
-				values, valErr := rec.GetValuesForComponentWithContext(gctx, compRef.Name)
+				values, prevalidated := candidate.profileValues[compRef.Name]
+				var valErr error
+				if !prevalidated {
+					values, valErr = rec.GetValuesForComponentWithContext(gctx, compRef.Name)
+				}
 				if valErr != nil {
 					slog.Warn("failed to load values for component",
-						"component", compRef.Name, "error", valErr)
+						logKeyComponent, compRef.Name, "error", valErr)
 					ci.Warnings = append(ci.Warnings,
 						fmt.Sprintf("failed to load values: %v", valErr))
 				} else {
-					// Apply --set overrides by component name and override keys.
-					applyValueOverrides(values, overrideLookup[compRef.Name])
-					keyOverrides, keyErr := overridesByKey(overrideLookup, compRef)
-					if keyErr != nil {
-						return keyErr
+					// Profile-owned values were already overridden and lock-
+					// validated above. Other components retain mirror's
+					// best-effort hydration behavior and apply the same
+					// canonical/alias-resolved override map.
+					if !prevalidated {
+						if applyErr := component.ApplyMapOverrides(
+							values, candidate.overrides[compRef.Name],
+						); applyErr != nil {
+							return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+								"failed to apply mirror value overrides",
+								applyErr,
+								map[string]any{logKeyComponent: compRef.Name})
+						}
 					}
-					applyValueOverrides(values, keyOverrides)
 
 					// Source-only refs omit the chart name; EffectiveChart
 					// applies the same component-name fallback the deployers
@@ -171,14 +201,14 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 							return gctx.Err()
 						}
 						slog.Warn("helm template failed for component",
-							"component", compRef.Name, "error", renderErr)
+							logKeyComponent, compRef.Name, "error", renderErr)
 						ci.Warnings = append(ci.Warnings,
 							fmt.Sprintf("helm template failed: %v", renderErr))
 					} else {
 						imgs, extractErr := bom.ExtractImagesFromYAML(rendered)
 						if extractErr != nil {
 							slog.Warn("image extraction failed",
-								"component", compRef.Name, "error", extractErr)
+								logKeyComponent, compRef.Name, "error", extractErr)
 							ci.Warnings = append(ci.Warnings,
 								fmt.Sprintf("image extraction failed: %v", extractErr))
 						} else {
@@ -276,7 +306,7 @@ func extractManifestImages(ctx context.Context, dp recipe.DataProvider, acc []st
 	content, readErr := recipe.GetManifestContentWithContext(ctx, dp, mPath)
 	if readErr != nil {
 		slog.Warn("failed to read manifest",
-			"component", compName, "path", mPath, "error", readErr)
+			logKeyComponent, compName, "path", mPath, "error", readErr)
 		ci.Warnings = append(ci.Warnings,
 			fmt.Sprintf("manifest read failed %s: %v", mPath, readErr))
 		return acc
@@ -306,57 +336,32 @@ func buildOverrideLookup(overrides []config.ComponentPath) map[string]map[string
 	return lookup
 }
 
-// applyValueOverrides applies flat key=value overrides to a nested values
-// map. Keys use dot-notation (e.g., "driver.version").
-func applyValueOverrides(values map[string]any, overrides map[string]string) {
-	for path, val := range overrides {
-		setNestedValue(values, path, val)
-	}
-}
+// effectiveOverridesForComponent resolves overrides supplied under the
+// canonical component name and every registry alias. It matches bundler
+// precedence: the canonical name wins a same-path collision, followed by
+// aliases in registry order. A registry failure is fatal whenever overrides
+// are present: otherwise a valid registry-only alias could be silently
+// discarded and mirror would inventory a different candidate than requested.
+func effectiveOverridesForComponent(
+	lookup map[string]map[string]string,
+	ref recipe.ComponentRef,
+	provider recipe.DataProvider,
+) (map[string]string, error) {
 
-// setNestedValue sets a dot-separated path in a nested map.
-func setNestedValue(m map[string]any, path, value string) {
-	parts := strings.Split(path, ".")
-	current := m
-	for i, part := range parts {
-		if i == len(parts)-1 {
-			current[part] = component.ConvertMapValue(value)
-			return
-		}
-		next, ok := current[part]
-		if !ok {
-			next = make(map[string]any)
-			current[part] = next
-		}
-		if nextMap, ok := next.(map[string]any); ok {
-			current = nextMap
-		} else {
-			// Overwrite non-map intermediate with a map.
-			nextMap := make(map[string]any)
-			current[part] = nextMap
-			current = nextMap
-		}
-	}
-}
-
-// overridesByKey returns overrides that match a component by its
-// valueOverrideKeys from the registry. This bridges the gap between
-// --set flag keys (e.g., "gpuoperator:driver.version") and the
-// component name (e.g., "gpu-operator").
-func overridesByKey(lookup map[string]map[string]string, ref recipe.ComponentRef) (map[string]string, error) {
-	registry, err := recipe.GetComponentRegistry()
+	keys := []string{ref.Name}
+	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "overridesByKey: failed to get component registry")
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to resolve component aliases for mirror overrides")
 	}
-	if registry == nil {
-		return map[string]string{}, nil
-	}
-	cfg := registry.Get(ref.Name)
-	if cfg == nil {
-		return map[string]string{}, nil
+	if registry != nil {
+		if cfg := registry.Get(ref.Name); cfg != nil {
+			keys = append(keys, cfg.ValueOverrideKeys...)
+		}
 	}
 	merged := make(map[string]string)
-	for _, key := range cfg.ValueOverrideKeys {
+	for i := len(keys) - 1; i >= 0; i-- {
+		key := keys[i]
 		if overrides, ok := lookup[key]; ok {
 			for path, val := range overrides {
 				merged[path] = val
@@ -364,6 +369,82 @@ func overridesByKey(lookup map[string]map[string]string, ref recipe.ComponentRef
 		}
 	}
 	return merged, nil
+}
+
+func prepareMirrorCandidate(
+	ctx context.Context,
+	rec *recipe.RecipeResult,
+	overrideLookup map[string]map[string]string,
+) (*mirrorCandidate, error) {
+
+	candidate := &mirrorCandidate{
+		refs:          make([]recipe.ComponentRef, 0, len(rec.ComponentRefs)),
+		overrides:     make(map[string]map[string]string, len(rec.ComponentRefs)),
+		profileValues: make(map[string]map[string]any),
+	}
+	var owned map[string][]string
+	if rec.Metadata.SelectedProfile != nil {
+		owned = rec.Metadata.SelectedProfile.OwnedPaths
+	}
+	for _, ref := range rec.ComponentRefs {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, errors.Wrap(
+				errors.ErrCodeTimeout, "mirror candidate preparation canceled", ctxErr)
+		}
+		var overrides map[string]string
+		if len(overrideLookup) > 0 {
+			var err error
+			overrides, err = effectiveOverridesForComponent(
+				overrideLookup, ref, rec.DataProvider(),
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if raw, exists := overrides[config.ComponentEnabledKey]; exists {
+			enabled, parseErr := strconv.ParseBool(raw)
+			if parseErr != nil {
+				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+					"invalid --set enabled value", parseErr,
+					map[string]any{logKeyComponent: ref.Name, "value": raw})
+			}
+			delete(overrides, config.ComponentEnabledKey)
+			if enabled && !ref.IsEnabled() {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q is disabled by the recipe and cannot be re-enabled with --set",
+						ref.Name))
+			}
+			if !enabled {
+				continue
+			}
+		}
+		if !ref.IsEnabled() {
+			continue
+		}
+
+		candidate.refs = append(candidate.refs, ref)
+		candidate.overrides[ref.Name] = overrides
+		if _, profileOwned := owned[ref.Name]; !profileOwned {
+			continue
+		}
+
+		values, valueErr := rec.GetValuesForComponentWithContext(ctx, ref.Name)
+		if valueErr != nil {
+			return nil, errors.PropagateOrWrap(valueErr, errors.ErrCodeInternal,
+				fmt.Sprintf("failed to load profile candidate values for component %q", ref.Name))
+		}
+		if applyErr := component.ApplyMapOverrides(values, overrides); applyErr != nil {
+			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				"failed to apply mirror value overrides",
+				applyErr,
+				map[string]any{logKeyComponent: ref.Name})
+		}
+		candidate.profileValues[ref.Name] = values
+	}
+	if err := rec.ValidateProfileLock(ctx, candidate.refs, candidate.profileValues, nil); err != nil {
+		return nil, err
+	}
+	return candidate, nil
 }
 
 // sortByIndex sorts componentResult slices by their original index

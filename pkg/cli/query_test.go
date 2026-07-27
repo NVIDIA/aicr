@@ -127,16 +127,16 @@ func TestQueryCmdFlagsExcludesOutput(t *testing.T) {
 
 func TestQueryCmdFlagsIncludesSelector(t *testing.T) {
 	flags := queryCmdFlags()
-	found := false
+	found := map[string]bool{}
 	for _, f := range flags {
 		names := f.Names()
 		for _, n := range names {
-			if n == "selector" {
-				found = true
-			}
+			found[n] = true
 		}
 	}
-	if !found {
-		t.Error("queryCmdFlags must include --selector flag")
+	for _, name := range []string{"selector", "profile"} {
+		if !found[name] {
+			t.Errorf("queryCmdFlags must include --%s flag", name)
+		}
 	}
 }

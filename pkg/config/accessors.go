@@ -89,6 +89,14 @@ func (r *RecipeSpec) DataDir() string {
 	return r.Data
 }
 
+// ProfileSelection returns spec.recipe.profile, or "" when unset.
+func (r *RecipeSpec) ProfileSelection() string {
+	if r == nil {
+		return ""
+	}
+	return r.Profile
+}
+
 // IsCriteriaStrict returns spec.recipe.criteriaStrict flattened to a
 // plain bool (false when unset). Mirrors the --criteria-strict CLI
 // flag. The pointer-to-bool shape on RecipeSpec lets the spec

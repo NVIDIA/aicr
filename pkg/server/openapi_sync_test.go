@@ -211,7 +211,7 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if want := "#/components/schemas/RecipeResponse"; tt.got != want {
+			if want := "#/components/schemas/LegacyRecipeResponse"; tt.got != want {
 				t.Errorf("$ref = %q, want %q", tt.got, want)
 			}
 		})
@@ -220,16 +220,22 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
 		schema      openAPIContractSchema
+		baseRef     string
 		required    []string
 		apiVersions []string
 		kinds       []string
 	}{
 		{
+			// /v1 responses are pinned to v1alpha2 by LegacyRecipeResponse,
+			// which wraps RecipeResponse and narrows the apiVersion enum.
+			// RecipeResponse itself now also admits v1alpha3 for /v2, so
+			// asserting on it directly would no longer prove v1 stays legacy.
+			// required and kind come from the RecipeResponse base and are
+			// checked there; this case owns the narrowing.
 			name:        "versioned response",
-			schema:      spec.Components.Schemas["RecipeResponse"],
-			required:    []string{"apiVersion", "kind"},
+			schema:      spec.Components.Schemas["LegacyRecipeResponse"],
+			baseRef:     "#/components/schemas/RecipeResponse",
 			apiVersions: []string{recipe.RecipeAPIVersion},
-			kinds:       []string{recipe.RecipeResultKind},
 		},
 		{
 			// The bundle request also admits the legacy Recipe kind: that was
@@ -244,8 +250,12 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			closure := allOfConstraint(t, tt.schema, "#/components/schemas/RecipeResponseBase")
-			if !equalStringsUnordered(closure.Required, tt.required) {
+			baseRef := tt.baseRef
+			if baseRef == "" {
+				baseRef = "#/components/schemas/RecipeResponseBase"
+			}
+			closure := allOfConstraint(t, tt.schema, baseRef)
+			if tt.required != nil && !equalStringsUnordered(closure.Required, tt.required) {
 				t.Errorf("required = %v, want %v", closure.Required, tt.required)
 			}
 			gotAPIVersions := closure.Properties["apiVersion"].Enum
@@ -253,7 +263,7 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 				t.Errorf("apiVersion enum = %v, want %v", gotAPIVersions, tt.apiVersions)
 			}
 			gotKinds := closure.Properties["kind"].Enum
-			if !equalStringsUnordered(gotKinds, tt.kinds) {
+			if tt.kinds != nil && !equalStringsUnordered(gotKinds, tt.kinds) {
 				t.Errorf("kind enum = %v, want %v", gotKinds, tt.kinds)
 			}
 		})
@@ -273,6 +283,282 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 			t.Errorf("RecipeResponseBase %s enum = %v, want wrapper-owned enum", name, got)
 		}
 	}
+}
+
+func TestOpenAPIV2BundleContract(t *testing.T) {
+	specPath := filepath.Join("..", "..", "api", "aicr", "v1", "server.yaml")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("read spec %q: %v", specPath, err)
+	}
+	var spec map[string]any
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+
+	content := openAPIObjectAt(t, spec,
+		"paths", "/v2/bundle", "post", "requestBody", "content")
+	for _, mediaType := range []string{"application/json", "application/x-yaml"} {
+		schema := openAPIObjectAt(t, content, mediaType, "schema")
+		if got := schema["$ref"]; got != "#/components/schemas/BundleRecipeV2Request" {
+			t.Errorf("%s request schema = %v, want BundleRecipeV2Request", mediaType, got)
+		}
+	}
+
+	responses := openAPIObjectAt(t, spec, "paths", "/v2/bundle", "post", "responses")
+	for _, status := range []string{"401", "404", "503", "504"} {
+		if _, ok := responses[status]; !ok {
+			t.Errorf("/v2/bundle response %s is not declared", status)
+		}
+	}
+
+	schemas := openAPIObjectAt(t, spec, "components", "schemas")
+	union := openAPIObjectAt(t, schemas, "BundleRecipeV2Request")
+	refs := map[string]bool{}
+	for _, item := range openAPISequence(t, union["oneOf"], "BundleRecipeV2Request.oneOf") {
+		schema := openAPIObject(t, item, "BundleRecipeV2Request.oneOf item")
+		ref, _ := schema["$ref"].(string)
+		refs[ref] = true
+	}
+	for _, ref := range []string{
+		"#/components/schemas/LegacyBundleRecipeV2Request",
+		"#/components/schemas/ProfileRecipeResponse",
+	} {
+		if !refs[ref] {
+			t.Errorf("BundleRecipeV2Request.oneOf does not reference %s", ref)
+		}
+	}
+	// The strict response schema must NOT be a request branch: reusing it
+	// there re-requires kind: RecipeResult and re-rejects the legacy shapes
+	// (kind absent/empty) the v2 decode path accepts.
+	if refs["#/components/schemas/LegacyRecipeResponse"] {
+		t.Error("BundleRecipeV2Request.oneOf must not reuse the strict LegacyRecipeResponse response schema")
+	}
+
+	// The legacy request branch covers the whole accepted legacy square:
+	// apiVersion absent/""/v1alpha2 × kind absent/""/RecipeResult, headers
+	// optional. Anything narrower leaves /v2/bundle stricter than its own
+	// server (DecodeRecipeResult enforces kind only when non-empty).
+	legacyBranch := openAPIObjectAt(t, schemas, "LegacyBundleRecipeV2Request")
+	legacyBranchAllOf := openAPISequence(t, legacyBranch["allOf"], "LegacyBundleRecipeV2Request.allOf")
+	legacyOverlay := openAPIObject(t, legacyBranchAllOf[1], "LegacyBundleRecipeV2Request overlay")
+	if _, required := legacyOverlay["required"]; required {
+		t.Error("LegacyBundleRecipeV2Request must not require header fields")
+	}
+	legacyAPIVersion := openAPIObjectAt(t, legacyOverlay, "properties", "apiVersion")
+	legacyAPIVersions := openAPISequence(t, legacyAPIVersion["enum"],
+		"LegacyBundleRecipeV2Request apiVersion enum")
+	for _, value := range []string{"", "aicr.run/v1alpha2"} {
+		if !openAPIHasString(legacyAPIVersions, value) {
+			t.Errorf("LegacyBundleRecipeV2Request apiVersion enum missing %q", value)
+		}
+	}
+	legacyKind := openAPIObjectAt(t, legacyOverlay, "properties", "kind")
+	legacyKinds := openAPISequence(t, legacyKind["enum"],
+		"LegacyBundleRecipeV2Request kind enum")
+	for _, value := range []string{"", "RecipeResult"} {
+		if !openAPIHasString(legacyKinds, value) {
+			t.Errorf("LegacyBundleRecipeV2Request kind enum missing %q", value)
+		}
+	}
+	if _, ok := union["discriminator"]; ok {
+		t.Error("BundleRecipeV2Request must not discriminate a versionless branch by apiVersion")
+	}
+
+	profile := openAPIObjectAt(t, schemas, "ProfileRecipeResponse")
+	profileAllOf := openAPISequence(t, profile["allOf"], "ProfileRecipeResponse.allOf")
+	if len(profileAllOf) != 2 {
+		t.Fatalf("ProfileRecipeResponse.allOf has %d entries, want 2", len(profileAllOf))
+	}
+	profileClosure := openAPIObject(t, profileAllOf[1], "ProfileRecipeResponse closure")
+	if closed, ok := profileClosure["additionalProperties"].(bool); !ok || closed {
+		t.Errorf("ProfileRecipeResponse additionalProperties = %v, want false", profileClosure["additionalProperties"])
+	}
+	profileMetadata := openAPIObjectAt(t, profileClosure, "properties", "metadata")
+	if !openAPIHasString(
+		openAPISequence(t, profileMetadata["required"], "ProfileRecipeResponse metadata.required"),
+		"selectedProfile",
+	) {
+
+		t.Error("ProfileRecipeResponse metadata does not require selectedProfile")
+	}
+	profileExcludedOverlay := openAPIObjectAt(t, profileMetadata,
+		"properties", "excludedOverlays", "items", "propertyNames")
+	profileExcludedOverlayNames := openAPISequence(t, profileExcludedOverlay["enum"],
+		"ProfileRecipeResponse excludedOverlays propertyNames.enum")
+	excludedOverlayFields := []string{"name", "reason"}
+	if len(profileExcludedOverlayNames) != len(excludedOverlayFields) {
+		t.Errorf("ProfileRecipeResponse excludedOverlays allows %d fields, want %d",
+			len(profileExcludedOverlayNames), len(excludedOverlayFields))
+	}
+	for _, field := range excludedOverlayFields {
+		if !openAPIHasString(profileExcludedOverlayNames, field) {
+			t.Errorf("ProfileRecipeResponse excludedOverlays does not allow %s", field)
+		}
+	}
+	baseExcludedOverlay := openAPIObjectAt(t, schemas, "RecipeResponseBase",
+		"properties", "metadata", "properties", "excludedOverlays", "items")
+	baseExcludedOverlayBranches := openAPISequence(t, baseExcludedOverlay["oneOf"],
+		"RecipeResponseBase excludedOverlays oneOf")
+	baseExcludedOverlayTypes := map[any]bool{}
+	var baseExcludedOverlayObject map[string]any
+	for _, branch := range baseExcludedOverlayBranches {
+		branchObject := openAPIObject(t, branch,
+			"RecipeResponseBase excludedOverlays oneOf item")
+		baseExcludedOverlayTypes[branchObject["type"]] = true
+		if branchObject["type"] == "object" {
+			baseExcludedOverlayObject = branchObject
+		}
+	}
+	for _, wantType := range []string{"string", "object"} {
+		if !baseExcludedOverlayTypes[wantType] {
+			t.Errorf("RecipeResponseBase excludedOverlays does not accept %s entries", wantType)
+		}
+	}
+	if baseExcludedOverlayObject == nil {
+		t.Fatal("RecipeResponseBase excludedOverlays has no object branch")
+	}
+	baseExcludedOverlayName := openAPIObjectAt(t, baseExcludedOverlayObject,
+		"properties", "name")
+	if got := baseExcludedOverlayName["minLength"]; got != 1 {
+		t.Errorf("RecipeResponseBase excludedOverlays object name minLength = %v, want 1", got)
+	}
+	profileConstraintWarning := openAPIObjectAt(t, profileMetadata,
+		"properties", "constraintWarnings", "items", "propertyNames")
+	profileConstraintWarningNames := openAPISequence(t, profileConstraintWarning["enum"],
+		"ProfileRecipeResponse constraintWarnings propertyNames.enum")
+	constraintWarningFields := []string{"overlay", "constraint", "expected", "actual", "reason"}
+	if len(profileConstraintWarningNames) != len(constraintWarningFields) {
+		t.Errorf("ProfileRecipeResponse constraintWarnings allows %d fields, want %d",
+			len(profileConstraintWarningNames), len(constraintWarningFields))
+	}
+	for _, field := range constraintWarningFields {
+		if !openAPIHasString(profileConstraintWarningNames, field) {
+			t.Errorf("ProfileRecipeResponse constraintWarnings does not allow %s", field)
+		}
+	}
+	componentFieldTypes := map[string]string{
+		"name":               "string",
+		"namespace":          "string",
+		"chart":              "string",
+		"type":               "string",
+		"source":             "string",
+		"version":            "string",
+		"tag":                "string",
+		"valuesFile":         "string",
+		"overrides":          "object",
+		"patches":            "array",
+		"dependencyRefs":     "array",
+		"manifestFiles":      "array",
+		"preManifestFiles":   "array",
+		"path":               "string",
+		"cleanup":            "boolean",
+		"expectedResources":  "array",
+		"healthCheckAsserts": "string",
+		"healthCheckSkip":    "boolean",
+	}
+	recipeResponseBase := openAPIObjectAt(t, schemas, "RecipeResponseBase")
+	componentProperties := openAPIObjectAt(t, recipeResponseBase,
+		"properties", "componentRefs", "items", "properties")
+	for field, wantType := range componentFieldTypes {
+		property := openAPIObjectAt(t, componentProperties, field)
+		if got := property["type"]; got != wantType {
+			t.Errorf("RecipeResponse componentRefs.%s type = %v, want %s", field, got, wantType)
+		}
+	}
+	profileComponent := openAPIObjectAt(t, profileClosure,
+		"properties", "componentRefs", "items")
+	profileComponentNames := openAPISequence(t,
+		openAPIObjectAt(t, profileComponent, "propertyNames")["enum"],
+		"ProfileRecipeResponse componentRefs propertyNames.enum")
+	if len(profileComponentNames) != len(componentFieldTypes) {
+		t.Errorf("ProfileRecipeResponse componentRefs allows %d fields, want %d",
+			len(profileComponentNames), len(componentFieldTypes))
+	}
+	for field := range componentFieldTypes {
+		if !openAPIHasString(profileComponentNames, field) {
+			t.Errorf("ProfileRecipeResponse componentRefs does not allow %s", field)
+		}
+	}
+	expectedResource := openAPIObjectAt(t, profileComponent,
+		"properties", "expectedResources", "items")
+	if closed, ok := expectedResource["additionalProperties"].(bool); !ok || closed {
+		t.Errorf("ProfileRecipeResponse expectedResources additionalProperties = %v, want false",
+			expectedResource["additionalProperties"])
+	}
+	expectedResourceProperties := openAPIObjectAt(t, expectedResource, "properties")
+	for _, field := range []string{"kind", "name", "namespace"} {
+		property := openAPIObjectAt(t, expectedResourceProperties, field)
+		if got := property["type"]; got != "string" {
+			t.Errorf("ProfileRecipeResponse expectedResources.%s type = %v, want string", field, got)
+		}
+	}
+
+	legacy := openAPIObjectAt(t, schemas, "LegacyRecipeResponse")
+	legacyAllOf := openAPISequence(t, legacy["allOf"], "LegacyRecipeResponse.allOf")
+	if len(legacyAllOf) != 2 {
+		t.Fatalf("LegacyRecipeResponse.allOf has %d entries, want 2", len(legacyAllOf))
+	}
+	legacyMetadata := openAPIObjectAt(t,
+		openAPIObject(t, legacyAllOf[1], "LegacyRecipeResponse version schema"),
+		"properties", "metadata", "not")
+	if !openAPIHasString(
+		openAPISequence(t, legacyMetadata["required"], "LegacyRecipeResponse metadata.not.required"),
+		"selectedProfile",
+	) {
+
+		t.Error("LegacyRecipeResponse does not prohibit selectedProfile")
+	}
+
+	// The legacy request branch prohibits selectedProfile and keeps its
+	// header enums to the legacy square only — a v1alpha3 artifact must
+	// still fail this branch so oneOf matches exactly one.
+	legacyBranchMetadata := openAPIObjectAt(t, legacyOverlay,
+		"properties", "metadata", "not")
+	if !openAPIHasString(
+		openAPISequence(t, legacyBranchMetadata["required"],
+			"LegacyBundleRecipeV2Request metadata.not.required"),
+		"selectedProfile",
+	) {
+
+		t.Error("LegacyBundleRecipeV2Request does not prohibit selectedProfile")
+	}
+}
+
+func openAPIObjectAt(t *testing.T, root map[string]any, path ...string) map[string]any {
+	t.Helper()
+	current := root
+	for _, key := range path {
+		current = openAPIObject(t, current[key], key)
+	}
+	return current
+}
+
+func openAPIObject(t *testing.T, value any, label string) map[string]any {
+	t.Helper()
+	object, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("%s = %T, want object", label, value)
+	}
+	return object
+}
+
+func openAPISequence(t *testing.T, value any, label string) []any {
+	t.Helper()
+	sequence, ok := value.([]any)
+	if !ok {
+		t.Fatalf("%s = %T, want array", label, value)
+	}
+	return sequence
+}
+
+func openAPIHasString(values []any, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // collectCriteriaEnumSites walks the YAML tree and returns every enum array

@@ -76,6 +76,7 @@ func main() {
 		OS:          "ubuntu", // REQUIRED to reach the OS-pinned kubeflow overlay; see "Recipe sources" below
 		Intent:      "training",
 		Platform:    "kubeflow",
+		// Profile:  "gpuStack=driver-installed", // only when the composition declares it
 	})
 	if err != nil {
 		log.Fatalf("resolve recipe: %v", err)
@@ -169,7 +170,11 @@ if err != nil {
 Client's own data provider and returns a Client-owned `*RecipeResult`
 ready for `ValidateState` / `BundleComponents` — it passes the same
 ownership check as a `ResolveRecipe` result. An already-hydrated
-`RecipeResult` file is returned with its provider bound to the Client.
+`RecipeResult` file is returned with its provider bound to the Client. For a
+profile-bearing overlay, the effective declaration resolved from that provider
+must structurally match the file's declaration after JSON normalization;
+otherwise loading fails rather than returning a recipe selected from a
+different profile contract.
 Note that bundle generation runs blocking preflight validations (for
 example `CheckDriverOwnershipCoherence`, which rejects a recipe whose
 snapshot recorded `gpuDriverState: absent` under a preinstalled-driver
@@ -248,13 +253,20 @@ identifiers. When you already hold a `pkg/recipe.AllowLists`, use
 
 `ResolveRecipe` takes the stable `RecipeRequest` shape and returns the
 facade `RecipeResult` — a deliberately small struct exposing the
-`Name`, `Version`, and `Components` of the resolved recipe. `Components`
-lists enabled (deployable) components only; disabled refs remain visible
-via `Resolved().ComponentRefs`. When you
+`Name`, `Version`, `Components`, and optional `SelectedProfile` of the
+resolved recipe. Set `RecipeRequest.Profile` to the exact `name=value`
+selection when the resolved composition declares a profile. Empty applies
+the declaration's required default; a nonempty selection against an
+unprofiled composition fails closed.
+
+`Components` lists enabled (deployable) components only; disabled refs remain
+visible via `Resolved().ComponentRefs`. When you
 already hold an `*aicr.Criteria` value — for example, a REST handler
 that parsed criteria from an incoming HTTP request and wrapped them with
-`aicr.WrapCriteria` — use `ResolveRecipeFromCriteria`. It returns the
-same facade `*RecipeResult`; call `result.Resolved()` when you need the
+`aicr.WrapCriteria` — use `ResolveRecipeFromCriteria`. Use
+`ResolveRecipeFromCriteriaWithProfile` for an explicit selection and
+`ResolveRecipeFromSnapshotWithProfile` for snapshot-filtered resolution.
+These return the same facade `*RecipeResult`; call `result.Resolved()` when you need the
 complete underlying `*pkg/recipe.RecipeResult` (constraints, deployment
 order, validation config, metadata):
 
@@ -266,6 +278,9 @@ if err != nil {
 
 // Facade surface — Name, Version, Components.
 log.Printf("recipe %s components: %d", rec.Name, len(rec.Components))
+if rec.SelectedProfile != nil {
+	log.Printf("profile %s=%s", rec.SelectedProfile.Name, rec.SelectedProfile.Value)
+}
 
 // Full upstream shape, when needed.
 resolved := rec.Resolved()
@@ -276,6 +291,8 @@ The returned `*RecipeResult` carries:
 
 - `Name`, `Version`, `TranslatedAt` — stable identity
 - `Components` — `[]ComponentRef` (Name, Kind, Version, Source, Chart, Namespace)
+- `SelectedProfile` — selected name/value and declaration-wide `OwnedPaths`;
+  nil for legacy recipes
 - `Resolved()` — the upstream `*pkg/recipe.RecipeResult` for callers that
   need constraints, deployment order, validation config, or metadata
   (e.g., evidence emission). Do not mutate; do not retain past the
@@ -290,6 +307,11 @@ identifiers. Construct one directly or wrap an upstream
 `nil` Client, `nil` context, or `nil` criteria each return
 `ErrCodeInvalidRequest`, and the same facade-level timeout bounds the
 resolve.
+
+`ListCatalog` projects the effective inherited profile declaration on each
+entry as `CatalogEntry.Profile`. The summary contains its name, description,
+required default, and sorted value names; it is nil when the composition is
+unprofiled.
 
 To extract a single value from a resolved recipe, use
 `SelectFromRecipe` with a dot-path selector. It hydrates the recipe's

@@ -26,9 +26,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// ApplyMapOverrides applies overrides to a map[string]any using dot-notation paths.
-// Handles nested maps by traversing the path segments and creating nested maps as needed.
-// Useful for applying --set flag overrides to values.yaml content.
+// ApplyMapOverrides applies overrides to a map[string]any using dot-notation
+// paths. Paths are applied shallowest-first, then lexicographically, so
+// overlapping inputs have a deterministic result. Intermediate maps are
+// created as needed; an existing non-map ancestor is rejected.
 func ApplyMapOverrides(target map[string]any, overrides map[string]string) error {
 	if target == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "target map cannot be nil")
@@ -39,7 +40,8 @@ func ApplyMapOverrides(target map[string]any, overrides map[string]string) error
 	}
 
 	var errs []string
-	for path, value := range overrides {
+	for _, path := range sortedOverridePaths(overrides) {
+		value := overrides[path]
 		if err := setMapValueByPath(target, path, value); err != nil {
 			errs = append(errs, fmt.Sprintf("%s=%s: %v", path, value, err))
 		}
@@ -93,9 +95,10 @@ func ApplyTypedOverrides(target map[string]any, overrides map[string]any) error 
 // sortedOverridePaths returns the override paths ordered shallowest-first by
 // dot-separated segment count, breaking ties lexicographically. A path that is
 // a strict dot-prefix of another always has fewer segments, so it is always
-// applied before the path that extends it — making overlapping-path merges
-// deterministic and letting the deeper override win.
-func sortedOverridePaths(overrides map[string]any) []string {
+// applied before the path that extends it. This makes overlapping-path merges
+// deterministic: compatible descendants apply last, while a non-map ancestor
+// consistently blocks them.
+func sortedOverridePaths[T any](overrides map[string]T) []string {
 	paths := make([]string, 0, len(overrides))
 	for path := range overrides {
 		paths = append(paths, path)

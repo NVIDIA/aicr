@@ -97,6 +97,237 @@ func resolveEmbeddedBundleBody(t *testing.T) []byte {
 	return body
 }
 
+func profileBundleBody(t *testing.T) []byte {
+	t.Helper()
+	result := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeProfileAPIVersion,
+		Kind:       recipe.RecipeResultKind,
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceAKS,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Intent:      recipe.CriteriaIntentTraining,
+		},
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:    "gpu-operator",
+			Version: "v25.3.3",
+			Type:    recipe.ComponentTypeHelm,
+			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Chart:   "gpu-operator",
+			Overrides: map[string]any{
+				"driver": map[string]any{"enabled": false},
+			},
+		}},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+	result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+		Name:  "gpuStack",
+		Value: "driver-installed",
+		OwnedPaths: map[string][]string{
+			"gpu-operator": {"driver.enabled", "enabled"},
+		},
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal profile recipe: %v", err)
+	}
+	return body
+}
+
+func TestDecodeBundleRecipeV2ContentType(t *testing.T) {
+	body := profileBundleBody(t)
+	tests := []struct {
+		name        string
+		contentType string
+		wantErr     string
+	}{
+		{
+			name:        "JSON parameter containing yaml remains JSON",
+			contentType: "application/json; note=yaml",
+		},
+		{
+			name:    "missing content type",
+			wantErr: "Content-Type is required",
+		},
+		{
+			name:        "unsupported content type",
+			contentType: "text/plain",
+			wantErr:     `unsupported Content-Type "text/plain"`,
+		},
+		{
+			name:        "undeclared application YAML alias",
+			contentType: "application/yaml",
+			wantErr:     `unsupported Content-Type "application/yaml"`,
+		},
+		{
+			name:        "undeclared text YAML alias",
+			contentType: "text/yaml",
+			wantErr:     `unsupported Content-Type "text/yaml"`,
+		},
+		{
+			name:        "vendor JSON is not declared",
+			contentType: "application/vnd.example+json",
+			wantErr:     `unsupported Content-Type "application/vnd.example+json"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decodeBundleRecipe(bytes.NewReader(body), tt.contentType, true)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("decodeBundleRecipe() error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("decodeBundleRecipe() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestProfileAwareBundleEndpoints(t *testing.T) {
+	h := newTestBundleHandler(t)
+	post := func(t *testing.T, v2 bool, query string, body []byte) *httptest.ResponseRecorder {
+		t.Helper()
+		path := "/v1/bundle"
+		if v2 {
+			path = "/v2/bundle"
+		}
+		path += query
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		if v2 {
+			h.HandleBundlesV2(w, req)
+		} else {
+			h.HandleBundles(w, req)
+		}
+		return w
+	}
+
+	t.Run("v1 rejects profile artifact", func(t *testing.T) {
+		w := post(t, false, "", profileBundleBody(t))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 accepts profile artifact", func(t *testing.T) {
+		w := post(t, true, "", profileBundleBody(t))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		if w.Header().Get("Content-Type") != "application/zip" {
+			t.Fatalf("Content-Type = %q, want application/zip", w.Header().Get("Content-Type"))
+		}
+	})
+
+	t.Run("v2 accepts legacy artifact", func(t *testing.T) {
+		w := post(t, true, "", resolveEmbeddedBundleBody(t))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 strictly rejects unknown artifact field", func(t *testing.T) {
+		body := profileBundleBody(t)
+		body = bytes.Replace(body, []byte(`"componentRefs"`), []byte(`"profie":true,"componentRefs"`), 1)
+		w := post(t, true, "", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 strictly rejects unknown excluded overlay field", func(t *testing.T) {
+		body := profileBundleBody(t)
+		body = bytes.Replace(
+			body,
+			[]byte(`"metadata":{`),
+			[]byte(`"metadata":{"excludedOverlays":[{"name":"overlay-a","reasn":"constraint-failed"}],`),
+			1,
+		)
+		w := post(t, true, "", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	invalidMetadataItems := []struct {
+		name        string
+		fixtureBody func(*testing.T) []byte
+		replacement string
+	}{
+		{
+			name:        "v2 rejects incomplete profile metadata item",
+			fixtureBody: profileBundleBody,
+			replacement: `"metadata":{"excludedOverlays":[{"reason":"constraint-failed"}],`,
+		},
+		{
+			name:        "v2 rejects null legacy excluded overlay",
+			fixtureBody: resolveEmbeddedBundleBody,
+			replacement: `"metadata":{"excludedOverlays":[null],`,
+		},
+	}
+	for _, tt := range invalidMetadataItems {
+		t.Run(tt.name, func(t *testing.T) {
+			body := bytes.Replace(
+				tt.fixtureBody(t),
+				[]byte(`"metadata":{`),
+				[]byte(tt.replacement),
+				1,
+			)
+			w := post(t, true, "", body)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	t.Run("v2 rejects profile version without selection", func(t *testing.T) {
+		var result recipe.RecipeResult
+		if err := json.Unmarshal(profileBundleBody(t), &result); err != nil {
+			t.Fatalf("decode fixture: %v", err)
+		}
+		result.Metadata.SelectedProfile = nil
+		body, err := json.Marshal(result)
+		if err != nil {
+			t.Fatalf("marshal fixture: %v", err)
+		}
+		w := post(t, true, "", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 rejects unknown query parameter", func(t *testing.T) {
+		w := post(t, true, "?profie=gpuStack%3Ddriver-installed", profileBundleBody(t))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	for _, tt := range []struct {
+		name  string
+		query string
+	}{
+		{
+			name:  "v2 rejects set override of profile-owned path",
+			query: "?set=gpu-operator:driver.enabled=true",
+		},
+		{
+			name:  "v2 rejects dynamic override of profile-owned path",
+			query: "?dynamic=gpu-operator:driver.enabled",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := post(t, true, tt.query, profileBundleBody(t))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 // TestBundleHandler_Attest pins the ?attest=true signing seam: a configured
 // server signs via the injected attesterBuilder, an unconfigured server rejects
 // the request with 400, and the default (no attest) path never touches signing.

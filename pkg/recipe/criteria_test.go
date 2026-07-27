@@ -21,6 +21,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 func TestParseCriteriaServiceType(t *testing.T) {
@@ -1119,13 +1121,51 @@ spec:
 	})
 }
 
-func TestParseCriteriaFromBody(t *testing.T) {
+func TestCriteriaBodyFormat(t *testing.T) {
 	tests := []struct {
 		name        string
-		body        string
 		contentType string
-		want        *Criteria
-		wantErr     bool
+		want        serializer.Format
+	}{
+		{
+			name:        "YAML with parameters",
+			contentType: "Application/YAML; charset=utf-8",
+			want:        serializer.FormatYAML,
+		},
+		{
+			name:        "JSON",
+			contentType: "application/json",
+			want:        serializer.FormatJSON,
+		},
+		{
+			name:        "empty defaults to JSON",
+			contentType: "",
+			want:        serializer.FormatJSON,
+		},
+		{
+			name:        "unrecognized defaults to JSON",
+			contentType: "text/plain",
+			want:        serializer.FormatJSON,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CriteriaBodyFormat(tt.contentType); got != tt.want {
+				t.Fatalf("CriteriaBodyFormat(%q) = %q, want %q", tt.contentType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCriteriaFromBody(t *testing.T) {
+	tests := []struct {
+		name            string
+		body            string
+		contentType     string
+		want            *Criteria
+		wantErr         bool
+		wantErrContains string
 	}{
 		{
 			name:        "JSON body with full structure",
@@ -1260,6 +1300,13 @@ spec:
 			wantErr: false,
 		},
 		{
+			name:            "malformed JSON with unknown content type",
+			body:            `{invalid json}`,
+			contentType:     "text/plain",
+			wantErr:         true,
+			wantErrContains: `unsupported content type "text/plain" and failed to parse as JSON`,
+		},
+		{
 			name:        "JSON body with platform kubeflow",
 			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
 			contentType: "application/json",
@@ -1310,6 +1357,10 @@ spec:
 				return
 			}
 			if tt.wantErr {
+				if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Fatalf("ParseCriteriaFromBody() error = %q, want containing %q",
+						err, tt.wantErrContains)
+				}
 				return
 			}
 			if got.Service != tt.want.Service {

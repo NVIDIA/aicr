@@ -15,7 +15,10 @@
 package aicr
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -472,6 +475,62 @@ func TestApplyGPUDriverAutoOverride_UnitCases(t *testing.T) {
 			}
 			if got != nil {
 				t.Errorf("driver.enabled = %v, want no injection", got)
+			}
+		})
+	}
+}
+
+func TestApplyGPUDriverAutoOverride_ProfileOwnedDriverConflictWarning(t *testing.T) {
+	preinstalledSnap := gpuHardwareSnapshotWith(func(b *measurement.SubtypeBuilder) {
+		b.SetBool(measurement.KeyGPUPresent, true).
+			SetInt(measurement.KeyGPUCount, 8).
+			SetBool(measurement.KeyGPUDriverLoaded, true)
+	})
+	tests := []struct {
+		name     string
+		enabled  bool
+		wantWarn bool
+	}{
+		{
+			name:     "operator-managed driver warns",
+			enabled:  true,
+			wantWarn: true,
+		},
+		{
+			name:    "preinstalled driver profile stays quiet",
+			enabled: false,
+		},
+	}
+
+	previousLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+				Level: slog.LevelWarn,
+			})))
+			result := &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{{
+					Name: gpuOperatorComponentName,
+					Overrides: map[string]any{
+						"driver": map[string]any{"enabled": tt.enabled},
+					},
+				}},
+			}
+			result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+				Name:  "gpuStack",
+				Value: "selected",
+				OwnedPaths: map[string][]string{
+					gpuOperatorComponentName: {"driver.enabled", "enabled"},
+				},
+			}
+
+			applyGPUDriverAutoOverride(t.Context(), result, preinstalledSnap)
+
+			gotWarn := strings.Contains(logs.String(), "may install a second driver")
+			if gotWarn != tt.wantWarn {
+				t.Errorf("warning present = %t, want %t; logs: %s", gotWarn, tt.wantWarn, logs.String())
 			}
 		})
 	}

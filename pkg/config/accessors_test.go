@@ -45,6 +45,9 @@ func TestAccessors_NilTolerant(t *testing.T) {
 	if got := nilRecipe.DataDir(); got != "" {
 		t.Errorf("nil RecipeSpec DataDir = %q, want empty", got)
 	}
+	if got := nilRecipe.ProfileSelection(); got != "" {
+		t.Errorf("nil RecipeSpec ProfileSelection = %q, want empty", got)
+	}
 	if got := nilRecipe.IsCriteriaStrict(); got {
 		t.Errorf("nil RecipeSpec IsCriteriaStrict = %v, want false", got)
 	}
@@ -94,9 +97,10 @@ func TestAccessors_PopulatedReturnsValues(t *testing.T) {
 	cfg := &config.AICRConfig{
 		Spec: config.Spec{
 			Recipe: &config.RecipeSpec{
-				Input:  &config.RecipeInputSpec{Snapshot: "snap.yaml"},
-				Output: &config.RecipeOutputSpec{Path: "out.yaml", Format: "json"},
-				Data:   "/data",
+				Input:   &config.RecipeInputSpec{Snapshot: "snap.yaml"},
+				Output:  &config.RecipeOutputSpec{Path: "out.yaml", Format: "json"},
+				Data:    "/data",
+				Profile: "gpuStack=operator",
 			},
 			Bundle: &config.BundleSpec{},
 		},
@@ -116,6 +120,9 @@ func TestAccessors_PopulatedReturnsValues(t *testing.T) {
 	}
 	if got := r.DataDir(); got != "/data" {
 		t.Errorf("DataDir = %q", got)
+	}
+	if got := r.ProfileSelection(); got != "gpuStack=operator" {
+		t.Errorf("ProfileSelection = %q", got)
 	}
 	if cfg.Bundle() == nil {
 		t.Fatal("Bundle() = nil")

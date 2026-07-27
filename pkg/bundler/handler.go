@@ -20,6 +20,7 @@ import (
 	stderrors "errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"strconv"
@@ -37,9 +38,51 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
-const zipCopyBufferSize = 32 * 1024
+const (
+	zipCopyBufferSize = 32 * 1024
+
+	bundleQueryAcceleratedNodeSelector   = "accelerated-node-selector"
+	bundleQueryAcceleratedNodeToleration = "accelerated-node-toleration"
+	bundleQueryAppName                   = "app-name"
+	bundleQueryBundlers                  = "bundlers"
+	bundleQueryDeployer                  = "deployer"
+	bundleQueryDynamic                   = "dynamic"
+	bundleQueryNodes                     = "nodes"
+	bundleQueryRepo                      = "repo"
+	bundleQuerySerial                    = "serial"
+	bundleQuerySet                       = "set"
+	bundleQuerySystemNodeSelector        = "system-node-selector"
+	bundleQuerySystemNodeToleration      = "system-node-toleration"
+	bundleQueryVendorCharts              = "vendor-charts"
+	bundleQueryWorkloadGate              = "workload-gate"
+	bundleQueryWorkloadSelector          = "workload-selector"
+)
 
 var canonicalZipModifiedTime = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+var supportedBundleQueryParameters = map[string]struct{}{
+	bundleQueryAcceleratedNodeSelector:   {},
+	bundleQueryAcceleratedNodeToleration: {},
+	bundleQueryAppName:                   {},
+	bundleQueryBundlers:                  {},
+	bundleQueryDeployer:                  {},
+	bundleQueryDynamic:                   {},
+	bundleQueryNodes:                     {},
+	bundleQueryRepo:                      {},
+	bundleQuerySerial:                    {},
+	bundleQuerySet:                       {},
+	bundleQuerySystemNodeSelector:        {},
+	bundleQuerySystemNodeToleration:      {},
+	bundleQueryVendorCharts:              {},
+	bundleQueryWorkloadGate:              {},
+	bundleQueryWorkloadSelector:          {},
+}
+
+// SupportedBundleQueryParameters returns the query parameter names recognized
+// by ParseBundleConfig. The returned map is a defensive copy.
+func SupportedBundleQueryParameters() map[string]struct{} {
+	return maps.Clone(supportedBundleQueryParameters)
+}
 
 // ParseBundleConfig parses the /v1/bundle query parameters from r and
 // returns the bundler *config.Config they describe. It is the exported
@@ -301,43 +344,43 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	var err error
 
 	// Parse value overrides
-	params.valueOverrides, err = config.ParseValueOverrides(query["set"])
+	params.valueOverrides, err = config.ParseValueOverrides(query[bundleQuerySet])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid set parameter", err)
 	}
 
 	// Parse dynamic value declarations
-	params.dynamicValues, err = config.ParseDynamicValues(query["dynamic"])
+	params.dynamicValues, err = config.ParseDynamicValues(query[bundleQueryDynamic])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid dynamic parameter", err)
 	}
 
 	// Parse system node selectors
-	params.systemNodeSelector, err = snapshotter.ParseNodeSelectors(query["system-node-selector"])
+	params.systemNodeSelector, err = snapshotter.ParseNodeSelectors(query[bundleQuerySystemNodeSelector])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid system-node-selector", err)
 	}
 
 	// Parse accelerated node selectors
-	params.acceleratedNodeSelector, err = snapshotter.ParseNodeSelectors(query["accelerated-node-selector"])
+	params.acceleratedNodeSelector, err = snapshotter.ParseNodeSelectors(query[bundleQueryAcceleratedNodeSelector])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid accelerated-node-selector", err)
 	}
 
 	// Parse system node tolerations
-	params.systemNodeTolerations, err = snapshotter.ParseTolerations(query["system-node-toleration"])
+	params.systemNodeTolerations, err = snapshotter.ParseTolerations(query[bundleQuerySystemNodeToleration])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid system-node-toleration", err)
 	}
 
 	// Parse accelerated node tolerations
-	params.acceleratedNodeTolerations, err = snapshotter.ParseTolerations(query["accelerated-node-toleration"])
+	params.acceleratedNodeTolerations, err = snapshotter.ParseTolerations(query[bundleQueryAcceleratedNodeToleration])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid accelerated-node-toleration", err)
 	}
 
 	// Parse deployer type (helm, argocd)
-	deployerStr := query.Get("deployer")
+	deployerStr := query.Get(bundleQueryDeployer)
 	if deployerStr == "" {
 		params.deployer = config.DeployerHelm // default
 	} else {
@@ -348,10 +391,10 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	}
 
 	// Parse repo URL (for Argo CD deployer)
-	params.repoURL = query.Get("repo")
+	params.repoURL = query.Get(bundleQueryRepo)
 
 	// Parse workload-gate taint
-	workloadGateStr := query.Get("workload-gate")
+	workloadGateStr := query.Get(bundleQueryWorkloadGate)
 	if workloadGateStr != "" {
 		params.workloadGateTaint, err = snapshotter.ParseTaint(workloadGateStr)
 		if err != nil {
@@ -360,13 +403,13 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	}
 
 	// Parse workload-selector
-	params.workloadSelector, err = snapshotter.ParseNodeSelectors(query["workload-selector"])
+	params.workloadSelector, err = snapshotter.ParseNodeSelectors(query[bundleQueryWorkloadSelector])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid workload-selector parameter", err)
 	}
 
 	// Parse nodes (estimated node count; 0 = unset)
-	if nodesStr := query.Get("nodes"); nodesStr != "" {
+	if nodesStr := query.Get(bundleQueryNodes); nodesStr != "" {
 		n, parseErr := strconv.Atoi(nodesStr)
 		if parseErr != nil || n < 0 {
 			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "nodes must be a non-negative integer")
@@ -375,7 +418,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	}
 
 	// Parse vendor-charts (opt-in air-gap vendoring)
-	if v := query.Get("vendor-charts"); v != "" {
+	if v := query.Get(bundleQueryVendorCharts); v != "" {
 		b, parseErr := strconv.ParseBool(v)
 		if parseErr != nil {
 			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
@@ -386,7 +429,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 
 	// Parse serial (deploy components one at a time instead of parallelizing
 	// independent ones; the API counterpart of the --serial CLI flag).
-	if v := query.Get("serial"); v != "" {
+	if v := query.Get(bundleQuerySerial); v != "" {
 		b, parseErr := strconv.ParseBool(v)
 		if parseErr != nil {
 			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
@@ -398,7 +441,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	// Parse app-name (parent Argo Application name for argocd / argocd-helm).
 	// Reject on other deployers so a typo on a helm-deployer request fails
 	// loudly rather than being silently ignored.
-	if v := query.Get("app-name"); v != "" {
+	if v := query.Get(bundleQueryAppName); v != "" {
 		if params.deployer != config.DeployerArgoCD && params.deployer != config.DeployerArgoCDHelm {
 			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 				"app-name is only valid with deployer=argocd or deployer=argocd-helm")
@@ -415,7 +458,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	// keyed on the query map, not query.Get, so an explicit empty value
 	// ("bundlers=" or "bundlers=,,") is rejected rather than silently
 	// bundling everything — only an ABSENT parameter means no filter. See #1531.
-	if values, ok := query["bundlers"]; ok {
+	if values, ok := query[bundleQueryBundlers]; ok {
 		for _, v := range values {
 			for _, name := range strings.Split(v, ",") {
 				if name = strings.TrimSpace(name); name != "" {
