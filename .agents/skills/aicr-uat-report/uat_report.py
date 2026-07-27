@@ -18,13 +18,20 @@
 Fetches runs of .github/workflows/uat-run.yaml via `gh`, keeps the runs
 that exercised `main` (aicr_version empty), and prints a Markdown summary
 table plus per-failure detail (failed job/step + run URL) for the agent to
-classify and narrate. Read-only: only `gh run list` / `gh run view`.
+classify and narrate. Reporting is read-only (`gh run list` / `gh run view`).
+
+With --download-debug DIR it additionally fetches the `uat-<cloud>-debug-<run_id>`
+artifact for failing runs into DIR/<service>-<gpu>-<intent>-<run_id>/ and
+prints a triage digest (cluster-debug/MANIFEST.yaml + report.json failing
+checks). That is the only mode that writes anything, and only under DIR.
 
 Usage: uat_report.py [--days N] [--repo OWNER/REPO] [--all-versions]
+                     [--download-debug DIR] [--max-downloads N] [--run ID]
 """
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -32,6 +39,18 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 WORKFLOW = "uat-run.yaml"
+
+# Per-cloud workflows upload the failure bundle as
+# `uat-<cloud>[-<intent>]-debug-<run_id>`. Reusable workflows share the caller's
+# run_id, so the artifact hangs off the uat-run.yaml run we already listed.
+DEBUG_ARTIFACT_HINT = "debug"
+
+# `retention-days: 30` on every "Upload failure debug" step.
+DEBUG_RETENTION_DAYS = 30
+
+# How much of MANIFEST.yaml to echo in the triage digest — enough to cover
+# generatedAt/runId/config/recipe/criteria plus the failingChecks block.
+MANIFEST_DIGEST_LINES = 40
 
 # Reservation names are <cloud>-<gpu> (infra/uat/reservations.yaml);
 # cloud maps to the managed-Kubernetes service users know it by.
@@ -67,8 +86,12 @@ def parse_title(title):
     return res, intent, ver, True
 
 
+def run_id_of(run_url):
+    return run_url.rstrip("/").rsplit("/", 1)[-1]
+
+
 def failed_steps(repo, run_url):
-    run_id = run_url.rstrip("/").rsplit("/", 1)[-1]
+    run_id = run_id_of(run_url)
     try:
         data = gh_json(["run", "view", run_id, "-R", repo, "--json", "jobs"])
     except (subprocess.SubprocessError, json.JSONDecodeError):
@@ -84,6 +107,121 @@ def failed_steps(repo, run_url):
     return "; ".join(parts) or "no failed job recorded"
 
 
+def debug_artifacts(repo, run_id):
+    """Return the run's non-expired debug artifacts, newest-largest first."""
+    arts = gh_json(
+        ["api", f"repos/{repo}/actions/runs/{run_id}/artifacts", "--jq", ".artifacts"]
+    )
+    return [a for a in arts if DEBUG_ARTIFACT_HINT in a.get("name", "")]
+
+
+def triage_digest(dest):
+    """Summarize a downloaded bundle: manifest head + failing checks + inventory."""
+    lines = []
+    manifest = os.path.join(dest, "cluster-debug", "MANIFEST.yaml")
+    if os.path.isfile(manifest):
+        with open(manifest, encoding="utf-8", errors="replace") as fh:
+            head = [next(fh, "").rstrip("\n") for _ in range(MANIFEST_DIGEST_LINES)]
+        lines.append("  MANIFEST.yaml:")
+        lines += [f"    {ln}" for ln in head if ln]
+    else:
+        lines.append(
+            "  no cluster-debug/MANIFEST.yaml — the collector did not run "
+            "(failure before prep, or kubectl unavailable)"
+        )
+    report = os.path.join(dest, "report.json")
+    if os.path.isfile(report):
+        try:
+            with open(report, encoding="utf-8") as fh:
+                tests = json.load(fh).get("results", {}).get("tests", [])
+            bad = [t for t in tests if t.get("status") in ("failed", "other")]
+            lines.append(
+                f"  report.json: {len(bad)}/{len(tests)} checks failing"
+                + (
+                    ": " + ", ".join(f"{t.get('name')}({t.get('status')})" for t in bad)
+                    if bad
+                    else ""
+                )
+            )
+        except (OSError, ValueError, AttributeError):
+            lines.append("  report.json present but unparseable")
+    # Presence, not a full listing: which top-level artifacts the run produced
+    # (is there a train-logs/? did evidence emit?) is the actionable part.
+    # cluster-debug/ collapses to a count — SKILL.md's reading order says which
+    # of its files to open, so naming all 40 here is noise.
+    contents = sorted(os.listdir(dest)) if os.path.isdir(dest) else []
+    cluster = os.path.join(dest, "cluster-debug")
+    if os.path.isdir(cluster):
+        count = len(os.listdir(cluster))
+        contents = [c for c in contents if c != "cluster-debug"]
+        contents.append(f"cluster-debug/ ({count} files)")
+    if contents:
+        lines.append(f"  contents: {', '.join(contents)}")
+    return lines
+
+
+def download_debug(repo, failures, outdir, limit):
+    """Fetch debug bundles for `failures` (newest first) into `outdir`.
+
+    Returns nothing; prints a per-run status block. An absent artifact is a
+    signal, not an error: the upload step is gated on
+    `failure() && steps.prep.outcome != 'skipped'`, so a run that died in
+    bring-up or image build has no bundle by construction.
+    """
+    print("## Debug bundles\n")
+    selected = failures[:limit]
+    if len(failures) > len(selected):
+        print(
+            f"Downloading {len(selected)} of {len(failures)} failing run(s) "
+            f"(newest first; raise --max-downloads to include the rest).\n"
+        )
+    for f in selected:
+        run_id = run_id_of(f["url"])
+        label = f"{f['svc']}/{f['gpu']}/{f['intent']} {f['ts']}Z run {run_id}"
+        dest = os.path.join(
+            outdir, f"{f['svc']}-{f['gpu']}-{f['intent']}-{run_id}".lower()
+        )
+        try:
+            arts = debug_artifacts(repo, run_id)
+        except (subprocess.SubprocessError, json.JSONDecodeError) as err:
+            print(f"- {label}: could not list artifacts ({err})")
+            continue
+        if not arts:
+            print(
+                f"- {label}: no debug artifact — either the cloud job never "
+                "reached `UAT - prep` (bring-up / image build), or the failure "
+                "was in a downstream job (evidence ingest) while the cluster "
+                "job passed. Both are infra/CI, not product signal."
+            )
+            continue
+        live = [a for a in arts if not a.get("expired")]
+        if not live:
+            print(
+                f"- {label}: debug artifact expired "
+                f"(retention is {DEBUG_RETENTION_DAYS}d)"
+            )
+            continue
+        for art in live:
+            mb = art.get("size_in_bytes", 0) / 1e6
+            os.makedirs(dest, exist_ok=True)
+            try:
+                subprocess.run(
+                    ["gh", "run", "download", run_id, "-R", repo,
+                     "-n", art["name"], "-D", dest],
+                    capture_output=True, text=True, timeout=600, check=True,
+                )
+            except subprocess.SubprocessError as err:
+                stderr = (getattr(err, "stderr", "") or "").strip()
+                print(
+                    f"- {label}: download of {art['name']} failed "
+                    f"({stderr or err})"
+                )
+                continue
+            print(f"- {label}: {art['name']} ({mb:.1f} MB) -> {dest}")
+            print("\n".join(triage_digest(dest)))
+    print()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--days", type=int, default=3, help="lookback window (default 3)")
@@ -92,6 +230,24 @@ def main():
         "--all-versions",
         action="store_true",
         help="also report release-version runs (default: main only)",
+    )
+    ap.add_argument(
+        "--download-debug",
+        metavar="DIR",
+        help="download the failure debug bundle of each failing run into DIR",
+    )
+    ap.add_argument(
+        "--max-downloads",
+        type=int,
+        default=5,
+        help="cap on bundles fetched by --download-debug (default 5, newest first)",
+    )
+    ap.add_argument(
+        "--run",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="restrict --download-debug to these run IDs (repeatable)",
     )
     opts = ap.parse_args()
 
@@ -130,6 +286,7 @@ def main():
             (r["createdAt"][:16], r["conclusion"], r["url"], derived)
         )
 
+    failures = []
     print(f"# UAT runs on {opts.repo}, last {opts.days} days (since {cutoff}Z)\n")
     for ver in sorted(agg, key=lambda v: (v != "main", v)):
         print(f"## Version: {ver}\n")
@@ -144,6 +301,9 @@ def main():
             print(f"| {svc} | {gpu} | {intent} | {ok}/{len(rows)} | {len(fails)} |")
             for ts, concl, url, derived in fails:
                 note = " (intent derived from dispatch-key cell)" if derived else ""
+                failures.append(
+                    {"ts": ts, "url": url, "svc": svc, "gpu": gpu, "intent": intent}
+                )
                 details.append(
                     f"- {svc}/{gpu}/{intent} {ts}Z {concl.upper()}{note}\n"
                     f"  {url}\n"
@@ -155,7 +315,28 @@ def main():
             print("\n".join(details))
             print()
 
+    if opts.download_debug:
+        wanted = failures
+        if opts.run:
+            wanted = [f for f in failures if run_id_of(f["url"]) in set(opts.run)]
+            missing = set(opts.run) - {run_id_of(f["url"]) for f in wanted}
+            if missing:
+                print(
+                    f"Note: run ID(s) {sorted(missing)} are not failing runs in "
+                    "this window; widen --days or drop --run.\n"
+                )
+        wanted.sort(key=lambda f: f["ts"], reverse=True)
+        if wanted:
+            download_debug(opts.repo, wanted, opts.download_debug, opts.max_downloads)
+        else:
+            print("## Debug bundles\n\nNo failing runs to download.\n")
+
     notes = []
+    if opts.days > DEBUG_RETENTION_DAYS and opts.download_debug:
+        notes.append(
+            f"window exceeds the {DEBUG_RETENTION_DAYS}d debug-artifact "
+            "retention; older bundles are gone"
+        )
     if not opts.all_versions and excluded_versions:
         notes.append(
             f"{excluded_versions} release-version run(s) excluded "
