@@ -173,6 +173,17 @@ Environment variables read at startup:
 | `AICR_ALLOWED_INTENTS` | unset → unrestricted | same |
 | `AICR_ALLOWED_OS` | unset → unrestricted | same |
 | `AICR_LOG_LEVEL` | `info` | `pkg/logging` |
+| `AICR_SIGNING_KEY` | unset → signing off | `parseSigningConfig` (Mode A KMS URI) |
+| `AICR_FULCIO_URL` | unset → signing off | `parseSigningConfig` (Mode B private Fulcio) |
+| `AICR_IDENTITY_TOKEN_FILE` | unset | `parseSigningConfig` (Mode B token source) |
+| `AICR_REKOR_URL` | unset | `parseSigningConfig` (both modes) |
+| `AICR_SIGNING_CONFIG_PATH` | unset | `parseSigningConfig` (both modes; Rekor v2) |
+| `AICR_TLOG_UPLOAD` | `true` | `parseSigningConfig` (Mode A only) |
+| `AICR_BINARY_ATTESTATION_FILE` | unset → `<executable>-attestation.sigstore.json` next to the binary | `resolveBinaryAttestationPath` (override for ko `KO_DATA_PATH` layouts) |
+| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | unset → `verifier.TrustedRepositoryPattern` (release `on-tag.yaml`) | `resolveBinaryAttestationIdentityPattern` (must contain `NVIDIA/aicr`, validated by `verifier.ValidateIdentityPattern`; retargets the attesting NVIDIA workflow, e.g. an e2e build) |
+
+See [Server-Side Bundle Signing](#server-side-bundle-signing) for the identity
+model and validation rules behind these variables.
 
 Compiled-time constants live in
 [`pkg/defaults`](https://github.com/NVIDIA/aicr/tree/main/pkg/defaults):
@@ -191,6 +202,75 @@ Compiled-time constants live in
 Constraint: every per-handler `WithTimeout` must be ≤ `ServerHandlerTimeout`,
 and `ServerWriteTimeout` must be ≥ `ServerHandlerTimeout`, else the outer
 middleware silently clamps a slow request.
+
+## Server-Side Bundle Signing
+
+`POST /v1/bundle?attest=true` returns a signed bundle. The signing identity is
+operator configuration, parsed once at startup by `parseSigningConfig`
+([`pkg/server/signing.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/server/signing.go))
+into a `signingConfig`. No field on that struct ever comes from a request: the
+server always signs as itself, so the request only chooses whether to sign, not
+with what. The handler enforces the trust boundary in `resolveAttestRequest`,
+rejecting `attest=true` with HTTP 400 when no identity is configured and
+rejecting an unparseable `attest` value with HTTP 400.
+
+**Access control is the operator's responsibility.** The signature attests that
+this aicrd deployment produced the bundle (build and tool provenance); it does not
+endorse the caller-supplied recipe's contents. `/v1/bundle` accepts arbitrary
+recipes and is not itself authenticated, so when signing is enabled the endpoint
+must be access-controlled by the deployment (network policy, gateway, or mTLS) to
+prevent an untrusted caller from obtaining server-signed bundles. Signing is
+opt-in and off by default.
+
+**Two mutually exclusive modes.** Mode A is KMS-backed (`AICR_SIGNING_KEY`, a
+cosign KMS URI validated against a scheme allowlist). Mode B is keyless against a
+private Sigstore (`AICR_FULCIO_URL` plus a token source: `AICR_IDENTITY_TOKEN_FILE`
+or GitHub Actions ambient OIDC). `parseSigningConfig` validates mode exclusivity
+and completeness and **fails fast**: an ambiguous config (both modes set), a
+malformed KMS URI, a partial keyless config, or a non-boolean `AICR_TLOG_UPLOAD`
+(parsed only in KMS mode, where the toggle applies) returns an error from `Serve`
+so the server does not start. When no signing variables are set, signing is simply
+off and the server starts normally.
+
+**Per-request options are rebuilt, not cached.** `signingConfig.resolveOptions`
+constructs the per-request `attestation.ResolveOptions`. For Mode B it reads the
+identity-token file **fresh** on every call, because ServiceAccount tokens rotate
+and Fulcio binds each certificate to a fresh token.
+
+**Binary attestation cached at startup.** Server signing also requires the aicrd
+binary's own attestation (tool provenance): a Sigstore bundle shipped next to the
+executable inside the container image, issued under the NVIDIA-CI identity and
+bound to the binary's digest. `loadBinaryAttestation` verifies it **once** at
+startup (`Serve` calls it after `parseSigningConfig`) and caches the raw bytes on
+the `signingConfig`; each signed bundle embeds those bytes as
+`attestation/aicr-attestation.sigstore.json`. This is fail-fast too: a signing
+server that cannot prove its own provenance must not start. Producing that
+attestation in CI/release is a separate dependency, tracked outside this feature.
+
+`resolveBinaryAttestationPath` chooses which file to verify: by default the
+conventional path next to the executable (`FindBinaryAttestation`), or the
+explicit `AICR_BINARY_ATTESTATION_FILE` override when set. The override exists for
+ko-built images, whose assets live under `KO_DATA_PATH`
+(`/var/run/ko/aicrd-attestation.sigstore.json`) rather than next to the binary.
+Only the attestation file path changes; the digest verified against it is always
+the running `os.Executable()` binary's digest.
+
+`resolveBinaryAttestationIdentityPattern` chooses the certificate-identity
+pattern the attestation is verified against: `verifier.TrustedRepositoryPattern`
+(the release `on-tag.yaml` workflow) by default, or the
+`AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` override when set. The override is
+validated by `verifier.ValidateIdentityPattern`, which requires it to contain
+`NVIDIA/aicr`, so it can only retarget which NVIDIA workflow attested the binary
+(e.g. the server-kms e2e build), never widen the org. A bad override fails
+startup fast. This mirrors the CLI's `--certificate-identity-regexp`, and a
+custom pattern is logged because bundles the server then signs will not pass a
+verifier using the default identity.
+
+**Injectable seams for tests.** The startup verifier
+(`binaryAttestationVerifier`) and the per-request attester builder
+(`attesterBuilder`) are function-typed fields so tests can inject fixtures: the
+real verifier pins the NVIDIA-CI identity and the running binary's digest, which
+a `go test` executable cannot satisfy.
 
 ## OpenAPI Parity Test
 
