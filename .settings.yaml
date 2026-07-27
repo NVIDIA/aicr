@@ -43,7 +43,7 @@ security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
   grype: 'v0.116.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
-  cosign: 'v3.1.1'
+  cosign: 'v3.1.2'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
   syft: 'v1.49.0'
 
@@ -91,7 +91,7 @@ testing_tools:
   yq: 'v4.53.3'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
-  awscli: '1.45.51'
+  awscli: '1.45.52'
   # MiniStack: MIT-licensed, token-free AWS emulator (https://ministack.org) used
   # by the KMS e2e in place of LocalStack, whose latest/stable images now refuse
   # to boot without a paid license token. Pinned (never :latest) for reproducibility.
