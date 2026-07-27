@@ -67,6 +67,15 @@ type BundleOptions struct {
 	// when --attest is passed.
 	Attester BundleAttester
 
+	// BinaryAttestation, when non-empty, is a pre-verified binary attestation
+	// (Sigstore bundle bytes) embedded into attested bundles as tool provenance.
+	// The caller (e.g. the aicrd server, which verifies its in-image attestation
+	// once at startup) is responsible for having verified these bytes. Empty
+	// leaves the bundler's default per-run discover-and-verify path unchanged
+	// (the CLI passes nil and relies on the attestation shipped next to its
+	// install-script binary).
+	BinaryAttestation []byte
+
 	// OutputDir is the directory bundle files are written to. Empty
 	// means the current directory ("."), matching Make's default.
 	OutputDir string
@@ -285,6 +294,9 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 	bundlerOpts := []bundler.Option{bundler.WithConfig(cfg)}
 	if opts.Attester != nil {
 		bundlerOpts = append(bundlerOpts, bundler.WithAttester(opts.Attester))
+	}
+	if len(opts.BinaryAttestation) > 0 {
+		bundlerOpts = append(bundlerOpts, bundler.WithVerifiedBinaryAttestation(opts.BinaryAttestation))
 	}
 	b, err := bundler.New(bundlerOpts...)
 	if err != nil {
