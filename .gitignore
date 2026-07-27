@@ -37,6 +37,9 @@ bin/
 /aicr-attestation.sigstore.json
 /recipe-catalog.sigstore.json
 
+# Generated aicrd binary attestations copied into ko data at release time
+cmd/aicrd/kodata/*.sigstore.json
+
 # =============================================================================
 # Build & Release
 # =============================================================================
