@@ -49,7 +49,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.18.2 | 1 |
-| network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
+| network-operator | helm | nvidia/network-operator | 26.4.1 | 5 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
@@ -191,10 +191,10 @@ _No images extracted._
 ### network-operator
 
 - `docker.io/library/busybox:1.38.0@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d`
-- `nvcr.io/nvidia/cloud-native/network-operator:v26.1.1`
+- `nvcr.io/nvidia/cloud-native/network-operator:v26.4.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
-- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.1.0`
+- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1`
 
 ### network-operator-ocp
 
