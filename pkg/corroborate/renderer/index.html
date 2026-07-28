@@ -24,8 +24,9 @@
      object/base-tag loads so an injection cannot exfiltrate or pivot. The page's
      own inline <style>/<script> require 'unsafe-inline'; it loads no remote code
      and fetches only same-origin JSON. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'">
-<title>AICR Recipe Validation — Corroboration (TestGrid · data-driven)</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'">
+<link rel="icon" href="data:,">
+<title>AICR Recipe Validation — Corroboration</title>
 <style>
   :root{
     /* ---- dark console palette ---- */
@@ -39,7 +40,7 @@
     --line-hi:#2a3647;
     --ink:#cdd6e4;
     --ink-soft:#93a0b4;
-    --ink-faint:#697585;
+    --ink-faint:#7f8b9c;
     --ink-strong:#eef3fb;
 
     /* NVIDIA accent */
@@ -59,14 +60,22 @@
     --failing:#ff4d5e;
     --untested:#5a6678;
     --partial:#a78bfa;
+    --confirmed-fill:#1a7a43;
+    /* Consensus-only hues share a 0.148 relative-luminance target so they
+       carry the same visual weight instead of reading as a darker tier. */
+    --single-fill:#177684;
+    --contested-fill:#94601c;
+    --failing-fill:#b8313f;
+    --untested-fill:#2a3340;
+    --partial-fill:#745db2;
 
-    /* ---- result / tile colors (TestGrid-style) ---- */
+    /* ---- result / tile colors ---- */
     --pass:#3ddc84;
-    --pass-tile:#1f8a4c;
+    --pass-tile:var(--confirmed-fill);
     --fail:#ff4d5e;
-    --fail-tile:#b8313f;
+    --fail-tile:var(--failing-fill);
     --notrun:#54606f;
-    --notrun-tile:#2a3340;
+    --notrun-tile:var(--untested-fill);
     --reported:#c08bff;
 
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
@@ -94,6 +103,8 @@
   a{color:var(--single);text-decoration:none}
   a:hover{text-decoration:underline}
   .hidden{display:none !important}
+  .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;
+    overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 
   /* ============ TOP BAR ============ */
   header.topbar{
@@ -198,26 +209,54 @@
     color:var(--ink-faint);padding:4px 16px 9px;display:flex;align-items:center;gap:8px;
   }
   .side-title b{color:var(--green)}
+  .side-tree-toggle{
+    margin-left:auto;display:inline-flex;align-items:center;gap:4px;background:none;
+    border:1px solid transparent;color:var(--ink-faint);padding:4px 6px;font-family:var(--mono);font-size:9px;
+    text-transform:uppercase;letter-spacing:.5px;cursor:pointer;
+  }
+  .side-tree-toggle:hover{color:var(--ink-strong)}
+  .side-tree-toggle:focus-visible{outline:2px solid var(--green);outline-offset:3px;border-radius:2px}
+  .side-tree-toggle .toggle-icon{font-size:9px}
+  .side-close{display:none;margin-left:4px;background:none;border:1px solid var(--line-hi);border-radius:5px;
+    color:var(--ink-soft);width:32px;height:32px;font-size:18px;line-height:1;cursor:pointer}
   .tree-group{margin-bottom:2px}
   .tree-node{
-    display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;
+    width:100%;border:0;background:none;text-align:left;
+    display:flex;align-items:stretch;cursor:pointer;user-select:none;
     font-family:var(--mono);transition:background .1s,color .1s;
   }
   .tree-node:hover{background:rgba(255,255,255,.03)}
+  .tree-disclosure,.tree-destination{
+    border:0;background:none;color:inherit;font:inherit;cursor:pointer;
+  }
+  .tree-disclosure{flex:none;display:flex;align-items:center;justify-content:center;padding:0}
+  .tree-destination{
+    flex:1;min-width:0;display:flex;align-items:center;gap:7px;text-align:left;
+    color:inherit;text-decoration:none;
+  }
+  .tree-disclosure:focus-visible,.tree-destination:focus-visible,.tg-tab:focus-visible{
+    outline:2px solid var(--green);outline-offset:-2px;
+  }
   .tree-node .tw{flex:none;width:12px;text-align:center;color:var(--ink-faint);font-size:9px;transition:transform .12s}
   .tree-node.collapsed .tw{transform:rotate(-90deg)}
   .tree-node .badge-mini{margin-left:auto;font-size:8.5px;color:var(--ink-faint);font-weight:500}
 
-  .tg-group{padding:7px 14px 7px 12px;font-size:12px;font-weight:700;color:var(--ink-strong);letter-spacing:.4px;text-transform:uppercase}
+  .tg-group{font-size:12px;font-weight:700;color:var(--ink-strong);letter-spacing:.4px;text-transform:uppercase}
+  .tg-group .tree-disclosure{width:34px}
+  .tg-group .tree-destination{padding:7px 14px 7px 0}
   .tg-group .csp{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;
     background:rgba(118,185,0,.1);color:var(--green);font-size:8px;font-weight:800;flex:none}
   .tg-group.empty{color:var(--ink-faint)}
   .tg-group.empty .csp{background:rgba(90,102,120,.12);color:var(--ink-faint)}
+  .tg-group.empty .tree-destination{cursor:default}
 
-  .tg-dash{padding:5px 14px 5px 26px;font-size:11.5px;color:var(--ink-soft);font-weight:600}
+  .tg-dash{font-size:11.5px;color:var(--ink-soft);font-weight:600}
+  .tg-dash .tree-disclosure{width:44px;padding-left:16px}
+  .tg-dash .tree-destination{padding:5px 14px 5px 0}
   .tg-dash .tw{color:var(--ink-faint)}
 
   .tg-tab{
+    width:100%;border-top:0;border-right:0;border-bottom:0;background:none;text-align:left;
     padding:4px 14px 4px 44px;font-size:11px;color:var(--ink-soft);
     display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent;
   }
@@ -264,7 +303,10 @@
   /* ============ LAYOUT ============ */
   main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
   .view{animation:fade .22s ease;flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 18px 18px}
-  #landing-host{flex:1;min-height:0;overflow:auto;padding:4px 2px 2px}  /* top pad so a hovered card's lifted outline isn't clipped by the scroll edge */
+  /* The overview scrolls as one page so its context and complete recipe grid
+     share a single natural reading flow. Detail views retain their own panes. */
+  #view-landing{overflow:auto}
+  #landing-host{flex:none;min-height:0;overflow:visible;padding:4px 2px 2px}
   #catalog-host{flex:1;min-height:0;display:flex}
   @keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 
@@ -287,6 +329,9 @@
   .summary-row .stat b{color:var(--green);font-weight:700;font-size:13px}
   .summary-row .stat-fresh{color:var(--ink-faint)}
   .summary-row .stat-fresh b{color:var(--ink-soft)}
+  .quick-legend{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:-4px 0 14px}
+  .quick-legend-label{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint);margin-right:2px}
+  .quick-legend .pbadge{font-size:9.5px;padding:3px 7px}
   details.howto{margin:0 0 16px;max-width:880px}
   details.howto>summary{
     cursor:pointer;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.7px;
@@ -325,26 +370,30 @@
     display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;font-weight:700;
     padding:4px 11px;border-radius:6px;border:1px solid;letter-spacing:.3px;
   }
-  .tab-status .ic{font-size:11px}
-  .tab-status .sub{font-weight:500;opacity:.85;font-size:10px}
 
   /* ============ CONSENSUS BADGE / CHIP ============ */
   .pbadge{
     display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:600;
     padding:4px 9px;border-radius:5px;border:1px solid;letter-spacing:.2px;white-space:nowrap;
   }
-  .pbadge .ic{font-size:11px;line-height:1}
-  .pbadge .cnt{opacity:.82;font-weight:500}
-  .st-confirmed{color:var(--confirmed);border-color:rgba(61,220,132,.42);background:rgba(61,220,132,.08)}
-  .st-single{color:var(--single);border-color:rgba(54,197,214,.42);background:rgba(54,197,214,.08)}
-  .st-contested{color:var(--contested);border-color:rgba(255,174,52,.62);background:rgba(255,174,52,.13);
-    box-shadow:0 0 14px rgba(255,174,52,.26),0 0 2px rgba(255,174,52,.4) inset;font-weight:700}
-  .st-failing{color:var(--failing);border-color:rgba(255,77,94,.5);background:rgba(255,77,94,.1)}
-  .st-untested{color:var(--untested);border-color:var(--line-hi);
-    background:repeating-linear-gradient(45deg,rgba(90,102,120,.07),rgba(90,102,120,.07) 4px,transparent 4px,transparent 8px)}
-  .st-partial{color:var(--partial);border-color:rgba(167,139,250,.42);background:rgba(167,139,250,.08)}
-  .reported-flag{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;font-weight:600;
-    color:var(--reported);border:1px dashed rgba(192,139,255,.5);border-radius:4px;padding:2px 6px;letter-spacing:.3px;white-space:nowrap}
+  .pbadge .cnt{opacity:1;font-weight:500}
+  .st-confirmed{--status-bg:var(--confirmed-fill);--status-fg:#dcffea;color:var(--status-fg);border-color:var(--confirmed);background:var(--status-bg)}
+  .st-single{--status-bg:var(--single-fill);--status-fg:#dcfbff;color:var(--status-fg);border-color:var(--single);background:var(--status-bg)}
+  .st-contested{--status-bg:var(--contested-fill);--status-fg:#fff2cf;color:var(--status-fg);border-color:var(--contested);background:var(--status-bg);font-weight:700}
+  .st-failing{--status-bg:var(--failing-fill);--status-fg:#ffe3e7;color:var(--status-fg);border-color:var(--failing);background:var(--status-bg)}
+  .st-untested{--status-bg:var(--untested-fill);--status-fg:#c2cbd8;color:var(--status-fg);border-color:#485568;background:var(--status-bg)}
+  .st-partial{--status-bg:var(--partial-fill);--status-fg:#f1ebff;color:var(--status-fg);border-color:var(--partial);background:var(--status-bg)}
+  td.consensus-fill{
+    padding:0;background:var(--status-bg);color:var(--status-fg);
+    border-left:1px solid rgba(255,255,255,.16);
+  }
+  .consensus-fill-content{
+    min-height:40px;width:100%;padding:5px 9px;display:flex;align-items:center;justify-content:center;
+    gap:6px;font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.15px;white-space:nowrap;
+  }
+  .consensus-fill-content .status-count{font-weight:500;opacity:1}
+  .reported-flag{font-family:var(--mono);font-size:9.5px;font-weight:600;
+    color:var(--reported);letter-spacing:.2px;white-space:nowrap}
 
   /* ============ CATALOG TABLE ============ */
   .catalog-wrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:auto;flex:1;min-height:0}
@@ -373,16 +422,23 @@
   .recipe-name .rn-head{color:var(--ink-faint)}
   .recipe-name .rn-tail{color:var(--ink-strong);font-weight:650}
   /* accelerator section header — the accelerator is the star (OS rides along as
-     subtle meta). Distinct bg, green left accent, a heavier top rule, and a drop
-     shadow separate it from the recipe rows below. */
+     subtle meta). It deliberately scrolls with its recipes: multiple sticky
+     section rows otherwise collide and obscure content in long catalogs. */
   table.catalog tr.dash-sec td{
-    position:sticky;top:36px;z-index:20;
     background:#172339;
     border-top:2px solid var(--line-hi);border-bottom:1px solid var(--line-hi);
     box-shadow:inset 4px 0 0 var(--green), 0 3px 5px -2px rgba(0,0,0,.5);
-    padding:9px 13px 9px 15px;
+    padding:0;
   }
-  .dash-sec-inner{display:flex;align-items:baseline;gap:11px}
+  .dash-sec-toggle{
+    width:100%;min-height:42px;border:0;background:none;color:inherit;padding:9px 13px 9px 15px;
+    display:flex;align-items:center;gap:11px;text-align:left;cursor:pointer;
+  }
+  .dash-sec-toggle:hover{background:rgba(255,255,255,.035)}
+  .dash-sec-toggle:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+  .dash-sec-toggle .dtw{flex:none;color:var(--green);font-size:10px;transition:transform .12s}
+  .dash-sec-toggle.collapsed .dtw{transform:rotate(-90deg)}
+  .dash-sec-inner{display:flex;align-items:baseline;gap:11px;min-width:0}
   .dash-sec-inner .dname{font-family:var(--mono);font-size:13.5px;font-weight:700;color:var(--green);letter-spacing:1.5px;text-transform:uppercase}
   .dash-sec-inner .dmeta{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
   .dash-sec-inner .dos{color:var(--ink);text-transform:uppercase;letter-spacing:.5px}
@@ -436,9 +492,11 @@
   table.matrix .colrow th .src-lbl{font-size:9px;color:var(--ink-strong);max-width:36px;overflow:hidden;text-overflow:ellipsis}
   table.matrix.labels-full .colrow th .src-lbl{max-width:none}
   table.matrix .colrow th .src-tag{font-size:7px;color:var(--ink-faint);letter-spacing:.4px;display:flex;flex-direction:column;align-items:center;gap:1px;white-space:normal;word-break:break-all;line-height:1.15}
-  table.matrix .colrow th .src-open{font-size:8px;color:var(--single);opacity:.7}
-  table.matrix .colrow th .rep-mark{color:var(--reported);font-weight:700}
-  table.matrix .colrow th .ok-mark{color:var(--ink-faint);font-weight:500}
+  table.matrix .colrow th .src-open{
+    font-size:8px;color:var(--single);border:1px solid rgba(54,197,214,.34);
+    border-radius:3px;padding:1px 3px;line-height:1.2;opacity:.9;
+  }
+  table.matrix .colrow th .rep-mark{color:var(--reported);font-weight:600}
   /* §8: stale source de-emphasis + age marker */
   table.matrix .colrow th.src-stale{opacity:.62}
   table.matrix .colrow th .src-age{font-size:7px;color:var(--contested);letter-spacing:.3px}
@@ -499,9 +557,11 @@
     padding:2px 12px;cursor:pointer;
   }
   tr.trow:nth-child(odd) td.cell-cons{background:var(--row-alt)}
-  .cons-cell{display:inline-flex;align-items:center;gap:6px;width:100%}
+  td.cell-cons.consensus-fill{padding:0;background:var(--status-bg);color:var(--status-fg)}
+  tr.trow:nth-child(odd) td.cell-cons.consensus-fill{background:var(--status-bg)}
+  td.cell-cons .consensus-fill-content{min-height:26px;padding:2px 7px}
 
-  /* solid TestGrid-style source tiles */
+  /* solid source-result tiles */
   td.cell-src{
     border-bottom:1px solid var(--line);border-left:1px solid var(--line);
     padding:0;position:relative;cursor:pointer;
@@ -515,6 +575,7 @@
     transition:box-shadow .08s;
   }
   td.cell-src:hover .tile{box-shadow:inset 0 0 0 2px var(--green)}
+  td.cell-src:focus-visible,table.tsgrid td.ts-cell:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
   .tile.t-pass{background:var(--pass-tile);color:#cdfbe0}
   .tile.t-fail{background:var(--fail-tile);color:#ffd9dd}
   .tile.t-notrun{background:var(--notrun-tile);color:var(--ink-faint)}
@@ -522,9 +583,9 @@
     background:repeating-linear-gradient(45deg,rgba(84,96,111,.12),rgba(84,96,111,.12) 4px,transparent 4px,transparent 8px);
     color:var(--ink-faint);
   }
-  /* reported source columns: hatched outline on tiles + dashed cell sep */
+  /* Reported-only sources keep one quiet column boundary; the header explains
+     eligibility in plain language, so each tile does not need another outline. */
   td.cell-src.reported-col{border-left:1px dashed rgba(192,139,255,.45)}
-  td.cell-src.reported-col .tile{outline:1px dashed rgba(192,139,255,.55);outline-offset:-2px}
   table.matrix .colrow th.reported-col{border-left:1px dashed rgba(192,139,255,.45)}
   /* tiles carry a visible glyph (✓/✕/·) + aria-label so status is conveyed by
      shape and text, not color alone (WCAG 1.4.1) */
@@ -535,7 +596,6 @@
   .ts-head{padding:13px 16px;border-bottom:1px solid var(--line-hi);background:var(--bg-2);
     display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
   .ts-head .ts-src{display:flex;align-items:center;gap:10px;min-width:0}
-  .ts-head .ts-src .src-shape{width:22px;height:22px;flex:none}
   .ts-head .ts-title{font-size:14px;color:var(--ink-strong);font-weight:700}
   .ts-head .ts-id{font-size:10px;color:var(--ink-faint);word-break:break-all;margin-top:2px}
   .ts-health{margin-left:auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
@@ -592,8 +652,20 @@
 
   /* ============ LANDING / CROSS-GROUP SUMMARY ============ */
   .landing-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
-  .land-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 15px;cursor:pointer;transition:border-color .12s,transform .08s}
+  .landing-viewbar{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;
+    font-family:var(--mono);font-size:10px;color:var(--ink-faint);
+  }
+  .landing-viewbar .toggle-group button{padding:5px 10px}
+  .landing-view-summary{margin-left:2px}
+  .land-card{
+    width:100%;text-align:left;color:inherit;font:inherit;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:14px 15px;cursor:pointer;
+    transition:border-color .12s,transform .08s;
+    display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;min-height:156px;
+  }
   .land-card:hover{border-color:var(--green-dim);transform:translateY(-1px)}
+  .land-card:focus-visible{outline:2px solid var(--green);outline-offset:3px}
   .land-card.empty{cursor:default;opacity:.7;border-style:dashed}
   .land-card .lc-top{display:flex;align-items:center;gap:9px;margin-bottom:10px}
   .land-card .lc-csp{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;
@@ -606,11 +678,80 @@
   .land-card .lc-dot{width:9px;height:9px;border-radius:2px;flex:none}
   .land-card .lc-empty-note{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);font-style:italic}
 
+  /* All-recipes overview: one compact, comparable row per recipe. Service
+     dividers keep the scan anchored without repeating the service in every row. */
+  .overview-grid-wrap{
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    overflow:visible;max-width:100%;
+  }
+  table.overview-grid{
+    width:100%;min-width:680px;border-collapse:separate;border-spacing:0;
+    font-family:var(--mono);table-layout:fixed;
+  }
+  table.overview-grid col.og-recipe-col{width:34%}
+  table.overview-grid thead th{
+    position:sticky;top:0;z-index:18;background:var(--bg-2);padding:9px 11px;
+    border-bottom:2px solid var(--line-hi);text-align:left;font-size:9px;
+    text-transform:uppercase;letter-spacing:.8px;color:var(--ink-faint);
+  }
+  table.overview-grid thead th:not(:first-child){text-align:center}
+  .og-head-short{display:none}
+  table.overview-grid tr.og-service td{
+    padding:8px 11px;background:#172339;border-top:1px solid var(--line-hi);
+    border-bottom:1px solid var(--line-hi);box-shadow:inset 4px 0 0 var(--green);
+  }
+  table.overview-grid tr.og-service td.og-service-clickable{padding:0}
+  .og-service-link{
+    width:100%;min-height:38px;padding:8px 11px;border:0;background:transparent;color:inherit;
+    display:flex;align-items:center;text-align:left;cursor:pointer;
+  }
+  .og-service-link:hover{background:rgba(118,185,0,.07)}
+  .og-service-link:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+  .og-service-inner{display:flex;align-items:baseline;gap:9px;width:100%}
+  .og-service-name{font-size:12px;font-weight:750;color:var(--green);letter-spacing:1px;text-transform:uppercase}
+  .og-service-count{font-size:9px;color:var(--ink-faint)}
+  .og-service-open{margin-left:auto;color:var(--single);font-size:16px;line-height:1}
+  table.overview-grid tr.og-dashboard td{background:#152033}
+  .og-dashboard .og-service-name{font-size:13px;letter-spacing:1.35px}
+  .og-dashboard-os{color:var(--ink);text-transform:uppercase;letter-spacing:.45px}
+  table.overview-grid tr.og-recipe{cursor:pointer;background:var(--row);transition:background .12s}
+  table.overview-grid tr.og-recipe:nth-child(odd){background:var(--row-alt)}
+  table.overview-grid tr.og-recipe:hover,
+  table.overview-grid tr.og-recipe:focus-within{
+    outline:none;background:#162031;box-shadow:inset 3px 0 0 var(--green);
+  }
+  table.overview-grid tr.og-recipe.dimmed{filter:saturate(.35)}
+  table.overview-grid tr.og-recipe td{
+    height:40px;padding:7px 11px;border-bottom:1px solid var(--line);vertical-align:middle;
+  }
+  table.overview-grid tr.og-recipe td:not(:first-child){text-align:center;border-left:1px solid var(--line)}
+  table.overview-grid tr.og-recipe td.og-status-cell{
+    padding:0;position:relative;font-weight:700;
+  }
+  table.overview-grid tr.og-recipe:hover td.og-status-cell{filter:brightness(1.06)}
+  .og-recipe-main{
+    display:block;font-size:11.5px;font-weight:650;color:var(--ink-strong);
+    overflow-wrap:anywhere;
+  }
+  .og-recipe-link{
+    display:block;width:100%;color:inherit;text-decoration:none;border-radius:2px;
+  }
+  .og-recipe-link:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+  .og-recipe-main .og-name-muted{color:var(--ink-faint);font-weight:500}
+  .og-recipe-main .og-name-strong{color:var(--ink-strong);font-weight:650}
+  .overview-chip{
+    display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:90px;
+    padding:3px 7px;border:1px solid;border-radius:5px;font-size:9px;font-weight:650;
+    white-space:nowrap;letter-spacing:.1px;
+  }
+  .og-status-cell .overview-chip{
+    width:100%;min-width:0;height:100%;padding:0 5px;border:0;border-radius:0;
+    color:inherit;background:transparent;box-shadow:none;
+  }
+  #grid-recipe-name:focus-visible{outline:2px solid var(--green);outline-offset:4px;border-radius:2px}
+
   /* ============ EMPTY GROUP STATE ============ */
-  .empty-group{background:var(--panel);border:1px dashed var(--line-hi);border-radius:12px;padding:54px 30px;text-align:center}
-  .empty-group .eg-icon{width:54px;height:54px;margin:0 auto 16px;border-radius:12px;
-    border:1px dashed var(--line-hi);display:flex;align-items:center;justify-content:center;
-    color:var(--ink-faint);font-size:24px;background:rgba(255,255,255,.015)}
+  .empty-group{background:var(--panel);border:1px dashed var(--line-hi);border-radius:12px;padding:40px 30px;text-align:center}
   .empty-group h3{margin:0 0 6px;font-size:15px;color:var(--ink-strong);font-family:var(--mono);font-weight:700;letter-spacing:.3px}
   .empty-group p{margin:0 auto;max-width:430px;color:var(--ink-soft);font-size:12.5px;line-height:1.55}
   .empty-group .eg-tag{display:inline-block;margin-top:14px;font-family:var(--mono);font-size:10.5px;color:var(--green);
@@ -627,14 +768,20 @@
   .tooltip.show{opacity:1}
   /* pinned = tap-to-show on touch: make it interactive so the drill-in link and
      close button are tappable, and give it a dismiss affordance */
-  .tooltip.pinned{pointer-events:auto}
+  .tooltip.pinned{
+    pointer-events:auto;left:auto !important;right:16px;top:118px !important;
+    width:min(380px,calc(100vw - 32px));max-width:none;max-height:calc(100vh - 134px);overflow:auto;
+    padding:16px 18px;border-color:var(--green-dim);border-radius:10px;box-shadow:var(--shadow-lg);
+  }
   .tooltip .tt-id{color:var(--green);font-weight:700;margin-bottom:3px;word-break:break-all;padding-right:18px}
   .tooltip .tt-row{display:flex;gap:8px}
   .tooltip .tt-k{color:var(--ink-faint);min-width:64px}
   .tt-pass{color:var(--pass)}.tt-fail{color:var(--fail)}.tt-notrun{color:var(--notrun)}.tt-reported{color:var(--reported)}
   .tooltip a.tt-ev{color:var(--single);pointer-events:auto;display:inline-block;padding:3px 0}
-  .tooltip .tt-close{position:absolute;top:5px;right:8px;color:var(--ink-faint);font-size:14px;line-height:1;cursor:pointer;display:none}
+  .tooltip .tt-close{position:absolute;top:8px;right:9px;background:none;border:1px solid transparent;border-radius:4px;color:var(--ink-faint);font-size:18px;line-height:1;cursor:pointer;display:none}
   .tooltip.pinned .tt-close{display:block}
+  .tooltip .tt-close:hover{color:var(--ink-strong);border-color:var(--line-hi)}
+  .tooltip .tt-close:focus-visible{outline:2px solid var(--green);outline-offset:2px}
   /* §7: copyable digest + verify command */
   .tooltip .tt-digest,.tooltip .tt-cmd{word-break:break-all;font-size:10px;flex:1}
   .tooltip .tt-cmd{color:var(--single)}
@@ -702,10 +849,30 @@
     html,body{height:auto}
     body{overflow:auto;-webkit-text-size-adjust:100%}
     header.topbar{padding:9px 12px}
-    .criteria-bar{padding:7px 12px}
+    .title small{display:none}
+    .criteria-bar{padding:10px 12px}
     /* zones stack; the vertical divider would read as a stray line, so drop it */
     .zone-divider{display:none}
-    .control-strip{gap:10px}
+    .control-strip{gap:16px}
+    .ctl-zone,.zone-controls{width:100%}
+    .zone-controls{gap:10px}
+    .zone-title,.zone-help{font-size:11px}
+    .crit{flex:1 1 calc(50% - 5px);min-width:138px}
+    .crit label{font-size:11px;letter-spacing:.55px}
+    .crit select{
+      width:100%;min-width:0;min-height:46px;padding:9px 34px 9px 12px;
+      font-size:16px;line-height:1.25;background-position:right 12px center;
+    }
+    .criteria-bar .btn{font-size:14px;padding:9px 13px}
+    .breadcrumb{gap:6px}
+    .breadcrumb .sep{display:none}
+    .quick-legend{
+      display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;
+    }
+    .quick-legend-label{grid-column:1/-1;margin:0}
+    .quick-legend .pbadge{justify-content:center}
+    .landing-viewbar{align-items:center}
+    .landing-view-summary{flex-basis:100%;margin:0}
     /* §1: header links collapse to icon-only on narrow widths; the Install chip
        drops its command preview and keeps just the label + copy */
     .header-links{gap:12px}
@@ -713,14 +880,23 @@
     .hinstall-code{display:none}
     .hinstall-label{border-right:none}
 
-    /* nav stacks above content; both flow in the document and scroll with the page */
+    /* The dashboard tree becomes an off-canvas drawer so navigation does not
+       displace the analysis surface. */
     .shell{flex-direction:column;flex:0 0 auto;align-items:stretch;min-height:0}
     aside.sidebar{
-      width:auto;align-self:auto;flex:none;
-      border-right:none;border-bottom:1px solid var(--line-hi);
-      max-height:42vh;overflow-y:auto;
+      display:block;position:fixed;z-index:190;inset:0 auto 0 0;width:min(88vw,360px);
+      border-right:1px solid var(--line-hi);border-bottom:none;max-height:none;overflow-y:auto;
+      box-shadow:var(--shadow-lg);transform:translateX(0);transition:transform .18s ease;
     }
+    body.nav-collapsed aside.sidebar{display:block;transform:translateX(-105%)}
+    .nav-backdrop{display:block;position:fixed;z-index:180;inset:0;background:rgba(3,6,10,.68);backdrop-filter:blur(2px)}
+    body.nav-collapsed .nav-backdrop{display:none}
+    .side-close{display:inline-flex;align-items:center;justify-content:center}
+    .side-tree-toggle{min-height:32px}
+    .tree-disclosure,.tree-destination,.tg-tab{min-height:44px}
+    .nav-toggles .btn,.criteria-bar .btn,.criteria-bar select{min-height:44px}
     main{flex:0 0 auto;overflow:visible}
+    #view-landing{overflow:visible}
     .view{padding:14px 12px 18px;overflow:visible}
 
     /* scroll panes lose their fixed-height flex parent — pin a real height so the
@@ -728,7 +904,15 @@
     #landing-host,#catalog-host{min-height:auto;overflow:visible}
     #catalog-host{display:block}
     .matrix-shell,.ts-shell{flex:none}
-    .matrix-scroll,.ts-scroll,.catalog-wrap{max-height:78vh;flex:none}
+    .matrix-scroll,.ts-scroll{max-height:78vh;flex:none}
+    .catalog-wrap{
+      max-height:none;overflow:visible;border:0;background:transparent;border-radius:0;
+    }
+    .scroll-cue{display:block}
+    .tooltip.pinned{
+      left:8px !important;right:8px;top:auto !important;bottom:8px;width:auto;max-height:min(62vh,520px);
+      border-radius:12px;padding:17px 18px calc(17px + env(safe-area-inset-bottom));
+    }
 
     /* Tighten the matrix into a dense tile grid. On desktop the table is
        table-layout:auto with min-width:max-content, so every column expands to
@@ -749,15 +933,95 @@
       min-width:0;padding:6px 8px;font-size:10.5px;white-space:normal;word-break:break-word;line-height:1.3;overflow:hidden;
     }
     table.matrix th.corner-cons,table.matrix td.cell-cons{
-      min-width:0;left:118px;padding:5px 7px;overflow:hidden;
+      min-width:0;left:118px;overflow:hidden;
     }
-    table.matrix .cons-cell{flex-wrap:wrap;gap:3px}
+    table.matrix td.cell-cons .consensus-fill-content{
+      min-height:26px;padding:3px;flex-wrap:nowrap;gap:2px;font-size:8px;
+    }
+    table.matrix td.cell-cons .consensus-fill-content .status-label .lbl{display:none}
+    table.matrix td.cell-cons.st-untested .consensus-fill-content .status-label .lbl{display:inline}
     table.matrix .colrow th{padding:4px 2px;overflow:hidden}
     table.matrix .colrow th .src-head{gap:2px}
     table.matrix .colrow th .src-lbl{max-width:30px;font-size:8.5px}
     table.matrix .colrow th .src-tag{font-size:6.5px;white-space:normal;word-break:break-all;line-height:1.2}
-    table.matrix .colrow th .src-open{display:none}
+    table.matrix .colrow th .src-open{display:block;font-size:0;padding:1px 2px}
+    table.matrix .colrow th .src-open::after{content:"history";font-size:7px}
     table.matrix tr.trow td{height:26px}
+    table.matrix .clshead.sources-band{font-size:0}
+    table.matrix .clshead.sources-band::before{content:"sources";font-size:9px}
+    table.matrix .clshead.sources-band .cnt{font-size:9px}
+    #controls-row{gap:10px !important}
+    #controls-row .facet{flex:1 1 150px}
+    #controls-row .facet label{font-size:10px}
+    #controls-row .facet input[type="text"],
+    #controls-row .facet select{width:100%;min-height:44px;font-size:16px}
+    #controls-row .btn{min-height:44px;font-size:13px}
+
+    /* Recipe catalog becomes a card list on phones. Every phase is visible
+       without horizontal scrolling, and accelerator headers participate in
+       normal page flow instead of stacking on top of one another. */
+    table.catalog,table.catalog tbody{display:block;width:100%}
+    table.catalog thead{display:none}
+    table.catalog tr.dash-sec{display:block;margin:0 0 8px}
+    table.catalog tr.dash-sec td{display:block;border-radius:8px;overflow:hidden}
+    .dash-sec-toggle{min-height:48px;padding:11px 12px}
+    .dash-sec-inner{flex-wrap:wrap;gap:4px 10px}
+    .dash-sec-inner .dname{font-size:15px}
+    .dash-sec-inner .dmeta{font-size:11px}
+    table.catalog tr.recipe-row{
+      display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;
+      margin:0 0 10px;background:var(--panel);border:1px solid var(--line-hi);
+      border-radius:9px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.16);
+    }
+    table.catalog tr.recipe-row:nth-child(odd),
+    table.catalog tr.recipe-row:nth-child(even){background:var(--panel)}
+    table.catalog tr.recipe-row:hover,
+    table.catalog tr.recipe-row:focus{box-shadow:inset 3px 0 0 var(--green),0 4px 14px rgba(0,0,0,.2)}
+    table.catalog tr.recipe-row td{
+      display:flex;min-width:0;padding:10px 8px;border-bottom:0;border-right:1px solid var(--line);
+      flex-direction:column;align-items:flex-start;gap:6px;
+    }
+    table.catalog tr.recipe-row td:first-child{
+      grid-column:1/-1;border-right:0;border-bottom:1px solid var(--line-hi);
+      padding:12px 13px;background:rgba(255,255,255,.02);
+    }
+    table.catalog tr.recipe-row td:last-child{border-right:0}
+    table.catalog tr.recipe-row td.consensus-fill{
+      padding:0;align-items:stretch;gap:0;
+    }
+    table.catalog tr.recipe-row td[data-label]::before{
+      content:attr(data-label);font-family:var(--mono);font-size:9px;text-transform:uppercase;
+      letter-spacing:.5px;color:var(--ink-faint);
+    }
+    table.catalog tr.recipe-row td.consensus-fill[data-label]::before{
+      padding:7px 7px 0;color:inherit;opacity:.72;
+    }
+    table.catalog td.consensus-fill .consensus-fill-content{
+      min-height:44px;padding:5px 4px;flex-wrap:wrap;gap:3px;font-size:9px;
+    }
+    table.catalog .recipe-name{font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+    table.catalog .recipe-name .rn-head{display:none}
+    table.catalog .pbadge{
+      width:100%;justify-content:center;padding:5px 4px;font-size:9px;gap:3px;
+    }
+
+    .overview-grid-wrap{border-radius:8px}
+    table.overview-grid{min-width:0;width:100%}
+    table.overview-grid col.og-recipe-col{width:42%}
+    table.overview-grid thead th{padding:8px 4px;text-align:center;font-size:8px;letter-spacing:.35px}
+    table.overview-grid thead th:first-child{text-align:left;padding-left:9px}
+    .og-head-full{display:none}
+    .og-head-short{display:inline}
+    table.overview-grid tr.og-service td{padding:8px 9px}
+    table.overview-grid tr.og-service td.og-service-clickable{padding:0}
+    .og-service-link{min-height:44px;padding:8px 9px}
+    table.overview-grid tr.og-recipe td{height:44px;padding:7px 5px}
+    table.overview-grid tr.og-recipe td:first-child{padding-left:9px}
+    .og-recipe-main{font-size:10.5px}
+    .og-status-cell .overview-chip{
+      min-width:0;width:100%;height:26px;padding:0 1px;
+      font-size:clamp(7px,2vw,8px);letter-spacing:0;
+    }
 
     /* Time-series grid: same treatment as the matrix. The build columns are
        sized by their header text (the long run id), so without fixed layout they
@@ -779,6 +1043,13 @@
     table.tsgrid th.ts-build .bh-when{white-space:normal;word-break:break-all;line-height:1.2}
     table.tsgrid tr.ts-row td{height:26px}
   }
+  .nav-backdrop{display:none}
+  .scroll-cue{display:none;flex:none;padding:7px 10px;border-bottom:1px solid var(--line);
+    background:var(--bg-2);color:var(--ink-soft);font-family:var(--mono);font-size:10px}
+  @media (max-width:820px){
+    body:not(.nav-collapsed) .nav-backdrop{display:block}
+    .scroll-cue{display:block}
+  }
 </style>
 </head>
 <body>
@@ -791,8 +1062,10 @@
     </div>
   </div>
   <div class="nav-toggles">
-    <button class="btn" id="toggle-nav" title="show/hide the dashboards panel">☰ dashboards</button>
-    <button class="btn" id="toggle-filters" title="show/hide recipe selectors &amp; evidence filters">⚙ filters</button>
+    <button type="button" class="btn" id="toggle-nav" title="show or hide the navigation sidebar"
+      aria-controls="sidebar" aria-expanded="true">☰ sidebar</button>
+    <button type="button" class="btn" id="toggle-filters" title="show/hide recipe selectors &amp; evidence filters"
+      aria-controls="criteria-bar" aria-expanded="true">⚙ filters</button>
   </div>
   <div class="spacer"></div>
   <nav class="header-links" id="header-links" aria-label="Site links"></nav>
@@ -803,14 +1076,14 @@
      runs/evidence within it. Distinct jobs, unified visual treatment. -->
 <div class="criteria-bar control-strip" id="criteria-bar">
   <div class="ctl-zone" id="zone-select">
-    <div class="zone-head"><span class="zone-title">▸ <b>select recipe</b></span><span class="zone-help">choose the cluster configuration</span></div>
+    <div class="zone-head"><span class="zone-title"><b>select recipe</b></span><span class="zone-help">choose the cluster configuration</span></div>
     <div class="zone-controls">
       <div class="crit"><label for="c-service">service</label><select id="c-service"></select></div>
       <div class="crit"><label for="c-accelerator">accelerator</label><select id="c-accelerator"></select></div>
       <div class="crit"><label for="c-os">os</label><select id="c-os"></select></div>
       <div class="crit"><label for="c-intent">intent</label><select id="c-intent"></select></div>
       <div class="crit"><label for="c-platform">platform</label><select id="c-platform"></select></div>
-      <button class="btn" id="c-reset" title="clear recipe selection">clear</button>
+      <button type="button" class="btn" id="c-reset" title="clear recipe selection">clear recipe</button>
     </div>
   </div>
   <div class="zone-divider" aria-hidden="true"></div>
@@ -819,7 +1092,7 @@
     <div class="zone-controls">
       <div class="crit"><label for="f-k8s">k8s version</label><select id="f-k8s"><option value="">all</option></select></div>
       <div class="crit"><label for="f-aicr">aicr version</label><select id="f-aicr" title="all versions = each source's latest run combined across versions (default). Pick a version for strict same-version corroboration."><option value="">all versions</option></select></div>
-      <button class="btn" id="f-reset" title="reset evidence filters">reset</button>
+      <button type="button" class="btn" id="f-reset" title="reset evidence filters">reset evidence</button>
     </div>
   </div>
 </div>
@@ -827,11 +1100,21 @@
 <div class="shell">
   <!-- ============ LEFT NAV TREE ============ -->
   <aside class="sidebar" id="sidebar">
-    <div class="side-title"><span>▦</span> <b>Dashboards</b></div>
-    <div id="tree-host"></div>
+    <div class="side-title">
+      <b>Dashboards</b>
+      <button class="side-tree-toggle" id="toggle-tree" type="button"
+        aria-expanded="true" aria-controls="tree-host" title="Collapse dashboard list">
+        <span class="toggle-icon" aria-hidden="true">▴</span>
+        <span class="toggle-label">collapse all</span>
+      </button>
+      <button class="side-close" id="close-sidebar" type="button" aria-label="close navigation sidebar">×</button>
+    </div>
+    <nav id="tree-host" aria-label="Dashboard navigation"></nav>
   </aside>
+  <div class="nav-backdrop" id="nav-backdrop" aria-hidden="true"></div>
 
   <main>
+    <div class="sr-only" id="results-status" role="status" aria-live="polite"></div>
     <!-- LANDING / OVERVIEW (default on load) -->
     <section class="view" id="view-landing">
       <div class="breadcrumb"><span class="crumb cur">overview</span></div>
@@ -841,6 +1124,7 @@
 
       <!-- summary stats (counts + freshness) — populated from index.meta -->
       <div class="summary-row" id="summary-row"></div>
+      <div class="quick-legend" id="quick-legend"></div>
 
       <!-- §3/§6: taxonomy + consensus legend, folded away by default -->
       <details class="howto" id="howto">
@@ -855,6 +1139,14 @@
         </div>
       </details>
 
+      <div class="landing-viewbar">
+        <span>Overview layout</span>
+        <div class="toggle-group" role="group" aria-label="Overview layout">
+          <button type="button" id="landing-mode-cards" aria-pressed="true">cards</button>
+          <button type="button" id="landing-mode-grid" aria-pressed="false">all recipes</button>
+        </div>
+        <span class="landing-view-summary" id="landing-view-summary"></span>
+      </div>
       <div id="landing-crit-note" class="mono" style="font-size:11px;color:var(--green);margin:-2px 0 12px"></div>
       <div id="landing-host"></div>
     </section>
@@ -862,9 +1154,9 @@
     <!-- GROUP CATALOG VIEW -->
     <section class="view hidden" id="view-catalog">
       <div class="breadcrumb" id="catalog-crumb"></div>
-      <div class="section-title">Dashboard <b id="cat-group-name">eks</b> · recipes × phases</div>
-      <div class="section-sub">Each row is a recipe; each cell is the phase consensus rolled up across all sources
-        (worst-first: CONTESTED &gt; FAILING &gt; UNTESTED &gt; SINGLE &gt; CONFIRMED). Select a recipe to open its corroboration matrix.</div>
+      <div class="section-title"><b id="cat-group-name" tabindex="-1" role="heading" aria-level="1">EKS</b> recipes by validation phase</div>
+      <div class="section-sub">Compare deployment, performance, and conformance evidence for each recipe.
+        Status reflects the most cautious result across sources. Select a recipe to inspect individual runs.</div>
       <div id="catalog-host"></div>
     </section>
 
@@ -872,7 +1164,8 @@
     <section class="view hidden" id="view-grid">
       <div class="breadcrumb" id="grid-crumb"></div>
       <div class="section-title" style="margin-bottom:12px">
-        <span id="grid-recipe-name" class="mono" style="color:var(--ink-strong);font-weight:600;text-transform:none;letter-spacing:0"></span>
+        <span id="grid-recipe-name" class="mono" tabindex="-1" role="heading" aria-level="1"
+          style="color:var(--ink-strong);font-weight:600;text-transform:none;letter-spacing:0"></span>
         <span id="grid-status"></span>
         <span id="grid-version-host"></span>
         <button class="btn cli-btn" id="copy-cli" title="show the CLI command that generates this recipe">
@@ -894,6 +1187,7 @@
         </div>
       </div>
       <div class="matrix-shell">
+        <div class="scroll-cue">Swipe for source evidence · tap a source header for run history</div>
         <div class="matrix-scroll" id="matrix-host"></div>
       </div>
     </section>
@@ -902,7 +1196,7 @@
     <section class="view hidden" id="view-ts">
       <div class="breadcrumb" id="ts-crumb"></div>
       <div class="ts-shell">
-        <div class="ts-head" id="ts-head"></div>
+        <div class="ts-head" id="ts-head" tabindex="-1" role="heading" aria-level="1"></div>
         <div class="ts-scroll" id="ts-host"></div>
       </div>
     </section>
@@ -910,7 +1204,7 @@
 </div>
 
 
-<div class="tooltip" id="tooltip"></div>
+<div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
 
 <!-- CLI / config preview popup (opened from "CLI command" in the grid view) -->
 <div class="cli-pop-backdrop hidden" id="cli-popup">
@@ -947,6 +1241,7 @@
    ============================================================ */
 
 const PHASES = ["deployment","performance","conformance"];
+const PHASE_SHORT = { deployment:"Deploy", performance:"Perf", conformance:"Conform" };
 const CLASS_ORDER = ["first-party","community","partner"];
 const CLASS_SHORT = { "first-party":"1P", "community":"COMM", "partner":"PTNR" };
 const CLASS_TITLE = { "first-party":"First-party (1P)", "community":"Community (COMM)", "partner":"Partner (PTNR)" };
@@ -975,21 +1270,27 @@ function esc(v){
     { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]
   ));
 }
+function phaseLabel(phase){
+  return phase.charAt(0).toUpperCase() + phase.slice(1);
+}
 const PLATFORM_NONE = "(none)";
+function platformCriteriaValue(value){
+  return value === null || value === "" || value === undefined ? PLATFORM_NONE : value;
+}
 
 // label = chip text; desc = plain-English meaning surfaced in the legend, badge
 // titles, and ARIA labels (§6). SINGLE = one source has passed it (verified once,
 // but not yet corroborated by a second independent source).
 const STATE_META = {
-  CONFIRMED:{ cls:"st-confirmed", ic:"✓",  label:"CONFIRMED",   desc:"multiple independent sources agree it passes" },
-  SINGLE:   { cls:"st-single",    ic:"1×", label:"SINGLE",      desc:"one source passed; not yet corroborated" },
-  CONTESTED:{ cls:"st-contested", ic:"⚠",  label:"CONTESTED",   desc:"sources disagree — inspect the runs" },
-  FAILING:  { cls:"st-failing",   ic:"✗",  label:"FAILING",     desc:"corroborated as failing" },
-  UNTESTED: { cls:"st-untested",  ic:"–",  label:"UNTESTED",    desc:"no evidence yet" },
+  CONFIRMED:{ cls:"st-confirmed", label:"CONFIRMED", desc:"multiple independent sources agree it passes" },
+  SINGLE:   { cls:"st-single", label:"SINGLE", desc:"one source passed; not yet corroborated" },
+  CONTESTED:{ cls:"st-contested", label:"CONTESTED", desc:"sources disagree — inspect the runs" },
+  FAILING:  { cls:"st-failing", label:"FAILING", desc:"corroborated as failing" },
+  UNTESTED: { cls:"st-untested", label:"UNTESTED", desc:"no evidence yet" },
   // PARTIAL is a rollup-only state (phase or recipe), never a per-row state:
   // corroborated where it ran, but some rows/phases have not been run yet (e.g.
   // a runner without the hardware for performance). See rollupPhase/rollupRecipe.
-  PARTIAL:  { cls:"st-partial",   ic:"◐",  label:"PARTIAL",     desc:"passing where tested, but not everything has run" },
+  PARTIAL:  { cls:"st-partial", label:"PARTIAL", desc:"passing where tested, but not everything has run" },
 };
 const STATE_COLOR = {
   CONFIRMED:"var(--confirmed)", SINGLE:"var(--single)", CONTESTED:"var(--contested)",
@@ -1019,6 +1320,7 @@ let COORD_TO_IDX = {};       // "group/dashboard/tab" -> DATA.recipes index (has
 let currentGroup = null;
 let currentRecipeIdx = null;
 let currentTsSrc = null;
+let landingMode = "cards";
 
 /* ============================================================
    PURE VIEW HELPERS (carried over from the mock unchanged)
@@ -1039,22 +1341,6 @@ function coordParts(c){
     ip: c.platform ? `${c.intent}-${c.platform}` : c.intent,
   };
 }
-function shapeSVG(cls, color, hollow, size){
-  size = size || 17;
-  const stroke = hollow ? color : "rgba(0,0,0,.55)";
-  const sw = hollow ? 1.7 : 0.8;
-  const fill = hollow ? "none" : color;
-  let inner;
-  if (cls === "first-party"){
-    inner = `<polygon points="8.5,1.2 15,4.9 15,12.1 8.5,15.8 2,12.1 2,4.9"`;
-  } else if (cls === "partner"){
-    inner = `<polygon points="8.5,1.7 15.3,15 1.7,15"`;
-  } else {
-    inner = `<polygon points="8.5,1.2 15.8,8.5 8.5,15.8 1.2,8.5"`;
-  }
-  inner += ` fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`;
-  return `<svg viewBox="0 0 17 17" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${inner}</svg>`;
-}
 // §a11y: tiles carry a redundant glyph (not color-only) AND an aria-label so
 // pass/fail are distinguishable without hue and announced to screen readers.
 function tileEl(res){
@@ -1066,29 +1352,45 @@ function tileEl(res){
   else { span.className = "tile t-empty"; span.textContent = ""; span.setAttribute("aria-label", "no data"); }
   return span;
 }
+function consensusCountText(state, pass, fail){
+  let cnt = "";
+  if (state === "CONTESTED")      cnt = `${pass} pass · ${fail} fail`;
+  else if (state === "FAILING")   cnt = `${fail} failed`;
+  else if (state === "UNTESTED")  cnt = "";
+  else                            cnt = `${pass} source${pass === 1 ? "" : "s"}`;
+  return cnt;
+}
 function badgeEl(state, pass, fail, reported){
   const m = STATE_META[state];
   const wrap = document.createElement("span");
   wrap.style.cssText = "display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap";
   const chip = document.createElement("span");
   chip.className = "pbadge " + m.cls;
-  let cnt = "";
-  if (state === "CONTESTED")      cnt = `${pass}✓${fail}✗`;
-  else if (state === "FAILING")   cnt = `×${fail}`;
-  else if (state === "UNTESTED")  cnt = "";
-  else                            cnt = `×${pass}`;
-  chip.innerHTML = `<span class="ic">${m.ic}</span>${m.label}` + (cnt ? `<span class="cnt">${cnt}</span>` : "");
+  const cnt = consensusCountText(state, pass, fail);
+  chip.innerHTML = m.label + (cnt ? `<span class="cnt">${cnt}</span>` : "");
   chip.title = m.desc;                                         // §6 plain-English on hover
   chip.setAttribute("aria-label", `${m.label}: ${m.desc}` + (cnt ? ` (${cnt})` : ""));
   wrap.appendChild(chip);
-  if (reported > 0){
-    const r = document.createElement("span");
-    r.className = "reported-flag";
-    r.title = `${reported} reported (unknown) signer${reported>1?"s":""} — shown, never counted toward consensus`;
-    r.innerHTML = `<span style="font-size:10px">❖</span>+${reported}`;
-    wrap.appendChild(r);
-  }
   return wrap;
+}
+function fillConsensusCell(cell, state, pass, fail, includeCount = true){
+  const m = STATE_META[state] || STATE_META.UNTESTED;
+  const cnt = includeCount ? consensusCountText(state, pass, fail) : "";
+  cell.classList.add("consensus-fill", m.cls);
+  cell.title = m.desc;
+
+  const sr = document.createElement("span");
+  sr.className = "sr-only";
+  sr.textContent = `${m.label}: ${m.desc}` + (cnt ? ` (${cnt})` : "");
+  cell.appendChild(sr);
+
+  const content = document.createElement("span");
+  content.className = "consensus-fill-content";
+  content.setAttribute("aria-hidden", "true");
+  content.innerHTML =
+    `<span class="status-label"><span class="lbl">${m.label}</span></span>` +
+    (cnt ? `<span class="status-count">${cnt}</span>` : "");
+  cell.appendChild(content);
 }
 
 /* ------------------------------------------------------------
@@ -1153,13 +1455,7 @@ function tabStatusEl(recipe){
   const m = STATE_META[r.state];
   const el = document.createElement("span");
   el.className = "tab-status " + m.cls;
-  const parts = [];
-  if (r.contested) parts.push(`${r.contested}⚠`);
-  if (r.failing) parts.push(`${r.failing}✗`);
-  if (r.confirmed) parts.push(`${r.confirmed}✓`);
-  if (r.single) parts.push(`${r.single}·1×`);
-  if (r.untested) parts.push(`${r.untested}–`);
-  el.innerHTML = `<span class="ic">${m.ic}</span>${m.label}<span class="sub">${parts.join("  ")}</span>`;
+  el.textContent = m.label;
   return el;
 }
 
@@ -1211,7 +1507,7 @@ function recipeMatchesCriteria(recipe){
   if (criteria.os && c.os !== criteria.os) return false;
   if (criteria.intent && c.intent !== criteria.intent) return false;
   if (criteria.platform){
-    const p = (c.platform === null || c.platform === "" || c.platform === undefined) ? PLATFORM_NONE : c.platform;
+    const p = platformCriteriaValue(c.platform);
     if (p !== criteria.platform) return false;
   }
   return true;
@@ -1228,11 +1524,44 @@ function dashMatchesCriteria(g, d){
    ============================================================ */
 const collapsedGroups = new Set();
 const collapsedDashes = new Set();
+const collapsedCatalogDashes = new Set();
 
+function toggleAndRefocus(set, key, rerender, selector, datasetKey){
+  if (set.has(key)) set.delete(key); else set.add(key);
+  rerender();
+  requestAnimationFrame(() => {
+    const next = [...document.querySelectorAll(selector)]
+      .find(el => el.dataset[datasetKey] === key);
+    if (next) next.focus();
+  });
+}
+
+function bindTreeDestination(link, navigate){
+  link.addEventListener("click", e => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    navigate();
+  });
+}
+
+function treeFullyExpanded(){
+  return TREE.every(g =>
+    !collapsedGroups.has(g.name) &&
+    g.dashboards.every(d => !collapsedDashes.has(`${g.name}/${d.ao}`)));
+}
+function syncTreeToggle(){
+  const btn = document.getElementById("toggle-tree");
+  if (!btn) return;
+  const expanded = treeFullyExpanded();
+  btn.setAttribute("aria-expanded", String(expanded));
+  btn.title = expanded ? "Collapse dashboard list" : "Expand dashboard list";
+  btn.querySelector(".toggle-icon").textContent = expanded ? "▴" : "▾";
+  btn.querySelector(".toggle-label").textContent = expanded ? "collapse all" : "expand all";
+}
 function renderTree(){
   const host = document.getElementById("tree-host");
   host.innerHTML = "";
-  TREE.forEach(g => {
+  TREE.forEach((g, gIdx) => {
     if (anyCriteria() && g.count > 0 && !groupMatchesCriteria(g)) return;
     const groupWrap = document.createElement("div");
     groupWrap.className = "tree-group";
@@ -1243,19 +1572,34 @@ function renderTree(){
 
     const gHead = document.createElement("div");
     const empty = g.count === 0;
+    const groupChildrenID = `tree-group-${gIdx}`;
     gHead.className = "tree-node tg-group" + (empty ? " empty" : "") + (collapsedGroups.has(g.name) ? " collapsed" : "");
-    gHead.innerHTML =
-      `<span class="tw">▾</span><span class="csp">${esc(g.name.slice(0,3).toUpperCase())}</span>` +
-      `<span>${esc(g.name)}</span><span class="badge-mini">${visTabs} recipe${visTabs===1?"":"s"}</span>`;
-    gHead.addEventListener("click", () => {
-      const wasCollapsed = collapsedGroups.has(g.name);
-      if (wasCollapsed) collapsedGroups.delete(g.name); else collapsedGroups.add(g.name);
-      if (wasCollapsed && g.count > 0) showGroupCatalog(g.name);
-      else renderTree();
+    const gToggle = document.createElement("button");
+    gToggle.type = "button";
+    gToggle.className = "tree-disclosure tg-group-toggle";
+    gToggle.dataset.group = g.name;
+    gToggle.setAttribute("aria-expanded", String(!collapsedGroups.has(g.name)));
+    gToggle.setAttribute("aria-controls", groupChildrenID);
+    gToggle.setAttribute("aria-label", `${collapsedGroups.has(g.name) ? "expand" : "collapse"} ${g.name} dashboards`);
+    gToggle.innerHTML = `<span class="tw" aria-hidden="true">▾</span>`;
+    gToggle.addEventListener("click", () => {
+      toggleAndRefocus(collapsedGroups, g.name, renderTree, ".tg-group-toggle", "group");
     });
+    const gDestination = document.createElement(empty ? "span" : "a");
+    gDestination.className = "tree-destination";
+    gDestination.innerHTML =
+      `<span class="csp" aria-hidden="true">${esc(g.name.slice(0,3).toUpperCase())}</span>` +
+      `<span>${esc(g.name)}</span><span class="badge-mini">${visTabs} recipe${visTabs===1?"":"s"}</span>`;
+    if (!empty){
+      gDestination.href = hashSegs(g.name);
+      gDestination.setAttribute("aria-label", `open ${g.name} dashboard`);
+      bindTreeDestination(gDestination, () => showServiceCatalog(g.name));
+    }
+    gHead.append(gToggle, gDestination);
     groupWrap.appendChild(gHead);
 
     const children = document.createElement("div");
+    children.id = groupChildrenID;
     children.className = "tree-children" + (collapsedGroups.has(g.name) ? " hidden" : "");
 
     if (empty){
@@ -1264,26 +1608,42 @@ function renderTree(){
       note.textContent = "no results yet — awaiting first attestation";
       children.appendChild(note);
     } else {
-      g.dashboards.forEach(d => {
+      g.dashboards.forEach((d, dIdx) => {
         if (anyCriteria() && !dashMatchesCriteria(g, d)) return;
         const dKey = `${g.name}/${d.ao}`;
         const visTabs = anyCriteria() ? d.tabs.filter(t=>recipeMatchesCriteria(DATA.recipes[t.idx])).length : d.tabs.length;
         const dHead = document.createElement("div");
+        const dashChildrenID = `tree-dash-${gIdx}-${dIdx}`;
         dHead.className = "tree-node tg-dash" + (collapsedDashes.has(dKey) ? " collapsed" : "");
-        dHead.innerHTML = `<span class="tw">▾</span><span>${esc(d.ao)}</span><span class="badge-mini">${visTabs}</span>`;
-        dHead.addEventListener("click", () => {
-          if (collapsedDashes.has(dKey)) collapsedDashes.delete(dKey); else collapsedDashes.add(dKey);
-          renderTree();
+        const dToggle = document.createElement("button");
+        dToggle.type = "button";
+        dToggle.className = "tree-disclosure tg-dash-toggle";
+        dToggle.dataset.dashboard = dKey;
+        dToggle.setAttribute("aria-expanded", String(!collapsedDashes.has(dKey)));
+        dToggle.setAttribute("aria-controls", dashChildrenID);
+        dToggle.setAttribute("aria-label", `${collapsedDashes.has(dKey) ? "expand" : "collapse"} ${d.ao} recipes`);
+        dToggle.innerHTML = `<span class="tw" aria-hidden="true">▾</span>`;
+        dToggle.addEventListener("click", () => {
+          toggleAndRefocus(collapsedDashes, dKey, renderTree, ".tg-dash-toggle", "dashboard");
         });
+        const dDestination = document.createElement("a");
+        dDestination.className = "tree-destination";
+        dDestination.href = hashSegs(g.name, d.ao);
+        dDestination.setAttribute("aria-label", `open ${d.ao} dashboard`);
+        dDestination.innerHTML = `<span>${esc(d.ao)}</span><span class="badge-mini">${visTabs}</span>`;
+        bindTreeDestination(dDestination, () => showDashboardCatalog(g.name, d.ao));
+        dHead.append(dToggle, dDestination);
         children.appendChild(dHead);
 
         const dChildren = document.createElement("div");
+        dChildren.id = dashChildrenID;
         dChildren.className = "tree-children" + (collapsedDashes.has(dKey) ? " hidden" : "");
         d.tabs.forEach(t => {
           const recipe = DATA.recipes[t.idx];
           if (anyCriteria() && !recipeMatchesCriteria(recipe)) return;
           const roll = rollupRecipe(versionView(recipe));
-          const tab = document.createElement("div");
+          const tab = document.createElement("button");
+          tab.type = "button";
           const isActive = (currentRecipeIdx === t.idx) &&
             !document.getElementById("view-grid").classList.contains("hidden");
           tab.className = "tg-tab" + (isActive ? " active" : "");
@@ -1291,6 +1651,7 @@ function renderTree(){
             `<span class="tabdot" style="background:${STATE_COLOR[roll.state]}"></span>` +
             `<span class="tablbl">${esc(t.tab)}</span>`;
           tab.title = `${recipe.name} — ${roll.state}`;
+          if (isActive) tab.setAttribute("aria-current", "page");
           tab.addEventListener("click", () => { currentGroup = g.name; openGrid(t.idx); });
           dChildren.appendChild(tab);
         });
@@ -1300,6 +1661,7 @@ function renderTree(){
     groupWrap.appendChild(children);
     host.appendChild(groupWrap);
   });
+  syncTreeToggle();
 }
 
 /* ============================================================
@@ -1308,6 +1670,12 @@ function renderTree(){
 function hideAllViews(){
   ["view-landing","view-catalog","view-grid","view-ts"].forEach(id =>
     document.getElementById(id).classList.add("hidden"));
+}
+function announceResults(message){
+  const status = document.getElementById("results-status");
+  if (!status) return;
+  status.textContent = "";
+  requestAnimationFrame(() => { status.textContent = message; });
 }
 
 /* ============================================================
@@ -1347,12 +1715,23 @@ function route(){
     .map(s => { try { return decodeURIComponent(s); } catch (e) { return s; } });
   if (seg.length === 0){ showLanding(); return; }
   if (seg.length < 3){ // 1-2 segments => group catalog
-    if (TREE.find(g => g.name === seg[0])) showGroupCatalog(seg[0]);
-    else showLanding();
+    const group = TREE.find(g => g.name === seg[0]);
+    if (!group){ showLanding(); return; }
+    CRIT_AXES.forEach(axis => { criteria[axis] = ""; });
+    criteria.service = group.name;
+    if (seg[1]){
+      const dash = group.dashboards.find(d => d.ao === seg[1]);
+      if (!dash){ showGroupCatalog(group.name); return; }
+      criteria.accelerator = dash.accelerator;
+      criteria.os = dash.os;
+    }
+    restoreCriteriaSelects();
+    showGroupCatalog(group.name, seg[1] || "");
     return;
   }
   const idx = COORD_TO_IDX[seg.slice(0, 3).join("/")]; // group/dashboard/tab
   if (idx === undefined){ showLanding(); return; }      // unknown coordinate
+  CRIT_AXES.forEach(axis => { criteria[axis] = ""; });
   if (seg.length === 3){ openGrid(idx); return; }
   openTimeSeries(DATA.recipes[idx], seg[3]);            // 4th segment = signer
 }
@@ -1362,7 +1741,10 @@ window.addEventListener("hashchange", () => {
   route();
 });
 
-function showLanding(){
+function showLanding(preserveCriteria){
+  if (!preserveCriteria){
+    CRIT_AXES.forEach(axis => { criteria[axis] = ""; });
+  }
   setHash(ROUTE_LANDING);
   if (typeof restoreCriteriaSelects === "function") restoreCriteriaSelects();
   hideAllViews();
@@ -1382,7 +1764,7 @@ function renderSummaryRow(){
   const c = (META && META.counts) || {};
   const stats = [
     [c.recipes, "recipes validated"],
-    [c.csps, "dashboards"],
+    [c.csps, "cloud services"],
     [c.sources, "independent sources"],
   ];
   stats.forEach(([v, label]) => {
@@ -1412,9 +1794,24 @@ function renderConsensusLegend(){
     const item = document.createElement("div");
     item.className = "legend-item";
     item.innerHTML =
-      `<span class="pbadge ${m.cls}"><span class="ic">${m.ic}</span>${m.label}</span>` +
+      `<span class="pbadge ${m.cls}">${m.label}</span>` +
       `<span class="legend-desc">${esc(m.desc)}</span>`;
     host.appendChild(item);
+  });
+  const quick = document.getElementById("quick-legend");
+  if (!quick) return;
+  quick.innerHTML = `<span class="quick-legend-label">Status key</span>`;
+  ["CONFIRMED","CONTESTED","FAILING","SINGLE"].forEach(s => {
+    const m = STATE_META[s];
+    const chip = document.createElement("span");
+    chip.className = `pbadge ${m.cls}`;
+    chip.textContent = m.label;
+    chip.title = m.desc;
+    const sr = document.createElement("span");
+    sr.className = "sr-only";
+    sr.textContent = `: ${m.desc}`;
+    chip.appendChild(sr);
+    quick.appendChild(chip);
   });
 }
 
@@ -1438,37 +1835,111 @@ function sourceAgeDays(src){
 }
 function ageLabel(days){
   if (days == null) return "";
-  if (days <= 0) return "today";
+  if (days <= 0) return "latest in this snapshot";
   return days === 1 ? "1 day ago" : days + " days ago";
 }
 
-function showGroupCatalog(name){
-  if (typeof restoreCriteriaSelects === "function") restoreCriteriaSelects();
+function showGroupCatalog(name, dashboardPath){
+  const activeElement = document.activeElement;
+  const focusFromSidebar = document.getElementById("sidebar").contains(activeElement);
+  const focusFromLanding = document.getElementById("view-landing").contains(activeElement);
+  const focusFromMobileNav = closeMobileNavForNavigation();
+  const focusDestination = focusFromSidebar || focusFromLanding || focusFromMobileNav;
   currentGroup = name;
-  setHash(hashSegs(name));
+  criteria.service = name;
+  restoreCriteriaSelects();
+  setHash(hashSegs(name, dashboardPath));
   hideAllViews();
   document.getElementById("view-catalog").classList.remove("hidden");
   renderCatalog();
   renderTree();
   window.scrollTo({ top:0, behavior:"auto" });
+  if (focusDestination){
+    requestAnimationFrame(() => {
+      document.getElementById("cat-group-name").focus({ preventScroll:true });
+    });
+  }
+}
+
+function showServiceCatalog(name){
+  CRIT_AXES.forEach(axis => { criteria[axis] = ""; });
+  showGroupCatalog(name);
+}
+
+function showDashboardCatalog(service, dashboardPath){
+  const group = TREE.find(g => g.name === service);
+  const dashboard = group && group.dashboards.find(d => d.ao === dashboardPath);
+  CRIT_AXES.forEach(axis => { criteria[axis] = ""; });
+  criteria.service = service;
+  if (dashboard){
+    criteria.accelerator = dashboard.accelerator;
+    criteria.os = dashboard.os;
+  }
+  showGroupCatalog(service, dashboardPath);
 }
 
 /* ============================================================
    RENDER: LANDING / CROSS-GROUP SUMMARY
    ============================================================ */
+function setLandingMode(mode){
+  if (mode !== "cards" && mode !== "grid") return;
+  landingMode = mode;
+  if (!document.getElementById("view-landing").classList.contains("hidden")) renderLanding();
+}
+
 function renderLanding(){
   const host = document.getElementById("landing-host");
   host.innerHTML = "";
   const note = document.getElementById("landing-crit-note");
-  if (note) note.textContent = anyCriteria()
-    ? "Criteria active — groups & counts below reflect only recipes matching the selection."
-    : "";
+  if (note){
+    const selected = CRIT_AXES
+      .filter(axis => criteria[axis])
+      .map(axis => `${axis} ${criteria[axis]}`);
+    note.textContent = selected.length
+      ? `Filtered: ${selected.join(" · ")}. ${landingMode === "grid"
+          ? "Muted text = selected or grouped criteria."
+          : "Groups and counts reflect matching recipes."}`
+      : "";
+  }
+
+  const cardsBtn = document.getElementById("landing-mode-cards");
+  const gridBtn = document.getElementById("landing-mode-grid");
+  if (cardsBtn){
+    cardsBtn.classList.toggle("active", landingMode === "cards");
+    cardsBtn.setAttribute("aria-pressed", String(landingMode === "cards"));
+  }
+  if (gridBtn){
+    gridBtn.classList.toggle("active", landingMode === "grid");
+    gridBtn.setAttribute("aria-pressed", String(landingMode === "grid"));
+  }
+  if (landingMode === "grid") renderLandingRecipeGrid(host);
+  else renderLandingCards(host);
+}
+
+function renderLandingEmpty(host){
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.innerHTML = `<p>No recipes match the current selection.</p>` +
+    `<button class="btn" id="empty-reset">clear selection</button>`;
+  host.appendChild(empty);
+  const summary = document.getElementById("landing-view-summary");
+  if (summary) summary.textContent = "0 recipes match the current selection";
+  announceResults("No recipes match the current selection");
+  const btn = empty.querySelector("#empty-reset");
+  if (btn) btn.addEventListener("click", () => {
+    CRIT_AXES.forEach(axis => { const s = document.getElementById("c-" + axis); if (s) s.value = ""; });
+    if (typeof applyCriteria === "function") applyCriteria();
+  });
+}
+
+function renderLandingCards(host){
   const grid = document.createElement("div");
   grid.className = "landing-grid";
   TREE.forEach(g => {
     if (anyCriteria() && g.count > 0 && !groupMatchesCriteria(g)) return;
-    const card = document.createElement("div");
     const empty = g.count === 0;
+    const card = document.createElement(empty ? "div" : "button");
+    if (!empty) card.type = "button";
     card.className = "land-card" + (empty ? " empty" : "");
     const tally = { CONFIRMED:0, SINGLE:0, CONTESTED:0, FAILING:0, PARTIAL:0, UNTESTED:0 };
     let dashCount = 0, tabCount = 0;
@@ -1501,26 +1972,215 @@ function renderLanding(){
   // §8: explicit "nothing matches" state instead of a blank page when criteria
   // filter everything out.
   if (!grid.children.length){
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.innerHTML = `<p>No recipes match the current selection.</p>` +
-      `<button class="btn" id="empty-reset">clear selection</button>`;
-    host.appendChild(empty);
-    const btn = empty.querySelector("#empty-reset");
-    if (btn) btn.addEventListener("click", () => {
-      CRIT_AXES.forEach(axis => { const s = document.getElementById("c-" + axis); if (s) s.value = ""; });
-      if (typeof applyCriteria === "function") applyCriteria();
-    });
+    renderLandingEmpty(host);
     return;
   }
   host.appendChild(grid);
+  const summary = document.getElementById("landing-view-summary");
+  if (summary) summary.textContent =
+    `${grid.children.length} cloud service${grid.children.length === 1 ? "" : "s"} summarized`;
+  announceResults(`${grid.children.length} cloud service${grid.children.length === 1 ? "" : "s"} shown`);
+}
+
+function overviewChip(state){
+  const m = STATE_META[state] || STATE_META.UNTESTED;
+  const chip = document.createElement("span");
+  chip.className = `overview-chip ${m.cls}`;
+  chip.textContent = m.label;
+  chip.title = m.desc;
+  chip.setAttribute("aria-hidden", "true");
+  return chip;
+}
+
+function overviewStateCell(state){
+  const m = STATE_META[state] || STATE_META.UNTESTED;
+  const cell = document.createElement("td");
+  cell.className = `og-status-cell ${m.cls}`;
+  const accessibleLabel = document.createElement("span");
+  accessibleLabel.className = "sr-only";
+  accessibleLabel.textContent = `${m.label}: ${m.desc}`;
+  cell.appendChild(accessibleLabel);
+  cell.appendChild(overviewChip(state));
+  return cell;
+}
+
+function overviewRecipeNameHTML(recipe, mutedAxes){
+  const c = recipe.coord;
+  const parts = [
+    { axis:"accelerator", value:c.accelerator },
+    { axis:"service", value:c.service },
+    { axis:"os", value:c.os },
+    { axis:"intent", value:c.intent },
+  ];
+  if (c.platform) parts.push({ axis:"platform", value:c.platform });
+
+  // Preserve unusual or future recipe naming schemes verbatim rather than
+  // reconstructing a name that may not match its canonical identifier.
+  if (parts.map(part => part.value).join("-") !== recipe.name){
+    return `<span class="og-name-strong">${esc(recipe.name)}</span>`;
+  }
+  return parts.map((part, idx) => {
+    const cls = mutedAxes.has(part.axis) ? "og-name-muted" : "og-name-strong";
+    return `<span class="${cls}">${idx ? "-" : ""}${esc(part.value)}</span>`;
+  }).join("");
+}
+
+function renderLandingRecipeGrid(host){
+  const groups = [];
+  let recipeCount = 0;
+  const matchingServices = TREE.filter(g => groupMatchesCriteria(g));
+  const dashboardMode = !!criteria.service && matchingServices.length === 1;
+  const selectedAxes = new Set(CRIT_AXES.filter(axis => criteria[axis]));
+
+  matchingServices.forEach(g => {
+    if (dashboardMode){
+      g.dashboards.forEach(d => {
+        const rows = d.tabs
+          .map(t => ({ idx:t.idx, recipe:DATA.recipes[t.idx] }))
+          .filter(row => recipeMatchesCriteria(row.recipe));
+        if (!rows.length) return;
+        groups.push({
+          kind:"dashboard",
+          service:g.name,
+          dashboard:d.ao,
+          name:d.accelerator || d.ao,
+          os:d.os,
+          rows,
+          mutedAxes:new Set(["service","accelerator","os", ...selectedAxes]),
+        });
+        recipeCount += rows.length;
+      });
+      return;
+    }
+
+    const rows = [];
+    g.dashboards.forEach(d => {
+      d.tabs.forEach(t => {
+        const recipe = DATA.recipes[t.idx];
+        if (!recipeMatchesCriteria(recipe)) return;
+        rows.push({ idx:t.idx, recipe });
+      });
+    });
+    if (rows.length){
+      groups.push({
+        kind:"service",
+        name:g.name,
+        rows,
+        mutedAxes:anyCriteria() ? new Set(["service", ...selectedAxes]) : new Set(),
+      });
+      recipeCount += rows.length;
+    }
+  });
+
+  if (!recipeCount){
+    renderLandingEmpty(host);
+    return;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "overview-grid-wrap";
+  const table = document.createElement("table");
+  table.className = "overview-grid";
+  const phaseColumns = PHASES.map(() => `<col class="og-state-col">`).join("");
+  const phaseHeaders = PHASES.map(ph => {
+    const full = phaseLabel(ph);
+    const short = PHASE_SHORT[ph] || full;
+    return `<th><span class="og-head-full">${esc(full)}</span>` +
+      `<span class="og-head-short">${esc(short)}</span></th>`;
+  }).join("");
+  table.innerHTML = `
+    <colgroup>
+      <col class="og-recipe-col">
+      <col class="og-state-col">${phaseColumns}
+    </colgroup>
+    <thead><tr>
+      <th>Recipe</th><th>Overall</th>${phaseHeaders}
+    </tr></thead><tbody></tbody>`;
+  const tbody = table.querySelector("tbody");
+
+  groups.forEach(g => {
+    const serviceRow = document.createElement("tr");
+    serviceRow.className = "og-service" + (g.kind === "dashboard" ? " og-dashboard" : "");
+    const serviceCell = document.createElement("td");
+    serviceCell.colSpan = PHASES.length + 2;
+    const context = g.kind === "dashboard" && g.os
+      ? `<span class="og-dashboard-os">${esc(g.os)}</span> · `
+      : "";
+    const sectionHTML =
+      `<span class="og-service-inner"><span class="og-service-name">${esc(g.name)}</span>` +
+      `<span class="og-service-count">${context}${g.rows.length} recipe${g.rows.length === 1 ? "" : "s"}</span>` +
+      `<span class="og-service-open" aria-hidden="true">›</span>` +
+      `</span>`;
+    serviceCell.classList.add("og-service-clickable");
+    const serviceLink = document.createElement("button");
+    serviceLink.type = "button";
+    serviceLink.className = "og-service-link";
+    serviceLink.setAttribute("aria-label", g.kind === "service"
+      ? `open ${g.name} dashboard`
+      : `open ${g.name}-${g.os} dashboard`);
+    serviceLink.innerHTML = sectionHTML;
+    serviceLink.addEventListener("click", () => {
+      if (g.kind === "service") showGroupCatalog(g.name);
+      else showDashboardCatalog(g.service, g.dashboard);
+    });
+    serviceCell.appendChild(serviceLink);
+    serviceRow.appendChild(serviceCell);
+    tbody.appendChild(serviceRow);
+
+    g.rows.forEach(row => {
+      const vv = versionView(row.recipe);
+      const tr = document.createElement("tr");
+      tr.className = "og-recipe";
+      if (!recipeMatchesK8s(row.recipe)) tr.classList.add("dimmed");
+
+      const name = document.createElement("td");
+      const recipeLink = document.createElement("a");
+      const cp = coordParts(row.recipe.coord);
+      recipeLink.className = "og-recipe-link";
+      recipeLink.href = hashSegs(cp.service, cp.ao, cp.ip);
+      recipeLink.setAttribute("aria-label", `open ${row.recipe.name}`);
+      recipeLink.innerHTML = `<span class="og-recipe-main">${overviewRecipeNameHTML(row.recipe, g.mutedAxes)}</span>`;
+      name.appendChild(recipeLink);
+      name.title = row.recipe.name;
+      tr.appendChild(name);
+
+      tr.appendChild(overviewStateCell(rollupRecipe(vv).state));
+      PHASES.forEach(ph => {
+        const tests = vv.tests.filter(t => t.phase === ph);
+        const state = vv._phaseRollup[ph] || (tests.length ? rollupPhase(tests).state : "UNTESTED");
+        tr.appendChild(overviewStateCell(state));
+      });
+
+      const open = focusHeading => openGrid(row.idx, focusHeading);
+      recipeLink.addEventListener("click", e => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        open(true);
+      });
+      tr.addEventListener("click", e => {
+        if (e.target.closest("a,button,input,select,textarea")) return;
+        open(false);
+      });
+      tbody.appendChild(tr);
+    });
+  });
+
+  wrap.appendChild(table);
+  host.appendChild(wrap);
+  const summary = document.getElementById("landing-view-summary");
+  if (summary){
+    const groupLabel = dashboardMode ? "accelerator/OS group" : "service";
+    summary.textContent =
+      `${recipeCount} recipe${recipeCount === 1 ? "" : "s"} across ${groups.length} ${groupLabel}${groups.length === 1 ? "" : "s"}`;
+  }
+  announceResults(`${recipeCount} recipe${recipeCount === 1 ? "" : "s"} shown in all-recipes overview`);
 }
 
 /* ============================================================
    RENDER: GROUP CATALOG (grouped by dashboard)
    ============================================================ */
 function renderCatalog(){
-  document.getElementById("cat-group-name").textContent = currentGroup;
+  document.getElementById("cat-group-name").textContent = currentGroup.toUpperCase();
 
   const bc = document.getElementById("catalog-crumb");
   bc.innerHTML = `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span><span class="crumb cur">${esc(currentGroup)}</span>`;
@@ -1542,7 +2202,6 @@ function renderCatalog(){
       ? `No <span class="mono">${esc(currentGroup)}</span> recipes match the current criteria selection.`
       : `This dashboard group has no published validation evidence.`;
     eg.innerHTML = `
-      <div class="eg-icon">▦</div>
       <h3>No matching recipes for <span style="color:var(--green)">${esc(currentGroup)}</span></h3>
       <p>${why} Adjust the criteria selector, or once a signer attests an
          <span class="mono">${esc(currentGroup)}</span> recipe its corroboration matrix will appear here.</p>
@@ -1558,29 +2217,47 @@ function renderCatalog(){
   table.innerHTML = `
     <thead><tr>
       <th style="width:40%">Recipe</th>
-      <th>Deployment</th><th>Performance</th><th>Conformance</th>
+      ${PHASES.map(ph => `<th>${esc(phaseLabel(ph))}</th>`).join("")}
     </tr></thead><tbody></tbody>`;
   const tbody = table.querySelector("tbody");
 
   dashes.forEach(d => {
+    const catalogDashKey = `${currentGroup}/${d.ao}`;
+    const catalogCollapsed = collapsedCatalogDashes.has(catalogDashKey);
     const secTr = document.createElement("tr");
     secTr.className = "dash-sec";
     const secTd = document.createElement("td");
-    secTd.setAttribute("colspan","4");
+    secTd.colSpan = PHASES.length + 1;
     // Accelerator-focused divider: the accelerator is the star; the OS rides
     // along as subtle context (it still distinguishes same-accelerator dashboards).
     const osMeta = d.os ? `<span class="dos">${esc(d.os)}</span> · ` : "";
-    secTd.innerHTML =
-      `<div class="dash-sec-inner"><span class="dname">${esc(d.accelerator || d.ao)}</span>` +
-      `<span class="dmeta">${osMeta}${d.tabs.length} recipe${d.tabs.length===1?"":"s"}</span></div>`;
+    const secButton = document.createElement("button");
+    secButton.type = "button";
+    secButton.className = "dash-sec-toggle" + (catalogCollapsed ? " collapsed" : "");
+    secButton.setAttribute("aria-expanded", String(!catalogCollapsed));
+    secButton.setAttribute("aria-label",
+      `${catalogCollapsed ? "expand" : "collapse"} ${d.accelerator || d.ao} recipes`);
+    secButton.dataset.catalogDash = catalogDashKey;
+    secButton.innerHTML =
+      `<span class="dtw" aria-hidden="true">▾</span>` +
+      `<span class="dash-sec-inner"><span class="dname">${esc(d.accelerator || d.ao)}</span>` +
+      `<span class="dmeta">${osMeta}${d.tabs.length} recipe${d.tabs.length===1?"":"s"}</span></span>`;
+    secButton.addEventListener("click", () => {
+      toggleAndRefocus(
+        collapsedCatalogDashes, catalogDashKey, renderCatalog,
+        ".dash-sec-toggle", "catalogDash");
+    });
+    secTd.appendChild(secButton);
     secTr.appendChild(secTd);
     tbody.appendChild(secTr);
 
+    if (catalogCollapsed) return;
     d.tabs.forEach(t => {
       const idx = t.idx;
       const recipe = DATA.recipes[idx];
       const vv = versionView(recipe);   // rollups reflect the AICR version in view
       const tr = document.createElement("tr");
+      tr.className = "recipe-row";
       tr.tabIndex = 0;
       tr.setAttribute("role","button");
       if (!recipeMatchesK8s(recipe)) tr.classList.add("dimmed");
@@ -1603,14 +2280,16 @@ function renderCatalog(){
 
       PHASES.forEach(ph => {
         const td = document.createElement("td");
+        td.dataset.label = ph;
         const tests = vv.tests.filter(t2 => t2.phase === ph);
         if (tests.length === 0){
-          td.appendChild(badgeEl(vv._phaseRollup[ph] || "UNTESTED", 0, 0, 0));
+          fillConsensusCell(td, vv._phaseRollup[ph] || "UNTESTED", 0, 0, false);
         } else {
-          // State from the baked Go rollup (single source of truth); pass/fail/
-          // reported are display tallies derived from the rows.
+          // State comes from the baked Go rollup (single source of truth). Phase
+          // tallies span multiple tests, so they are not source counts; keep this
+          // overview cell state-only and leave source counts to per-test cells.
           const r = rollupPhase(tests);
-          td.appendChild(badgeEl(vv._phaseRollup[ph] || r.state, r.pass, r.fail, r.reported));
+          fillConsensusCell(td, vv._phaseRollup[ph] || r.state, r.pass, r.fail, false);
         }
         tr.appendChild(td);
       });
@@ -1624,6 +2303,8 @@ function renderCatalog(){
 
   wrap.appendChild(table);
   host.appendChild(wrap);
+  const recipeCount = tbody.querySelectorAll("tr.recipe-row").length;
+  announceResults(`${recipeCount} recipe${recipeCount === 1 ? "" : "s"} shown for ${currentGroup}`);
 }
 
 /* ============================================================
@@ -1737,7 +2418,9 @@ function refreshGridHeader(recipe){
   }
   vhost.appendChild(note);
 }
-function openGrid(idx){
+function openGrid(idx, focusHeading){
+  const focusFromMobileNav = closeMobileNavForNavigation();
+  const focusDestination = !!focusHeading || focusFromMobileNav;
   currentRecipeIdx = idx;
   const recipe = DATA.recipes[idx];
   const cp = coordParts(recipe.coord);
@@ -1748,11 +2431,16 @@ function openGrid(idx){
   const bc = document.getElementById("grid-crumb");
   bc.innerHTML =
     `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span>` +
-    `<a href="#" class="crumb" data-back="1">${esc(cp.service)}</a><span class="sep">›</span>` +
-    `<a href="#" class="crumb" data-back="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-service="1">${esc(cp.service)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-dashboard="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
     `<span class="crumb cur">${esc(cp.ip)}</span>`;
-  bc.querySelectorAll("[data-back]").forEach(a => {
-    a.addEventListener("click", e => { e.preventDefault(); backToCatalog(); });
+  bc.querySelector("[data-service]").addEventListener("click", e => {
+    e.preventDefault();
+    showServiceCatalog(cp.service);
+  });
+  bc.querySelector("[data-dashboard]").addEventListener("click", e => {
+    e.preventDefault();
+    backToCatalog();
   });
   bc.querySelectorAll("[data-home]").forEach(a => {
     a.addEventListener("click", e => { e.preventDefault(); showLanding(); });
@@ -1768,6 +2456,11 @@ function openGrid(idx){
   renderTree();
   fitMatrixColumns();   // size source columns now that the grid is visible (widths need a laid-out container)
   window.scrollTo({ top:0, behavior:"auto" });
+  if (focusDestination){
+    requestAnimationFrame(() => {
+      document.getElementById("grid-recipe-name").focus({ preventScroll:true });
+    });
+  }
 }
 
 // Adaptive source-column sizing. When the full source labels fit in the space
@@ -1884,7 +2577,7 @@ function renderMatrix(recipe){
       inner.className = "clshead " + cls;
       // short code (1P/COMM/PTNR) keeps the group label inside narrow colspans;
       // full class name is in each source header's tooltip
-      inner.innerHTML = `${CLASS_SHORT[cls] || cls} <span class="cnt">×${n}</span>`;
+      inner.innerHTML = `${CLASS_SHORT[cls] || cls} <span class="cnt">${n} source${n === 1 ? "" : "s"}</span>`;
       th.title = `${CLASS_TITLE[cls] || cls} — ${n} source${n > 1 ? "s" : ""}`;
       th.appendChild(inner);
       groupRow.appendChild(th);
@@ -1896,7 +2589,7 @@ function renderMatrix(recipe){
     th.setAttribute("colspan", String(cols.length));
     const inner = document.createElement("div");
     inner.className = "clshead sources-band";
-    inner.innerHTML = `independent sources <span class="cnt">×${cols.length}</span>`;
+    inner.innerHTML = `<span class="cnt">${cols.length}</span> independent source${cols.length === 1 ? "" : "s"}`;
     th.appendChild(inner);
     groupRow.appendChild(th);
   }
@@ -1912,22 +2605,21 @@ function renderMatrix(recipe){
     if (!srcMatchesK8sInTests(src, aTests)) th.style.opacity = ".3";
     const head = document.createElement("div");
     head.className = "src-head";
-    // §5: with class bands off, the per-source tag carries only the trust signal
-    // that matters to a visitor — "reported" (zero-weight) vs nothing (counts
-    // toward consensus). The class code is shown only when CLASS_BANDS is on.
+    // With class bands off, only exceptional eligibility needs a visible label.
+    // Counted sources are the default and need no repeated symbol or tag.
     const tag = CLASS_BANDS
-      ? `${esc(CLASS_SHORT[cls] || cls)}${reported ? ` <span class="rep-mark">❖ reported</span>` : ""}`
-      : (reported ? `<span class="rep-mark">❖ reported</span>` : `<span class="ok-mark">✓ counts</span>`);
+      ? `${esc(CLASS_SHORT[cls] || cls)}${reported ? ` <span class="rep-mark">not counted</span>` : ""}`
+      : (reported ? `<span class="rep-mark">not counted</span>` : "");
     // §8: de-emphasize stale sources (no run within STALE_DAYS of the snapshot)
     const ageD = sourceAgeDays(src);
     const stale = ageD != null && ageD > STALE_DAYS;
     if (stale) th.classList.add("src-stale");
-    const ageTag = stale ? `<span class="src-age" title="last attested ${esc(ageLabel(ageD))}">⏱ ${ageD}d</span>` : "";
+    const ageTag = stale ? `<span class="src-age" title="last attested ${esc(ageLabel(ageD))}">stale, ${ageD}d</span>` : "";
     head.innerHTML =
       `<span class="src-lbl">${esc(meta ? meta.label : src)}</span>` +
-      `<span class="src-tag">${tag}</span>` +
+      (tag ? `<span class="src-tag">${tag}</span>` : "") +
       ageTag +
-      `<span class="src-open" title="open builds-over-time time-series">⤢</span>`;
+      `<span class="src-open" aria-hidden="true" title="open this source's run history">history</span>`;
     th.appendChild(head);
     // Custom tooltip (works on hover AND tap) replaces the native title so the
     // truncated source label has a full-text affordance on touch devices too.
@@ -1935,12 +2627,11 @@ function renderMatrix(recipe){
       label: meta ? meta.label : src, id: src, cls,
       clsTitle: CLASS_TITLE[cls] || cls, allow: !reported,
     });
-    th._nav = () => openTimeSeries(recipe, src);
+    th._nav = () => openTimeSeries(recipe, src, null, true);
     // §a11y: keyboard-reachable drill-in (mirror catalog-row pattern)
     th.tabIndex = 0;
     th.setAttribute("role", "button");
-    th.setAttribute("aria-label", `open time-series for ${meta ? meta.label : src}`);
-    th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); openTimeSeries(recipe, src); } });
+    th.setAttribute("aria-label", `open run history for ${meta ? meta.label : src}`);
     bindCellNav(th);
     colRow.appendChild(th);
   });
@@ -1996,10 +2687,7 @@ function renderMatrix(recipe){
       tr.appendChild(tdTest);
       const tdCons = document.createElement("td");
       tdCons.className = "cell-cons";
-      const consWrap = document.createElement("span");
-      consWrap.className = "cons-cell";
-      consWrap.appendChild(badgeEl("UNTESTED", 0, 0, 0));
-      tdCons.appendChild(consWrap);
+      fillConsensusCell(tdCons, "UNTESTED", 0, 0);
       tr.appendChild(tdCons);
       cols.forEach(({src}) => {
         const td = document.createElement("td");
@@ -2031,10 +2719,7 @@ function renderMatrix(recipe){
 
       const tdCons = document.createElement("td");
       tdCons.className = "cell-cons";
-      const consWrap = document.createElement("span");
-      consWrap.className = "cons-cell";
-      consWrap.appendChild(badgeEl(c.state, c.passAllow, c.failAllow, c.reported));
-      tdCons.appendChild(consWrap);
+      fillConsensusCell(tdCons, c.state, c.passAllow, c.failAllow);
       tr.appendChild(tdCons);
 
       cols.forEach(({src}) => {
@@ -2055,7 +2740,9 @@ function renderMatrix(recipe){
           build: rm.build || "—", buildWhen: rm.when || "—", evidenceRef: rm.evidenceRef || "",
         });
         if (dimmed) td.classList.add("dimcell");
-        td._nav = () => openTimeSeries(recipe, src, test.name);
+        td._nav = () => openTimeSeries(recipe, src, test.name, true);
+        td.setAttribute("aria-label",
+          `${test.name}, ${meta ? meta.label : src}: ${res === null ? "not run here" : res}. Open evidence details.`);
         bindCellNav(td);
         tr.appendChild(td);
       });
@@ -2065,17 +2752,24 @@ function renderMatrix(recipe){
   });
   table.appendChild(tbody);
   host.appendChild(table);
+  const shown = table.querySelectorAll("tr.trow:not(.filtered)").length;
+  announceResults(`${shown} test row${shown === 1 ? "" : "s"} shown`);
   fitMatrixColumns();   // re-fit source columns after a re-render (sort/filter/facets); no-op while the view is hidden
 }
 
 function backToCatalog(){
-  setHash(hashSegs(currentGroup));
-  restoreCriteriaSelects();
-  hideAllViews();
-  document.getElementById("view-catalog").classList.remove("hidden");
-  renderCatalog();
-  renderTree();
-  window.scrollTo({ top:0, behavior:"auto" });
+  const recipe = currentRecipeIdx === null ? null : DATA.recipes[currentRecipeIdx];
+  if (recipe){
+    criteria.service = recipe.coord.service;
+    criteria.accelerator = recipe.coord.accelerator;
+    criteria.os = recipe.coord.os;
+  }
+  criteria.intent = "";
+  criteria.platform = "";
+  const dashboardPath = criteria.accelerator && criteria.os
+    ? `${criteria.accelerator}-${criteria.os}`
+    : "";
+  showGroupCatalog(criteria.service || currentGroup, dashboardPath);
 }
 
 /* ============================================================
@@ -2095,7 +2789,9 @@ async function fetchSeries(recipeName){
 /* ============================================================
    RENDER: SOURCE TIME-SERIES (builds over time) — lazy JSON
    ============================================================ */
-async function openTimeSeries(recipe, src, focusTest){
+async function openTimeSeries(recipe, src, focusTest, focusHeading = false){
+  const focusFromMobileNav = closeMobileNavForNavigation();
+  const focusDestination = focusHeading || focusFromMobileNav;
   currentRecipeIdx = DATA.recipes.indexOf(recipe);
   currentTsSrc = src;
   const cp = coordParts(recipe.coord);
@@ -2108,12 +2804,13 @@ async function openTimeSeries(recipe, src, focusTest){
   const bc = document.getElementById("ts-crumb");
   bc.innerHTML =
     `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span>` +
-    `<a href="#" class="crumb" data-back="1">${esc(cp.service)}</a><span class="sep">›</span>` +
-    `<a href="#" class="crumb" data-back="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-service="1">${esc(cp.service)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-dashboard="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
     `<a href="#" class="crumb" data-grid="1">${esc(cp.ip)}</a><span class="sep">›</span>` +
-    `<span class="crumb cur">${esc(src)}</span>`;
+    `<span class="crumb cur" title="${esc(src)}">${esc(meta ? meta.label : src.slice(0, 10) + "…")}</span>`;
   bc.querySelectorAll("[data-home]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); showLanding(); }));
-  bc.querySelectorAll("[data-back]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); backToCatalog(); }));
+  bc.querySelector("[data-service]").addEventListener("click", e => { e.preventDefault(); showServiceCatalog(cp.service); });
+  bc.querySelector("[data-dashboard]").addEventListener("click", e => { e.preventDefault(); backToCatalog(); });
   bc.querySelectorAll("[data-grid]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); openGrid(currentRecipeIdx); }));
 
   const headHost = document.getElementById("ts-head");
@@ -2126,6 +2823,9 @@ async function openTimeSeries(recipe, src, focusTest){
   headHost.innerHTML = `<div class="ts-src"><div class="ts-title">${meta ? esc(meta.label) : esc(src)}</div></div>`;
   host.innerHTML = `<div class="loading-note">loading build history for <span class="mono">${esc(recipe.name)}</span> …</div>`;
   window.scrollTo({ top:0, behavior:"auto" });
+  if (focusDestination){
+    requestAnimationFrame(() => headHost.focus({ preventScroll:true }));
+  }
 
   let series;
   try {
@@ -2136,7 +2836,7 @@ async function openTimeSeries(recipe, src, focusTest){
   }
   if (currentTsSrc !== src || currentRecipeIdx !== DATA.recipes.indexOf(recipe)) return; // navigated away
 
-  // Full build history for this source. There is no per-testgrid version picker:
+  // Full build history for this source. There is no per-source version picker:
   // the single FILTER EVIDENCE → AICR VERSION control drives it. AICR version is a
   // hard FILTER here (columns for other versions are removed — the per-source
   // analogue of the matrix version lens); the k8s facet still only DIMS columns.
@@ -2149,8 +2849,7 @@ async function openTimeSeries(recipe, src, focusTest){
   // Source label + signer identity only — the recipe coordinate is already the
   // breadcrumb above, so restating it here would be redundant.
   left.innerHTML =
-    `<span class="src-shape">${shapeSVG(meta?meta.class:"community", reported?"var(--reported)":"var(--ink-soft)", reported, 22)}</span>` +
-    `<div><div class="ts-title">${esc(meta ? meta.label : src)} ${reported ? `<span class="reported-flag">❖ reported</span>` : ""}</div>` +
+    `<div><div class="ts-title">${esc(meta ? meta.label : src)} ${reported ? `<span class="reported-flag">not counted</span>` : ""}</div>` +
     `<div class="ts-id">${esc(meta ? meta.id : src)}</div></div>`;
   headHost.appendChild(left);
 
@@ -2177,6 +2876,11 @@ async function openTimeSeries(recipe, src, focusTest){
   const tests = (series.rows && series.rows.length)
     ? series.rows.map(r => ({ name: r.name, phase: r.phase }))
     : recipe.tests;
+  if (focusTest){
+    tests
+      .filter(test => test.name === focusTest)
+      .forEach(test => collapsedTsPhases.delete(`${recipe.name}/${src}/${test.phase}`));
+  }
   function paint(){
     host.innerHTML = "";
     // AICR version filtered this source down to nothing — say so rather than
@@ -2285,6 +2989,7 @@ async function openTimeSeries(recipe, src, focusTest){
       phaseTests.forEach(test => {
         const tr = document.createElement("tr");
         tr.className = "ts-row";
+        tr.dataset.test = test.name;
         if (focusTest && test.name === focusTest) tr.style.boxShadow = "inset 3px 0 0 var(--green)";
         const td0 = document.createElement("td");
         td0.className = "ts-name";
@@ -2312,6 +3017,8 @@ async function openTimeSeries(recipe, src, focusTest){
             test: test.name, build: bm.id || "—", res, aicr: bm.aicrVer || "—", k8s: bm.k8sVer || "—", when: bm.when || "—",
             label: meta ? meta.label : src, ev: bm.evidenceRef || "",
           });
+          td.setAttribute("aria-label",
+            `${test.name}, build ${bm.id || "unknown"}: ${res}. Open build evidence details.`);
           bindCellNav(td);  // tap pins the tooltip on touch; hover handles desktop
           tr.appendChild(td);
         }
@@ -2324,7 +3031,7 @@ async function openTimeSeries(recipe, src, focusTest){
   paint();
 
   if (focusTest){
-    const row = [...host.querySelectorAll(".ts-row")].find(r => r.querySelector(".ts-name").textContent === focusTest);
+    const row = [...host.querySelectorAll(".ts-row")].find(r => r.dataset.test === focusTest);
     if (row) row.scrollIntoView({ block:"center", behavior:"auto" });
   }
 }
@@ -2336,16 +3043,118 @@ async function openTimeSeries(recipe, src, focusTest){
 // bars to reclaim screen space. Default collapsed on mobile. ----
 const _tgNav = document.getElementById("toggle-nav");
 const _tgFil = document.getElementById("toggle-filters");
+const _tgTree = document.getElementById("toggle-tree");
+const _closeSidebar = document.getElementById("close-sidebar");
+const _navBackdrop = document.getElementById("nav-backdrop");
+const _mobileNav = window.matchMedia("(max-width:820px)");
+const _navBackground = [
+  document.querySelector(".topbar"),
+  document.getElementById("criteria-bar"),
+  document.querySelector("main"),
+  document.getElementById("tooltip"),
+  document.getElementById("cli-popup"),
+].filter(Boolean);
+let _navReturnFocus = null;
+let _lastSidebarFocus = null;
+let _navCollapsedPreference = null;
+let _filtersCollapsedPreference = null;
+document.getElementById("sidebar").addEventListener("focusin", e => {
+  _lastSidebarFocus = e.target;
+});
 function _syncNavToggles(){
-  _tgNav.classList.toggle("active", !document.body.classList.contains("nav-collapsed"));
-  _tgFil.classList.toggle("active", !document.body.classList.contains("filters-collapsed"));
+  const navOpen = !document.body.classList.contains("nav-collapsed");
+  _tgNav.classList.toggle("active", navOpen);
+  _tgNav.setAttribute("aria-expanded", String(navOpen));
+  const sidebar = document.getElementById("sidebar");
+  const mobileClosed = _mobileNav.matches && !navOpen;
+  sidebar.inert = mobileClosed;
+  sidebar.setAttribute("aria-hidden", String(mobileClosed));
+  const mobileOpen = _mobileNav.matches && navOpen;
+  _navBackground.forEach(el => { el.inert = mobileOpen; });
+  const filtersOpen = !document.body.classList.contains("filters-collapsed");
+  _tgFil.classList.toggle("active", filtersOpen);
+  _tgFil.setAttribute("aria-expanded", String(filtersOpen));
 }
-_tgNav.addEventListener("click", () => { document.body.classList.toggle("nav-collapsed"); _syncNavToggles(); fitMatrixColumns(); });
-_tgFil.addEventListener("click", () => { document.body.classList.toggle("filters-collapsed"); _syncNavToggles(); fitMatrixColumns(); });
-if (window.matchMedia("(max-width:820px)").matches){ document.body.classList.add("nav-collapsed", "filters-collapsed"); }
+function closeMobileNav(restoreFocus){
+  if (!_mobileNav.matches || document.body.classList.contains("nav-collapsed")) return;
+  document.body.classList.add("nav-collapsed");
+  _syncNavToggles();
+  if (restoreFocus !== false && _navReturnFocus && _navReturnFocus.focus) _navReturnFocus.focus();
+  _navReturnFocus = null;
+}
+function closeMobileNavForNavigation(){
+  const sidebar = document.getElementById("sidebar");
+  const focusDestination = _mobileNav.matches &&
+    !document.body.classList.contains("nav-collapsed") &&
+    sidebar.contains(document.activeElement);
+  closeMobileNav(false);
+  return focusDestination;
+}
+function openMobileNav(){
+  if (tooltip.classList.contains("pinned")) hideTip(false);
+  document.body.classList.remove("nav-collapsed");
+  _navReturnFocus = document.activeElement;
+  _syncNavToggles();
+  requestAnimationFrame(() => _closeSidebar.focus());
+}
+function toggleSidebar(){
+  if (_mobileNav.matches){
+    if (document.body.classList.contains("nav-collapsed")) openMobileNav();
+    else closeMobileNav(true);
+  } else {
+    document.body.classList.toggle("nav-collapsed");
+    _navCollapsedPreference = document.body.classList.contains("nav-collapsed");
+    _syncNavToggles();
+    fitMatrixColumns();
+  }
+}
+_tgNav.addEventListener("click", toggleSidebar);
+_closeSidebar.addEventListener("click", () => closeMobileNav(true));
+_navBackdrop.addEventListener("click", () => closeMobileNav(true));
+_tgFil.addEventListener("click", () => {
+  document.body.classList.toggle("filters-collapsed");
+  _filtersCollapsedPreference = document.body.classList.contains("filters-collapsed");
+  _syncNavToggles();
+  fitMatrixColumns();
+});
+_tgTree.addEventListener("click", () => {
+  const expand = !treeFullyExpanded();
+  collapsedGroups.clear();
+  collapsedDashes.clear();
+  if (!expand){
+    TREE.forEach(g => {
+      collapsedGroups.add(g.name);
+      g.dashboards.forEach(d => collapsedDashes.add(`${g.name}/${d.ao}`));
+    });
+  }
+  renderTree();
+});
+if (_mobileNav.matches){ document.body.classList.add("nav-collapsed", "filters-collapsed"); }
+_mobileNav.addEventListener("change", e => {
+  const sidebar = document.getElementById("sidebar");
+  const focusedSidebarControl = sidebar.contains(document.activeElement);
+  const focusWasInOpenDrawer = !e.matches && _navReturnFocus &&
+    (focusedSidebarControl || _lastSidebarFocus);
+  const focusedMobileClose = _lastSidebarFocus === _closeSidebar;
+  document.body.classList.toggle("nav-collapsed",
+    e.matches || _navCollapsedPreference === true);
+  document.body.classList.toggle("filters-collapsed",
+    _filtersCollapsedPreference === null ? e.matches : _filtersCollapsedPreference);
+  _syncNavToggles();
+  const focusWasHidden = e.matches
+    ? focusedSidebarControl
+    : focusWasInOpenDrawer &&
+      (document.body.classList.contains("nav-collapsed") || focusedMobileClose);
+  if (focusWasHidden){
+    _navReturnFocus = null;
+    requestAnimationFrame(() => _tgNav.focus());
+  }
+  fitMatrixColumns();
+});
 _syncNavToggles();
 
 const tooltip = document.getElementById("tooltip");
+let _tipReturnFocus = null;
 function tipResultClass(res){ return res==="pass"?"tt-pass":res==="fail"?"tt-fail":"tt-notrun"; }
 
 // HOVER-capable pointer (desktop/mouse) vs coarse/touch. On hover devices the
@@ -2375,9 +3184,9 @@ function renderTip(el){
   if (el.dataset.tip){
     const d = JSON.parse(el.dataset.tip);
     const repLine = d.allow ? "" :
-      `<div class="tt-row"><span class="tt-k">flag</span><span class="tt-reported">❖ reported · not allowlisted (zero-weight)</span></div>`;
+      `<div class="tt-row"><span class="tt-k">consensus</span><span class="tt-reported">not counted; source is not allowlisted</span></div>`;
     tooltip.innerHTML =
-      `<span class="tt-close" data-tip-close>×</span>` +
+      `<button class="tt-close" type="button" data-tip-close aria-label="close evidence details">×</button>` +
       `<div class="tt-id">${esc(d.label)}</div>` +
       `<div class="tt-row"><span class="tt-k">signer</span><span style="word-break:break-all">${esc(d.id)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">result</span><span class="${tipResultClass(d.res)}">${esc(d.res)}</span></div>` +
@@ -2387,30 +3196,30 @@ function renderTip(el){
       repLine +
       evidenceRows(d.evidenceRef) +
       `<div class="tt-note">this run's evidence — per signer, per build</div>` +
-      (el._nav ? `<div class="tt-row" style="margin-top:5px"><a href="#" class="tt-ev">open this signer's time-series ↗</a></div>` : "");
+      (el._nav ? `<div class="tt-row" style="margin-top:5px"><a href="#" class="tt-ev">open this source's run history</a></div>` : "");
     return true;
   }
   if (el.dataset.tipSrc){
     const d = JSON.parse(el.dataset.tipSrc);
     const repLine = d.allow
-      ? `<div class="tt-row"><span class="tt-k">standing</span><span style="color:var(--confirmed)">✓ counts toward consensus</span></div>`
-      : `<div class="tt-row"><span class="tt-k">standing</span><span class="tt-reported">❖ reported · not allowlisted (zero-weight)</span></div>`;
+      ? `<div class="tt-row"><span class="tt-k">consensus</span><span>counted</span></div>`
+      : `<div class="tt-row"><span class="tt-k">consensus</span><span class="tt-reported">not counted; source is not allowlisted</span></div>`;
     const age = sourceAgeDays(d.id);
     const ageLine = age == null ? "" :
       `<div class="tt-row"><span class="tt-k">last attested</span><span${age > STALE_DAYS ? ' class="tt-stale"' : ''}>${esc(ageLabel(age))}${age > STALE_DAYS ? " · stale" : ""}</span></div>`;
     tooltip.innerHTML =
-      `<span class="tt-close" data-tip-close>×</span>` +
+      `<button class="tt-close" type="button" data-tip-close aria-label="close evidence details">×</button>` +
       `<div class="tt-id">${esc(d.label)}</div>` +
       `<div class="tt-row"><span class="tt-k">signer</span><span style="word-break:break-all">${esc(d.id)}</span></div>` +
       repLine +
       ageLine +
-      (el._nav ? `<div class="tt-row" style="margin-top:5px"><a href="#" class="tt-ev">open time-series ↗</a></div>` : "");
+      (el._nav ? `<div class="tt-row" style="margin-top:5px"><a href="#" class="tt-ev">open source run history</a></div>` : "");
     return true;
   }
   if (el.dataset.tipBuild){
     const d = JSON.parse(el.dataset.tipBuild);
     tooltip.innerHTML =
-      `<span class="tt-close" data-tip-close>×</span>` +
+      `<button class="tt-close" type="button" data-tip-close aria-label="close evidence details">×</button>` +
       `<div class="tt-id">${esc(d.build)} — ${esc(d.label)}</div>` +
       `<div class="tt-row"><span class="tt-k">test</span><span>${esc(d.test)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">result</span><span class="${tipResultClass(d.res)}">${esc(d.res)}</span></div>` +
@@ -2429,24 +3238,58 @@ function positionTip(x, y){
   tooltip.style.left = x + "px";
   tooltip.style.top = y + "px";
 }
-function hideTip(){ tooltip.classList.remove("show", "pinned"); tooltip._nav = null; }
+function hideTip(restoreFocus){
+  const wasPinned = tooltip.classList.contains("pinned");
+  tooltip.classList.remove("show", "pinned");
+  tooltip.setAttribute("role", "status");
+  tooltip.setAttribute("aria-live", "polite");
+  tooltip.removeAttribute("aria-label");
+  document.body.classList.remove("tip-pinned");
+  tooltip._nav = null;
+  if (wasPinned && restoreFocus !== false && _tipReturnFocus && _tipReturnFocus.focus) _tipReturnFocus.focus();
+  _tipReturnFocus = null;
+}
 function pinTipAt(el){
   if (!renderTip(el)) return;
+  _tipReturnFocus = el;
   tooltip._nav = el._nav || null;
   tooltip.classList.add("show", "pinned");
-  const r = el.getBoundingClientRect();
-  positionTip(r.left + r.width / 2, r.bottom + 8);
+  tooltip.setAttribute("role", "dialog");
+  tooltip.removeAttribute("aria-live");
+  tooltip.setAttribute("aria-label", "Evidence details");
+  document.body.classList.add("tip-pinned");
+  const close = tooltip.querySelector("[data-tip-close]");
+  if (close) close.focus();
 }
 
 // Click behavior (§7). A status cell (per-signer run) opens its detail panel on
-// click — desktop and touch alike — and the panel's link drills into the
-// time-series. A source-column header drills in directly on a desktop click but
-// pins its tip on touch. Everything else (build cells) opens its panel.
+// click — desktop and touch alike — and the panel's link drills into the run
+// history. Source-column headers always navigate directly to that history view;
+// their hover tooltip remains supplemental on pointer devices. Everything else
+// (build cells) opens its panel.
 function bindCellNav(el){
+  if (!el.hasAttribute("tabindex")) el.tabIndex = 0;
+  if (!el.hasAttribute("role")) el.setAttribute("role", "button");
   el.addEventListener("click", e => {
     const isHeaderNav = el.dataset.tipSrc && el._nav;
-    if (isHeaderNav && HOVER){ el._nav(); return; }
+    if (isHeaderNav){
+      e.preventDefault();
+      hideTip(false);
+      el._nav();
+      return;
+    }
     e.preventDefault();
+    pinTipAt(el);
+  });
+  el.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    const isHeaderNav = el.dataset.tipSrc && el._nav;
+    if (isHeaderNav){
+      hideTip(false);
+      el._nav();
+      return;
+    }
     pinTipAt(el);
   });
 }
@@ -2477,10 +3320,10 @@ document.body.addEventListener("click", e => {
     return;
   }
   if (e.target.closest("a.tt-ev")){ e.preventDefault(); const nav = tooltip._nav; hideTip(); if (nav) nav(); return; }
-  if (e.target.closest("[data-tip-close]")){ hideTip(); return; }
+  if (e.target.closest("[data-tip-close]")){ hideTip(true); return; }
   if (e.target.closest("#tooltip")) return;           // taps inside the pinned panel do nothing
   if (e.target.closest("[data-tip],[data-tip-src],[data-tip-build]")) return; // its own bindCellNav handles it
-  if (tooltip.classList.contains("pinned")) hideTip(); // tap-away
+  if (tooltip.classList.contains("pinned")) hideTip(false); // tap-away
 });
 
 /* ============================================================
@@ -2643,11 +3486,39 @@ function syncCriteriaSelectStyles(){
 function applyCriteria(){
   CRIT_AXES.forEach(axis => { criteria[axis] = document.getElementById("c-" + axis).value; });
   syncCriteriaSelectStyles();
-  if (criteria.service){
-    const g = TREE.find(x => x.name === criteria.service);
-    if (g && groupMatchesCriteria(g)){ showGroupCatalog(criteria.service); return; }
+  const landingGridActive = landingMode === "grid" &&
+    !document.getElementById("view-landing").classList.contains("hidden");
+  if (landingGridActive){
+    showLanding(true);
+    return;
   }
-  showLanding();
+  if (!criteria.service){
+    showLanding(true);
+    return;
+  }
+  const group = TREE.find(g => g.name === criteria.service);
+  if (!group){
+    showLanding();
+    return;
+  }
+  if (!groupMatchesCriteria(group)){
+    showLanding(true);
+    return;
+  }
+
+  const matches = [];
+  group.dashboards.forEach(d => d.tabs.forEach(t => {
+    if (recipeMatchesCriteria(DATA.recipes[t.idx])) matches.push(t.idx);
+  }));
+  const dashboardPath = criteria.accelerator && criteria.os
+    ? `${criteria.accelerator}-${criteria.os}`
+    : "";
+  const exactRecipe = dashboardPath && criteria.intent && criteria.platform && matches.length === 1;
+  if (exactRecipe){
+    openGrid(matches[0]);
+    return;
+  }
+  showGroupCatalog(criteria.service, dashboardPath);
 }
 CRIT_AXES.forEach(axis => {
   document.getElementById("c-" + axis).addEventListener("change", applyCriteria);
@@ -2658,7 +3529,7 @@ document.getElementById("c-reset").addEventListener("click", () => {
 });
 function reflectCriteriaForCoord(coord){
   const map = { service:coord.service, accelerator:coord.accelerator, os:coord.os, intent:coord.intent,
-                platform: coord.platform === null ? PLATFORM_NONE : coord.platform };
+                platform: platformCriteriaValue(coord.platform) };
   CRIT_AXES.forEach(axis => {
     const sel = document.getElementById("c-" + axis);
     sel.value = map[axis];
@@ -2698,6 +3569,16 @@ document.getElementById("sort-sel").addEventListener("change", e => {
 // parent crumb calls backToCatalog / openGrid / showLanding). Esc still steps up.
 document.addEventListener("keydown", e => {
   if (e.key === "Escape"){
+    if (tooltip.classList.contains("pinned")){
+      e.preventDefault();
+      hideTip(true);
+      return;
+    }
+    if (_mobileNav.matches && !document.body.classList.contains("nav-collapsed")){
+      e.preventDefault();
+      closeMobileNav(true);
+      return;
+    }
     if (!document.getElementById("view-ts").classList.contains("hidden")){
       if (currentRecipeIdx !== null) openGrid(currentRecipeIdx);
     } else if (!document.getElementById("view-grid").classList.contains("hidden")){
@@ -2705,6 +3586,18 @@ document.addEventListener("keydown", e => {
     } else if (!document.getElementById("view-catalog").classList.contains("hidden")){
       showLanding();
     }
+  }
+  if (e.key === "Tab" && _mobileNav.matches && !document.body.classList.contains("nav-collapsed")){
+    const sidebar = document.getElementById("sidebar");
+    const focusable = [...sidebar.querySelectorAll("button, [href], input, select, [tabindex]:not([tabindex='-1'])")]
+      .filter(el => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (!sidebar.contains(document.activeElement)){
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
   }
 });
 
@@ -2823,8 +3716,8 @@ function buildModelFromIndex(index){
     CRITERIA_VALUES[axis].forEach(v => { const o=document.createElement("option"); o.value=v; o.textContent=v; sel.appendChild(o); });
   });
 
-  // default: everything collapsed in the tree
-  TREE.forEach(g => { collapsedGroups.add(g.name); g.dashboards.forEach(d => collapsedDashes.add(`${g.name}/${d.ao}`)); });
+  // The dashboard tree is expanded by default. The panel-level control can
+  // collapse or restore every group and dashboard in one action.
 }
 
 function showError(msg){
@@ -2872,7 +3765,7 @@ function renderHeaderLinks(){
     w.title = "Install AICR — copy and run in your shell";
     const label = document.createElement("span");
     label.className = "hinstall-label";
-    label.textContent = "Install AICR";
+    label.textContent = "Get AICR";
     const code = document.createElement("code");
     code.className = "hinstall-code";
     code.textContent = installCmd;                 // textContent — no injection
@@ -2910,6 +3803,13 @@ function renderHeaderLinks(){
     _home.addEventListener("click", () => showLanding());
     _home.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); showLanding(); } });
   }
+}
+
+{
+  const cards = document.getElementById("landing-mode-cards");
+  const grid = document.getElementById("landing-mode-grid");
+  if (cards) cards.addEventListener("click", () => setLandingMode("cards"));
+  if (grid) grid.addEventListener("click", () => setLandingMode("grid"));
 }
 
 boot();
