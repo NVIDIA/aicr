@@ -16,10 +16,10 @@ export GOTOOLCHAIN  = go$(GO_VERSION)
 GOLINT_VERSION      = $(shell golangci-lint --version 2>/dev/null | awk '{print $$4}' | sed 's/golangci-lint version //' || echo "not installed")
 KO_VERSION          = $(shell ko version 2>/dev/null || echo "not installed")
 GORELEASER_VERSION  = $(shell goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p' || echo "not installed")
+# No fallback on purpose: an unreadable threshold (missing yq, missing key)
+# must fail the gate in test-coverage rather than silently enforce a looser
+# floor than .settings.yaml declares.
 COVERAGE_THRESHOLD ?= $(shell yq -r '.quality.coverage_threshold' .settings.yaml 2>/dev/null)
-ifeq ($(COVERAGE_THRESHOLD),)
-COVERAGE_THRESHOLD := 70
-endif
 LINT_TIMEOUT       ?= $(shell yq -r '.quality.lint_timeout' .settings.yaml 2>/dev/null)
 ifeq ($(LINT_TIMEOUT),)
 LINT_TIMEOUT       := 5m
@@ -230,8 +230,22 @@ test: test-shell ## Runs unit tests with race detector and coverage (use -short 
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
 
+# Listed before `test` so an unreadable threshold fails in seconds rather than
+# after the full race-enabled suite. Fails closed on both an empty value (yq
+# missing) and the literal "null" (yq prints that for a missing key, exit 0) --
+# bc would resolve either to 0 and silently pass the check below with no floor.
+# Keep in sync with the matching guard in .github/actions/go-coverage.
+.PHONY: check-coverage-threshold
+check-coverage-threshold:
+	@if [ -z "$(COVERAGE_THRESHOLD)" ] || [ "$(COVERAGE_THRESHOLD)" = "null" ]; then \
+		echo "ERROR: coverage threshold unavailable from .settings.yaml (quality.coverage_threshold)"; \
+		echo "       Check that yq is installed ('make tools-setup') and that"; \
+		echo "       .settings.yaml defines quality.coverage_threshold."; \
+		exit 1; \
+	fi
+
 .PHONY: test-coverage
-test-coverage: test ## Runs tests and enforces coverage threshold (from .settings.yaml quality.coverage_threshold)
+test-coverage: check-coverage-threshold test ## Runs tests and enforces coverage threshold (from .settings.yaml quality.coverage_threshold)
 	@coverage=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
 	echo "Coverage: $$coverage% (threshold: $(COVERAGE_THRESHOLD)%)"; \
 	if [ $$(echo "$$coverage < $(COVERAGE_THRESHOLD)" | bc) -eq 1 ]; then \

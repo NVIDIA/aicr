@@ -91,7 +91,7 @@ command name — there is no Cobra-style `SetOut`/`SetArgs`/`Execute`.)
 Direct `fmt.Println` / `fmt.Printf` to stdout in `pkg/cli` breaks
 this pattern and is a review-blocker.
 
-**Coverage floor: 75%** (project-wide, from `.settings.yaml`
+**Coverage floor: 80%** (project-wide, from `.settings.yaml`
 `quality.coverage_threshold`). `make test-coverage` enforces it.
 Per-package decreases > 0.5% are flagged for justification.
 
@@ -167,7 +167,7 @@ profile inside the worktree disappears with `worktree remove --force`.
 
 **Gates:**
 
-- **Block** if `make test-coverage` fails (project-wide 75% floor).
+- **Block** if `make test-coverage` fails (project-wide 80% floor).
 - **Block** if any new exported function or method has 0% coverage
   in the diff — add tests before pushing.
 - **Flag** any per-package decrease > 0.5% and explain in the PR.
@@ -478,7 +478,7 @@ half of the pipeline and skips deploy-side assertions.
 
 `make qualify` is the canonical pre-push command. It runs:
 
-- `test-coverage` — `go test -race ./...` plus the 75% coverage floor.
+- `test-coverage` — `go test -race ./...` plus the 80% coverage floor.
 - `lint` — golangci-lint with `.golangci.yaml` plus yamllint.
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
@@ -529,7 +529,7 @@ the pre-push gate is local.
   The generator sets a fixed platform matrix and `LC_ALL=C`, so
   `make notices` produces byte-identical output on macOS and Linux.
 - **Coverage decrease > 0.5%** is flagged for justification (the project-wide
-  75% floor is what blocks). Add tests rather than
+  80% floor is what blocks). Add tests rather than
   reaching for `// nolint` or `t.Skip` — both are review-blockers
   under the no-skip-tests rule in CLAUDE.md.
 - **Live-cluster connections from unit tests.** A test that forgets

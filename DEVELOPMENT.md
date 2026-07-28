@@ -455,7 +455,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 |--------|-------------|
 | `make qualify` | Full qualification (test + lint + e2e + scan) |
 | `make test` | Unit tests with race detector and coverage |
-| `make test-coverage` | Tests with coverage threshold (default 70%) |
+| `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
 | `make lint` | Lint Go, YAML, and verify license headers |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
