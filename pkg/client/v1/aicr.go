@@ -1059,11 +1059,11 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	}
 
 	// Agree with DefaultBundler.Make (bundler.go), which fails closed with
-	// ErrCodeInvalidRequest when every component is disabled. Without this,
-	// an all-disabled recipe silently returns an empty, successful bundle
-	// list here — an SDK caller that loops over the result and deploys
-	// would silently no-op instead of getting an actionable error.
-	if len(r.Components) == 0 && r.internal != nil && len(r.internal.ComponentRefs) > 0 {
+	// ErrCodeInvalidRequest whenever there is nothing to deploy — whether
+	// that's every component disabled or a zero-componentRef recipe. An
+	// SDK caller that loops over the result and deploys would otherwise
+	// silently no-op on either input.
+	if len(r.Components) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"recipe has no enabled components")
 	}
