@@ -223,8 +223,6 @@ test-shell: ## Runs shell unit tests (tools/*_test.sh; hermetic, no cluster)
 # validators/ tests run as part of `make test` but are excluded from the
 # coverage.out this target emits: per-package coverage there runs 41-92%
 # (see #1752), which would pull the project-wide gate from ~80% to ~75.8%.
-# Tracked for a separate, lower validators coverage floor in #<ISSUE>.
-# Remove the grep below once that floor lands.
 .PHONY: test
 test: test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
@@ -662,7 +660,7 @@ changelog-file: ## Updates CHANGELOG.md with changes since the last release
 
 .PHONY: clean
 clean: ## Cleans build artifacts (dist, coverage files, third-party notices)
-	@rm -rf ./dist ./bin ./coverage.out ./THIRD_PARTY_NOTICES.md ./.licenses-cache
+	@rm -rf ./dist ./bin ./coverage.out ./coverage.full.out ./THIRD_PARTY_NOTICES.md ./.licenses-cache
 	@go clean ./...
 	@echo "Cleaned build artifacts"
 
