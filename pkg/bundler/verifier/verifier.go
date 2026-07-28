@@ -769,6 +769,19 @@ func VerifyBinaryAttestation(ctx context.Context, bundlePath string, identityPat
 	if err != nil {
 		return "", err // already coded by readBoundedFileContext
 	}
+	return VerifyBinaryAttestationData(ctx, data, identityPattern, artifactDigest)
+}
+
+// VerifyBinaryAttestationData verifies an already-read binary attestation
+// (Sigstore bundle bytes) against the NVIDIA-CI identity pattern and the
+// artifact digest. VerifyBinaryAttestation reads a file then delegates here;
+// callers that already hold the bytes (e.g. the aicrd server, which caches and
+// embeds them) call this directly to verify the exact content they will use,
+// avoiding a verify-then-reread window.
+func VerifyBinaryAttestationData(ctx context.Context, data []byte, identityPattern string, artifactDigest []byte) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled before binary attestation verification", err)
+	}
 
 	// Pin identity to NVIDIA CI using the provided pattern
 	identity, err := verify.NewShortCertificateIdentity(

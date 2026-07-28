@@ -78,18 +78,48 @@ treated as potential OIDC/key compromise.
 The identity scan matches every entry under the release SAN, which includes
 every legitimate release: each real release signs an entry under exactly that
 identity, so a naive scan would page on every tag. To separate real releases
-from an attacker, the workflow first fetches the repo's release tags and passes
-them to the tool via `--known-tags-file`. The tool then suppresses any identity
-match whose certificate SAN carries an `@refs/tags/<tag>` that is a known
-release, so only an entry for a tag with **no corresponding release** alerts.
+from an attacker, the workflow fetches the tags a real release actually signed
+and passes them to the tool via `--known-tags-file`. The tool then suppresses
+any identity match whose certificate SAN carries an `@refs/tags/<tag>` that is a
+known signed tag, so only an entry for a tag **no release signed** alerts.
+
+The correlation source is the **`on-tag.yaml` (release signing workflow) run
+history** (`RELEASE_WORKFLOW_FILE`), not the repo's current tags or releases.
+The SAN is `on-tag.yaml@refs/tags/<tag>`, so a tag-push run of that workflow is
+the authoritative proof that a real release signed `<tag>`. Crucially, run
+history **persists after a tag or release is deleted**, whereas `/tags` and
+`/releases` do not: an ephemeral release candidate (`vX.Y.Z-rc1`, whose tag and
+GitHub Release are cleaned up once the final ships) would otherwise reappear as
+an unexplained identity hit even though it was a genuine signing. That exact
+false positive is what [#1902](https://github.com/NVIDIA/aicr/issues/1902)
+caught. Runs of any conclusion count (a release that signed and then flaked in a
+later step still produced a legitimate entry). The correlation fetch reads the
+workflow name from the `RELEASE_WORKFLOW_FILE` env var; `CERT_SUBJECT` is a
+separate literal regex that names the same workflow, kept in sync by convention
+(both sit in the env block with a "change both together" note). They are not
+auto-derived from one value: building the anchored, regex-escaped `CERT_SUBJECT`
+from the var in shell would be more error-prone than the drift it prevents, and
+a mismatch fails safe anyway (the runs query 404s, surfaced as operational, not
+a false page).
 
 The suppression is fail-closed: an unknown tag or a malformed SAN still alerts,
 an *empty* allowlist file disables suppression (so every match alerts), and a
 *missing* allowlist file is a hard error that fails the run (exit 2, surfaced as
-operational). A broken correlation input can never silently silence a real hit. One residual gap is accepted: an attacker who
-re-signs an *existing* release tag is suppressed, because that tag is on the
-allowlist. Closing it needs a per-tag entry-count or provenance check (how many
-entries a known tag is expected to have), tracked as a follow-up in
+operational). A broken correlation input can never silently silence a real hit.
+
+Two residual gaps are accepted, both requiring the attacker to also subvert the
+signing path (not just forge a log entry). First, an attacker who re-signs an
+*existing* release tag is suppressed, because that tag is on the allowlist.
+Second, the allowlist keys on a completed on-tag run of **any conclusion**, not
+on proof that the sign step itself ran: signing happens mid-run, so a real
+release whose later step flakes still concludes `failure` (e.g. `v0.18.0`
+itself) and must stay on the allowlist, which means gating on `conclusion ==
+success` is not viable (it would re-create the [#1902](https://github.com/NVIDIA/aicr/issues/1902)
+false positive on genuine releases). In-progress runs are excluded
+(`status=completed`), but a run that failed *before* the sign step still
+allowlists its tag. Closing both tightly needs a per-signing-step or per-tag
+entry-count / provenance check (did the sign step succeed; how many entries a
+known tag is expected to have), tracked as a follow-up in
 [#1887](https://github.com/NVIDIA/aicr/issues/1887).
 
 ### Why v2, and why identity monitoring is feasible now
