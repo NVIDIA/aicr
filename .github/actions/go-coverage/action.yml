@@ -52,8 +52,22 @@ runs:
 
         COVERAGE_FILE="${{ inputs.coverage_file }}"
         THRESHOLD="${{ inputs.threshold }}"
-        if [[ -z "$THRESHOLD" ]]; then
-          THRESHOLD=70
+        # Fail closed: defaulting here would silently enforce a looser floor
+        # than .settings.yaml declares. Two distinct bad inputs to reject:
+        #   - empty      -> load-versions could not read .settings.yaml at all
+        #   - "null"     -> yq prints the literal string for a missing key and
+        #                   exits 0, so load-versions happily emits it
+        # The numeric check is the real backstop: bc resolves any non-numeric
+        # token to 0, so a bad threshold would make "$COVERAGE < $THRESHOLD"
+        # false and silently pass the gate with no floor at all.
+        # Keep in sync with the matching guard in the Makefile's test-coverage.
+        if [[ -z "$THRESHOLD" || "$THRESHOLD" == "null" ]]; then
+          echo "::error::Coverage threshold is empty or null (expected quality.coverage_threshold from .settings.yaml via load-versions)"
+          exit 1
+        fi
+        if ! [[ "$THRESHOLD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+          echo "::error::Coverage threshold is not numeric: '$THRESHOLD'"
+          exit 1
         fi
 
         if [[ ! -f "$COVERAGE_FILE" ]]; then
