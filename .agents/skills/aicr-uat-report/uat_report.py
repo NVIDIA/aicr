@@ -108,11 +108,29 @@ def failed_steps(repo, run_url):
 
 
 def debug_artifacts(repo, run_id):
-    """Return the run's non-expired debug artifacts, newest-largest first."""
+    """Return every debug artifact on the run, expired ones included.
+
+    The caller filters for expiry so it can distinguish "never uploaded"
+    (infra failure before prep) from "aged out of retention" — different
+    classifications that a silent filter here would collapse into one.
+    """
     arts = gh_json(
         ["api", f"repos/{repo}/actions/runs/{run_id}/artifacts", "--jq", ".artifacts"]
     )
     return [a for a in arts if DEBUG_ARTIFACT_HINT in a.get("name", "")]
+
+
+def slug(*parts):
+    """Build a filesystem-safe directory name from run metadata.
+
+    Reservation names reach us through the workflow's run-name, and the title
+    regexes accept any non-whitespace token, so `svc`/`gpu` are not guaranteed
+    to be well-formed. Collapsing everything outside [a-z0-9-] removes both
+    separators and dot runs, so no component can traverse out of the download
+    directory.
+    """
+    raw = "-".join(str(p) for p in parts).lower()
+    return re.sub(r"[^a-z0-9-]+", "-", raw).strip("-") or "unknown"
 
 
 def triage_digest(dest):
@@ -133,7 +151,11 @@ def triage_digest(dest):
     if os.path.isfile(report):
         try:
             with open(report, encoding="utf-8") as fh:
-                tests = json.load(fh).get("results", {}).get("tests", [])
+                # `or {}` / `or []` rather than .get(k, default): a truncated
+                # report can carry an explicit null, which a default does not
+                # catch. Nothing here may raise — triage_digest is called
+                # per-run, so one bad file must not abort the whole download.
+                tests = (json.load(fh).get("results") or {}).get("tests") or []
             bad = [t for t in tests if t.get("status") in ("failed", "other")]
             lines.append(
                 f"  report.json: {len(bad)}/{len(tests)} checks failing"
@@ -143,7 +165,7 @@ def triage_digest(dest):
                     else ""
                 )
             )
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, AttributeError, TypeError):
             lines.append("  report.json present but unparseable")
     # Presence, not a full listing: which top-level artifacts the run produced
     # (is there a train-logs/? did evidence emit?) is the actionable part.
@@ -179,7 +201,7 @@ def download_debug(repo, failures, outdir, limit):
         run_id = run_id_of(f["url"])
         label = f"{f['svc']}/{f['gpu']}/{f['intent']} {f['ts']}Z run {run_id}"
         dest = os.path.join(
-            outdir, f"{f['svc']}-{f['gpu']}-{f['intent']}-{run_id}".lower()
+            outdir, slug(f["svc"], f["gpu"], f["intent"], run_id)
         )
         try:
             arts = debug_artifacts(repo, run_id)
@@ -202,12 +224,18 @@ def download_debug(repo, failures, outdir, limit):
             )
             continue
         for art in live:
+            # One run normally carries one bundle, but a caller that fans out
+            # several cloud jobs under a single run_id would produce more.
+            # Unpacking those into a shared directory would silently merge two
+            # clusters' state and make the digest describe neither, so give
+            # each artifact its own subdirectory once there is more than one.
+            art_dest = dest if len(live) == 1 else os.path.join(dest, slug(art["name"]))
             mb = art.get("size_in_bytes", 0) / 1e6
-            os.makedirs(dest, exist_ok=True)
+            os.makedirs(art_dest, exist_ok=True)
             try:
                 subprocess.run(
                     ["gh", "run", "download", run_id, "-R", repo,
-                     "-n", art["name"], "-D", dest],
+                     "-n", art["name"], "-D", art_dest],
                     capture_output=True, text=True, timeout=600, check=True,
                 )
             except subprocess.SubprocessError as err:
@@ -217,8 +245,8 @@ def download_debug(repo, failures, outdir, limit):
                     f"({stderr or err})"
                 )
                 continue
-            print(f"- {label}: {art['name']} ({mb:.1f} MB) -> {dest}")
-            print("\n".join(triage_digest(dest)))
+            print(f"- {label}: {art['name']} ({mb:.1f} MB) -> {art_dest}")
+            print("\n".join(triage_digest(art_dest)))
     print()
 
 
