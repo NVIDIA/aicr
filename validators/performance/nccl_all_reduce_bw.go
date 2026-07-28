@@ -62,6 +62,21 @@ func constraintNameForVariant(variant ncclVariant) string {
 	}
 }
 
+// ncclVariantDisplayName returns a human-readable, non-stuttering name for the
+// variant suitable for skip messages and logs.
+func ncclVariantDisplayName(variant ncclVariant) string {
+	switch variant {
+	case variantNET:
+		return "NET"
+	case variantNVLS:
+		return "NVLS"
+	case variantDefault:
+		return "default"
+	default:
+		return string(variant)
+	}
+}
+
 func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) error {
 	name := constraintNameForVariant(variant)
 	constraint, found := findPerformanceConstraint(ctx, name)

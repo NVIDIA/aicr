@@ -65,7 +65,11 @@ const (
 	gpuClaimPrefix   = "gpu-claim-"
 	// noAllocProbePrefix names the standalone probe pod that is granted no
 	// GPU at all (no ResourceClaims, no nvidia.com/gpu limits).
-	noAllocProbePrefix       = "no-alloc-probe-"
+	noAllocProbePrefix = "no-alloc-probe-"
+
+	// allocationModeExactCount is the Kubernetes DRA DeviceRequest
+	// allocationMode enum value. It is an upstream API constant, not an AICR
+	// internal token. See k8s.io/api/resource/{v1beta1,v1,v1beta2}.DeviceRequest.
 	allocationModeExactCount = "ExactCount"
 
 	// cudaTestImage runs the in-container GPU visibility verification.

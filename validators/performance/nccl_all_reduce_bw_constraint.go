@@ -62,9 +62,23 @@ const (
 	// ncclTrainingRuntimeName is the name of the TrainingRuntime resource.
 	// Must stay in sync with runtime.yaml.
 	ncclTrainingRuntimeName = "nccl-all-reduce-runtime"
-
-	skipMsgNCCLFewNodes = "skipped - requires at least 2 GPU nodes for EW fabric test"
 )
+
+// skipMsg* are the constraint-result strings returned when the NCCL check cannot
+// run. The "skipped " prefix is contractual: nccl_all_reduce_bw.go:78 dispatches
+// on it via strings.HasPrefix(actual, "skipped") to emit CTRF Skip status.
+const (
+	skipMsgNCCLNoInput        = "skipped - requires Service + Accelerator"
+	skipMsgNCCLNotImplemented = "skipped - requires Service + Accelerator to be implemented"
+	skipMsgNCCLFewNodes       = "skipped - requires at least 2 GPU nodes for EW fabric test"
+)
+
+// skipMsgNCCLNoProfile returns the skip result when the resolved benchmark
+// profile does not implement the requested NCCL variant.
+func skipMsgNCCLNoProfile(target ncclBenchmarkTarget, variant ncclVariant) string {
+	return fmt.Sprintf("skipped - benchmark profile %s does not implement the %s NCCL variant",
+		target.String(), ncclVariantDisplayName(variant))
+}
 
 // Package-level GVR definitions for Kubeflow Trainer CRDs used by both
 // applyNCCLResources and cleanupNCCLResources.
@@ -252,7 +266,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Skip unless the validation targets a supported service + accelerator combination.
 	if ctx.ValidationInput == nil {
 		slog.Info("Skipping NCCL All Reduce bandwidth validation: no validation")
-		return "skipped - requires Service + Accelerator", true, nil
+		return skipMsgNCCLNoInput, true, nil
 	}
 
 	service := ctx.ValidationInput.Criteria.Service
@@ -323,10 +337,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 			// The profile itself is valid (resolveNCCLBenchmarkProfile fails
 			// closed on unknown pairs); it just doesn't implement this variant
 			// — e.g. gb200/eks covers net and nvls but not the default check.
-			return fmt.Sprintf("skipped - benchmark profile %s does not implement the %s NCCL variant",
-				target.String(), constraintNameForVariant(variant)), true, nil
+			return skipMsgNCCLNoProfile(target, variant), true, nil
 		}
-		return "skipped - requires Service + Accelerator to be implemented", true, nil
+		return skipMsgNCCLNotImplemented, true, nil
 	}
 
 	// Extract threshold from constraint
@@ -373,7 +386,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// NCCL all-reduce tests EW (East-West) fabric between nodes and requires at least
 	// two GPU nodes. Skip gracefully rather than fail when only one node is available.
 	if gpuConfig.WorkerCount < 2 {
-		slog.Info("Skipping NCCL All Reduce bandwidth validation: "+skipMsgNCCLFewNodes,
+		slog.Info("Skipping NCCL All Reduce bandwidth validation: requires at least 2 GPU nodes for EW fabric test",
 			"nodes", gpuConfig.WorkerCount)
 		return skipMsgNCCLFewNodes, true, nil
 	}

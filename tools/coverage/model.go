@@ -30,8 +30,6 @@ const (
 	// only the Azure UAT trees). Distinct from not-yet-covered: the assets are
 	// present but inert pending a revive-or-retire decision (DC6, #1280).
 	StatusStubbed Status = "stubbed"
-
-	emDash = "—"
 )
 
 // Harness identifies an execution mechanism that can exercise an item. The set

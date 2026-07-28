@@ -3126,3 +3126,14 @@ func TestRejectUnsupportedGPUTopology(t *testing.T) {
 		})
 	}
 }
+
+func TestInferenceSkipMessagesHaveContractualPrefix(t *testing.T) {
+	for _, msg := range []string{
+		inferenceSkipMsgNoDynamoPlatform,
+		inferenceSkipMsgCRDNotInstalled,
+	} {
+		if !strings.HasPrefix(msg, "skipped") {
+			t.Fatalf("skip status %q is missing contractual 'skipped' prefix — inference_perf.go dispatches on it", msg)
+		}
+	}
+}

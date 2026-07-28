@@ -19,6 +19,9 @@ import (
 	"strings"
 )
 
+// emDash is the placeholder rendered for an empty matrix cell.
+const emDash = "—"
+
 // Render returns the full Markdown body of docs/user/coverage-matrix.md.
 //
 // The page is fully generated (no splice markers): this keeps it inside the
