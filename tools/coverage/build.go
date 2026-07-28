@@ -171,14 +171,14 @@ func newRow(kind Kind, item string, harnesses map[Harness]bool, unwiredUAT bool)
 func hardwareCadence(h map[Harness]bool, status Status) (hardware, cadence string) {
 	switch {
 	case status == StatusStubbed:
-		return "GPU (unwired)", "—"
+		return "GPU (unwired)", emDash
 	case h[HarnessUAT] || h[HarnessGPUNightly]:
 		return "GPU (H100, real)", "nightly"
 	case h[HarnessChainsaw] || h[HarnessKWOK]:
 		return "simulated / none", "per-PR"
 	case h[HarnessDemo]:
-		return "docs", "—"
+		return "docs", emDash
 	default:
-		return "—", "—"
+		return emDash, emDash
 	}
 }

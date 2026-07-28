@@ -853,6 +853,66 @@ const (
 	EnvServerShutdownTimeoutSeconds = "SHUTDOWN_TIMEOUT_SECONDS"
 )
 
+// Server-side bundle-signing configuration (see docs/plans/2026-07-20-server-bundle-attestation-design.md).
+const (
+	// EnvSigningKey selects KMS-backed (Mode A) signing. Value is a cosign
+	// KMS URI (awskms:// | gcpkms:// | azurekms:// | hashivault://).
+	EnvSigningKey = "AICR_SIGNING_KEY"
+
+	// EnvFulcioURL is the private Fulcio CA endpoint; its presence (with a
+	// token source) selects keyless (Mode B) signing.
+	EnvFulcioURL = "AICR_FULCIO_URL"
+
+	// EnvRekorURL overrides the Rekor transparency-log endpoint (both modes).
+	EnvRekorURL = "AICR_REKOR_URL"
+
+	// EnvIdentityTokenFile is the path to the server's own OIDC token
+	// (projected ServiceAccount token, audience "sigstore") for Mode B.
+	// Read fresh per request.
+	EnvIdentityTokenFile = "AICR_IDENTITY_TOKEN_FILE"
+
+	// EnvTLogUpload=false disables the Rekor upload for KMS (Mode A) signing
+	// (air-gapped). KMS-only; keyless always uploads.
+	EnvTLogUpload = "AICR_TLOG_UPLOAD"
+
+	// EnvSigningConfigPath points signing at a Sigstore SigningConfig JSON
+	// (Rekor v2 targeting). Honored by both modes.
+	EnvSigningConfigPath = "AICR_SIGNING_CONFIG_PATH"
+
+	// EnvGitHubActionsIDTokenRequestURL / …RequestToken are the GitHub Actions
+	// ambient OIDC endpoint env vars used for keyless (Mode B) signing when
+	// aicrd itself runs in a GitHub Actions job.
+	EnvGitHubActionsIDTokenRequestURL   = "ACTIONS_ID_TOKEN_REQUEST_URL"
+	EnvGitHubActionsIDTokenRequestToken = "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+
+	// EnvBinaryAttestationFile overrides the path to the server's own binary
+	// attestation (tool provenance). Unset falls back to the conventional
+	// <executable>-attestation.sigstore.json next to the running binary. Set it
+	// when the attestation ships elsewhere in the image (e.g. a ko build's
+	// KO_DATA_PATH: /var/run/ko/aicrd-attestation.sigstore.json).
+	EnvBinaryAttestationFile = "AICR_BINARY_ATTESTATION_FILE"
+
+	// EnvKoDataPath is ko's runtime data directory env var (set automatically
+	// inside ko-built images). AICR ships the server's per-architecture binary
+	// attestation there so a multi-arch image needs no per-deployment config.
+	EnvKoDataPath = "KO_DATA_PATH"
+
+	// BinaryAttestationKoDataNameFormat is the per-architecture filename for the
+	// aicrd binary attestation shipped in ko's KO_DATA_PATH. The %s is GOARCH
+	// (e.g. amd64, arm64). The .goreleaser.yaml aicrd build hook writes files
+	// with this exact convention into cmd/aicrd/kodata/; keep the two in sync.
+	BinaryAttestationKoDataNameFormat = "aicrd-%s-attestation.sigstore.json"
+
+	// EnvBinaryAttestationIdentityRegexp overrides the certificate-identity
+	// pattern the server pins its own binary attestation to. Unset uses the
+	// release-workflow default (verifier.TrustedRepositoryPattern). A custom
+	// value MUST still contain "NVIDIA/aicr" (enforced by
+	// verifier.ValidateIdentityPattern) so it stays pinned to the NVIDIA org;
+	// it retargets WHICH NVIDIA workflow attested the binary (e.g. an e2e
+	// workflow), not the org. Mirrors the CLI's --certificate-identity-regexp.
+	EnvBinaryAttestationIdentityRegexp = "AICR_BINARY_ATTESTATION_IDENTITY_REGEXP"
+)
+
 // Log scanner buffer sizes.
 const (
 	// LogScannerBufferSize is the maximum line size for reading pod logs.

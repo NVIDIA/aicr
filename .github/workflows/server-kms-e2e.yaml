@@ -1,0 +1,208 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Server-side (aicrd) HashiCorp Vault-backed bundle attestation e2e. The
+# companion of vault-kms-e2e.yaml, which exercises the same hashivault:// path
+# through the aicr CLI; this one drives the aicrd HTTP SERVER's
+# POST /v1/bundle?attest=true surface (#1150) with a non-interactive,
+# operator-supplied KMS signing identity.
+#
+# It builds an ATTESTED aicrd binary (goreleaser + the cosign attest-blob hook,
+# fed by generate-slsa-predicate which sets SLSA_PREDICATE + AICR_SIGNING_CONFIG),
+# then delegates to the suite's run.sh. run.sh owns the full runtime lifecycle:
+# it starts OpenBAO in dev mode (plain docker run, so it can reference the
+# load-versions image pin — a services: container would start before that step),
+# provisions an ecdsa-p256 Transit key, starts aicrd in the background with the
+# signing identity, drives the sign + verify round-trip, and tears both down.
+# Keeping OpenBAO + server ownership inside run.sh means the exact same script
+# runs locally and in CI (no drift between an inlined workflow copy and the
+# runner).
+#
+# Dev-mode OpenBAO serves plain HTTP with a known root token, so no TLS/mkcert
+# dance is needed. The image is pinned in .settings.yaml
+# (testing_tools.openbao_image) and resolved via load-versions, never :latest.
+
+name: Server KMS E2E
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  # Validate on PRs that touch the suite, its workflow/tooling, or the
+  # server-signing / verify code under test. Gated to same-repo in the job `if`
+  # below: fork PRs lack the OIDC token needed to attest the binary, so they
+  # skip rather than fail.
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tests/chainsaw/signing/server-bundle-attestation-vault/**'
+      - '.github/workflows/server-kms-e2e.yaml'
+      - '.github/actions/load-versions/**'
+      - '.github/actions/generate-slsa-predicate/**'
+      - '.github/actions/setup-build-tools/**'
+      - '.settings.yaml'
+      - '.goreleaser.yaml'
+      # The server signing/attestation surface under test.
+      - 'pkg/server/**'
+      - 'pkg/bundler/**'
+      # The keyless/trust-root verification path imports pkg/trust directly.
+      - 'pkg/trust/**'
+      # `verify --key`/`--insecure-ignore-tlog` plumbing lives in pkg/cli;
+      # cmd/aicrd is the server entrypoint, cmd/aicr the CLI entrypoint. go.mod/
+      # sum cover dependency bumps (e.g. sigstore) that change the signing path.
+      - 'pkg/cli/**'
+      - 'cmd/aicrd/**'
+      - 'cmd/aicr/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'vendor/**'
+
+# Least privilege at the workflow level; id-token is granted only to the job
+# that needs it (below).
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Dev-mode OpenBAO: plain HTTP, fixed root token. Nothing here is a real secret.
+  VAULT_ADDR: http://127.0.0.1:8200
+  VAULT_TOKEN: root
+  VAULT_KMS_KEY: aicr
+  # The aicrd binary built here is attested by THIS workflow's identity (via
+  # generate-slsa-predicate workflow_file: server-kms-e2e.yaml + the goreleaser
+  # cosign attest-blob hook), not the release workflow (on-tag.yaml) the server
+  # pins by default. Retarget the certificate-identity pattern to this workflow
+  # so the server can verify its own binary attestation at startup. Still pinned
+  # to NVIDIA/aicr (enforced by verifier.ValidateIdentityPattern). run.sh
+  # defaults to the same value; set here explicitly for clarity.
+  AICR_BINARY_ATTESTATION_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/server-kms-e2e\.yaml@.*'
+
+jobs:
+  server-kms-e2e:
+    name: Server KMS E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # id-token: write mints the GitHub OIDC token for Sigstore keyless signing.
+    # The "Build binaries" step runs goreleaser, whose cosign attest-blob hook
+    # uses that identity to produce the aicrd binary's SLSA provenance (fed by
+    # "Generate SLSA predicate"), which the server embeds as tool provenance.
+    permissions:
+      contents: read
+      id-token: write
+    # Skip on fork PRs: they get a read-only token, so `cosign attest-blob`
+    # (binary attestation) cannot run. push/workflow_dispatch always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        with:
+          version: ${{ steps.versions.outputs.goreleaser }}
+          install-only: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          # Pin from .settings.yaml (>= v3.1.0) so cosign logs DSSE attestations
+          # to Rekor v2 as hashedrekord/PAE. The installer default (v3.0.6) writes
+          # the legacy dsse entry type, which sigstore-go cannot verify. See #1650.
+          cosign-release: ${{ steps.versions.outputs.cosign }}
+
+      - name: Generate SLSA predicate
+        uses: ./.github/actions/generate-slsa-predicate
+        with:
+          workflow_file: server-kms-e2e.yaml
+
+      - name: Build binaries
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          set -euo pipefail
+          # Builds aicr + aicrd for the host target. With SLSA_PREDICATE +
+          # AICR_SIGNING_CONFIG set (by "Generate SLSA predicate"), the
+          # .goreleaser.yaml aicrd post-hook runs cosign attest-blob and writes
+          # aicrd-attestation.sigstore.json next to the binary — the server's
+          # own tool provenance the e2e embeds.
+          goreleaser build --clean --single-target --snapshot --timeout 10m
+
+      - name: Locate binaries
+        run: |
+          set -euo pipefail
+
+          AICRD_BIN=""
+          for pattern in dist/aicrd_linux_amd64_v1/aicrd dist/aicrd_linux_amd64/aicrd; do
+            if [ -x "$pattern" ]; then
+              AICRD_BIN="$(pwd)/$pattern"
+              break
+            fi
+          done
+          if [ -z "$AICRD_BIN" ]; then
+            echo "::error::Built aicrd server binary not found in dist/"
+            exit 1
+          fi
+
+          AICR_BIN=""
+          for pattern in dist/aicr_linux_amd64_v1/aicr dist/aicr_linux_amd64/aicr; do
+            if [ -x "$pattern" ]; then
+              AICR_BIN="$(pwd)/$pattern"
+              break
+            fi
+          done
+          if [ -z "$AICR_BIN" ]; then
+            echo "::error::Built aicr CLI binary not found in dist/"
+            exit 1
+          fi
+
+          echo "AICRD_BIN=${AICRD_BIN}" >> "$GITHUB_ENV"
+          echo "AICR_BIN=${AICR_BIN}" >> "$GITHUB_ENV"
+          echo "Server binary: ${AICRD_BIN}"
+          echo "CLI binary:    ${AICR_BIN}"
+
+          ATTEST_FILE="$(dirname "$AICRD_BIN")/aicrd-attestation.sigstore.json"
+          if [ -f "$ATTEST_FILE" ]; then
+            echo "aicrd binary attestation found: $ATTEST_FILE (full mode)"
+          else
+            echo "::warning::No aicrd binary attestation found; run.sh will fall back to smoke mode"
+          fi
+
+      - name: Run Server KMS e2e (starts OpenBAO + aicrd, sign + verify)
+        run: |
+          set -euo pipefail
+          ./tests/chainsaw/signing/server-bundle-attestation-vault/run.sh

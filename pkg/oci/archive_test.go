@@ -368,7 +368,7 @@ func readArchiveFiles(t *testing.T, archivePath string) (map[string]string, []st
 	var entries []string
 	for {
 		header, nextErr := tarReader.Next()
-		if nextErr == io.EOF {
+		if stderrors.Is(nextErr, io.EOF) {
 			break
 		}
 		if nextErr != nil {

@@ -15,6 +15,7 @@
 package aicr_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -290,6 +292,93 @@ func TestMakeBundle_TimeoutOptIn(t *testing.T) {
 		})
 		if err == nil {
 			t.Fatal("expected error from already-expired caller deadline, got nil")
+		}
+	})
+}
+
+// fixtureBundleAttester returns fixed, non-nil bundle JSON from Attest so the
+// bundler reaches verifyAndCopyBinaryAttestation (a nil return short-circuits
+// attestBundle before the binary attestation is embedded). It stands in for the
+// real keyless attester the CLI/server build under --attest.
+type fixtureBundleAttester struct {
+	bundleJSON []byte
+}
+
+func (a *fixtureBundleAttester) Attest(_ context.Context, _ attestation.AttestSubject) ([]byte, error) {
+	return a.bundleJSON, nil
+}
+
+func (a *fixtureBundleAttester) Identity() string { return "fixture" }
+
+func (a *fixtureBundleAttester) HasRekorEntry() bool { return false }
+
+// TestMakeBundle_InjectedBinaryAttestation proves that BundleOptions.BinaryAttestation
+// bytes flow through MakeBundle into the produced bundle as the embedded tool
+// provenance, and confirms the additivity contract: with no attestation enabled
+// and no injected bytes, no attestation directory is emitted (the CLI/default path).
+func TestMakeBundle_InjectedBinaryAttestation(t *testing.T) {
+	t.Parallel()
+
+	embeddedPathOf := func(dir string) string {
+		return filepath.Join(dir, filepath.FromSlash(attestation.BinaryAttestationFile))
+	}
+
+	t.Run("injected bytes are embedded when attest enabled", func(t *testing.T) {
+		t.Parallel()
+		client, rec := resolveEmbeddedTrainingRecipe(t)
+
+		fixture := []byte(`{"pre-verified":"binary-attestation"}`)
+		outDir := t.TempDir()
+
+		out, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+			Config: config.NewConfig(
+				config.WithVersion("v-test"),
+				config.WithDeployer(config.DeployerHelm),
+				config.WithAttest(true),
+			),
+			// A non-nil bundle JSON is required so attestBundle does not
+			// short-circuit before embedding the binary attestation.
+			Attester:          &fixtureBundleAttester{bundleJSON: []byte(`{"bundle":true}`)},
+			OutputDir:         outDir,
+			BinaryAttestation: fixture,
+		})
+		if err != nil {
+			t.Fatalf("MakeBundle: %v", err)
+		}
+		if out == nil || out.HasErrors() {
+			t.Fatalf("MakeBundle produced errors: %+v", out)
+		}
+
+		got, err := os.ReadFile(embeddedPathOf(outDir))
+		if err != nil {
+			t.Fatalf("reading embedded binary attestation %s: %v", attestation.BinaryAttestationFile, err)
+		}
+		if !bytes.Equal(got, fixture) {
+			t.Errorf("embedded binary attestation = %q, want %q", got, fixture)
+		}
+	})
+
+	t.Run("default path emits no attestation dir", func(t *testing.T) {
+		t.Parallel()
+		client, rec := resolveEmbeddedTrainingRecipe(t)
+
+		outDir := t.TempDir()
+		out, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+			Config: config.NewConfig(
+				config.WithVersion("v-test"),
+				config.WithDeployer(config.DeployerHelm),
+			),
+			OutputDir: outDir,
+			// No Attester, no BinaryAttestation, no --attest: the CLI default.
+		})
+		if err != nil {
+			t.Fatalf("MakeBundle (default): %v", err)
+		}
+		if out == nil || out.HasErrors() {
+			t.Fatalf("MakeBundle (default) produced errors: %+v", out)
+		}
+		if _, statErr := os.Stat(embeddedPathOf(outDir)); !os.IsNotExist(statErr) {
+			t.Errorf("expected no binary attestation on default path, stat err = %v", statErr)
 		}
 	})
 }

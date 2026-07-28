@@ -105,10 +105,31 @@ func Serve() error {
 	}()
 	h := newRecipeHandler(client, allowLists)
 
+	// Parse the operator-configured server signing identity from the
+	// environment. Fails fast on ambiguous/incomplete configuration so a
+	// misconfigured server never starts.
+	signing, err := parseSigningConfig()
+	if err != nil {
+		// parseSigningConfig already returns coded errors; propagate rather
+		// than re-wrap (avoids double-wrapping an already-classified error).
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to parse signing configuration")
+	}
+
+	// When signing is enabled, verify and cache the server's own binary
+	// attestation ONCE at startup (tool provenance embedded into every attested
+	// bundle). Fail-fast: a signing server that cannot prove its own provenance
+	// must not start. No-op when signing is disabled.
+	if err := signing.loadBinaryAttestation(ctx, defaultBinaryAttestationVerifier); err != nil {
+		return err
+	}
+	if signing.enabled {
+		slog.Info("server bundle signing enabled", "keyless", signing.keyless)
+	}
+
 	// Setup bundle handler backed by the same aicr.Client facade. server.go
 	// no longer constructs a bundler.Bundler (or a recipe.Builder) directly —
 	// the Client owns both, completing #1077 acceptance criterion #2.
-	bh := newBundleHandler(client, allowLists)
+	bh := newBundleHandler(client, allowLists, signing)
 
 	r := map[string]http.HandlerFunc{
 		"/v1/recipe": h.HandleRecipes,

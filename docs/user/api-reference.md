@@ -29,6 +29,7 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 | Recipe generation | ✅ GET /v1/recipe | ✅ `aicr recipe` |
 | Value query | ✅ GET /v1/query | ✅ `aicr query` |
 | Bundle creation | ✅ POST /v1/bundle | ✅ `aicr bundle` |
+| Bundle attestation | ✅ POST /v1/bundle?attest=true (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
 | Snapshot capture | ❌ Use CLI | ✅ `aicr snapshot` |
 | ConfigMap I/O | ❌ Use CLI | ✅ `cm://` URIs |
 | Agent deployment | ❌ Use CLI | ✅ `aicr snapshot` |
@@ -411,6 +412,7 @@ Generate deployment bundles from a recipe.
 | `deployer` | string | helm | Deployment method: `helm`, `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=flux`; ignored by `deployer=argocd-helm`) |
 | `app-name` | string | | Parent Argo Application name (default: `aicr-stack` for `deployer=argocd-helm`, `nvidia-stack` for `deployer=argocd`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `deployer=argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected with HTTP 400 on other deployers. |
+| `attest` | bool | false | Return a cryptographically signed bundle. When `true`, the server signs the bundle as **itself** using its operator-configured signing identity; no signing key, token, or identity is ever taken from the request. Parsed with Go `strconv.ParseBool` semantics; a present-but-unparseable value is rejected with HTTP 400. Absent or `false` returns an unsigned bundle. If the server has no signing identity configured, `attest=true` is rejected with HTTP 400 (`Server is not configured for attestation`). See [Server-Side Signing](#server-side-signing) for setup. |
 
 **Request Body:**
 
@@ -565,6 +567,74 @@ generated. After extraction, `aicr verify .` performs full closed-world
 verification: every manifest digest must match and every additional file or
 directory, symlink, or other non-regular object is rejected, except the exact
 allowed inventory metadata paths.
+
+#### Server-Side Signing
+
+Pass `?attest=true` to `POST /v1/bundle` to receive a cryptographically signed
+bundle. The server signs the bundle as **itself** using an operator-configured
+signing identity. This is the trust boundary: no signing key, token, or identity
+is ever taken from the request, so any client that can reach the endpoint gets
+bundles signed under the server's identity, never its own.
+
+A signed bundle additionally carries, inside the returned zip:
+
+```text
+attestation/bundle-attestation.sigstore.json   # signature over the bundle
+attestation/aicr-attestation.sigstore.json     # aicrd tool-provenance attestation
+```
+
+`attest=true` requires a configured signing identity. If none is configured the
+request is rejected with HTTP 400 (`Server is not configured for attestation`).
+An unparseable `attest` value is also HTTP 400. Absent or `false` returns an
+unsigned bundle, as before.
+
+The server supports two mutually exclusive signing modes, selected by
+environment variables at startup. The configuration is validated fail-fast: a
+malformed or ambiguous setting stops the server from starting.
+
+**Mode A: KMS key.** Set `AICR_SIGNING_KEY` to a cosign KMS URI. The bundle is
+signed with a long-lived key held in the KMS; no OIDC identity is involved.
+
+**Mode B: keyless against a private Sigstore.** Set `AICR_FULCIO_URL` to a
+private Fulcio CA plus a token source. The server obtains a short-lived signing
+certificate from Fulcio using its own OIDC identity. Operator setup for Mode B:
+
+- Run a private Fulcio that trusts the cluster's ServiceAccount token issuer.
+- Mount a projected ServiceAccount token with audience `sigstore` into the aicrd
+  pod, and point `AICR_IDENTITY_TOKEN_FILE` at it. The token is read fresh for
+  every signed request because ServiceAccount tokens rotate.
+- Alternatively, when aicrd itself runs inside GitHub Actions, its ambient OIDC
+  environment is used as the token source.
+
+| Variable | Mode | Purpose |
+|----------|------|---------|
+| `AICR_SIGNING_KEY` | A | cosign KMS URI (`awskms://`, `gcpkms://`, `azurekms://`, `hashivault://`). Its presence selects Mode A. |
+| `AICR_FULCIO_URL` | B | Private Fulcio CA endpoint. Its presence (with a token source) selects Mode B. |
+| `AICR_IDENTITY_TOKEN_FILE` | B | Path to the server's OIDC token (projected ServiceAccount token, audience `sigstore`). Read fresh per request. |
+| `AICR_REKOR_URL` | A, B | Rekor transparency-log endpoint override. |
+| `AICR_SIGNING_CONFIG_PATH` | A, B | Sigstore SigningConfig JSON for Rekor v2 targeting. |
+| `AICR_TLOG_UPLOAD` | A | Set `false` to skip the Rekor upload for air-gapped KMS signing. KMS-only; keyless always uploads. |
+| `AICR_BINARY_ATTESTATION_FILE` | A, B | Absolute path to the aicrd binary attestation. Unset defaults to the conventional `<executable>-attestation.sigstore.json` next to the running binary. Set it when the attestation ships elsewhere in the image, e.g. a ko build stages assets under `KO_DATA_PATH` (`/var/run/ko/aicrd-attestation.sigstore.json`) rather than next to the binary. |
+| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | A, B | Certificate-identity pattern the server pins its own binary attestation to. Unset uses the release-workflow default (`on-tag.yaml`). A custom value MUST still contain `NVIDIA/aicr` so it stays pinned to the NVIDIA org; it retargets which NVIDIA workflow attested the binary (e.g. an e2e workflow), not the org, and a value that is not so pinned fails startup. Mirrors the CLI's `--certificate-identity-regexp`. |
+
+Setting both `AICR_SIGNING_KEY` and the keyless variables is ambiguous and the
+server refuses to start.
+
+Server signing also requires the aicrd **binary attestation**
+(`aicrd-attestation.sigstore.json`, issued under the NVIDIA-CI identity and
+bound to the aicrd binary digest) to be shipped inside the container image. The
+server verifies it once at startup and embeds it as tool provenance
+(`attestation/aicr-attestation.sigstore.json`) in every signed bundle. If
+signing is enabled but that attestation is missing or invalid, the server fails
+to start. Producing that attestation in the CI/release pipeline is a separate
+dependency, tracked outside this feature.
+
+By default the server discovers that attestation next to its own executable. Set
+`AICR_BINARY_ATTESTATION_FILE` to point at an explicit path when the image stages
+it elsewhere: a ko-built image places assets under `KO_DATA_PATH`
+(`/var/run/ko/aicrd-attestation.sigstore.json`), not next to the binary. Only the
+attestation file path changes; it is still verified against the aicrd binary's
+own digest.
 
 ---
 

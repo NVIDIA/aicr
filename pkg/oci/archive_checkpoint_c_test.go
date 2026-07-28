@@ -201,7 +201,7 @@ func assertCanonicalArchiveBytes(t *testing.T, data []byte, prefix string) {
 	}
 	for {
 		header, nextErr := tReader.Next()
-		if nextErr == io.EOF {
+		if stderrors.Is(nextErr, io.EOF) {
 			break
 		}
 		if nextErr != nil {
