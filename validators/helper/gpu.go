@@ -72,6 +72,12 @@ func FindGpuNodes(ctx context.Context, clientset kubernetes.Interface) ([]GpuNod
 
 	var gpuNodes []GpuNode
 	for _, node := range nodeList.Items {
+		select {
+		case <-ctx.Done():
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+				"canceled while scanning nodes for allocatable GPU resources", ctx.Err())
+		default:
+		}
 		if q, ok := node.Status.Allocatable[v1.ResourceName(GpuResourceName)]; ok && !q.IsZero() {
 			gpuNodes = append(gpuNodes, GpuNode{Node: node, Cordoned: node.Spec.Unschedulable})
 		}
@@ -88,6 +94,12 @@ func FindSchedulableGpuNodes(ctx context.Context, clientset kubernetes.Interface
 
 	var gpuNodes []v1.Node
 	for _, n := range all {
+		select {
+		case <-ctx.Done():
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+				"canceled while filtering schedulable GPU nodes", ctx.Err())
+		default:
+		}
 		if !n.Cordoned {
 			gpuNodes = append(gpuNodes, n.Node)
 		}

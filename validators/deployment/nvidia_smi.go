@@ -43,7 +43,7 @@ const (
 func checkNvidiaSMI(ctx *validators.Context) error {
 	allNodes, err := helper.FindGpuNodes(ctx.Ctx, ctx.Clientset)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to query for GPU nodes", err)
+		return err
 	}
 
 	if len(allNodes) == 0 {
@@ -53,6 +53,12 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 	var gpuNodes []v1.Node
 	var cordonedNames []string
 	for _, n := range allNodes {
+		select {
+		case <-ctx.Ctx.Done():
+			return errors.Wrap(errors.ErrCodeTimeout,
+				"canceled while partitioning GPU nodes by cordon state", ctx.Ctx.Err())
+		default:
+		}
 		if n.Cordoned {
 			cordonedNames = append(cordonedNames, n.Node.Name)
 			continue
