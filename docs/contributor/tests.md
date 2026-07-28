@@ -91,8 +91,8 @@ command name — there is no Cobra-style `SetOut`/`SetArgs`/`Execute`.)
 Direct `fmt.Println` / `fmt.Printf` to stdout in `pkg/cli` breaks
 this pattern and is a review-blocker.
 
-**Coverage floor: 75%** (project-wide, from `.settings.yaml`
-`quality.coverage_threshold`). `make test-coverage` enforces it.
+**Coverage floor: 75%** (from `.settings.yaml`
+`quality.coverage_threshold`; excludes `validators/`, see #1752). `make test-coverage` enforces it.
 Per-package decreases > 0.5% are flagged for justification.
 
 ## Test Isolation (`--no-cluster`)
