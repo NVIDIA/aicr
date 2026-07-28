@@ -35,20 +35,43 @@ const (
 	nvidiaSMILogContextLines = 20
 )
 
-// checkNvidiaSMI verifies that nvidia-smi works correctly on all GPU nodes.
+// checkNvidiaSMI verifies that nvidia-smi works correctly on every schedulable
+// GPU node. Cordoned GPU nodes narrow the verified scope, so they are
+// reported explicitly (never silently dropped from the node count) and the
+// evidence records how many of the cluster's GPU nodes were actually
+// verified — see docs/contributor/validator.md and issue #1668.
 func checkNvidiaSMI(ctx *validators.Context) error {
-	gpuNodes, err := helper.FindSchedulableGpuNodes(ctx.Ctx, ctx.Clientset)
+	allNodes, err := helper.FindGpuNodes(ctx.Ctx, ctx.Clientset)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to query for GPU nodes", err)
 	}
 
-	if len(gpuNodes) == 0 {
+	if len(allNodes) == 0 {
 		return validators.Skip("no GPU nodes found in the cluster")
 	}
 
-	fmt.Printf("Found %d GPU node(s):\n", len(gpuNodes))
+	var gpuNodes []v1.Node
+	var cordonedNames []string
+	for _, n := range allNodes {
+		if n.Cordoned {
+			cordonedNames = append(cordonedNames, n.Node.Name)
+			continue
+		}
+		gpuNodes = append(gpuNodes, n.Node)
+	}
+
+	fmt.Printf("Found %d GPU node(s), %d schedulable, %d cordoned:\n",
+		len(allNodes), len(gpuNodes), len(cordonedNames))
 	for _, node := range gpuNodes {
 		fmt.Printf("  %s\n", node.Name)
+	}
+	for _, name := range cordonedNames {
+		fmt.Printf("  %s: skipped (cordoned)\n", name)
+	}
+
+	if len(gpuNodes) == 0 {
+		return validators.Skip(fmt.Sprintf(
+			"all %d GPU node(s) are cordoned; nothing to verify", len(cordonedNames)))
 	}
 
 	// Check if any nodes are busy
@@ -98,7 +121,9 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 				len(failedNodes), len(gpuNodes), failedNodes))
 	}
 
-	fmt.Printf("Successfully verified GPU on all %d nodes\n", len(gpuNodes))
+	fmt.Printf("nodesValidated: %d/%d (%d cordoned, skipped)\n",
+		len(gpuNodes), len(allNodes), len(cordonedNames))
+	fmt.Printf("Successfully verified GPU on all %d schedulable node(s)\n", len(gpuNodes))
 	return nil
 }
 

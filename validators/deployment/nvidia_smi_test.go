@@ -15,11 +15,19 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
+
+// isSkipError reports whether err came from validators.Skip. Skip wraps the
+// unexported "skip" sentinel, so the rendered error always ends with ": skip".
+func isSkipError(err error) bool {
+	return err != nil && strings.HasSuffix(err.Error(), ": skip")
+}
 
 func TestVerifyNvidiaSMILogs(t *testing.T) {
 	t.Parallel()
@@ -107,5 +115,65 @@ func TestVerifyNvidiaSMILogs(t *testing.T) {
 				t.Fatalf("verifyNvidiaSMILogs() error = %q, want %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestCheckNvidiaSMI_NoGPUNodes proves the check still skips cleanly when the
+// cluster has no GPU nodes at all — distinct from the all-cordoned case below,
+// which must give a different, more specific reason.
+func TestCheckNvidiaSMI_NoGPUNodes(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, []runtime.Object{}, nil, nil)
+
+	err := checkNvidiaSMI(ctx)
+	if !isSkipError(err) {
+		t.Fatalf("checkNvidiaSMI() error = %v, want a skip", err)
+	}
+	if !strings.Contains(err.Error(), "no GPU nodes found in the cluster") {
+		t.Errorf("checkNvidiaSMI() error = %v, want it to mention no GPU nodes found", err)
+	}
+}
+
+// TestCheckNvidiaSMI_AllNodesCordoned proves that when every GPU node is
+// cordoned, the check discloses the cordoned count in its skip reason instead
+// of reporting the cluster as having no GPU nodes at all (issue #1668: a
+// cordon narrows scope, it must never look identical to "nothing to check").
+func TestCheckNvidiaSMI_AllNodesCordoned(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		cordon(gpuNode("cordoned-1", 8, -1)),
+		cordon(gpuNode("cordoned-2", 8, -1)),
+	}, nil, nil)
+
+	err := checkNvidiaSMI(ctx)
+	if !isSkipError(err) {
+		t.Fatalf("checkNvidiaSMI() error = %v, want a skip", err)
+	}
+	if !strings.Contains(err.Error(), "all 2 GPU node(s) are cordoned") {
+		t.Errorf("checkNvidiaSMI() error = %v, want it to disclose the cordoned count", err)
+	}
+}
+
+// TestCheckNvidiaSMI_MixedCordonAndNonGPU proves cordoned GPU nodes and
+// non-GPU nodes are partitioned correctly: a non-GPU node never counts toward
+// either the schedulable or cordoned tally, and a cluster with only cordoned
+// GPU nodes plus unrelated non-GPU nodes still reports the cordon-specific
+// skip reason rather than falling back to "no GPU nodes found."
+func TestCheckNvidiaSMI_MixedCordonAndNonGPU(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		cordon(gpuNode("cordoned-1", 8, -1)),
+		gpuNode("non-gpu-1", -1, -1),
+	}, nil, nil)
+
+	err := checkNvidiaSMI(ctx)
+	if !isSkipError(err) {
+		t.Fatalf("checkNvidiaSMI() error = %v, want a skip", err)
+	}
+	if !strings.Contains(err.Error(), "all 1 GPU node(s) are cordoned") {
+		t.Errorf("checkNvidiaSMI() error = %v, want it to disclose the cordoned count", err)
 	}
 }

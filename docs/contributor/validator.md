@@ -393,6 +393,41 @@ constraint, which is an explicit anti-pattern in CLAUDE.md.
 The `dependencyAffinity` pre-flight (validator catalog entries
 declaring a required dependency) follows the same rule.
 
+### Node-scoped checks: cordoned GPU nodes
+
+A cordon (`Node.Spec.Unschedulable`) means "do not schedule new pods,"
+not "exclude this node from GPU service" — it is commonly transient
+maintenance, not deliberate exclusion. A node-scoped check that
+enumerates only the schedulable cohort (e.g. via
+`helper.FindSchedulableGpuNodes`) can pass while silently validating
+fewer nodes than the cluster has, with nothing in the evidence
+indicating reduced coverage. That is the spuriously-passing-check
+failure mode CLAUDE.md's anti-pattern table calls out, applied to node
+enumeration instead of a single boolean.
+
+Checks that deploy a per-node test pod (`check-nvidia-smi`) must
+instead call `helper.FindGpuNodes`, which returns every GPU node
+tagged with its cordon state, and:
+
+1. Validate only the schedulable subset (a cordoned node cannot
+   schedule the probe pod).
+2. Report cordoned nodes explicitly in the check's stdout evidence
+   (`<node>: skipped (cordoned)`), never omit them from the node count.
+3. Print a coverage line (`nodesValidated: <schedulable>/<total>`) so a
+   pass on reduced scope is visible in the CTRF report.
+
+Cluster-aggregate checks that assert on an operator's aggregate status
+(`gpu-operator-health`, `expected-resources`) are unaffected by this —
+DaemonSet operands ignore cordons, so those checks already cover
+cordoned nodes.
+
+For *deliberate*, durable exclusion of a node from GPU service (as
+opposed to transient cordon-for-maintenance), use the GPU Operator's
+`nvidia.com/gpu.deploy.operands=false` node label instead of a cordon.
+It removes the node from allocatable `nvidia.com/gpu` entirely, so the
+node drops out of both node-scoped checks and ClusterPolicy
+aggregation consistently — a cordon does neither reliably.
+
 ### Performance benchmark tuning
 
 Performance checks ship validation *methodology* knobs as env vars on
