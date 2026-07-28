@@ -109,6 +109,32 @@ builds:
       -X github.com/NVIDIA/aicr/pkg/server.version={{.Version}}
       -X github.com/NVIDIA/aicr/pkg/server.commit={{.FullCommit}}
       -X github.com/NVIDIA/aicr/pkg/server.date={{.Date}}
+    hooks:
+      post:
+        ## Binary attestation for the aicrd server binary. Same cosign attest-blob
+        ## flow as the aicr CLI build above (Rekor v2 via SLSA_PREDICATE +
+        ## AICR_SIGNING_CONFIG; skipped when SLSA_PREDICATE is unset, e.g. local
+        ## snapshot builds). Writes the bundle next to the binary AND copies it into
+        ## cmd/aicrd/kodata/ with a per-arch name so ko ships it at KO_DATA_PATH for
+        ## the multi-arch image. The server (pkg/server/signing.go
+        ## resolveBinaryAttestationPath) reads KO_DATA_PATH/aicrd-<GOARCH>-attestation.sigstore.json;
+        ## keep the filename in sync with defaults.BinaryAttestationKoDataNameFormat.
+        - cmd: >-
+            bash -c '[ -z "${SLSA_PREDICATE:-}" ] && exit 0;
+            [ -z "${AICR_SIGNING_CONFIG:-}" ] && { echo "AICR_SIGNING_CONFIG unset while signing; refusing to fall back to Rekor v1" >&2; exit 1; };
+            for n in 1 2 3; do
+            cosign attest-blob
+            --predicate "${SLSA_PREDICATE}"
+            --type https://slsa.dev/provenance/v1
+            --signing-config "${AICR_SIGNING_CONFIG}"
+            --bundle "$(dirname "{{ .Path }}")/aicrd-attestation.sigstore.json"
+            --yes "{{ .Path }}" && break;
+            echo "cosign attest-blob attempt $n failed; retrying" >&2;
+            if [ "$n" -lt 3 ]; then sleep $((n * 5)); else echo "cosign attest-blob failed after 3 attempts" >&2; exit 1; fi;
+            done;
+            mkdir -p cmd/aicrd/kodata;
+            cp "$(dirname "{{ .Path }}")/aicrd-attestation.sigstore.json" "cmd/aicrd/kodata/aicrd-{{ .Arch }}-attestation.sigstore.json"'
+          output: true
     goos:
       - linux
     goarch:

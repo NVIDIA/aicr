@@ -23,8 +23,7 @@
 #
 # Exemptions:
 #   - lifecycle/frozen: Never goes stale
-#   - priority/critical: Never goes stale
-#   - do-not-merge: PR won't be closed
+#   - do-not-merge: PRs never go stale
 #
 # Pattern from: gpu-operator
 
@@ -64,7 +63,7 @@ jobs:
             If this issue is no longer relevant, it's okay to let it close.
           days-before-stale: 90
           stale-issue-label: 'lifecycle/stale'
-          exempt-issue-labels: 'lifecycle/frozen,priority/critical,good first issue'
+          exempt-issue-labels: 'lifecycle/frozen,good first issue'
 
           # PR settings (shorter timeline)
           stale-pr-message: |

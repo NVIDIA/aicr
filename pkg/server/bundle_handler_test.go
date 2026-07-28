@@ -15,17 +15,38 @@
 package server
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
+
+// fixtureBundleAttester returns fixed, non-nil bundle JSON from Attest so the
+// bundler does not short-circuit attestBundle (a nil return skips embedding the
+// binary attestation). It stands in for the real keyless/KMS attester the
+// server builds under ?attest=true.
+type fixtureBundleAttester struct {
+	bundleJSON []byte
+}
+
+func (a *fixtureBundleAttester) Attest(_ context.Context, _ attestation.AttestSubject) ([]byte, error) {
+	return a.bundleJSON, nil
+}
+
+func (a *fixtureBundleAttester) Identity() string { return "fixture" }
+
+func (a *fixtureBundleAttester) HasRekorEntry() bool { return false }
 
 var testBundleZipHeaders = []string{
 	"Content-Disposition",
@@ -41,7 +62,256 @@ func newTestBundleHandler(t *testing.T) *bundleHandler {
 		t.Fatalf("NewClient: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	return newBundleHandler(client, nil)
+	return newBundleHandler(client, nil, nil)
+}
+
+// resolveEmbeddedBundleBody resolves a known-good embedded recipe and returns
+// its wire-format JSON (the pkg/recipe.RecipeResult shape the bundle handler
+// decodes), so attest tests can drive a real, successful bundle end-to-end.
+func resolveEmbeddedBundleBody(t *testing.T) []byte {
+	t.Helper()
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+		aicr.WithVersion("v-test"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	rec, err := client.ResolveRecipe(t.Context(), aicr.RecipeRequest{
+		Service:     "eks",
+		Accelerator: "h100",
+		OS:          "ubuntu",
+		Intent:      "training",
+	})
+	if err != nil {
+		t.Fatalf("ResolveRecipe: %v", err)
+	}
+	body, err := json.Marshal(rec.Resolved())
+	if err != nil {
+		t.Fatalf("marshal recipe: %v", err)
+	}
+	return body
+}
+
+// TestBundleHandler_Attest pins the ?attest=true signing seam: a configured
+// server signs via the injected attesterBuilder, an unconfigured server rejects
+// the request with 400, and the default (no attest) path never touches signing.
+func TestBundleHandler_Attest(t *testing.T) {
+	const kmsKey = "awskms:///alias/aicr-signing"
+
+	body := resolveEmbeddedBundleBody(t)
+
+	newHandler := func(t *testing.T, signing *signingConfig, builder attesterBuilder) *bundleHandler {
+		t.Helper()
+		h := newTestBundleHandler(t)
+		h.signing = signing
+		if builder != nil {
+			h.newAttester = builder
+		}
+		return h
+	}
+
+	post := func(h *bundleHandler, target string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, target, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.HandleBundles(w, req)
+		return w
+	}
+
+	t.Run("attest=true wires configured KMS signing", func(t *testing.T) {
+		var called bool
+		var gotOpts attestation.ResolveOptions
+		h := newHandler(t,
+			// binaryAttestation is required now that attest=true enables
+			// Config.Attest(): bundler.New's fail-fast gate is satisfied by the
+			// injected bytes (the startup-verified tool provenance).
+			&signingConfig{
+				enabled:           true,
+				signingKey:        kmsKey,
+				tlogUpload:        true,
+				binaryAttestation: []byte("fixture-attestation"),
+			},
+			func(_ context.Context, opts attestation.ResolveOptions) (attestation.Attester, error) {
+				called = true
+				gotOpts = opts
+				return attestation.NewNoOpAttester(), nil
+			})
+
+		w := post(h, "/v1/bundle?attest=true")
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if !called {
+			t.Fatal("newAttester was not called for attest=true")
+		}
+		if !gotOpts.Attest {
+			t.Error("ResolveOptions.Attest = false, want true")
+		}
+		if gotOpts.SigningKey != kmsKey {
+			t.Errorf("ResolveOptions.SigningKey = %q, want %q", gotOpts.SigningKey, kmsKey)
+		}
+	})
+
+	t.Run("attest=true fails 500 without leaking builder error", func(t *testing.T) {
+		const secretErr = "super-secret-kms-internal-failure-detail"
+		h := newHandler(t,
+			&signingConfig{enabled: true, signingKey: kmsKey, tlogUpload: true},
+			func(context.Context, attestation.ResolveOptions) (attestation.Attester, error) {
+				return nil, aicrerrors.New(aicrerrors.ErrCodeInternal, secretErr)
+			})
+
+		w := post(h, "/v1/bundle?attest=true")
+
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusInternalServerError, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), secretErr) {
+			t.Errorf("response leaked internal builder error: %s", w.Body.String())
+		}
+	})
+
+	t.Run("attest=true fails 500 when identity token file is missing", func(t *testing.T) {
+		// Use the DEFAULT newAttester (no injected builder) so the real
+		// resolveOptions runs and fails reading the non-existent token file.
+		h := newHandler(t, &signingConfig{
+			enabled:           true,
+			keyless:           true,
+			fulcioURL:         "https://fulcio.example",
+			identityTokenFile: filepath.Join(t.TempDir(), "does-not-exist.token"),
+		}, nil)
+
+		w := post(h, "/v1/bundle?attest=true")
+
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusInternalServerError, w.Body.String())
+		}
+	})
+
+	t.Run("attest=notabool rejected with 400", func(t *testing.T) {
+		h := newHandler(t,
+			&signingConfig{enabled: true, signingKey: kmsKey, tlogUpload: true},
+			nil)
+
+		w := post(h, "/v1/bundle?attest=notabool")
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+	})
+
+	t.Run("attest=true rejected when not configured", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			signing *signingConfig
+		}{
+			{"nil signing", nil},
+			{"disabled signing", &signingConfig{enabled: false, signingKey: kmsKey}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				var called bool
+				h := newHandler(t, tc.signing,
+					func(context.Context, attestation.ResolveOptions) (attestation.Attester, error) {
+						called = true
+						return attestation.NewNoOpAttester(), nil
+					})
+
+				w := post(h, "/v1/bundle?attest=true")
+
+				if w.Code != http.StatusBadRequest {
+					t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+				}
+				if called {
+					t.Error("newAttester was called despite signing being unconfigured")
+				}
+			})
+		}
+	})
+
+	t.Run("attest absent leaves signing untouched", func(t *testing.T) {
+		var called bool
+		h := newHandler(t,
+			&signingConfig{enabled: true, signingKey: kmsKey, tlogUpload: true},
+			func(context.Context, attestation.ResolveOptions) (attestation.Attester, error) {
+				called = true
+				return attestation.NewNoOpAttester(), nil
+			})
+
+		w := post(h, "/v1/bundle")
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if called {
+			t.Error("newAttester was called for a request without attest=true")
+		}
+	})
+}
+
+// TestBundleHandler_AttestEmbedsBinaryAttestation is the end-to-end proof that
+// server signing embeds the cached tool provenance: with signing enabled, a
+// non-empty binaryAttestation, and a real (non-nil JSON) attester, the streamed
+// bundle zip contains attestation/aicr-attestation.sigstore.json equal to the
+// cached binary attestation bytes. The zip staging step re-verifies checksums
+// (not Sigstore signatures), so a fixture attestation survives the stream path.
+func TestBundleHandler_AttestEmbedsBinaryAttestation(t *testing.T) {
+	const kmsKey = "awskms:///alias/aicr-signing"
+	fixtureBinary := []byte(`{"pre-verified":"server-binary-attestation"}`)
+	body := resolveEmbeddedBundleBody(t)
+
+	h := newTestBundleHandler(t)
+	h.signing = &signingConfig{
+		enabled:           true,
+		signingKey:        kmsKey,
+		tlogUpload:        true,
+		binaryAttestation: fixtureBinary,
+	}
+	// A non-nil bundle JSON is required so attestBundle does not short-circuit
+	// before embedding the binary attestation.
+	h.newAttester = func(context.Context, attestation.ResolveOptions) (attestation.Attester, error) {
+		return &fixtureBundleAttester{bundleJSON: []byte(`{"bundle":true}`)}, nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle?attest=true", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleBundles(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatalf("open bundle zip: %v", err)
+	}
+
+	var got []byte
+	for _, f := range zr.File {
+		if f.Name != attestation.BinaryAttestationFile {
+			continue
+		}
+		rc, openErr := f.Open()
+		if openErr != nil {
+			t.Fatalf("open %s in zip: %v", f.Name, openErr)
+		}
+		got, err = io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatalf("read %s in zip: %v", f.Name, err)
+		}
+		break
+	}
+	if got == nil {
+		t.Fatalf("bundle zip missing %s", attestation.BinaryAttestationFile)
+	}
+	if !bytes.Equal(got, fixtureBinary) {
+		t.Errorf("embedded binary attestation = %q, want %q", got, fixtureBinary)
+	}
 }
 
 // TestBundleHandler_MethodGate verifies only POST is accepted.
