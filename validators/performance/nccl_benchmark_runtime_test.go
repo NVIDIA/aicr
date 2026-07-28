@@ -321,7 +321,7 @@ spec:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "skipped - requires at least 2 GPU nodes for EW fabric test"
+	want := skipMsgNCCLFewNodes
 	if !passed || msg != want {
 		t.Errorf("got (%q, %v), want (%q, true) — sizing must narrow by the runtime's own nodeSelector", msg, passed, want)
 	}
@@ -356,7 +356,7 @@ func TestValidateNcclAllReduceBwCustomRuntimeClusterPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "skipped - requires at least 2 GPU nodes for EW fabric test"
+	want := skipMsgNCCLFewNodes
 	if !passed || msg != want {
 		t.Errorf("got (%q, %v), want (%q, true)", msg, passed, want)
 	}

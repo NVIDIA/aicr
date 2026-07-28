@@ -288,7 +288,7 @@ func readEvidencePackageFiles(t *testing.T, storePath, manifestDigest string) ma
 	tarReader := tar.NewReader(gzipReader)
 	for {
 		header, nextErr := tarReader.Next()
-		if nextErr == io.EOF {
+		if stderrors.Is(nextErr, io.EOF) {
 			break
 		}
 		if nextErr != nil {

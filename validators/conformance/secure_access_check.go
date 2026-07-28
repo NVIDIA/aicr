@@ -67,6 +67,11 @@ const (
 	// GPU at all (no ResourceClaims, no nvidia.com/gpu limits).
 	noAllocProbePrefix = "no-alloc-probe-"
 
+	// allocationModeExactCount is the Kubernetes DRA DeviceRequest
+	// allocationMode enum value. It is an upstream API constant, not an AICR
+	// internal token. See k8s.io/api/resource/{v1beta1,v1,v1beta2}.DeviceRequest.
+	allocationModeExactCount = "ExactCount"
+
 	// cudaTestImage runs the in-container GPU visibility verification.
 	cudaTestImage = "nvidia/cuda:12.9.0-base-ubuntu24.04"
 	// bashShell is the shell binary used by cudaTestImage containers.
@@ -1587,12 +1592,12 @@ func buildResourceClaim(run *gpuTestRun, version string) *unstructured.Unstructu
 	}
 	if version == versionV1beta1 {
 		request["deviceClassName"] = draDriverGPU
-		request["allocationMode"] = "ExactCount"
+		request["allocationMode"] = allocationModeExactCount
 		request["count"] = int64(1)
 	} else {
 		request["exactly"] = map[string]interface{}{
 			"deviceClassName": draDriverGPU,
-			"allocationMode":  "ExactCount",
+			"allocationMode":  allocationModeExactCount,
 			"count":           int64(1),
 		}
 	}
