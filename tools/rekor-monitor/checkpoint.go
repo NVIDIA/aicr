@@ -153,47 +153,70 @@ func (s checkpointStore) writeProgress(scannedTo int64) error {
 	return nil
 }
 
-// stallPath is the companion tracking catch-up convergence across runs: the last
-// partial pass's `remaining` count and the number of consecutive partial passes
-// where it failed to decrease. It lets observe distinguish a converging catch-up
-// (remaining trending down: healthy) from a diverging one (remaining flat or
-// growing: the log is outpacing the scan) so the latter can page instead of
-// reporting clean indefinitely. Carried in the same artifact as the checkpoint.
+// stallPath is the companion tracking catch-up convergence across runs (see
+// scanTrend for the fields). It lets observe distinguish a converging catch-up
+// (remaining trending down: healthy) from a diverging or glacial one (the log
+// outpacing the scan) so the latter can page instead of reporting clean
+// indefinitely. Carried in the same artifact as the checkpoint.
 func (s checkpointStore) stallPath() string { return s.path + ".stall" }
 
-// readScanTrend returns the persisted (remaining, stallCount), or (0, 0) when the
-// companion is absent (a fresh window, or the first run after this shipped). A
+// scanTrend is the persisted catch-up convergence state (the .stall companion):
+//   - bestRemaining: the smallest `remaining` seen in this window so far (a
+//     low-water mark). Comparing against the watermark rather than the prior pass
+//     means a single lucky decrease inside an oscillating divergence cannot reset
+//     the stall count.
+//   - stall: consecutive partial passes that failed to beat bestRemaining.
+//   - passes: total partial passes in this window (an absolute "behind too long"
+//     bound that trips even a glacial-but-monotone catch-up the watermark misses).
+//
+// All three reset when the window advances (resetScanTrend).
+type scanTrend struct {
+	bestRemaining int64
+	stall         int
+	passes        int
+}
+
+// readScanTrend returns the persisted trend, or the zero value when the companion
+// is absent (a fresh window, or the first run after this shipped). A two-field
+// file (the pre-passes format) is accepted with passes defaulting to 0. A
 // present-but-malformed file is an error rather than a silent reset, so a bad
 // companion never masks a real divergence.
-func (s checkpointStore) readScanTrend() (remaining int64, stall int, err error) {
+func (s checkpointStore) readScanTrend() (scanTrend, error) {
 	data, rerr := os.ReadFile(s.stallPath()) //nolint:gosec // path is a workflow-controlled constant
 	if rerr != nil {
 		if stderrors.Is(rerr, os.ErrNotExist) {
-			return 0, 0, nil
+			return scanTrend{}, nil
 		}
-		return 0, 0, errors.Wrap(errors.ErrCodeInternal, "failed to read scan-trend file", rerr)
+		return scanTrend{}, errors.Wrap(errors.ErrCodeInternal, "failed to read scan-trend file", rerr)
 	}
 	fields := strings.Fields(string(data))
 	if len(fields) == 0 {
-		return 0, 0, nil
+		return scanTrend{}, nil
 	}
-	if len(fields) != 2 {
-		return 0, 0, errors.New(errors.ErrCodeInternal, "scan-trend file is malformed")
+	if len(fields) != 2 && len(fields) != 3 {
+		return scanTrend{}, errors.New(errors.ErrCodeInternal, "scan-trend file is malformed")
 	}
-	remaining, perr := strconv.ParseInt(fields[0], 10, 64)
-	if perr != nil || remaining < 0 {
-		return 0, 0, errors.New(errors.ErrCodeInternal, "scan-trend remaining is invalid")
+	best, perr := strconv.ParseInt(fields[0], 10, 64)
+	if perr != nil || best < 0 {
+		return scanTrend{}, errors.New(errors.ErrCodeInternal, "scan-trend best-remaining is invalid")
 	}
-	stall, perr = strconv.Atoi(fields[1])
+	stall, perr := strconv.Atoi(fields[1])
 	if perr != nil || stall < 0 {
-		return 0, 0, errors.New(errors.ErrCodeInternal, "scan-trend stall count is invalid")
+		return scanTrend{}, errors.New(errors.ErrCodeInternal, "scan-trend stall count is invalid")
 	}
-	return remaining, stall, nil
+	passes := 0
+	if len(fields) == 3 {
+		passes, perr = strconv.Atoi(fields[2])
+		if perr != nil || passes < 0 {
+			return scanTrend{}, errors.New(errors.ErrCodeInternal, "scan-trend pass count is invalid")
+		}
+	}
+	return scanTrend{bestRemaining: best, stall: stall, passes: passes}, nil
 }
 
-// writeScanTrend persists (remaining, stallCount) as two space-separated integers.
-func (s checkpointStore) writeScanTrend(remaining int64, stall int) error {
-	line := strconv.FormatInt(remaining, 10) + " " + strconv.Itoa(stall) + "\n"
+// writeScanTrend persists the trend as three space-separated integers.
+func (s checkpointStore) writeScanTrend(t scanTrend) error {
+	line := strconv.FormatInt(t.bestRemaining, 10) + " " + strconv.Itoa(t.stall) + " " + strconv.Itoa(t.passes) + "\n"
 	if err := os.MkdirAll(filepath.Dir(s.stallPath()), 0o750); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create scan-trend directory", err)
 	}

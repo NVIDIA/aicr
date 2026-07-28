@@ -84,10 +84,15 @@
 #   - Tamper / consistency failure (security issue + page): the Merkle consistency
 #     proof failed. Re-run once to rule out a corrupt cached proof; a persistent
 #     break is a tamper signal: escalate to Sigstore.
-#   - Operational / degraded (no page): a red hourly job with no issue is a
-#     transient infra blip (Sigstore/Rekor/TUF/GitHub-API) that self-heals. A
-#     "degraded" issue appears only after three consecutive failed runs and needs
-#     no action unless it persists.
+#   - Operational (no page): a red hourly job with no issue is a transient infra
+#     blip (Sigstore/Rekor/TUF/GitHub-API) that self-heals; the "degraded" issue
+#     appears only after three consecutive failed runs and needs no action unless
+#     it persists.
+#   - Degraded (no page, but real): the same issue title also covers a catch-up
+#     that is NOT converging (the log outpacing the bounded per-run scan). Here the
+#     monitor completed every pass; it will NOT self-heal. The issue body says so
+#     and gives the remediation (more scan budget per run, or triage a held finding
+#     pinning the cursor).
 
 name: Rekor Monitor
 
@@ -108,7 +113,7 @@ env:
   # v1 checkpoint is simply ignored; no migration needed.
   ARTIFACT_NAME: rekor-v2-checkpoint
   ALERT_TITLE: "Rekor v2 monitor: release identity / log consistency alert"
-  DEGRADED_TITLE: "Rekor v2 monitor: degraded (unable to complete)"
+  DEGRADED_TITLE: "Rekor v2 monitor: degraded"
   # Maintainers group notified on an alert (GitHub team; issues cannot be
   # assigned to a team, so it is @-mentioned in the issue body instead).
   MAINTAINERS_TEAM: "@nvidia/aicr-maintainer"
@@ -333,7 +338,7 @@ jobs:
             "https://hooks.slack.com/services/${SLACK_SERVICE}"
           echo "Posted Slack alert."
 
-      - name: Open degraded issue if operational failure is persistent
+      - name: Open degraded issue if a non-security failure is persistent
         # Inverse of the security allowlist: any failure that is NOT a confirmed
         # tamper/identity signal is operational. This deliberately also covers an
         # EMPTY classification, i.e. a step BEFORE the monitor failed (tags fetch,
@@ -345,6 +350,7 @@ jobs:
         if: ${{ failure() && steps.monitor.outputs.classification != 'tamper' && steps.monitor.outputs.classification != 'identity' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          CLASSIFICATION: ${{ steps.monitor.outputs.classification }}
         run: |
           set -euo pipefail
           # Persistence via run history: only escalate once this run plus the two
@@ -373,10 +379,24 @@ jobs:
             exit 0
           fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          detail="This is an **operational** problem (Sigstore/Rekor/TUF reachability or the GitHub API), **not** a security finding: no tamper or identity signal was detected."
-          detail="${detail} No maintainer action is required unless it persists; the check will resume automatically when upstream recovers."
+          # The degraded sink covers two very different states; write the body for
+          # the one that actually happened. A catch-up stall is NOT an upstream blip
+          # that self-heals -- the monitor is completing every pass -- so its
+          # remediation is concrete, not "wait for upstream".
+          if [ "${CLASSIFICATION}" = "degraded" ]; then
+            opening="The Rekor v2 monitor's identity catch-up is **not converging** (latest: [run ${GITHUB_RUN_ID}](${run_url}))."
+            opening="${opening} The transparency log is growing faster than the bounded per-run scan, so \`remaining\` is not shrinking;"
+            opening="${opening} the monitor **is** completing each pass and persisting progress."
+            detail="This is **not** a security finding (no tamper or identity signal). It will **not** self-heal on its own."
+            detail="${detail} Remediate by giving the scan more budget per run (raise the pass \`--timeout\` or lower \`scanBudgetHeadroom\`),"
+            detail="${detail} or by triaging a held identity finding that is pinning the cursor. See the catch-up notes in \`docs/contributor/maintaining.md\`."
+          else
+            opening="The Rekor v2 monitor has been **unable to complete** for 3+ consecutive hourly runs (latest: [run ${GITHUB_RUN_ID}](${run_url}))."
+            detail="This is an **operational** problem (Sigstore/Rekor/TUF reachability or the GitHub API), **not** a security finding: no tamper or identity signal was detected."
+            detail="${detail} No maintainer action is required unless it persists; the check will resume automatically when upstream recovers."
+          fi
           {
-            echo "The Rekor v2 monitor has been **unable to complete** for 3+ consecutive hourly runs (latest: [run ${GITHUB_RUN_ID}](${run_url}))."
+            echo "${opening}"
             echo
             echo "${detail}"
             echo

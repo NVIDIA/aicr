@@ -64,8 +64,13 @@ identity failure opens a security tracking issue that mentions the maintainers
 and posts a Slack page. An operational failure (Sigstore/Rekor/TUF/GitHub-API
 trouble) pages no one: a single red hourly job with no issue is a transient blip
 that self-heals, and only after three consecutive failed runs does a calm
-`area/ci` "degraded" issue open. The job still goes red on any failure, and a
-later clean run closes both the security and degraded issues.
+`area/ci` "degraded" issue open. That same degraded issue also covers a `degraded`
+classification, which is different: the identity catch-up is not converging (the
+log outpacing the bounded per-run scan). There the monitor completed every pass
+and will not self-heal, so its issue body gives a concrete remediation (more scan
+budget per run, or triage a held finding) rather than "wait for upstream". The job
+still goes red on any failure, and a later clean run closes both the security and
+degraded issues.
 
 This protects the trust root every AICR consumer depends on: the release
 binaries, the signed recipe catalog, and the container images all chain to that
@@ -210,6 +215,31 @@ streak — opens the low-urgency degraded issue. The stall trend resets on any
 checkpoint advance, so once catch-up resumes (or the log growth slows) the monitor
 returns to `clean` on its own. This closes the gap where a permanently-behind
 catch-up would otherwise report green indefinitely.
+
+### Recovering a wedged checkpoint artifact
+
+The cursor and its `.scan`/`.stall` companions travel in one GitHub artifact
+(`rekor-v2-checkpoint`). A corrupt companion is self-healing on most paths (an
+advance rewrites it), but a malformed `.scan` on the identity-scan path fails the
+pass, and the `if: !cancelled()` upload re-publishes the bad artifact, so the next
+run re-reads it: a wedge that only a human can clear. Symptom: consecutive
+`operational` runs whose logs show a scan-progress parse error (`failed to parse
+scan-progress file` / `scan progress exceeds window end`), not an upstream outage.
+
+To recover, delete the poisoned artifact so the next run re-baselines from head:
+
+```bash
+# find the latest rekor-v2-checkpoint artifact from a main run
+gh api "repos/NVIDIA/aicr/actions/artifacts?name=rekor-v2-checkpoint&per_page=100" \
+  --jq '[.artifacts[] | select(.workflow_run.head_branch == "main")] | sort_by(.created_at) | last | {id, created_at}'
+# delete it (replace <id>)
+gh api -X DELETE "repos/NVIDIA/aicr/actions/artifacts/<id>"
+```
+
+Coverage cost: re-baselining skips identity-scanning the window between the last
+good checkpoint and the current head (consistency is unaffected). That gap is the
+same one a first run has, and is acceptable for recovery; note it if the skipped
+window is large.
 
 ### Shard rotation (and what the operator sees)
 

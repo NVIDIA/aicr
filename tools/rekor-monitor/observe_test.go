@@ -464,37 +464,47 @@ func TestObserveCatchUpConvergesStaysClean(t *testing.T) {
 		if err := observe(context.Background(), f, store, nil, io.Discard); err != nil {
 			t.Fatalf("run %d: observe() = %v, want nil (converging)", run, err)
 		}
-		if _, stall, _ := store.readScanTrend(); stall != 0 {
-			t.Fatalf("run %d: stall count = %d, want 0 while converging", run, stall)
+		if tr, _ := store.readScanTrend(); tr.stall != 0 {
+			t.Fatalf("run %d: stall count = %d, want 0 while converging", run, tr.stall)
 		}
 		head += 10 // head grows slower than the 50/run scan, so remaining falls
 	}
 }
 
 // TestScanTrendRoundTrip covers the scan-trend companion: write then read returns
-// the pair; reset and an absent file read as (0, 0); a malformed file errors.
+// the triple; a two-field (legacy) file reads with passes=0; reset and an absent
+// file read as the zero value; malformed and out-of-range files error.
 func TestScanTrendRoundTrip(t *testing.T) {
 	store := checkpointStore{path: filepath.Join(t.TempDir(), "cp.txt")}
-	if r, s, err := store.readScanTrend(); err != nil || r != 0 || s != 0 {
-		t.Fatalf("readScanTrend (absent) = %d,%d,%v; want 0,0,nil", r, s, err)
+	if tr, err := store.readScanTrend(); err != nil || tr != (scanTrend{}) {
+		t.Fatalf("readScanTrend (absent) = %+v,%v; want zero,nil", tr, err)
 	}
-	if err := store.writeScanTrend(4242, 2); err != nil {
+	if err := store.writeScanTrend(scanTrend{bestRemaining: 4242, stall: 2, passes: 9}); err != nil {
 		t.Fatalf("writeScanTrend: %v", err)
 	}
-	if r, s, err := store.readScanTrend(); err != nil || r != 4242 || s != 2 {
-		t.Fatalf("readScanTrend = %d,%d,%v; want 4242,2,nil", r, s, err)
+	if tr, err := store.readScanTrend(); err != nil || tr != (scanTrend{4242, 2, 9}) {
+		t.Fatalf("readScanTrend = %+v,%v; want {4242 2 9},nil", tr, err)
+	}
+	// Legacy two-field file: passes defaults to 0.
+	if err := os.WriteFile(store.stallPath(), []byte("5000 1\n"), 0o600); err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+	if tr, err := store.readScanTrend(); err != nil || tr != (scanTrend{5000, 1, 0}) {
+		t.Fatalf("readScanTrend (legacy) = %+v,%v; want {5000 1 0},nil", tr, err)
 	}
 	if err := store.resetScanTrend(); err != nil {
 		t.Fatalf("resetScanTrend: %v", err)
 	}
-	if r, s, err := store.readScanTrend(); err != nil || r != 0 || s != 0 {
-		t.Fatalf("readScanTrend (after reset) = %d,%d,%v; want 0,0,nil", r, s, err)
+	if tr, err := store.readScanTrend(); err != nil || tr != (scanTrend{}) {
+		t.Fatalf("readScanTrend (after reset) = %+v,%v; want zero,nil", tr, err)
 	}
-	if err := os.WriteFile(store.stallPath(), []byte("garbage"), 0o600); err != nil {
-		t.Fatalf("seed malformed: %v", err)
-	}
-	if _, _, err := store.readScanTrend(); err == nil {
-		t.Error("readScanTrend on a malformed file = nil error, want an error")
+	for _, bad := range []string{"garbage", "1 2 3 4", "-1 2 3", "10 -2 3", "10 2 x"} {
+		if err := os.WriteFile(store.stallPath(), []byte(bad+"\n"), 0o600); err != nil {
+			t.Fatalf("seed %q: %v", bad, err)
+		}
+		if _, err := store.readScanTrend(); err == nil {
+			t.Errorf("readScanTrend(%q) = nil error, want an error", bad)
+		}
 	}
 }
 

@@ -239,12 +239,19 @@ var (
 	// from completed catch-up runs, not derived from the 2026-07-24 wedge, which
 	// only bounds the window size, not completed work.)
 	maxScanEntriesPerRun int64 = 2_000_000
-	// maxCatchUpStallRuns is how many consecutive partial passes may show a
-	// non-decreasing `remaining` before observe declares the catch-up diverging
-	// (the log is outpacing the scan) and returns a degraded error. Combined with
-	// the workflow's own consecutive-failure streak before it opens a degraded
-	// issue, this is deliberately slow so a single transient slow pass never pages.
+	// maxCatchUpStallRuns is how many consecutive partial passes may fail to beat
+	// the best-ever `remaining` (see scanTrend) before observe declares the
+	// catch-up diverging and returns a degraded error. Combined with the workflow's
+	// own consecutive-failure streak before it opens a degraded issue, this is
+	// deliberately slow so a single transient slow pass never pages.
 	maxCatchUpStallRuns = 3
+	// maxCatchUpTotalRuns is an absolute bound: how many partial passes a single
+	// window may take before observe declares it degraded, even if `remaining` is
+	// still inching down (which keeps the stall count above at 0). It catches a
+	// glacial catch-up the watermark never trips. Must exceed the passes a
+	// legitimate large backlog needs -- the ~6.5M-entry 2026-07 wedge caught up in
+	// well under ten passes at ~1M/pass -- so 72 (~3 days hourly) leaves ample room.
+	maxCatchUpTotalRuns = 72
 )
 
 // scanWindow computes the [start, end] entry-index window to scan between the
@@ -321,13 +328,18 @@ func (o outcome) report(w io.Writer) {
 		fmt.Fprintf(w, "shard rotation detected: %q -> %q; re-baselining on the new shard at size %d. "+
 			"Entries around the rotation boundary are not identity-scanned; see the shard-rotation note in "+
 			"docs/contributor/maintaining.md.\n", o.prev.Origin, o.cur.Origin, o.cur.Size)
-		if o.abandonedProgress > 0 {
-			// A catch-up scan was mid-window when the shard rotated. The vendored
-			// IdentitySearch only reads the latest shard, so the prior shard's
-			// unscanned tail is abandoned; surface the count instead of the
-			// pre-catch-up assumption that the gap was at most one hour of entries.
+		// A catch-up scan mid-window when the shard rotated: the vendored
+		// IdentitySearch only reads the latest shard, so the prior shard's unscanned
+		// tail is abandoned. Surface it instead of the pre-catch-up assumption that
+		// the gap was at most one hour of entries. A negative value means the
+		// progress companion could not be read (corrupt); report that, not a count.
+		switch {
+		case o.abandonedProgress > 0:
 			fmt.Fprintf(w, "WARNING: an in-progress prior-shard identity scan had reached index %d; "+
 				"its remaining entries are abandoned across the rotation and never scanned.\n", o.abandonedProgress)
+		case o.abandonedProgress < 0:
+			fmt.Fprintf(w, "WARNING: prior-shard scan progress could not be read (corrupt companion); "+
+				"any in-progress prior-shard scan is abandoned across the rotation.\n")
 		}
 		return
 	}

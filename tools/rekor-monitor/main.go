@@ -175,21 +175,13 @@ func observe(ctx context.Context, mon monitorChecks, store checkpointStore, know
 
 	out := outcome{prev: prev, cur: cur}
 
-	// Read persisted scan progress up front: the rotation branch reports how far
-	// the abandoned prior-shard scan reached, and the same-shard path resumes from
-	// it. A present-but-unparseable companion is an error (never a silent reset).
-	progress, err := store.readProgress()
-	if err != nil {
-		return err
-	}
-
 	// Shard rotation (yearly, e.g. log2025-1 -> log2026-1): prev and cur are
 	// different logs, so a size-based window is meaningless and the vendored
 	// IdentitySearch only reads the latest shard. Re-baseline on the new shard
 	// (resetting scan progress) and report the gap rather than silently skipping.
 	if prev != nil && cur != nil && prev.Origin != cur.Origin {
 		out.rotated = true
-		out.abandonedProgress = progress
+		out.abandonedProgress = abandonedForReport(store)
 		out.report(w)
 		return advanceCheckpoint(store, prev, cur)
 	}
@@ -203,9 +195,16 @@ func observe(ctx context.Context, mon monitorChecks, store checkpointStore, know
 		return advanceCheckpoint(store, prev, cur)
 	}
 
-	// Resume the identity scan from persisted progress within (start, end]. A
-	// large window is scanned across several runs rather than re-scanned (and
-	// timed out) from scratch every pass.
+	// Resume the identity scan from persisted progress within (start, end]. Read
+	// it only here, past the rotation/baseline/consistency-only early returns: each
+	// of those advances via writeProgress(0), which overwrites a corrupt companion,
+	// so reading above would turn a self-healing state into a wedge. A large window
+	// is scanned across several runs rather than re-scanned (and timed out) from
+	// scratch every pass.
+	progress, err := store.readProgress()
+	if err != nil {
+		return err
+	}
 	scanFrom := start
 	if progress == end {
 		// The whole window was already scanned by a prior run whose checkpoint
@@ -263,6 +262,15 @@ func observe(ctx context.Context, mon monitorChecks, store checkpointStore, know
 		}
 		found, failed, scanErr := mon.scanIdentity(ctx, reached, chunkEnd)
 		if scanErr != nil {
+			// If the pass deadline expired inside this chunk but earlier chunks
+			// landed, treat it as a clean partial rather than an operational failure:
+			// every completed chunk's progress is already persisted, and the
+			// finalization below is local file IO that does not need a live context.
+			// Requiring at least one landed chunk (reached > scanFrom) means a
+			// genuinely hung first chunk still errors operationally.
+			if stderrors.Is(scanErr, context.DeadlineExceeded) && reached > scanFrom {
+				break
+			}
 			return scanErr // progress up to `reached` is already persisted
 		}
 		found = filterKnownReleases(found, knownTags)
@@ -311,28 +319,54 @@ func observe(ctx context.Context, mon monitorChecks, store checkpointStore, know
 	return advanceCheckpoint(store, prev, cur)
 }
 
+// abandonedForReport reads how far a prior-shard scan reached, for the rotation
+// report only. This is purely a human-readable number, so a corrupt companion
+// must never fail the pass -- and must not block the re-baseline whose
+// writeProgress(0) is exactly what overwrites the bad file. Returns -1 (unknown)
+// on a read error rather than propagating it.
+func abandonedForReport(store checkpointStore) int64 {
+	abandoned, err := store.readProgress()
+	if err != nil {
+		slog.Warn("could not read scan-progress for the rotation report", "error", err)
+		return -1
+	}
+	return abandoned
+}
+
 // recordCatchUpProgress persists this partial pass's convergence trend and
-// returns a degraded error once `remaining` has failed to decrease for
-// maxCatchUpStallRuns consecutive passes -- i.e. the log is outpacing the scan
-// and the catch-up is not converging. Normal catch-up drives `remaining` down
-// each run, resetting the stall count; the trend companion persists in the
-// artifact and is cleared on any checkpoint advance, so it auto-recovers once
-// catch-up resumes.
+// returns a degraded error when the catch-up is not making adequate ground. Two
+// independent triggers, both auto-recovering (the trend resets on any advance):
+//   - stall: `remaining` failed to beat its best-ever low-water mark for
+//     maxCatchUpStallRuns consecutive passes. Comparing against the watermark, not
+//     the immediately-prior pass, means an oscillating divergence (down one pass,
+//     up the next) cannot keep resetting the counter to evade detection.
+//   - passes: the window has taken maxCatchUpTotalRuns partial passes without ever
+//     catching up. This absolute bound trips a glacial-but-monotone catch-up that
+//     inches `remaining` down forever without the stall count ever firing.
 func recordCatchUpProgress(store checkpointStore, remaining int64) error {
-	prevRemaining, stall, err := store.readScanTrend()
+	t, err := store.readScanTrend()
 	if err != nil {
 		return err
 	}
-	if prevRemaining > 0 && remaining >= prevRemaining {
-		stall++
+	t.passes++
+	if t.bestRemaining == 0 || remaining < t.bestRemaining {
+		// First partial pass in this window, or a new low-water mark: genuine net
+		// progress, so the stall count resets. (remaining is always > 0 here -- a
+		// caught-up pass never reaches this function.)
+		t.bestRemaining, t.stall = remaining, 0
 	} else {
-		stall = 0
+		t.stall++
 	}
-	if err := store.writeScanTrend(remaining, stall); err != nil {
+	if err := store.writeScanTrend(t); err != nil {
 		return err
 	}
-	if stall >= maxCatchUpStallRuns {
-		return &catchUpStalledError{remaining: remaining, runs: stall}
+	switch {
+	case t.stall >= maxCatchUpStallRuns:
+		return &catchUpStalledError{remaining: remaining,
+			reason: fmt.Sprintf("no new low-water mark for %d consecutive passes", t.stall)}
+	case t.passes >= maxCatchUpTotalRuns:
+		return &catchUpStalledError{remaining: remaining,
+			reason: fmt.Sprintf("still behind after %d partial passes", t.passes)}
 	}
 	return nil
 }
@@ -384,12 +418,11 @@ const (
 // operational failure.
 type catchUpStalledError struct {
 	remaining int64
-	runs      int
+	reason    string
 }
 
 func (e *catchUpStalledError) Error() string {
-	return fmt.Sprintf("identity catch-up not converging: %d entries remaining, not decreasing over %d consecutive runs",
-		e.remaining, e.runs)
+	return fmt.Sprintf("identity catch-up not converging: %d entries remaining (%s)", e.remaining, e.reason)
 }
 
 // classify maps a non-nil terminal error to its classification. Only the two
@@ -425,7 +458,7 @@ func main() {
 
 // realMain parses args, bounds the pass with a timeout, runs it (retrying
 // operational failures via runWithRetry), and returns the process exit code:
-// 0 clean, 1 security (tamper/identity), 3 operational, 2 bad args. It prints a
+// 0 clean, 1 security (tamper/identity), 3 operational or degraded, 2 bad args. It prints a
 // machine-readable CLASSIFICATION=<value> line to w so the workflow can branch
 // its alerting without re-deriving intent from a stack trace.
 func realMain(args []string, runFn runFunc, w io.Writer) int {
@@ -504,6 +537,16 @@ func runWithRetry(ctx context.Context, opts options, w io.Writer, runFn runFunc)
 		}
 		if attempt == maxPassAttempts {
 			break
+		}
+		// Do not retry if too little of the pass budget remains for a meaningful
+		// attempt. With the soft scan budget already spent, a retry would scan a
+		// single chunk, break, and report a clean partial pass -- masking this
+		// operational failure and handing the stall detector a spurious "made
+		// progress" reset. Report the failure instead.
+		if d, ok := ctx.Deadline(); ok && time.Until(d) < scanBudgetHeadroom {
+			slog.Warn("insufficient pass budget remaining to retry; reporting the failure",
+				"attempt", attempt, "error", lastErr)
+			return lastErr
 		}
 		slog.Warn("operational failure; retrying monitor pass",
 			"attempt", attempt, "maxAttempts", maxPassAttempts, "error", lastErr)

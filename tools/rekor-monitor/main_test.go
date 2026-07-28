@@ -42,6 +42,9 @@ func TestRealMain(t *testing.T) {
 	operational := func(context.Context, options, io.Writer) error {
 		return errors.New(errors.ErrCodeUnavailable, "shards down")
 	}
+	degraded := func(context.Context, options, io.Writer) error {
+		return &catchUpStalledError{remaining: 5, reason: "no new low-water mark for 3 consecutive passes"}
+	}
 	tests := []struct {
 		name      string
 		args      []string
@@ -55,6 +58,10 @@ func TestRealMain(t *testing.T) {
 		{"tamper -> 1", nil, tamper, 1, "CLASSIFICATION=tamper", false},
 		{"identity -> 1", nil, identity, 1, "CLASSIFICATION=identity", false},
 		{"operational -> 3", nil, operational, 3, "CLASSIFICATION=operational", false},
+		// classDegraded must exit 3 (a non-security failure), NOT 1 -- exit 1 would
+		// route a catch-up stall to the security alert + Slack page this scheme
+		// exists to prevent.
+		{"degraded -> 3", nil, degraded, 3, "CLASSIFICATION=degraded", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -151,6 +158,40 @@ func TestRunWithRetry(t *testing.T) {
 		}
 	})
 
+	t.Run("does not retry a degraded (catch-up stalled) classification", func(t *testing.T) {
+		calls := 0
+		fn := func(context.Context, options, io.Writer) error {
+			calls++
+			return &catchUpStalledError{remaining: 5, reason: "stalled"}
+		}
+		err := runWithRetry(context.Background(), options{}, io.Discard, fn)
+		if err == nil {
+			t.Fatal("err = nil, want a degraded error")
+		}
+		if calls != 1 {
+			t.Errorf("calls = %d, want 1 (degraded is deterministic; retrying just re-scans)", calls)
+		}
+	})
+
+	t.Run("does not retry when too little pass budget remains", func(t *testing.T) {
+		// A near-expired deadline: an operational failure must NOT be retried into a
+		// trivial one-chunk partial pass that would mask it. defer withScanBounds so
+		// scanBudgetHeadroom is the default (the guard compares against it).
+		ctx, cancel := context.WithTimeout(context.Background(), scanBudgetHeadroom/2)
+		defer cancel()
+		calls := 0
+		fn := func(context.Context, options, io.Writer) error {
+			calls++
+			return errors.New(errors.ErrCodeUnavailable, "late blip")
+		}
+		if err := runWithRetry(ctx, options{}, io.Discard, fn); err == nil {
+			t.Fatal("err = nil, want the operational failure reported, not masked")
+		}
+		if calls != 1 {
+			t.Errorf("calls = %d, want 1 (no retry without budget)", calls)
+		}
+	})
+
 	t.Run("does not retry a tamper classification", func(t *testing.T) {
 		calls := 0
 		fn := func(context.Context, options, io.Writer) error {
@@ -180,6 +221,7 @@ func TestClassify(t *testing.T) {
 	}{
 		{"tamper: root mismatch (wrapped)", wrappedTamper, classTamper},
 		{"identity: conflict", errors.New(errors.ErrCodeConflict, "1 match"), classIdentity},
+		{"degraded: catch-up stalled", &catchUpStalledError{remaining: 5, reason: "stalled"}, classDegraded},
 		{"operational: unavailable", errors.New(errors.ErrCodeUnavailable, "shards"), classOperational},
 		{"operational: timeout", errors.New(errors.ErrCodeTimeout, "stall"), classOperational},
 		{"operational: malformed proof (not mismatch)", errors.Wrap(errors.ErrCodeInternal, "consistency verification failed", fmt.Errorf("building consistency proof: %w", stderrors.New("empty proof"))), classOperational},
