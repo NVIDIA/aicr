@@ -514,6 +514,73 @@ func TestNew_AttestWithoutBinaryAttestation(t *testing.T) {
 	}
 }
 
+func TestNew_AttestWithInjectedBinaryAttestation(t *testing.T) {
+	// With a pre-verified binary attestation injected, New's fail-fast gate
+	// must be satisfied even though the test binary has no attestation file
+	// next to it (the "go install"/manual-download scenario).
+	cfg := config.NewConfig(config.WithAttest(true))
+	b, err := New(WithConfig(cfg), WithVerifiedBinaryAttestation([]byte(`{"injected":true}`)))
+	if err != nil {
+		t.Fatalf("New() with injected attestation error = %v; gate should be bypassed", err)
+	}
+	if b == nil {
+		t.Fatal("New() returned nil bundler")
+	}
+}
+
+// fixtureBinaryAttester returns fixed bundle JSON from Attest so tests reach
+// verifyAndCopyBinaryAttestation (closedWorldTestAttester returns nil, which
+// short-circuits attestBundle before the binary attestation is embedded).
+type fixtureBinaryAttester struct {
+	bundleJSON []byte
+}
+
+func (a *fixtureBinaryAttester) Attest(_ context.Context, _ attestation.AttestSubject) ([]byte, error) {
+	return a.bundleJSON, nil
+}
+
+func (a *fixtureBinaryAttester) Identity() string { return "fixture" }
+
+func (a *fixtureBinaryAttester) HasRekorEntry() bool { return false }
+
+func TestAttestBundle_EmbedsInjectedBinaryAttestation(t *testing.T) {
+	dir := t.TempDir()
+	payloadPath := filepath.Join(dir, "payload.txt")
+	if err := os.WriteFile(payloadPath, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checksum.GenerateChecksums(context.Background(), dir, []string{payloadPath}); err != nil {
+		t.Fatal(err)
+	}
+
+	fixture := []byte(`{"pre-verified":"binary-attestation"}`)
+	b := &DefaultBundler{
+		Config: config.NewConfig(
+			config.WithIncludeChecksums(true),
+			config.WithAttest(true),
+		),
+		Attester:                  &fixtureBinaryAttester{bundleJSON: []byte(`{"bundle":true}`)},
+		verifiedBinaryAttestation: fixture,
+	}
+
+	files, err := b.attestBundle(context.Background(), dir, nil, closedWorldRecipeResult())
+	if err != nil {
+		t.Fatalf("attestBundle() error = %v", err)
+	}
+	if !slices.Contains(files, attestation.BinaryAttestationFile) {
+		t.Errorf("attestBundle() files = %v, want to contain %q", files, attestation.BinaryAttestationFile)
+	}
+
+	embeddedPath := filepath.Join(dir, filepath.FromSlash(attestation.BinaryAttestationFile))
+	got, err := os.ReadFile(embeddedPath) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatalf("reading embedded binary attestation: %v", err)
+	}
+	if !bytes.Equal(got, fixture) {
+		t.Errorf("embedded binary attestation = %q, want %q", got, fixture)
+	}
+}
+
 func TestNewWithConfig(t *testing.T) {
 	t.Run("nil config uses default", func(t *testing.T) {
 		bundler, err := NewWithConfig(nil)

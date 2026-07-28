@@ -37,8 +37,12 @@ info:
 
     - **Trust management** (`aicr trust update`) — updates the local Sigstore TUF root cache.
 
-    - **Bundle attestation** (`aicr bundle --attest`) — requires OIDC interactive or ambient
-      authentication for Sigstore signing.
+    - **Interactive Sigstore attestation** (`aicr bundle --attest` with browser-based OIDC):
+      the interactive, user-authenticated signing flow is CLI-only. The API server instead
+      offers non-interactive server-side attestation: `POST /v1/bundle?attest=true` returns a
+      signed bundle, with the server signing as itself using its operator-configured KMS key or
+      private-Sigstore keyless identity. No signing identity is ever taken from the request.
+      See the `attest` query parameter on POST /v1/bundle.
 
     - **OCI registry push** (`aicr bundle --output oci://...`) — pushes bundle artifacts to
       a container registry.
@@ -1083,6 +1087,26 @@ paths:
             pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
             maxLength: 253
           example: gpu-runtime
+        - name: attest
+          in: query
+          required: false
+          description: >
+            Return a cryptographically signed bundle. When true, the server
+            signs the bundle as itself using its operator-configured signing
+            identity; no signing key, token, or identity is ever taken from the
+            request (the trust boundary). Parsed with Go strconv.ParseBool
+            semantics (accepts 1/t/T/TRUE/true/True and 0/f/F/FALSE/false/False);
+            a present-but-unparseable value is rejected with HTTP 400. Absent or
+            false returns an unsigned bundle, as before. If attestation is
+            requested but the server has no signing identity configured, the
+            request is rejected with HTTP 400 ("Server is not configured for
+            attestation"). A signed bundle additionally carries
+            attestation/bundle-attestation.sigstore.json and
+            attestation/aicr-attestation.sigstore.json inside the returned zip;
+            the response format is otherwise unchanged.
+          schema:
+            type: boolean
+            default: false
       requestBody:
         required: true
         description: The recipe (RecipeResult) to generate bundles from

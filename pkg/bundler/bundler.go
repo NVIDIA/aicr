@@ -103,6 +103,15 @@ type DefaultBundler struct {
 	// Attester signs bundle content. NoOpAttester is used when --attest is not set.
 	Attester attestation.Attester
 
+	// verifiedBinaryAttestation, when non-empty, is a pre-verified binary
+	// attestation (Sigstore bundle bytes) supplied by the caller. It lets a
+	// long-running server verify its in-image binary attestation ONCE at
+	// startup and reuse it per bundle: New's fail-fast gate is satisfied
+	// without a file next to the binary, and attestBundle embeds these bytes
+	// directly instead of re-finding/re-verifying/re-reading. Empty (the CLI
+	// default) preserves the discover-and-verify-per-run path exactly.
+	verifiedBinaryAttestation []byte
+
 	// warnings stores warning messages to be added to deployment notes.
 	warnings []string
 }
@@ -137,6 +146,19 @@ func WithAllowLists(al *recipe.AllowLists) Option {
 	}
 }
 
+// WithVerifiedBinaryAttestation supplies a pre-verified binary attestation
+// (Sigstore bundle bytes) to embed in attested bundles, bypassing the per-run
+// FindBinaryAttestation + VerifyBinaryAttestation discovery. The caller is
+// responsible for having verified these bytes (identity + binary-digest binding)
+// before injecting them. Empty leaves the default discover-and-verify behavior.
+func WithVerifiedBinaryAttestation(data []byte) Option {
+	return func(db *DefaultBundler) {
+		if len(data) > 0 {
+			db.verifiedBinaryAttestation = append([]byte(nil), data...) // defensive copy
+		}
+	}
+}
+
 // New creates a new DefaultBundler with the given options.
 //
 // Example:
@@ -160,7 +182,7 @@ func New(opts ...Option) (*DefaultBundler, error) {
 	// file exists before any expensive work (OIDC auth, recipe resolution, bundle
 	// generation). Binaries installed via "go install" or manual download won't
 	// have the attestation file that is included in release archives.
-	if db.Config.Attest() {
+	if db.Config.Attest() && len(db.verifiedBinaryAttestation) == 0 {
 		binaryPath, err := os.Executable()
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
@@ -1841,6 +1863,21 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 // verifyAndCopyBinaryAttestation resolves the running binary's attestation,
 // cryptographically verifies it (REQ-6), and copies it into the bundle directory.
 func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir string) error {
+	// Injected, pre-verified attestation: write it directly. The caller
+	// verified identity + binary-digest binding at injection time, so we do
+	// not re-discover or re-verify here.
+	if len(b.verifiedBinaryAttestation) > 0 {
+		destPath, joinErr := deployer.SafeJoin(dir, attestation.BinaryAttestationFile)
+		if joinErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "unsafe binary attestation path", joinErr)
+		}
+		if writeErr := os.WriteFile(destPath, b.verifiedBinaryAttestation, 0600); writeErr != nil { //nolint:gosec // path validated by SafeJoin
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write injected binary attestation", writeErr)
+		}
+		slog.Info("embedded pre-verified binary attestation")
+		return nil
+	}
+
 	binaryPath, execErr := os.Executable()
 	if execErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
