@@ -857,6 +857,9 @@ func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult
 		internal:     r,
 	}
 	for _, c := range r.ComponentRefs {
+		if !c.IsEnabled() {
+			continue
+		}
 		// Project the chart the component actually deploys: a source-only
 		// Helm ref falls back to the component name (the deployers'
 		// EffectiveChart rule), so SDK consumers never see an empty chart
@@ -1053,6 +1056,16 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	}
 	if preflightErr != nil {
 		return nil, preflightErr
+	}
+
+	// Agree with DefaultBundler.Make (bundler.go), which fails closed with
+	// ErrCodeInvalidRequest whenever there is nothing to deploy — whether
+	// that's every component disabled or a zero-componentRef recipe. An
+	// SDK caller that loops over the result and deploys would otherwise
+	// silently no-op on either input.
+	if len(r.Components) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"recipe has no enabled components")
 	}
 
 	bundles := make([]ComponentBundle, 0, len(r.Components))

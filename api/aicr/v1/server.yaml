@@ -1653,7 +1653,11 @@ components:
             properties:
               name:
                 type: string
-                description: Component name
+                description: >-
+                  Component name. Must be unique within componentRefs (across
+                  both enabled and disabled refs) when non-empty; a duplicate
+                  non-empty name is rejected with 400. Refs with an empty
+                  name are exempt from the uniqueness check.
               type:
                 type: string
                 enum: [Helm, Kustomize]
