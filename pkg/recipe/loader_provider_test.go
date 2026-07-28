@@ -15,9 +15,13 @@
 package recipe
 
 import (
+	stderrors "errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // newTestLayeredProvider builds a LayeredDataProvider over a temp dir holding a
@@ -126,6 +130,42 @@ func TestLoadFromFileWithProvider(t *testing.T) {
 		// Nil dp must not bind a provider, matching LoadFromFile.
 		if rec.DataProvider() != nil {
 			t.Errorf("DataProvider() = %v, want nil for nil-dp path", rec.DataProvider())
+		}
+	})
+
+	t.Run("hand-authored duplicate componentRef names are rejected", func(t *testing.T) {
+		// Exercises the most-used boundary — a hand-authored, already-
+		// hydrated RecipeResult file loaded via LoadFromFileWithProvider,
+		// which is the shape `aicr bundle -r`/`aicr validate -r` and
+		// POST /v1/bundle load. See #1874.
+		layered := newTestLayeredProvider(t)
+		dir := t.TempDir()
+		path := filepath.Join(dir, "recipe.yaml")
+		content := "kind: RecipeResult\n" +
+			"apiVersion: aicr.run/v1alpha2\n" +
+			"criteria:\n  service: eks\n" +
+			"componentRefs:\n" +
+			"  - name: gpu-operator\n" +
+			"    type: Helm\n" +
+			"    source: https://charts.example.com\n" +
+			"    version: \"1.0.0\"\n" +
+			"  - name: gpu-operator\n" +
+			"    type: Helm\n" +
+			"    source: https://charts.example.com\n" +
+			"    version: \"1.0.0\"\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write recipe: %v", err)
+		}
+
+		_, err := LoadFromFileWithProvider(t.Context(), path, "", "vtest", layered)
+		if err == nil {
+			t.Fatal("expected an error for duplicate componentRef names, got nil")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "duplicate") {
+			t.Errorf("error should mention the duplicate, got: %v", err)
 		}
 	})
 }

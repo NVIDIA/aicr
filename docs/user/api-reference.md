@@ -484,6 +484,9 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 > carrying surrounding whitespace are rejected — deployers consume them
 > verbatim.
 > Incoherent refs are rejected with HTTP 400 naming the component.
+> Component ref names must also be unique within a recipe (enabled or
+> disabled refs); a duplicate name is rejected with HTTP 400 naming the
+> conflicting positions.
 
 ```shell
 # Basic: pipe recipe to bundle
