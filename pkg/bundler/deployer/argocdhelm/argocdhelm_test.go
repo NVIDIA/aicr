@@ -592,6 +592,310 @@ func TestGenerate_DataFiles(t *testing.T) {
 	}
 }
 
+// TestGenerate_StaticDirCreatedOnlyWhenPopulated verifies that static/ is
+// emitted only when at least one component contributes a values file.
+//
+// Components land in static/ only when they resolve to a remote Helm chart
+// (type Helm with a non-empty Source). A recipe whose components are all
+// local charts — the OCP overlays, which build from manifestFiles with no
+// upstream Source — contributes nothing, so an unconditionally created
+// static/ would remain empty. The bundle inventory validator walks the
+// finished tree and rejects any directory contributing no files, which
+// failed generation outright. See issue #1942.
+func TestGenerate_StaticDirCreatedOnlyWhenPopulated(t *testing.T) {
+	// Manifest-only components must carry post-manifests so the delegated
+	// argocd.Generator wraps them as local charts, mirroring how the OCP
+	// overlays supply manifestFiles.
+	localManifest := func(name string) map[string][]byte {
+		return map[string][]byte{
+			name + ".yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: " + name + "\n"),
+		}
+	}
+
+	localOnlyRefs := []recipe.ComponentRef{
+		{Name: "nfd-ocp-olm", Namespace: "nfd", Type: recipe.ComponentTypeHelm, Source: ""},
+		{Name: "nfd-ocp", Namespace: "nfd", Type: recipe.ComponentTypeHelm, Source: ""},
+	}
+	localOnlyValues := map[string]map[string]any{
+		"nfd-ocp-olm": {"enabled": true},
+		"nfd-ocp":     {"enabled": true},
+	}
+	localOnlyManifests := map[string]map[string][]byte{
+		"nfd-ocp-olm": localManifest("nfd-ocp-olm"),
+		"nfd-ocp":     localManifest("nfd-ocp"),
+	}
+
+	tests := []struct {
+		name           string
+		refs           []recipe.ComponentRef
+		values         map[string]map[string]any
+		postManifests  map[string]map[string][]byte
+		staleStaticDir bool
+		wantStaticDir  bool
+	}{
+		{
+			name:          "all components local charts omits static dir",
+			refs:          localOnlyRefs,
+			values:        localOnlyValues,
+			postManifests: localOnlyManifests,
+			wantStaticDir: false,
+		},
+		{
+			// A pre-fix failed run leaves an empty static/ in --output, and
+			// generation does not clear the directory between runs, so the
+			// retry must remove it rather than fail the same way again.
+			name:           "stale empty static dir from a prior run is removed",
+			refs:           localOnlyRefs,
+			values:         localOnlyValues,
+			postManifests:  localOnlyManifests,
+			staleStaticDir: true,
+			wantStaticDir:  false,
+		},
+		{
+			name: "at least one remote chart creates static dir",
+			refs: []recipe.ComponentRef{
+				{Name: "nfd-ocp", Namespace: "nfd", Type: recipe.ComponentTypeHelm, Source: ""},
+				{
+					Name:      "cert-manager",
+					Namespace: "cert-manager",
+					Type:      recipe.ComponentTypeHelm,
+					Chart:     "cert-manager",
+					Version:   "v1.20.2",
+					Source:    "https://charts.jetstack.io",
+				},
+			},
+			values: map[string]map[string]any{
+				"nfd-ocp":      {"enabled": true},
+				"cert-manager": {"replicaCount": 1},
+			},
+			postManifests: map[string]map[string][]byte{
+				"nfd-ocp": localManifest("nfd-ocp"),
+			},
+			wantStaticDir: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			rr := newRecipeResult("v1.0.0", tt.refs)
+			order := make([]string, 0, len(tt.refs))
+			for _, ref := range tt.refs {
+				order = append(order, ref.Name)
+			}
+			rr.DeploymentOrder = order
+
+			g := &Generator{
+				RecipeResult:           rr,
+				ComponentValues:        tt.values,
+				Version:                "test",
+				RepoURL:                "https://github.com/example/repo.git",
+				TargetRevision:         "main",
+				ComponentPostManifests: tt.postManifests,
+				// Drives finalizeOutput -> checksum.WriteChecksums ->
+				// validateExactTree, the check that actually rejected the
+				// empty directory in #1942. Without it this test asserts
+				// only the proxy (static/ absent from a fresh tree).
+				IncludeChecksums: true,
+			}
+
+			if tt.staleStaticDir {
+				if err := os.MkdirAll(filepath.Join(outputDir, "static"), 0o755); err != nil {
+					t.Fatalf("failed to seed stale static/: %v", err)
+				}
+			}
+
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			staticPath := filepath.Join(outputDir, "static")
+			info, err := os.Stat(staticPath)
+			switch {
+			case tt.wantStaticDir:
+				if err != nil {
+					t.Fatalf("static/ missing, want present: %v", err)
+				}
+				entries, readErr := os.ReadDir(staticPath)
+				if readErr != nil {
+					t.Fatalf("failed to read static/: %v", readErr)
+				}
+				if len(entries) == 0 {
+					t.Error("static/ exists but is empty; an empty directory fails bundle inventory validation")
+				}
+			case err == nil:
+				t.Errorf("static/ present (isDir=%v), want omitted when no component contributes values", info.IsDir())
+			case !os.IsNotExist(err):
+				t.Fatalf("unexpected error stating static/: %v", err)
+			}
+		})
+	}
+}
+
+// TestGenerate_StaleStaticPathIsNotDestroyed verifies that clearing a stale
+// static/ never destroys data at that path.
+//
+// os.Remove unlinks regular files as readily as it removes empty directories,
+// so a non-directory must be rejected rather than silently deleted, and a
+// populated directory must be preserved for validateExactTree to report.
+func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
+	localManifest := map[string][]byte{
+		"nfd-ocp.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: nfd-ocp\n"),
+	}
+	// withRemoteChart toggles between the two routes to the static path: with
+	// no remote chart every component is skipped and only removeStaleStaticDir
+	// runs, while a single upstream chart reaches ensureStaticDir first. Both
+	// must reject a non-directory identically.
+	newGen := func(withRemoteChart bool) *Generator {
+		refs := []recipe.ComponentRef{
+			{Name: "nfd-ocp", Namespace: "nfd", Type: recipe.ComponentTypeHelm, Source: ""},
+		}
+		values := map[string]map[string]any{"nfd-ocp": {"enabled": true}}
+		if withRemoteChart {
+			refs = append(refs, recipe.ComponentRef{
+				Name:      "cert-manager",
+				Namespace: "cert-manager",
+				Type:      recipe.ComponentTypeHelm,
+				Chart:     "cert-manager",
+				Version:   "v1.20.2",
+				Source:    "https://charts.jetstack.io",
+			})
+			values["cert-manager"] = map[string]any{"replicaCount": 1}
+		}
+		rr := newRecipeResult("v1.0.0", refs)
+		order := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			order = append(order, ref.Name)
+		}
+		rr.DeploymentOrder = order
+		return &Generator{
+			RecipeResult:           rr,
+			ComponentValues:        values,
+			Version:                "test",
+			RepoURL:                "https://github.com/example/repo.git",
+			TargetRevision:         "main",
+			ComponentPostManifests: map[string]map[string][]byte{"nfd-ocp": localManifest},
+			// Reaches finalizeOutput -> checksum.WriteChecksums ->
+			// validateExactTree, the check that rejected the empty directory
+			// in #1942.
+			//
+			// This only affects the "populated static dir is preserved"
+			// subtest, the one that runs far enough to reach the validator.
+			// The file and symlink subtests fail earlier inside
+			// checkStaticPath and return before finalizeOutput, so they assert
+			// checkStaticPath's own message and DO pin the error code in both
+			// directions -- including the no-ErrCodeInternal check that keeps
+			// the CLI exit code at 2. Do not relax those.
+			//
+			// For the validator subtest only: production builds this Generator
+			// with IncludeChecksums false (the argocdhelm.Generator literal in
+			// DefaultBundler.buildDeployer) and reaches the same validator from
+			// DefaultBundler.runDeployer instead, so the wrapper around that
+			// failure differs from the shipped CLI. Its assertion is on
+			// validateExactTree's message, identical on both routes; its
+			// surrounding error code is not pinned. End-to-end coverage of the
+			// production path lives in tests/chainsaw/cli/bundle-ocp.
+			IncludeChecksums: true,
+		}
+	}
+
+	for _, tc := range []struct {
+		name            string
+		withRemoteChart bool
+	}{
+		{"no remote chart (removeStaleStaticDir path)", false},
+		{"with remote chart (ensureStaticDir path)", true},
+	} {
+		t.Run("regular file at the static path is rejected, not unlinked: "+tc.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			staticPath := filepath.Join(outputDir, "static")
+			const payload = "user data that must survive\n"
+			if err := os.WriteFile(staticPath, []byte(payload), 0o600); err != nil {
+				t.Fatalf("failed to seed file: %v", err)
+			}
+
+			_, err := newGen(tc.withRemoteChart).Generate(context.Background(), outputDir)
+			if err == nil {
+				t.Fatal("Generate() succeeded, want failure when static path is not a directory")
+			}
+			if !strings.Contains(err.Error(), "is not a directory") {
+				t.Errorf("Generate() error = %v, want it to name the non-directory path", err)
+			}
+			// Both routes must agree on the code: the same user error must not
+			// be INVALID_REQUEST for one recipe shape and INTERNAL for another.
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			// The negative direction is what actually pins writeValuesFiles to
+			// PropagateOrWrap. errors.Is walks the Unwrap chain, so the check
+			// above still passes when an outer Wrap(ErrCodeInternal, ...) buries
+			// the real code — while ExitCodeFromError reads the OUTERMOST
+			// StructuredError, so the exit code a user observes would flip from
+			// 2 to 8 with the assertion above still green.
+			if errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+				t.Errorf("Generate() error = %v, want no ErrCodeInternal anywhere in the chain", err)
+			}
+
+			got, readErr := os.ReadFile(staticPath)
+			if readErr != nil {
+				t.Fatalf("file at static path was destroyed: %v", readErr)
+			}
+			if string(got) != payload {
+				t.Errorf("file contents = %q, want %q", got, payload)
+			}
+		})
+	}
+
+	t.Run("symlink at the static path is rejected", func(t *testing.T) {
+		outputDir := t.TempDir()
+		target := t.TempDir()
+		staticPath := filepath.Join(outputDir, "static")
+		if err := os.Symlink(target, staticPath); err != nil {
+			t.Skipf("symlinks unsupported here: %v", err)
+		}
+
+		_, err := newGen(false).Generate(context.Background(), outputDir)
+		if err == nil {
+			t.Fatal("Generate() succeeded, want failure when static path is a symlink")
+		}
+		if !strings.Contains(err.Error(), "symbolic link") {
+			t.Errorf("Generate() error = %v, want it to name the symlink", err)
+		}
+		if _, statErr := os.Lstat(staticPath); statErr != nil {
+			t.Errorf("symlink was removed: %v", statErr)
+		}
+	})
+
+	t.Run("populated static dir is preserved", func(t *testing.T) {
+		outputDir := t.TempDir()
+		staticPath := filepath.Join(outputDir, "static")
+		if err := os.MkdirAll(staticPath, 0o755); err != nil {
+			t.Fatalf("failed to seed dir: %v", err)
+		}
+		leftover := filepath.Join(staticPath, "leftover.yaml")
+		if err := os.WriteFile(leftover, []byte("stale: true\n"), 0o600); err != nil {
+			t.Fatalf("failed to seed leftover file: %v", err)
+		}
+
+		// Generation fails because validateExactTree reports the stale output.
+		// For an all-local recipe static/ is not an expected directory at all,
+		// so the walk rejects the directory itself before reaching its
+		// contents — the message names the directory, not leftover.yaml.
+		// Asserted specifically so the subtest cannot drift into passing on
+		// some unrelated error.
+		_, err := newGen(false).Generate(context.Background(), outputDir)
+		if err == nil {
+			t.Fatal("Generate() succeeded, want failure on unexpected stale output")
+		}
+		if !strings.Contains(err.Error(), `unexpected directory: "static"`) {
+			t.Errorf("Generate() error = %v, want validateExactTree to reject the stale static/", err)
+		}
+		if _, statErr := os.Stat(leftover); statErr != nil {
+			t.Errorf("populated static/ was removed: %v", statErr)
+		}
+	})
+}
+
 // TestConvertToSingleSourceWithValues verifies the structured YAML
 // transformation from multi-source to single-source with helm.values.
 func TestConvertToSingleSourceWithValues(t *testing.T) {

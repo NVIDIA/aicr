@@ -255,7 +255,7 @@ func TestValidateNcclAllReduceBwProfileGate(t *testing.T) {
 			profile:     "gb200/eks",
 			constraint:  thresholdC(checkNameNCCLAllReduceBW, ">= 40"),
 			variant:     variantDefault,
-			wantMsg:     "skipped - benchmark profile gb200/eks does not implement the nccl-all-reduce-bw NCCL variant",
+			wantMsg:     "skipped - benchmark profile gb200/eks does not implement the default NCCL variant",
 		},
 		{
 			name:        "malformed profile fails closed before cluster access",
@@ -373,8 +373,14 @@ func TestValidateNcclAllReduceBwProfileClusterPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "skipped - requires at least 2 GPU nodes for EW fabric test"
+	want := skipMsgNCCLFewNodes
 	if !passed || msg != want {
 		t.Errorf("got (%q, %v), want (%q, true)", msg, passed, want)
+	}
+}
+
+func TestSkipMsgNCCLFewNodesHasContractualPrefix(t *testing.T) {
+	if !strings.HasPrefix(skipMsgNCCLFewNodes, "skipped") {
+		t.Fatal("skip status prefix is contractual — nccl_all_reduce_bw.go dispatches on it")
 	}
 }

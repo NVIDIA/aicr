@@ -268,7 +268,9 @@ type RecipeResult struct {
 	// internal RecipeResult currently carries no build timestamp.
 	TranslatedAt time.Time
 
-	// Components lists the deployable components in the recipe.
+	// Components lists the deployable components in the recipe — enabled
+	// component refs only. Disabled refs are omitted; call Resolved() for
+	// the full underlying ComponentRefs (enabled and disabled).
 	Components []ComponentRef
 
 	// internal holds the upstream pkg/recipe.RecipeResult so

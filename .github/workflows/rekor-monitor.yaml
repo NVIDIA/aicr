@@ -22,7 +22,11 @@
 #     `rekor-v2-checkpoint` artifact between runs.
 #   - Identity: scan entries added since the last checkpoint for AICR's release
 #     signing identity. An entry under that identity that a release did not
-#     produce signals OIDC/key compromise.
+#     produce signals OIDC/key compromise. The scan is resumable: a large backlog
+#     window (from a multi-hour outage or a held cursor) is scanned in bounded
+#     slices across several runs, persisting progress in a checkpoint companion,
+#     rather than re-scanning (and timing out on) the whole window every pass. The
+#     signed checkpoint advances only once the scan has caught up to head.
 # The monitor exits non-zero on any failure and prints a CLASSIFICATION line, and
 # this workflow branches notifications on it so infra flakiness never pages like a
 # security event:
@@ -30,8 +34,10 @@
 #     open a security tracking issue (mentioning the maintainers group) and post a
 #     Slack alert (via the SLACK_SERVICE webhook).
 #   - operational (Sigstore/Rekor/TUF/GitHub-API trouble, or a crash before any
-#     classification): no page. Only after three consecutive failed scheduled runs
-#     does it open a low-urgency "degraded" issue; a single blip stays quiet.
+#     classification) or degraded (the identity catch-up is not converging: the
+#     log is outpacing the bounded per-run scan, so `remaining` is not shrinking):
+#     no page. Only after three consecutive failed scheduled runs does it open a
+#     low-urgency "degraded" issue; a single blip stays quiet.
 # The job still goes red on every failure. A later clean run closes both the
 # security and degraded issues. The tags a real release actually signed are fetched
 # first from the RELEASE_WORKFLOW_FILE (on-tag.yaml) run history and passed to the
@@ -78,16 +84,21 @@
 #   - Tamper / consistency failure (security issue + page): the Merkle consistency
 #     proof failed. Re-run once to rule out a corrupt cached proof; a persistent
 #     break is a tamper signal: escalate to Sigstore.
-#   - Operational / degraded (no page): a red hourly job with no issue is a
-#     transient infra blip (Sigstore/Rekor/TUF/GitHub-API) that self-heals. A
-#     "degraded" issue appears only after three consecutive failed runs and needs
-#     no action unless it persists.
+#   - Operational (no page): a red hourly job with no issue is a transient infra
+#     blip (Sigstore/Rekor/TUF/GitHub-API) that self-heals; the "degraded" issue
+#     appears only after three consecutive failed runs and needs no action unless
+#     it persists.
+#   - Degraded (no page, but real): the same issue title also covers a catch-up
+#     that is NOT converging (the log outpacing the bounded per-run scan). Here the
+#     monitor completed every pass; it will NOT self-heal. The issue body says so
+#     and gives the remediation (more scan budget per run, or triage a held finding
+#     pinning the cursor).
 
 name: Rekor Monitor
 
 on:
-  # schedule:
-  #   - cron: "17 * * * *"  # hourly, offset off the top of the hour
+  schedule:
+    - cron: "17 * * * *"  # hourly, offset off the top of the hour
   workflow_dispatch: {}
 
 permissions: {}
@@ -102,7 +113,7 @@ env:
   # v1 checkpoint is simply ignored; no migration needed.
   ARTIFACT_NAME: rekor-v2-checkpoint
   ALERT_TITLE: "Rekor v2 monitor: release identity / log consistency alert"
-  DEGRADED_TITLE: "Rekor v2 monitor: degraded (unable to complete)"
+  DEGRADED_TITLE: "Rekor v2 monitor: degraded"
   # Maintainers group notified on an alert (GitHub team; issues cannot be
   # assigned to a team, so it is @-mentioned in the issue body instead).
   MAINTAINERS_TEAM: "@nvidia/aicr-maintainer"
@@ -238,7 +249,21 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.CHECKPOINT_FILE }}
+          # The signed checkpoint plus its two companions (<file>.scan and
+          # <file>.stall): the tool advances the checkpoint only once the identity
+          # scan has caught up to head, persists partial progress in .scan so a
+          # large backlog is scanned across several runs, and tracks catch-up
+          # convergence in .stall so a diverging (non-converging) catch-up can page.
+          # All must travel in the artifact so the next run resumes and the trend
+          # continues. Every advance path writes .scan (advanceCheckpoint resets it
+          # to 0) and clears .stall, so the files are absent only when the run fails
+          # before it can advance the cursor or save a chunk (e.g. a first run whose
+          # consistency check errors); if-no-files-found: ignore covers that so a
+          # pre-advance failure does not fail the upload.
+          path: |
+            ${{ env.CHECKPOINT_FILE }}
+            ${{ env.CHECKPOINT_FILE }}.scan
+            ${{ env.CHECKPOINT_FILE }}.stall
           # Must exceed the hourly cadence so the cursor never expires between
           # runs; wide enough to survive a brief scheduling pause.
           retention-days: 30
@@ -313,7 +338,7 @@ jobs:
             "https://hooks.slack.com/services/${SLACK_SERVICE}"
           echo "Posted Slack alert."
 
-      - name: Open degraded issue if operational failure is persistent
+      - name: Open degraded issue if a non-security failure is persistent
         # Inverse of the security allowlist: any failure that is NOT a confirmed
         # tamper/identity signal is operational. This deliberately also covers an
         # EMPTY classification, i.e. a step BEFORE the monitor failed (tags fetch,
@@ -325,6 +350,7 @@ jobs:
         if: ${{ failure() && steps.monitor.outputs.classification != 'tamper' && steps.monitor.outputs.classification != 'identity' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          CLASSIFICATION: ${{ steps.monitor.outputs.classification }}
         run: |
           set -euo pipefail
           # Persistence via run history: only escalate once this run plus the two
@@ -353,10 +379,24 @@ jobs:
             exit 0
           fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          detail="This is an **operational** problem (Sigstore/Rekor/TUF reachability or the GitHub API), **not** a security finding: no tamper or identity signal was detected."
-          detail="${detail} No maintainer action is required unless it persists; the check will resume automatically when upstream recovers."
+          # The degraded sink covers two very different states; write the body for
+          # the one that actually happened. A catch-up stall is NOT an upstream blip
+          # that self-heals -- the monitor is completing every pass -- so its
+          # remediation is concrete, not "wait for upstream".
+          if [ "${CLASSIFICATION}" = "degraded" ]; then
+            opening="The Rekor v2 monitor's identity catch-up is **not converging** (latest: [run ${GITHUB_RUN_ID}](${run_url}))."
+            opening="${opening} The transparency log is growing faster than the bounded per-run scan, so \`remaining\` is not shrinking;"
+            opening="${opening} the monitor **is** completing each pass and persisting progress."
+            detail="This is **not** a security finding (no tamper or identity signal). It will **not** self-heal on its own."
+            detail="${detail} Remediate by giving the scan more budget per run (raise the pass \`--timeout\` or lower \`scanBudgetHeadroom\`),"
+            detail="${detail} or by triaging a held identity finding that is pinning the cursor. See the catch-up notes in \`docs/contributor/maintaining.md\`."
+          else
+            opening="The Rekor v2 monitor has been **unable to complete** for 3+ consecutive hourly runs (latest: [run ${GITHUB_RUN_ID}](${run_url}))."
+            detail="This is an **operational** problem (Sigstore/Rekor/TUF reachability or the GitHub API), **not** a security finding: no tamper or identity signal was detected."
+            detail="${detail} No maintainer action is required unless it persists; the check will resume automatically when upstream recovers."
+          fi
           {
-            echo "The Rekor v2 monitor has been **unable to complete** for 3+ consecutive hourly runs (latest: [run ${GITHUB_RUN_ID}](${run_url}))."
+            echo "${opening}"
             echo
             echo "${detail}"
             echo
