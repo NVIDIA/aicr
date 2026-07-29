@@ -35,11 +35,73 @@ const (
 	nvidiaSMILogContextLines = 20
 )
 
+// gpuNodeCoverage partitions check-nvidia-smi's discovered GPU nodes into the
+// schedulable cohort actually validated and the cordoned cohort skipped. It
+// exists so the disclosure text is a pure, independently testable function of
+// the partition rather than interleaved fmt.Printf calls — and so every exit
+// path (not just the success path) prints the same coverage line. See
+// docs/contributor/validator.md and issue #1668.
+type gpuNodeCoverage struct {
+	total       int
+	schedulable []v1.Node
+	cordoned    []string
+}
+
+// partitionGpuNodes splits allNodes into schedulable and cordoned buckets.
+func partitionGpuNodes(ctx context.Context, allNodes []helper.GpuNode) (gpuNodeCoverage, error) {
+	c := gpuNodeCoverage{total: len(allNodes)}
+	for _, n := range allNodes {
+		select {
+		case <-ctx.Done():
+			return gpuNodeCoverage{}, errors.Wrap(errors.ErrCodeTimeout,
+				"canceled while partitioning GPU nodes by cordon state", ctx.Err())
+		default:
+		}
+		if n.Cordoned {
+			c.cordoned = append(c.cordoned, n.Node.Name)
+			continue
+		}
+		c.schedulable = append(c.schedulable, n.Node)
+	}
+	return c, nil
+}
+
+// enumerationLines renders the discovered-node listing: total/schedulable/
+// cordoned counts, each schedulable node by name, and each cordoned node
+// explicitly marked "skipped (cordoned)" rather than omitted from the count.
+func (c gpuNodeCoverage) enumerationLines() []string {
+	lines := make([]string, 0, 1+len(c.schedulable)+len(c.cordoned))
+	lines = append(lines, fmt.Sprintf("Found %d GPU node(s), %d schedulable, %d cordoned:",
+		c.total, len(c.schedulable), len(c.cordoned)))
+	for _, node := range c.schedulable {
+		lines = append(lines, fmt.Sprintf("  %s", node.Name))
+	}
+	for _, name := range c.cordoned {
+		lines = append(lines, fmt.Sprintf("  %s: skipped (cordoned)", name))
+	}
+	return lines
+}
+
+// coverageLine renders the nodesValidated disclosure for however many
+// schedulable nodes were actually validated when the check exits — 0 when it
+// exits before attempting any (all-cordoned skip, busy skip).
+func (c gpuNodeCoverage) coverageLine(validated int) string {
+	return fmt.Sprintf("nodesValidated: %d/%d (%d cordoned, skipped)",
+		validated, c.total, len(c.cordoned))
+}
+
+func printLines(lines ...string) {
+	for _, l := range lines {
+		fmt.Println(l)
+	}
+}
+
 // checkNvidiaSMI verifies that nvidia-smi works correctly on every schedulable
 // GPU node. Cordoned GPU nodes narrow the verified scope, so they are
 // reported explicitly (never silently dropped from the node count) and the
 // evidence records how many of the cluster's GPU nodes were actually
-// verified — see docs/contributor/validator.md and issue #1668.
+// verified, on every exit path — see docs/contributor/validator.md and issue
+// #1668.
 func checkNvidiaSMI(ctx *validators.Context) error {
 	allNodes, err := helper.FindGpuNodes(ctx.Ctx, ctx.Clientset)
 	if err != nil {
@@ -50,34 +112,17 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 		return validators.Skip("no GPU nodes found in the cluster")
 	}
 
-	var gpuNodes []v1.Node
-	var cordonedNames []string
-	for _, n := range allNodes {
-		select {
-		case <-ctx.Ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"canceled while partitioning GPU nodes by cordon state", ctx.Ctx.Err())
-		default:
-		}
-		if n.Cordoned {
-			cordonedNames = append(cordonedNames, n.Node.Name)
-			continue
-		}
-		gpuNodes = append(gpuNodes, n.Node)
+	coverage, err := partitionGpuNodes(ctx.Ctx, allNodes)
+	if err != nil {
+		return err
 	}
+	printLines(coverage.enumerationLines()...)
 
-	fmt.Printf("Found %d GPU node(s), %d schedulable, %d cordoned:\n",
-		len(allNodes), len(gpuNodes), len(cordonedNames))
-	for _, node := range gpuNodes {
-		fmt.Printf("  %s\n", node.Name)
-	}
-	for _, name := range cordonedNames {
-		fmt.Printf("  %s: skipped (cordoned)\n", name)
-	}
-
+	gpuNodes := coverage.schedulable
 	if len(gpuNodes) == 0 {
+		printLines(coverage.coverageLine(0))
 		return validators.Skip(fmt.Sprintf(
-			"all %d GPU node(s) are cordoned; nothing to verify", len(cordonedNames)))
+			"all %d GPU node(s) are cordoned; nothing to verify", len(coverage.cordoned)))
 	}
 
 	// Check if any nodes are busy
@@ -95,6 +140,7 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 	}
 
 	if len(busyNodes) > 0 {
+		printLines(coverage.coverageLine(0))
 		return validators.Skip(fmt.Sprintf("GPU nodes busy with existing workloads: %v", busyNodes))
 	}
 
@@ -115,20 +161,23 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 
 	// Report results
 	var failedNodes []string
+	validated := 0
 	for nodeName, nodeErr := range results {
 		if nodeErr != nil {
 			failedNodes = append(failedNodes, fmt.Sprintf("%s (%v)", nodeName, nodeErr))
+			continue
 		}
+		validated++
 	}
 
 	if len(failedNodes) > 0 {
+		printLines(coverage.coverageLine(validated))
 		return errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("GPU verification failed on %d/%d nodes: %v",
 				len(failedNodes), len(gpuNodes), failedNodes))
 	}
 
-	fmt.Printf("nodesValidated: %d/%d (%d cordoned, skipped)\n",
-		len(gpuNodes), len(allNodes), len(cordonedNames))
+	printLines(coverage.coverageLine(validated))
 	fmt.Printf("Successfully verified GPU on all %d schedulable node(s)\n", len(gpuNodes))
 	return nil
 }

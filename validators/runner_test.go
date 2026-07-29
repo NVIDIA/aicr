@@ -74,6 +74,25 @@ func TestSkipIsNotGenericError(t *testing.T) {
 	}
 }
 
+// TestIsSkip proves IsSkip gives external packages (and their tests) a
+// robust, non-string-matching way to classify a Skip() error, including
+// through a wrap chain.
+func TestIsSkip(t *testing.T) {
+	if !IsSkip(Skip("no GPU nodes found")) {
+		t.Error("IsSkip(Skip(...)) = false, want true")
+	}
+	wrapped := errors.New("outer: " + Skip("inner reason").Error())
+	if IsSkip(wrapped) {
+		t.Error("IsSkip() must not match a plain error that merely mentions skip text")
+	}
+	if IsSkip(nil) {
+		t.Error("IsSkip(nil) = true, want false")
+	}
+	if IsSkip(errors.New("some other error")) {
+		t.Error("IsSkip() = true for a plain non-skip error, want false")
+	}
+}
+
 // withTempTerminationLog redirects terminationLogPath to a temp file for
 // the duration of a test and returns the path. Restores the original on
 // test cleanup.

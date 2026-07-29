@@ -409,17 +409,39 @@ Checks that deploy a per-node test pod (`check-nvidia-smi`) must
 instead call `helper.FindGpuNodes`, which returns every GPU node
 tagged with its cordon state, and:
 
-1. Validate only the schedulable subset (a cordoned node cannot
-   schedule the probe pod).
+1. Validate only the schedulable subset. Note this is a **deliberate
+   policy choice, not a technical necessity**: `check-nvidia-smi`'s
+   probe pod is pinned via `nodeName` and tolerates all taints
+   (`testdata/nvidia-smi-verify-pod.yaml`), so it bypasses the
+   scheduler and *could* run on a cordoned node — `Unschedulable` is a
+   scheduler-side predicate that kubelet admission of a directly-bound
+   pod never consults. The check still excludes cordoned nodes because
+   a cordon signals operator intent to keep workloads off the node
+   during maintenance, even when a specific pod could technically slip
+   past it. A future check with a different tradeoff should say so
+   explicitly rather than assume cordons are unconditionally
+   unschedulable.
 2. Report cordoned nodes explicitly in the check's stdout evidence
    (`<node>: skipped (cordoned)`), never omit them from the node count.
-3. Print a coverage line (`nodesValidated: <schedulable>/<total>`) so a
-   pass on reduced scope is visible in the CTRF report.
+3. Print a coverage line (`nodesValidated: <schedulable>/<total>`) on
+   every exit path (skip, failure, and success), not only the success
+   path, so a pass *or* a failure on reduced scope is visible.
+   Caveat: this line reaches `TestResult.Stdout`/`.Message` in the CTRF
+   report, which the default ("minimal") redaction policy
+   (`pkg/evidence/redact`) strips from a signed evidence bundle — it is
+   visible for `aicr validate` live/`--output` runs and `--full`
+   bundles, but not guaranteed to survive into the artifact a
+   downstream consumer verifies by default. See #1951 for carrying
+   this kind of outcome data in a structured field that survives
+   redaction instead.
 
-Cluster-aggregate checks that assert on an operator's aggregate status
-(`gpu-operator-health`, `expected-resources`) are unaffected by this —
-DaemonSet operands ignore cordons, so those checks already cover
-cordoned nodes.
+This pattern is not yet applied everywhere it could be. Cluster-aggregate
+checks that assert on an operator's aggregate status
+(`gpu-operator-health`) are unaffected — DaemonSet operands ignore
+cordons — but `expected-resources`' `rdmaFabricProbe` is itself
+node-scoped (it calls `helper.FindSchedulableGpuNodes` to build its
+RDMA-capable cohort) and has the same undisclosed narrowing; it has not
+been updated to this pattern. See #1952.
 
 For *deliberate*, durable exclusion of a node from GPU service (as
 opposed to transient cordon-for-maintenance), use the GPU Operator's

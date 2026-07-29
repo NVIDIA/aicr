@@ -175,6 +175,7 @@ func TestFindGpuNodes(t *testing.T) {
 		gpuTestNode("schedulable-1", 8, false),
 		gpuTestNode("cordoned-1", 8, true),
 		gpuTestNode("non-gpu", -1, false),
+		gpuTestNode("zero-gpu", 0, false),
 	)
 
 	got, err := FindGpuNodes(context.Background(), clientset)
@@ -182,11 +183,19 @@ func TestFindGpuNodes(t *testing.T) {
 		t.Fatalf("FindGpuNodes() error = %v", err)
 	}
 
+	// want tracks expected presence; non-gpu (resource absent) and zero-gpu
+	// (allocatable quantity 0, not IsZero()-excluded) must both be absent.
 	want := map[string]bool{"schedulable-1": false, "cordoned-1": true}
-	if len(got) != len(want) {
-		t.Fatalf("FindGpuNodes() returned %d node(s), want %d: %+v", len(got), len(want), got)
-	}
+	seen := make(map[string]bool, len(got))
 	for _, n := range got {
+		// A duplicate result could mask a missing expected node if only
+		// checked by membership, so duplicates are caught explicitly here
+		// rather than relying on a bare length comparison.
+		if seen[n.Node.Name] {
+			t.Fatalf("FindGpuNodes() returned duplicate node %q", n.Node.Name)
+		}
+		seen[n.Node.Name] = true
+
 		wantCordoned, ok := want[n.Node.Name]
 		if !ok {
 			t.Errorf("FindGpuNodes() returned unexpected node %q", n.Node.Name)
@@ -194,6 +203,11 @@ func TestFindGpuNodes(t *testing.T) {
 		}
 		if n.Cordoned != wantCordoned {
 			t.Errorf("FindGpuNodes() node %q Cordoned = %v, want %v", n.Node.Name, n.Cordoned, wantCordoned)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("FindGpuNodes() missing expected node %q", name)
 		}
 	}
 }
@@ -215,12 +229,23 @@ func TestFindSchedulableGpuNodes(t *testing.T) {
 		t.Fatalf("FindSchedulableGpuNodes() error = %v", err)
 	}
 
-	if len(got) != 2 {
-		t.Fatalf("FindSchedulableGpuNodes() returned %d node(s), want 2: %+v", len(got), got)
-	}
+	want := map[string]bool{"schedulable-1": true, "schedulable-2": true}
+	seen := make(map[string]bool, len(got))
 	for _, n := range got {
+		if seen[n.Name] {
+			t.Fatalf("FindSchedulableGpuNodes() returned duplicate node %q", n.Name)
+		}
+		seen[n.Name] = true
+
 		if n.Name == "cordoned-1" {
 			t.Errorf("FindSchedulableGpuNodes() must not include cordoned node %q", n.Name)
+		} else if !want[n.Name] {
+			t.Errorf("FindSchedulableGpuNodes() returned unexpected node %q", n.Name)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("FindSchedulableGpuNodes() missing expected node %q", name)
 		}
 	}
 }

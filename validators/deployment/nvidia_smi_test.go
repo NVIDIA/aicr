@@ -15,19 +15,16 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
-
-// isSkipError reports whether err came from validators.Skip. Skip wraps the
-// unexported "skip" sentinel, so the rendered error always ends with ": skip".
-func isSkipError(err error) bool {
-	return err != nil && strings.HasSuffix(err.Error(), ": skip")
-}
 
 func TestVerifyNvidiaSMILogs(t *testing.T) {
 	t.Parallel()
@@ -162,7 +159,7 @@ func TestCheckNvidiaSMI_SkipScenarios(t *testing.T) {
 			ctx := newDeploymentTestContext(t, tt.nodes, nil, nil)
 
 			err := checkNvidiaSMI(ctx)
-			if !isSkipError(err) {
+			if !validators.IsSkip(err) {
 				t.Fatalf("checkNvidiaSMI() error = %v, want a skip", err)
 			}
 			for _, sub := range tt.wantErrSubs {
@@ -171,5 +168,68 @@ func TestCheckNvidiaSMI_SkipScenarios(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGpuNodeCoverage_MixedCordonedAndSchedulable exercises the headline
+// behavior of this change directly: a cluster with both a schedulable and a
+// cordoned GPU node must list the schedulable node plainly, mark the
+// cordoned node "skipped (cordoned)" rather than omitting it, and report a
+// nodesValidated coverage line reflecting the actual validated count. This is
+// a pure function of the partition (no fake clientset or pod lifecycle
+// needed), factored out of checkNvidiaSMI specifically so this scenario is
+// testable without simulating a full pod-watch/log round trip.
+func TestGpuNodeCoverage_MixedCordonedAndSchedulable(t *testing.T) {
+	t.Parallel()
+
+	allNodes := []helper.GpuNode{
+		{Node: v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "schedulable-1"}}, Cordoned: false},
+		{Node: v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "cordoned-1"}}, Cordoned: true},
+	}
+
+	coverage, err := partitionGpuNodes(context.Background(), allNodes)
+	if err != nil {
+		t.Fatalf("partitionGpuNodes() error = %v", err)
+	}
+
+	wantEnumeration := []string{
+		"Found 2 GPU node(s), 1 schedulable, 1 cordoned:",
+		"  schedulable-1",
+		"  cordoned-1: skipped (cordoned)",
+	}
+	gotEnumeration := coverage.enumerationLines()
+	if len(gotEnumeration) != len(wantEnumeration) {
+		t.Fatalf("enumerationLines() = %v, want %v", gotEnumeration, wantEnumeration)
+	}
+	for i, want := range wantEnumeration {
+		if gotEnumeration[i] != want {
+			t.Errorf("enumerationLines()[%d] = %q, want %q", i, gotEnumeration[i], want)
+		}
+	}
+
+	if got, want := coverage.coverageLine(1), "nodesValidated: 1/2 (1 cordoned, skipped)"; got != want {
+		t.Errorf("coverageLine(1) = %q, want %q", got, want)
+	}
+	// The busy/all-cordoned/failed-before-completion exit paths report 0
+	// validated even though a schedulable node exists — validated tracks
+	// nodes actually confirmed, not nodes attempted.
+	if got, want := coverage.coverageLine(0), "nodesValidated: 0/2 (1 cordoned, skipped)"; got != want {
+		t.Errorf("coverageLine(0) = %q, want %q", got, want)
+	}
+}
+
+// TestPartitionGpuNodes_ContextCanceled proves the partition loop honors
+// cancellation instead of silently finishing over an already-fetched slice.
+func TestPartitionGpuNodes_ContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := partitionGpuNodes(ctx, []helper.GpuNode{
+		{Node: v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1"}}},
+	})
+	if !strings.Contains(err.Error(), "canceled while partitioning GPU nodes") {
+		t.Errorf("partitionGpuNodes() error = %v, want cancellation error", err)
 	}
 }
