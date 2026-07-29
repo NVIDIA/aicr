@@ -94,7 +94,7 @@ spec:
 
     - name: kai-scheduler
       type: Helm
-      source: oci://ghcr.io/kai-scheduler/kai-scheduler
+      source: oci://ghcr.io/nvidia/kai-scheduler
       valuesFile: components/kai-scheduler/values.yaml
       dependencyRefs:
         - gpu-operator

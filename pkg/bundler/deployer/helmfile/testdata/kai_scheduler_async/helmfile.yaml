@@ -1,6 +1,6 @@
 repositories:
-  - name: ghcr-io-kai-scheduler-kai-scheduler
-    url: ghcr.io/kai-scheduler/kai-scheduler
+  - name: ghcr-io-nvidia-kai-scheduler
+    url: ghcr.io/nvidia/kai-scheduler
     oci: true
 helmDefaults:
   wait: true
@@ -9,8 +9,8 @@ helmDefaults:
 releases:
   - name: kai-scheduler
     namespace: kai-scheduler
-    chart: ghcr-io-kai-scheduler-kai-scheduler/kai-scheduler
-    version: v0.14.1
+    chart: ghcr-io-nvidia-kai-scheduler/kai-scheduler
+    version: v0.13.0
     values:
       - ./001-kai-scheduler/values.yaml
     wait: false

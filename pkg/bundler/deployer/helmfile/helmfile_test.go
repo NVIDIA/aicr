@@ -109,8 +109,8 @@ func TestGenerate_Scenarios(t *testing.T) {
 			name: "kai_scheduler_async",
 			gen: &Generator{
 				RecipeResult: recipeWith(
-					ref("kai-scheduler", "kai-scheduler", "kai-scheduler", "v0.14.1",
-						"oci://ghcr.io/kai-scheduler/kai-scheduler"),
+					ref("kai-scheduler", "kai-scheduler", "kai-scheduler", "v0.13.0",
+						"oci://ghcr.io/nvidia/kai-scheduler"),
 				),
 				ComponentValues: map[string]map[string]any{
 					"kai-scheduler": {"enabled": true},

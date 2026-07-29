@@ -179,7 +179,7 @@ func TestRenderZarfOCIChartURL(t *testing.T) {
 		Charts: []ChartRef{
 			{
 				Name:       "kai-scheduler",
-				Repository: "oci://ghcr.io/kai-scheduler",
+				Repository: "oci://registry.example.com/charts",
 				Chart:      "kai-scheduler",
 				Version:    "v0.2.71",
 				Namespace:  "kai-scheduler",
@@ -194,7 +194,7 @@ func TestRenderZarfOCIChartURL(t *testing.T) {
 
 	output := buf.String()
 	// OCI chart: URL should be oci://repo/chart (no trailing slash duplication)
-	if !strings.Contains(output, "url: oci://ghcr.io/kai-scheduler/kai-scheduler") {
+	if !strings.Contains(output, "url: oci://registry.example.com/charts/kai-scheduler") {
 		t.Errorf("OCI chart URL not correctly formed\nGot:\n%s", output)
 	}
 	// OCI charts should NOT have repoName

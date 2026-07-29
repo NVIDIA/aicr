@@ -485,9 +485,9 @@ components:
     healthCheck:
       assertFile: checks/kai-scheduler/health-check.yaml
     helm:
-      defaultRepository: oci://ghcr.io/kai-scheduler/kai-scheduler
+      defaultRepository: oci://ghcr.io/nvidia/kai-scheduler
       defaultChart: kai-scheduler
-      defaultVersion: v0.14.1
+      defaultVersion: v0.13.0
       defaultNamespace: kai-scheduler
     nodeScheduling:
       system:

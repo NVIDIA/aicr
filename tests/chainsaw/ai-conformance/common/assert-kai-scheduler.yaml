@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Assert KAI scheduler is available.
-# Chart: kai-scheduler v0.12.10 (oci://ghcr.io/nvidia/kai-scheduler)
+# Chart: kai-scheduler v0.13.0 (oci://ghcr.io/nvidia/kai-scheduler)
 # GPU-aware Kubernetes scheduler with gang scheduling, hierarchical queuing,
 # bin-packing, and topology-aware placement.
 # Satisfies CNCF AI Conformance gang scheduling requirement.

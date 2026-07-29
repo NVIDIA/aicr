@@ -1324,12 +1324,12 @@ func TestBuildApplicationData_OCIHandling(t *testing.T) {
 			wantVersion:    "v1.3.0",
 		},
 		{
-			name:           "OCI source: chart appended even when org name == chart name (kai-scheduler pattern)",
-			source:         "oci://ghcr.io/kai-scheduler/kai-scheduler",
+			name:           "OCI source: chart appended even when final path segment equals chart",
+			source:         "oci://registry.example.com/kai-scheduler/kai-scheduler",
 			chart:          "kai-scheduler",
-			recipeVer:      "v0.14.1",
-			wantRepository: "oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler",
-			wantVersion:    "v0.14.1",
+			recipeVer:      "v1.2.3",
+			wantRepository: "oci://registry.example.com/kai-scheduler/kai-scheduler/kai-scheduler",
+			wantVersion:    "v1.2.3",
 		},
 		{
 			name:           "OCI source with trailing slash: no double slash",
