@@ -539,7 +539,9 @@ security-critical verification to upstream's library packages. It takes the
 watched identity as flags, so it monitors your identity as readily as AICR's:
 
 ```shell
-git clone https://github.com/NVIDIA/aicr && cd aicr
+# Pin the tool you audit. Cloning the default branch means the monitor can
+# change under you between runs; bump this ref deliberately after review.
+git clone --branch v0.18.0 --depth 1 https://github.com/NVIDIA/aicr && cd aicr
 GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
   --file checkpoint_v2.txt \
   --cert-subject '^ci@myorg\.example\.com$' \
@@ -642,9 +644,10 @@ jobs:
 
 The examples use readable version tags so they stay legible. In production, pin
 every external reference in them by full-length commit SHA: each `uses:` action,
-the upstream reusable workflow in the next example, and the `ref:` above. A tag
-is mutable and can be repointed, which is the same argument the digest-pinning
-advice earlier in this guide makes for images.
+the upstream reusable workflow in the next example, the `ref:` above, and the
+`git clone --branch` in the shell example, since the cloned source is the
+monitor you are trusting. A tag is mutable and can be repointed, which is the
+same argument the digest-pinning advice earlier in this guide makes for images.
 
 One further hardening step from AICR's own workflow is worth copying before you
 rely on this: it branches notifications on the `CLASSIFICATION=` value, so that
