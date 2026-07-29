@@ -207,13 +207,13 @@ func TestGpuNodeCoverage_MixedCordonedAndSchedulable(t *testing.T) {
 		}
 	}
 
-	if got, want := coverage.coverageLine(1), "nodesValidated: 1/2 (1 cordoned, skipped)"; got != want {
+	if got, want := coverage.coverageLine(1), "RESULT: nodesValidated: 1/2 (1 cordoned, skipped)"; got != want {
 		t.Errorf("coverageLine(1) = %q, want %q", got, want)
 	}
 	// The busy/all-cordoned/failed-before-completion exit paths report 0
 	// validated even though a schedulable node exists — validated tracks
 	// nodes actually confirmed, not nodes attempted.
-	if got, want := coverage.coverageLine(0), "nodesValidated: 0/2 (1 cordoned, skipped)"; got != want {
+	if got, want := coverage.coverageLine(0), "RESULT: nodesValidated: 0/2 (1 cordoned, skipped)"; got != want {
 		t.Errorf("coverageLine(0) = %q, want %q", got, want)
 	}
 }

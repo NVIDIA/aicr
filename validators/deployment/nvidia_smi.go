@@ -84,9 +84,13 @@ func (c gpuNodeCoverage) enumerationLines() []string {
 
 // coverageLine renders the nodesValidated disclosure for however many
 // schedulable nodes were actually validated when the check exits — 0 when it
-// exits before attempting any (all-cordoned skip, busy skip).
+// exits before attempting any (all-cordoned skip, busy skip). The "RESULT: "
+// prefix is the validator runtime's own convention (pkg/validator/validator.go
+// resultSummaryPrefix) for echoing a stdout line into live CLI output at INFO
+// level, not just the CTRF report's Stdout array — without it this line is
+// only visible after the run, in the (possibly redacted) report.
 func (c gpuNodeCoverage) coverageLine(validated int) string {
-	return fmt.Sprintf("nodesValidated: %d/%d (%d cordoned, skipped)",
+	return fmt.Sprintf("RESULT: nodesValidated: %d/%d (%d cordoned, skipped)",
 		validated, c.total, len(c.cordoned))
 }
 
