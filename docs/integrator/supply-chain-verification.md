@@ -463,6 +463,259 @@ aicr trust update
 Run this when Sigstore rotates their keys (a few times per year) or if
 verification reports a stale root.
 
+## Monitoring Your Signing Identity
+
+Everything above is consumer-side: it proves that an artifact you already hold
+came from the identity you expect. It cannot tell you that somebody else signed
+something *as you*. That is the producer-side question, and the transparency log
+is the only place it can be answered. An entry under your signing identity that
+you did not produce means your identity was used without you.
+
+The gap is sharpest for keyless signing, which leaves no local trace. The Fulcio
+certificate is short-lived, there is no private key on disk whose use you could
+audit, and the signing event is invisible once the process exits. The Rekor entry
+is the only durable record, so watching the log is the only way to notice misuse.
+Sigstore reaches the same conclusion: its
+[threat model](https://docs.sigstore.dev/about/threat-model/) treats identity and
+consistency monitoring as the detection control for a compromised signing
+identity, and its [Rekor documentation](https://docs.sigstore.dev/logging/overview/)
+tells artifact owners to monitor the log for their own identity.
+AICR runs exactly this check against its own release signing identity in
+[`.github/workflows/rekor-monitor.yaml`](https://github.com/NVIDIA/aicr/blob/main/.github/workflows/rekor-monitor.yaml);
+this section is how to run it against yours.
+
+Every AICR signing path uploads to a transparency log by default:
+`aicr bundle --attest`, `aicr validate --emit-attestation --push`,
+`aicr evidence publish`, and `aicr evidence sign`. The one signing mode that
+uploads nothing is `--tlog-upload=false` (KMS-only air-gapped signing). With no
+log entry there is nothing to monitor.
+
+### What your signature records
+
+Configure the monitor from what your own entries actually carry, rather than
+guessing. Read it off a bundle you signed:
+
+```shell
+# Fulcio certificate from a keyless-signed bundle. The SAN is under
+# "X509v3 Subject Alternative Name"; the OIDC issuer is extension
+# 1.3.6.1.4.1.57264.1.8.
+jq -r '.verificationMaterial.certificate.rawBytes' \
+  ./my-bundle/attestation/bundle-attestation.sigstore.json \
+  | base64 -d | openssl x509 -inform DER -noout -text
+```
+
+| Signing mode | What the log entry identifies you by | Log |
+|--------------|--------------------------------------|-----|
+| Interactive keyless (`--attest`, browser or `--oidc-device-flow`) | Fulcio certificate: your email address in the SAN, plus the OIDC issuer that authenticated you | public-good Rekor v2 |
+| Non-interactive keyless (ambient CI OIDC, or `--identity-token`) | Fulcio certificate: the workload identity URL in the SAN; under GitHub Actions the issuer is `https://token.actions.githubusercontent.com` | public-good Rekor v2 |
+| KMS key (`--signing-key <kms-uri>`) | a public key, not a certificate: no SAN and no issuer to match, only the key itself | public-good Rekor v2 |
+| Private Sigstore (`--fulcio-url` / `--rekor-url`) | as keyless above, but issued by your own CA | your private Rekor v1 |
+| Rekor v1 opt-out (`--rekor-url https://rekor.sigstore.dev`) | as keyless above | public-good Rekor v1 |
+| Air-gapped KMS (`--tlog-upload=false`) | nothing is uploaded | none |
+
+Rekor v2 is the default for every keyless and KMS signing path in the CLI;
+`--rekor-url` and `--signing-config` are the opt-outs. See
+[Rekor v2 Signing](../contributor/rekor-v2-signing.md).
+
+### Monitoring the public-good Rekor v2
+
+**The upstream [`sigstore/rekor-monitor`](https://github.com/sigstore/rekor-monitor)
+reusable workflow cannot monitor this log today.** It resolves which Rekor to
+read from Sigstore's *default* signing config, which lists only Rekor v1;
+Sigstore's [Rekor evolution post](https://blog.sigstore.dev/rekor-evolution/)
+states that the public-good instance will continue using Rekor v1 as the default
+log for the foreseeable future. The workflow's inputs are `file_issue`,
+`artifact_retention_days`, `once`, `config`, and `url`; none of them selects a
+different signing config, and pointing `url` at a v2 shard falls through to its
+v1 client and fails.
+
+AICR hit that same wall and wrote `tools/rekor-monitor` for it. The tool resolves
+the v2 shard from the same signing config AICR signs against, then delegates the
+security-critical verification to upstream's library packages. It takes the
+watched identity as flags, so it monitors your identity as readily as AICR's:
+
+```shell
+git clone https://github.com/NVIDIA/aicr && cd aicr
+GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+  --file checkpoint_v2.txt \
+  --cert-subject '^ci@myorg\.example\.com$' \
+  --cert-issuer '^https://token\.actions\.githubusercontent\.com$'
+```
+
+`--cert-subject` and `--cert-issuer` are regexes matched against the
+certificate's SAN and OIDC issuer extension; anchor them, or a lookalike
+identity matches. `--file` is the cursor: the first run baselines at the current
+tree head and scans nothing, and every later run scans only the window added
+since. The tool writes two companions alongside it, `<file>.scan` and
+`<file>.stall`, holding partial progress and catch-up trend so that a large
+backlog is scanned across several bounded runs; all three must survive between
+runs or the scan restarts. `--timeout` bounds a single pass. Exit `0` is clean,
+`1` is a security finding (`tamper` or `identity`), and `3` is a non-security
+failure (`operational` for Sigstore, Rekor, or network trouble; `degraded` when
+the log is outpacing the per-run scan). Every completed run prints a matching
+`CLASSIFICATION=` line to branch on. Full flag and exit-code reference:
+[`tools/rekor-monitor/README.md`](https://github.com/NVIDIA/aicr/blob/main/tools/rekor-monitor/README.md).
+
+On a schedule, in your own repository:
+
+```yaml
+name: Signer identity monitor
+on:
+  schedule:
+    - cron: "17 * * * *"
+permissions: {}
+concurrency:
+  group: signer-identity-monitor
+  cancel-in-progress: false
+env:
+  CERT_SUBJECT: '^ci@myorg\.example\.com$'
+  CERT_ISSUER: '^https://token\.actions\.githubusercontent\.com$'
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read   # read the prior run's checkpoint artifact
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: NVIDIA/aicr
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Fetch previous checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          id="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=rekor-v2-checkpoint&per_page=100" \
+            | jq -rs '[.[].artifacts[] | select(.expired == false)]
+                | sort_by(.created_at) | last | .id // empty')"
+          if [ -z "${id}" ]; then
+            echo "No prior checkpoint; treating this as the first run."
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > checkpoint.zip
+
+      - name: Scan for our signing identity
+        run: |
+          GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+            --file checkpoint_v2.txt \
+            --restore-zip checkpoint.zip \
+            --cert-subject "${CERT_SUBJECT}" \
+            --cert-issuer "${CERT_ISSUER}"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: rekor-v2-checkpoint
+          # The cursor plus its .scan and .stall companions. All three must
+          # travel together so the next run resumes an in-progress catch-up.
+          path: |
+            checkpoint_v2.txt
+            checkpoint_v2.txt.scan
+            checkpoint_v2.txt.stall
+          retention-days: 30   # must exceed the cron interval
+          if-no-files-found: ignore
+```
+
+Pin the actions by commit SHA in production. Two hardening steps from AICR's own
+workflow are worth copying before you rely on this: it filters the artifact list
+to runs from its own repository on `main` (the by-name query also returns
+same-named artifacts uploaded by fork pull-request runs, and a poisoned
+checkpoint would silently collapse the scan window), and it branches
+notifications on the `CLASSIFICATION=` value so that Sigstore or GitHub-API
+flakiness does not page like a security event.
+
+### Monitoring Rekor v1 and a private Rekor
+
+If you opted signing out to Rekor v1 with `--rekor-url`, including a private
+Rekor v1 alongside a private Fulcio, the upstream reusable workflow is the right
+tool: v1 is what it supports. Sigstore's
+[walkthrough of rekor-monitor](https://blog.sigstore.dev/using-rekor-monitor/)
+covers the same ground in more depth, including the split between its consistency
+check and its identity search, and the key-fingerprint mode used below.
+
+```yaml
+name: Signer identity monitor (Rekor v1)
+on:
+  schedule:
+    - cron: "0 * * * *"
+permissions: read-all
+jobs:
+  monitor:
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    uses: sigstore/rekor-monitor/.github/workflows/reusable_monitoring.yml@main
+    with:
+      file_issue: true
+      artifact_retention_days: 14
+      # Omit `url` for the public-good Rekor v1; set it to reach a private one.
+      url: https://rekor.internal.example.com
+      config: |
+        monitoredValues:
+          certIdentities:
+            - certSubject: ci@myorg\.example\.com
+              issuers:
+                - https://fulcio\.internal\.example\.com
+```
+
+A KMS-signed entry carries no certificate, so there is no subject or issuer to
+match. Watch the key instead, via `fingerprints`, which is the hex-encoded
+SHA-256 of the DER-encoded public key:
+
+```shell
+cosign public-key --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k \
+  | openssl pkey -pubin -outform DER \
+  | openssl dgst -sha256 -hex | awk '{print $NF}'
+```
+
+Then substitute that digest for the `config:` block in the workflow above:
+
+```yaml
+      config: |
+        monitoredValues:
+          fingerprints:
+            - <hex digest from the command above>
+```
+
+**Two coverage gaps, stated plainly.** A **KMS key signing to the default Rekor
+v2** has no turnkey monitor: `tools/rekor-monitor` exposes only the certificate
+identity flags, even though the upstream library it builds on does match v2
+entries by key fingerprint. And a **private Rekor v2** (reached with
+`--signing-config`) is out of reach for both tools, because `tools/rekor-monitor`
+resolves its shards from Sigstore's TUF-distributed v2 signing config and takes
+no override. In either case, treat `tools/rekor-monitor` as a small reference
+implementation to adapt, or sign those artifacts to a target one of the two
+monitors already covers.
+
+### Responding to a hit
+
+1. **Rule yourself out first.** Cross-check the entry's log index and integrated
+   timestamp against your own CI run history and any local signing you did. AICR
+   automates this for its release identity by correlating matches against its
+   release workflow's run history; for a personal identity the equivalent is
+   asking whether you signed anything at that moment.
+2. **Confirm the match is really your identity.** Re-read the entry's certificate
+   SAN and OIDC issuer, or its key fingerprint, against what you configured. An
+   unanchored regex is the usual cause of a false positive.
+3. **Treat an unexplained hit as compromise of the identity, not of the
+   artifact.** For keyless signing the OIDC account is what was taken: rotate its
+   credentials, revoke active sessions and tokens, and check the identity
+   provider's own audit log. For a KMS key, rotate the key and revoke the
+   principals allowed to sign with it.
+4. **Re-verify what you already published.** Run `aicr verify` over every bundle
+   you shipped under that identity, pinning the signer with `--require-creator`,
+   so you know which artifacts are genuine.
+5. **Expect the entry to be permanent.** Nothing can be removed from a
+   transparency log, so the response is rotation plus a public statement of which
+   entries are legitimate, never takedown.
+
 ## References
 
 - [GitHub Artifact Attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
@@ -472,3 +725,8 @@ verification reports a stale root.
 - [Sigstore Cosign](https://docs.sigstore.dev/cosign/signing/overview/)
 - [Sigstore Policy Controller](https://docs.sigstore.dev/policy-controller/overview/)
 - [Kyverno Image Verification](https://kyverno.io/docs/policy-types/cluster-policy/verify-images/overview/)
+- [Sigstore Rekor](https://docs.sigstore.dev/logging/overview/), on why artifact owners should monitor the log for their own identity
+- [Sigstore Threat Model](https://docs.sigstore.dev/about/threat-model/), which positions identity and consistency monitoring as the detection control for a compromised signer
+- [Using rekor-monitor to Scan Your Transparency Logs](https://blog.sigstore.dev/using-rekor-monitor/), Sigstore's walkthrough of consistency checking, identity search, and key-fingerprint monitoring
+- [sigstore/rekor-monitor](https://github.com/sigstore/rekor-monitor), the upstream tool and its reusable workflow inputs
+- [sigstore.dev and Rekor evolution](https://blog.sigstore.dev/rekor-evolution/), Sigstore's current statement on Rekor v1 remaining the public-good default and v2 being opt-in

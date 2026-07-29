@@ -353,6 +353,16 @@ case "$(jq '.exit' result.json)" in
 esac
 ```
 
+## Monitoring Your Signing Identity
+
+Verification is only half the picture. It proves that an artifact you hold came
+from the identity you expect, but it cannot tell you that somebody else signed
+something *as you*: an entry in the transparency log under your signing identity
+that you did not produce means the identity was used without you. Keyless signing
+leaves no local trace of a signing event, so the log is the only place that
+misuse shows up. For what each signing mode records and how to watch for it, see
+[Monitoring Your Signing Identity](../integrator/supply-chain-verification.md#monitoring-your-signing-identity).
+
 ## Troubleshooting Common Failures
 
 **Certificate chain errors / stale trusted root.** Sigstore rotates signing
