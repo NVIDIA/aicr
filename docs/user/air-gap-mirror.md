@@ -272,7 +272,9 @@ generate the deployment-specific manifest for a specific deployment.
 > field; the Hauler and Zarf outputs **omit them entirely**. Treat a
 > tool-specific manifest as authoritative only after confirming the YAML/JSON
 > run reported no warnings — otherwise the mirrored set may be silently
-> incomplete.
+> incomplete. Invalid members in a recognized mapping-valued `image` or
+> `scalingPodImage` descriptor are the exception: `mirror list` exits nonzero
+> instead of emitting a known-incomplete image set.
 
 > **Runtime validation image:** `slinky-slurm-health` launches
 > `docker.io/library/alpine:3.23.3` dynamically through `srun` on GPU-backed

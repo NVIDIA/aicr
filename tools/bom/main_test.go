@@ -18,8 +18,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 )
@@ -210,7 +212,10 @@ func TestSurveyComponentHelm(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
 	if res.Name != "gpu-operator" {
 		t.Errorf("Name = %q, want %q", res.Name, "gpu-operator")
 	}
@@ -253,7 +258,10 @@ func TestSurveyComponentSkipHelm(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(context.Background(), root, c, mock, true)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, true)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
 	// With skipHelm, no images should come from the renderer.
 	if len(res.Images) != 0 {
 		t.Errorf("expected 0 images with skipHelm, got %d: %v", len(res.Images), res.Images)
@@ -278,7 +286,10 @@ func TestSurveyComponentRendererError(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
 	if len(res.Warnings) == 0 {
 		t.Fatal("expected warnings from renderer error, got none")
 	}
@@ -298,7 +309,10 @@ func TestSurveyComponentKustomize(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
 	if res.Type != "kustomize" {
 		t.Errorf("Type = %q, want %q", res.Type, "kustomize")
 	}
@@ -335,7 +349,10 @@ spec:
 		DisplayName: "My Component",
 	}
 
-	res := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
 	if res.Type != "manifest" {
 		t.Errorf("Type = %q, want %q", res.Type, "manifest")
 	}
@@ -344,6 +361,50 @@ spec:
 	}
 	if res.Images[0] != "docker.io/library/nginx:1.27" {
 		t.Errorf("Images[0] = %q, want %q", res.Images[0], "docker.io/library/nginx:1.27")
+	}
+}
+
+func TestSurveyComponentRejectsInvalidStructuredImageDescriptorInManifest(t *testing.T) {
+	root := writeTestRegistry(t, testRegistryHelm)
+	manifestPath := filepath.Join(
+		root,
+		"recipes",
+		"components",
+		"my-comp",
+		"manifests",
+		"config.yaml",
+	)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
+		t.Fatalf("mkdir manifests: %v", err)
+	}
+	manifest := `apiVersion: example.com/v1
+kind: Config
+spec:
+  operand:
+    image:
+      name: null
+      repository: nvcr.io/nvidia
+      tag: v25.3.0
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, err := surveyComponent(
+		context.Background(),
+		root,
+		component{Name: "my-comp"},
+		&helmtest.MockRenderer{},
+		true,
+	)
+	if err == nil {
+		t.Fatal("surveyComponent() error = nil, want invalid structured image descriptor error")
+	}
+	if !bom.IsInvalidStructuredImageDescriptor(err) {
+		t.Errorf("IsInvalidStructuredImageDescriptor(%v) = false, want true", err)
+	}
+	if !strings.Contains(err.Error(), manifestPath) {
+		t.Errorf("error %q does not identify manifest %q", err, manifestPath)
 	}
 }
 
@@ -384,7 +445,10 @@ spec:
 		},
 	}
 
-	res := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
 	// 2 from helm + 1 from manifests = 3 unique images.
 	if len(res.Images) != 3 {
 		t.Fatalf("expected 3 images (helm + manifests), got %d: %v", len(res.Images), res.Images)
@@ -623,6 +687,44 @@ func TestRunStrictWithWarnings(t *testing.T) {
 	}
 }
 
+func TestRunRejectsInvalidStructuredImageDescriptorWithoutStrict(t *testing.T) {
+	root := writeTestRegistry(t, testRegistryHelm)
+	outDir := t.TempDir()
+	mock := &helmtest.MockRenderer{
+		Rendered: map[string][]byte{
+			"gpu-operator": []byte(`
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - image: nvcr.io/nvidia/gpu-operator:v25.3.0
+---
+apiVersion: example.com/v1
+kind: Config
+spec:
+  operand:
+    image:
+      name: null
+      repository: nvcr.io/nvidia
+      tag: v25.3.0
+`),
+		},
+	}
+
+	err := run(root, outDir, "test-v1", mock, false, false, true, true)
+	if err == nil {
+		t.Fatal("run() error = nil, want invalid structured image descriptor error")
+	}
+	if !bom.IsInvalidStructuredImageDescriptor(err) {
+		t.Errorf("IsInvalidStructuredImageDescriptor(%v) = false, want true", err)
+	}
+	for _, name := range []string{"bom.cdx.json", "bom.md"} {
+		if _, statErr := os.Stat(filepath.Join(outDir, name)); !os.IsNotExist(statErr) {
+			t.Errorf("%s was written despite fatal extraction error: %v", name, statErr)
+		}
+	}
+}
+
 func TestRunSkipHelm(t *testing.T) {
 	root := writeTestRegistry(t, testRegistryHelm)
 	outDir := t.TempDir()
@@ -729,7 +831,10 @@ func TestSurveyComponentSourceOnlyChartFallback(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
 	if len(res.Warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", res.Warnings)
 	}

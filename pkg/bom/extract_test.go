@@ -15,6 +15,7 @@
 package bom
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -271,6 +272,84 @@ spec:
 				"nvcr.io/nvidia/k8s/container-toolkit:v1.18.0",
 			},
 		},
+		{
+			name: "operator image mappings with name repository and tag",
+			in: `apiVersion: kai.scheduler/v1
+kind: Config
+metadata:
+  name: kai-config
+spec:
+  binder:
+    service:
+      image:
+        name: binder
+        repository: ghcr.io/kai-scheduler/kai-scheduler
+        tag: &kaiTag v0.14.1
+        pullPolicy: IfNotPresent
+  scheduler:
+    service:
+      image:
+        name: scheduler
+        repository: ghcr.io/kai-scheduler/kai-scheduler/
+        tag: *kaiTag
+  operator:
+    image:
+      repository: ghcr.io/kai-scheduler/kai-scheduler/operator
+      tag: v0.14.1
+`,
+			want: []string{
+				"ghcr.io/kai-scheduler/kai-scheduler/binder:v0.14.1",
+				"ghcr.io/kai-scheduler/kai-scheduler/operator:v0.14.1",
+				"ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.14.1",
+			},
+		},
+		{
+			name: "operator image mapping skips unresolved templates and incomplete descriptors",
+			in: `spec:
+  templated:
+    image:
+      name: "{{ .Values.image.name }}"
+      repository: ghcr.io/example
+      tag: v1.0.0
+  missing:
+    image:
+      tag: v1.0.0
+`,
+			want: []string{},
+		},
+		{
+			// A trailing slash on repository must be trimmed in the
+			// name-absent fallback too, not only when repository is
+			// prepended to a separate name.
+			name: "operator image mapping trims trailing repository slash in name fallback",
+			in: `spec:
+  operator:
+    image:
+      repository: ghcr.io/kai-scheduler/kai-scheduler/
+      tag: v0.14.1
+`,
+			want: []string{"ghcr.io/kai-scheduler/kai-scheduler:v0.14.1"},
+		},
+		{
+			// tag: "" and tag: null are the Helm "use appVersion" idiom —
+			// treated like an absent tag, emitting an untagged reference
+			// rather than failing the survey.
+			name: "operator image mapping treats empty and null tag as absent",
+			in: `spec:
+  empty:
+    image:
+      repository: ghcr.io/example/empty-tag
+      tag: ""
+  nulltag:
+    image:
+      repository: ghcr.io/example/null-tag
+      tag:
+`,
+			want: []string{
+				"ghcr.io/example/empty-tag",
+				"ghcr.io/example/null-tag",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -282,6 +361,105 @@ spec:
 				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExtractImagesFromYAML_InvalidStructuredImageDescriptor(t *testing.T) {
+	tests := []struct {
+		name       string
+		descriptor string
+		wantField  string
+	}{
+		{
+			name: "null name",
+			descriptor: `name: null
+      repository: ghcr.io/kai-scheduler/kai-scheduler
+      tag: v0.14.1`,
+			wantField: "name",
+		},
+		{
+			name: "null repository",
+			descriptor: `name: binder
+      repository: ~
+      tag: v0.14.1`,
+			wantField: imageRepositoryKey,
+		},
+		{
+			name: "non-scalar tag",
+			descriptor: `name: binder
+      repository: ghcr.io/kai-scheduler/kai-scheduler
+      tag:
+        - v0.14.1`,
+			wantField: "tag",
+		},
+		{
+			name: "registry member present",
+			descriptor: `registry: nvcr.io
+      repository: nvidia/foo
+      tag: v1`,
+			wantField: "registry",
+		},
+		{
+			name: "digest member present",
+			descriptor: `repository: ghcr.io/example/pinned
+      tag: v1
+      digest: sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b`,
+			wantField: "digest",
+		},
+		{
+			name: "empty name",
+			descriptor: `name: ""
+      repository: ghcr.io/kai-scheduler/kai-scheduler
+      tag: v0.14.1`,
+			wantField: "name",
+		},
+		{
+			name: "non-scalar name",
+			descriptor: `name:
+        - binder
+      repository: ghcr.io/kai-scheduler/kai-scheduler
+      tag: v0.14.1`,
+			wantField: "name",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := "spec:\n  binder:\n    image:\n      " + tt.descriptor + "\n"
+			_, err := ExtractImagesFromYAML([]byte(input))
+			if err == nil {
+				t.Fatal("expected invalid structured image descriptor error")
+			}
+			if !IsInvalidStructuredImageDescriptor(err) {
+				t.Errorf("IsInvalidStructuredImageDescriptor(%v) = false, want true", err)
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf("field %q", tt.wantField)) {
+				t.Errorf("error %q does not identify field %q", err.Error(), tt.wantField)
+			}
+		})
+	}
+}
+
+// TestExtractImagesFromYAML_DescriptorErrorLineMatchesFile pins that a
+// descriptor error reports the line number of the original file, not of the
+// buffer with directive-only Helm lines stripped: stripHelmTemplates must
+// blank those lines out rather than delete them.
+func TestExtractImagesFromYAML_DescriptorErrorLineMatchesFile(t *testing.T) {
+	input := `{{- if .Values.enabled }}
+{{- $tag := .Values.tag }}
+spec:
+  binder:
+    image:
+      name: ""
+      repository: ghcr.io/kai-scheduler/kai-scheduler
+`
+	// `name: ""` sits on line 6 of the file; with the two directive-only
+	// lines deleted it would misreport as line 4.
+	_, err := ExtractImagesFromYAML([]byte(input))
+	if err == nil {
+		t.Fatal("expected invalid structured image descriptor error")
+	}
+	if !strings.Contains(err.Error(), "line 6") {
+		t.Errorf("error %q does not report original file line 6", err.Error())
 	}
 }
 

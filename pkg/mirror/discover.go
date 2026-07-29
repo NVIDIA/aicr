@@ -207,6 +207,17 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 					} else {
 						imgs, extractErr := bom.ExtractImagesFromYAML(rendered)
 						if extractErr != nil {
+							if bom.IsInvalidStructuredImageDescriptor(extractErr) {
+								return errors.WrapWithContext(
+									errors.ErrCodeInvalidRequest,
+									fmt.Sprintf(
+										"invalid structured image descriptor in component %q",
+										compRef.Name,
+									),
+									extractErr,
+									map[string]any{"component": compRef.Name},
+								)
+							}
 							slog.Warn("image extraction failed",
 								logKeyComponent, compRef.Name, "error", extractErr)
 							ci.Warnings = append(ci.Warnings,
@@ -227,11 +238,23 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 				return gctx.Err()
 			}
 			dp := rec.DataProvider()
-			for _, mPath := range compRef.ManifestFiles {
-				allImages = extractManifestImages(gctx, dp, allImages, &ci, compRef.Name, mPath)
+			manifestSets := [][]string{
+				compRef.ManifestFiles,
+				compRef.PreManifestFiles,
 			}
-			for _, mPath := range compRef.PreManifestFiles {
-				allImages = extractManifestImages(gctx, dp, allImages, &ci, compRef.Name, mPath)
+			for _, paths := range manifestSets {
+				for _, mPath := range paths {
+					if err := gctx.Err(); err != nil {
+						return err
+					}
+					var manifestErr error
+					allImages, manifestErr = extractManifestImages(
+						gctx, dp, allImages, &ci, compRef.Name, mPath,
+					)
+					if manifestErr != nil {
+						return manifestErr
+					}
+				}
 			}
 
 			slices.Sort(allImages)
@@ -299,25 +322,51 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 }
 
 // extractManifestImages reads a manifest file from the supplied DataProvider
-// and appends extracted images to the accumulator, recording warnings on
-// failure. A nil provider falls back to the package-global embedded provider
-// inside recipe.GetManifestContentWithContext.
-func extractManifestImages(ctx context.Context, dp recipe.DataProvider, acc []string, ci *ComponentImages, compName, mPath string) []string {
+// and appends extracted images to the accumulator. Read and general parse
+// failures are recorded as warnings; invalid structured image descriptors are
+// returned as errors so discovery cannot succeed with a known-incomplete image
+// set. A nil provider falls back to the package-global embedded provider inside
+// recipe.GetManifestContentWithContext.
+func extractManifestImages(
+	ctx context.Context,
+	dp recipe.DataProvider,
+	acc []string,
+	ci *ComponentImages,
+	compName, mPath string,
+) ([]string, error) {
+
 	content, readErr := recipe.GetManifestContentWithContext(ctx, dp, mPath)
 	if readErr != nil {
+		if ctx.Err() != nil {
+			return acc, ctx.Err()
+		}
 		slog.Warn("failed to read manifest",
 			logKeyComponent, compName, "path", mPath, "error", readErr)
 		ci.Warnings = append(ci.Warnings,
 			fmt.Sprintf("manifest read failed %s: %v", mPath, readErr))
-		return acc
+		return acc, nil
 	}
 	imgs, extractErr := bom.ExtractImagesFromYAML(content)
 	if extractErr != nil {
+		if bom.IsInvalidStructuredImageDescriptor(extractErr) {
+			return acc, errors.WrapWithContext(
+				errors.ErrCodeInvalidRequest,
+				fmt.Sprintf(
+					"invalid structured image descriptor in component %q manifest %q",
+					compName,
+					mPath,
+				),
+				extractErr,
+				map[string]any{"component": compName, "manifest": mPath},
+			)
+		}
+		slog.Warn("manifest image extraction failed",
+			"component", compName, "path", mPath, "error", extractErr)
 		ci.Warnings = append(ci.Warnings,
 			fmt.Sprintf("manifest image extraction failed %s: %v", mPath, extractErr))
-		return acc
+		return acc, nil
 	}
-	return append(acc, imgs...)
+	return append(acc, imgs...), nil
 }
 
 // buildOverrideLookup converts a slice of ComponentPath overrides into

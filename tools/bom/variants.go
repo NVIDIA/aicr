@@ -357,11 +357,26 @@ func deriveVariants(reg *registry, sources []recipeSource) ([]bom.VariantResult,
 // parity, not deployment fidelity. Variant image sets are rendered, never
 // copied from the default entry: the two versions may ship different images,
 // and a mixed Helm+manifest component contributes its manifest images too.
-func surveyVariant(ctx context.Context, repoRoot string, v bom.VariantResult, base component, r helm.Renderer, skipHelm bool) bom.VariantResult {
+func surveyVariant(
+	ctx context.Context,
+	repoRoot string,
+	v bom.VariantResult,
+	base component,
+	r helm.Renderer,
+	skipHelm bool,
+) (bom.VariantResult, error) {
+
 	variantComponent := base
 	variantComponent.Helm.DefaultVersion = v.Version
-	res := surveyComponent(ctx, repoRoot, variantComponent, r, skipHelm)
+	res, err := surveyComponent(ctx, repoRoot, variantComponent, r, skipHelm)
+	if err != nil {
+		return v, errors.PropagateOrWrap(
+			err,
+			errors.ErrCodeInvalidRequest,
+			"survey variant images",
+		)
+	}
 	v.Images = res.Images
 	v.Warnings = append(v.Warnings, res.Warnings...)
-	return v
+	return v, nil
 }

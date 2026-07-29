@@ -18,7 +18,10 @@
 // It exposes the reusable pieces of the BOM pipeline:
 //
 //   - ExtractImagesFromYAML walks rendered Helm output (or any K8s manifest
-//     bundle) and returns the unique sorted set of `image:` scalar values.
+//     bundle) and returns the unique sorted set of scalar `image:` references
+//     plus recognized structured `image:` and `scalingPodImage:` descriptors.
+//     Invalid members in a recognized descriptor return an error rather than
+//     silently producing an incomplete inventory.
 //   - ParseImageRef splits a container image string into registry, repository,
 //     tag, and digest components.
 //   - BuildBOM assembles a CycloneDX 1.6 document from per-component image
