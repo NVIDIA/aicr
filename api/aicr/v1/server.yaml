@@ -193,7 +193,7 @@ paths:
                   summary: Basic recipe request
                   value:
                     apiVersion: aicr.run/v1alpha2
-                    kind: Recipe
+                    kind: RecipeResult
                     metadata:
                       version: v1.0.0
                       created: "2025-01-15T10:30:00Z"
@@ -861,6 +861,11 @@ paths:
         This design enables a simple workflow: pipe the output from GET /v1/recipe directly
         to POST /v1/bundle.
 
+        Current recipes carry apiVersion aicr.run/v1alpha2 and kind RecipeResult.
+        For backward compatibility, legacy artifacts may omit either header field,
+        carry it as an empty string after a decode/remarshal round trip, or carry
+        the kind Recipe published by this contract through v0.18.0.
+
         The response is a binary zip file containing all generated bundle artifacts
         organized by bundler type (e.g., gpu-operator/, network-operator/).
       parameters:
@@ -1113,13 +1118,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RecipeResponse"
+              $ref: "#/components/schemas/BundleRecipeRequest"
             examples:
               simpleRecipe:
                 summary: Simple recipe with GPU operator
                 value:
                   apiVersion: aicr.run/v1alpha2
-                  kind: Recipe
+                  kind: RecipeResult
                   componentRefs:
                     - name: gpu-operator
                       type: Helm
@@ -1130,7 +1135,7 @@ paths:
                 summary: Full recipe with metadata
                 value:
                   apiVersion: aicr.run/v1alpha2
-                  kind: Recipe
+                  kind: RecipeResult
                   metadata:
                     version: v1.0.0
                     created: "2025-01-15T10:30:00Z"
@@ -1562,21 +1567,22 @@ components:
             $ref: "#/components/schemas/Subtype"
           description: List of configuration subtypes within this measurement
 
-    RecipeResponse:
+    RecipeResponseBase:
       type: object
-      description: Complete recipe response with metadata and component references
-      required: [apiVersion, kind]
+      description: >
+        Reusable RecipeResult shape. Response and bundle-request wrappers apply
+        their respective apiVersion requirements.
       properties:
         apiVersion:
           type: string
-          description: API version of the recipe format
-          enum: [aicr.run/v1alpha2]
-          example: aicr.run/v1alpha2
+          description: >
+            API version of the recipe format. Response and bundle-request
+            wrappers constrain the supported value.
         kind:
           type: string
-          description: Resource type
-          enum: [Recipe]
-          example: Recipe
+          description: >
+            Resource type. Response and bundle-request wrappers constrain the
+            supported value.
         metadata:
           type: object
           description: Recipe metadata
@@ -1761,6 +1767,61 @@ components:
           description: Deployment constraints (driver versions, etc.)
           additionalProperties: true
 
+    RecipeResponse:
+      description: Complete recipe response with metadata and component references
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponseBase"
+        - type: object
+          required: [apiVersion, kind]
+          properties:
+            apiVersion:
+              type: string
+              enum: [aicr.run/v1alpha2]
+              example: aicr.run/v1alpha2
+            kind:
+              type: string
+              enum: [RecipeResult]
+              example: RecipeResult
+
+    BundleRecipeRequest:
+      description: >
+        RecipeResult accepted by POST /v1/bundle. Current aicr.run/v1alpha2
+        artifacts and legacy artifacts with absent or empty header fields are
+        accepted. The kind value Recipe is also accepted: it was the value this
+        contract published through v0.18.0, and the handler performs no header
+        validation, so clients written against that spec must keep working.
+
+        A legacy kind is echoed into the generated bundle's recipe.yaml rather
+        than normalized, and the CLI file loader accepts an absent or empty kind
+        but rejects Recipe. A bundle generated from a kind Recipe body is
+        therefore not reloadable via aicr bundle -r or aicr validate -r. Send
+        kind RecipeResult to keep the emitted artifact round-trippable.
+
+        apiVersion deliberately has no equivalent legacy window. The artifact
+        group/version bump is a hard break with no transition period (see
+        docs/design/011-artifact-apiversion-policy.md), so an artifact stamped
+        with a prior group/version should be regenerated rather than sent. That
+        is a client-contract rule rather than an enforced one: this endpoint
+        validates no header field, so a prior apiVersion is ignored rather than
+        rejected. The CLI file-load path does enforce it.
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponseBase"
+        - type: object
+          properties:
+            apiVersion:
+              type: string
+              description: >
+                Current API version, or empty after a legacy struct round trip.
+                Prior group/versions are not accepted — see the schema
+                description for the hard-break policy.
+              enum: ["", aicr.run/v1alpha2]
+            kind:
+              type: string
+              description: >
+                RecipeResult, the legacy Recipe value published through
+                v0.18.0, or empty for a legacy artifact
+              enum: ["", Recipe, RecipeResult]
+
     QueryRequest:
       type: object
       description: Query request with criteria and dot-path selector
@@ -1782,12 +1843,12 @@ components:
       description: Request body for bundle generation
       deprecated: true
       x-deprecation-reason: >
-        Use RecipeResponse directly as the request body and specify bundlers
+        Use a RecipeResult directly as the request body and specify bundlers
         via the "bundlers" query parameter (comma-delimited).
       required: [recipe]
       properties:
         recipe:
-          $ref: "#/components/schemas/RecipeResponse"
+          $ref: "#/components/schemas/BundleRecipeRequest"
           description: The recipe to generate bundles from
         bundlers:
           type: array

@@ -42,7 +42,7 @@ All server code lives in [`pkg/server`](https://github.com/NVIDIA/aicr/tree/main
 | `allowlist.go` | Handler-level allowlist pre-check (`validateAgainstAllowLists`) |
 | `response_writer.go` | Status-capture wrapper so middleware can observe the handler's status code |
 | `context.go` | Typed context keys and `RequestIDFromContext` helper |
-| `openapi_sync_test.go` | CI gate: enum drift between OpenAPI spec and Go criteria types fails the build |
+| `openapi_sync_test.go` | CI gate: criteria-enum and `/v1/bundle` contract drift fails the build |
 
 `cmd/aicrd/main.go` is a one-liner that calls `server.Serve()`.
 
@@ -275,10 +275,23 @@ a `go test` executable cannot satisfy.
 ## OpenAPI Parity Test
 
 [`pkg/server/openapi_sync_test.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/server/openapi_sync_test.go)
-asserts that every criteria-field enum in `api/aicr/v1/server.yaml`
-matches the corresponding `pkg/recipe.GetCriteria*Types()` function.
-It scans both query-parameter enums and `components.schemas.Criteria`
-properties.
+contains two contract gates:
+
+- `TestOpenAPIEnumsMatchGoTypes` asserts that every criteria-field enum in
+  `api/aicr/v1/server.yaml` matches the corresponding
+  `pkg/recipe.GetCriteria*Types()` function. It scans both query-parameter enums
+  and `components.schemas.Criteria` properties.
+- `TestOpenAPIV1BundleRecipeContract` asserts that `/v1/bundle` and its
+  deprecated wrapper share the request schema, that both `/v1/recipe` success
+  responses still point at the strict `RecipeResponse`, and that the header
+  enums on both sides stay synchronized with the Go constants. It matches the
+  `allOf` branches by content rather than position, since `allOf` is
+  semantically unordered.
+
+  Runtime acceptance of the legacy header shapes is pinned separately by
+  `TestBundleHandler_LegacyRecipeHeaders`, which posts absent, empty, and
+  `kind: Recipe` bodies to the handler and asserts 200. The spec gate alone
+  would only be checking the spec against itself.
 
 Drift is a contract bug: clients conforming to the spec will reject
 inputs the server actually accepts, or generate types that reject
@@ -296,7 +309,10 @@ test strips it before comparison.
 4. **Register the route.** Add an entry to the `map[string]http.HandlerFunc` in `serve.go` (the `WithHandler` argument). The route picks up the full middleware chain automatically.
 5. **Wire allowlists if needed.** Pass `allowLists` into the handler constructor and call `validateAgainstAllowLists` before the facade call. Do not invent a parallel allowlist path; reuse `aicr.ToInternalAllowLists`.
 6. **Tighten the body cap.** If the endpoint accepts POST bodies and 8 MiB is wrong, define a `defaults.Max<Name>POSTBytes` constant and wrap `r.Body` with `http.MaxBytesReader` inside the handler. Handle `*http.MaxBytesError` explicitly → 413.
-7. **Run the parity test.** `go test -run TestOpenAPIEnumsMatchGoTypes ./pkg/server/...`. Add cases to `openapi_sync_test.go` if you introduced a new enum-bearing field.
+7. **Run the contract tests.**
+   `go test -run '^(TestOpenAPIEnumsMatchGoTypes|TestOpenAPIV1BundleRecipeContract)$' ./pkg/server/...`.
+   Add cases to `openapi_sync_test.go` if you introduced a new enum-bearing
+   field or changed the `/v1/bundle` recipe schema.
 8. **Update [docs/user/api-reference.md](../user/api-reference.md)** in the same PR. CLAUDE.md's docs-updates-with-behavior-changes rule applies.
 
 The endpoint cannot return business types raw — it must serialize

@@ -30,6 +30,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // fixtureBundleAttester returns fixed, non-nil bundle JSON from Attest so the
@@ -341,7 +343,7 @@ func TestBundleHandler_EmptyComponentRefs(t *testing.T) {
 	t.Parallel()
 	h := newTestBundleHandler(t)
 
-	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "Recipe", "componentRefs": []}`
+	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "RecipeResult", "componentRefs": []}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -359,7 +361,7 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 	t.Parallel()
 	h := newTestBundleHandler(t)
 
-	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "Recipe", "componentRefs": [` +
+	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "RecipeResult", "componentRefs": [` +
 		`{"name": "gpu-operator", "type": "Helm", "version": "v1", "tag": "v2"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -367,6 +369,130 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 	h.HandleBundles(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+// TestBundleHandler_LegacyRecipeHeaders pins the backward compatibility the
+// BundleRecipeRequest schema advertises: POST /v1/bundle accepts a recipe whose
+// header fields are absent, empty, or carry the legacy Recipe kind this
+// contract published through v0.18.0.
+//
+// The handler validates no header field, so without this test the promise is
+// enforced only by TestOpenAPIV1BundleRecipeContract parsing the spec against
+// itself — a later header check would break the documented contract while every
+// test stayed green. The canonical case is included deliberately as a control:
+// it proves a 200 here means the body was accepted, not that the assertion is
+// vacuous.
+func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
+	t.Parallel()
+
+	canonical := resolveEmbeddedBundleBody(t)
+
+	// Fail closed if the fixture ever stops being the canonical shape: a
+	// "legacy" case below must differ from the baseline to be meaningful.
+	var fixture map[string]any
+	if err := json.Unmarshal(canonical, &fixture); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	if got := fixture["kind"]; got != recipe.RecipeResultKind {
+		t.Fatalf("fixture kind = %v, want %q", got, recipe.RecipeResultKind)
+	}
+	if got := fixture["apiVersion"]; got != recipe.RecipeAPIVersion {
+		t.Fatalf("fixture apiVersion = %v, want %q", got, recipe.RecipeAPIVersion)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name:   "canonical headers (control)",
+			mutate: func(map[string]any) {},
+		},
+		{
+			name: "both headers absent",
+			mutate: func(body map[string]any) {
+				delete(body, "kind")
+				delete(body, "apiVersion")
+			},
+		},
+		{
+			name: "both headers empty-string",
+			mutate: func(body map[string]any) {
+				body["kind"] = ""
+				body["apiVersion"] = ""
+			},
+		},
+		// The schema constrains apiVersion and kind independently — neither is
+		// in a required[] and each admits its own empty value — and
+		// pkg/recipe/loader.go tolerates each one missing on its own ("empty
+		// kind allowed", "empty apiVersion allowed for backward compat" in
+		// loader_test.go). Mutating both together would leave a paired check
+		// ("either both canonical or both absent") passing every case above
+		// while it broke the single-field forms below.
+		{
+			name: "kind absent, apiVersion canonical",
+			mutate: func(body map[string]any) {
+				delete(body, "kind")
+			},
+		},
+		{
+			name: "apiVersion absent, kind canonical",
+			mutate: func(body map[string]any) {
+				delete(body, "apiVersion")
+			},
+		},
+		{
+			name: "kind empty, apiVersion canonical",
+			mutate: func(body map[string]any) {
+				body["kind"] = ""
+			},
+		},
+		{
+			name: "apiVersion empty, kind canonical",
+			mutate: func(body map[string]any) {
+				body["apiVersion"] = ""
+			},
+		},
+		{
+			name: "legacy Recipe kind with apiVersion absent",
+			mutate: func(body map[string]any) {
+				body["kind"] = string(header.KindRecipe)
+				delete(body, "apiVersion")
+			},
+		},
+		{
+			name: "legacy Recipe kind",
+			mutate: func(body map[string]any) {
+				body["kind"] = string(header.KindRecipe)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var body map[string]any
+			if err := json.Unmarshal(canonical, &body); err != nil {
+				t.Fatalf("unmarshal fixture: %v", err)
+			}
+			tt.mutate(body)
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal body: %v", err)
+			}
+
+			h := newTestBundleHandler(t)
+			req := httptest.NewRequest(http.MethodPost, "/v1/bundle", bytes.NewReader(encoded))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.HandleBundles(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+			}
+		})
 	}
 }
 

@@ -416,7 +416,34 @@ Generate deployment bundles from a recipe.
 
 **Request Body:**
 
-The request body is the recipe (RecipeResult) directly. No wrapper object needed.
+The request body is the recipe (`RecipeResult`) directly. No wrapper object is
+needed. Current artifacts carry `apiVersion: aicr.run/v1alpha2` and
+`kind: RecipeResult`, and new clients should send that versioned form.
+
+For backward compatibility, the endpoint also accepts:
+
+- Legacy artifacts that omit `apiVersion` or `kind`, or carry them as empty
+  strings after a decode/remarshal round trip.
+- The `kind: Recipe` value this contract published through v0.18.0.
+
+The handler does not validate these header fields, so all three shapes reach the
+bundler identically.
+
+`apiVersion` has no equivalent legacy window on purpose. An artifact
+group/version bump is a hard break with no transition period, so a recipe
+stamped with a prior group/version should be regenerated rather than sent.
+
+That is a client-contract rule, not an enforced one. As above, this endpoint
+validates no header field: a prior `apiVersion` is ignored rather than rejected,
+so such a request still succeeds. The CLI file-load path does enforce it and
+rejects an unsupported `apiVersion` outright.
+
+**Round-trip caveat for `kind: Recipe`.** The header is copied into the
+generated bundle's `recipe.yaml` rather than normalized. The CLI file loader
+tolerates an absent or empty `kind` but rejects `Recipe`, so a bundle generated
+from a `kind: Recipe` body cannot be fed back through `aicr bundle -r` or
+`aicr validate -r`. Send `kind: RecipeResult` if you need the emitted artifact
+to remain reloadable.
 
 #### Components
 
