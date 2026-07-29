@@ -775,7 +775,27 @@ func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
 			RepoURL:                "https://github.com/example/repo.git",
 			TargetRevision:         "main",
 			ComponentPostManifests: map[string]map[string][]byte{"nfd-ocp": localManifest},
-			IncludeChecksums:       true,
+			// Reaches finalizeOutput -> checksum.WriteChecksums ->
+			// validateExactTree, the check that rejected the empty directory
+			// in #1942.
+			//
+			// This only affects the "populated static dir is preserved"
+			// subtest, the one that runs far enough to reach the validator.
+			// The file and symlink subtests fail earlier inside
+			// checkStaticPath and return before finalizeOutput, so they assert
+			// checkStaticPath's own message and DO pin the error code in both
+			// directions -- including the no-ErrCodeInternal check that keeps
+			// the CLI exit code at 2. Do not relax those.
+			//
+			// For the validator subtest only: production builds this Generator
+			// with IncludeChecksums false (the argocdhelm.Generator literal in
+			// DefaultBundler.buildDeployer) and reaches the same validator from
+			// DefaultBundler.runDeployer instead, so the wrapper around that
+			// failure differs from the shipped CLI. Its assertion is on
+			// validateExactTree's message, identical on both routes; its
+			// surrounding error code is not pinned. End-to-end coverage of the
+			// production path lives in tests/chainsaw/cli/bundle-ocp.
+			IncludeChecksums: true,
 		}
 	}
 
@@ -805,6 +825,15 @@ func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
 			// be INVALID_REQUEST for one recipe shape and INTERNAL for another.
 			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			// The negative direction is what actually pins writeValuesFiles to
+			// PropagateOrWrap. errors.Is walks the Unwrap chain, so the check
+			// above still passes when an outer Wrap(ErrCodeInternal, ...) buries
+			// the real code — while ExitCodeFromError reads the OUTERMOST
+			// StructuredError, so the exit code a user observes would flip from
+			// 2 to 8 with the assertion above still green.
+			if errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+				t.Errorf("Generate() error = %v, want no ErrCodeInternal anywhere in the chain", err)
 			}
 
 			got, readErr := os.ReadFile(staticPath)
@@ -848,13 +877,21 @@ func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
 			t.Fatalf("failed to seed leftover file: %v", err)
 		}
 
-		// Generation fails because validateExactTree reports the stale file
-		// as unexpected output. The file itself must still be there.
-		if _, err := newGen(false).Generate(context.Background(), outputDir); err == nil {
-			t.Error("Generate() succeeded, want failure on unexpected stale output")
+		// Generation fails because validateExactTree reports the stale output.
+		// For an all-local recipe static/ is not an expected directory at all,
+		// so the walk rejects the directory itself before reaching its
+		// contents — the message names the directory, not leftover.yaml.
+		// Asserted specifically so the subtest cannot drift into passing on
+		// some unrelated error.
+		_, err := newGen(false).Generate(context.Background(), outputDir)
+		if err == nil {
+			t.Fatal("Generate() succeeded, want failure on unexpected stale output")
 		}
-		if _, err := os.Stat(leftover); err != nil {
-			t.Errorf("populated static/ was removed: %v", err)
+		if !strings.Contains(err.Error(), `unexpected directory: "static"`) {
+			t.Errorf("Generate() error = %v, want validateExactTree to reject the stale static/", err)
+		}
+		if _, statErr := os.Stat(leftover); statErr != nil {
+			t.Errorf("populated static/ was removed: %v", statErr)
 		}
 	})
 }

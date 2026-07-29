@@ -643,9 +643,23 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 // an upstream chart.
 //
 // The check matters most before removal, since os.Remove unlinks regular files
-// as readily as it removes empty directories. Lstat rather than Stat also
-// rejects a symlink planted after checksum.ValidateOutputRoot ran, which
-// happens before generation and permits pre-existing regular files.
+// as readily as it removes empty directories. A pre-existing regular file at
+// this path reaches generation on every route: checksum.ValidateOutputRoot
+// runs first on the DefaultBundler path but permits regular files, rejecting
+// only symlinks and special objects.
+//
+// Lstat rather than Stat additionally rejects a symlink here. On the
+// DefaultBundler path that is redundant, since ValidateOutputRoot already
+// rejects a symlink anywhere under the output root before any deployer runs;
+// it still holds for a caller that constructs this Generator directly and
+// bypasses that check.
+//
+// The guarantee stops there. This is a check-then-act on a path, so a symlink
+// planted between this call and the MkdirAll or Remove that follows is not
+// caught. Closing that would require openat-based operations throughout, and
+// it buys nothing in a supported configuration: it takes a local process with
+// write access to --output, and anything with that access can already rewrite
+// the finished bundle and its checksums.
 func checkStaticPath(staticDir string) error {
 	info, statErr := os.Lstat(staticDir)
 	switch {
@@ -694,7 +708,7 @@ func removeStaleStaticDir(staticDir string) error {
 			"failed to inspect static directory", readErr)
 	}
 	if len(entries) > 0 {
-		slog.Debug("keeping populated static directory from an earlier run",
+		slog.Warn("keeping populated static directory from an earlier run",
 			"path", staticDir, "entries", len(entries))
 		return nil
 	}
