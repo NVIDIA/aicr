@@ -40,8 +40,8 @@
 //     layer.
 //  3. Build a root values.yaml with ONLY dynamic paths (recipe defaults when
 //     available, empty strings otherwise). Static values stay in chart files.
-//  4. Write Chart.yaml + static/ + templates/ + values.yaml as a valid Helm
-//     chart.
+//  4. Write Chart.yaml + templates/ + values.yaml as a valid Helm chart,
+//     plus static/ when any component contributes a values file to it.
 //
 // This approach means changes to the Argo CD deployer (new component types,
 // sync policies, etc.) automatically flow through without duplication.
@@ -439,9 +439,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // targetRevision, and deployer defaults injected), and values.schema.json.
 // Each written file is appended to output.Files/TotalSize.
 func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) error {
+	// PropagateOrWrap rather than Wrap: writeStaticValuesAndBuildStubs now
+	// reports a non-directory at the static path as ErrCodeInvalidRequest, and
+	// re-coding that as INTERNAL would present a bad --output path as a server
+	// fault — and over the API would withhold the cause from the response,
+	// since 5xx bodies omit it.
 	staticFiles, staticSize, dynamicOnlyValues, err := g.writeStaticValuesAndBuildStubs(outputDir)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to write static values", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to write static values")
 	}
 	output.Files = append(output.Files, staticFiles...)
 	output.TotalSize += staticSize
@@ -523,20 +528,40 @@ func (g *Generator) finalizeOutput(ctx context.Context, output *deployer.Output,
 	return nil
 }
 
-// writeStaticValuesAndBuildStubs writes each component's values to static/<name>.yaml
-// and builds the dynamic-only stubs map for the root values.yaml.
+// writeStaticValuesAndBuildStubs writes static/<name>.yaml for each component
+// that resolves to a remote Helm chart, and builds the dynamic-only stubs map
+// for the root values.yaml. When no component qualifies, static/ is not
+// created and a stale one from an earlier run is removed.
 func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, int64, map[string]any, error) {
 	staticDir, err := deployer.SafeJoin(outputDir, "static")
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	if mkdirErr := os.MkdirAll(staticDir, 0755); mkdirErr != nil {
-		return nil, 0, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create static directory", mkdirErr)
-	}
 
 	var files []string
 	var totalSize int64
 	dynamicOnlyValues := make(map[string]any)
+
+	// static/ is created lazily, immediately before the first component
+	// values file is written. A recipe whose components all render as local
+	// charts (type Helm with no upstream Source, as the OCP overlays do)
+	// skips every iteration below, and an unconditional MkdirAll would then
+	// leave an empty directory that the bundle inventory validator rejects
+	// as unexpected. See issue #1942.
+	staticDirReady := false
+	ensureStaticDir := func() error {
+		if staticDirReady {
+			return nil
+		}
+		if err := checkStaticPath(staticDir); err != nil {
+			return err
+		}
+		if mkdirErr := os.MkdirAll(staticDir, 0755); mkdirErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to create static directory", mkdirErr)
+		}
+		staticDirReady = true
+		return nil
+	}
 
 	for _, ref := range g.RecipeResult.ComponentRefs {
 		// Skip non-Helm components (Kustomize, manifest-only)
@@ -584,6 +609,9 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		}
 
 		// Write static values (dynamic paths removed)
+		if dirErr := ensureStaticDir(); dirErr != nil {
+			return nil, 0, nil, dirErr
+		}
 		staticPath, staticSize, staticErr := deployer.WriteValuesFile(staticValues, staticDir, ref.Name+".yaml")
 		if staticErr != nil {
 			return nil, 0, nil, errors.Wrap(errors.ErrCodeInternal,
@@ -593,7 +621,89 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		totalSize += staticSize
 	}
 
+	// Generation writes directly into --output and the directory is not
+	// cleared between runs, so a failed pre-fix run leaves its empty static/
+	// behind. Without this, retrying into that same directory reproduces the
+	// original failure even though nothing new is created.
+	if !staticDirReady {
+		if err := removeStaleStaticDir(staticDir); err != nil {
+			return nil, 0, nil, err
+		}
+	}
+
 	return files, totalSize, dynamicOnlyValues, nil
+}
+
+// checkStaticPath rejects anything occupying the static path that is not a
+// plain directory. Both the create and the remove path call it, so a
+// pre-existing file or symlink produces the same ErrCodeInvalidRequest
+// regardless of whether the recipe happens to contribute static values —
+// otherwise the identical user error would surface as INVALID_REQUEST for an
+// all-local recipe and INTERNAL (from MkdirAll's ENOTDIR) for any recipe with
+// an upstream chart.
+//
+// The check matters most before removal, since os.Remove unlinks regular files
+// as readily as it removes empty directories. Lstat rather than Stat also
+// rejects a symlink planted after checksum.ValidateOutputRoot ran, which
+// happens before generation and permits pre-existing regular files.
+func checkStaticPath(staticDir string) error {
+	info, statErr := os.Lstat(staticDir)
+	switch {
+	case os.IsNotExist(statErr):
+		return nil
+	case statErr != nil:
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect static directory", statErr)
+	case info.Mode()&os.ModeSymlink != 0:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %q is a symbolic link", staticDir))
+	case !info.IsDir():
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %q exists and is not a directory", staticDir))
+	}
+	return nil
+}
+
+// removeStaleStaticDir clears a static/ left behind by an earlier run when the
+// current generation contributed no files to it.
+//
+// Emptiness is checked explicitly rather than inferred from an os.Remove
+// errno, which keeps the intent readable and avoids platform-specific error
+// values. A populated static/ is kept: its contents are reported by
+// validateExactTree as unexpected output, though only when checksums are
+// enabled, since that validator runs inside the IncludeChecksums path. With
+// checksums off a stale static/ survives into the bundle, which is unchanged
+// from before this fix — a reused --output was never cleared, so stale files
+// of any kind already persisted.
+//
+// Anything that blocks removal of an empty directory fails generation rather
+// than being logged and ignored: leaving it behind either trips that same
+// validator or, when checksums are disabled, ships the bundle this fix exists
+// to prevent.
+func removeStaleStaticDir(staticDir string) error {
+	if err := checkStaticPath(staticDir); err != nil {
+		return err
+	}
+
+	entries, readErr := os.ReadDir(staticDir)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return nil
+		}
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect static directory", readErr)
+	}
+	if len(entries) > 0 {
+		slog.Debug("keeping populated static directory from an earlier run",
+			"path", staticDir, "entries", len(entries))
+		return nil
+	}
+
+	if rmErr := os.Remove(staticDir); rmErr != nil && !os.IsNotExist(rmErr) {
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to remove empty static directory %q", staticDir), rmErr)
+	}
+	return nil
 }
 
 // valuesSchemaProperty, valuesSchemaDeployerProps, valuesSchemaDeployer,

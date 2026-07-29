@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/sigstore/rekor-monitor/pkg/identity"
 	rekorv2 "github.com/sigstore/rekor-monitor/pkg/rekor/v2"
@@ -203,6 +204,56 @@ func filterKnownReleases(found []identity.MonitoredIdentity, known map[string]bo
 	return residual
 }
 
+// scanChunkSize, maxScanEntriesPerRun, and scanBudgetHeadroom bound the
+// resumable identity scan. They are package vars (not consts) only so tests can
+// shrink them (via withScanBounds); production never reassigns them. Because that
+// mutation is process-global, tests in this package must not call t.Parallel() --
+// with -race a parallel test would data-race on these.
+var (
+	// scanChunkSize bounds a single IdentitySearch call so one chunk cannot
+	// approach the pass deadline, and gives the resumable scan a save point: the
+	// persisted progress cursor advances one chunk at a time. It also caps the
+	// overrun past the soft budget, since the budget is only checked between
+	// chunks (one in-flight chunk may finish after the budget is spent).
+	scanChunkSize int64 = 50_000
+	// scanBudgetHeadroom is the PRIMARY bound: the scan stops once the pass
+	// deadline is within this margin, saving progress to resume next run. This
+	// makes catch-up adaptive to scan speed -- a slow run covers fewer entries,
+	// a fast run more, and neither overruns the deadline. The margin only needs to
+	// cover the one in-flight chunk running when the deadline trips (the budget is
+	// checked between chunks): a completed catch-up run measured ~950k entries in
+	// ~40min (~24k/min), so a 50k chunk is ~2min, call it ~3-4min on a slow-network
+	// day. 5m is ~1.5x that worst case, and finalizing a partial pass is
+	// near-instant (progress is already persisted per chunk; the checkpoint stays
+	// at prev). If a trailing chunk still overruns the 45m pass deadline, ctx
+	// cancellation degrades that run gracefully (operational classification,
+	// retryable) and the next run resumes from saved progress -- it never surfaces
+	// a false security finding.
+	scanBudgetHeadroom = 5 * time.Minute
+	// maxScanEntriesPerRun is the outer SAFETY ceiling on one run's scan, in case
+	// an unexpectedly fast run (or a broken clock) would otherwise scan an
+	// unbounded slice. On normal infra the soft budget above stops the scan first
+	// (a completed run covered ~950k entries in the ~40min budget), so this rarely
+	// binds; it exists so a single run can never run away. The log grows ~70k/hr,
+	// well under a per-run pass, so catch-up converges. (Throughput is measured
+	// from completed catch-up runs, not derived from the 2026-07-24 wedge, which
+	// only bounds the window size, not completed work.)
+	maxScanEntriesPerRun int64 = 2_000_000
+	// maxCatchUpStallRuns is how many consecutive partial passes may fail to beat
+	// the best-ever `remaining` (see scanTrend) before observe declares the
+	// catch-up diverging and returns a degraded error. Combined with the workflow's
+	// own consecutive-failure streak before it opens a degraded issue, this is
+	// deliberately slow so a single transient slow pass never pages.
+	maxCatchUpStallRuns = 3
+	// maxCatchUpTotalRuns is an absolute bound: how many partial passes a single
+	// window may take before observe declares it degraded, even if `remaining` is
+	// still inching down (which keeps the stall count above at 0). It catches a
+	// glacial catch-up the watermark never trips. Must exceed the passes a
+	// legitimate large backlog needs -- the ~6.5M-entry 2026-07 wedge caught up in
+	// well under ten passes at ~1M/pass -- so 72 (~3 days hourly) leaves ample room.
+	maxCatchUpTotalRuns = 72
+)
+
 // scanWindow computes the [start, end] entry-index window to scan between the
 // previous checkpoint and the current head. ok is false when there is no prior
 // checkpoint (first run) or the window is empty/degenerate, so the caller only
@@ -234,10 +285,21 @@ func scanWindow(prev, cur *tlog.Checkpoint) (start, end int64, ok bool) {
 type outcome struct {
 	prev, cur *tlog.Checkpoint // prev is nil on the first run (baseline)
 	rotated   bool             // prev and cur are different shards (yearly rotation)
-	scanned   bool             // whether an identity scan ran this pass
-	from, to  int64            // the inclusive range actually scanned (valid when scanned)
-	found     []identity.MonitoredIdentity
-	failed    []identity.FailedLogEntry
+	// abandonedProgress is the prior-shard scan cursor at a rotation: when > 0, an
+	// in-progress catch-up is being abandoned across the rotation boundary and its
+	// remaining entries will never be identity-scanned (reported loudly).
+	abandonedProgress int64
+	scanned           bool  // whether an identity scan ran this pass
+	from, to          int64 // the inclusive range actually scanned (valid when scanned)
+	found             []identity.MonitoredIdentity
+	failed            []identity.FailedLogEntry
+	// caughtUp reports whether this pass finished scanning the whole window up to
+	// the current head. When false, the scan was bounded (soft budget / per-run
+	// entry cap) and persisted its progress; a later run resumes and continues.
+	caughtUp bool
+	// remaining is the number of window entries still unscanned after this pass
+	// (valid when scanned and !caughtUp), for the human-readable catch-up line.
+	remaining int64
 }
 
 // hasFindings reports whether the scan surfaced anything alert-worthy: a matched
@@ -266,6 +328,19 @@ func (o outcome) report(w io.Writer) {
 		fmt.Fprintf(w, "shard rotation detected: %q -> %q; re-baselining on the new shard at size %d. "+
 			"Entries around the rotation boundary are not identity-scanned; see the shard-rotation note in "+
 			"docs/contributor/maintaining.md.\n", o.prev.Origin, o.cur.Origin, o.cur.Size)
+		// A catch-up scan mid-window when the shard rotated: the vendored
+		// IdentitySearch only reads the latest shard, so the prior shard's unscanned
+		// tail is abandoned. Surface it instead of the pre-catch-up assumption that
+		// the gap was at most one hour of entries. A negative value means the
+		// progress companion could not be read (corrupt); report that, not a count.
+		switch {
+		case o.abandonedProgress > 0:
+			fmt.Fprintf(w, "WARNING: an in-progress prior-shard identity scan had reached index %d; "+
+				"its remaining entries are abandoned across the rotation and never scanned.\n", o.abandonedProgress)
+		case o.abandonedProgress < 0:
+			fmt.Fprintf(w, "WARNING: prior-shard scan progress could not be read (corrupt companion); "+
+				"any in-progress prior-shard scan is abandoned across the rotation.\n")
+		}
 		return
 	}
 	fmt.Fprintf(w, "consistency verified: %d -> %d\n", o.prev.Size, o.cur.Size)
@@ -273,6 +348,11 @@ func (o outcome) report(w io.Writer) {
 		return
 	}
 	if !o.hasFindings() {
+		if o.scanned && !o.caughtUp {
+			fmt.Fprintf(w, "identity scan [%d, %d]: no matching entries; catching up, %d entr(y/ies) remaining\n",
+				o.from, o.to, o.remaining)
+			return
+		}
 		fmt.Fprintf(w, "identity scan [%d, %d]: no matching entries\n", o.from, o.to)
 		return
 	}

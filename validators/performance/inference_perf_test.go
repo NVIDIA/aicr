@@ -1042,6 +1042,25 @@ func TestBuildAIPerfJob_ModelViaEnvNotShell(t *testing.T) {
 	}
 }
 
+// TestBuildAIPerfJob_ModelPassedWithFlag verifies the model reaches aiperf via
+// the explicit --model flag rather than as a positional argument. aiperf 0.11.0
+// dropped the positional form and aborts with "Unused Tokens: ['<model>']", so a
+// regression here fails every inference-perf run on every cloud.
+func TestBuildAIPerfJob_ModelPassedWithFlag(t *testing.T) {
+	clearTuningEnvs(t)
+	job, _, err := buildAIPerfJob("ns", "aicr-aiperf-run-0", "http://ep:8000", "Qwen/Qwen3-8B", 16, nil)
+	if err != nil {
+		t.Fatalf("buildAIPerfJob: %v", err)
+	}
+	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	if !strings.Contains(script, `--model "$AICR_MODEL"`) {
+		t.Errorf("script must pass the model as `--model \"$AICR_MODEL\"`; script:\n%s", script)
+	}
+	if strings.Contains(script, `aiperf profile "$AICR_MODEL"`) {
+		t.Errorf("model must not be passed positionally (rejected by aiperf >= 0.11.0); script:\n%s", script)
+	}
+}
+
 func TestBuildAIPerfJob_RequestCountFloor(t *testing.T) {
 	clearTuningEnvs(t)
 	tests := []struct {
