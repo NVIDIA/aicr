@@ -112,15 +112,16 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 		return err
 	}
 
-	if len(allNodes) == 0 {
-		return validators.Skip("no GPU nodes found in the cluster")
-	}
-
 	coverage, err := partitionGpuNodes(ctx.Ctx, allNodes)
 	if err != nil {
 		return err
 	}
 	printLines(coverage.enumerationLines()...)
+
+	if len(allNodes) == 0 {
+		printLines(coverage.coverageLine(0))
+		return validators.Skip("no GPU nodes found in the cluster")
+	}
 
 	gpuNodes := coverage.schedulable
 	if len(gpuNodes) == 0 {
