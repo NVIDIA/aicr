@@ -534,13 +534,13 @@ func (r *RecipeResult) backfillComponentTypes() error {
 
 // PrepareAndValidate normalizes a RecipeResult's component refs and rejects
 // incoherent ones, in the required order: reject refs named with the reserved
-// deployer override key (all refs, enabled or disabled), back-fill missing
+// deployer override key, reject duplicate non-empty ref names, back-fill missing
 // types on enabled refs from the registry, canonicalize the type casing, then
 // validate
 // coherence (which itself only inspects enabled refs). Boundaries
 // that produce a RecipeResult WITHOUT running ApplyRegistryDefaults — file load
 // (LoadFromFileWithProvider) and external adoption (client adoptRecipe) — call
-// this single method so the three steps cannot drift or be partially applied
+// this single method so the four steps cannot drift or be partially applied
 // (e.g. validating before canonicalizing would reject legitimate lowercase
 // types; skipping the back-fill would reject type-less registry refs). The
 // resolve path (finalizeRecipeResult) instead back-fills via ApplyRegistryDefaults
@@ -563,11 +563,45 @@ func (r *RecipeResult) PrepareAndValidate() error {
 				fmt.Sprintf("recipe component %q uses the reserved deployer override key as its name; %q is reserved for --set deployer:<key> Argo deployer options", r.ComponentRefs[i].Name, ReservedDeployerKey))
 		}
 	}
+	// Reject duplicate component-ref names (enabled or disabled) BEFORE
+	// registry back-fill. See validateRefNames for the rationale.
+	if err := validateRefNames(r.ComponentRefs); err != nil {
+		return err
+	}
 	if err := r.backfillComponentTypes(); err != nil {
 		return err
 	}
 	canonicalizeComponentTypes(r.ComponentRefs)
 	return r.ValidateCoherence()
+}
+
+// validateRefNames rejects duplicate non-empty component-ref names (enabled
+// or disabled). Component names key value materialization, override
+// routing, validation, filtering, and deployment ordering throughout the
+// bundler/validations/deployer paths, all of which assume a unique
+// name -> ref mapping. AICR-generated recipes never produce duplicates, but
+// a hand-authored or externally-adopted recipe can, and a disabled
+// duplicate must not be allowed to silently mask an enabled ref of the same
+// name (or vice versa) — so ALL refs participate in the check, not just
+// enabled ones. Empty names are exempt: they are never used as a lookup
+// key. Shared between PrepareAndValidate (the file-load, adopt, and
+// bundle/validate -r / POST /v1/bundle boundary) and finalizeRecipeResult
+// (the criteria-resolve boundary), so both fail closed on the same
+// recipes. See #1874.
+func validateRefNames(refs []ComponentRef) error {
+	seen := make(map[string]int, len(refs))
+	for i := range refs {
+		name := refs[i].Name
+		if name == "" {
+			continue
+		}
+		if first, ok := seen[name]; ok {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("recipe has duplicate component ref name %q (refs %d and %d)", name, first, i))
+		}
+		seen[name] = i
+	}
+	return nil
 }
 
 // ValidateCoherence rejects enabled ComponentRefs whose deployment-shape fields

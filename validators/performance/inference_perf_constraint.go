@@ -2935,8 +2935,13 @@ func buildAIPerfJob(namespace, jobName, endpoint, model string, concurrency int,
 	// AICR_INFERENCE_PERF_MODEL value with shell metacharacters (e.g. $(...))
 	// would otherwise be command-substituted by /bin/sh -c even inside double
 	// quotes; "$AICR_MODEL" expands to the literal value without re-scanning it.
+	//
+	// The model must be passed with the explicit --model flag: aiperf 0.11.0
+	// dropped support for a positional model argument, rejecting it with
+	// "Unused Tokens: ['<model>']" before the benchmark starts.
 	script := fmt.Sprintf(`set -e
-aiperf profile "$AICR_MODEL" \
+aiperf profile \
+  --model "$AICR_MODEL" \
   --url %s \
   --endpoint-type chat \
   --streaming \
