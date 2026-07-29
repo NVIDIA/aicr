@@ -426,7 +426,7 @@ tagged with its cordon state, and:
 3. Print a coverage line (`RESULT: nodesValidated: <schedulable>/<total>`)
    on every exit path (skip, failure, and success), not only the
    success path, so a pass *or* a failure on reduced scope is visible.
-   The `RESULT: ` prefix is `pkg/validator/validator.go`'s
+   The `RESULT:` prefix is `pkg/validator/validator.go`'s
    `resultSummaryPrefix` convention: the validator runtime echoes the
    trailing text of any such stdout line into live CLI output via
    `slog.Info`, unconditionally — without it, the line is only visible
@@ -434,7 +434,7 @@ tagged with its cordon state, and:
    Caveat: the line still also lands in `TestResult.Stdout`/`.Message`
    in the CTRF report, which the default ("minimal") redaction policy
    (`pkg/evidence/redact`) strips from a signed evidence bundle. The
-   `RESULT: ` prefix makes the coverage figure visible during a live
+   `RESULT:` prefix makes the coverage figure visible during a live
    `aicr validate` run regardless of redaction, but it is not
    guaranteed to survive into the artifact a downstream consumer
    verifies by default. See #1951 for carrying this kind of outcome
