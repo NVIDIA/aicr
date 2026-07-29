@@ -509,12 +509,16 @@ jq -r '.verificationMaterial.certificate.rawBytes' \
 | Interactive keyless (`--attest`, browser or `--oidc-device-flow`) | Fulcio certificate: your email address in the SAN, plus the OIDC issuer that authenticated you | public-good Rekor v2 |
 | Non-interactive keyless (ambient CI OIDC, or `--identity-token`) | Fulcio certificate: the workload identity URL in the SAN; under GitHub Actions the issuer is `https://token.actions.githubusercontent.com` | public-good Rekor v2 |
 | KMS key (`--signing-key <kms-uri>`) | a public key, not a certificate: no SAN and no issuer to match, only the key itself | public-good Rekor v2 |
-| Private Sigstore (`--fulcio-url` / `--rekor-url`) | as keyless above, but issued by your own CA | your private Rekor v1 |
+| Private Fulcio alone (`--fulcio-url`) | as keyless above, but the certificate is issued by your own CA | public-good Rekor v2 |
+| Private Fulcio plus private log (`--fulcio-url` with `--rekor-url`) | as keyless above, but the certificate is issued by your own CA | your private Rekor v1 |
 | Rekor v1 opt-out (`--rekor-url https://rekor.sigstore.dev`) | as keyless above | public-good Rekor v1 |
 | Air-gapped KMS (`--tlog-upload=false`) | nothing is uploaded | none |
 
-Rekor v2 is the default for every keyless and KMS signing path in the CLI;
-`--rekor-url` and `--signing-config` are the opt-outs. See
+Note the third column carefully. Rekor v2 is the default for every keyless and
+KMS signing path in the CLI, and only `--rekor-url` and `--signing-config` change
+the log. `--fulcio-url` selects the certificate authority, not the log, so a
+private CA on its own still publishes into the public-good Rekor v2. Pair it with
+`--rekor-url` to keep the entry inside your own infrastructure. See
 [Rekor v2 Signing](../contributor/rekor-v2-signing.md).
 
 ### Monitoring the public-good Rekor v2
@@ -581,6 +585,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: NVIDIA/aicr
+          # Pin the tool you audit. A scheduled security job should not float on
+          # another project's default branch; bump this deliberately.
+          ref: v0.18.0
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -590,12 +597,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The by-name artifact query is repo-wide: it also returns same-named
+          # artifacts uploaded by a fork pull_request run, whose GITHUB_TOKEN can
+          # upload under any name. A poisoned checkpoint (a genuine one copied
+          # from the live log head) passes the consistency proof while collapsing
+          # the identity-scan window to empty, silently skipping entries. So
+          # accept only artifacts produced by this repository on main:
+          # head_repository_id == repository_id rejects every fork run, and
+          # head_branch == "main" limits to the scheduled runs.
           id="$(gh api --paginate \
             "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=rekor-v2-checkpoint&per_page=100" \
-            | jq -rs '[.[].artifacts[] | select(.expired == false)]
+            | jq -rs '[.[].artifacts[]
+                | select(.expired == false)
+                | select(.workflow_run.head_branch == "main")
+                | select(.workflow_run.head_repository_id == .workflow_run.repository_id)]
                 | sort_by(.created_at) | last | .id // empty')"
           if [ -z "${id}" ]; then
-            echo "No prior checkpoint; treating this as the first run."
+            echo "No prior checkpoint from this repository on main; treating this as the first run."
             exit 0
           fi
           gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > checkpoint.zip
@@ -622,13 +640,16 @@ jobs:
           if-no-files-found: ignore
 ```
 
-Pin the actions by commit SHA in production. Two hardening steps from AICR's own
-workflow are worth copying before you rely on this: it filters the artifact list
-to runs from its own repository on `main` (the by-name query also returns
-same-named artifacts uploaded by fork pull-request runs, and a poisoned
-checkpoint would silently collapse the scan window), and it branches
-notifications on the `CLASSIFICATION=` value so that Sigstore or GitHub-API
-flakiness does not page like a security event.
+The examples use readable version tags so they stay legible. In production, pin
+every external reference in them by full-length commit SHA: each `uses:` action,
+the upstream reusable workflow in the next example, and the `ref:` above. A tag
+is mutable and can be repointed, which is the same argument the digest-pinning
+advice earlier in this guide makes for images.
+
+One further hardening step from AICR's own workflow is worth copying before you
+rely on this: it branches notifications on the `CLASSIFICATION=` value, so that
+Sigstore or GitHub-API flakiness produces a quiet, self-healing failure rather
+than paging like a security event.
 
 ### Monitoring Rekor v1 and a private Rekor
 
@@ -660,10 +681,13 @@ jobs:
       config: |
         monitoredValues:
           certIdentities:
-            - certSubject: ci@myorg\.example\.com
+            - certSubject: ^ci@myorg\.example\.com$
               issuers:
-                - https://fulcio\.internal\.example\.com
+                - ^https://fulcio\.internal\.example\.com$
 ```
+
+Upstream matches both `certSubject` and each entry of `issuers` as Go regular
+expressions, so anchor them here for the same reason you anchor the flags above.
 
 A KMS-signed entry carries no certificate, so there is no subject or issuer to
 match. Watch the key instead, via `fingerprints`, which is the hex-encoded
@@ -709,9 +733,13 @@ monitors already covers.
    credentials, revoke active sessions and tokens, and check the identity
    provider's own audit log. For a KMS key, rotate the key and revoke the
    principals allowed to sign with it.
-4. **Re-verify what you already published.** Run `aicr verify` over every bundle
-   you shipped under that identity, pinning the signer with `--require-creator`,
-   so you know which artifacts are genuine.
+4. **Re-verify what you already published, but do not mistake what that proves.**
+   `aicr verify --require-creator <identity>` narrows the set to artifacts signed
+   by that identity. It cannot separate yours from the attacker's inside that
+   set, because a compromised identity satisfies the check exactly as well as you
+   do. Establish legitimacy from a record the attacker does not control: compare
+   each artifact's digest and provenance against your own build and release
+   history. Quarantine anything you cannot account for there.
 5. **Expect the entry to be permanent.** Nothing can be removed from a
    transparency log, so the response is rotation plus a public statement of which
    entries are legitimate, never takedown.
