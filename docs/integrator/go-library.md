@@ -248,7 +248,9 @@ identifiers. When you already hold a `pkg/recipe.AllowLists`, use
 
 `ResolveRecipe` takes the stable `RecipeRequest` shape and returns the
 facade `RecipeResult` — a deliberately small struct exposing the
-`Name`, `Version`, and `Components` of the resolved recipe. When you
+`Name`, `Version`, and `Components` of the resolved recipe. `Components`
+lists enabled (deployable) components only; disabled refs remain visible
+via `Resolved().ComponentRefs`. When you
 already hold an `*aicr.Criteria` value — for example, a REST handler
 that parsed criteria from an incoming HTTP request and wrapped them with
 `aicr.WrapCriteria` — use `ResolveRecipeFromCriteria`. It returns the

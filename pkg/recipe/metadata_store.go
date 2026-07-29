@@ -968,6 +968,18 @@ func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec 
 	}
 	result.Metadata.AppliedOverlays = appliedOverlays
 
+	// Reject duplicate component-ref names before they reach ValidateCoherence
+	// or any caller of BuildRecipeResult/ResolveRecipe. RecipeMetadataSpec.Merge
+	// silently last-wins-collapses same-name refs via componentMap, so this
+	// only fires when an external --data base carries duplicates AND no
+	// matching overlay merge collapses them. Mirrors the same check
+	// PrepareAndValidate runs at the file-load/adopt/bundle boundary, so the
+	// criteria-resolve boundary (aicr recipe -o, aicr query,
+	// Client.ResolveRecipe) fails closed on the same recipes too. See #1874.
+	if err := validateRefNames(mergedSpec.ComponentRefs); err != nil {
+		return nil, err
+	}
+
 	// Reject refs whose deployment-shape fields are incoherent (e.g. a Helm ref
 	// that also carries a Kustomize tag/path), after defaults populate Type.
 	// The same check also runs at the load and adopt boundaries (see

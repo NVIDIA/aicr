@@ -3,56 +3,10 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-07-22T00:00:00Z",
-  "version": 8,
-  "tooling": "manual; aiperf-bench statements verified against aiperf v0.7.0 source; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); aicr-gate statements suppress CVEs in the embedded upstream kyverno/chainsaw binary (affected packages identified via vuln.go.dev), justified by chainsaw's ephemeral cluster-internal readiness-gate usage",
+  "timestamp": "2026-07-24T00:00:00Z",
+  "version": 9,
+  "tooling": "manual; aiperf-bench statements verified against aiperf v0.11.0 source (which pins pillow~=12.2.0) — the GHSA-whj4-6x5x-4v2j and GHSA-pwv6-vv43-88gr statements were dropped because their CVEs are fixed in pillow 12.2.0 and no longer present; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); aicr-gate statements suppress CVEs in the embedded upstream kyverno/chainsaw binary (affected packages identified via vuln.go.dev), justified by chainsaw's ephemeral cluster-internal readiness-gate usage",
   "statements": [
-    {
-      "vulnerability": {
-        "name": "GHSA-whj4-6x5x-4v2j",
-        "description": "pillow FITS image format decoder GZIP decompression bomb leading to unbounded memory consumption (CVE-2026-40192, CWE-400, High). Fixed in pillow 12.2.0; pinned by aiperf to 12.1.x."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "AICR invokes aiperf-bench as `aiperf profile <text-LLM> --url <endpoint>` against text-only models (Qwen/Qwen3-0.6B per validators/performance/inference_perf_constraint.go) with synthetic text tokens (aiperfInputTokensMean=128, aiperfOutputTokensMean=128). The benchmark transports only JSON over HTTP and never loads image files. aiperf's image-loading code paths in dataset_manager.py / generator/image.py / utils.py are gated to multimodal benchmark configurations that the AICR validator does not exercise. Even when image mode is enabled, aiperf's ImageFormat enum (aiperf/common/enums/enums.py) restricts inputs to PNG/JPEG; FITS is not in the allowlist."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-pwv6-vv43-88gr",
-        "description": "pillow PSD image codec integer overflow leading to out-of-bounds write in src/decode.c / src/encode.c (CVE-2026-25990, CWE-787, High). Fixed in pillow 12.2.0; pinned by aiperf to 12.1.x."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Same reachability argument as GHSA-whj4-6x5x-4v2j: the AICR text-LLM benchmark workload never enters pillow's image-loading paths, and aiperf's ImageFormat allowlist restricts inputs to PNG/JPEG. PSD is not in the allowlist."
-    },
     {
       "vulnerability": {
         "name": "CVE-2026-15308",
@@ -74,7 +28,7 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The trigger requires incrementally feeding attacker-controlled HTML containing repeated unterminated markup declarations into html.parser.HTMLParser.feed(). aiperf v0.7.0 source contains zero references to html.parser, HTMLParser, or any html stdlib import (verified with `grep -rn -E 'html\\.parser|HTMLParser|^(import|from) html'` against the PyPI sdist \u2014 no hits). AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go); the workload exchanges only JSON over HTTP via aiohttp + msgspec/orjson and never parses HTML documents from the inference endpoint or any other source. No attacker-controlled markup can reach the vulnerable parser, so the quadratic-complexity code path is unreachable."
+      "impact_statement": "The trigger requires incrementally feeding attacker-controlled HTML containing repeated unterminated markup declarations into html.parser.HTMLParser.feed(). aiperf 0.11.0 source contains zero references to html.parser, HTMLParser, or any html stdlib import (verified with `grep -rn -E 'html\\.parser|HTMLParser|^(import|from) html'` against the aiperf 0.11.0 wheel \u2014 no hits). AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go); the workload exchanges only JSON over HTTP via aiohttp + msgspec/orjson and never parses HTML documents from the inference endpoint or any other source. No attacker-controlled markup can reach the vulnerable parser, so the quadratic-complexity code path is unreachable."
     },
     {
       "vulnerability": {
@@ -1014,7 +968,7 @@
     {
       "vulnerability": {
         "name": "GHSA-vjc4-5qp5-m44j",
-        "description": "pillow JPEG2000 tiled decode retains a growing scratch buffer and can be used for denial of service (CVE-2026-59204, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow JPEG2000 tiled decode retains a growing scratch buffer and can be used for denial of service (CVE-2026-59204, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1032,12 +986,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. JPEG2000 decode is reached only by opening JP2/J2K inputs; aiperf's ImageFormat allowlist (src/aiperf/common/enums/enums.py) permits only PNG and JPEG, and `grep -riE 'jp2|jpeg2000' aiperf-0.7.0/src` returns zero hits."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. JPEG2000 decode is reached only by opening JP2/J2K inputs; aiperf's ImageFormat allowlist (aiperf/common/enums/enums.py) permits only PNG and JPEG, and `grep -riE 'jp2|jpeg2000' aiperf/ (the 0.11.0 wheel)` returns zero hits."
     },
     {
       "vulnerability": {
         "name": "GHSA-xj96-63gp-2gmr",
-        "description": "pillow heap out-of-bounds write in ImageFilter.RankFilter via integer overflow in ImagingExpand (CVE-2026-59197, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow heap out-of-bounds write in ImageFilter.RankFilter via integer overflow in ImagingExpand (CVE-2026-59197, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1055,12 +1009,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. The vulnerable entry point is ImageFilter.RankFilter; `grep -rn 'ImageFilter' aiperf-0.7.0/src` returns zero hits."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable entry point is ImageFilter.RankFilter; `grep -rn 'ImageFilter' aiperf/ (the 0.11.0 wheel)` returns zero hits."
     },
     {
       "vulnerability": {
         "name": "GHSA-62p4-gmf7-7g93",
-        "description": "pillow out-of-bounds read via attacker-controlled row stride on the mmap path for McIdas AREA files (CVE-2026-54058, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow out-of-bounds read via attacker-controlled row stride on the mmap path for McIdas AREA files (CVE-2026-54058, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1078,12 +1032,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. Triggering requires opening a McIdas AREA file; `grep -rn 'McIdas' aiperf-0.7.0/src` returns zero hits and the ImageFormat allowlist permits only PNG and JPEG."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. Triggering requires opening a McIdas AREA file; `grep -rn 'McIdas' aiperf/ (the 0.11.0 wheel)` returns zero hits and the ImageFormat allowlist permits only PNG and JPEG."
     },
     {
       "vulnerability": {
         "name": "GHSA-6r8x-57c9-28j4",
-        "description": "pillow heap out-of-bounds write in Image.paste()/Image.crop() via signed coordinate overflow (CVE-2026-59199, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow heap out-of-bounds write in Image.paste()/Image.crop() via signed coordinate overflow (CVE-2026-59199, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1101,12 +1055,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. `grep -rnE '\\.paste\\(|\\.crop\\(' aiperf-0.7.0/src` returns zero hits \u2014 aiperf never calls the vulnerable methods."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. `grep -rnE '\\.paste\\(|\\.crop\\(' aiperf/ (the 0.11.0 wheel)` returns zero hits \u2014 aiperf never calls the vulnerable methods."
     },
     {
       "vulnerability": {
         "name": "GHSA-9hw9-ch79-4vh6",
-        "description": "pillow controlled heap out-of-bounds write in ImageCmsTransform.apply() via output mode mismatch (CVE-2026-59205, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow controlled heap out-of-bounds write in ImageCmsTransform.apply() via output mode mismatch (CVE-2026-59205, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1124,12 +1078,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. The vulnerable entry point is the ImageCms color-management module; `grep -rn 'ImageCms' aiperf-0.7.0/src` returns zero hits."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable entry point is the ImageCms color-management module; `grep -rn 'ImageCms' aiperf/ (the 0.11.0 wheel)` returns zero hits."
     },
     {
       "vulnerability": {
         "name": "GHSA-45hq-cxwh-f6vc",
-        "description": "pillow BdfFontFile: Image.new() called without decompression-bomb check \u2014 bomb protection bypass via BDF font loading (CVE-2026-55379, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow BdfFontFile: Image.new() called without decompression-bomb check \u2014 bomb protection bypass via BDF font loading (CVE-2026-55379, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1147,12 +1101,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image and PIL.ImageDraw \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf-0.7.0/src` returns zero hits, so no external font file is ever parsed."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
     },
     {
       "vulnerability": {
         "name": "GHSA-5x94-69rx-g8h2",
-        "description": "pillow FontFile.compile(): Image.new() called without decompression-bomb check (CVE-2026-54060, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow FontFile.compile(): Image.new() called without decompression-bomb check (CVE-2026-54060, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1170,12 +1124,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image and PIL.ImageDraw \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf-0.7.0/src` returns zero hits, so no external font file is ever parsed."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
     },
     {
       "vulnerability": {
         "name": "GHSA-phj9-mv4w-65pm",
-        "description": "pillow GdImageFile._open(): image dimensions accepted without decompression-bomb check (CVE-2026-55380, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow GdImageFile._open(): image dimensions accepted without decompression-bomb check (CVE-2026-55380, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1193,12 +1147,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. GD images are not auto-registered with Image.open; the vulnerable path requires explicit PIL.GdImageFile usage \u2014 `grep -rn 'GdImageFile' aiperf-0.7.0/src` returns zero hits."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. GD images are not auto-registered with Image.open; the vulnerable path requires explicit PIL.GdImageFile usage \u2014 `grep -rn 'GdImageFile' aiperf/ (the 0.11.0 wheel)` returns zero hits."
     },
     {
       "vulnerability": {
         "name": "GHSA-8v84-f9pq-wr9x",
-        "description": "pillow PcfFontFile._load_bitmaps(): Image.frombytes() called without decompression-bomb check \u2014 bomb protection bypass via PCF font loading (CVE-2026-54059, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow PcfFontFile._load_bitmaps(): Image.frombytes() called without decompression-bomb check \u2014 bomb protection bypass via PCF font loading (CVE-2026-54059, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1216,12 +1170,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image and PIL.ImageDraw \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf-0.7.0/src` returns zero hits, so no external font file is ever parsed."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
     },
     {
       "vulnerability": {
         "name": "GHSA-jjj6-mw9f-p565",
-        "description": "pillow decompression-bomb denial of service via PdfParser.PdfStream.decode() (CVE-2026-59200, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.7.0 pins pillow~=12.1.1 and every later aiperf release through 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow decompression-bomb denial of service via PdfParser.PdfStream.decode() (CVE-2026-59200, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1239,7 +1193,7 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py) for synthetic multimodal dataset generation, which the AICR workload never configures. PdfParser runs only when reading or appending to existing PDF files; `grep -rnE 'PdfParser|\\.pdf' aiperf-0.7.0/src` returns zero hits and the ImageFormat allowlist permits only PNG and JPEG."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. PdfParser runs only when reading or appending to existing PDF files; `grep -rnE 'PdfParser|\\.pdf' aiperf/ (the 0.11.0 wheel)` returns zero hits and the ImageFormat allowlist permits only PNG and JPEG."
     },
     {
       "vulnerability": {

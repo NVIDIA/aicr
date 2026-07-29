@@ -37,8 +37,12 @@ info:
 
     - **Trust management** (`aicr trust update`) — updates the local Sigstore TUF root cache.
 
-    - **Bundle attestation** (`aicr bundle --attest`) — requires OIDC interactive or ambient
-      authentication for Sigstore signing.
+    - **Interactive Sigstore attestation** (`aicr bundle --attest` with browser-based OIDC):
+      the interactive, user-authenticated signing flow is CLI-only. The API server instead
+      offers non-interactive server-side attestation: `POST /v1/bundle?attest=true` returns a
+      signed bundle, with the server signing as itself using its operator-configured KMS key or
+      private-Sigstore keyless identity. No signing identity is ever taken from the request.
+      See the `attest` query parameter on POST /v1/bundle.
 
     - **OCI registry push** (`aicr bundle --output oci://...`) — pushes bundle artifacts to
       a container registry.
@@ -189,7 +193,7 @@ paths:
                   summary: Basic recipe request
                   value:
                     apiVersion: aicr.run/v1alpha2
-                    kind: Recipe
+                    kind: RecipeResult
                     metadata:
                       version: v1.0.0
                       created: "2025-01-15T10:30:00Z"
@@ -857,6 +861,11 @@ paths:
         This design enables a simple workflow: pipe the output from GET /v1/recipe directly
         to POST /v1/bundle.
 
+        Current recipes carry apiVersion aicr.run/v1alpha2 and kind RecipeResult.
+        For backward compatibility, legacy artifacts may omit either header field,
+        carry it as an empty string after a decode/remarshal round trip, or carry
+        the kind Recipe published by this contract through v0.18.0.
+
         The response is a binary zip file containing all generated bundle artifacts
         organized by bundler type (e.g., gpu-operator/, network-operator/).
       parameters:
@@ -1083,19 +1092,39 @@ paths:
             pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
             maxLength: 253
           example: gpu-runtime
+        - name: attest
+          in: query
+          required: false
+          description: >
+            Return a cryptographically signed bundle. When true, the server
+            signs the bundle as itself using its operator-configured signing
+            identity; no signing key, token, or identity is ever taken from the
+            request (the trust boundary). Parsed with Go strconv.ParseBool
+            semantics (accepts 1/t/T/TRUE/true/True and 0/f/F/FALSE/false/False);
+            a present-but-unparseable value is rejected with HTTP 400. Absent or
+            false returns an unsigned bundle, as before. If attestation is
+            requested but the server has no signing identity configured, the
+            request is rejected with HTTP 400 ("Server is not configured for
+            attestation"). A signed bundle additionally carries
+            attestation/bundle-attestation.sigstore.json and
+            attestation/aicr-attestation.sigstore.json inside the returned zip;
+            the response format is otherwise unchanged.
+          schema:
+            type: boolean
+            default: false
       requestBody:
         required: true
         description: The recipe (RecipeResult) to generate bundles from
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RecipeResponse"
+              $ref: "#/components/schemas/BundleRecipeRequest"
             examples:
               simpleRecipe:
                 summary: Simple recipe with GPU operator
                 value:
                   apiVersion: aicr.run/v1alpha2
-                  kind: Recipe
+                  kind: RecipeResult
                   componentRefs:
                     - name: gpu-operator
                       type: Helm
@@ -1106,7 +1135,7 @@ paths:
                 summary: Full recipe with metadata
                 value:
                   apiVersion: aicr.run/v1alpha2
-                  kind: Recipe
+                  kind: RecipeResult
                   metadata:
                     version: v1.0.0
                     created: "2025-01-15T10:30:00Z"
@@ -1538,21 +1567,22 @@ components:
             $ref: "#/components/schemas/Subtype"
           description: List of configuration subtypes within this measurement
 
-    RecipeResponse:
+    RecipeResponseBase:
       type: object
-      description: Complete recipe response with metadata and component references
-      required: [apiVersion, kind]
+      description: >
+        Reusable RecipeResult shape. Response and bundle-request wrappers apply
+        their respective apiVersion requirements.
       properties:
         apiVersion:
           type: string
-          description: API version of the recipe format
-          enum: [aicr.run/v1alpha2]
-          example: aicr.run/v1alpha2
+          description: >
+            API version of the recipe format. Response and bundle-request
+            wrappers constrain the supported value.
         kind:
           type: string
-          description: Resource type
-          enum: [Recipe]
-          example: Recipe
+          description: >
+            Resource type. Response and bundle-request wrappers constrain the
+            supported value.
         metadata:
           type: object
           description: Recipe metadata
@@ -1629,7 +1659,11 @@ components:
             properties:
               name:
                 type: string
-                description: Component name
+                description: >-
+                  Component name. Must be unique within componentRefs (across
+                  both enabled and disabled refs) when non-empty; a duplicate
+                  non-empty name is rejected with 400. Refs with an empty
+                  name are exempt from the uniqueness check.
               type:
                 type: string
                 enum: [Helm, Kustomize]
@@ -1733,6 +1767,61 @@ components:
           description: Deployment constraints (driver versions, etc.)
           additionalProperties: true
 
+    RecipeResponse:
+      description: Complete recipe response with metadata and component references
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponseBase"
+        - type: object
+          required: [apiVersion, kind]
+          properties:
+            apiVersion:
+              type: string
+              enum: [aicr.run/v1alpha2]
+              example: aicr.run/v1alpha2
+            kind:
+              type: string
+              enum: [RecipeResult]
+              example: RecipeResult
+
+    BundleRecipeRequest:
+      description: >
+        RecipeResult accepted by POST /v1/bundle. Current aicr.run/v1alpha2
+        artifacts and legacy artifacts with absent or empty header fields are
+        accepted. The kind value Recipe is also accepted: it was the value this
+        contract published through v0.18.0, and the handler performs no header
+        validation, so clients written against that spec must keep working.
+
+        A legacy kind is echoed into the generated bundle's recipe.yaml rather
+        than normalized, and the CLI file loader accepts an absent or empty kind
+        but rejects Recipe. A bundle generated from a kind Recipe body is
+        therefore not reloadable via aicr bundle -r or aicr validate -r. Send
+        kind RecipeResult to keep the emitted artifact round-trippable.
+
+        apiVersion deliberately has no equivalent legacy window. The artifact
+        group/version bump is a hard break with no transition period (see
+        docs/design/011-artifact-apiversion-policy.md), so an artifact stamped
+        with a prior group/version should be regenerated rather than sent. That
+        is a client-contract rule rather than an enforced one: this endpoint
+        validates no header field, so a prior apiVersion is ignored rather than
+        rejected. The CLI file-load path does enforce it.
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponseBase"
+        - type: object
+          properties:
+            apiVersion:
+              type: string
+              description: >
+                Current API version, or empty after a legacy struct round trip.
+                Prior group/versions are not accepted — see the schema
+                description for the hard-break policy.
+              enum: ["", aicr.run/v1alpha2]
+            kind:
+              type: string
+              description: >
+                RecipeResult, the legacy Recipe value published through
+                v0.18.0, or empty for a legacy artifact
+              enum: ["", Recipe, RecipeResult]
+
     QueryRequest:
       type: object
       description: Query request with criteria and dot-path selector
@@ -1754,12 +1843,12 @@ components:
       description: Request body for bundle generation
       deprecated: true
       x-deprecation-reason: >
-        Use RecipeResponse directly as the request body and specify bundlers
+        Use a RecipeResult directly as the request body and specify bundlers
         via the "bundlers" query parameter (comma-delimited).
       required: [recipe]
       properties:
         recipe:
-          $ref: "#/components/schemas/RecipeResponse"
+          $ref: "#/components/schemas/BundleRecipeRequest"
           description: The recipe to generate bundles from
         bundlers:
           type: array

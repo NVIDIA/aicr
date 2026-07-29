@@ -318,6 +318,21 @@
         executionMode: "update",
       },
     },
+
+    // ---- aiperf-bench base image is capped below python 3.14 ----
+    // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
+    // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage
+    // image had no toolchain to compile them). Even with the current
+    // multi-stage toolchain, aiperf 0.11.0 declares requires-python <3.14, so
+    // pip refuses to install on 3.14 — the 3.14 move is blocked upstream until
+    // aiperf supports it. This cap mirrors that constraint; #1910 tracks
+    // lifting it.
+    {
+      matchManagers: ["dockerfile"],
+      matchFileNames: ["validators/performance/aiperf-bench.Dockerfile"],
+      matchDepNames: ["python"],
+      allowedVersions: "<3.14",
+    },
   ],
 
   // Vendor-curated GPU networking images that Renovate cannot crawl without

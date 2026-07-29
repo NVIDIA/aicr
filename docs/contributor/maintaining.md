@@ -64,8 +64,13 @@ identity failure opens a security tracking issue that mentions the maintainers
 and posts a Slack page. An operational failure (Sigstore/Rekor/TUF/GitHub-API
 trouble) pages no one: a single red hourly job with no issue is a transient blip
 that self-heals, and only after three consecutive failed runs does a calm
-`area/ci` "degraded" issue open. The job still goes red on any failure, and a
-later clean run closes both the security and degraded issues.
+`area/ci` "degraded" issue open. That same degraded issue also covers a `degraded`
+classification, which is different: the identity catch-up is not converging (the
+log outpacing the bounded per-run scan). There the monitor completed every pass
+and will not self-heal, so its issue body gives a concrete remediation (more scan
+budget per run, or triage a held finding) rather than "wait for upstream". The job
+still goes red on any failure, and a later clean run closes both the security and
+degraded issues.
 
 This protects the trust root every AICR consumer depends on: the release
 binaries, the signed recipe catalog, and the container images all chain to that
@@ -78,18 +83,48 @@ treated as potential OIDC/key compromise.
 The identity scan matches every entry under the release SAN, which includes
 every legitimate release: each real release signs an entry under exactly that
 identity, so a naive scan would page on every tag. To separate real releases
-from an attacker, the workflow first fetches the repo's release tags and passes
-them to the tool via `--known-tags-file`. The tool then suppresses any identity
-match whose certificate SAN carries an `@refs/tags/<tag>` that is a known
-release, so only an entry for a tag with **no corresponding release** alerts.
+from an attacker, the workflow fetches the tags a real release actually signed
+and passes them to the tool via `--known-tags-file`. The tool then suppresses
+any identity match whose certificate SAN carries an `@refs/tags/<tag>` that is a
+known signed tag, so only an entry for a tag **no release signed** alerts.
+
+The correlation source is the **`on-tag.yaml` (release signing workflow) run
+history** (`RELEASE_WORKFLOW_FILE`), not the repo's current tags or releases.
+The SAN is `on-tag.yaml@refs/tags/<tag>`, so a tag-push run of that workflow is
+the authoritative proof that a real release signed `<tag>`. Crucially, run
+history **persists after a tag or release is deleted**, whereas `/tags` and
+`/releases` do not: an ephemeral release candidate (`vX.Y.Z-rc1`, whose tag and
+GitHub Release are cleaned up once the final ships) would otherwise reappear as
+an unexplained identity hit even though it was a genuine signing. That exact
+false positive is what [#1902](https://github.com/NVIDIA/aicr/issues/1902)
+caught. Runs of any conclusion count (a release that signed and then flaked in a
+later step still produced a legitimate entry). The correlation fetch reads the
+workflow name from the `RELEASE_WORKFLOW_FILE` env var; `CERT_SUBJECT` is a
+separate literal regex that names the same workflow, kept in sync by convention
+(both sit in the env block with a "change both together" note). They are not
+auto-derived from one value: building the anchored, regex-escaped `CERT_SUBJECT`
+from the var in shell would be more error-prone than the drift it prevents, and
+a mismatch fails safe anyway (the runs query 404s, surfaced as operational, not
+a false page).
 
 The suppression is fail-closed: an unknown tag or a malformed SAN still alerts,
 an *empty* allowlist file disables suppression (so every match alerts), and a
 *missing* allowlist file is a hard error that fails the run (exit 2, surfaced as
-operational). A broken correlation input can never silently silence a real hit. One residual gap is accepted: an attacker who
-re-signs an *existing* release tag is suppressed, because that tag is on the
-allowlist. Closing it needs a per-tag entry-count or provenance check (how many
-entries a known tag is expected to have), tracked as a follow-up in
+operational). A broken correlation input can never silently silence a real hit.
+
+Two residual gaps are accepted, both requiring the attacker to also subvert the
+signing path (not just forge a log entry). First, an attacker who re-signs an
+*existing* release tag is suppressed, because that tag is on the allowlist.
+Second, the allowlist keys on a completed on-tag run of **any conclusion**, not
+on proof that the sign step itself ran: signing happens mid-run, so a real
+release whose later step flakes still concludes `failure` (e.g. `v0.18.0`
+itself) and must stay on the allowlist, which means gating on `conclusion ==
+success` is not viable (it would re-create the [#1902](https://github.com/NVIDIA/aicr/issues/1902)
+false positive on genuine releases). In-progress runs are excluded
+(`status=completed`), but a run that failed *before* the sign step still
+allowlists its tag. Closing both tightly needs a per-signing-step or per-tag
+entry-count / provenance check (did the sign step succeed; how many entries a
+known tag is expected to have), tracked as a follow-up in
 [#1887](https://github.com/NVIDIA/aicr/issues/1887).
 
 ### Why v2, and why identity monitoring is feasible now
@@ -143,6 +178,68 @@ checkpoint, so it establishes a baseline at the current v2 tree head and skips
 the identity scan; every run after that scans only the newly-added window.
 Entries predating the baseline are covered by release-time verification (the
 `aicr verify` path), not by this monitor.
+
+### Catching up across runs (large backlog windows)
+
+The identity scan is linear in the window size, so a window that has not
+advanced for a while (a multi-hour Sigstore/TUF outage, or a finding that
+deliberately holds the cursor) can grow past what one run can scan inside the
+pass deadline. Rather than re-scan (and time out on) the whole window every run,
+the scan is **resumable**: each run scans (in `scanChunkSize` chunks) whatever
+fits before a **soft time budget** expires -- it stops once the pass deadline is
+within `scanBudgetHeadroom` -- and persists how far it got in a `<checkpoint>.scan`
+companion carried in the same artifact. The time budget is the primary bound, so
+catch-up adapts to scan speed (a slow run covers fewer entries, a fast run more)
+and never overruns the deadline; `maxScanEntriesPerRun` is only an outer safety
+ceiling on a single run. On a same-shard window the signed checkpoint advances
+(and the companion resets) only once the scan reaches head; the other advance
+paths (first-run baseline, an empty window, and a shard rotation) re-baseline and
+are reported as such. So a large backlog is caught up over several hourly runs
+while each run stays within budget, with no coverage gap for a same-shard window.
+A partial catch-up run is a clean (exit 0) pass; its log line reads `catching up,
+N entr(y/ies) remaining`. A finding halts catch-up at that chunk (it is
+re-detected until triaged), so a partial-clean same-shard pass never coexists with
+an open finding alert; the one exception is a shard rotation, which re-baselines
+past any held finding (rare, yearly) and reports the abandoned prior-shard count.
+This is what unblocks a backlog like the ~1.2M-entry window that followed the
+[#1902](https://github.com/NVIDIA/aicr/issues/1902) correlation fix, where the
+earlier single-pass scan timed out every run and never advanced.
+
+A catch-up is only healthy if it converges. Each partial pass records its
+`remaining` count in a second `<checkpoint>.stall` companion; if `remaining`
+fails to decrease for `maxCatchUpStallRuns` consecutive passes (the log is growing
+faster than the per-run scan), the run returns a `degraded` classification instead
+of `clean`. That is a non-security failure, so it never pages like a compromise,
+but it makes the run go red and — after the workflow's usual consecutive-failure
+streak — opens the low-urgency degraded issue. The stall trend resets on any
+checkpoint advance, so once catch-up resumes (or the log growth slows) the monitor
+returns to `clean` on its own. This closes the gap where a permanently-behind
+catch-up would otherwise report green indefinitely.
+
+### Recovering a wedged checkpoint artifact
+
+The cursor and its `.scan`/`.stall` companions travel in one GitHub artifact
+(`rekor-v2-checkpoint`). A corrupt companion is self-healing on most paths (an
+advance rewrites it), but a malformed `.scan` on the identity-scan path fails the
+pass, and the `if: !cancelled()` upload re-publishes the bad artifact, so the next
+run re-reads it: a wedge that only a human can clear. Symptom: consecutive
+`operational` runs whose logs show a scan-progress parse error (`failed to parse
+scan-progress file` / `scan progress exceeds window end`), not an upstream outage.
+
+To recover, delete the poisoned artifact so the next run re-baselines from head:
+
+```bash
+# find the latest rekor-v2-checkpoint artifact from a main run
+gh api "repos/NVIDIA/aicr/actions/artifacts?name=rekor-v2-checkpoint&per_page=100" \
+  --jq '[.artifacts[] | select(.workflow_run.head_branch == "main")] | sort_by(.created_at) | last | {id, created_at}'
+# delete it (replace <id>)
+gh api -X DELETE "repos/NVIDIA/aicr/actions/artifacts/<id>"
+```
+
+Coverage cost: re-baselining skips identity-scanning the window between the last
+good checkpoint and the current head (consistency is unaffected). That gap is the
+same one a first run has, and is acceptable for recovery; note it if the skipped
+window is large.
 
 ### Shard rotation (and what the operator sees)
 

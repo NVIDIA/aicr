@@ -21,14 +21,23 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// attesterBuilder constructs an Attester from resolve options. Injectable so
+// tests can assert signing wiring without a real KMS/Fulcio backend. Defaults
+// to attestation.ResolveAttester (eager: the keyless token is already in hand
+// from the token-file read, so no deferred resolution is needed).
+type attesterBuilder func(context.Context, attestation.ResolveOptions) (attestation.Attester, error)
 
 var bundleZipResponseHeaders = []string{
 	"Content-Type",
@@ -54,15 +63,23 @@ type bundleHandler struct {
 	// "Recipe criteria value not allowed" message) before bundling. The
 	// Client's MakeBundle enforcement remains a backstop.
 	allowLists *aicr.AllowLists
+	// signing holds the operator-configured server signing identity. When nil
+	// or disabled, an attest=true request is rejected with 400. No field here
+	// ever comes from a request.
+	signing *signingConfig
+	// newAttester builds an Attester from resolve options. Injectable for tests.
+	newAttester attesterBuilder
 }
 
-// newBundleHandler constructs a bundleHandler bound to the given client and
-// allowlists.
-func newBundleHandler(client *aicr.Client, allowLists *aicr.AllowLists) *bundleHandler {
+// newBundleHandler constructs a bundleHandler bound to the given client,
+// allowlists, and server signing identity.
+func newBundleHandler(client *aicr.Client, allowLists *aicr.AllowLists, signing *signingConfig) *bundleHandler {
 	return &bundleHandler{
-		client:     client,
-		allowLists: allowLists,
-		streamZip:  bundler.StreamZipResponseContext,
+		client:      client,
+		allowLists:  allowLists,
+		streamZip:   bundler.StreamZipResponseContext,
+		signing:     signing,
+		newAttester: attestation.ResolveAttester,
 	}
 }
 
@@ -92,6 +109,13 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	bundleConfig, err := bundler.ParseBundleConfig(r)
 	if err != nil {
 		WriteErrorFromErr(w, r, err, "Invalid query parameters", nil)
+		return
+	}
+
+	// Opt-in signing (?attest=true), parsed and validated up front so a bad
+	// value or an unconfigured server is rejected before any bundle work.
+	attestRequested, handled := h.resolveAttestRequest(w, r)
+	if handled {
 		return
 	}
 
@@ -164,11 +188,44 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	// boundary explicitly. The outer ServerHandlerTimeout middleware is
 	// now sized ≥ BundleHandlerTimeout so this 60s deadline runs to
 	// completion instead of being silently clamped.
-	output, err := h.client.MakeBundle(ctx, adopted, aicr.BundleOptions{
+	bundleOpts := aicr.BundleOptions{
 		Config:    bundleConfig,
 		OutputDir: tempDir,
 		Timeout:   defaults.BundleHandlerTimeout,
-	})
+	}
+
+	// Opt-in signing via ?attest=true. The server signs as itself using the
+	// operator-configured identity (KMS or private-Sigstore keyless); no
+	// identity material comes from the request. The "not configured" rejection
+	// and the attest parse already ran above; here we build only the attester,
+	// which reads the identity token fresh (SA tokens rotate) and so cannot be
+	// hoisted out of the request path.
+	if attestRequested {
+		resolveOpts, buildErr := h.signing.resolveOptions()
+		if buildErr != nil {
+			logger.Error("failed to prepare signing options", "error", buildErr)
+			WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
+				"Failed to prepare signing", false, nil)
+			return
+		}
+		attester, attErr := h.newAttester(ctx, resolveOpts)
+		if attErr != nil {
+			logger.Error("failed to construct attester", "error", attErr)
+			WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
+				"Failed to initialize signing", false, nil)
+			return
+		}
+
+		// Enable attestation on this request's config (mirrors the CLI's
+		// config.WithAttest) and embed the server's pre-verified binary
+		// attestation as tool provenance. The bytes were verified ONCE at
+		// startup and cached on the signing config.
+		bundlercfg.WithAttest(true)(bundleConfig)
+		bundleOpts.Attester = attester
+		bundleOpts.BinaryAttestation = h.signing.binaryAttestation
+	}
+
+	output, err := h.client.MakeBundle(ctx, adopted, bundleOpts)
 	if err != nil {
 		WriteErrorFromErr(w, r, err, "Failed to generate bundle", nil)
 		return
@@ -195,6 +252,38 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeZipResponse(ctx, w, r, tempDir, output)
+}
+
+// resolveAttestRequest parses the ?attest query parameter and validates it
+// against the server's static signing config. It returns attestRequested and a
+// handled flag: when handled is true the function has already written the HTTP
+// response (a 400) and the caller must return without further processing.
+//
+// Absent/empty attest means no signing. A present-but-unparseable value is a
+// client error (a typo must not silently ship an unsigned bundle) — mirrors
+// parseTLogUpload / getSetEnabledOverride. The "not configured" rejection is
+// hoisted here so it fails fast: it depends only on the query param and static
+// server config, never on request-body or bundle work.
+func (h *bundleHandler) resolveAttestRequest(w http.ResponseWriter, r *http.Request) (attestRequested, handled bool) {
+	if v := r.URL.Query().Get("attest"); v != "" {
+		parsed, perr := strconv.ParseBool(v)
+		if perr != nil {
+			WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+				"Invalid attest parameter (want true or false)", false, map[string]any{
+					keyError: v,
+				})
+			return false, true
+		}
+		attestRequested = parsed
+	}
+
+	if attestRequested && (h.signing == nil || !h.signing.enabled) {
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+			"Server is not configured for attestation", false, nil)
+		return false, true
+	}
+
+	return attestRequested, false
 }
 
 func (h *bundleHandler) writeZipResponse(

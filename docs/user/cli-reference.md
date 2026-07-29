@@ -1993,6 +1993,8 @@ bundles/
 
 Manifest-only components and mixed-component raw manifests are supported by `--deployer argocd-helm` via the path-based Application shape.
 
+`static/` holds per-component values for upstream-helm Applications only. A recipe whose components are all local charts — the OpenShift overlays, for example — contributes no such files, and the directory is omitted from the bundle entirely rather than emitted empty.
+
 **The bundle's `repoURL` defaults to the registry it was pushed to.** No `--repo` flag is needed (and is ignored if passed with `--deployer argocd-helm`). When pushed to an OCI registry, the parent namespace is baked into `values.yaml` as the default `repoURL` — a plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when deploying from a different registry.
 **Recommended deploy flow:**
 

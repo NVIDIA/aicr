@@ -367,6 +367,60 @@ func TestBundleComponents_HelmComponentLoadsManifestFiles(t *testing.T) {
 	}
 }
 
+// TestBundleComponents_RejectsAllDisabled locks in that an all-disabled
+// recipe is rejected the same way DefaultBundler.Make rejects it
+// (bundler.go), rather than silently returning an empty, successful
+// bundle list. See #1917.
+func TestBundleComponents_RejectsAllDisabled(t *testing.T) {
+	t.Parallel()
+
+	client := newClientForBundleTest(t)
+	r := newRecipeResultForBundleTest(client,
+		[]recipe.ComponentRef{
+			{
+				Name:      "disabled-a",
+				Type:      recipe.ComponentTypeHelm,
+				Overrides: map[string]any{"enabled": false},
+			},
+		},
+		nil, // facade Components is empty because the only ref is disabled
+	)
+	_, err := client.BundleComponents(context.Background(), r)
+	if err == nil {
+		t.Fatal("expected error for all-disabled recipe, got nil")
+	}
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+}
+
+// TestBundleComponents_RejectsZeroComponentRefs locks in that a recipe
+// with no componentRefs at all is rejected the same way as an all-
+// disabled recipe — the zero-ref divergence from DefaultBundler.Make
+// that the dropped r.internal.ComponentRefs conjunct used to miss.
+// See #1917.
+func TestBundleComponents_RejectsZeroComponentRefs(t *testing.T) {
+	t.Parallel()
+
+	client := newClientForBundleTest(t)
+	r := newRecipeResultForBundleTest(client, nil, nil)
+	_, err := client.BundleComponents(context.Background(), r)
+	if err == nil {
+		t.Fatal("expected error for zero-componentRef recipe, got nil")
+	}
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+}
+
 // TestRecipeResultFromInternal_PlumbsHelmFields locks in that the
 // translation from pkg/recipe.ComponentRef into the facade's
 // ComponentRef carries Source, Chart, and Namespace through. Without
@@ -1366,5 +1420,33 @@ func TestFacadeResultFromInternal_ChartProjection(t *testing.T) {
 		if comp.Chart != want {
 			t.Errorf("component %q Chart = %q, want %q", comp.Name, comp.Chart, want)
 		}
+	}
+}
+
+// TestFacadeResultFromInternal_OmitsDisabledComponents pins the facade
+// contract: only deployable (enabled) components appear in the SDK
+// facade result. See #1874.
+func TestFacadeResultFromInternal_OmitsDisabledComponents(t *testing.T) {
+	t.Parallel()
+
+	internal := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "enabled-a", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			{
+				Name:      "disabled-b",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://charts.example.com",
+				Version:   "1.0.0",
+				Overrides: map[string]any{"enabled": false},
+			},
+		},
+	}
+
+	out := facadeResultFromInternal(internal, "test")
+	if len(out.Components) != 1 {
+		t.Fatalf("components = %d, want 1", len(out.Components))
+	}
+	if out.Components[0].Name != "enabled-a" {
+		t.Errorf("got component %q, want enabled-a", out.Components[0].Name)
 	}
 }
