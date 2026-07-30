@@ -16,11 +16,15 @@ package job
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	corev1 "k8s.io/api/core/v1"
@@ -71,7 +75,7 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 	switch {
 	case cs.State.Terminated != nil:
 		result.ExitCode = cs.State.Terminated.ExitCode
-		result.TerminationMsg = cs.State.Terminated.Message
+		result.TerminationMsg = boundTerminationMsg(cs.State.Terminated.Message, defaults.ValidatorMaxTerminationMsgBytes)
 		if cs.State.Terminated.Reason == "OOMKilled" {
 			result.TerminationMsg = "Container OOMKilled"
 		}
@@ -107,8 +111,18 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 }
 
 // HandleTimeout extracts whatever result is available when the orchestrator's
-// wait has timed out. Uses a fresh context since the parent may be canceled.
-func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
+// wait returned an error. Uses a fresh context since the parent may be
+// canceled.
+//
+// waitCause is the error returned by WaitForCompletion. It classifies the
+// failure so the rendered TerminationMsg reflects the ACTUAL cause: a genuine
+// context-deadline expiry (stdlib DeadlineExceeded or a pkg/errors
+// ErrCodeTimeout) renders the "timeout: validator did not complete within
+// <configured>" wording, while any other cause (e.g. an infra/unavailable
+// error) renders "validation failed: <cause>" so a mid-run infra failure is
+// not misreported as the full catalog timeout (see issue #1966). A nil
+// waitCause is treated as a timeout for backward compatibility.
+func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.ValidatorResult {
 	result := &ctrf.ValidatorResult{
 		Name:  d.config.Entry.Name,
 		Phase: d.config.Entry.Phase,
@@ -126,7 +140,7 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
 	if !found {
 		result.ExitCode = -1
-		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s (container %q not found - validator package contract)", d.config.Entry.Timeout, ValidatorContainerName)
+		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s (container %q not found - validator package contract)", effectiveTimeout(d.config.Entry.Timeout), ValidatorContainerName)
 		return result
 	}
 
@@ -140,16 +154,53 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 
 	if cs.State.Terminated != nil {
 		result.ExitCode = cs.State.Terminated.ExitCode
-		result.TerminationMsg = cs.State.Terminated.Message
+		result.TerminationMsg = boundTerminationMsg(cs.State.Terminated.Message, defaults.ValidatorMaxTerminationMsgBytes)
 		result.StartTime = cs.State.Terminated.StartedAt.Time
 		result.CompletionTime = cs.State.Terminated.FinishedAt.Time
 		result.Duration = result.CompletionTime.Sub(result.StartTime)
 	} else {
 		result.ExitCode = -1
-		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s", d.config.Entry.Timeout)
+		result.TerminationMsg = waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout))
 	}
 
 	return result
+}
+
+// effectiveTimeout mirrors the fallback runPhase applies before waiting: a
+// catalog entry with no explicit timeout is waited on for
+// defaults.ValidatorDefaultTimeout, so the rendered message must report that
+// same effective value rather than a bare "0s".
+func effectiveTimeout(configured time.Duration) time.Duration {
+	if configured == 0 {
+		return defaults.ValidatorDefaultTimeout
+	}
+	return configured
+}
+
+// waitFailureMessage renders the TerminationMsg for a validator whose container
+// never terminated. Only a genuine context-deadline expiry is reported as a
+// "timeout ... within <configured>" — any other cause (infra/unavailable) is
+// surfaced verbatim so diagnosis is not misdirected to the catalog timeout
+// (see issue #1966). A nil cause is treated as a timeout for backward
+// compatibility with callers that had no error to thread through.
+func waitFailureMessage(cause error, configured time.Duration) string {
+	if cause == nil || isDeadlineCause(cause) {
+		return fmt.Sprintf("timeout: validator did not complete within %s", configured)
+	}
+	return fmt.Sprintf("validation failed: %v", cause)
+}
+
+// isDeadlineCause reports whether err represents a genuine context-deadline
+// expiry — either the stdlib context.DeadlineExceeded sentinel or a pkg/errors
+// StructuredError carrying ErrCodeTimeout.
+func isDeadlineCause(err error) bool {
+	if err == nil {
+		return false
+	}
+	if stderrors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	return stderrors.Is(err, errors.New(errors.ErrCodeTimeout, ""))
 }
 
 // truncateLogLines splits raw log output into lines and returns at most the
@@ -178,6 +229,23 @@ func filterStdoutLines(lines []string, maxLineLen int) []string {
 	}
 
 	return lines
+}
+
+// boundTerminationMsg defensively caps a container termination message at
+// maxBytes, appending a truncation suffix that reports the dropped byte count.
+// The kubelet already caps the message upstream, but bounding it at the source
+// keeps oversized messages out of ConfigMaps and rendered reports regardless.
+func boundTerminationMsg(msg string, maxBytes int) string {
+	if len(msg) <= maxBytes {
+		return msg
+	}
+	// Trim the cut back to a valid UTF-8 rune boundary so a multi-byte rune is
+	// never split into an invalid sequence in the emitted message.
+	head := msg[:maxBytes]
+	for len(head) > 0 && !utf8.ValidString(head) {
+		head = head[:len(head)-1]
+	}
+	return head + fmt.Sprintf("... [truncated %d bytes]", len(msg)-len(head))
 }
 
 // getPodForJob finds the pod created by the validator Job using the shared

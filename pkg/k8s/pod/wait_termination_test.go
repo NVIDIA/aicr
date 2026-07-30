@@ -25,6 +25,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -381,6 +382,106 @@ func TestWaitForJobTerminal(t *testing.T) {
 	}
 }
 
+// TestWaitForJobTerminal_WatchClosureResumes proves the fix for issue #1966 on
+// the terminal-wait path: a watch channel that closes without the Job being
+// terminal (kube-apiserver --min-request-timeout expiry) is followed by a
+// re-established watch that delivers the terminal event, and the observed Job is
+// returned rather than ErrCodeUnavailable. Reverting the re-watch line fails it.
+func TestWaitForJobTerminal_WatchClosureResumes(t *testing.T) {
+	t.Parallel()
+
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default", ResourceVersion: "1"}}
+	client := fake.NewSimpleClientset(job) //nolint:staticcheck
+
+	var attempts atomic.Int32
+	first := watch.NewFake()
+	second := watch.NewFake()
+	client.PrependWatchReactor("jobs", func(_ k8stesting.Action) (bool, watch.Interface, error) {
+		switch attempts.Add(1) {
+		case 1:
+			return true, first, nil
+		case 2:
+			return true, second, nil
+		default:
+			return true, watch.NewFake(), nil
+		}
+	})
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		first.Stop()
+	}()
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		second.Modify(jobWithCondition(batchCond("Failed")))
+	}()
+
+	got, err := pod.WaitForJobTerminal(context.Background(), client, "default", "test-job", 2*time.Second)
+	if err != nil {
+		t.Fatalf("expected nil error after watch resume, got: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil terminal job after resume")
+	}
+	if n := attempts.Load(); n < 2 {
+		t.Errorf("expected at least 2 watch attempts (resume), got %d", n)
+	}
+}
+
+// TestWaitForJobTerminal_StaleObjectRVResyncsViaList is the terminal-wait mirror
+// of the long-running-validator regression: a watch from the aged-out object RV
+// 410s, so the resume must resync via a field-selected List and re-watch from
+// the current collection RV. Regressing to the object RV would 410-loop until
+// this test's deadline.
+func TestWaitForJobTerminal_StaleObjectRVResyncsViaList(t *testing.T) {
+	t.Parallel()
+
+	client := fake.NewSimpleClientset(&batchv1.Job{ //nolint:staticcheck
+		ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default", ResourceVersion: "1"},
+	})
+
+	const freshCollectionRV = "100"
+	var lists, fromStale, fromFresh atomic.Int32
+	client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		lists.Add(1)
+		return true, &batchv1.JobList{
+			ListMeta: metav1.ListMeta{ResourceVersion: freshCollectionRV},
+			Items:    []batchv1.Job{{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default", ResourceVersion: "1"}}},
+		}, nil
+	})
+	client.PrependWatchReactor("jobs", func(action k8stesting.Action) (bool, watch.Interface, error) {
+		rv := action.(k8stesting.WatchActionImpl).WatchRestrictions.ResourceVersion
+		fw := watch.NewFake()
+		if rv == freshCollectionRV {
+			fromFresh.Add(1)
+			terminal := jobWithCondition(batchCond("Complete"))
+			terminal.ResourceVersion = "101"
+			go func() { fw.Modify(terminal) }()
+		} else {
+			fromStale.Add(1)
+			go func() {
+				expired := apierrors.NewResourceExpired("too old resource version: " + rv)
+				fw.Error(&expired.ErrStatus)
+			}()
+		}
+		return true, fw, nil
+	})
+
+	got, err := pod.WaitForJobTerminal(context.Background(), client, "default", "test-job", 3*time.Second)
+	if err != nil {
+		t.Fatalf("expected terminal job via collection-RV watch, got: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil terminal job after List resync")
+	}
+	if lists.Load() == 0 {
+		t.Error("expected a resync List after the stale-RV watch 410ed")
+	}
+	if fromFresh.Load() == 0 {
+		t.Error("expected a watch re-established from the fresh collection RV")
+	}
+}
+
 func TestWaitForJobTerminal_WatchError(t *testing.T) {
 	t.Parallel()
 
@@ -412,6 +513,95 @@ func TestWaitForJobTerminal_WatchError(t *testing.T) {
 	}
 	if sErr.Code != errors.ErrCodeInternal {
 		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeInternal)
+	}
+}
+
+// TestWaitForJobTerminal_RetryableWatchErrorResumes mirrors the F1 fix on the
+// terminal-wait path: a mid-stream 410 (Gone) watch.Error resumes the watch
+// instead of aborting.
+func TestWaitForJobTerminal_RetryableWatchErrorResumes(t *testing.T) {
+	t.Parallel()
+
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default", ResourceVersion: "1"}}
+	client := fake.NewSimpleClientset(job) //nolint:staticcheck
+
+	var attempts atomic.Int32
+	first := watch.NewFake()
+	second := watch.NewFake()
+	client.PrependWatchReactor("jobs", func(_ k8stesting.Action) (bool, watch.Interface, error) {
+		switch attempts.Add(1) {
+		case 1:
+			return true, first, nil
+		case 2:
+			return true, second, nil
+		default:
+			return true, watch.NewFake(), nil
+		}
+	})
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		expired := apierrors.NewResourceExpired("compacted")
+		first.Error(&expired.ErrStatus)
+		time.Sleep(30 * time.Millisecond)
+		second.Modify(jobWithCondition(batchCond("Complete")))
+	}()
+
+	got, err := pod.WaitForJobTerminal(context.Background(), client, "default", "test-job", 2*time.Second)
+	if err != nil {
+		t.Fatalf("expected nil error after retryable watch error resume, got: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil terminal job after resume")
+	}
+	if n := attempts.Load(); n < 2 {
+		t.Errorf("expected at least 2 watch attempts (resume after 410 error), got %d", n)
+	}
+}
+
+// TestWaitForJobTerminal_ResyncListCatchesTerminal covers the closure-race
+// branch on the terminal-wait path: the Job goes terminal while the watch is
+// down, so the resync List observes it and no watch is re-established.
+func TestWaitForJobTerminal_ResyncListCatchesTerminal(t *testing.T) {
+	t.Parallel()
+
+	client := fake.NewSimpleClientset(&batchv1.Job{ //nolint:staticcheck
+		ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default", ResourceVersion: "1"},
+	})
+
+	terminal := jobWithCondition(batchCond("Complete"))
+	terminal.ResourceVersion = "2"
+	client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &batchv1.JobList{
+			ListMeta: metav1.ListMeta{ResourceVersion: "100"},
+			Items:    []batchv1.Job{*terminal},
+		}, nil
+	})
+
+	var watches atomic.Int32
+	first := watch.NewFake()
+	client.PrependWatchReactor("jobs", func(_ k8stesting.Action) (bool, watch.Interface, error) {
+		if watches.Add(1) == 1 {
+			return true, first, nil
+		}
+		t.Error("watch must not be re-established once the resync List observes terminal")
+		return true, watch.NewFake(), nil
+	})
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		first.Stop()
+	}()
+
+	got, err := pod.WaitForJobTerminal(context.Background(), client, "default", "test-job", 2*time.Second)
+	if err != nil {
+		t.Fatalf("expected nil when resync List catches terminal, got: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil terminal job from resync List")
+	}
+	if n := watches.Load(); n != 1 {
+		t.Errorf("expected exactly 1 watch attempt (no rewatch), got %d", n)
 	}
 }
 
