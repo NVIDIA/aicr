@@ -108,8 +108,15 @@ func (b *Builder) DataProvider() DataProvider {
 // It loads the metadata store, applies matching overlays, and returns
 // a RecipeResult with merged components and computed deployment order.
 func (b *Builder) BuildFromCriteria(ctx context.Context, c *Criteria) (*RecipeResult, error) {
+	return b.BuildFromCriteriaWithProfile(ctx, c, "")
+}
+
+// BuildFromCriteriaWithProfile creates a RecipeResult using an explicit
+// name=value profile selection, or the declaration's default when profile is
+// empty.
+func (b *Builder) BuildFromCriteriaWithProfile(ctx context.Context, c *Criteria, profile string) (*RecipeResult, error) {
 	return b.buildWithStore(ctx, c, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
-		return store.BuildRecipeResult(buildCtx, c)
+		return store.BuildRecipeResultWithProfile(buildCtx, c, profile)
 	})
 }
 
@@ -133,8 +140,20 @@ func (b *Builder) BuildFromCriteria(ctx context.Context, c *Criteria) (*RecipeRe
 // invokes BuildFromCriteriaWithEvaluator directly and wants those
 // measurement-driven overrides must apply them itself.
 func (b *Builder) BuildFromCriteriaWithEvaluator(ctx context.Context, c *Criteria, evaluator ConstraintEvaluatorFunc) (*RecipeResult, error) {
+	return b.BuildFromCriteriaWithEvaluatorAndProfile(ctx, c, evaluator, "")
+}
+
+// BuildFromCriteriaWithEvaluatorAndProfile is the snapshot-filtered variant
+// with an explicit profile selection.
+func (b *Builder) BuildFromCriteriaWithEvaluatorAndProfile(
+	ctx context.Context,
+	c *Criteria,
+	evaluator ConstraintEvaluatorFunc,
+	profile string,
+) (*RecipeResult, error) {
+
 	return b.buildWithStore(ctx, c, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
-		return store.BuildRecipeResultWithEvaluator(buildCtx, c, evaluator)
+		return store.BuildRecipeResultWithEvaluatorAndProfile(buildCtx, c, evaluator, profile)
 	})
 }
 

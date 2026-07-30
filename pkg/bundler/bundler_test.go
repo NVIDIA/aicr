@@ -688,6 +688,21 @@ func TestMake_EmptyComponentRefs(t *testing.T) {
 	}
 }
 
+func TestMake_NilConfigFailsClosed(t *testing.T) {
+	bundler := &DefaultBundler{}
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}},
+	}
+
+	_, err := bundler.Make(t.Context(), recipeResult, t.TempDir())
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "construct the bundler with New") {
+		t.Fatalf("Make() error = %v, want constructor guidance", err)
+	}
+}
+
 func TestMake_Success(t *testing.T) {
 	bundler, err := New()
 	if err != nil {
@@ -763,6 +778,111 @@ func TestMake_Success(t *testing.T) {
 	if output.TotalFiles < 7 {
 		t.Errorf("expected at least 7 files, got %d", output.TotalFiles)
 	}
+}
+
+func TestMake_ProfileLockBeforeOutput(t *testing.T) {
+	newRecipe := func() *recipe.RecipeResult {
+		result := &recipe.RecipeResult{
+			APIVersion: recipe.RecipeProfileAPIVersion,
+			Kind:       recipe.RecipeResultKind,
+			Criteria: &recipe.Criteria{
+				Service:     recipe.CriteriaServiceAKS,
+				Accelerator: recipe.CriteriaAcceleratorH100,
+				Intent:      recipe.CriteriaIntentTraining,
+			},
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name:    "gpu-operator",
+					Version: "v25.3.3",
+					Type:    recipe.ComponentTypeHelm,
+					Source:  "https://helm.ngc.nvidia.com/nvidia",
+					Chart:   "gpu-operator",
+					Overrides: map[string]any{
+						"driver": map[string]any{"enabled": false},
+					},
+				},
+				{
+					Name:    "cert-manager",
+					Version: "v1.20.0",
+					Type:    recipe.ComponentTypeHelm,
+					Source:  "https://charts.jetstack.io",
+					Chart:   "cert-manager",
+				},
+			},
+			DeploymentOrder: []string{"cert-manager", "gpu-operator"},
+		}
+		result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+			Name:  "gpuStack",
+			Value: "driver-installed",
+			OwnedPaths: map[string][]string{
+				"gpu-operator": {"driver.enabled", "enabled"},
+			},
+		}
+		return result
+	}
+
+	tests := []struct {
+		name    string
+		options []config.Option
+		wantErr string
+	}{
+		{
+			name: "divergent set",
+			options: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"gpuoperator": {"driver.enabled": "true"},
+			})},
+			wantErr: "driver.enabled diverged",
+		},
+		{
+			name: "dynamic owned path",
+			options: []config.Option{config.WithDynamicValues(map[string][]string{
+				"gpuoperator": {"driver.enabled"},
+			})},
+			wantErr: "intersects profile-owned",
+		},
+		{
+			name: "subset omits owned component",
+			options: []config.Option{config.WithBundlers([]string{
+				"cert-manager",
+			})},
+			wantErr: "absent or disabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bundler, err := New(WithConfig(config.NewConfig(tt.options...)))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			outputDir := filepath.Join(t.TempDir(), "not-created")
+			_, err = bundler.Make(t.Context(), newRecipe(), outputDir)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Make() error = %v, want containing %q", err, tt.wantErr)
+			}
+			if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
+				t.Fatalf("output directory exists before profile rejection: %v", statErr)
+			}
+		})
+	}
+
+	t.Run("redundant set succeeds", func(t *testing.T) {
+		bundler, err := New(WithConfig(config.NewConfig(
+			config.WithValueOverrides(map[string]map[string]string{
+				"gpuoperator": {"driver.enabled": "false"},
+			}),
+		)))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		outputDir := filepath.Join(t.TempDir(), "bundle")
+		if _, err := bundler.Make(t.Context(), newRecipe(), outputDir); err != nil {
+			t.Fatalf("Make() error = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(outputDir, "recipe.yaml")); err != nil {
+			t.Fatalf("profile bundle recipe.yaml: %v", err)
+		}
+	})
 }
 
 // TestMake_RecipeCoveredByChecksums verifies the resolved recipe participates

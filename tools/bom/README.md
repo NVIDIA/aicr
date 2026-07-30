@@ -2,7 +2,7 @@
 
 Generates an authoritative inventory of every container image AICR can deploy.
 Renders each Helm chart in `recipes/registry.yaml` at its pinned version,
-extracts every `image:` reference, walks embedded manifests under
+extracts recognized container-image references, walks embedded manifests under
 `recipes/components/<name>/manifests/`, and emits:
 
 - `bom.cdx.json` — CycloneDX 1.6 JSON (canonical, machine-readable)
@@ -72,8 +72,14 @@ supply-chain dashboards without conversion.
 - Charts that fail to render (missing required values, network unreachable)
   emit a warning property on the component and contribute zero images. Use
   `-strict` to make these fatal.
-- Image extraction looks for any `image:` scalar in the rendered YAML. False
-  positives are possible but rare in valid Kubernetes manifests; CRDs that
-  use `image` as an unrelated field would be flagged.
+- Image extraction recognizes scalar `image:` values and mapping-valued
+  `image:` or `scalingPodImage:` descriptors using the `name`, `repository`,
+  and `tag` fields. A present field must be a non-null, non-empty scalar.
+  Violations stop generation in all modes rather than publishing an incomplete
+  reference. Other fields are ignored. Descriptors that rely on separate
+  `registry` or `digest` fields are unsupported and can yield an incomplete or
+  incorrectly resolved reference.
+- False positives are possible but rare in valid Kubernetes manifests. CRDs
+  that use `image` as an unrelated scalar field may be flagged.
 - Unrendered Go template directives (`{{ .Values.image }}`) are skipped — they
   appear when the chart's values don't supply a required override.

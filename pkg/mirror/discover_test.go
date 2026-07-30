@@ -16,17 +16,68 @@ package mirror
 
 import (
 	"context"
+	stderrors "errors"
+	"fmt"
 	"io/fs"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/bom"
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+func newProfiledRecipe() *recipe.RecipeResult {
+	result := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeProfileAPIVersion,
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:    "gpu-operator",
+			Type:    recipe.ComponentTypeHelm,
+			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Chart:   "gpu-operator",
+			Version: "v25.3.0",
+			Overrides: map[string]any{
+				"driver": map[string]any{"enabled": false},
+			},
+		}},
+	}
+	result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+		Name:  "gpuStack",
+		Value: "driver-installed",
+		OwnedPaths: map[string][]string{
+			"gpu-operator": {"driver.enabled", "enabled"},
+		},
+	}
+	return result
+}
+
+func TestPrepareMirrorCandidate_Canceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := prepareMirrorCandidate(ctx, &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}},
+	}, nil)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Fatalf("prepareMirrorCandidate() error = %v, want ErrCodeTimeout", err)
+	}
+}
+
+func mustParseOverride(t *testing.T, raw string) config.ComponentPath {
+	t.Helper()
+	var override config.ComponentPath
+	if err := override.Parse(raw); err != nil {
+		t.Fatalf("ComponentPath.Parse(%q) error = %v", raw, err)
+	}
+	return override
+}
 
 func TestDiscover(t *testing.T) {
 	tests := []struct {
@@ -283,56 +334,253 @@ spec:
 	}
 }
 
-func TestSetNestedValue(t *testing.T) {
+func TestDiscover_ProfileLock(t *testing.T) {
 	tests := []struct {
-		name     string
-		path     string
-		value    string
-		initial  map[string]any
-		expected any
+		name             string
+		override         string
+		wantErr          bool
+		wantDriver       bool
+		wantEnabledValue bool
 	}{
 		{
-			name:     "simple key",
-			path:     "key",
-			value:    "val",
-			initial:  map[string]any{},
-			expected: "val",
+			name:       "divergent owned value",
+			override:   "gpuoperator:driver.enabled=true",
+			wantErr:    true,
+			wantDriver: false,
 		},
 		{
-			name:     "nested key",
-			path:     "a.b.c",
-			value:    "deep",
-			initial:  map[string]any{},
-			expected: "deep",
+			name:       "redundant owned value",
+			override:   "gpuoperator:driver.enabled=false",
+			wantDriver: false,
 		},
 		{
-			name:     "override existing",
-			path:     "driver.version",
-			value:    "new",
-			initial:  map[string]any{"driver": map[string]any{"version": "old"}},
-			expected: "new",
+			name:             "redundant component presence",
+			override:         "gpuoperator:enabled=true",
+			wantDriver:       false,
+			wantEnabledValue: false,
+		},
+		{
+			name:       "divergent component presence",
+			override:   "gpuoperator:enabled=false",
+			wantErr:    true,
+			wantDriver: false,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setNestedValue(tt.initial, tt.path, tt.value)
-
-			// Walk to the value.
-			var current any = tt.initial
-			for _, part := range splitPath(tt.path) {
-				m, ok := current.(map[string]any)
-				if !ok {
-					t.Fatalf("expected map at %q, got %T", part, current)
-				}
-				current = m[part]
+			renderer := &helmtest.MockRenderer{
+				Rendered: map[string][]byte{"gpu-operator": {}},
 			}
-
-			if current != tt.expected {
-				t.Errorf("got %v, want %v", current, tt.expected)
+			lister := NewLister(
+				WithHelmRenderer(renderer),
+				WithValueOverrides([]config.ComponentPath{mustParseOverride(t, tt.override)}),
+			)
+			result := newProfiledRecipe()
+			_, err := lister.Discover(t.Context(), result)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Discover() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if len(renderer.Inputs) != 0 {
+					t.Fatalf("renderer called %d times before profile rejection", len(renderer.Inputs))
+				}
+				return
+			}
+			if len(renderer.Inputs) != 1 {
+				t.Fatalf("renderer calls = %d, want 1", len(renderer.Inputs))
+			}
+			driver := renderer.Inputs[0].Values["driver"].(map[string]any)
+			if driver["enabled"] != tt.wantDriver {
+				t.Fatalf("render driver.enabled = %v, want %v", driver["enabled"], tt.wantDriver)
+			}
+			_, enabledValuePresent := renderer.Inputs[0].Values["enabled"]
+			if enabledValuePresent != tt.wantEnabledValue {
+				t.Fatalf("render values has enabled=%v, want %v",
+					enabledValuePresent, tt.wantEnabledValue)
+			}
+			inputDriver := result.ComponentRefs[0].Overrides["driver"].(map[string]any)
+			if inputDriver["enabled"] != false {
+				t.Fatalf("input recipe mutated: driver.enabled=%v", inputDriver["enabled"])
 			}
 		})
 	}
+}
+
+func TestDiscover_ProfileValidationRejectsBlockedOverridePath(t *testing.T) {
+	result := newProfiledRecipe()
+
+	renderer := &helmtest.MockRenderer{
+		Rendered: map[string][]byte{"gpu-operator": {}},
+	}
+	lister := NewLister(
+		WithHelmRenderer(renderer),
+		WithValueOverrides([]config.ComponentPath{
+			// Even though the canonical child spells the selected value, the
+			// alias replaces its parent with a scalar. Bundling rejects that
+			// structurally blocked path, so mirror discovery must also fail.
+			mustParseOverride(t, "gpuoperator:driver=true"),
+			mustParseOverride(t, "gpu-operator:driver.enabled=false"),
+		}),
+	)
+	_, err := lister.Discover(t.Context(), result)
+	if err == nil ||
+		!strings.Contains(err.Error(), "driver.enabled=false") ||
+		!strings.Contains(err.Error(), "exists but is not a map") {
+
+		t.Fatalf("Discover() error = %v, want deterministic blocked-child rejection", err)
+	}
+	if len(renderer.Inputs) != 0 {
+		t.Fatalf("renderer called %d times before override rejection", len(renderer.Inputs))
+	}
+}
+
+func TestDiscover_RejectsNonMapOverrideAncestor(t *testing.T) {
+	renderer := &helmtest.MockRenderer{
+		Rendered: map[string][]byte{"gpu-operator": {}},
+	}
+	result := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:    "gpu-operator",
+			Type:    recipe.ComponentTypeHelm,
+			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Chart:   "gpu-operator",
+			Version: "v25.3.0",
+			Overrides: map[string]any{
+				"driver": "not-a-map",
+			},
+		}},
+	}
+
+	_, err := NewLister(
+		WithHelmRenderer(renderer),
+		WithValueOverrides([]config.ComponentPath{
+			mustParseOverride(t, "gpuoperator:driver.enabled=false"),
+		}),
+	).Discover(t.Context(), result)
+	if err == nil || !strings.Contains(err.Error(), "exists but is not a map") {
+		t.Fatalf("Discover() error = %v, want non-map ancestor rejection", err)
+	}
+	if len(renderer.Inputs) != 0 {
+		t.Fatalf("renderer called %d times before override rejection", len(renderer.Inputs))
+	}
+}
+
+func TestDiscover_SetEnabledOverride(t *testing.T) {
+	tests := []struct {
+		name     string
+		override string
+		wantErr  bool
+	}{
+		{
+			name:     "false skips component",
+			override: "gpuoperator:enabled=false",
+		},
+		{
+			name:     "non-boolean is rejected",
+			override: "gpuoperator:enabled=not-a-bool",
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			renderer := &helmtest.MockRenderer{
+				Rendered: map[string][]byte{"gpu-operator": {}},
+			}
+			result, err := NewLister(
+				WithHelmRenderer(renderer),
+				WithValueOverrides([]config.ComponentPath{
+					mustParseOverride(t, tt.override),
+				}),
+			).Discover(t.Context(), &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{{
+					Name:    "gpu-operator",
+					Type:    recipe.ComponentTypeHelm,
+					Source:  "https://helm.ngc.nvidia.com/nvidia",
+					Chart:   "gpu-operator",
+					Version: "v25.3.0",
+				}},
+			})
+			switch {
+			case tt.wantErr:
+				if err == nil {
+					t.Fatal("Discover() error = nil, want invalid enabled override")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("Discover() error = %v, want ErrCodeInvalidRequest", err)
+				}
+				if !strings.Contains(err.Error(), "invalid --set enabled value") {
+					t.Fatalf("Discover() error = %v, want invalid enabled override", err)
+				}
+				if result != nil {
+					t.Fatalf("Discover() result = %#v, want nil after invalid override", result)
+				}
+			case err != nil:
+				t.Fatalf("Discover() error = %v", err)
+			default:
+				if len(result.Components) != 0 || len(result.Charts) != 0 || len(result.Images) != 0 {
+					t.Fatalf("component remained in mirror list: %#v", result)
+				}
+			}
+			if len(renderer.Inputs) != 0 {
+				t.Fatalf("renderer calls = %d, want 0", len(renderer.Inputs))
+			}
+		})
+	}
+}
+
+func TestDiscover_ProfileLockLeavesUnownedHydrationBestEffort(t *testing.T) {
+	result := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeProfileAPIVersion,
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+				Chart:   "gpu-operator",
+				Version: "v25.3.0",
+				Overrides: map[string]any{
+					"driver": map[string]any{"enabled": false},
+				},
+			},
+			{
+				Name:       "network-operator",
+				Type:       recipe.ComponentTypeHelm,
+				Source:     "https://helm.ngc.nvidia.com/nvidia",
+				Chart:      "network-operator",
+				Version:    "v25.1.0",
+				ValuesFile: "components/does-not-exist/values.yaml",
+			},
+		},
+	}
+	result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+		Name:  "gpuStack",
+		Value: "driver-installed",
+		OwnedPaths: map[string][]string{
+			"gpu-operator": {"driver.enabled", "enabled"},
+		},
+	}
+	renderer := &helmtest.MockRenderer{
+		Rendered: map[string][]byte{"gpu-operator": {}},
+	}
+
+	list, err := NewLister(WithHelmRenderer(renderer)).Discover(t.Context(), result)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(list.Components) != 2 {
+		t.Fatalf("components = %d, want 2", len(list.Components))
+	}
+	for _, componentImages := range list.Components {
+		if componentImages.Component != "network-operator" {
+			continue
+		}
+		if len(componentImages.Warnings) == 0 {
+			t.Fatal("network-operator hydration failure did not produce a warning")
+		}
+		return
+	}
+	t.Fatal("network-operator missing from mirror result")
 }
 
 func TestKubeVersionFromConstraints(t *testing.T) {
@@ -393,29 +641,181 @@ func TestKubeVersionFromConstraints(t *testing.T) {
 	}
 }
 
-func splitPath(path string) []string {
-	var parts []string
-	for _, p := range []byte(path) {
-		switch {
-		case p == '.':
-			parts = append(parts, "")
-		case len(parts) == 0:
-			parts = append(parts, string(p))
-		default:
-			parts[len(parts)-1] += string(p)
+type kaiConfigRenderer struct {
+	inputs []helm.ChartInput
+}
+
+func (r *kaiConfigRenderer) Render(_ context.Context, input helm.ChartInput) ([]byte, error) {
+	r.inputs = append(r.inputs, input)
+
+	binderName := "binder"
+	if binder, ok := input.Values["binder"].(map[string]any); ok {
+		if image, ok := binder["image"].(map[string]any); ok {
+			if name, ok := image["name"]; ok {
+				binderName = fmt.Sprint(name)
+			}
 		}
 	}
-	return parts
+
+	scalingPodImage := ""
+	if global, ok := input.Values["global"].(map[string]any); ok {
+		if enabled, ok := global["clusterAutoscaling"].(bool); ok && enabled {
+			scalingPodImage = `
+  nodeScaleAdjuster:
+    service:
+      enabled: true
+    args:
+      scalingPodImage:
+        name: scalingpod
+        repository: ghcr.io/kai-scheduler/kai-scheduler
+        tag: v0.14.1`
+		}
+	}
+
+	return []byte(fmt.Sprintf(`
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: operator
+          image: ghcr.io/kai-scheduler/kai-scheduler/operator:v0.14.1
+---
+apiVersion: kai.scheduler/v1
+kind: Config
+spec:
+  binder:
+    service:
+      image:
+        name: %s
+        repository: ghcr.io/kai-scheduler/kai-scheduler
+        tag: v0.14.1
+  scheduler:
+    service:
+      image:
+        name: scheduler
+        repository: ghcr.io/kai-scheduler/kai-scheduler
+        tag: v0.14.1%s
+`, binderName, scalingPodImage)), nil
+}
+
+func TestDiscoverOperatorManagedImagesWithAutoscalingOverride(t *testing.T) {
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "kai-scheduler",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "oci://ghcr.io/kai-scheduler/kai-scheduler",
+				Chart:   "kai-scheduler",
+				Version: "v0.14.1",
+			},
+		},
+	}
+	renderer := &kaiConfigRenderer{}
+
+	overrides, err := config.ParseValueOverrides([]string{
+		"kaischeduler:global.clusterAutoscaling=true",
+	})
+	if err != nil {
+		t.Fatalf("ParseValueOverrides() error = %v", err)
+	}
+
+	list, err := NewLister(
+		WithHelmRenderer(renderer),
+		WithValueOverrides(overrides),
+	).Discover(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	want := []string{
+		"ghcr.io/kai-scheduler/kai-scheduler/binder:v0.14.1",
+		"ghcr.io/kai-scheduler/kai-scheduler/operator:v0.14.1",
+		"ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.14.1",
+		"ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.14.1",
+	}
+	if !slices.Equal(list.Images, want) {
+		t.Errorf("Images = %v, want %v", list.Images, want)
+	}
+
+	if len(renderer.inputs) != 1 {
+		t.Fatalf("renderer inputs = %d, want 1", len(renderer.inputs))
+	}
+	global, ok := renderer.inputs[0].Values["global"].(map[string]any)
+	if !ok {
+		t.Fatalf("global values = %T, want map[string]any", renderer.inputs[0].Values["global"])
+	}
+	if enabled, ok := global["clusterAutoscaling"].(bool); !ok || !enabled {
+		t.Errorf("global.clusterAutoscaling = %#v, want true", global["clusterAutoscaling"])
+	}
+}
+
+func TestDiscoverRejectsNullOperatorImageNameOverride(t *testing.T) {
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "kai-scheduler",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "oci://ghcr.io/kai-scheduler/kai-scheduler",
+				Chart:   "kai-scheduler",
+				Version: "v0.14.1",
+			},
+		},
+	}
+	renderer := &kaiConfigRenderer{}
+
+	overrides, err := config.ParseValueOverrides([]string{
+		"kaischeduler:binder.image.name=null",
+	})
+	if err != nil {
+		t.Fatalf("ParseValueOverrides() error = %v", err)
+	}
+
+	_, err = NewLister(
+		WithHelmRenderer(renderer),
+		WithValueOverrides(overrides),
+	).Discover(context.Background(), rec)
+	if err == nil {
+		t.Fatal("Discover() error = nil, want invalid structured image descriptor error")
+	}
+	if !bom.IsInvalidStructuredImageDescriptor(err) {
+		t.Errorf("IsInvalidStructuredImageDescriptor(%v) = false, want true", err)
+	}
+	if !strings.Contains(err.Error(), `component "kai-scheduler"`) {
+		t.Errorf("error %q does not identify the component", err.Error())
+	}
+	if count := strings.Count(err.Error(), "invalid structured image descriptor"); count != 1 {
+		t.Errorf("error %q repeats the descriptor summary %d times, want 1", err.Error(), count)
+	}
+
+	if len(renderer.inputs) != 1 {
+		t.Fatalf("renderer inputs = %d, want 1", len(renderer.inputs))
+	}
+	binder, ok := renderer.inputs[0].Values["binder"].(map[string]any)
+	if !ok {
+		t.Fatalf("binder values = %T, want map[string]any", renderer.inputs[0].Values["binder"])
+	}
+	image, ok := binder["image"].(map[string]any)
+	if !ok {
+		t.Fatalf("binder.image values = %T, want map[string]any", binder["image"])
+	}
+	if got := image["name"]; got != "null" {
+		t.Errorf("binder.image.name = %#v, want %q", got, "null")
+	}
 }
 
 // inMemoryDataProvider is a minimal recipe.DataProvider backed by an
 // in-memory map[path]content. Only ReadFile is exercised by extractManifestImages;
 // WalkDir and Source are implemented to satisfy the interface.
 type inMemoryDataProvider struct {
-	files map[string][]byte
+	files    map[string][]byte
+	readFile func(context.Context, string) ([]byte, error)
 }
 
 func (p *inMemoryDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if p.readFile != nil {
+		return p.readFile(ctx, path)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -458,7 +858,7 @@ spec:
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:          "network-operator",
-				Type:          recipe.ComponentTypeKustomize,
+				Type:          recipe.ComponentTypeHelm,
 				ManifestFiles: []string{manifestPath},
 			},
 		},
@@ -481,6 +881,174 @@ spec:
 	}
 }
 
+func TestDiscover_RejectsInvalidStructuredImageDescriptorInManifest(t *testing.T) {
+	const manifestPath = "components/kai-scheduler/manifests/invalid-image.yaml"
+	dp := &inMemoryDataProvider{files: map[string][]byte{
+		manifestPath: []byte(`
+apiVersion: kai.scheduler/v1
+kind: Config
+spec:
+  binder:
+    service:
+      image:
+        name: null
+        repository: ghcr.io/kai-scheduler/kai-scheduler
+        tag: v0.14.1
+`),
+	}}
+
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:          "kai-scheduler",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{manifestPath},
+			},
+		},
+	}
+	rec.BindDataProvider(dp)
+
+	_, err := NewLister(WithHelmRenderer(&helmtest.MockRenderer{})).
+		Discover(context.Background(), rec)
+	if err == nil {
+		t.Fatal("Discover() error = nil, want invalid structured image descriptor error")
+	}
+	if !bom.IsInvalidStructuredImageDescriptor(err) {
+		t.Errorf("IsInvalidStructuredImageDescriptor(%v) = false, want true", err)
+	}
+	if !strings.Contains(err.Error(), manifestPath) {
+		t.Errorf("error %q does not identify manifest %q", err.Error(), manifestPath)
+	}
+}
+
+func TestDiscover_PropagatesManifestReadCancellation(t *testing.T) {
+	const manifestPath = "components/test/manifests/canceled.yaml"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:          "test",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{manifestPath},
+			},
+		},
+	}
+	rec.BindDataProvider(&inMemoryDataProvider{
+		readFile: func(ctx context.Context, _ string) ([]byte, error) {
+			cancel()
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	})
+
+	_, err := NewLister(WithHelmRenderer(&helmtest.MockRenderer{})).Discover(ctx, rec)
+	if !stderrors.Is(err, context.Canceled) {
+		t.Fatalf("Discover() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestDiscover_ChecksCancellationBetweenManifestReads(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const validManifest = `
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - image: example.com/test:v1
+`
+	readCount := 0
+	dp := &inMemoryDataProvider{
+		readFile: func(_ context.Context, _ string) ([]byte, error) {
+			readCount++
+			if readCount == 1 {
+				cancel()
+			}
+			return []byte(validManifest), nil
+		},
+	}
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:          "test",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{"first.yaml", "second.yaml"},
+			},
+		},
+	}
+	rec.BindDataProvider(dp)
+
+	_, err := NewLister(WithHelmRenderer(&helmtest.MockRenderer{})).Discover(ctx, rec)
+	if !stderrors.Is(err, context.Canceled) {
+		t.Fatalf("Discover() error = %v, want context.Canceled", err)
+	}
+	if readCount != 1 {
+		t.Errorf("manifest reads = %d, want 1", readCount)
+	}
+}
+
+// TestDiscover_NilDataProviderFallsBackToEmbedded confirms the back-compat
+// path: when a RecipeResult has no bound provider, extractManifestImages must
+// still resolve manifest paths via the package-global embedded provider
+// (recipe.GetManifestContentWithContext treats a nil dp as embedded fallback).
+
+func TestDiscover_OverrideAliasRegistryFailureIsFatal(t *testing.T) {
+	dp := &inMemoryDataProvider{files: map[string][]byte{
+		"registry.yaml": []byte("components: ["),
+	}}
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:    "network-operator",
+			Type:    recipe.ComponentTypeHelm,
+			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Chart:   "network-operator",
+			Version: "v25.7.0",
+		}},
+	}
+	rec.BindDataProvider(dp)
+
+	_, err := NewLister(
+		WithHelmRenderer(&helmtest.MockRenderer{}),
+		WithValueOverrides([]config.ComponentPath{
+			mustParseOverride(t, "networkoperator:feature.enabled=true"),
+		}),
+	).Discover(t.Context(), rec)
+	if err == nil {
+		t.Fatal("Discover() error = nil, want registry failure")
+	}
+	if !strings.Contains(err.Error(), "failed to parse registry.yaml") {
+		t.Fatalf("Discover() error = %v, want registry parse failure", err)
+	}
+}
+
+func TestDiscover_RegistryFailureWithoutOverridesIsNotFatal(t *testing.T) {
+	dp := &inMemoryDataProvider{files: map[string][]byte{
+		"registry.yaml": []byte("components: ["),
+	}}
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:    "network-operator",
+			Type:    recipe.ComponentTypeHelm,
+			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Chart:   "network-operator",
+			Version: "v25.7.0",
+		}},
+	}
+	rec.BindDataProvider(dp)
+
+	_, err := NewLister(
+		WithHelmRenderer(&helmtest.MockRenderer{
+			Rendered: map[string][]byte{"network-operator": {}},
+		}),
+	).Discover(t.Context(), rec)
+	if err != nil {
+		t.Fatalf("Discover() error = %v, want malformed registry ignored without overrides", err)
+	}
+}
+
 // TestDiscover_NilDataProviderFallsBackToEmbedded confirms the back-compat
 // path: when a RecipeResult has no bound provider, extractManifestImages must
 // still resolve manifest paths via the package-global embedded provider
@@ -493,7 +1061,7 @@ func TestDiscover_NilDataProviderFallsBackToEmbedded(t *testing.T) {
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:          "network-operator",
-				Type:          recipe.ComponentTypeKustomize,
+				Type:          recipe.ComponentTypeHelm,
 				ManifestFiles: []string{embeddedManifest},
 			},
 		},

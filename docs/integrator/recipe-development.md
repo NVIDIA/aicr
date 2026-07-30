@@ -420,7 +420,159 @@ Base → ValuesFile → Overrides → CLI --set flags
 # Result: driver.version="580.13.01", driver.repository="nvcr.io/nvidia" (preserved)
 ```
 
-**Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is resolved from a snapshot (via `aicr recipe --snapshot` or `ResolveRecipeFromSnapshot`), AICR reads the sampled GPU node's `driver-loaded` measurement and injects `gpu-operator.overrides.driver.enabled=false` when the NVIDIA kernel module is already loaded on the node — as an Overrides entry, so it wins over base and provider values files. Explicit `--set` flags at bundle generation (`aicr bundle --set gpuoperator:driver.enabled=true`) retain higher precedence and can supersede the injection — `--set` is a bundle-time flag, not an `aicr recipe` flag. The gate: injection only fires when the resolved overlay already declares the coordinated preinstalled-driver profile (`gpu-operator.driver.enabled=false` in the merged base+valuesFile) — that scopes auto-detect to overlays like AKS, GKE-COS, and OKE, and skips bare EKS with a warning instead of leaving the Operator half-configured. Policy is only-false (never forces `true`), so recipes resolved without a snapshot fall back to today's static defaults. Capture the snapshot **before** deploying the GPU Operator: a snapshot taken after a prior AICR-managed driver install still reports `driver-loaded=true` and would flip a re-deploy toward driverless nodes; AICR emits a warning when both `driver-loaded=true` and a gpu-operator ClusterPolicy are present in the snapshot. See [Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
+### Configuration Profiles
+
+A service or OS overlay may declare one configuration profile when the same
+criteria combination has multiple qualified ownership modes. The core
+mechanism ships without an embedded adopter; its first declaration is planned
+for AKS in a separate rollout.
+
+A declaring overlay uses recipe apiVersion `aicr.run/v1alpha3`:
+
+```yaml
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha3
+metadata:
+  name: example-service
+spec:
+  criteria:
+    service: example
+  profile:
+    name: gpuStack
+    description: Who installs the GPU driver.
+    default: driver-installed
+    values:
+      # SHAPE ONLY — not a shippable declaration. Neither value carries
+      # the distinguishing constraint ADR-015 requires (see below).
+      driver-installed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: false
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+```
+
+**Every value must carry a distinguishing constraint.** ADR-015 requires each
+value to declare a validation signal that distinguishes its configuration from
+every sibling value's. A value with no constraints at all — or with constraints
+identical to a sibling's — does not support the "validated against deployed
+config" claim and must not be declared. The snippet above shows the declaration
+shape only; it is not a declaration you should copy into an overlay.
+
+**Constraint names must be measurement paths a collector actually emits**, in
+`{Type}.{Subtype}.{Key}` form. The type must be one the snapshot carries —
+`K8s`, `GPU`, `OS`, `SystemD`, `NodeTopology`, or `NetworkTopology` —
+so `K8s.server.version` resolves while an unknown type is rejected outright as
+an invalid measurement type. Constraints are evaluated against the snapshot
+when one is supplied, and a name whose subtype nothing produces fails closed
+with `subtype not found`. Either way a fabricated path makes the whole value
+unselectable rather than unconstrained.
+
+Do not borrow paths from `validation.deployment.constraints`, such as
+`Deployment.gpu-operator.version`. Those are deployment-phase validator keys
+evaluated against a live cluster, not snapshot readings, and `Deployment` is
+not a measurement type.
+
+**Which signal qualifies a driver-ownership profile depends on the service.**
+The example above names none, which is why it is shape only. `GPU.hardware`
+readings do not settle it: `driver-loaded` proves a driver is *present*, not
+which mode installed it.
+
+**AKS** projects each GPU agent pool's durable `gpuProfile.driver` property
+into a snapshot reading — `Install` selects the preinstalled value, `None`
+selects the operator-managed one. Unavailable, unknown, or mixed pool values
+fail closed. ADR-015 resolves this signal, and AKS is the first planned
+adopter.
+
+No equivalent reading exists for other services yet. Declare a
+driver-ownership profile only once the signal for that service exists, and
+give both values symmetric constraints over it. Do not substitute a signal
+that reports something adjacent: GKE's
+`gke-no-default-nvidia-gpu-device-plugin` label, for instance, governs
+device-plugin advertisement rather than driver provisioning
+([#1755](https://github.com/NVIDIA/aicr/issues/1755) keeps the two
+deliberately separate), so selecting driver modes with it can pick the wrong
+configuration on a supported cluster.
+
+Nothing in core admission blocks a constraint-free declaration — the
+distinguishability rule is enforced during catalog review. A value without
+constraints still resolves, still returns `metadata.selectedProfile`, and still
+locks its `ownedPaths`, so shipping one produces a recipe that attests an
+unqualified configuration.
+
+Profile declarations are intentionally narrow:
+
+- One declaration may influence a resolved composition. Put it on a shared
+  overlay ancestor; mixins cannot declare profiles.
+- `default` is required. Profile and value identifiers use
+  `[A-Za-z0-9._-]+`.
+- A value permits only `constraints` and
+  `componentRefs{name,overrides}` in the core mechanism. `valuesFile`,
+  component identity/deployment fields, literal dotted keys, nested empty
+  maps, and root `overrides.enabled` are rejected.
+- Override leaves must be JSON/YAML scalar values. Finite numbers and YAML
+  timestamps are supported; non-finite `.nan`/`.inf` values are rejected
+  because every resolved recipe must remain JSON-serializable. Integers must
+  remain within the JSON round-trip-safe range, from -9007199254740991 through
+  9007199254740991.
+- Every value must assign the same flattened override paths. A profile may
+  configure only components already enabled in the surviving composition.
+- Profile values may assign overrides only to Helm components. Kustomize
+  components do not consume values overrides, so they may be referenced only
+  without overrides for presence locking.
+- Profile constraints must distinguish sibling modes. They are evaluated
+  fail closed during snapshot resolution and remain in the hydrated recipe
+  for later validation. This qualification rule is enforced during catalog
+  review; core admission does not infer whether arbitrary readings
+  semantically distinguish two modes.
+- The GKE-only `advertiser` and allocation-policy selector paths are reserved
+  but rejected until the GKE extension lands.
+
+Select with `aicr recipe --profile name=value`; omission uses the declared
+default. A profiled result uses `aicr.run/v1alpha3` and records
+`metadata.selectedProfile`, including declaration-wide `ownedPaths`.
+Divergent static overrides, all intersecting dynamic paths, removal of an
+owned component, and argocd-helm install-time values on owned paths fail
+closed. A redundant override that resolves to the selected value is allowed.
+
+**Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is
+resolved from a snapshot (via `aicr recipe --snapshot` or
+`ResolveRecipeFromSnapshot`), AICR reads the sampled GPU node's `driver-loaded`
+measurement. When the NVIDIA kernel module is already loaded, AICR injects
+`gpu-operator.overrides.driver.enabled=false` as an Overrides entry, so it wins
+over base and provider values files.
+
+Explicit `--set` flags at bundle generation, such as
+`aicr bundle --set gpuoperator:driver.enabled=true`, retain higher precedence
+and can supersede the injection unless the path is profile-owned. Divergent
+overrides of profile-owned paths fail closed. `--set` is a bundle-time flag,
+not an `aicr recipe` flag.
+
+**Profile ownership.** When a selected profile owns
+`gpu-operator.driver.enabled`, auto-detection does not mutate that path. The
+selected profile remains authoritative.
+
+**Static activation gate.** Otherwise, injection fires only when the resolved
+component values already set `gpu-operator.driver.enabled=false` and carry the
+coordinated preinstalled-driver configuration. This prerequisite is independent
+of whether the recipe declares an ADR-015 profile. It scopes auto-detection to
+statically prepared overlays such as AKS, GKE-COS, and OKE. Bare EKS is skipped
+with a warning instead of leaving the Operator half-configured. The policy is
+only-false and never forces `true`, so recipes resolved without a snapshot use
+their static defaults.
+
+**Snapshot timing.** Capture the snapshot **before** deploying the GPU
+Operator. A snapshot taken after an earlier AICR-managed driver install still
+reports `driver-loaded=true` and could flip a re-deployment toward driverless
+nodes. AICR warns when both `driver-loaded=true` and a gpu-operator
+ClusterPolicy are present in the snapshot. See
+[Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
 
 ## Disable a Component in an Overlay
 

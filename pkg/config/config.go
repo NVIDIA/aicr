@@ -105,6 +105,7 @@ type RecipeSpec struct {
 	Input    *RecipeInputSpec  `yaml:"input,omitempty" json:"input,omitempty"`
 	Output   *RecipeOutputSpec `yaml:"output,omitempty" json:"output,omitempty"`
 	Data     string            `yaml:"data,omitempty" json:"data,omitempty"`
+	Profile  string            `yaml:"profile,omitempty" json:"profile,omitempty"`
 
 	// CriteriaStrict, when true, rejects criteria values not in the
 	// embedded OSS catalog (i.e., hides registry entries contributed by

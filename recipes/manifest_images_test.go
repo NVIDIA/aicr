@@ -91,7 +91,7 @@ var imageDigestExemptions = map[string]string{
 	// NicClusterPolicy (network-operator AKS): repository/image/version
 	// triplet schema; no digest field.
 	"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2":               "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
-	"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.1.0": "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
+	"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1": "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
 	"nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host":                    "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
 
 	// Skyhook Package (nodewright-customizations no-op): shellscript package

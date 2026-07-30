@@ -40,6 +40,17 @@ var (
 	date    = "unknown"
 )
 
+func newRoutes(h *recipeHandler, bh *bundleHandler) map[string]http.HandlerFunc {
+	return map[string]http.HandlerFunc{
+		"/v1/recipe": h.HandleRecipes,
+		"/v1/query":  h.HandleQuery,
+		"/v1/bundle": bh.HandleBundles,
+		"/v2/recipe": h.HandleRecipesV2,
+		"/v2/query":  h.HandleQueryV2,
+		"/v2/bundle": bh.HandleBundlesV2,
+	}
+}
+
 // Serve starts the aicrd HTTP server and blocks until shutdown.
 // It configures logging, sets up routes, and handles graceful shutdown.
 // Returns an error if the server fails to start or encounters a fatal error.
@@ -131,17 +142,11 @@ func Serve() error {
 	// the Client owns both, completing #1077 acceptance criterion #2.
 	bh := newBundleHandler(client, allowLists, signing)
 
-	r := map[string]http.HandlerFunc{
-		"/v1/recipe": h.HandleRecipes,
-		"/v1/query":  h.HandleQuery,
-		"/v1/bundle": bh.HandleBundles,
-	}
-
 	// Create and run server
 	s := New(
 		WithName(name),
 		WithVersion(version),
-		WithHandler(r),
+		WithHandler(newRoutes(h, bh)),
 	)
 
 	if err := s.Run(ctx); err != nil {

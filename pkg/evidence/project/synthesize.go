@@ -25,7 +25,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/recipe"
-	"gopkg.in/yaml.v3"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // k8sServerVersionConstraint is the recipe constraint whose value is
@@ -243,14 +243,22 @@ func readRecipeView(bundleDir string) (*recipeView, error) {
 		return nil, err
 	}
 
-	var view recipeView
-	if err := yaml.Unmarshal(data, &view); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "parse bundle recipe.yaml", err)
+	result, err := recipe.DecodeRecipeResult(data, serializer.FormatYAML)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"parse bundle recipe.yaml")
 	}
-	if view.Criteria == nil {
+	if result.Criteria == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "bundle recipe.yaml has no criteria")
 	}
-	return &view, nil
+	if result.Metadata.SelectedProfile != nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"profile-bearing evidence projection is deferred to the profile adoption rollout")
+	}
+	return &recipeView{
+		Criteria:    result.Criteria,
+		Constraints: result.Constraints,
+	}, nil
 }
 
 // readBoundedFile reads path into memory, capped at max bytes. The +1

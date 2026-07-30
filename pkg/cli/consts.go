@@ -35,6 +35,7 @@ const (
 	flagIntent      = "intent"
 	flagOS          = "os"
 	flagPlatform    = "platform"
+	flagProfile     = "profile"
 	flagNoHealth    = "no-health"
 )
 

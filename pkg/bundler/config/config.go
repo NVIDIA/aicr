@@ -41,7 +41,8 @@ const (
 	// DeployerArgoCD generates Argo CD App of Apps manifests.
 	DeployerArgoCD DeployerType = "argocd"
 	// DeployerArgoCDHelm generates a Helm chart app-of-apps for Argo CD.
-	// All values are overridable at install time via helm --set.
+	// All non-profile-owned values are overridable at install time via helm
+	// --set; a profiled recipe's lock template rejects profile-owned paths.
 	// Use --dynamic to pre-populate specific paths in root values.yaml.
 	DeployerArgoCDHelm DeployerType = "argocd-helm"
 	// DeployerFlux generates Flux HelmRelease manifests.

@@ -40,8 +40,12 @@
 //     layer.
 //  3. Build a root values.yaml with ONLY dynamic paths (recipe defaults when
 //     available, empty strings otherwise). Static values stay in chart files.
-//  4. Write Chart.yaml + static/ + templates/ + values.yaml as a valid Helm
-//     chart.
+//  4. Write Chart.yaml + templates/ + values.yaml as a valid Helm chart,
+//     plus static/ when any component contributes a values file to it, and
+//     templates/aicr-profile-lock.yaml when the recipe carries a selected
+//     profile. That template fails the install if a value is supplied for a
+//     profile-owned path, so the lock survives helm install/upgrade rather
+//     than holding only at bundle generation.
 //
 // This approach means changes to the Argo CD deployer (new component types,
 // sync policies, etc.) automatically flow through without duplication.
@@ -50,7 +54,9 @@
 //
 // The bundler routes here when --deployer argocd-helm is specified.
 // The --dynamic flag is optional — it pre-populates specific paths in the
-// root values.yaml, but all values are overridable regardless.
+// root values.yaml, but all non-profile-owned values are overridable
+// regardless. Profile-owned paths are the exception: the lock template
+// above rejects install-time values for them.
 //
 // # Deployment requires a chart-source backend (git or OCI)
 //
@@ -75,7 +81,9 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -96,10 +104,18 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// yamlStringTag is the YAML resolved-tag for explicit scalar strings, used
-// when emitting nodes that must serialize as quoted strings (e.g. Helm
-// template placeholders that would otherwise be misparsed).
-const yamlStringTag = "!!str"
+const (
+	// yamlStringTag is the YAML resolved-tag for explicit scalar strings, used
+	// when emitting nodes that must serialize as quoted strings (e.g. Helm
+	// template placeholders that would otherwise be misparsed).
+	yamlStringTag = "!!str"
+
+	// profileLockTemplateName is reserved only when a profiled recipe emits
+	// the deployer-owned install-time guard of the same name.
+	profileLockTemplateName = "aicr-profile-lock"
+
+	profileLockTemplateHeader = "{{- /* AICR profile install-time ownership guard. */ -}}\n"
+)
 
 // DefaultChartName is the Helm chart name used when ChartName is not set
 // (typically when --output is a local directory). When --output is an OCI
@@ -389,6 +405,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if mkdirErr := os.MkdirAll(templatesDir, 0755); mkdirErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create templates directory", mkdirErr)
 	}
+	lockPath, lockSize, lockErr := g.writeProfileLockTemplate(templatesDir)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	if lockPath != "" {
+		output.Files = append(output.Files, lockPath)
+		output.TotalSize += lockSize
+	}
 
 	if processErr := g.processFolders(ctx, tmpDir, outputDir, templatesDir, output); processErr != nil {
 		return nil, processErr
@@ -434,14 +458,168 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	return output, nil
 }
 
+// writeProfileLockTemplate emits a Helm-render-time guard for profiled
+// bundles. ArgoCD-Helm deliberately exposes component values through the
+// parent chart's .Values; the guard rejects any install-time key whose path
+// equals, contains, or is contained by a profile-owned path. Key existence is
+// used throughout, so false, null, empty maps, and empty lists cannot bypass
+// the lock. Unprofiled bundles emit no file and remain byte-identical.
+func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64, error) {
+	if g.RecipeResult == nil || g.RecipeResult.Metadata.SelectedProfile == nil {
+		if err := removeGeneratedProfileLockTemplate(templatesDir); err != nil {
+			return "", 0, err
+		}
+		return "", 0, nil
+	}
+
+	components := make([]string, 0, len(g.RecipeResult.Metadata.SelectedProfile.OwnedPaths))
+	for component := range g.RecipeResult.Metadata.SelectedProfile.OwnedPaths {
+		components = append(components, component)
+	}
+	sort.Strings(components)
+
+	var buf strings.Builder
+	buf.WriteString(profileLockTemplateHeader)
+	for componentIndex, componentName := range components {
+		overrideKey, err := resolveOverrideKey(componentName, g.RecipeResult.DataProvider())
+		if err != nil {
+			return "", 0, err
+		}
+		for pathIndex, lockedPath := range g.RecipeResult.Metadata.SelectedProfile.OwnedPaths[componentName] {
+			segments := strings.Split(lockedPath, ".")
+			writeProfilePathGuard(
+				&buf,
+				".Values",
+				append([]string{overrideKey}, segments...),
+				fmt.Sprintf("aicrProfile%d_%d", componentIndex, pathIndex),
+				componentName+"."+lockedPath,
+			)
+		}
+	}
+
+	outputPath, err := deployer.SafeJoin(templatesDir, profileLockTemplateName+".yaml")
+	if err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			"failed to resolve profile lock template path", err)
+	}
+	exists, generated, err := inspectProfileLockTemplate(outputPath)
+	if err != nil {
+		return "", 0, err
+	}
+	if exists && !generated {
+		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("refusing to overwrite non-AICR profile lock template %q", outputPath))
+	}
+	content := []byte(buf.String())
+	if err := os.WriteFile(outputPath, content, 0600); err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			"failed to write profile lock template", err)
+	}
+	return outputPath, int64(len(content)), nil
+}
+
+// removeGeneratedProfileLockTemplate removes only a guard recognizable as
+// AICR-owned output from a prior profiled generation. An unrelated preexisting
+// file with the same name is left untouched so unprofiled generation retains
+// its legacy collision behavior.
+func removeGeneratedProfileLockTemplate(templatesDir string) error {
+	outputPath, err := deployer.SafeJoin(templatesDir, profileLockTemplateName+".yaml")
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to resolve stale profile lock template path", err)
+	}
+	exists, generated, err := inspectProfileLockTemplate(outputPath)
+	if err != nil {
+		return err
+	}
+	if !exists || !generated {
+		return nil
+	}
+	if err := os.Remove(outputPath); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to remove stale profile lock template", err)
+	}
+	return nil
+}
+
+func inspectProfileLockTemplate(outputPath string) (bool, bool, error) {
+	file, err := os.Open(outputPath)
+	if os.IsNotExist(err) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect profile lock template", err)
+	}
+	generated, inspectErr := hasGeneratedProfileLockHeader(file)
+	closeErr := file.Close()
+	if inspectErr != nil {
+		return false, false, errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect profile lock template", inspectErr)
+	}
+	if closeErr != nil {
+		return false, false, errors.Wrap(errors.ErrCodeInternal,
+			"failed to close profile lock template", closeErr)
+	}
+	return true, generated, nil
+}
+
+func hasGeneratedProfileLockHeader(reader io.Reader) (bool, error) {
+	prefix := make([]byte, len(profileLockTemplateHeader))
+	n, err := io.ReadFull(reader, prefix)
+	if err != nil {
+		if stderrors.Is(err, io.EOF) || stderrors.Is(err, io.ErrUnexpectedEOF) {
+			return false, nil
+		}
+		return false, err
+	}
+	return n == len(prefix) && string(prefix) == profileLockTemplateHeader, nil
+}
+
+func writeProfilePathGuard(
+	buf *strings.Builder,
+	parent string,
+	segments []string,
+	varPrefix string,
+	displayPath string,
+) {
+
+	if len(segments) == 0 {
+		return
+	}
+	key := segments[0]
+	fmt.Fprintf(buf, "{{- if hasKey %s %q -}}\n", parent, key)
+	if len(segments) == 1 {
+		fmt.Fprintf(buf, "{{- fail %q -}}\n",
+			"install-time value intersects profile-owned path "+displayPath)
+		buf.WriteString("{{- end -}}\n")
+		return
+	}
+
+	current := fmt.Sprintf("$%s_%d", varPrefix, len(segments))
+	fmt.Fprintf(buf, "{{- %s := index %s %q -}}\n", current, parent, key)
+	fmt.Fprintf(buf, "{{- if kindIs \"map\" %s -}}\n", current)
+	writeProfilePathGuard(buf, current, segments[1:], varPrefix, displayPath)
+	buf.WriteString("{{- else -}}\n")
+	fmt.Fprintf(buf, "{{- fail %q -}}\n",
+		"install-time value intersects profile-owned path "+displayPath)
+	buf.WriteString("{{- end -}}\n")
+	buf.WriteString("{{- end -}}\n")
+}
+
 // writeValuesFiles writes the chart's value surfaces: per-component
 // static/<name>.yaml files, the root values.yaml (with appName, repoURL,
 // targetRevision, and deployer defaults injected), and values.schema.json.
 // Each written file is appended to output.Files/TotalSize.
 func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) error {
+	// PropagateOrWrap rather than Wrap: writeStaticValuesAndBuildStubs now
+	// reports a non-directory at the static path as ErrCodeInvalidRequest, and
+	// re-coding that as INTERNAL would present a bad --output path as a server
+	// fault — and over the API would withhold the cause from the response,
+	// since 5xx bodies omit it.
 	staticFiles, staticSize, dynamicOnlyValues, err := g.writeStaticValuesAndBuildStubs(outputDir)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to write static values", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to write static values")
 	}
 	output.Files = append(output.Files, staticFiles...)
 	output.TotalSize += staticSize
@@ -523,20 +701,40 @@ func (g *Generator) finalizeOutput(ctx context.Context, output *deployer.Output,
 	return nil
 }
 
-// writeStaticValuesAndBuildStubs writes each component's values to static/<name>.yaml
-// and builds the dynamic-only stubs map for the root values.yaml.
+// writeStaticValuesAndBuildStubs writes static/<name>.yaml for each component
+// that resolves to a remote Helm chart, and builds the dynamic-only stubs map
+// for the root values.yaml. When no component qualifies, static/ is not
+// created and a stale one from an earlier run is removed.
 func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, int64, map[string]any, error) {
 	staticDir, err := deployer.SafeJoin(outputDir, "static")
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	if mkdirErr := os.MkdirAll(staticDir, 0755); mkdirErr != nil {
-		return nil, 0, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create static directory", mkdirErr)
-	}
 
 	var files []string
 	var totalSize int64
 	dynamicOnlyValues := make(map[string]any)
+
+	// static/ is created lazily, immediately before the first component
+	// values file is written. A recipe whose components all render as local
+	// charts (type Helm with no upstream Source, as the OCP overlays do)
+	// skips every iteration below, and an unconditional MkdirAll would then
+	// leave an empty directory that the bundle inventory validator rejects
+	// as unexpected. See issue #1942.
+	staticDirReady := false
+	ensureStaticDir := func() error {
+		if staticDirReady {
+			return nil
+		}
+		if err := checkStaticPath(staticDir); err != nil {
+			return err
+		}
+		if mkdirErr := os.MkdirAll(staticDir, 0755); mkdirErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to create static directory", mkdirErr)
+		}
+		staticDirReady = true
+		return nil
+	}
 
 	for _, ref := range g.RecipeResult.ComponentRefs {
 		// Skip non-Helm components (Kustomize, manifest-only)
@@ -584,6 +782,9 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		}
 
 		// Write static values (dynamic paths removed)
+		if dirErr := ensureStaticDir(); dirErr != nil {
+			return nil, 0, nil, dirErr
+		}
 		staticPath, staticSize, staticErr := deployer.WriteValuesFile(staticValues, staticDir, ref.Name+".yaml")
 		if staticErr != nil {
 			return nil, 0, nil, errors.Wrap(errors.ErrCodeInternal,
@@ -593,7 +794,103 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		totalSize += staticSize
 	}
 
+	// Generation writes directly into --output and the directory is not
+	// cleared between runs, so a failed pre-fix run leaves its empty static/
+	// behind. Without this, retrying into that same directory reproduces the
+	// original failure even though nothing new is created.
+	if !staticDirReady {
+		if err := removeStaleStaticDir(staticDir); err != nil {
+			return nil, 0, nil, err
+		}
+	}
+
 	return files, totalSize, dynamicOnlyValues, nil
+}
+
+// checkStaticPath rejects anything occupying the static path that is not a
+// plain directory. Both the create and the remove path call it, so a
+// pre-existing file or symlink produces the same ErrCodeInvalidRequest
+// regardless of whether the recipe happens to contribute static values —
+// otherwise the identical user error would surface as INVALID_REQUEST for an
+// all-local recipe and INTERNAL (from MkdirAll's ENOTDIR) for any recipe with
+// an upstream chart.
+//
+// The check matters most before removal, since os.Remove unlinks regular files
+// as readily as it removes empty directories. A pre-existing regular file at
+// this path reaches generation on every route: checksum.ValidateOutputRoot
+// runs first on the DefaultBundler path but permits regular files, rejecting
+// only symlinks and special objects.
+//
+// Lstat rather than Stat additionally rejects a symlink here. On the
+// DefaultBundler path that is redundant, since ValidateOutputRoot already
+// rejects a symlink anywhere under the output root before any deployer runs;
+// it still holds for a caller that constructs this Generator directly and
+// bypasses that check.
+//
+// The guarantee stops there. This is a check-then-act on a path, so a symlink
+// planted between this call and the MkdirAll or Remove that follows is not
+// caught. Closing that would require openat-based operations throughout, and
+// it buys nothing in a supported configuration: it takes a local process with
+// write access to --output, and anything with that access can already rewrite
+// the finished bundle and its checksums.
+func checkStaticPath(staticDir string) error {
+	info, statErr := os.Lstat(staticDir)
+	switch {
+	case os.IsNotExist(statErr):
+		return nil
+	case statErr != nil:
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect static directory", statErr)
+	case info.Mode()&os.ModeSymlink != 0:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %q is a symbolic link", staticDir))
+	case !info.IsDir():
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %q exists and is not a directory", staticDir))
+	}
+	return nil
+}
+
+// removeStaleStaticDir clears a static/ left behind by an earlier run when the
+// current generation contributed no files to it.
+//
+// Emptiness is checked explicitly rather than inferred from an os.Remove
+// errno, which keeps the intent readable and avoids platform-specific error
+// values. A populated static/ is kept: its contents are reported by
+// validateExactTree as unexpected output, though only when checksums are
+// enabled, since that validator runs inside the IncludeChecksums path. With
+// checksums off a stale static/ survives into the bundle, which is unchanged
+// from before this fix — a reused --output was never cleared, so stale files
+// of any kind already persisted.
+//
+// Anything that blocks removal of an empty directory fails generation rather
+// than being logged and ignored: leaving it behind either trips that same
+// validator or, when checksums are disabled, ships the bundle this fix exists
+// to prevent.
+func removeStaleStaticDir(staticDir string) error {
+	if err := checkStaticPath(staticDir); err != nil {
+		return err
+	}
+
+	entries, readErr := os.ReadDir(staticDir)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return nil
+		}
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect static directory", readErr)
+	}
+	if len(entries) > 0 {
+		slog.Warn("keeping populated static directory from an earlier run",
+			"path", staticDir, "entries", len(entries))
+		return nil
+	}
+
+	if rmErr := os.Remove(staticDir); rmErr != nil && !os.IsNotExist(rmErr) {
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to remove empty static directory %q", staticDir), rmErr)
+	}
+	return nil
 }
 
 // valuesSchemaProperty, valuesSchemaDeployerProps, valuesSchemaDeployer,
@@ -929,6 +1226,8 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 	if readErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to list argocd output", readErr)
 	}
+	profileLockReserved := g.RecipeResult != nil &&
+		g.RecipeResult.Metadata.SelectedProfile != nil
 	for _, e := range folderEntries {
 		select {
 		case <-ctx.Done():
@@ -1019,7 +1318,9 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 		if keyErr != nil {
 			return keyErr
 		}
-		tmplPath, tmplSize, transformErr := transformApplication(tmpDir, templatesDir, folderName, folderComponent, overrideKey)
+		tmplPath, tmplSize, transformErr := transformApplication(
+			tmpDir, templatesDir, folderName, folderComponent, overrideKey, profileLockReserved,
+		)
 		if transformErr != nil {
 			return transformErr
 		}
@@ -1040,7 +1341,11 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 //   - spec.source (single-source path-based): inject helm.values that exposes
 //     just the dynamic .Values.<overrideKey> overrides; the wrapped chart at
 //     the path provides its own values.yaml as the static layer.
-func transformApplication(srcDir, templatesDir, folderName, componentName, overrideKey string) (string, int64, error) {
+func transformApplication(
+	srcDir, templatesDir, folderName, componentName, overrideKey string,
+	profileLockReserved bool,
+) (string, int64, error) {
+
 	if !deployer.IsSafePathComponent(componentName) {
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", componentName))
@@ -1048,6 +1353,10 @@ func transformApplication(srcDir, templatesDir, folderName, componentName, overr
 	if !deployer.IsSafePathComponent(folderName) {
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid folder name %q: must not contain path separators or parent directory references", folderName))
+	}
+	if profileLockReserved && componentName == profileLockTemplateName {
+		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q template collides with a deployer-owned template", componentName))
 	}
 	componentDir, joinErr := deployer.SafeJoin(srcDir, folderName)
 	if joinErr != nil {
@@ -1437,8 +1746,9 @@ func copyFolderContent(srcDir, outputDir, folderName string, skip ...string) ([]
 // replacing the multi-source "sources" block with a single "source" that
 // loads static values from a chart file and merges dynamic overrides.
 //
-// All Helm components use the merge pattern — every value is overridable
-// at install time via --set, not just paths declared with --dynamic.
+// All Helm components use the merge pattern — every non-profile-owned value
+// is overridable at install time via --set, not just paths declared with
+// --dynamic. Profile-owned paths are rejected by the lock template, not here.
 func convertToSingleSourceWithValues(app map[string]any, componentName, overrideKey string) error {
 	spec, ok := app["spec"].(map[string]any)
 	if !ok {

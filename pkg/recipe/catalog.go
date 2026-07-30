@@ -14,7 +14,12 @@
 
 package recipe
 
-import "sort"
+import (
+	"context"
+	"sort"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+)
 
 // CatalogEntry describes a single overlay entry in the recipe catalog.
 //
@@ -30,6 +35,12 @@ type CatalogEntry struct {
 	Criteria *Criteria `json:"criteria" yaml:"criteria"`
 	IsLeaf   bool      `json:"is_leaf"  yaml:"is_leaf"`
 	Source   string    `json:"source"   yaml:"source"`
+
+	// Profile is the effective declaration reachable from this overlay,
+	// nil for an unprofiled entry. Only ListCatalogWithProfiles populates
+	// it; ListCatalog leaves it nil because projection requires validating
+	// every reachable declaration and a context for cancellation.
+	Profile *ProfileSummary `json:"profile,omitempty" yaml:"profile,omitempty"`
 }
 
 // ListCatalog returns catalog entries for overlays in the store that have
@@ -84,6 +95,54 @@ func (s *MetadataStore) ListCatalog(filter *Criteria) []CatalogEntry {
 	})
 
 	return entries
+}
+
+// ListCatalogWithProfiles returns the catalog projection with each entry's
+// effective inherited/co-matched profile declaration. It reuses the same
+// pre-filter declaration resolver as recipe generation so discovery cannot
+// disagree with selection, and fails without a partial result when ctx is
+// canceled.
+func (s *MetadataStore) ListCatalogWithProfiles(
+	ctx context.Context,
+	filter *Criteria,
+) ([]CatalogEntry, error) {
+
+	if s == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "metadata store is required")
+	}
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required")
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, errors.Wrap(
+			errors.ErrCodeTimeout, "catalog profile projection canceled before enumeration", ctxErr)
+	}
+	entries := s.ListCatalog(filter)
+	resolvedByCriteria := make(map[Criteria]*effectiveProfileDeclaration)
+	for i := range entries {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, errors.Wrap(
+				errors.ErrCodeTimeout, "catalog profile projection canceled before completion", ctxErr)
+		}
+		key := *entries[i].Criteria
+		effective, resolved := resolvedByCriteria[key]
+		if !resolved {
+			var err error
+			effective, err = s.resolveProfileDeclaration(s.FindMatchingOverlays(entries[i].Criteria))
+			if err != nil {
+				return nil, err
+			}
+			resolvedByCriteria[key] = effective
+		}
+		if effective != nil {
+			entries[i].Profile = profileSummary(effective.Declaration)
+		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, errors.Wrap(
+			errors.ErrCodeTimeout, "catalog profile projection canceled before completion", ctxErr)
+	}
+	return entries, nil
 }
 
 // matchesCatalogFilter reports whether overlayCriteria satisfies every

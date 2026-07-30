@@ -246,21 +246,30 @@ When a query matches a leaf recipe with a `spec.base` reference, the builder:
 3. **Merges in order**, later overlays overriding earlier ones.
 4. **Applies mixins** (`spec.mixins`): appends their constraints and
    `componentRefs`, evaluating mixin constraints when a snapshot is provided.
-5. **Strips context** maps from subtypes unless context output is requested.
+5. **Applies the selected profile** after overlay and mixin composition. An
+   explicit `name=value` selection wins; otherwise the declaration's default
+   is used. Its overrides merge before finalization and registry defaults.
+6. **Strips context** maps from subtypes unless context output is requested.
 
 For the resolver internals (specificity scoring, deep-merge semantics) see
 [Recipe architecture](../contributor/recipe.md).
 
 ### Recipe Data Structure
 
-```
+Unprofiled recipe results retain `aicr.run/v1alpha2`. Selecting a configuration
+profile produces `aicr.run/v1alpha3` and records the selected profile and its
+owned value paths in result metadata.
+
+```text
 ┌─────────────────────────────────────────────────────────┐
-│ RecipeResult (aicr.run/v1alpha2)                          │
+│ RecipeResult                                            │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
 │   version: CLI version that generated the recipe        │
 │   appliedOverlays: inheritance chain (root to leaf)     │
 │   excludedOverlays: matched-but-excluded overlays       │
+│   selectedProfile: name, value, and ownedPaths          │
+│                    (v1alpha3 only)                      │
 │                                                         │
 │ criteria: Criteria (6 dimensions — see mapping above)   │
 │                                                         │

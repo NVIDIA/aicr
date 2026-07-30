@@ -198,6 +198,13 @@ func TestValidate_Errors(t *testing.T) {
 			wantSub: "spec.recipe.output.format",
 		},
 		{
+			name: "invalid profile",
+			mutate: func(c *config.AICRConfig) {
+				c.Spec.Recipe.Profile = "gpuStack"
+			},
+			wantSub: "name=value",
+		},
+		{
 			name: "invalid deployer",
 			mutate: func(c *config.AICRConfig) {
 				c.Spec.Bundle = &config.BundleSpec{

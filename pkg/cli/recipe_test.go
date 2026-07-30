@@ -656,7 +656,10 @@ func TestRecipeCmd_CommandStructure(t *testing.T) {
 		t.Error("Description should not be empty")
 	}
 
-	requiredFlags := []string{"service", "accelerator", "intent", "os", "nodes", "snapshot", "output", "format"}
+	requiredFlags := []string{
+		"service", "accelerator", "intent", "os", "profile",
+		"nodes", "snapshot", "output", "format",
+	}
 	for _, flagName := range requiredFlags {
 		found := false
 		for _, flag := range cmd.Flags {

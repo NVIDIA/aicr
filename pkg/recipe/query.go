@@ -24,6 +24,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+const hydratedNameKey = "name"
+
 // HydrateResult builds a fully hydrated map from a RecipeResult.
 // Component values are merged via GetValuesForComponent so the output
 // contains the final resolved configuration, not file references.
@@ -57,6 +59,17 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 	if result.Metadata.GPUDriverState != "" {
 		metadata["gpuDriverState"] = result.Metadata.GPUDriverState
 	}
+	if result.Metadata.SelectedProfile != nil {
+		metadata["selectedProfile"] = map[string]any{
+			hydratedNameKey: result.Metadata.SelectedProfile.Name,
+			"value":         result.Metadata.SelectedProfile.Value,
+			"ownedPaths":    cloneOwnedPaths(result.Metadata.SelectedProfile.OwnedPaths),
+		}
+		if result.Metadata.SelectedProfile.Advertiser != "" {
+			metadata["selectedProfile"].(map[string]any)["advertiser"] =
+				result.Metadata.SelectedProfile.Advertiser
+		}
+	}
 
 	hydrated := map[string]any{
 		"kind":            result.Kind,
@@ -80,8 +93,8 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 		constraintList := make([]map[string]any, 0, len(result.Constraints))
 		for _, c := range result.Constraints {
 			entry := map[string]any{
-				"name":   c.Name,
-				keyValue: c.Value,
+				hydratedNameKey: c.Name,
+				keyValue:        c.Value,
 			}
 			if c.Severity != "" {
 				entry["severity"] = c.Severity
@@ -100,9 +113,9 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 	components := make(map[string]any, len(result.ComponentRefs))
 	for _, ref := range result.ComponentRefs {
 		comp := map[string]any{
-			"name":   ref.Name,
-			"type":   string(ref.Type),
-			"source": ref.Source,
+			hydratedNameKey: ref.Name,
+			"type":          string(ref.Type),
+			"source":        ref.Source,
 		}
 
 		if ref.Namespace != "" {

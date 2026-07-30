@@ -412,6 +412,10 @@ func hasPreinstalledDriverProfile(ctx context.Context, r *recipe.RecipeResult) b
 // a pre-installed driver on the sampled GPU node AND the resolved
 // overlay already declares the coordinated preinstalled-driver profile.
 //
+// When a selected configuration profile owns driver.enabled, the function
+// never mutates: an agreeing profile value makes the injection redundant and
+// a disagreeing one must win, so ownership short-circuits before any write.
+//
 // Policy is only-false: the function never forces driver.enabled=true.
 // The injection is a no-op on rendered Helm output for overlays that
 // already carry the profile (the resolved recipe records the override
@@ -485,6 +489,23 @@ func applyGPUDriverAutoOverride(ctx context.Context, r *recipe.RecipeResult, sna
 			"reason", "driver state is not preinstalled")
 		return
 	}
+	if r.OwnsProfilePath(gpuOperatorComponentName, "driver.enabled") {
+		driverEnabled, known := profileOwnedDriverEnabled(r)
+		if known && !driverEnabled {
+			slog.Debug("gpu-operator driver auto-detect: selected profile owns driver.enabled; skipping mutation",
+				"state", state.String(),
+				"component", gpuOperatorComponentName)
+		} else {
+			slog.Warn("gpu-operator driver auto-detect: selected profile owns driver.enabled; "+
+				"skipping mutation even though a pre-installed driver was observed. "+
+				"If the selected profile keeps driver.enabled=true, applying it may install "+
+				"a second driver. Select a preinstalled-driver profile or regenerate the recipe.",
+				"state", state.String(),
+				"component", gpuOperatorComponentName,
+				"profile", r.Metadata.SelectedProfile.Name+"="+r.Metadata.SelectedProfile.Value)
+		}
+		return
+	}
 	if !hasPreinstalledDriverProfile(ctx, r) {
 		slog.Warn("gpu-operator driver auto-detect: pre-installed driver observed on sampled node, "+
 			"but the resolved overlay is not a preinstalled-driver profile "+
@@ -537,4 +558,17 @@ func applyGPUDriverAutoOverride(ctx context.Context, r *recipe.RecipeResult, sna
 	}
 	slog.Debug("gpu-operator driver auto-detect: no gpu-operator component ref in resolved recipe",
 		"state", state.String())
+}
+
+func profileOwnedDriverEnabled(r *recipe.RecipeResult) (bool, bool) {
+	ref := r.GetComponentRef(gpuOperatorComponentName)
+	if ref == nil {
+		return false, false
+	}
+	driver, ok := ref.Overrides["driver"].(map[string]any)
+	if !ok {
+		return false, false
+	}
+	enabled, ok := driver["enabled"].(bool)
+	return enabled, ok
 }

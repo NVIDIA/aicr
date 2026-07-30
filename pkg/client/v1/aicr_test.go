@@ -799,6 +799,99 @@ func TestResolveRecipeFromCriteriaLossless(t *testing.T) {
 	}
 }
 
+func TestResolveRecipeWithProfile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o755); err != nil {
+		t.Fatalf("setup overlays directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
+		[]byte("components: []\n"), 0o600); err != nil {
+		t.Fatalf("setup registry.yaml: %v", err)
+	}
+	overlay := []byte(`apiVersion: aicr.run/v1alpha3
+kind: RecipeMetadata
+metadata:
+  name: profile-aks
+spec:
+  criteria:
+    service: aks
+  profile:
+    name: gpuStack
+    default: driver-installed
+    values:
+      driver-installed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: false
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+`)
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "profile-aks.yaml"),
+		overlay, 0o600); err != nil {
+		t.Fatalf("setup profile overlay: %v", err)
+	}
+
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.FilesystemSource(dir)),
+		aicr.WithVersion("v1.2.3"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	criteria, err := recipe.BuildCriteriaWithRegistry(client.CriteriaRegistry(),
+		recipe.WithServiceRegistry("aks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteriaWithRegistry: %v", err)
+	}
+	result, err := client.ResolveRecipeFromCriteriaWithProfile(
+		t.Context(), aicr.WrapCriteria(criteria), "gpuStack=operator-managed",
+	)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteriaWithProfile: %v", err)
+	}
+	if result.SelectedProfile == nil ||
+		result.SelectedProfile.Value != "operator-managed" ||
+		result.Resolved().APIVersion != recipe.RecipeProfileAPIVersion {
+
+		t.Fatalf("profile result = %#v, apiVersion=%q",
+			result.SelectedProfile, result.Resolved().APIVersion)
+	}
+	values, err := result.Resolved().GetValuesForComponentWithContext(t.Context(), "gpu-operator")
+	if err != nil {
+		t.Fatalf("GetValuesForComponentWithContext: %v", err)
+	}
+	if enabled := values["driver"].(map[string]any)["enabled"]; enabled != true {
+		t.Fatalf("driver.enabled = %v, want true", enabled)
+	}
+
+	entries, err := client.ListCatalog(t.Context(), &aicr.Criteria{Service: "aks"})
+	if err != nil {
+		t.Fatalf("ListCatalog: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Name == "profile-aks" {
+			if entry.Profile == nil || entry.Profile.Default != "driver-installed" {
+				t.Fatalf("catalog profile = %#v", entry.Profile)
+			}
+			return
+		}
+	}
+	t.Fatal("profile-aks catalog entry not found")
+}
+
 // TestResolveRecipeFromSnapshot proves the snapshot-evaluator resolve path:
 // ResolveRecipeFromSnapshot builds a recipe from explicit Criteria while
 // evaluating its resolution constraints against an observed cluster Snapshot

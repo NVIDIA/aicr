@@ -528,18 +528,12 @@ func componentDisabled(ref *recipe.ComponentRef, bundlerConfig *config.Config, k
 // so a bundle whose values cannot be resolved is never emitted by either
 // path.
 //
-// Override-apply failures (--set / --set-json / --set-file) are blocking
-// too. extractComponentValues usually rejects them with
-// ErrCodeInvalidRequest before validations run, but not reliably:
-// ApplyMapOverrides applies scalar --set paths in Go's randomized
-// map-iteration order, so an overlapping pair (e.g. gpuoperator:a.b=1
-// alongside gpuoperator:a=2) can apply cleanly child-first during
-// extraction yet fail parent-first here on a fresh iteration order.
-// Skipping on that failure would disarm the gate for exactly the
-// override sets whose effective values it cannot reconstruct — with
-// gpuDriverState=absent that lets a driverless bundle through — so the
-// gate fails closed instead. When extraction already failed, validations
-// never run, so this cannot duplicate the bundler's own rejection.
+// Override-apply failures (--set / --set-json / --set-file) are blocking too.
+// Bundle generation normally rejects them during value extraction before
+// validations run, but this helper is also usable directly. Skipping an
+// override it cannot reconstruct would disarm the gate for that candidate —
+// with gpuDriverState=absent that could let a driverless configuration pass —
+// so the gate independently fails closed.
 func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, componentName string, keys []string) (map[string]any, error) {
 	values, err := recipeResult.GetValuesForComponentWithContext(ctx, componentName)
 	if err != nil {

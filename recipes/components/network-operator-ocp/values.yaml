@@ -45,7 +45,7 @@ ofedDriver:
 rdmaSharedDevicePlugin:
   image: k8s-rdma-shared-dev-plugin
   repository: nvcr.io/nvidia/mellanox
-  version: network-operator-v26.1.0
+  version: network-operator-v26.4.1
   config: |
     {
       "configList": [{
@@ -61,7 +61,7 @@ rdmaSharedDevicePlugin:
 nvIpam:
   image: nvidia-k8s-ipam
   repository: nvcr.io/nvidia/mellanox
-  version: network-operator-v26.1.0
+  version: network-operator-v26.4.1
   enableWebhook: false
 
 # --- Fields present in network-operator/values.yaml but NOT in NicClusterPolicy CR ---

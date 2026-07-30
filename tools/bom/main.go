@@ -107,9 +107,9 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 
 	ctx := context.Background()
 
-	results := make([]bom.ComponentResult, 0, len(reg.Components))
-	for _, c := range reg.Components {
-		results = append(results, surveyComponent(ctx, repoRoot, c, renderer, skipHelm))
+	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "survey components")
 	}
 
 	// Version variants: explicit base/overlay/mixin Helm pins that differ
@@ -119,16 +119,28 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load recipe sources")
 	}
-	byName := make(map[string]component, len(reg.Components))
-	for _, c := range reg.Components {
-		byName[c.Name] = c
-	}
+	byName := indexComponentsByName(reg.Components)
 	variants, err := deriveVariants(reg, sources)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "derive variants")
 	}
 	for i, v := range variants {
-		variants[i] = surveyVariant(ctx, repoRoot, v, byName[v.Name], renderer, skipHelm)
+		surveyed, surveyErr := surveyVariant(
+			ctx,
+			repoRoot,
+			v,
+			byName[v.Name],
+			renderer,
+			skipHelm,
+		)
+		if surveyErr != nil {
+			return errors.PropagateOrWrap(
+				surveyErr,
+				errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("survey component variant %q@%q", v.Name, v.Version),
+			)
+		}
+		variants[i] = surveyed
 	}
 
 	if strict {
@@ -225,6 +237,37 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	return nil
 }
 
+func indexComponentsByName(components []component) map[string]component {
+	byName := make(map[string]component, len(components))
+	for _, c := range components {
+		byName[c.Name] = c
+	}
+	return byName
+}
+
+func surveyComponents(
+	ctx context.Context,
+	repoRoot string,
+	components []component,
+	renderer helm.Renderer,
+	skipHelm bool,
+) ([]bom.ComponentResult, error) {
+
+	results := make([]bom.ComponentResult, 0, len(components))
+	for _, c := range components {
+		result, err := surveyComponent(ctx, repoRoot, c, renderer, skipHelm)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(
+				err,
+				errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("survey component %q", c.Name),
+			)
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
 // renderHelmComponent shells out to `helm template` for c. The timeout
 // context is scoped to this call so its associated timer is canceled before
 // the manifests walk begins, regardless of how many components are surveyed.
@@ -259,7 +302,14 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 
 // surveyComponent renders the component's chart (if any) and walks its
 // embedded manifests directory, returning the union of image refs.
-func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer, skipHelm bool) bom.ComponentResult {
+func surveyComponent(
+	ctx context.Context,
+	repoRoot string,
+	c component,
+	r helm.Renderer,
+	skipHelm bool,
+) (bom.ComponentResult, error) {
+
 	version := pinnedVersion(c)
 	// Repository carries the Helm chart repo or, for a Kustomize component, its
 	// source; pkg/bom names the property by effective type. Chart/Namespace are
@@ -287,6 +337,13 @@ func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.R
 		if len(out) > 0 {
 			imgs, parseErr := bom.ExtractImagesFromYAML(out)
 			if parseErr != nil {
+				if bom.IsInvalidStructuredImageDescriptor(parseErr) {
+					return res, wrapInvalidDescriptorSurveyError(
+						parseErr,
+						c.Name,
+						"",
+					)
+				}
 				res.Warnings = append(res.Warnings, "parse rendered yaml: "+parseErr.Error())
 			}
 			for _, i := range imgs {
@@ -313,6 +370,9 @@ func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.R
 			}
 			imgs, perr := bom.ExtractImagesFromYAML(data)
 			if perr != nil {
+				if bom.IsInvalidStructuredImageDescriptor(perr) {
+					return wrapInvalidDescriptorSurveyError(perr, c.Name, path)
+				}
 				res.Warnings = append(res.Warnings, fmt.Sprintf("parse %s: %v", path, perr))
 				return nil
 			}
@@ -322,6 +382,13 @@ func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.R
 			return nil
 		})
 		if walkErr != nil {
+			if bom.IsInvalidStructuredImageDescriptor(walkErr) {
+				return res, errors.PropagateOrWrap(
+					walkErr,
+					errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("survey component %q manifests", c.Name),
+				)
+			}
 			res.Warnings = append(res.Warnings, "walk manifests: "+walkErr.Error())
 		}
 	}
@@ -331,5 +398,27 @@ func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.R
 		res.Images = append(res.Images, i)
 	}
 	sort.Strings(res.Images)
-	return res
+	return res, nil
+}
+
+func wrapInvalidDescriptorSurveyError(err error, componentName, manifestPath string) error {
+	errContext := map[string]any{"component": componentName}
+	message := fmt.Sprintf(
+		"invalid structured image descriptor in component %q rendered chart",
+		componentName,
+	)
+	if manifestPath != "" {
+		errContext["manifest"] = manifestPath
+		message = fmt.Sprintf(
+			"invalid structured image descriptor in component %q manifest %q",
+			componentName,
+			manifestPath,
+		)
+	}
+	return errors.WrapWithContext(
+		errors.ErrCodeInvalidRequest,
+		message,
+		err,
+		errContext,
+	)
 }

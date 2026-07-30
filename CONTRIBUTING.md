@@ -197,17 +197,32 @@ We welcome the use of AI tools (e.g., GitHub Copilot, ChatGPT, Claude) to help y
 
 Automated bots manage the lifecycle of issues and pull requests:
 
-| Day | Action |
-|-----|--------|
-| 0 | Issue/PR opened, `needs-triage` label added to issues |
-| 14 | Inactive PRs receive a reminder comment |
-| 30 | Inactive PRs marked `lifecycle/stale` |
-| 44 | Stale PRs auto-closed |
-| 60 | Inactive issues marked `lifecycle/stale` |
-| 74 | Stale issues auto-closed |
-| 90+ | Closed issues/PRs locked |
+| When | Action |
+|------|--------|
+| On open | `needs-triage` label added to issues |
+| 14 days of PR inactivity | PR author receives a reminder comment (once per PR) |
+| 30 days of PR inactivity | PR marked `lifecycle/stale` |
+| 30 days after being marked stale | Stale PR auto-closed |
+| 90 days of issue inactivity | Issue marked `lifecycle/stale` |
+| 30 days after being marked stale | Stale issue auto-closed |
+| 90 days of inactivity while closed | Issue/PR thread locked |
 
-**To prevent auto-close:** Add the `lifecycle/frozen` label. PRs with `do-not-merge` are also exempt.
+These are **inactivity windows, not days since opening**: any comment or update
+restarts the applicable counter — including the day-14 reminder itself, which is
+a comment and so pushes the stale mark out.
+
+The day-14 reminder is the exception: it is posted **at most once per pull
+request**. The workflow skips any PR that already carries a reminder, so
+replying and later going quiet again does not produce a second nudge — the next
+automated action on that PR is the day-30 stale mark.
+
+Each bot runs on a daily schedule, so an action lands on its next scheduled run
+rather than the moment a threshold is crossed — expect up to ~24 hours of lag.
+
+**To stay out of the stale process entirely:** Add the `lifecycle/frozen` label.
+Exempt items are never marked `lifecycle/stale` in the first place, not merely
+spared from closing. `good first issue` also exempts issues, and `do-not-merge`
+exempts pull requests.
 
 ### Claiming an Issue
 

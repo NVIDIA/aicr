@@ -31,16 +31,23 @@ import (
 // YAML parsing. Files under recipes/components/*/manifests/ are sometimes
 // Helm-template-shaped (the bundler processes them as chart templates), so
 // raw YAML parsing would fail on the bare directives.
-const helmTemplatePlaceholder = "_aicr_helm_template_"
+const (
+	helmTemplatePlaceholder = "_aicr_helm_template_"
+	imageRepositoryKey      = "repository"
+	imageTagKey             = "tag"
+)
 
 var helmTemplateRE = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
 // stripHelmTemplates pre-processes a YAML document so the parser doesn't
 // choke on Go-template directives. Two passes:
-//  1. Drop any line whose non-whitespace content consists entirely of one or
-//     more Helm directives (e.g., `  {{- if foo }}`, `  {{- end }}`,
+//  1. Blank out any line whose non-whitespace content consists entirely of
+//     one or more Helm directives (e.g., `  {{- if foo }}`, `  {{- end }}`,
 //     `  {{- toYaml . | nindent 4 }}`). These are control-flow scaffolding
-//     that produces no YAML node when rendered.
+//     that produces no YAML node when rendered. The line is kept (empty)
+//     rather than deleted so yaml.Node positions — and therefore the
+//     line/column reported by descriptor errors — still index the original
+//     file.
 //  2. On surviving lines, replace inline directives with a placeholder so a
 //     value like `key: {{ .Values.x }}` becomes `key: _aicr_helm_template_`
 //     instead of breaking YAML parsing. The placeholder is filtered out by
@@ -51,6 +58,7 @@ func stripHelmTemplates(data []byte) []byte {
 	for _, l := range lines {
 		stripped := helmTemplateRE.ReplaceAll(l, nil)
 		if len(bytes.TrimSpace(stripped)) == 0 && bytes.Contains(l, []byte("{{")) {
+			out = append(out, nil)
 			continue
 		}
 		out = append(out, helmTemplateRE.ReplaceAll(l, []byte(helmTemplatePlaceholder)))
@@ -59,8 +67,15 @@ func stripHelmTemplates(data []byte) []byte {
 }
 
 // ExtractImagesFromYAML walks every YAML document in data and returns the
-// sorted, de-duplicated set of `image:` scalar values. It skips empty values,
-// `null`, and any value still containing an unrendered Go template directive.
+// sorted, de-duplicated set of container image references. It recognizes both
+// scalar `image:` values and operator-style `image: {name, repository, tag}`
+// mappings. Empty or null scalar `image:` values and values still containing an
+// unrendered Go template directive are skipped. A recognized structured
+// descriptor returns an invalid-request error when a present name or
+// repository field is null, empty, or non-scalar, when a tag field is
+// non-scalar, or when a registry or digest member is present (dropping either
+// would emit a wrong or un-pinned reference). A null or empty tag follows the
+// Helm appVersion idiom and is treated as absent.
 //
 // Helm template directives ({{ ... }}) are replaced with a placeholder before
 // parsing, so files mixing YAML with Helm templates (those under
@@ -105,12 +120,19 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 		// `version` siblings carry the registry and tag. A sibling
 		// `containerSHA` (Skyhook Package CRD; ghcr.io/nvidia/nodewright)
 		// supplies the OCI digest and is folded in as `@<sha>`.
-		var imgScalar, repoScalar, verScalar, shaScalar string
+		var (
+			imgScalar, repoScalar, verScalar, shaScalar string
+			imgMappings                                 []*yaml.Node
+		)
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
 			target := v
 			if v.Kind == yaml.AliasNode && v.Alias != nil {
 				target = v.Alias
+			}
+			if isStructuredImageKey(k.Value) && target.Kind == yaml.MappingNode {
+				imgMappings = append(imgMappings, target)
+				continue
 			}
 			if target.Kind != yaml.ScalarNode {
 				continue
@@ -118,12 +140,21 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 			switch k.Value {
 			case "image":
 				imgScalar = strings.TrimSpace(target.Value)
-			case "repository":
+			case imageRepositoryKey:
 				repoScalar = strings.TrimSpace(target.Value)
 			case "version":
 				verScalar = strings.TrimSpace(target.Value)
 			case "containerSHA":
 				shaScalar = strings.TrimSpace(target.Value)
+			}
+		}
+		for _, imgMapping := range imgMappings {
+			mapped, err := imageReferenceFromMapping(imgMapping)
+			if err != nil {
+				return err
+			}
+			if isLikelyImage(mapped) {
+				seen[mapped] = struct{}{}
 			}
 		}
 		if imgScalar != "" {
@@ -158,6 +189,141 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 		// Scalar leaf — no nested image references.
 	}
 	return nil
+}
+
+// isStructuredImageKey allowlists mapping-valued image descriptor keys known
+// to be consumed as container images. Matching every *Image key would risk
+// inventorying chart metadata or templates that never become workloads.
+func isStructuredImageKey(key string) bool {
+	return key == "image" || key == "scalingPodImage"
+}
+
+// imageReferenceFromMapping recognizes the image descriptor shape used by
+// operator-managed workloads such as KAI Scheduler:
+//
+//	image:
+//	  name: binder
+//	  repository: ghcr.io/kai-scheduler/kai-scheduler
+//	  tag: v0.14.1
+//
+// Some charts omit name because repository already carries the full image
+// path. In that form, repository becomes the image name before tag is
+// appended. A present name or repository must be a non-null, non-empty
+// scalar. A null or empty tag is the Helm idiom for "default to the chart
+// appVersion" and is treated like an absent tag. Only name, repository, and
+// tag are combined; a present registry or digest member is rejected because
+// dropping it would emit a reference that resolves to the wrong registry or
+// silently un-pins a digest. Other members (pullPolicy, pullSecrets, ...)
+// do not affect the reference identity and are ignored.
+func imageReferenceFromMapping(n *yaml.Node) (string, error) {
+	var name, repository, tag string
+	var namePresent bool
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		key, value := n.Content[i], n.Content[i+1]
+		switch key.Value {
+		case "name", imageRepositoryKey, imageTagKey:
+		case "registry", "digest":
+			return "", errors.Wrap(
+				errors.ErrCodeInvalidRequest,
+				"invalid image descriptor member",
+				&invalidStructuredImageDescriptorError{
+					field:  key.Value,
+					line:   key.Line,
+					column: key.Column,
+					reason: "is not combined into the extracted reference; fold it into repository or tag",
+				},
+			)
+		default:
+			continue
+		}
+
+		scalar, ok := nonNullImageMappingScalar(value)
+		if !ok {
+			if key.Value == imageTagKey && isNullOrEmptyScalar(value) {
+				// tag: "" / tag: null — the Helm "use appVersion"
+				// idiom. Treat like an absent tag instead of failing
+				// the whole survey.
+				continue
+			}
+			return "", errors.Wrap(
+				errors.ErrCodeInvalidRequest,
+				"invalid image descriptor member",
+				&invalidStructuredImageDescriptorError{
+					field:  key.Value,
+					line:   value.Line,
+					column: value.Column,
+					reason: "must be a non-null, non-empty scalar",
+				},
+			)
+		}
+		switch key.Value {
+		case "name":
+			namePresent = true
+			name = scalar
+		case imageRepositoryKey:
+			repository = scalar
+		case imageTagKey:
+			tag = scalar
+		}
+	}
+	if !namePresent {
+		// combineCRDTriplet trims a trailing slash from repository only
+		// when it is prepended to a separate name, so trim here before
+		// repository itself becomes the name.
+		name = strings.TrimRight(repository, "/")
+		repository = ""
+	}
+	if name == "" {
+		return "", nil
+	}
+	return combineCRDTriplet(name, repository, tag), nil
+}
+
+func nonNullImageMappingScalar(n *yaml.Node) (string, bool) {
+	if n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	if n.Kind != yaml.ScalarNode || n.Tag == "!!null" {
+		return "", false
+	}
+	value := strings.TrimSpace(n.Value)
+	return value, value != ""
+}
+
+// isNullOrEmptyScalar reports whether n is a null or empty-string scalar —
+// the shapes a Helm chart's `tag: ""` appVersion default renders to. A
+// non-scalar node is not covered; that stays a descriptor error.
+func isNullOrEmptyScalar(n *yaml.Node) bool {
+	if n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	return n.Kind == yaml.ScalarNode &&
+		(n.Tag == "!!null" || strings.TrimSpace(n.Value) == "")
+}
+
+type invalidStructuredImageDescriptorError struct {
+	field  string
+	line   int
+	column int
+	reason string
+}
+
+func (e *invalidStructuredImageDescriptorError) Error() string {
+	return fmt.Sprintf(
+		"field %q at line %d, column %d %s",
+		e.field,
+		e.line,
+		e.column,
+		e.reason,
+	)
+}
+
+// IsInvalidStructuredImageDescriptor reports whether err was caused by a
+// recognized mapping-valued image descriptor whose name, repository, or tag
+// field was present but null, empty, or non-scalar.
+func IsInvalidStructuredImageDescriptor(err error) bool {
+	var target *invalidStructuredImageDescriptorError
+	return stderrors.As(err, &target)
 }
 
 // combineCRDTriplet builds a fully-qualified image reference from

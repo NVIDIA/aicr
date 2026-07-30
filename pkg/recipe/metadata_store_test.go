@@ -224,6 +224,7 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 		wantPassed   bool
 		wantWarnings int
 		wantErr      bool
+		wantErrCode  aicrerrors.ErrorCode
 	}{
 		{
 			name:        "no constraints passes",
@@ -317,6 +318,32 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "empty constraint name fails closed",
+			constraints: []Constraint{
+				{Value: ">= 1.30"},
+			},
+			evaluator: func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{
+					Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found"),
+				}
+			},
+			wantErr:     true,
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "empty constraint value fails closed",
+			constraints: []Constraint{
+				{Name: "k8s"},
+			},
+			evaluator: func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{
+					Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found"),
+				}
+			},
+			wantErr:     true,
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+		},
 	}
 
 	for _, tt := range tests {
@@ -331,6 +358,9 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrCode != "" && !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+					t.Fatalf("error = %v, want code %s", err, tt.wantErrCode)
 				}
 				return
 			}
@@ -2083,6 +2113,50 @@ func TestEvaluateMixinConstraintsReturnsErrorWhenConstraintCannotBeMappedToCandi
 	}
 }
 
+func TestEvaluateMixinConstraintsRejectsIncompleteConstraint(t *testing.T) {
+	tests := []struct {
+		name       string
+		constraint Constraint
+	}{
+		{
+			name:       "missing name",
+			constraint: Constraint{Value: ">= 6.8"},
+		},
+		{
+			name:       "missing value",
+			constraint: Constraint{Name: "OS.kernel"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overlay := &RecipeMetadata{}
+			overlay.Metadata.Name = "candidate"
+			overlay.Spec.Mixins = []string{"os-gate"}
+			mixin := &RecipeMixin{}
+			mixin.Metadata.Name = "os-gate"
+			mixin.Spec.Constraints = []Constraint{tt.constraint}
+			store := &MetadataStore{
+				Overlays: map[string]*RecipeMetadata{"candidate": overlay},
+				Mixins:   map[string]*RecipeMixin{"os-gate": mixin},
+			}
+
+			_, err := store.evaluateMixinConstraints(
+				&RecipeMetadataSpec{Constraints: []Constraint{tt.constraint}},
+				func(_ Constraint) ConstraintEvalResult {
+					return ConstraintEvalResult{
+						Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found"),
+					}
+				},
+				map[string]bool{tt.constraint.Name: true},
+				[]string{"candidate"},
+			)
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("error = %v, want code %s", err, aicrerrors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}
+
 // TestMalformedMixinRejected verifies that mixin files with forbidden fields
 // (base, criteria, mixins, validation) are rejected at load time by
 // KnownFields(true) strict parsing.
@@ -2179,6 +2253,28 @@ func TestExcludedOverlayUnmarshalYAML(t *testing.T) {
 				{Name: "overlay-a"},
 			},
 		},
+		{
+			name:  "legacy object form accepts unknown field",
+			input: "- name: overlay-a\n  reasn: constraint-failed\n",
+			expected: []ExcludedOverlay{
+				{Name: "overlay-a"},
+			},
+		},
+		{
+			name:    "object form requires name",
+			input:   "- {}\n",
+			wantErr: true,
+		},
+		{
+			name:    "object form rejects null name",
+			input:   "- name: null\n",
+			wantErr: true,
+		},
+		{
+			name:    "scalar form requires string",
+			input:   "- 42\n",
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2186,6 +2282,9 @@ func TestExcludedOverlayUnmarshalYAML(t *testing.T) {
 			err := yaml.Unmarshal([]byte(tt.input), &got)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
 			}
 			if !reflect.DeepEqual(got, tt.expected) {
 				t.Errorf("got %+v, want %+v", got, tt.expected)
@@ -2224,6 +2323,28 @@ func TestExcludedOverlayUnmarshalJSON(t *testing.T) {
 				{Name: "overlay-a"},
 			},
 		},
+		{
+			name:  "legacy object form accepts unknown field",
+			input: `[{"name":"overlay-a","reasn":"constraint-failed"}]`,
+			expected: []ExcludedOverlay{
+				{Name: "overlay-a"},
+			},
+		},
+		{
+			name:    "object form requires name",
+			input:   `[{}]`,
+			wantErr: true,
+		},
+		{
+			name:    "object form rejects null name",
+			input:   `[{"name":null}]`,
+			wantErr: true,
+		},
+		{
+			name:    "null is neither legacy string nor object",
+			input:   `[null]`,
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2231,6 +2352,9 @@ func TestExcludedOverlayUnmarshalJSON(t *testing.T) {
 			err := json.Unmarshal([]byte(tt.input), &got)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
 			}
 			if !reflect.DeepEqual(got, tt.expected) {
 				t.Errorf("got %+v, want %+v", got, tt.expected)
@@ -2355,6 +2479,43 @@ spec:
 		"overlays/" + overlayName + ".yaml": overlayYAML,
 	}
 	return newInMemoryProvider(overlayName, files)
+}
+
+func TestLoadMetadataStore_ProfileMetadataRequiresKind(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	provider := newInMemoryProvider("missing-kind", map[string][]byte{
+		"overlays/base.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`),
+		"overlays/profile.yaml": []byte(`apiVersion: aicr.run/v1alpha3
+metadata:
+  name: profile
+spec:
+  criteria:
+    service: aks
+  profile:
+    name: gpuStack
+    default: driver-installed
+    values:
+      driver-installed: {}
+`),
+	})
+
+	_, err := LoadMetadataStoreFor(t.Context(), provider)
+	if err == nil {
+		t.Fatal("LoadMetadataStoreFor() error = nil, want missing-kind rejection")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), `requires kind "RecipeMetadata"`) {
+		t.Fatalf("error = %v, want RecipeMetadata kind requirement", err)
+	}
 }
 
 // TestLoadMetadataStore_PerProviderIsolation verifies that distinct

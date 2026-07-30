@@ -32,4 +32,7 @@ const (
 	keyError      = "error"
 	keyAllowed    = "allowed"
 	keyLimitBytes = "limit_bytes"
+	keyService    = "service"
+	keyProfile    = "profile"
+	keyNodes      = "nodes"
 )

@@ -246,6 +246,14 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 			"recipe must contain at least one component reference")
 	}
 
+	// New initializes Config for every supported construction path. Fail
+	// closed when a caller bypasses it with a zero-value or struct-literal
+	// bundler instead of panicking on the first configuration lookup.
+	if b.Config == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"bundler config is required; construct the bundler with New")
+	}
+
 	// Reject incoherent component refs (e.g. a Helm ref that also carries a
 	// Kustomize tag/path, which the deployers silently build as Kustomize)
 	// before generating anything. DefaultBundler.Make is a public entry point
@@ -256,10 +264,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// canonicalization from mutating the caller's RecipeResult. See #1584.
 	validated := *recipeResult
 	validated.ComponentRefs = append([]recipe.ComponentRef(nil), recipeResult.ComponentRefs...)
-	if err := validated.PrepareAndValidate(); err != nil {
+	if err := validated.PrepareAndValidateWithContext(ctx); err != nil {
 		return nil, err
 	}
 	recipeResult = &validated
+	profileBaseline := recipeResult
 
 	enabledRefs, filteredOrder, filterErr := b.filterEnabledComponents(recipeResult)
 	if filterErr != nil {
@@ -271,22 +280,6 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	filtered.ComponentRefs = enabledRefs
 	filtered.DeploymentOrder = filteredOrder
 	recipeResult = &filtered
-
-	// Set default output directory
-	if dir == "" {
-		dir = "."
-	}
-
-	// Create output directory
-	if dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to create output directory", err)
-		}
-	}
-	if err := checksum.ValidateOutputRoot(ctx, dir); err != nil {
-		return nil, err
-	}
 
 	// Bundle-time override policy for GPU allocation-policy keys (#1327):
 	// reject --dynamic declarations, warn on static overrides. Runs after
@@ -321,9 +314,34 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, exposureErr
 	}
 
+	dynamicValues, err := b.buildDynamicValuesMap(recipeResult.DataProvider())
+	if err != nil {
+		return nil, err
+	}
+	if lockErr := profileBaseline.ValidateProfileLock(
+		ctx, recipeResult.ComponentRefs, componentValues, dynamicValues,
+	); lockErr != nil {
+		return nil, lockErr
+	}
+
 	// Run component-specific validations
 	if validationErr := b.runComponentValidations(ctx, recipeResult); validationErr != nil {
 		return nil, componentValidationError(validationErr)
+	}
+
+	// No filesystem output is created until the final candidate has passed the
+	// profile state and mutability invariant above.
+	if dir == "" {
+		dir = "."
+	}
+	if dir != "." {
+		if mkdirErr := os.MkdirAll(dir, 0755); mkdirErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to create output directory", mkdirErr)
+		}
+	}
+	if rootErr := checksum.ValidateOutputRoot(ctx, dir); rootErr != nil {
+		return nil, rootErr
 	}
 
 	// Copy external data files before deployer construction so the file list
