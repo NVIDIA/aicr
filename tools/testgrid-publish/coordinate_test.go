@@ -90,6 +90,28 @@ func TestCoordinateFor(t *testing.T) {
 			wantTab:   "inference-dynamo",
 			wantPath:  "kind/h100-any/inference-dynamo",
 		},
+		{
+			name: "profile segment does not alter the bare intent tab",
+			criteria: RecipeCriteria{
+				Service: "aks", Accelerator: "h100", OS: "ubuntu", Intent: "training",
+				ProfileSegment: "gpustack-operator-managed",
+			},
+			wantGroup: "aks",
+			wantDash:  "h100-ubuntu",
+			wantTab:   "training",
+			wantPath:  "aks/h100-ubuntu/training",
+		},
+		{
+			name: "profile segment does not alter the platform tab",
+			criteria: RecipeCriteria{
+				Service: "aks", Accelerator: "h100", OS: "ubuntu", Intent: "training",
+				Platform: "kubeflow", ProfileSegment: "gpustack-azure-managed",
+			},
+			wantGroup: "aks",
+			wantDash:  "h100-ubuntu",
+			wantTab:   "training-kubeflow",
+			wantPath:  "aks/h100-ubuntu/training-kubeflow",
+		},
 		// ── Error cases ────────────────────────────────────────────────────────
 		{name: "empty service", criteria: RecipeCriteria{Accelerator: "h100", OS: "ubuntu", Intent: "training"}, wantErr: true},
 		{name: "any service", criteria: RecipeCriteria{Service: "any", Accelerator: "h100", OS: "ubuntu", Intent: "training"}, wantErr: true},

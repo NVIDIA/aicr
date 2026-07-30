@@ -27,6 +27,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // PublishOptions controls a single Publish run. Publish operates on an
@@ -157,13 +159,50 @@ func loadOnDiskBundle(dir string) (*Bundle, string, error) {
 		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
 			"bundle statement predicate is missing recipe.{name,digest}")
 	}
+	profile, err := readBundleRecipeProfile(summaryDir)
+	if err != nil {
+		return nil, "", err
+	}
 	return &Bundle{
 		SummaryDir:    summaryDir,
 		RecipeName:    pred.Recipe.Name,
+		Profile:       profile,
 		SubjectDigest: pred.Recipe.Digest,
 		Predicate:     pred,
 		StatementJSON: stmt,
 	}, outDir, nil
+}
+
+// readBundleRecipeProfile decodes the summary bundle's recipe.yaml and
+// returns the canonical name=value selection it carries, or "" for an
+// unprofiled recipe. Publish reconstructs the pointer from the on-disk
+// bundle, so the recorded selection must come from the attested recipe
+// bytes — the predicate carries only the (suffixed) recipe name. The
+// read is size-bounded like readBundlePredicate: the publish target may
+// be an attacker-influenced bundle root where os.ReadFile would allocate
+// the whole file before any size check.
+func readBundleRecipeProfile(summaryDir string) (string, error) {
+	path := filepath.Join(summaryDir, RecipeFilename)
+	f, err := os.Open(path) //nolint:gosec // bundle-local path resolved by resolveSummaryDir
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeNotFound, "failed to read bundle recipe.yaml", err)
+	}
+	defer func() { _ = f.Close() }()
+	body, err := io.ReadAll(io.LimitReader(f, defaults.MaxRecipePOSTBytes+1))
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to read bundle recipe.yaml", err)
+	}
+	if int64(len(body)) > defaults.MaxRecipePOSTBytes {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"bundle recipe.yaml exceeds maximum size of "+
+				strconv.FormatInt(defaults.MaxRecipePOSTBytes, 10)+" bytes")
+	}
+	rec, err := recipe.DecodeRecipeResult(body, serializer.FormatYAML)
+	if err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"failed to parse bundle recipe.yaml")
+	}
+	return ProfileSelectionString(rec), nil
 }
 
 // resolveSummaryDir accepts either the summary-bundle root or a parent

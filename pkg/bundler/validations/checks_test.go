@@ -757,6 +757,11 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 		r.Criteria.OS = os
 		return r
 	}
+	resultProfiled := func(state string, service recipe.CriteriaServiceType, refs ...recipe.ComponentRef) *recipe.RecipeResult {
+		r := result(state, service, refs...)
+		r.Metadata.SelectedProfile = &recipe.SelectedProfile{Name: "gpuStack", Value: "azure-managed"}
+		return r
+	}
 	aks := recipe.CriteriaServiceAKS
 
 	tests := []struct {
@@ -805,10 +810,21 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			recipeResult: result(recipe.GPUDriverStatePreinstalled, aks, gpuOpRef(driverOff())),
 		},
 		{
+			// Legacy pre-profile artifact: no selectedProfile, so the
+			// ownership lock does not apply and the remedy must keep
+			// naming the four-flag tuple.
 			name:         "Rule 1: absent + driver.enabled=false → blocked (nil bundler config)",
 			recipeResult: result(recipe.GPUDriverStateAbsent, aks, gpuOpRef(driverOff())),
 			wantMsgs:     1,
-			wantContains: []string{"driverless", "--gpu-driver none", "driver.enabled=true"},
+			wantContains: []string{"driverless", "--gpu-driver none", "--set gpuoperator:driver.enabled=true"},
+		},
+		{
+			// Profiled artifact: the tuple is lock-rejected, so the remedy
+			// names the recapture + --profile path instead.
+			name:         "Rule 1: absent + profiled recipe → profile-aware remedy",
+			recipeResult: resultProfiled(recipe.GPUDriverStateAbsent, aks, gpuOpRef(driverOff())),
+			wantMsgs:     1,
+			wantContains: []string{"driverless", "--profile gpuStack=operator-managed", "recapture the snapshot"},
 		},
 		{
 			name: "Rule 1: absent + toolkit.enabled=false alone → blocked",

@@ -1680,7 +1680,9 @@ function announceResults(message){
 
 /* ============================================================
    HASH ROUTING — resolvable URLs (#/group/dashboard/tab[/signer]).
-   The path after #/ is the recipe's Coordinate.Path() (group/dashboard/tab); the
+   The path after #/ is this renderer's route (routeSegs): the recipe's
+   criteria-only Coordinate.Path() base, with the tab segment suffixed
+   "-<name>-<value>" for profiled recipes; the
    fragment scheme is owned by this renderer (the consumer), per ADR-012. So a
    catalog / consensus grid / per-signer drilldown is bookmarkable, shareable,
    and works with the browser back/forward buttons. The hash is never sent to
@@ -1693,8 +1695,20 @@ function announceResults(message){
 const ROUTE_LANDING = "#/";
 let _navGuard = false; // true while WE are setting the hash (skip that hashchange)
 
-// coordPath is a recipe's stable "group/dashboard/tab" (== Coordinate.Path()).
-function coordPath(recipe){ const cp = coordParts(recipe.coord); return `${cp.service}/${cp.ao}/${cp.ip}`; }
+// routeSegs: the canonical hash-route segments for a recipe — the
+// criteria-only base coordinate (Coordinate.Path) refined per this
+// consumer's contract: the tab
+// component carries the profile suffix so two profile values of one family
+// keep distinct routes (mirrors the on-disk suffixed coordinate). For a
+// profiled recipe the joined route therefore differs from Coordinate.Path()
+// — Coordinate.Path() stays criteria-only; the suffix is this renderer's
+// refinement, and TestGrid instead keeps the unsuffixed coordinate and
+// partitions values by digest-bound build ID.
+// coordPath joins routeSegs into this renderer's "group/dashboard/tab"
+// route string (NOT Coordinate.Path() for profiled recipes). Every
+// place that builds a recipe hash must go through this (or routeSegs).
+function routeSegs(recipe){ const cp = coordParts(recipe.coord); const tab = recipe.profile ? `${cp.ip}-${recipe.profile}` : cp.ip; return [cp.service, cp.ao, tab]; }
+function coordPath(recipe){ return routeSegs(recipe).join("/"); }
 
 // hashSegs builds a "#/a/b/c" hash from decoded path segments, encoding each.
 function hashSegs(...segs){ return "#/" + segs.filter(s => s != null && s !== "").map(encodeURIComponent).join("/"); }
@@ -2135,9 +2149,8 @@ function renderLandingRecipeGrid(host){
 
       const name = document.createElement("td");
       const recipeLink = document.createElement("a");
-      const cp = coordParts(row.recipe.coord);
       recipeLink.className = "og-recipe-link";
-      recipeLink.href = hashSegs(cp.service, cp.ao, cp.ip);
+      recipeLink.href = hashSegs(...routeSegs(row.recipe));
       recipeLink.setAttribute("aria-label", `open ${row.recipe.name}`);
       recipeLink.innerHTML = `<span class="og-recipe-main">${overviewRecipeNameHTML(row.recipe, g.mutedAxes)}</span>`;
       name.appendChild(recipeLink);
@@ -2425,7 +2438,7 @@ function openGrid(idx, focusHeading){
   const recipe = DATA.recipes[idx];
   const cp = coordParts(recipe.coord);
   currentGroup = cp.service;
-  setHash(hashSegs(cp.service, cp.ao, cp.ip));
+  setHash(hashSegs(...routeSegs(recipe)));
   reflectCriteriaForCoord(recipe.coord);
 
   const bc = document.getElementById("grid-crumb");
@@ -2433,7 +2446,7 @@ function openGrid(idx, focusHeading){
     `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span>` +
     `<a href="#" class="crumb" data-service="1">${esc(cp.service)}</a><span class="sep">›</span>` +
     `<a href="#" class="crumb" data-dashboard="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
-    `<span class="crumb cur">${esc(cp.ip)}</span>`;
+    `<span class="crumb cur">${esc(routeSegs(recipe)[2])}</span>`;
   bc.querySelector("[data-service]").addEventListener("click", e => {
     e.preventDefault();
     showServiceCatalog(cp.service);
@@ -2797,7 +2810,7 @@ async function openTimeSeries(recipe, src, focusTest, focusHeading = false){
   const cp = coordParts(recipe.coord);
   currentGroup = cp.service;
   reflectCriteriaForCoord(recipe.coord);   // reflect the recipe in the SELECT RECIPE dropdowns (esp. on a direct deep-link)
-  setHash(hashSegs(cp.service, cp.ao, cp.ip, src));
+  setHash(hashSegs(...routeSegs(recipe), src));
   const meta = SOURCES[src];
   const reported = meta && !meta.allowlisted;
 
@@ -2806,7 +2819,7 @@ async function openTimeSeries(recipe, src, focusTest, focusHeading = false){
     `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span>` +
     `<a href="#" class="crumb" data-service="1">${esc(cp.service)}</a><span class="sep">›</span>` +
     `<a href="#" class="crumb" data-dashboard="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
-    `<a href="#" class="crumb" data-grid="1">${esc(cp.ip)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-grid="1">${esc(routeSegs(recipe)[2])}</a><span class="sep">›</span>` +
     `<span class="crumb cur" title="${esc(src)}">${esc(meta ? meta.label : src.slice(0, 10) + "…")}</span>`;
   bc.querySelectorAll("[data-home]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); showLanding(); }));
   bc.querySelector("[data-service]").addEventListener("click", e => { e.preventDefault(); showServiceCatalog(cp.service); });
@@ -3392,6 +3405,7 @@ function recipeGenCommand(recipe){
   const c = recipe.coord || {};
   let cmd = `aicr recipe --service ${c.service} --accelerator ${c.accelerator} --os ${c.os} --intent ${c.intent}`;
   if (c.platform && c.platform !== PLATFORM_NONE) cmd += ` --platform ${c.platform}`;
+  if (recipe.profileSelection) cmd += ` --profile ${recipe.profileSelection}`;
   return cmd;
 }
 // The same selection expressed as an AICRConfig document (spec.recipe.criteria),
@@ -3418,6 +3432,7 @@ function recipeConfigYAML(recipe){
     `  recipe:`,
     `    criteria:`,
     ...crit,
+    ...(recipe.profileSelection ? [`    profile: ${recipe.profileSelection}`] : []),
   ].join("\n");
 }
 // §2: "CLI command" opens a preview popup with the command (copyable), instead
@@ -3650,7 +3665,7 @@ function buildModelFromIndex(index){
         // Tab consensus is computed and frozen in Go (single source of truth);
         // the page consumes it rather than re-deriving the state.
         DATA.recipes.push({
-          coord: tab.coord, name: tab.recipe, versions, combined,
+          coord: tab.coord, profile: tab.profile || "", profileSelection: tab.profileSelection || "", name: tab.recipe, versions, combined,
           tests: combined.tests, _phaseRollup: combined._phaseRollup,   // default view = combined (all versions)
         });
         RECIPE_BY_NAME[tab.recipe] = idx;
@@ -3681,7 +3696,7 @@ function buildModelFromIndex(index){
       ao: `${d.accelerator}-${d.os}`,
       accelerator: d.accelerator,
       os: d.os,
-      tabs: d.tabs.map(tab => ({ tab: coordParts(tab.coord).ip, idx: RECIPE_BY_NAME[tab.recipe] })),
+      tabs: d.tabs.map(tab => ({ tab: coordParts(tab.coord).ip + (tab.profile ? `-${tab.profile}` : ""), idx: RECIPE_BY_NAME[tab.recipe] })),
     }));
     let count = 0; dashboards.forEach(d => count += d.tabs.length);
     return { name: g.service, dashboards, count };

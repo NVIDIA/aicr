@@ -397,12 +397,28 @@ func legacyRecipeAlternativeRemedy(service recipe.CriteriaServiceType, os recipe
 // set. Mirrors pkg/client/v1's resolution-time helper of the same name
 // (see gpuOperatorManagedOverrideSet above for why the duplication
 // exists).
-func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType) string {
+func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType, profiled bool) string {
 	switch service { //nolint:exhaustive // only AKS and GKE have provider-specific wording; every other service takes the generic default
 	case recipe.CriteriaServiceAKS:
-		return "Either recreate the GPU node pools without --gpu-driver none " +
-			"(AKS installs the NVIDIA driver by default), or bundle in " +
-			"GPU-Operator-managed mode: " + gpuOperatorManagedOverrideSet + "."
+		if !profiled {
+			// Legacy pre-profile artifact: the ownership lock does not
+			// apply (no metadata.selectedProfile), so the four-flag
+			// bundle-time tuple remains this artifact's supported flip.
+			return "Either recreate the GPU node pools without --gpu-driver " +
+				"none (AKS installs the NVIDIA driver by default), or bundle " +
+				"in GPU-Operator-managed mode: " + gpuOperatorManagedOverrideSet + "."
+		}
+		return "Either repair the AKS-managed driver install (recreate the " +
+			"GPU node pools without --gpu-driver none; AKS installs the " +
+			"NVIDIA driver by default) and recapture the snapshot, or switch " +
+			"to operator-managed mode end to end: recreate the pools WITH " +
+			"--gpu-driver none, recapture the snapshot, and regenerate with " +
+			"--profile gpuStack=operator-managed. The operator-managed value's " +
+			"constraint " +
+			"requires the pools to read gpu-driver=None, so regenerating " +
+			"against the current snapshot alone fails closed; and the " +
+			"gpuStack profile owns the driver-ownership paths, so flipping " +
+			"them via per-path --set overrides is rejected."
 	case recipe.CriteriaServiceGKE:
 		switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
 		case recipe.CriteriaOSCOS:
@@ -921,8 +937,12 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 // The check runs at bundle generation — not at snapshot-driven recipe
 // resolution, which only warns — because this is the first point where
 // the user's --set ownership overrides are known: `aicr recipe` has no
-// --set, so a resolution-time hard failure would leave supported
+// --set, so a resolution-time hard failure would leave supported LEGACY
 // GPU-Operator-managed clusters unable to reach the documented override.
+// On ADR-015-profiled recipes (AKS gpuStack) the --set escape does not
+// apply — ownership paths are profile-owned and per-path flips are
+// rejected — so the profiled remedy is out-of-band (fix/recreate pools,
+// recapture, regenerate with --profile); see driverAbsentRemedy.
 // Registered with severity error on gpu-operator (recipes/registry.yaml),
 // which converts the returned messages into a blocking
 // ErrCodeInvalidRequest in RunValidations. The check returns hard
@@ -1053,7 +1073,7 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 				"but the snapshot that produced this recipe observed no NVIDIA kernel "+
 				"driver on the sampled GPU node. Deploying this bundle would leave GPU "+
 				"nodes driverless. %s",
-			componentName, driverAbsentRemedy(service, osCriteria)))
+			componentName, driverAbsentRemedy(service, osCriteria, recipeResult.Metadata.SelectedProfile != nil)))
 	}
 
 	installDir, installDirDeclared, hostPathMsgs := resolveInstallDir(values, componentName)

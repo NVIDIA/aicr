@@ -33,11 +33,27 @@ import (
 // component values); pass nil to fall back to the embedded provider when
 // no external data source is configured.
 func ComputeRecipeDigest(ctx context.Context, dp recipe.DataProvider, path, kubeconfig, version string) (string, error) {
+	return ComputeRecipeDigestWithProfile(ctx, dp, path, kubeconfig, version, "")
+}
+
+// ComputeRecipeDigestWithProfile is ComputeRecipeDigest with an explicit
+// name=value profile selection (same semantics as `aicr recipe --profile`).
+// The selection applies only when path is an overlay: hydration then
+// selects that profile value instead of the declaration's default. A
+// hydrated RecipeResult input carries its own metadata.selectedProfile, so
+// combining it with a non-empty profile is rejected as invalid. An empty
+// profile behaves exactly like ComputeRecipeDigest.
+func ComputeRecipeDigestWithProfile(
+	ctx context.Context,
+	dp recipe.DataProvider,
+	path, kubeconfig, version, profile string,
+) (string, error) {
+
 	if path == "" {
 		return "", errors.New(errors.ErrCodeInvalidRequest, "recipe path is required")
 	}
 
-	rec, err := recipe.LoadFromFileWithProvider(ctx, path, kubeconfig, version, dp)
+	rec, err := recipe.LoadFromFileWithProviderProfile(ctx, path, kubeconfig, version, dp, profile)
 	if err != nil {
 		return "", err
 	}

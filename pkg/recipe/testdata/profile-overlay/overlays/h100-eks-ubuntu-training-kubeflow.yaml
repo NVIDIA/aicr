@@ -1,6 +1,8 @@
 # Test fixture: a profiled leaf overlay layered over the embedded catalog.
 #
-# It shadows the embedded overlay of the same name so the resolution path runs
+# It shadows the embedded EKS overlay of the same name (the AKS family now
+# declares its own gpuStack profile, so shadowing it would collide with the
+# composition-wide uniqueness rule) so the resolution path runs
 # end to end — criteria match, profile declaration discovery, value selection,
 # ownership locking — without the shipped catalog declaring a profile.
 #
@@ -12,13 +14,13 @@ kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha3
 
 metadata:
-  name: h100-aks-ubuntu-training-kubeflow
+  name: h100-eks-ubuntu-training-kubeflow
 
 spec:
-  base: h100-aks-ubuntu-training
+  base: h100-eks-ubuntu-training
 
   criteria:
-    service: aks
+    service: eks
     accelerator: h100
     os: ubuntu
     intent: training

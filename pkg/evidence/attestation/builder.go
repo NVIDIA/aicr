@@ -88,6 +88,12 @@ type Bundle struct {
 
 	RecipeName string
 
+	// Profile is the canonical name=value selection carried by the
+	// attested recipe's metadata.selectedProfile, or "" for an
+	// unprofiled recipe. Recorded in the evidence pointer so the repo
+	// gate can recompute the digest with the same selection.
+	Profile string
+
 	// SubjectDigest is sha256(canonicalize(recipe.yaml)) as hex.
 	SubjectDigest string
 
@@ -238,6 +244,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 	return &Bundle{
 		SummaryDir:    summaryDir,
 		RecipeName:    recipeName,
+		Profile:       ProfileSelectionString(opts.Recipe),
 		SubjectDigest: subjectDigest,
 		Predicate:     pred,
 		StatementJSON: stmt,
@@ -284,6 +291,15 @@ const criteriaWildcard = "any"
 // RecipeNameFor derives the bundle's recipe identifier from the resolved
 // criteria: hyphen-joined non-wildcard accelerator/service/os/intent/
 // platform values, or "recipe" when every slot is empty or wildcard.
+//
+// A profile-bearing recipe (metadata.selectedProfile set) additionally
+// carries the ProfileSegment suffix (e.g. "h100-aks-ubuntu-training-
+// gpustack-operator-managed") so evidence for two values of one profile family
+// lands under distinct names instead of overwriting each other. The
+// suffix applies to every profiled recipe, including the declaration's
+// default value — deterministic, with no knowledge of the default needed.
+// An unresolvable segment (invalid selection identifiers) yields "" so
+// callers fail closed rather than collapse two values onto one name.
 func RecipeNameFor(r *recipe.RecipeResult) string {
 	if r == nil || r.Criteria == nil {
 		return ""
@@ -301,10 +317,67 @@ func RecipeNameFor(r *recipe.RecipeResult) string {
 			parts = append(parts, v)
 		}
 	}
-	if len(parts) == 0 {
-		return defaultRecipeName
+	name := defaultRecipeName
+	if len(parts) > 0 {
+		name = strings.Join(parts, "-")
 	}
-	return strings.Join(parts, "-")
+	if r.Metadata.SelectedProfile != nil {
+		segment, err := ProfileSegment(r.Metadata.SelectedProfile)
+		if err != nil {
+			return ""
+		}
+		name += "-" + segment
+	}
+	return name
+}
+
+// ParsePointerProfile converts a pointer's recorded wire-form selection
+// ("name=value") into the lowercase path segment RecipeNameFor appends,
+// validating the form on the way.
+func ParsePointerProfile(selection string) (string, error) {
+	sel, err := recipe.ParseProfileSelection(selection)
+	if err != nil {
+		return "", err
+	}
+	if sel == nil {
+		return "", errors.New(errors.ErrCodeInvalidRequest, "profile selection is empty")
+	}
+	return ProfileSegment(&recipe.SelectedProfile{Name: sel.Name, Value: sel.Value})
+}
+
+// ProfileSegment returns the lowercase path-forming segment
+// "<name>-<value>" derived from a selected profile, or "" when sp is nil
+// (unprofiled recipe). It is the single shared derivation joined into the
+// evidence recipe name (RecipeNameFor) and the corroboration coordinate
+// tab (pkg/evidence/project). The TestGrid coordinate deliberately does
+// NOT carry it — the publisher's digest-bound build ID already partitions
+// per value (see tools/testgrid-publish RecipeCriteria.ProfileSegment).
+//
+// The selection is re-validated through recipe.ParseProfileSelection —
+// the same [A-Za-z0-9._-]+ name=value contract the profile core enforces
+// — so an out-of-contract selection fails closed instead of forming a
+// path segment.
+func ProfileSegment(sp *recipe.SelectedProfile) (string, error) {
+	if sp == nil {
+		return "", nil
+	}
+	if _, err := recipe.ParseProfileSelection(sp.Name + "=" + sp.Value); err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"selected profile does not form a valid path segment")
+	}
+	return strings.ToLower(sp.Name) + "-" + strings.ToLower(sp.Value), nil
+}
+
+// ProfileSelectionString returns the canonical name=value wire form of
+// the recipe's selected profile, or "" when the recipe is unprofiled.
+// This is the exact string producers record in the evidence pointer's
+// `profile` field and the repo gate replays via
+// `aicr evidence digest --profile`.
+func ProfileSelectionString(r *recipe.RecipeResult) string {
+	if r == nil || r.Metadata.SelectedProfile == nil {
+		return ""
+	}
+	return r.Metadata.SelectedProfile.Name + "=" + r.Metadata.SelectedProfile.Value
 }
 
 func criteriaOf(r *recipe.RecipeResult) *recipe.Criteria {

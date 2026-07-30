@@ -120,6 +120,29 @@ func validProfileIdentifier(value string) bool {
 	return profileIdentifierPattern.MatchString(value)
 }
 
+// caseUniqueValueNames returns the declaration's value names sorted,
+// rejecting names that differ only by case: evidence and corroboration
+// derive lowercase path segments from the selected value, so "Operator"
+// and "operator" would collapse onto one evidence directory and overwrite
+// each other's results.
+func caseUniqueValueNames(decl *ProfileDeclaration) ([]string, error) {
+	valueNames := make([]string, 0, len(decl.Values))
+	lowered := make(map[string]string, len(decl.Values))
+	for name := range decl.Values {
+		valueNames = append(valueNames, name)
+		lower := strings.ToLower(name)
+		if prev, dup := lowered[lower]; dup {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("profile %q values %q and %q differ only by case; "+
+					"evidence path segments are lowercase, so value names must be "+
+					"case-insensitively unique", decl.Name, prev, name))
+		}
+		lowered[lower] = name
+	}
+	sort.Strings(valueNames)
+	return valueNames, nil
+}
+
 // ValidateProfileDeclaration validates the closed v1 profile declaration and
 // returns its declaration-wide ownership record.
 func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, error) {
@@ -143,11 +166,10 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 			fmt.Sprintf("profile %q default %q is not a declared value", decl.Name, decl.Default))
 	}
 
-	valueNames := make([]string, 0, len(decl.Values))
-	for name := range decl.Values {
-		valueNames = append(valueNames, name)
+	valueNames, nameErr := caseUniqueValueNames(decl)
+	if nameErr != nil {
+		return nil, nameErr
 	}
-	sort.Strings(valueNames)
 
 	var expected []string
 	ownedSet := make(map[string]map[string]struct{})

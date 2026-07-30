@@ -245,3 +245,24 @@ func TestStringsFromTypes_PreservesOrder(t *testing.T) {
 		t.Errorf("ordering mismatch\n  got:  %v\n  want: %v", got, want)
 	}
 }
+
+// TestToInternalAgentConfig_ProjectsAKSGPUPoolsPath pins the SDK-level
+// plumbing for the AKS pool projection: Client.CollectSnapshot translates
+// the facade AgentConfig through toInternalAgentConfig, and a dropped
+// AKSGPUPoolsPath would silently produce snapshots whose missing reading
+// fails AKS profile-qualified resolution closed.
+func TestToInternalAgentConfig_ProjectsAKSGPUPoolsPath(t *testing.T) {
+	got := toInternalAgentConfig(&AgentConfig{
+		Namespace:       "gpu-operator",
+		AKSGPUPoolsPath: "/tmp/pools.json",
+	})
+	if got.AKSGPUPoolsPath != "/tmp/pools.json" {
+		t.Fatalf("AKSGPUPoolsPath = %q, want /tmp/pools.json", got.AKSGPUPoolsPath)
+	}
+	if got.Namespace != "gpu-operator" {
+		t.Fatalf("Namespace = %q, want gpu-operator", got.Namespace)
+	}
+	if toInternalAgentConfig(nil) != nil {
+		t.Fatal("toInternalAgentConfig(nil) should stay nil")
+	}
+}

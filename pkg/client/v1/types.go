@@ -111,6 +111,15 @@ type AgentConfig struct {
 	OS                 string
 	Requests           corev1.ResourceList
 	Limits             corev1.ResourceList
+
+	// AKSGPUPoolsPath points at an operator-supplied
+	// `az aks nodepool list -o json` dump on the machine running this
+	// client. The snapshotter projects it into the snapshot's
+	// K8s.aks-gpu-pools.gpu-driver reading (ADR-015 DD3) — controller-
+	// side, before any cluster work; the file never enters the cluster.
+	// Required for AKS profile-qualified resolution from a collected
+	// snapshot; empty disables the projection.
+	AKSGPUPoolsPath string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution

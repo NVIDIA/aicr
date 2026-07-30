@@ -63,7 +63,7 @@ compute:
             nodeGroup: cpu-worker
         - name: gpuworker1
           gpuType: h100  # NDSH100v5 family: 2x96=192 of 1152 vCPUs
-          # AKS driver-only profile (the Azure default): the node image
+          # AKS azure-managed profile (Azure's "Driver only" preinstall): the node image
           # preinstalls the NVIDIA driver + container toolkit, matching the
           # AKS recipe defaults (gpu-operator driver.enabled=false,
           # toolkit.enabled=false). Existing pools provisioned with

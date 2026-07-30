@@ -423,9 +423,10 @@ Base → ValuesFile → Overrides → CLI --set flags
 ### Configuration Profiles
 
 A service or OS overlay may declare one configuration profile when the same
-criteria combination has multiple qualified ownership modes. The core
-mechanism ships without an embedded adopter; its first declaration is planned
-for AKS in a separate rollout.
+criteria combination has multiple qualified ownership modes. The first
+embedded adopter is the AKS family: `recipes/overlays/aks.yaml` declares
+`gpuStack` (`azure-managed` default, `operator-managed` alternative) over the GPU
+driver/toolkit ownership paths.
 
 A declaring overlay uses recipe apiVersion `aicr.run/v1alpha3`:
 
@@ -465,7 +466,10 @@ identical to a sibling's — does not support the "validated against deployed
 config" claim and must not be declared. The snippet above shows the declaration
 shape only; it is not a declaration you should copy into an overlay.
 
-**Constraint names must be measurement paths a collector actually emits**, in
+**Constraint names must be measurement paths a supported snapshot producer
+actually emits** — a collector, or a provider projection attached at the
+snapshot orchestration layer (e.g. `K8s.aks-gpu-pools.gpu-driver` from
+`aicr snapshot --aks-gpu-pools`) — in
 `{Type}.{Subtype}.{Key}` form. The type must be one the snapshot carries —
 `K8s`, `GPU`, `OS`, `SystemD`, `NodeTopology`, or `NetworkTopology` —
 so `K8s.server.version` resolves while an unknown type is rejected outright as
@@ -485,10 +489,15 @@ readings do not settle it: `driver-loaded` proves a driver is *present*, not
 which mode installed it.
 
 **AKS** projects each GPU agent pool's durable `gpuProfile.driver` property
-into a snapshot reading — `Install` selects the preinstalled value, `None`
-selects the operator-managed one. Unavailable, unknown, or mixed pool values
-fail closed. ADR-015 resolves this signal, and AKS is the first planned
-adopter.
+into a snapshot reading (`K8s.aks-gpu-pools.gpu-driver`). The reading
+**qualifies** a selection, it does not make one: the selected value comes
+from `--profile` (or the declaration's default), and its recorded constraint
+is then checked against the reading — `azure-managed` requires `Install`,
+`operator-managed` requires `None`. A `None`-pool snapshot resolved without
+`--profile gpuStack=operator-managed` therefore fails closed on the azure-managed
+default rather than silently switching values. Unavailable, unknown, or
+mixed pool values fail closed against either selection. ADR-015 resolves
+this signal, and the AKS family above is the first embedded adopter.
 
 No equivalent reading exists for other services yet. Declare a
 driver-ownership profile only once the signal for that service exists, and
@@ -511,7 +520,11 @@ Profile declarations are intentionally narrow:
 - One declaration may influence a resolved composition. Put it on a shared
   overlay ancestor; mixins cannot declare profiles.
 - `default` is required. Profile and value identifiers use
-  `[A-Za-z0-9._-]+`.
+  `[A-Za-z0-9._-]+`, and value names must additionally be unique
+  **case-insensitively** (rejected at catalog load): evidence and
+  corroboration derive lowercase path segments from the selected value,
+  so `Operator-Managed` and `operator-managed` would collapse onto one evidence
+  directory.
 - A value permits only `constraints` and
   `componentRefs{name,overrides}` in the core mechanism. `valuesFile`,
   component identity/deployment fields, literal dotted keys, nested empty
@@ -536,10 +549,26 @@ Profile declarations are intentionally narrow:
 
 Select with `aicr recipe --profile name=value`; omission uses the declared
 default. A profiled result uses `aicr.run/v1alpha3` and records
-`metadata.selectedProfile`, including declaration-wide `ownedPaths`.
-Divergent static overrides, all intersecting dynamic paths, removal of an
-owned component, and argocd-helm install-time values on owned paths fail
-closed. A redundant override that resolves to the selected value is allowed.
+`metadata.selectedProfile`, including declaration-wide `ownedPaths`. The
+lock on owned paths is enforced per surface:
+
+- **`aicr bundle` static overrides** (any static source — `--set`,
+  `--set-json`, `--set-file`, config-file): identical values are
+  accepted, divergent values fail closed. Typed sources are always
+  rejected for the `enabled` presence key, even when identical.
+- **`aicr mirror list --set` overrides**: same identical-accepted /
+  divergent-rejected rule; mirror exposes only the repeatable scalar
+  `--set` (no typed flags) and does not apply a config file's
+  `spec.bundle.deployment.set` overrides.
+- **`--dynamic` exports**: fail closed on intersection with an owned
+  path, regardless of value.
+- **argocd-helm install-time values**: any owned-key presence fails
+  closed at Helm render time, even when the value is identical.
+- **Component presence** (the synthetic `enabled` owned path): removal of
+  an owned component fails closed, and profile fragments cannot assign
+  `enabled` — so reselecting a profile changes owned **value** paths
+  only, never which components are present. Presence changes are
+  catalog/composition changes.
 
 **Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is
 resolved from a snapshot (via `aicr recipe --snapshot` or

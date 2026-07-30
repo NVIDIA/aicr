@@ -38,6 +38,18 @@ jobs:
         with:
           kubeconfig: ${{ secrets.KUBECONFIG }}
       
+      # On AKS, the gpuStack profile qualifies against the
+      # K8s.aks-gpu-pools.gpu-driver reading — capture it BEFORE the
+      # snapshot step or later snapshot-qualified resolution / validate
+      # readiness fails closed. Export the path once; snapshot/validate
+      # pick it up via AICR_AKS_GPU_POOLS_PATH. (Profile selection happens
+      # at recipe generation — see Pattern 2.)
+      # - name: Dump AKS GPU pool modes (AKS clusters only)
+      #   run: |
+      #     az aks nodepool list -g "$RG" --cluster-name "$CLUSTER" -o json \
+      #       > "$GITHUB_WORKSPACE/aks-gpu-pools.json"
+      #     echo "AICR_AKS_GPU_POOLS_PATH=$GITHUB_WORKSPACE/aks-gpu-pools.json" >> "$GITHUB_ENV"
+
       - name: Deploy AICR Agent
         run: |
           # aicr snapshot deploys the in-cluster Job, waits synchronously for
@@ -45,7 +57,7 @@ jobs:
           # separate `kubectl wait` step is needed.
           aicr snapshot --namespace gpu-operator \
             --output cm://gpu-operator/aicr-snapshot --timeout 300s
-      
+
       - name: Capture snapshot from ConfigMap
         run: |
           kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot\.yaml}' > snapshot.yaml
@@ -95,6 +107,8 @@ jobs:
       # 1. Snapshot: agent Job writes cluster state to a ConfigMap.
       #    aicr snapshot waits synchronously for the Job and cleans it up,
       #    so no separate `kubectl wait` step is needed.
+      #    On AKS, dump the GPU pool modes and export AICR_AKS_GPU_POOLS_PATH
+      #    BEFORE this step (see Pattern 1's "Dump AKS GPU pool modes").
       - name: Capture snapshot
         run: |
           aicr snapshot --namespace gpu-operator \
@@ -102,6 +116,9 @@ jobs:
 
       # 2. Recipe: read the snapshot ConfigMap, emit an optimized recipe.
       #    Use --service/--accelerator/--intent flags for query mode instead.
+      #    AKS: add `--profile gpuStack=operator-managed` when the GPU pools were
+      #    created with --gpu-driver none (the default azure-managed value
+      #    requires pools reading Install and fails closed otherwise).
       - name: Generate recipe
         run: |
           aicr recipe \
@@ -345,6 +362,13 @@ API responses are cacheable (recipe and query responses carry
 HTTP response cache only; the server's internal per-`Client` provider caches
 are not time-bounded and persist until `Client.Close()` is called.
 
+> **Route note:** these helpers use `GET /v2/recipe` — it serves every
+> family (profiled and unprofiled) with the same criteria parameters, plus
+> optional `profile=gpuStack=azure-managed|operator-managed` on AKS. `/v1/recipe`
+> still works for non-profiled families but rejects `service=aks` now that
+> the AKS family carries the `gpuStack` profile. See
+> [API Reference › Profile-aware v2 endpoints](../user/api-reference.md#profile-aware-v2-endpoints).
+
 ```python
 import requests
 from cachetools import TTLCache
@@ -356,7 +380,7 @@ def get_recipe_cached(params):
     cache_key = frozenset(params.items())
     
     if cache_key not in recipe_cache:
-        response = requests.get('http://localhost:8080/v1/recipe', params=params)
+        response = requests.get('http://localhost:8080/v2/recipe', params=params)
         recipe_cache[cache_key] = response.json()
     
     return recipe_cache[cache_key]
@@ -373,7 +397,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
     wait=wait_exponential(multiplier=1, min=4, max=10)
 )
 def get_recipe_with_retry(params):
-    response = requests.get('http://localhost:8080/v1/recipe', params=params)
+    response = requests.get('http://localhost:8080/v2/recipe', params=params)
     response.raise_for_status()
     return response.json()
 ```
@@ -385,14 +409,14 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 def get_recipe(params):
-    response = requests.get('http://localhost:8080/v1/recipe', params=params)
+    response = requests.get('http://localhost:8080/v2/recipe', params=params)
     return response.json()
 
 # Generate recipes for multiple environments in parallel
 environments = [
     {'os': 'ubuntu', 'accelerator': 'h100', 'service': 'eks'},
     {'os': 'ubuntu', 'accelerator': 'gb200', 'service': 'gke'},
-    {'os': 'rhel', 'accelerator': 'a100', 'service': 'aks'},
+    {'os': 'cos', 'accelerator': 'h100', 'service': 'gke'},
 ]
 
 with ThreadPoolExecutor(max_workers=3) as executor:
@@ -484,14 +508,14 @@ spec:
 
 ```bash
 # Verbose curl
-curl -v "http://localhost:8080/v1/recipe?os=ubuntu&accelerator=h100"
+curl -v "http://localhost:8080/v2/recipe?os=ubuntu&accelerator=h100"
 
 # With timing
 curl -w "\nTime: %{time_total}s\n" \
-  "http://localhost:8080/v1/recipe?os=ubuntu&accelerator=h100"
+  "http://localhost:8080/v2/recipe?os=ubuntu&accelerator=h100"
 
 # Check headers
-curl -I "http://localhost:8080/v1/recipe?os=ubuntu&accelerator=h100"
+curl -I "http://localhost:8080/v2/recipe?os=ubuntu&accelerator=h100"
 ```
 
 ### Validate Snapshots

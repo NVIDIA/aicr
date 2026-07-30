@@ -40,15 +40,25 @@ type RunMeta struct {
 	SchemaVersion string            `json:"schemaVersion"`
 	Coordinate    RunMetaCoordinate `json:"coordinate"`
 	Recipe        string            `json:"recipe"`
-	Signer        RunMetaSigner     `json:"signer"`
-	RunID         string            `json:"runId"`
-	AICRVersion   string            `json:"aicrVersion"`
-	K8sVersion    string            `json:"k8sVersion"`
-	K8sConstraint string            `json:"k8sConstraint"`
-	BundleDigest  string            `json:"bundleDigest"`
-	EvidenceRef   string            `json:"evidenceRef"`
-	RekorLogIndex *int64            `json:"rekorLogIndex,omitempty"`
-	AttestedAt    string            `json:"attestedAt"`
+	// Profile is the lowercase profile path segment GP2 appended to
+	// Coordinate.Tab for profile-bearing recipes ("<name>-<value>");
+	// empty for unprofiled runs. The criteria inversion strips it from
+	// the Tab — without that, the segment would be misread as a phantom
+	// platform.
+	Profile string `json:"profile,omitempty"`
+	// ProfileSelection is the exact-case "name=value" wire form (see
+	// project.Meta.ProfileSelection); used verbatim by the renderer's
+	// copy-CLI/copy-config generators.
+	ProfileSelection string        `json:"profileSelection,omitempty"`
+	Signer           RunMetaSigner `json:"signer"`
+	RunID            string        `json:"runId"`
+	AICRVersion      string        `json:"aicrVersion"`
+	K8sVersion       string        `json:"k8sVersion"`
+	K8sConstraint    string        `json:"k8sConstraint"`
+	BundleDigest     string        `json:"bundleDigest"`
+	EvidenceRef      string        `json:"evidenceRef"`
+	RekorLogIndex    *int64        `json:"rekorLogIndex,omitempty"`
+	AttestedAt       string        `json:"attestedAt"`
 }
 
 // RunMetaCoordinate is the GP2-derived coordinate carried in meta.json. GP4

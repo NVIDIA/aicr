@@ -583,3 +583,52 @@ func topologySnapshotWith(labels map[string]measurement.Reading) *snapshotter.Sn
 		},
 	}
 }
+
+// TestDriverAbsentRemedyBranches pins every branch of the client-side
+// remedy twin. driverAbsentRemedy here and the bundler copy
+// (pkg/bundler/validations/checks.go) must stay in sync per their comments;
+// the bundler copy is branch-tested through CheckDriverOwnershipCoherence,
+// and this direct table keeps the client copy from drifting silently on
+// the branches the resolve-path tests do not reach.
+func TestDriverAbsentRemedyBranches(t *testing.T) {
+	tests := []struct {
+		name     string
+		service  recipe.CriteriaServiceType
+		os       recipe.CriteriaOSType
+		profiled bool
+		want     string
+	}{
+		{"aks legacy keeps the four-flag tuple", recipe.CriteriaServiceAKS, recipe.CriteriaOSUbuntu, false,
+			"bundle in GPU-Operator-managed mode"},
+		{"aks profiled points at --profile", recipe.CriteriaServiceAKS, recipe.CriteriaOSUbuntu, true,
+			"--profile gpuStack=operator-managed"},
+		{"gke cos forbids operator install", recipe.CriteriaServiceGKE, recipe.CriteriaOSCOS, false,
+			"GPU Operator cannot install the driver"},
+		{"gke ubuntu allows operator mode", recipe.CriteriaServiceGKE, recipe.CriteriaOSUbuntu, false,
+			"GKE Ubuntu node images the GPU Operator can manage"},
+		{"gke unknown os presents both paths", recipe.CriteriaServiceGKE, recipe.CriteriaOSAny, false,
+			"those may bundle in GPU-Operator-managed mode"},
+		{"generic service gets the platform wording", recipe.CriteriaServiceEKS, recipe.CriteriaOSUbuntu, false,
+			"reprovision the GPU nodes with a platform-installed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := driverAbsentRemedy(tt.service, tt.os, tt.profiled)
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("driverAbsentRemedy(%s,%s,%v) = %q, want substring %q",
+					tt.service, tt.os, tt.profiled, got, tt.want)
+			}
+		})
+	}
+	// The AKS legacy and profiled remedies must be distinct: the lock only
+	// applies to profiled artifacts, so the tuple wording may appear only
+	// on the legacy side.
+	legacy := driverAbsentRemedy(recipe.CriteriaServiceAKS, recipe.CriteriaOSUbuntu, false)
+	profiled := driverAbsentRemedy(recipe.CriteriaServiceAKS, recipe.CriteriaOSUbuntu, true)
+	if legacy == profiled {
+		t.Error("AKS legacy and profiled remedies are identical; the profiled lock wording is missing")
+	}
+	if strings.Contains(profiled, "bundle in GPU-Operator-managed mode:") {
+		t.Errorf("profiled AKS remedy still offers the bundle-time tuple: %q", profiled)
+	}
+}

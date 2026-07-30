@@ -96,9 +96,15 @@ The two surfaces share the same foundation:
   the two surfaces share one GCS bucket or stand up their own is an open
   GP3/TG1 deconfliction tracked in ADR-012; the shared contract is the
   evidence tree, not a specific bucket.)
-- Same recipe→coordinate mapping (`pkg/recipe.CoordinateFor`) — the
-  anti-drift guarantee that both surfaces place every recipe in the same
-  `<group>/<dashboard>/<tab>`.
+- Same recipe→coordinate mapping (`pkg/recipe.CoordinateFor`) as the
+  shared criteria-only base — the anti-drift guarantee for both surfaces.
+  (Profile-bearing recipes refine it per consumer: the Golden Path route
+  appends the `-<name>-<value>` profile segment to the tab, while TestGrid
+  keeps the unsuffixed coordinate and separates values via the digest-bound
+  build ID — see ADR-012/ADR-015.) Both surfaces anchor every recipe to the
+  same criteria-only `<group>/<dashboard>/<tab>` base; for profiled recipes
+  the complete coordinates diverge by design (suffixed GP tab segment vs
+  unsuffixed, digest-partitioned TG builds).
 - The GP dashboard's JSON contract (`data/index.json` + `data/series/<recipe>.json`)
   uses coordinate-keyed layouts that are forward-compatible with the
   TestGrid workers, API, and UI. It is not a throwaway interim format.
@@ -107,14 +113,23 @@ RQ1 (#1283) — the follow-on to #1224's `pending` Evidence column — targets
 the evidence dashboard specifically: it is the link
 target today because TG4a/TG4b's live API and UI have not shipped yet — not
 because TG work is deferred; the two surfaces are being built in parallel
-(see above). Once RQ1 lands, the Recipe Health Evidence column will deep-link
-to the dashboard's coordinate URL —
+(see above). The Recipe Health generator (`tools/health/markdown.go`)
+deep-links the Evidence column to the dashboard's coordinate URL today,
+gated on a committed dashboard presence —
 `https://validation.aicr.run/#/<group>/<dashboard>/<tab>` — built offline
-from resolved criteria via `pkg/recipe.CoordinateFor`. The link is stable
+from resolved criteria via `pkg/recipe.CoordinateFor`. Recipes without a
+committed presence stay `pending`, and profiled families' presence entries
+are deliberately withheld until profile-aware links land (the lowercase
+`-<name>-<value>` tab segment for a profiled recipe cannot yet be derived
+by the criteria-only generator). The link is stable
 across Kubernetes upgrades because the Kubernetes version lives in the
 column, not the path. Once TG4a's own coordinate-presence endpoint ships, the
-same coordinate resolves on this board too — the two surfaces are addressed
-identically, so nothing about the link changes when the live board comes up.
+same criteria-only base (`Coordinate.Path()`) resolves on this board too. The
+bases are addressed identically; only the profile refinement differs per
+surface — the Golden Path route appends the profile segment to the tab, while
+TestGrid stays at the unsuffixed base and separates profile values via the
+digest-bound build ID — so how a link is derived does not change when the
+live board comes up.
 
 ## How it relates to recipe health
 
@@ -123,6 +138,6 @@ The TestGrid and the [Recipe Health](./recipe-health.md) matrix are **two surfac
 - **Recipe Health** owns the **offline structural / freshness** signal — does the recipe resolve cleanly, are its charts pinned — computed without a live cluster.
 - **The TestGrid** owns the **live validation-posture** signal — derived from real runs against real clusters.
 
-AICR keeps these axes deliberately separate so a "resolves cleanly" verdict never gets fused with a "validated and performant" one. The two surfaces share exactly one thing: the recipe's `metadata.name`, the identity by which both address the same recipe.
+AICR keeps these axes deliberately separate so a "resolves cleanly" verdict never gets fused with a "validated and performant" one. The two surfaces share exactly one thing: the criteria-only base coordinate (`pkg/recipe.CoordinateFor`) by which both address the same recipe family — for profile-bearing recipes the Golden Path refines it with the `-<name>-<value>` tab segment (and the evidence recipe name carries the same segment), while TestGrid stays at the base, separating values by digest-bound build ID.
 
-The Recipe Health **Evidence** column is the cross-link between them. Today it reads `pending` for every recipe. Once a recipe has a **published coordinate** on the [interim evidence dashboard](#interim-evidence-dashboard), that column will **link** into it — this is the link target today because TG4a/TG4b's live board hasn't shipped yet, not because TG work is deferred — and the link is automatically checkable so it can never point at a coordinate that does not exist. A recipe with no dashboard coordinate yet stays `pending`. It links, it never copies either board's content.
+The Recipe Health **Evidence** column is the cross-link between them. When a recipe has a **committed presence** on the [interim evidence dashboard](#interim-evidence-dashboard), the column **links** into its coordinate — the dashboard is the link target today because TG4a/TG4b's live board hasn't shipped yet, not because TG work is deferred — and the link is automatically checkable so it can never point at a coordinate that does not exist. A recipe with no committed dashboard presence stays `pending` (profiled families' entries are deliberately withheld until profile-aware links land). It links, it never copies either board's content.

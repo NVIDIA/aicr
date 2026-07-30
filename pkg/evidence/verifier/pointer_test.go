@@ -17,7 +17,10 @@ package verifier
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
 func TestLoadAndValidatePointer_HappyPath(t *testing.T) {
@@ -100,5 +103,39 @@ func TestLoadAndValidatePointer_RejectsHuge(t *testing.T) {
 	}
 	if _, err := LoadAndValidatePointer(p); err == nil {
 		t.Errorf("expected error for oversize pointer")
+	}
+}
+
+// TestValidatePointerProfileSuffixConsistency pins the per-value evidence
+// invariant: a profiled pointer whose recipe name lacks the profile path
+// segment is rejected — an unsuffixed name would collapse two values into
+// one evidence directory.
+func TestValidatePointerProfileSuffixConsistency(t *testing.T) {
+	base := func() *attestation.Pointer {
+		return &attestation.Pointer{
+			SchemaVersion: "1.0.0",
+			Recipe:        "h100-aks-ubuntu-training-gpustack-operator-managed",
+			Profile:       "gpuStack=operator-managed",
+			Attestations: []attestation.PointerAttestation{{
+				Bundle: attestation.PointerBundle{PredicateType: attestation.PredicateTypeV1},
+			}},
+		}
+	}
+
+	if err := validatePointer(base()); err != nil {
+		t.Fatalf("suffixed profiled pointer rejected: %v", err)
+	}
+
+	unsuffixed := base()
+	unsuffixed.Recipe = "h100-aks-ubuntu-training"
+	err := validatePointer(unsuffixed)
+	if err == nil || !strings.Contains(err.Error(), "profile path segment") {
+		t.Fatalf("unsuffixed profiled pointer error = %v, want segment rejection", err)
+	}
+
+	malformed := base()
+	malformed.Profile = "not-a-selection"
+	if err := validatePointer(malformed); err == nil {
+		t.Fatal("malformed profile accepted")
 	}
 }

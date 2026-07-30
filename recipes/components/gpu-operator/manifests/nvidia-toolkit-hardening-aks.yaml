@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NVIDIA Container Toolkit device-isolation hardening for the AKS driver-only
+# NVIDIA Container Toolkit device-isolation hardening for the AKS azure-managed
 # profile.
 #
 # Under the AKS Azure-managed driver profile the container toolkit is
@@ -28,7 +28,7 @@
 # isolation gap is real for any multi-tenant workload.
 #
 # Scope: this DaemonSet renders ONLY when gpu-operator.toolkit.enabled is
-# false (the driver-only default). Under the GPU-Operator-managed fallback
+# false (the azure-managed default). Under the GPU-Operator-managed fallback
 # (--gpu-driver none + toolkit.enabled=true) it is omitted — there the operator
 # owns the toolkit and the hardened keys are set via gpu-operator.toolkit.env
 # (ACCEPT_NVIDIA_VISIBLE_DEVICES_* in values-aks*.yaml). Gating it out of the
@@ -89,7 +89,7 @@
 # and is tracked in https://github.com/NVIDIA/aicr/issues/1839.
 {{- $gpuOp := index .Values "gpu-operator" }}
 {{- $toolkit := index $gpuOp "toolkit" }}
-{{- /* Render only in the driver-only profile (toolkit.enabled=false). In the */}}
+{{- /* Render only in the azure-managed profile (toolkit.enabled=false). In the */}}
 {{- /* GPU-Operator-managed fallback the operator owns the toolkit and the */}}
 {{- /* hardened keys come from toolkit.env, so this DaemonSet is omitted (and */}}
 {{- /* cannot deadlock helm --wait on nodes where nvidia-ctk is not present). */}}

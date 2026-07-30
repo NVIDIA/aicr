@@ -299,8 +299,11 @@ The evidence corroboration dashboard (GP) and the [AICR TestGrid](./testgrid.md)
 - They both derive recipe coordinates from the **single shared mapping
   function** `pkg/recipe.CoordinateFor` (see
   [ADR-012](../design/012-recipe-coordinate-mapping.md)), the anti-drift
-  guarantee that ensures every consumer places a recipe in the same
-  group/dashboard/tab.
+  guarantee that anchors every consumer to the same **criteria-only base**
+  group/dashboard/tab. Profile-bearing recipes refine that base per
+  consumer: this dashboard's value routes append a `-<name>-<value>`
+  segment to the tab, while TestGrid keeps the unsuffixed base coordinate
+  and partitions profile values by the digest-bound build ID.
 - The GP JSON contract (`data/index.json` + `data/series/<recipe>.json`)
   uses the same coordinate scheme and is forward-compatible with TG's
   workers, API, and UI — it is not a throwaway interim format.
@@ -315,15 +318,29 @@ The difference is in the rendering stack:
   cluster. TG is being built in parallel; its children (TG1–TG7) are Ready
   and in progress.
 
-**RQ1 (#1283) targets this dashboard.** It is the link target today because
-TG4a/TG4b's live API and UI have not shipped yet — not because TG work is
-deferred; the two surfaces are being built in parallel (see above). Once RQ1
-lands, the Recipe Health Evidence column will deep-link here —
+**The Recipe Health Evidence column deep-links here (RQ1 / #1283).** This
+dashboard is the link target because TG4a/TG4b's live API and UI have not
+shipped yet — not because TG work is deferred; the two surfaces are being
+built in parallel (see above). The health generator
+(`tools/health/markdown.go`) emits presence-gated links today: a recipe
+with a committed dashboard presence gets a deep-link —
 `https://validation.aicr.run/#/<group>/<dashboard>/<tab>`, i.e. this site's
 origin plus `/#/` plus the recipe's `Coordinate.Path()` — built
 offline from resolved criteria via `pkg/recipe.CoordinateFor`, with no network
-call from the generator. Only recipes with an actual dashboard presence get a
-link; the rest keep an honest `pending` until real-hardware coverage broadens.
+call from the generator, and the committed `recipe-health.md` carries those
+live links for unprofiled recipes with a committed presence. A recipe
+without a committed presence stays an honest `pending` until real-hardware
+coverage broadens. For a profile-bearing recipe the route's `<tab>`
+segment (and the dashboard tab) carries the lowercase `-<name>-<value>`
+profile suffix, so two values of one profile family keep distinct routes;
+the criteria facets (service, accelerator, OS, intent, platform) stay
+profile-blind. Because the Recipe Health generator builds links from
+criteria alone, it cannot yet target a profile-suffixed route — profiled
+families' Evidence cells stay an honest `pending` (their entries are
+deliberately withheld from the presence manifest) until profile-aware
+Health links land. (This dashboard's suffix contract applies to the
+corroboration routes only; the TestGrid coordinate deliberately stays
+unsuffixed — its digest-bound build ID partitions per value.)
 This `index.json` is also available as an interim coordinate-presence source
 for the RQ2 link-integrity check while TG4a's own coordinate-presence endpoint
 isn't live yet — a sequencing option for RQ2, not a re-point of
@@ -341,18 +358,22 @@ dashboard are **structural siblings that never duplicate each other**:
 - **This dashboard** owns the **live corroboration** signal — derived from
   real, signed validation runs attested by distinct parties.
 
-The two surfaces share exactly one thing: the recipe's `metadata.name` join
-key. Both enumerate recipes by overlay name; the coordinate is derived from
-the same resolved criteria by the same mapping function. They line up on
-identity without sharing computation.
+The two surfaces line up on identity without sharing computation:
+Recipe Health enumerates catalog leaf overlays by name, this dashboard
+enumerates published evidence by the criteria-derived recipe slug
+(suffixed for profiled recipes), and both derive the criteria-only base
+coordinate from the same resolved criteria by the same mapping function.
+Profile-bearing recipes refine that base here — this dashboard's value
+routes append the profile segment to the tab, so each profile value gets
+its own suffixed route — while the base coordinate itself stays
+criteria-only.
 
-Issue `#1224` shipped the Recipe Health **Evidence** column as a literal `pending`
-for every recipe; that's still true today. RQ1 (`#1283`), the follow-on issue
-that fills it in, turns a recipe's `pending` into a deep-link only once
-that recipe has a published coordinate on this dashboard — see
+Issue `#1224` shipped the Recipe Health **Evidence** column as a literal
+`pending` placeholder; RQ1 (`#1283`) filled it in with presence-gated links.
+Today a recipe's row deep-links to its coordinate on this dashboard when a
+published coordinate exists, and shows `pending` only when none exists — see
 [Relationship to TestGrid](#relationship-to-testgrid) above for the exact URL
-form and the presence condition; a recipe with no dashboard coordinate yet
-stays `pending`. Once a link exists it is **stable**, because Kubernetes
+form and the presence condition. Once a link exists it is **stable**, because Kubernetes
 version is kept out of the coordinate path (see
 [The coordinate and stable URLs](#the-coordinate-and-stable-urls)), so a
 cluster upgrade never breaks it. The cross-link is advisory and

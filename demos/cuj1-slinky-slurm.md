@@ -57,6 +57,17 @@ aicr recipe \
   -o recipe.yaml
 ```
 
+> **AKS:** capture the snapshot with the GPU pool projection or the
+> snapshot-qualified resolve (and validate readiness) fails closed:
+> `az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json`
+> then `aicr snapshot --aks-gpu-pools pools.json -o system.yaml`; add
+> `--profile gpuStack=operator-managed` to `aicr recipe` when the GPU pools were
+> created with `--gpu-driver none`. Criteria-only generation (the AKS row
+> above) needs no pool dump, but the `--profile gpuStack=operator-managed` flag is
+> still required for `--gpu-driver none` pools — the default profile is
+> azure-managed, and without a snapshot nothing catches the mismatch until
+> `aicr validate`.
+
 The `K8s.slinky-slurm` summary distinguishes absent, detected,
 unsupported-multicluster, and unknown outcomes. It does not prove operator/runtime
 health and does not reconstruct the current Slinky chart values. Review and
@@ -194,6 +205,12 @@ kubectl wait --for=jsonpath='{.status.conditions[?(@.type=="Available")].status}
 If nodewright is already installed, skip those sections in `deploy.sh` to avoid upgrade conflicts.
 
 ## Validate Cluster
+
+> **AKS note:** the validate commands below capture cluster state inline, and the
+> gpuStack profile qualifies against the `K8s.aks-gpu-pools.gpu-driver` reading. On
+> AKS either pass the already-captured `system.yaml` via `--snapshot`, or export
+> `AICR_AKS_GPU_POOLS_PATH` (or pass `--aks-gpu-pools`) so live capture carries the
+> reading — otherwise the profiled readiness check fails closed.
 
 Use **deployment** and **conformance**. Performance validation is **not supported yet** on slurm leaves — there is no Slurm-native NCCL (or equivalent) check in AICR today; a K8s Pod benchmark would bypass slurmd and is the wrong path on a Slinky-managed cluster.
 

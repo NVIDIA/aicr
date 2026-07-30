@@ -76,7 +76,7 @@ func main() {
 		OS:          "ubuntu", // REQUIRED to reach the OS-pinned kubeflow overlay; see "Recipe sources" below
 		Intent:      "training",
 		Platform:    "kubeflow",
-		// Profile:  "gpuStack=driver-installed", // only when the composition declares it
+		// Profile:  "gpuStack=operator-managed", // only when the composition declares one (embedded adopter: AKS; values azure-managed [default] / operator-managed)
 	})
 	if err != nil {
 		log.Fatalf("resolve recipe: %v", err)
@@ -100,16 +100,53 @@ telemetry hooks.
 // mirrors most fields of the underlying pkg/snapshotter.AgentConfig
 // (the in-pod network-discovery fields ClusterConfigPath and
 // DiscoverNetwork are not surfaced on the facade).
-snap, err := client.CollectSnapshot(ctx, &aicr.AgentConfig{
+//
+// On AKS, set AKSGPUPoolsPath to an `az aks nodepool list -o json` dump
+// on the machine running this client: the pool projection is merged
+// controller-side into the returned snapshot, and AKS profile-qualified
+// resolution from that snapshot REQUIRES the resulting
+// K8s.aks-gpu-pools.gpu-driver reading (a snapshot without it fails
+// closed).
+// Give the Job-backed snapshot its own deadline: contexts cap the
+// configured timeouts from the parent side, so reusing the 30-second
+// resolve ctx above would override the 5-minute AgentConfig.Timeout.
+snapCtx, cancelSnap := context.WithTimeout(context.Background(), 10*time.Minute)
+defer cancelSnap()
+snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Kubeconfig:         "/path/to/target-kubeconfig",
 	Namespace:          "aicr-snapshot",
 	Image:              "ghcr.io/nvidia/aicr:v0.11.1",
 	ServiceAccountName: "aicr-agent",
 	Timeout:            5 * time.Minute,
 	Cleanup:            true,
+	AKSGPUPoolsPath:    "/path/to/aks-gpu-pools.json", // AKS only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
+}
+
+// NOTE: AgentConfig.AKSGPUPoolsPath and ResolveRecipeFromSnapshotWithProfile
+// require the release containing the AKS gpuStack adoption (PR #1967) —
+// newer than the module pin shown under Installation; update the pin to
+// that release when reproducing this example.
+// On AKS, resolve FROM the collected snapshot so the profile selection is
+// verified against the recorded pool modes (ResolveRecipeFromSnapshot uses
+// the declaration default, azure-managed, which requires pools reading
+// Install; gpuStack=operator-managed as below requires a pool dump reading None —
+// i.e. pools created with --gpu-driver none). A snapshot whose reading
+// mismatches the selection — or that was collected without
+// AKSGPUPoolsPath — fails closed.
+resolveCtx, cancelResolve := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancelResolve()
+aksResult, err := client.ResolveRecipeFromSnapshotWithProfile(resolveCtx,
+	&aicr.Criteria{
+		Service:     "aks",
+		Accelerator: "h100",
+		OS:          "ubuntu",
+		Intent:      "training",
+	}, snap, "gpuStack=operator-managed")
+if err != nil {
+	log.Fatalf("resolve from snapshot: %v", err)
 }
 
 // ValidateState runs the validation phases against the resolved recipe +
@@ -117,8 +154,17 @@ if err != nil {
 // so that namespace, RBAC, ConfigMap, validator Job, and result operations all
 // target that cluster. With no WithValidationPhases option it runs all three
 // phases (Deployment, Conformance, Performance) in canonical order.
-results, err := client.ValidateState(ctx, result, snap,
-	aicr.WithValidationKubeconfig("/path/to/target-kubeconfig"))
+// Validation runs cluster Jobs per phase and can take well over an
+// hour on the performance phase — bound it independently of the short
+// resolve context (the SDK's own per-phase caps still apply inside).
+valCtx, cancelVal := context.WithTimeout(context.Background(), 2*time.Hour)
+defer cancelVal()
+// WithValidationTimeout(0) removes the facade's default 75-minute
+// operation cap (a per-check ordering guarantee, not a bound on a
+// serial all-phase run) so valCtx above is the governing deadline.
+results, err := client.ValidateState(valCtx, aksResult, snap,
+	aicr.WithValidationKubeconfig("/path/to/target-kubeconfig"),
+	aicr.WithValidationTimeout(0))
 if err != nil {
 	log.Fatalf("validate state: %v", err)
 }
@@ -178,11 +224,15 @@ different profile contract.
 Note that bundle generation runs blocking preflight validations (for
 example `CheckDriverOwnershipCoherence`, which rejects a recipe whose
 snapshot recorded `gpuDriverState: absent` under a preinstalled-driver
-profile); the remedies those checks print are `--set` override flags,
-and the override-capable SDK surface is `MakeBundle` with
+profile). For recipes carrying `metadata.selectedProfile` (the AKS
+family), the remedy is out-of-band: fix or recreate the GPU pools,
+recapture the snapshot, and regenerate — the driver-ownership paths are
+profile-owned, so `--set` overrides diverging from the selected value
+are rejected. Only legacy pre-profile artifacts are remedied through
+`--set` override flags, whose SDK surface is `MakeBundle` with
 `BundleOptions.Config` — `BundleComponents` takes no overrides, so a
-blocked recipe must be bundled through `MakeBundle` (or regenerated)
-rather than retried on the same call.
+blocked legacy recipe must be bundled through `MakeBundle` (or
+regenerated) rather than retried on the same call.
 The kubeconfig argument (third parameter) is only needed when the recipe
 path (first argument) is a `cm://` ConfigMap URI.
 
