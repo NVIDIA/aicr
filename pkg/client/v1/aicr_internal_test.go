@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -364,6 +365,60 @@ func TestBundleComponents_HelmComponentLoadsManifestFiles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestBundleComponents_RejectsAllDisabled locks in that an all-disabled
+// recipe is rejected the same way DefaultBundler.Make rejects it
+// (bundler.go), rather than silently returning an empty, successful
+// bundle list. See #1917.
+func TestBundleComponents_RejectsAllDisabled(t *testing.T) {
+	t.Parallel()
+
+	client := newClientForBundleTest(t)
+	r := newRecipeResultForBundleTest(client,
+		[]recipe.ComponentRef{
+			{
+				Name:      "disabled-a",
+				Type:      recipe.ComponentTypeHelm,
+				Overrides: map[string]any{"enabled": false},
+			},
+		},
+		nil, // facade Components is empty because the only ref is disabled
+	)
+	_, err := client.BundleComponents(context.Background(), r)
+	if err == nil {
+		t.Fatal("expected error for all-disabled recipe, got nil")
+	}
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+}
+
+// TestBundleComponents_RejectsZeroComponentRefs locks in that a recipe
+// with no componentRefs at all is rejected the same way as an all-
+// disabled recipe — the zero-ref divergence from DefaultBundler.Make
+// that the dropped r.internal.ComponentRefs conjunct used to miss.
+// See #1917.
+func TestBundleComponents_RejectsZeroComponentRefs(t *testing.T) {
+	t.Parallel()
+
+	client := newClientForBundleTest(t)
+	r := newRecipeResultForBundleTest(client, nil, nil)
+	_, err := client.BundleComponents(context.Background(), r)
+	if err == nil {
+		t.Fatal("expected error for zero-componentRef recipe, got nil")
+	}
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
 	}
 }
 
@@ -894,6 +949,41 @@ func TestAdoptRecipe_DeepCopiesForClientIsolation(t *testing.T) {
 	}
 }
 
+func TestAdoptRecipe_RejectsCyclicProfileOverridesBeforeDeepCopy(t *testing.T) {
+	client := newClientForBundleTest(t)
+	overrides := map[string]any{}
+	overrides["driver"] = overrides
+	input := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeProfileAPIVersion,
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:      "gpu-operator",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.example.com",
+			Chart:     "gpu-operator",
+			Version:   "1.0.0",
+			Overrides: overrides,
+		}},
+		Metadata: recipe.RecipeResultMetadata{
+			SelectedProfile: &recipe.SelectedProfile{
+				Name:  "gpuStack",
+				Value: "driver-installed",
+				OwnedPaths: map[string][]string{
+					"gpu-operator": {"driver.enabled", "enabled"},
+				},
+			},
+		},
+	}
+
+	_, err := client.AdoptRecipe(t.Context(), input)
+	if err == nil || !strings.Contains(err.Error(), "cyclic reference") {
+		t.Fatalf("AdoptRecipe() error = %v, want cyclic-reference rejection", err)
+	}
+	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("AdoptRecipe() error = %v, want ErrCodeInvalidRequest", err)
+	}
+}
+
 // TestClient_CloseDrainsInflightResolve is the deterministic race
 // test for the inflight-drain pattern. Without the drain, this
 // sequence races storeCache repopulation against eviction:
@@ -1169,6 +1259,70 @@ func (b *blockingReadFileProvider) WalkDir(ctx context.Context, root string, fn 
 
 func (b *blockingReadFileProvider) Source(path string) string { return b.underlying.Source(path) }
 
+type deadlineRequiredProvider struct {
+	underlying recipe.DataProvider
+	calls      atomic.Int64
+}
+
+func (d *deadlineRequiredProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	d.calls.Add(1)
+	if _, ok := ctx.Deadline(); !ok {
+		return nil, aicrerrors.New(
+			aicrerrors.ErrCodeInternal, "provider read did not receive a deadline")
+	}
+	return d.underlying.ReadFile(ctx, path)
+}
+
+func (d *deadlineRequiredProvider) WalkDir(
+	ctx context.Context,
+	root string,
+	fn fs.WalkDirFunc,
+) error {
+
+	d.calls.Add(1)
+	if _, ok := ctx.Deadline(); !ok {
+		return aicrerrors.New(
+			aicrerrors.ErrCodeInternal, "provider walk did not receive a deadline")
+	}
+	return d.underlying.WalkDir(ctx, root, fn)
+}
+
+func (d *deadlineRequiredProvider) Source(path string) string {
+	return d.underlying.Source(path)
+}
+
+func TestAdoptRecipe_BoundsProviderIO(t *testing.T) {
+	t.Parallel()
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	dp := &deadlineRequiredProvider{underlying: embedded}
+	c := &Client{
+		builder: recipe.NewBuilder(recipe.WithDataProvider(dp)),
+		dp:      dp,
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	_, err := c.AdoptRecipe(context.Background(), &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeAPIVersion,
+		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Source:  "https://charts.example.com",
+				Chart:   "gpu-operator",
+				Version: "v1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("AdoptRecipe(context.Background()) error = %v", err)
+	}
+	if dp.calls.Load() == 0 {
+		t.Fatal("AdoptRecipe() did not exercise provider I/O")
+	}
+}
+
 // TestClient_CloseDrainsInflightAdopt pins the inflight registration added for
 // adoptRecipe (issue #1584): PrepareAndValidate reads the component registry to
 // back-fill a missing type, so a concurrent Close must drain the adopt before
@@ -1366,5 +1520,33 @@ func TestFacadeResultFromInternal_ChartProjection(t *testing.T) {
 		if comp.Chart != want {
 			t.Errorf("component %q Chart = %q, want %q", comp.Name, comp.Chart, want)
 		}
+	}
+}
+
+// TestFacadeResultFromInternal_OmitsDisabledComponents pins the facade
+// contract: only deployable (enabled) components appear in the SDK
+// facade result. See #1874.
+func TestFacadeResultFromInternal_OmitsDisabledComponents(t *testing.T) {
+	t.Parallel()
+
+	internal := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "enabled-a", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			{
+				Name:      "disabled-b",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://charts.example.com",
+				Version:   "1.0.0",
+				Overrides: map[string]any{"enabled": false},
+			},
+		},
+	}
+
+	out := facadeResultFromInternal(internal, "test")
+	if len(out.Components) != 1 {
+		t.Fatalf("components = %d, want 1", len(out.Components))
+	}
+	if out.Components[0].Name != "enabled-a" {
+		t.Errorf("got component %q, want enabled-a", out.Components[0].Name)
 	}
 }

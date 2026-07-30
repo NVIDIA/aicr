@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -49,12 +50,14 @@ var bundleZipResponseHeaders = []string{
 
 type streamZipFunc func(context.Context, http.ResponseWriter, string, *result.Output) error
 
-// bundleHandler backs the /v1/bundle endpoint with an aicr.Client. It
-// reproduces pkg/bundler.(*DefaultBundler).HandleBundles exactly — same
-// method gate, body decode, allowlist check, query-param parsing, and zip
-// response — swapping the direct bundler.New + Make for the Client facade
-// (AdoptRecipe + MakeBundle). The body, headers, and status codes are
-// byte-identical to the legacy handler.
+// bundleHandler backs the /v1/bundle and /v2/bundle endpoints with an
+// aicr.Client. The v1 handler reproduces
+// pkg/bundler.(*DefaultBundler).HandleBundles exactly — same method gate, body
+// decode, allowlist check, query-param parsing, and zip response — swapping
+// the direct bundler.New + Make for the Client facade (AdoptRecipe +
+// MakeBundle). Its headers and status codes match the legacy handler;
+// error-body detail strings may differ where the facade wraps decode errors. The v2 handler shares that path and additionally accepts
+// strict v1alpha3 profile recipes.
 type bundleHandler struct {
 	client    *aicr.Client
 	streamZip streamZipFunc
@@ -89,14 +92,49 @@ func newBundleHandler(client *aicr.Client, allowLists *aicr.AllowLists, signing 
 // deployer, node selectors/tolerations, repo, workload-gate, workload-selector,
 // nodes, vendor-charts, app-name). The response is a zip archive of the bundle.
 func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
+	h.handleBundles(w, r, false)
+}
+
+// HandleBundlesV2 accepts legacy recipes and strict v1alpha3 profile recipes.
+func (h *bundleHandler) HandleBundlesV2(w http.ResponseWriter, r *http.Request) {
+	h.handleBundles(w, r, true)
+}
+
+func decodeBundleRecipe(
+	input io.Reader,
+	contentType string,
+	v2 bool,
+) (recipe.RecipeResult, error) {
+
+	var result recipe.RecipeResult
+	if !v2 {
+		if err := json.NewDecoder(input).Decode(&result); err != nil {
+			return result, aicrerrors.PropagateOrWrap(
+				err, aicrerrors.ErrCodeInvalidRequest, "failed to decode bundle recipe")
+		}
+		return result, nil
+	}
+	bodyData, err := io.ReadAll(input)
+	if err != nil {
+		return result, aicrerrors.PropagateOrWrap(
+			err, aicrerrors.ErrCodeInvalidRequest, "failed to read bundle recipe")
+	}
+	format, err := v2BodyFormat(contentType)
+	if err != nil {
+		return result, err
+	}
+	decoded, err := recipe.DecodeRecipeResult(bodyData, format)
+	if err != nil {
+		return result, aicrerrors.PropagateOrWrap(
+			err, aicrerrors.ErrCodeInvalidRequest, "failed to decode bundle recipe")
+	}
+	return *decoded, nil
+}
+
+func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request, v2 bool) {
 	logger := slog.With("requestID", RequestIDFromContext(r.Context()))
 
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
-			"Method not allowed", false, map[string]any{
-				keyMethod: r.Method,
-			})
+	if bundleRequestRejected(w, r, v2) {
 		return
 	}
 
@@ -121,9 +159,13 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request body directly as RecipeResult. Bound the body to defend
 	// against memory exhaustion (same cap as the legacy handler).
-	bounded := http.MaxBytesReader(w, r.Body, defaults.MaxBundlePOSTBytes)
-	var recipeResult recipe.RecipeResult
-	if err = json.NewDecoder(bounded).Decode(&recipeResult); err != nil {
+	recipeResult, err := decodeBundleRecipe(
+		http.MaxBytesReader(w, r.Body, defaults.MaxBundlePOSTBytes),
+		r.Header.Get("Content-Type"),
+		v2,
+	)
+
+	if err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if stderrors.As(err, &maxBytesErr) {
 			logger.Warn("bundle POST body exceeded size limit",
@@ -140,6 +182,11 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 			"Invalid request body", false, map[string]any{
 				keyError: err.Error(),
 			})
+		return
+	}
+	if !v2 && recipeResult.Metadata.SelectedProfile != nil {
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+			"Profiled recipes are available only on /v2/bundle", false, nil)
 		return
 	}
 
@@ -164,15 +211,6 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		"components", len(recipeResult.ComponentRefs),
 	)
 
-	// Create temporary directory for bundle output.
-	tempDir, err := os.MkdirTemp("", "aicr-bundle-*")
-	if err != nil {
-		WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
-			"Failed to create temporary directory", true, nil)
-		return
-	}
-	defer os.RemoveAll(tempDir) // Clean up on exit
-
 	// Adopt the decoded recipe onto the Client (binds the Client's provider
 	// + owner token) so MakeBundle accepts it and provider-scoped reads route
 	// through the Client's recipe source.
@@ -181,6 +219,15 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		WriteErrorFromErr(w, r, err, "Failed to prepare recipe for bundling", nil)
 		return
 	}
+
+	// Create the output directory only after the raw artifact gate succeeds.
+	tempDir, err := os.MkdirTemp("", "aicr-bundle-*")
+	if err != nil {
+		WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
+			"Failed to create temporary directory", true, nil)
+		return
+	}
+	defer os.RemoveAll(tempDir) // Clean up on exit
 
 	// Generate bundle through the facade. Set Timeout as a belt-and-
 	// suspenders cap that matches the ctx deadline above — MakeBundle
@@ -252,6 +299,31 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeZipResponse(ctx, w, r, tempDir, output)
+}
+
+func bundleRequestRejected(w http.ResponseWriter, r *http.Request, v2 bool) bool {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
+			"Method not allowed", false, map[string]any{
+				keyMethod: r.Method,
+			})
+		return true
+	}
+
+	if v2 {
+		if err := validateV2BundleQueryParameters(r); err != nil {
+			WriteErrorFromErr(w, r, err, "Invalid query parameters", nil)
+			return true
+		}
+	}
+	return false
+}
+
+func validateV2BundleQueryParameters(r *http.Request) error {
+	allowed := bundler.SupportedBundleQueryParameters()
+	allowed["attest"] = struct{}{}
+	return validateV2QueryParameters(r, allowed)
 }
 
 // resolveAttestRequest parses the ?attest query parameter and validates it

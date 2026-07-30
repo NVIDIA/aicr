@@ -145,7 +145,7 @@ func flagMatchesName(f cli.Flag, name string) bool {
 //nolint:gocyclo // linear option resolution
 func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	if validErr := validateSingleValueFlags(cmd, "recipe", "service", "accelerator",
-		"intent", "os", "platform", "snapshot", "config", "format", "output"); validErr != nil {
+		"intent", "os", "platform", flagProfile, "snapshot", "config", "format", "output"); validErr != nil {
 		return validErr
 	}
 
@@ -237,6 +237,10 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*recipe.RecipeResult, error) {
 	recipePath := cmd.String("recipe")
 	if recipePath != "" {
+		if cmd.IsSet(flagProfile) || cfg.Recipe().ProfileSelection() != "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--profile/spec.recipe.profile selects during criteria resolution and cannot be combined with --recipe")
+		}
 		slog.Info("loading recipe from file", "path", recipePath)
 
 		loaded, err := client.LoadRecipe(ctx, recipePath, cmd.String("kubeconfig"))

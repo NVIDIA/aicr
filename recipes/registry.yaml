@@ -164,7 +164,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
-      defaultVersion: "26.1.1"
+      defaultVersion: "26.4.1"
       defaultNamespace: nvidia-network-operator
     nodeScheduling:
       system:

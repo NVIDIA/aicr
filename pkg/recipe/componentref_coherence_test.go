@@ -304,3 +304,103 @@ func TestPrepareAndValidate_RejectsReservedDeployerName(t *testing.T) {
 		})
 	}
 }
+
+// TestPrepareAndValidate_RejectsDuplicateNames verifies the common
+// validation boundary fails closed on a recipe with two component refs
+// sharing the same non-empty Name. Component names key value
+// materialization, override routing, validation, filtering, and deployment
+// ordering throughout the bundler/validations/deployer paths, all of which
+// assume a unique name -> ref mapping. Disabled refs participate too, so a
+// disabled duplicate can't silently mask an enabled ref of the same name
+// (or vice versa). See #1874.
+func TestPrepareAndValidate_RejectsDuplicateNames(t *testing.T) {
+	tests := []struct {
+		name    string
+		refs    []ComponentRef
+		wantErr bool
+	}{
+		{
+			name: "adjacent duplicate",
+			refs: []ComponentRef{
+				{Name: "gpu-operator", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "gpu-operator", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "non-adjacent duplicate",
+			refs: []ComponentRef{
+				{Name: "a", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "b", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "a", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "disabled duplicate still rejected",
+			refs: []ComponentRef{
+				{Name: "a", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "a", Overrides: map[string]any{"enabled": false}},
+			},
+			wantErr: true,
+		},
+		{
+			// Both refs are enabled and nameless — the actual shape that
+			// reaches the deployers if the name=="" exemption were ever
+			// removed. Disabled nameless refs would pass trivially for an
+			// unrelated reason (backfillComponentTypes/ValidateCoherence
+			// skip disabled refs entirely), so this must use enabled ones
+			// to pin the exemption it's named for.
+			name: "empty names not flagged",
+			refs: []ComponentRef{
+				{Name: "", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unique names ok",
+			refs: []ComponentRef{
+				{Name: "a", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+				{Name: "b", Type: ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			},
+			wantErr: false,
+		},
+		{
+			// Reserved-key rejection runs before the duplicate check, so
+			// two refs both named ReservedDeployerKey must surface the
+			// "reserved" message, never the "duplicate" one. Deliberate
+			// precedence; pinned here so an inversion is caught.
+			name: "reserved-key precedence over duplicate check",
+			refs: []ComponentRef{
+				{Name: ReservedDeployerKey, Overrides: map[string]any{"enabled": false}},
+				{Name: ReservedDeployerKey, Overrides: map[string]any{"enabled": false}},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &RecipeResult{ComponentRefs: tt.refs}
+			err := r.PrepareAndValidate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("PrepareAndValidate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
+			}
+			if tt.name == "reserved-key precedence over duplicate check" {
+				if !strings.Contains(err.Error(), "reserved") {
+					t.Errorf("error should mention the reservation, got: %v", err)
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), "duplicate") {
+				t.Errorf("error should mention the duplicate, got: %v", err)
+			}
+		})
+	}
+}

@@ -90,10 +90,11 @@ before the run starts and print no classification line.
 
 | Exit | Classification | Meaning |
 |------|----------------|---------|
-| `0` | `clean` | Consistency verified and no unexpected identity entry; the cursor advanced. |
+| `0` | `clean` | Consistency verified and no unexpected identity entry. The signed cursor advances once the identity scan reaches head; a partial catch-up pass (a large backlog scanned across several runs) is also `clean`, with the cursor deliberately held at the prior checkpoint and `catching up, N remaining` logged. |
 | `1` | `tamper` | The consistency (Merkle) proof failed: the log did not verify as append-only. |
 | `1` | `identity` | An entry under the release identity for a tag with no corresponding release (or an entry that failed verification). |
 | `3` | `operational` | Could not complete the check (Sigstore/Rekor/TUF/network trouble, or a timeout). Operational errors are retried a few times before this is returned. |
+| `3` | `degraded` | The identity catch-up is not converging (the log is outpacing the bounded per-run scan). The monitor completed the pass; this is a non-security failure that needs more scan budget per run (or a held finding triaged), not an upstream fix, so it is not retried. |
 | `2` | (none) | A pre-run input error: invalid arguments, or a set-but-unreadable `--known-tags-file`. |
 
-Only `tamper` and `identity` are security signals; the calling workflow pages maintainers on those and treats `operational` as infrastructure noise.
+Only `tamper` and `identity` are security signals; the calling workflow pages maintainers on those and treats `operational` and `degraded` as non-security (a red job plus, if persistent, a low-urgency `area/ci` "degraded" issue — no page).

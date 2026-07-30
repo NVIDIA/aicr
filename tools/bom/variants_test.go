@@ -236,7 +236,10 @@ spec:
 	}
 	v := bom.VariantResult{Name: "kube-prometheus-stack", Version: "83.7.0", Sources: []string{"aks"}}
 
-	got := surveyVariant(context.Background(), root, v, base, mock, false)
+	got, surveyErr := surveyVariant(context.Background(), root, v, base, mock, false)
+	if surveyErr != nil {
+		t.Fatalf("surveyVariant() error = %v", surveyErr)
+	}
 	if len(got.Images) != 1 || got.Images[0] != "quay.io/prometheus/prometheus:v2.83.0" {
 		t.Errorf("images = %v, want the rendered image", got.Images)
 	}
@@ -250,7 +253,10 @@ spec:
 
 	// skipHelm leaves the variant unrendered (no images, no renderer call).
 	mock2 := &helmtest.MockRenderer{}
-	got2 := surveyVariant(context.Background(), root, v, base, mock2, true)
+	got2, surveyErr := surveyVariant(context.Background(), root, v, base, mock2, true)
+	if surveyErr != nil {
+		t.Fatalf("surveyVariant(skipHelm) error = %v", surveyErr)
+	}
 	if len(got2.Images) != 0 || len(mock2.Inputs) != 0 {
 		t.Errorf("skipHelm variant should not render, got images=%v calls=%d", got2.Images, len(mock2.Inputs))
 	}
@@ -404,7 +410,17 @@ spec:
 
 	// With -skip-helm the variant must still pick up manifest images, exactly
 	// like the default survey path.
-	got := surveyVariant(context.Background(), root, v, base, &helmtest.MockRenderer{}, true)
+	got, surveyErr := surveyVariant(
+		context.Background(),
+		root,
+		v,
+		base,
+		&helmtest.MockRenderer{},
+		true,
+	)
+	if surveyErr != nil {
+		t.Fatalf("surveyVariant(skipHelm) error = %v", surveyErr)
+	}
 	if len(got.Images) != 1 || got.Images[0] != "nvcr.io/nvidia/extra:v1.0.0" {
 		t.Errorf("skip-helm variant images = %v, want the embedded manifest image", got.Images)
 	}

@@ -15,11 +15,42 @@
 package recipe
 
 import (
+	"context"
+	stderrors "errors"
+	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
+
+type unexpectedLoadProvider struct {
+	calls atomic.Int64
+}
+
+func (p *unexpectedLoadProvider) ReadFile(_ context.Context, _ string) ([]byte, error) {
+	p.calls.Add(1)
+	return nil, fs.ErrNotExist
+}
+
+func (p *unexpectedLoadProvider) WalkDir(
+	_ context.Context,
+	_ string,
+	_ fs.WalkDirFunc,
+) error {
+
+	p.calls.Add(1)
+	return fs.ErrNotExist
+}
+
+func (p *unexpectedLoadProvider) Source(path string) string {
+	return path
+}
 
 func TestLoadFromFile(t *testing.T) {
 	tests := []struct {
@@ -62,6 +93,31 @@ func TestLoadFromFile(t *testing.T) {
 			},
 		},
 		{
+			name: "profile RecipeMetadata outside active catalog fails closed",
+			yamlContent: `kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha3
+metadata:
+  name: direct-profile
+spec:
+  criteria:
+    service: eks
+    accelerator: h100
+    intent: training
+  profile:
+    name: gpuStack
+    default: operator-managed
+    values:
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+`,
+			wantErr:    true,
+			errContain: "was not applied; add a structurally matching declaration to the active catalog",
+		},
+		{
 			name:        "RecipeMetadata without criteria errors",
 			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
@@ -95,6 +151,72 @@ func TestLoadFromFile(t *testing.T) {
 			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\ncriteria:\n  service: eks\n",
 			wantErr:     true,
 			errContain:  `apiVersion "aicr.nvidia.com/v1alpha1"`,
+		},
+		{
+			name: "profile RecipeResult loads strictly",
+			yamlContent: `kind: RecipeResult
+apiVersion: aicr.run/v1alpha3
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+componentRefs: []
+`,
+			checkResult: func(t *testing.T, rec *RecipeResult) {
+				t.Helper()
+				if rec.Metadata.SelectedProfile == nil ||
+					rec.Metadata.SelectedProfile.Value != "one" {
+
+					t.Fatalf("selectedProfile = %#v", rec.Metadata.SelectedProfile)
+				}
+			},
+		},
+		{
+			name: "profile RecipeResult rejects unknown field",
+			yamlContent: `kind: RecipeResult
+apiVersion: aicr.run/v1alpha3
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+profie: typo
+`,
+			wantErr:    true,
+			errContain: "field profie not found",
+		},
+		{
+			name: "profile RecipeResult requires kind",
+			yamlContent: `apiVersion: aicr.run/v1alpha3
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+componentRefs: []
+`,
+			wantErr:    true,
+			errContain: `requires kind "RecipeResult"`,
+		},
+		{
+			name:        "profile version requires selection",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1alpha3\ncomponentRefs: []\n",
+			wantErr:     true,
+			errContain:  "requires metadata.selectedProfile",
+		},
+		{
+			name: "legacy version rejects selection",
+			yamlContent: `kind: RecipeResult
+apiVersion: aicr.run/v1alpha2
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+`,
+			wantErr:    true,
+			errContain: "cannot carry metadata.selectedProfile",
 		},
 		{
 			name:        "unsupported apiVersion on RecipeMetadata overlay rejected",
@@ -140,5 +262,111 @@ func TestLoadFromFile(t *testing.T) {
 				tt.checkResult(t, rec)
 			}
 		})
+	}
+}
+
+func TestProfileDeclarationsEqualNormalizesJSONNumbers(t *testing.T) {
+	declaration := func(value any) *ProfileDeclaration {
+		return &ProfileDeclaration{
+			Name:    "mode",
+			Default: "selected",
+			Values: map[string]ProfileValue{
+				"selected": {
+					ComponentRefs: []ProfileComponentRef{{
+						Name:      "gpu-operator",
+						Overrides: map[string]any{"replicas": value},
+					}},
+				},
+			},
+		}
+	}
+
+	equal, err := profileDeclarationsEqual(declaration(1), declaration(float64(1)))
+	if err != nil {
+		t.Fatalf("profileDeclarationsEqual() error: %v", err)
+	}
+	if !equal {
+		t.Fatal("profileDeclarationsEqual() = false, want numerically equivalent declarations")
+	}
+}
+
+func TestLoadFromFile_UnsupportedOverlayRejectedBeforeHydration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "overlay.yaml")
+	content := `kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: unsupported
+spec:
+  criteria:
+    service: eks
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+
+	provider := &unexpectedLoadProvider{}
+	_, err := LoadFromFileWithProvider(t.Context(), path, "", "test", provider)
+	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("LoadFromFileWithProvider() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), `apiVersion "aicr.nvidia.com/v1alpha1"`) {
+		t.Fatalf("LoadFromFileWithProvider() error = %v, want apiVersion rejection", err)
+	}
+	if got := provider.calls.Load(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0 before version rejection", got)
+	}
+}
+
+func TestLoadFromFile_ProfileDecodeErrorIsInvalidRequest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "recipe.yaml")
+	content := `kind: RecipeResult
+apiVersion: aicr.run/v1alpha3
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+profie: typo
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write profile recipe: %v", err)
+	}
+
+	_, err := LoadFromFileWithProvider(t.Context(), path, "", "test", nil)
+	if err == nil {
+		t.Fatal("LoadFromFileWithProvider() error = nil, want invalid request")
+	}
+	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
+	}
+}
+
+func TestLoadFromFile_ProfileSourceReadOnce(t *testing.T) {
+	const content = `kind: RecipeResult
+apiVersion: aicr.run/v1alpha3
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+componentRefs: []
+`
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	_, err := LoadFromFileWithProvider(
+		t.Context(), server.URL+"/recipe.yaml", "", "test", nil,
+	)
+	if err != nil {
+		t.Fatalf("LoadFromFileWithProvider() error = %v", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("source requests = %d, want 1", got)
 	}
 }

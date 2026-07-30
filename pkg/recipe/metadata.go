@@ -16,6 +16,7 @@
 package recipe
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -533,14 +534,14 @@ func (r *RecipeResult) backfillComponentTypes() error {
 }
 
 // PrepareAndValidate normalizes a RecipeResult's component refs and rejects
-// incoherent ones, in the required order: reject refs named with the reserved
-// deployer override key (all refs, enabled or disabled), back-fill missing
-// types on enabled refs from the registry, canonicalize the type casing, then
-// validate
+// incoherent ones, in the required order: validate the profile contract;
+// reject refs named with the reserved deployer override key (all refs, enabled
+// or disabled); reject duplicate non-empty ref names; back-fill missing types
+// on enabled refs from the registry; canonicalize the type casing; then validate
 // coherence (which itself only inspects enabled refs). Boundaries
 // that produce a RecipeResult WITHOUT running ApplyRegistryDefaults — file load
 // (LoadFromFileWithProvider) and external adoption (client adoptRecipe) — call
-// this single method so the three steps cannot drift or be partially applied
+// this single method so these gates cannot drift or be partially applied
 // (e.g. validating before canonicalizing would reject legitimate lowercase
 // types; skipping the back-fill would reject type-less registry refs). The
 // resolve path (finalizeRecipeResult) instead back-fills via ApplyRegistryDefaults
@@ -549,7 +550,10 @@ func (r *RecipeResult) PrepareAndValidate() error {
 	if r == nil {
 		return nil
 	}
-	// Fail closed on the reserved deployer key BEFORE anything else, and
+	if err := r.ValidateProfileContract(); err != nil {
+		return err
+	}
+	// Fail closed on the reserved deployer key before registry back-fill and
 	// for ALL refs including disabled ones: registry loads are guarded
 	// (see loadComponentRegistryFor), but a hand-authored recipe passed
 	// to `aicr bundle -r` or POST /v1/bundle can carry a componentRef
@@ -563,11 +567,45 @@ func (r *RecipeResult) PrepareAndValidate() error {
 				fmt.Sprintf("recipe component %q uses the reserved deployer override key as its name; %q is reserved for --set deployer:<key> Argo deployer options", r.ComponentRefs[i].Name, ReservedDeployerKey))
 		}
 	}
+	// Reject duplicate component-ref names (enabled or disabled) BEFORE
+	// registry back-fill. See validateRefNames for the rationale.
+	if err := validateRefNames(r.ComponentRefs); err != nil {
+		return err
+	}
 	if err := r.backfillComponentTypes(); err != nil {
 		return err
 	}
 	canonicalizeComponentTypes(r.ComponentRefs)
 	return r.ValidateCoherence()
+}
+
+// validateRefNames rejects duplicate non-empty component-ref names (enabled
+// or disabled). Component names key value materialization, override
+// routing, validation, filtering, and deployment ordering throughout the
+// bundler/validations/deployer paths, all of which assume a unique
+// name -> ref mapping. AICR-generated recipes never produce duplicates, but
+// a hand-authored or externally-adopted recipe can, and a disabled
+// duplicate must not be allowed to silently mask an enabled ref of the same
+// name (or vice versa) — so ALL refs participate in the check, not just
+// enabled ones. Empty names are exempt: they are never used as a lookup
+// key. Shared between PrepareAndValidate (the file-load, adopt, and
+// bundle/validate -r / POST /v1/bundle boundary) and finalizeRecipeResult
+// (the criteria-resolve boundary), so both fail closed on the same
+// recipes. See #1874.
+func validateRefNames(refs []ComponentRef) error {
+	seen := make(map[string]int, len(refs))
+	for i := range refs {
+		name := refs[i].Name
+		if name == "" {
+			continue
+		}
+		if first, ok := seen[name]; ok {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("recipe has duplicate component ref name %q (refs %d and %d)", name, first, i))
+		}
+		seen[name] = i
+	}
+	return nil
 }
 
 // ValidateCoherence rejects enabled ComponentRefs whose deployment-shape fields
@@ -640,6 +678,11 @@ type RecipeMetadataSpec struct {
 	// Validation defines multi-phase validation configuration.
 	// Presence of a phase implies it is enabled.
 	Validation *ValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+
+	// Profile declares one overlay-scoped configuration choice. It is resolved
+	// after overlay and mixin composition and is never copied into a hydrated
+	// RecipeResult; only metadata.selectedProfile and the selected effects are.
+	Profile *ProfileDeclaration `json:"profile,omitempty" yaml:"profile,omitempty"`
 }
 
 // RecipeMixinKind is the kind value for mixin files.
@@ -713,6 +756,8 @@ const (
 	ExcludedOverlayReasonMixinConstraintFailed ExcludedOverlayReason = "mixin-constraint-failed"
 )
 
+const excludedOverlayYAMLStringTag = "!!str"
+
 // ExcludedOverlay records a matching overlay that was excluded from the final
 // recipe result, along with a machine-readable reason.
 type ExcludedOverlay struct {
@@ -730,6 +775,10 @@ type ExcludedOverlay struct {
 //   - excludedOverlays: [{name: overlay-name, reason: constraint-failed}]
 func (e *ExcludedOverlay) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind == yaml.ScalarNode {
+		if node.ShortTag() != excludedOverlayYAMLStringTag {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"excluded overlay scalar must be a string")
+		}
 		e.Name = node.Value
 		e.Reason = ""
 		return nil
@@ -740,12 +789,21 @@ func (e *ExcludedOverlay) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&raw); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode excluded overlay", err)
 	}
+	if raw.Name == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"excluded overlay object requires a non-empty name")
+	}
 	*e = ExcludedOverlay(raw)
 	return nil
 }
 
 // UnmarshalJSON accepts both the legacy string form and the current object form.
 func (e *ExcludedOverlay) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"excluded overlay must be a string or object")
+	}
+
 	var name string
 	if err := json.Unmarshal(data, &name); err == nil {
 		e.Name = name
@@ -757,6 +815,10 @@ func (e *ExcludedOverlay) UnmarshalJSON(data []byte) error {
 	var raw rawExcludedOverlay
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode excluded overlay JSON", err)
+	}
+	if raw.Name == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"excluded overlay object requires a non-empty name")
 	}
 	*e = ExcludedOverlay(raw)
 	return nil
@@ -791,6 +853,10 @@ type RecipeResultMetadata struct {
 	// bundle-time CheckDriverOwnershipCoherence validation to enforce
 	// driver-ownership coherence once --set overrides are known.
 	GPUDriverState string `json:"gpuDriverState,omitempty" yaml:"gpuDriverState,omitempty"`
+
+	// SelectedProfile records the generation-time configuration choice and
+	// its declaration-wide lock surface.
+	SelectedProfile *SelectedProfile `json:"selectedProfile,omitempty" yaml:"selectedProfile,omitempty"`
 }
 
 // RecipeResult represents the final merged recipe output.
@@ -973,9 +1039,15 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// read but not consumed via ownership-checked entry points.
 	}
 
-	// Metadata: scalar Version and GPUDriverState plus three slices.
+	// Metadata: scalar Version and GPUDriverState, the SelectedProfile
+	// pointer (cloned with its OwnedPaths map), plus three slices.
 	out.Metadata.Version = r.Metadata.Version
 	out.Metadata.GPUDriverState = r.Metadata.GPUDriverState
+	if r.Metadata.SelectedProfile != nil {
+		selected := *r.Metadata.SelectedProfile
+		selected.OwnedPaths = cloneOwnedPaths(r.Metadata.SelectedProfile.OwnedPaths)
+		out.Metadata.SelectedProfile = &selected
+	}
 	if r.Metadata.AppliedOverlays != nil {
 		out.Metadata.AppliedOverlays = make([]string, len(r.Metadata.AppliedOverlays))
 		copy(out.Metadata.AppliedOverlays, r.Metadata.AppliedOverlays)

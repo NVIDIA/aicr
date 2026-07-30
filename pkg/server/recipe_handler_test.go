@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,6 +47,59 @@ func newTestHandler(t *testing.T, allowLists *aicr.AllowLists) *recipeHandler {
 	return newRecipeHandler(client, allowLists)
 }
 
+func newProfileTestHandler(t *testing.T) *recipeHandler {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o755); err != nil {
+		t.Fatalf("setup overlays directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
+		[]byte("components: []\n"), 0o600); err != nil {
+		t.Fatalf("setup registry.yaml: %v", err)
+	}
+	overlay := []byte(`apiVersion: aicr.run/v1alpha3
+kind: RecipeMetadata
+metadata:
+  name: profile-aks
+spec:
+  criteria:
+    service: aks
+  profile:
+    name: gpuStack
+    default: driver-installed
+    values:
+      driver-installed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: false
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+`)
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "profile-aks.yaml"),
+		overlay, 0o600); err != nil {
+		t.Fatalf("setup profile overlay: %v", err)
+	}
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.FilesystemSource(dir)),
+		aicr.WithVersion("test"),
+	)
+	if err != nil {
+		t.Fatalf("failed to construct profile test client: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := client.Close(); closeErr != nil {
+			t.Errorf("client close failed: %v", closeErr)
+		}
+	})
+	return newRecipeHandler(client, nil)
+}
+
 // TestHandleRecipes_Success verifies GET and POST resolve a recipe with a 200
 // status and a Cache-Control header.
 func TestHandleRecipes_Success(t *testing.T) {
@@ -68,6 +123,19 @@ func TestHandleRecipes_Success(t *testing.T) {
 			target:      "/v1/recipe",
 			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","intent":"training"}}`,
 			contentType: "application/json",
+		},
+		{
+			name:   "POST JSON without content type preserves legacy default",
+			method: http.MethodPost,
+			target: "/v1/recipe",
+			body:   `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","intent":"training"}}`,
+		},
+		{
+			name:        "POST JSON with text plain preserves legacy fallback",
+			method:      http.MethodPost,
+			target:      "/v1/recipe",
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","intent":"training"}}`,
+			contentType: "text/plain",
 		},
 	}
 
@@ -97,6 +165,444 @@ func TestHandleRecipes_Success(t *testing.T) {
 			}
 			if len(result.ComponentRefs) == 0 {
 				t.Error("expected at least one component in resolved recipe")
+			}
+		})
+	}
+}
+
+func TestProfileAwareRecipeEndpoints(t *testing.T) {
+	h := newProfileTestHandler(t)
+
+	t.Run("v2 GET selects explicit value", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/v2/recipe?service=aks&accelerator=h100&intent=training&profile=gpuStack%3Doperator-managed",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		h.HandleRecipesV2(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		var result recipe.RecipeResult
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatalf("decode result: %v", err)
+		}
+		if result.APIVersion != recipe.RecipeProfileAPIVersion ||
+			result.Metadata.SelectedProfile == nil ||
+			result.Metadata.SelectedProfile.Value != "operator-managed" {
+
+			t.Fatalf("profile result apiVersion=%q selected=%#v",
+				result.APIVersion, result.Metadata.SelectedProfile)
+		}
+	})
+
+	t.Run("v2 POST applies default", func(t *testing.T) {
+		body := `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"}}`
+		req := httptest.NewRequest(http.MethodPost, "/v2/recipe", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.HandleRecipesV2(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		var result recipe.RecipeResult
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatalf("decode result: %v", err)
+		}
+		if result.Metadata.SelectedProfile == nil ||
+			result.Metadata.SelectedProfile.Value != "driver-installed" {
+
+			t.Fatalf("default selectedProfile = %#v", result.Metadata.SelectedProfile)
+		}
+	})
+
+	for _, tt := range []struct {
+		name   string
+		target string
+		body   string
+	}{
+		{
+			name:   "v2 POST selects profile from query",
+			target: "/v2/recipe?profile=gpuStack%3Doperator-managed",
+			body:   `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"}}`,
+		},
+		{
+			name:   "v2 POST accepts agreeing query and body profiles",
+			target: "/v2/recipe?profile=gpuStack%3Doperator-managed",
+			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+				`"profile":"gpuStack=operator-managed"}`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.target, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.HandleRecipesV2(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+			var result recipe.RecipeResult
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatalf("decode result: %v", err)
+			}
+			if result.Metadata.SelectedProfile == nil ||
+				result.Metadata.SelectedProfile.Value != "operator-managed" {
+
+				t.Fatalf("selectedProfile = %#v, want operator-managed",
+					result.Metadata.SelectedProfile)
+			}
+		})
+	}
+
+	t.Run("v2 query exposes selected profile", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/v2/query?service=aks&accelerator=h100&intent=training&"+
+				"profile=gpuStack%3Doperator-managed&selector=metadata.selectedProfile.value",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		h.HandleQueryV2(w, req)
+		if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `"operator-managed"` {
+			t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+		}
+	})
+
+	for _, tt := range []struct {
+		name   string
+		target string
+		body   string
+	}{
+		{
+			name:   "v2 POST query selects profile from query",
+			target: "/v2/query?profile=gpuStack%3Doperator-managed",
+			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+				`"selector":"metadata.selectedProfile.value"}`,
+		},
+		{
+			name:   "v2 POST query accepts agreeing query and body profiles",
+			target: "/v2/query?profile=gpuStack%3Doperator-managed",
+			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+				`"profile":"gpuStack=operator-managed","selector":"metadata.selectedProfile.value"}`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.target, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.HandleQueryV2(w, req)
+			if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `"operator-managed"` {
+				t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	t.Run("v2 GET query requires selector presence", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/v2/query?service=eks&accelerator=h100&intent=training",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		h.HandleQueryV2(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 POST query requires selector presence", func(t *testing.T) {
+		body := `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"}}`
+		req := httptest.NewRequest(http.MethodPost, "/v2/query", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.HandleQueryV2(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 query accepts an explicitly empty selector", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/v2/query?service=aks&accelerator=h100&intent=training&selector=",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		h.HandleQueryV2(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		var hydrated map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &hydrated); err != nil {
+			t.Fatalf("decode hydrated recipe: %v", err)
+		}
+		if _, ok := hydrated["components"]; !ok {
+			t.Fatalf("hydrated recipe keys = %v, want components", keysOf(hydrated))
+		}
+	})
+
+	t.Run("v2 POST query accepts an explicitly empty selector", func(t *testing.T) {
+		body := `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},"selector":""}`
+		req := httptest.NewRequest(http.MethodPost, "/v2/query", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.HandleQueryV2(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		var hydrated map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &hydrated); err != nil {
+			t.Fatalf("decode hydrated recipe: %v", err)
+		}
+		if _, ok := hydrated["components"]; !ok {
+			t.Fatalf("hydrated recipe keys = %v, want components", keysOf(hydrated))
+		}
+	})
+
+	t.Run("v1 rejects resolved profiled composition", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/v1/recipe?service=aks&accelerator=h100&intent=training", nil)
+		w := httptest.NewRecorder()
+		h.HandleRecipes(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v1 rejects explicit profile input", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/v1/recipe?service=eks&profile=gpuStack%3Doperator-managed", nil)
+		w := httptest.NewRecorder()
+		h.HandleRecipes(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	tests := []struct {
+		name   string
+		method string
+		target string
+		body   string
+	}{
+		{
+			name:   "v2 rejects unknown query parameter",
+			method: http.MethodGet,
+			target: "/v2/recipe?service=eks&profie=gpuStack%3Dx",
+		},
+		{
+			name:   "v2 rejects malformed raw query",
+			method: http.MethodGet,
+			target: "/v2/recipe?service=aks&profile=gpuStack%3Doperator-managed;ignored=x",
+		},
+		{
+			name:   "v2 rejects conflicting repeated profile",
+			method: http.MethodGet,
+			target: "/v2/recipe?service=eks&profile=a%3Db&profile=a%3Dc",
+		},
+		{
+			name:   "v2 rejects unknown envelope field",
+			method: http.MethodPost,
+			target: "/v2/recipe",
+			body:   `{"criteria":{"service":"eks"},"profie":"gpuStack=x"}`,
+		},
+		{
+			name:   "v2 rejects unknown POST query parameter",
+			method: http.MethodPost,
+			target: "/v2/recipe?profie=gpuStack%3Dx",
+			body:   `{"criteria":{"service":"eks"}}`,
+		},
+		{
+			name:   "v2 rejects conflicting POST profile surfaces",
+			method: http.MethodPost,
+			target: "/v2/recipe?profile=gpuStack%3Doperator-managed",
+			body:   `{"criteria":{"service":"aks"},"profile":"gpuStack=driver-installed"}`,
+		},
+		{
+			name:   "v2 rejects negative nodes in POST criteria",
+			method: http.MethodPost,
+			target: "/v2/recipe",
+			body:   `{"criteria":{"service":"aks","nodes":-1}}`,
+		},
+		{
+			name:   "v1 rejects top-level POST profile",
+			method: http.MethodPost,
+			target: "/v1/recipe",
+			body:   `{"profile":"gpuStack=x","spec":{"service":"eks"}}`,
+		},
+		{
+			name:   "v1 rejects POST profile query parameter",
+			method: http.MethodPost,
+			target: "/v1/recipe?profile=gpuStack%3Dx",
+			body: `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2",` +
+				`"spec":{"service":"eks"}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.target, strings.NewReader(tt.body))
+			if tt.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			w := httptest.NewRecorder()
+			if strings.HasPrefix(tt.target, "/v2/") {
+				h.HandleRecipesV2(w, req)
+			} else {
+				h.HandleRecipes(w, req)
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	queryRejections := []struct {
+		name   string
+		v2     bool
+		target string
+		body   string
+	}{
+		{
+			name:   "v2 query rejects unknown POST query parameter",
+			v2:     true,
+			target: "/v2/query?profie=gpuStack%3Dx",
+			body: `{"criteria":{"service":"aks"},"selector":` +
+				`"metadata.selectedProfile.value"}`,
+		},
+		{
+			name:   "v2 query rejects conflicting POST profile surfaces",
+			v2:     true,
+			target: "/v2/query?profile=gpuStack%3Doperator-managed",
+			body: `{"criteria":{"service":"aks"},"profile":"gpuStack=driver-installed",` +
+				`"selector":"metadata.selectedProfile.value"}`,
+		},
+		{
+			name:   "v2 query rejects negative nodes in POST criteria",
+			v2:     true,
+			target: "/v2/query",
+			body: `{"criteria":{"service":"aks","nodes":-1},` +
+				`"selector":"metadata.selectedProfile.value"}`,
+		},
+		{
+			name:   "v1 query rejects POST profile query parameter",
+			target: "/v1/query?profile=gpuStack%3Dx",
+			body: `{"criteria":{"service":"eks"},"selector":` +
+				`"metadata.selectedProfile.value"}`,
+		},
+	}
+	for _, tt := range queryRejections {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.target, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			if tt.v2 {
+				h.HandleQueryV2(w, req)
+			} else {
+				h.HandleQuery(w, req)
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	unsupportedContentTypes := []struct {
+		name        string
+		query       bool
+		contentType string
+		body        string
+	}{
+		{
+			name: "v2 recipe rejects missing content type",
+			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"}}`,
+		},
+		{
+			name:        "v2 recipe rejects unsupported content type",
+			contentType: "text/plain",
+			body:        `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"}}`,
+		},
+		{
+			name:  "v2 query rejects missing content type",
+			query: true,
+			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+				`"selector":"metadata.selectedProfile.value"}`,
+		},
+		{
+			name:        "v2 query rejects unsupported content type",
+			query:       true,
+			contentType: "text/plain",
+			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+				`"selector":"metadata.selectedProfile.value"}`,
+		},
+	}
+	for _, tt := range unsupportedContentTypes {
+		t.Run(tt.name, func(t *testing.T) {
+			target := "/v2/recipe"
+			if tt.query {
+				target = "/v2/query"
+			}
+			req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(tt.body))
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
+			w := httptest.NewRecorder()
+			if tt.query {
+				h.HandleQueryV2(w, req)
+			} else {
+				h.HandleRecipesV2(w, req)
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	nullProfileRejections := []struct {
+		name        string
+		query       bool
+		contentType string
+		body        string
+	}{
+		{
+			name:        "v2 recipe rejects JSON null profile",
+			contentType: "application/json",
+			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+				`"profile":null}`,
+		},
+		{
+			name:        "v2 recipe rejects YAML null profile",
+			contentType: "application/x-yaml",
+			body: "criteria:\n  service: aks\n  accelerator: h100\n  intent: training\n" +
+				"profile: null\n",
+		},
+		{
+			name:        "v2 query rejects JSON null profile",
+			query:       true,
+			contentType: "application/json",
+			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+				`"profile":null,"selector":"metadata.selectedProfile.value"}`,
+		},
+		{
+			name:        "v2 query rejects YAML null profile",
+			query:       true,
+			contentType: "application/x-yaml",
+			body: "criteria:\n  service: aks\n  accelerator: h100\n  intent: training\n" +
+				"profile: null\nselector: metadata.selectedProfile.value\n",
+		},
+	}
+	for _, tt := range nullProfileRejections {
+		t.Run(tt.name, func(t *testing.T) {
+			target := "/v2/recipe"
+			if tt.query {
+				target = "/v2/query"
+			}
+			req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", tt.contentType)
+			w := httptest.NewRecorder()
+			if tt.query {
+				h.HandleQueryV2(w, req)
+			} else {
+				h.HandleRecipesV2(w, req)
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 			}
 		})
 	}
@@ -151,6 +657,93 @@ func TestHandleRecipes_AllowListRejection(t *testing.T) {
 	}
 }
 
+// TestV1ProfileDetectionPreservesLegacyContracts verifies the v2-only profile
+// pre-detector preserves established v1 parse errors and the query route's
+// legacy YAML-without-content-type behavior.
+func TestV1ProfileDetectionPreservesLegacyContracts(t *testing.T) {
+	h := newTestHandler(t, nil)
+	tests := []struct {
+		name        string
+		target      string
+		body        string
+		contentType string
+		handle      http.HandlerFunc
+		wantError   string
+	}{
+		{
+			name:        "recipe empty body",
+			target:      "/v1/recipe",
+			contentType: "application/json",
+			handle:      h.HandleRecipes,
+			wantError:   "[INVALID_REQUEST] request body is empty",
+		},
+		{
+			name:        "query empty body",
+			target:      "/v1/query",
+			contentType: "application/json",
+			handle:      h.HandleQuery,
+			wantError:   "[INVALID_REQUEST] request body cannot be empty",
+		},
+		{
+			name:   "recipe YAML profile without content type preserves JSON default",
+			target: "/v1/recipe",
+			body: "profile: gpuStack=driver-installed\n" +
+				"spec:\n" +
+				"  service: aks\n",
+			handle:    h.HandleRecipes,
+			wantError: "[INVALID_REQUEST] failed to parse JSON body: invalid character 'p' looking for beginning of value",
+		},
+		{
+			name:   "query YAML profile without content type",
+			target: "/v1/query",
+			body: "profile: gpuStack=driver-installed\n" +
+				"criteria:\n" +
+				"  service: aks\n" +
+				"selector: components.gpu-operator.values.driver.enabled\n",
+			handle:    h.HandleQuery,
+			wantError: "[INVALID_REQUEST] profile selection is available only on /v2/query",
+		},
+		{
+			name:        "recipe profile detected despite ignored out-of-range number",
+			target:      "/v1/recipe",
+			body:        `{"profile":"gpuStack=operator-managed","unmapped":1e999,"spec":{"service":"eks"}}`,
+			contentType: "application/json",
+			handle:      h.HandleRecipes,
+			wantError:   "[INVALID_REQUEST] profile selection is available only on /v2/recipe",
+		},
+		{
+			name:        "query profile detected despite ignored out-of-range number",
+			target:      "/v1/query",
+			body:        `{"profile":"gpuStack=operator-managed","unmapped":1e999,"criteria":{"service":"eks"},"selector":"components"}`,
+			contentType: "application/json",
+			handle:      h.HandleQuery,
+			wantError:   "[INVALID_REQUEST] profile selection is available only on /v2/query",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.target, strings.NewReader(tt.body))
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
+			w := httptest.NewRecorder()
+
+			tt.handle(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+			var response errorResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if got := response.Details[keyError]; got != tt.wantError {
+				t.Fatalf("details.error = %q, want %q", got, tt.wantError)
+			}
+		})
+	}
+}
+
 // TestHandleQuery_Success verifies GET and POST query against a selector return
 // the selected value.
 func TestHandleQuery_Success(t *testing.T) {
@@ -179,6 +772,27 @@ func TestHandleQuery_Success(t *testing.T) {
 			target:      "/v1/query",
 			body:        `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},"selector":"` + selector + `"}`,
 			contentType: "application/json",
+		},
+		{
+			name:   "POST YAML without content type preserves legacy default",
+			method: http.MethodPost,
+			target: "/v1/query",
+			body: "criteria:\n" +
+				"  service: eks\n" +
+				"  accelerator: h100\n" +
+				"  intent: training\n" +
+				"selector: " + selector + "\n",
+		},
+		{
+			name:        "POST YAML with text plain preserves legacy fallback",
+			method:      http.MethodPost,
+			target:      "/v1/query",
+			contentType: "text/plain",
+			body: "criteria:\n" +
+				"  service: eks\n" +
+				"  accelerator: h100\n" +
+				"  intent: training\n" +
+				"selector: " + selector + "\n",
 		},
 	}
 

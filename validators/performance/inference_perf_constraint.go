@@ -270,6 +270,15 @@ const (
 	mainContainerName = "main"
 )
 
+// inferenceSkip* are the result.status strings returned when the inference
+// performance check cannot run. The "skipped " prefix is contractual:
+// inference_perf.go dispatches on it via strings.HasPrefix(result.status,
+// "skipped") to emit CTRF Skip status.
+const (
+	inferenceSkipMsgNoDynamoPlatform = "skipped - dynamo-platform not in recipe components"
+	inferenceSkipMsgCRDNotInstalled  = "skipped - DynamoGraphDeployment CRD not installed on cluster (dynamo-platform component declared but operator not deployed yet)"
+)
+
 type inferenceRoutingMode string
 
 const (
@@ -418,7 +427,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// Guard B: dynamo-platform must be declared in the recipe's componentRefs.
 	// Presence of a Criteria block is independent and not consulted here.
 	if !hasDynamoPlatform(ctx) {
-		return &inferenceResult{status: "skipped - dynamo-platform not in recipe components"}, nil
+		return &inferenceResult{status: inferenceSkipMsgNoDynamoPlatform}, nil
 	}
 
 	// Guard C: the Dynamo operator CRD must actually be installed on the
@@ -437,7 +446,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 		return nil, crdErr
 	}
 	if !installed {
-		return &inferenceResult{status: "skipped - DynamoGraphDeployment CRD not installed on cluster (dynamo-platform component declared but operator not deployed yet)"}, nil
+		return &inferenceResult{status: inferenceSkipMsgCRDNotInstalled}, nil
 	}
 
 	// Build workload configuration from cluster state. Callees already
@@ -2926,8 +2935,13 @@ func buildAIPerfJob(namespace, jobName, endpoint, model string, concurrency int,
 	// AICR_INFERENCE_PERF_MODEL value with shell metacharacters (e.g. $(...))
 	// would otherwise be command-substituted by /bin/sh -c even inside double
 	// quotes; "$AICR_MODEL" expands to the literal value without re-scanning it.
+	//
+	// The model must be passed with the explicit --model flag: aiperf 0.11.0
+	// dropped support for a positional model argument, rejecting it with
+	// "Unused Tokens: ['<model>']" before the benchmark starts.
 	script := fmt.Sprintf(`set -e
-aiperf profile "$AICR_MODEL" \
+aiperf profile \
+  --model "$AICR_MODEL" \
   --url %s \
   --endpoint-type chat \
   --streaming \

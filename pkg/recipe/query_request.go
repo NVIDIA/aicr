@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
 
@@ -29,6 +30,16 @@ import (
 type QueryRequest struct {
 	Criteria *Criteria `json:"criteria" yaml:"criteria"`
 	Selector string    `json:"selector" yaml:"selector"`
+}
+
+// QueryRequestBodyFormat returns the format ParseQueryRequestFromBody uses for
+// a Content-Type value. Values containing "json" select JSON; empty and every
+// other value select YAML for legacy compatibility.
+func QueryRequestBodyFormat(contentType string) serializer.Format {
+	if strings.Contains(contentType, "json") {
+		return serializer.FormatJSON
+	}
+	return serializer.FormatYAML
 }
 
 // ParseQueryRequestFromBody parses a QueryRequest from the request body,
@@ -53,7 +64,7 @@ func ParseQueryRequestFromBody(body io.Reader, contentType string) (*QueryReques
 	}
 
 	var req QueryRequest
-	if strings.Contains(contentType, "json") {
+	if QueryRequestBodyFormat(contentType) == serializer.FormatJSON {
 		if err := json.Unmarshal(data, &req); err != nil {
 			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to parse JSON body", err)
 		}

@@ -250,9 +250,9 @@ func (s *Server) configureRootHandler() {
 			sort.Strings(routes)
 
 			response := map[string]any{
-				"service": s.config.Name,
-				"version": s.config.Version,
-				"routes":  routes,
+				keyService: s.config.Name,
+				"version":  s.config.Version,
+				"routes":   routes,
 			}
 
 			serializer.RespondJSON(w, http.StatusOK, response)

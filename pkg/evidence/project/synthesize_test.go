@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,6 +158,28 @@ func TestSynthesize_HappyPath(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(res.RunDir, "ctrf", "performance.json")); !os.IsNotExist(err) {
 		t.Errorf("performance.json should be absent, stat err = %v", err)
+	}
+}
+
+func TestSynthesize_RejectsProfileRecipeUntilProjectionSupportLands(t *testing.T) {
+	in := baseInput(t)
+	in.BundleDir = writeBundle(t, `apiVersion: aicr.run/v1alpha3
+kind: RecipeResult
+metadata:
+  selectedProfile:
+    name: gpuStack
+    value: driver-installed
+    ownedPaths: {}
+criteria:
+  service: aks
+  accelerator: h100
+  os: ubuntu
+  intent: training
+`, map[string]string{"deployment": "{}"})
+
+	_, err := Synthesize(context.Background(), in)
+	if err == nil || !strings.Contains(err.Error(), "profile-bearing evidence projection") {
+		t.Fatalf("Synthesize() error = %v, want deferred profile projection rejection", err)
 	}
 }
 

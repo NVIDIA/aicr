@@ -106,6 +106,7 @@ spec:
       os: ubuntu
       platform: kubeflow
       nodes: 2
+    profile: ""                      # optional name=value; empty uses the declared default
     # input:
     #   snapshot: snapshot.yaml      # derive criteria from a snapshot instead
     output:
@@ -211,6 +212,7 @@ exclusive** — query by criteria or derive from a snapshot, not both.
 |-------|------|-------|
 | `criteria.service` / `.accelerator` / `.intent` / `.os` / `.platform` | string | Same names and values as the CLI flags |
 | `criteria.nodes` | int | Target GPU node count |
+| `profile` | string | Optional configuration profile selection in `name=value` form. Empty applies the resolved declaration's default. |
 | `input.snapshot` | string | Snapshot path to derive the recipe from |
 | `output.path` | string | Recipe output path |
 | `output.format` | string | `yaml` \| `json` \| `table` |

@@ -1011,10 +1011,9 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			wantContains: []string{"driverless", "regenerate the recipe"},
 		},
 		{
-			// Fail closed: the bundler's extractComponentValues only warns
-			// on a recipe-side resolution failure and renders from an EMPTY
-			// map, so a skip here would let an unverifiable recipe bypass
-			// the gate entirely and still bundle.
+			// Fail closed within validation itself. Normal bundle value
+			// extraction also rejects this input, but direct validation
+			// callers must not treat an unverifiable recipe as a skip.
 			name: "unresolvable gpu-operator values → blocking error, not skip",
 			recipeResult: result(recipe.GPUDriverStateAbsent, aks, recipe.ComponentRef{
 				Name:       "gpu-operator",
@@ -1035,12 +1034,10 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			wantErrContains: []string{"driver-ownership coherence", "nvidia-dra-driver-gpu"},
 		},
 		{
-			// Fail closed on override REAPPLICATION too: ApplyMapOverrides
-			// iterates scalar --set paths in randomized map order, so an
-			// overlapping pair can pass extraction yet fail here — a silent
-			// skip would disarm the gate for exactly the override sets whose
-			// effective values it cannot reconstruct. (driver.enabled is a
-			// boolean, so the deeper path fails traversal deterministically.)
+			// Fail closed on override reapplication too. This direct
+			// validation call must surface an override set whose effective
+			// values it cannot reconstruct. (driver.enabled is a boolean, so
+			// the deeper path fails traversal deterministically.)
 			name:         "--set override that cannot be reapplied → blocking error, not skip",
 			recipeResult: result(recipe.GPUDriverStateAbsent, aks, gpuOpRef(driverOff())),
 			bundlerConfig: config.NewConfig(config.WithValueOverrides(map[string]map[string]string{
