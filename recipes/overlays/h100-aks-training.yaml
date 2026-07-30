@@ -26,7 +26,7 @@ spec:
     accelerator: h100
     intent: training
 
-  # Specific constraints for H100 on AKS training workloads
+  # DRA requires Kubernetes 1.34+ (GA)
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version

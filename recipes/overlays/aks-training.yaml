@@ -25,7 +25,7 @@ spec:
     service: aks
     intent: training
 
-  # Training specific constraints for AKS workloads
+  # DRA requires Kubernetes 1.34+ (GA)
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
