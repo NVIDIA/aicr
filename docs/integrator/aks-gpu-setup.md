@@ -148,6 +148,29 @@ its own device plugin, DCGM exporter, and GPU health tooling, which duplicate
 and conflict with the GPU Operator operands AICR deploys. See
 [AKS install profiles](https://learn.microsoft.com/en-us/azure/aks/aks-managed-gpu-nodes#install-profiles).
 
+**Recording the pool mode in snapshots.** The ownership mode lives in the
+Azure control plane (AgentPool `gpuProfile.driver`), not in any Kubernetes
+API object, so a snapshot cannot observe it from inside the cluster. To
+record it, dump the node pools and pass the file to `aicr snapshot`:
+
+```shell
+az aks nodepool list \
+  --cluster-name <cluster> \
+  --resource-group <rg> \
+  -o json > pools.json
+
+aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
+```
+
+The GPU pools' driver modes are projected into the snapshot's
+`K8s.aks-gpu-pools.gpu-driver` reading (`Install` for driver-only pools,
+`None` for `--gpu-driver none` pools; disagreeing or AKS-managed pools
+project a value that fails recipe qualification closed). `aicr validate`
+accepts the same `--aks-gpu-pools` flag when it captures a live snapshot.
+The projection runs on the machine invoking the CLI — the file never
+enters the cluster — and a malformed or missing file fails the command
+before any cluster work.
+
 ### Default: Use the AKS Driver-Only Profile
 
 Create nodepools with the AKS **Driver only** install profile — the AKS

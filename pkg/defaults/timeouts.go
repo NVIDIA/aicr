@@ -62,6 +62,12 @@ const (
 	// the collector will read into memory. Used as the io.LimitReader bound
 	// per the project rule against unbounded os.ReadFile.
 	MaxClusterConfigBytes = int64(1 << 20) // 1 MiB
+
+	// MaxAKSGPUPoolsBytes caps the size of an --aks-gpu-pools JSON file
+	// (the `az aks nodepool list -o json` dump) read into memory. Same
+	// io.LimitReader rule as MaxClusterConfigBytes; a real pool list is
+	// a few KiB.
+	MaxAKSGPUPoolsBytes = int64(1 << 20) // 1 MiB
 )
 
 // Handler timeouts for HTTP request processing.
