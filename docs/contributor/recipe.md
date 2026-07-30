@@ -538,6 +538,7 @@ externally-visible product. Fields beyond `ComponentRefs` and
 | `Metadata.AppliedOverlays` | Ordered list of overlays merged into this result (base first, leaf last). |
 | `Metadata.ExcludedOverlays` | Overlays that matched criteria but were dropped (e.g., a mixin constraint failed against the snapshot). Each carries a typed `Reason` (`constraint-failed`, `mixin-constraint-failed`). |
 | `Metadata.ConstraintWarnings` | Per-constraint detail for excluded overlays (overlay, constraint name, expected vs actual, reason text). |
+| `Configuration` | Closed desired-state configuration that affects rendering without participating in overlay matching. Slurm accounting records exactly one ownership mode and derives its protected component gates. |
 | `Validation` | Multi-phase config (`readiness`, `deployment`, `performance`, `conformance`) inherited from overlay metadata. |
 | `owner` (unexported) | `*Builder` that produced this result. `AssertOwnedBy(b)` enforces — two builders bound to different `DataProvider`s must not cross-read each other's results. |
 | `provider` (unexported) | `DataProvider` that produced this result; accessed via `(*RecipeResult).DataProvider()`. Lets `GetValuesForComponent` route file reads through the originating provider, preserving per-Client isolation. |

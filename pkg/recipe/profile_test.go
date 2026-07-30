@@ -781,6 +781,17 @@ func TestProfileArtifactContract(t *testing.T) {
 			Metadata:   metadata,
 		}
 	}
+	configuredAccountingRecipeResult := func(selectedProfile *SelectedProfile) *RecipeResult {
+		return &RecipeResult{
+			APIVersion: RecipeProfileAPIVersion,
+			Metadata:   RecipeResultMetadata{SelectedProfile: selectedProfile},
+			Configuration: &RecipeConfiguration{
+				Slurm: &SlurmConfiguration{
+					Accounting: &SlurmAccountingConfiguration{Mode: AccountingModeDisabled},
+				},
+			},
+		}
+	}
 	validWarning := ConstraintWarning{
 		Overlay:    "overlay-a",
 		Constraint: "signal",
@@ -891,6 +902,34 @@ func TestProfileArtifactContract(t *testing.T) {
 			name:    "profile version without selection",
 			result:  &RecipeResult{APIVersion: RecipeProfileAPIVersion},
 			wantErr: "requires",
+		},
+		{
+			name:   "configured accounting version without profile selection",
+			result: configuredAccountingRecipeResult(nil),
+		},
+		{
+			name: "configured accounting validates excluded overlays",
+			result: func() *RecipeResult {
+				result := configuredAccountingRecipeResult(nil)
+				result.Metadata.ExcludedOverlays = []ExcludedOverlay{{
+					Reason: ExcludedOverlayReasonConstraintFailed,
+				}}
+				return result
+			}(),
+			wantErr: "excludedOverlays[0].name is required",
+		},
+		{
+			name: "configured accounting validates constraint warnings",
+			result: func() *RecipeResult {
+				result := configuredAccountingRecipeResult(nil)
+				result.Metadata.ConstraintWarnings = []ConstraintWarning{warningWithoutReason}
+				return result
+			}(),
+			wantErr: "constraintWarnings[0].reason is required",
+		},
+		{
+			name:   "profile selection and configured accounting coexist",
+			result: configuredAccountingRecipeResult(selected),
 		},
 		{
 			name:    "unknown version",
@@ -2101,5 +2140,97 @@ func TestValidateProfileDeclaration_CaseInsensitiveValueUniqueness(t *testing.T)
 	_, err := ValidateProfileDeclaration(decl)
 	if err == nil || !strings.Contains(err.Error(), "differ only by case") {
 		t.Fatalf("ValidateProfileDeclaration() error = %v, want case-uniqueness rejection", err)
+	}
+}
+
+func TestValidateOwnershipDisjoint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		first      OwnershipDomain
+		second     OwnershipDomain
+		wantErr    bool
+		wantDetail string
+	}{
+		{
+			name: "disjoint components",
+			first: OwnershipDomain{
+				Name:  "profile gpuStack=operator",
+				Paths: map[string][]string{"gpu-operator": {"driver.enabled"}},
+			},
+			second: OwnershipDomain{
+				Name:  "configuration.slurm.accounting.mode=disabled",
+				Paths: map[string][]string{"slinky-slurm": {"accounting.enabled"}},
+			},
+		},
+		{
+			name: "disjoint paths on one component",
+			first: OwnershipDomain{
+				Name:  "first",
+				Paths: map[string][]string{"component": {"driver.enabled"}},
+			},
+			second: OwnershipDomain{
+				Name:  "second",
+				Paths: map[string][]string{"component": {"toolkit.enabled"}},
+			},
+		},
+		{
+			name: "exact overlap",
+			first: OwnershipDomain{
+				Name:  "first",
+				Paths: map[string][]string{"component": {"driver.enabled"}},
+			},
+			second: OwnershipDomain{
+				Name:  "second",
+				Paths: map[string][]string{"component": {"driver.enabled"}},
+			},
+			wantErr:    true,
+			wantDetail: "component.driver.enabled",
+		},
+		{
+			name: "first path is ancestor",
+			first: OwnershipDomain{
+				Name:  "first",
+				Paths: map[string][]string{"component": {"driver"}},
+			},
+			second: OwnershipDomain{
+				Name:  "second",
+				Paths: map[string][]string{"component": {"driver.enabled"}},
+			},
+			wantErr:    true,
+			wantDetail: "component.driver",
+		},
+		{
+			name: "second path is ancestor",
+			first: OwnershipDomain{
+				Name:  "first",
+				Paths: map[string][]string{"component": {"driver.enabled"}},
+			},
+			second: OwnershipDomain{
+				Name:  "second",
+				Paths: map[string][]string{"component": {"driver"}},
+			},
+			wantErr:    true,
+			wantDetail: "component.driver.enabled",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateOwnershipDisjoint(tt.first, tt.second)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateOwnershipDisjoint() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("ValidateOwnershipDisjoint() error = %v, want ErrCodeInvalidRequest", err)
+				}
+				if !strings.Contains(err.Error(), tt.wantDetail) {
+					t.Fatalf("ValidateOwnershipDisjoint() error = %v, want containing %q",
+						err, tt.wantDetail)
+				}
+			}
+		})
 	}
 }

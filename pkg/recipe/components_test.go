@@ -346,6 +346,7 @@ func TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths(t *testing.T) {
 		"controller.podSpec.tolerations",
 		"restapi.podSpec.tolerations",
 		"loginsets.slinky.podSpec.tolerations",
+		"accounting.podSpec.tolerations",
 	}
 	gotSysToleration := slurmCluster.GetSystemTolerationPaths()
 	for _, p := range wantSysToleration {
@@ -358,6 +359,7 @@ func TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths(t *testing.T) {
 		"controller.podSpec.nodeSelector",
 		"restapi.podSpec.nodeSelector",
 		"loginsets.slinky.podSpec.nodeSelector",
+		"accounting.podSpec.nodeSelector",
 	}
 	gotSysSelector := slurmCluster.GetSystemNodeSelectorPaths()
 	for _, p := range wantSysSelector {
@@ -396,6 +398,26 @@ func TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths(t *testing.T) {
 	if _, ok := values.Loginsets["slinky"]; !ok {
 		t.Errorf("%s must define loginsets.slinky to match the registry's "+
 			"nodeScheduling paths (got loginsets keys: %v)", valuesPath, slices.Sorted(maps.Keys(values.Loginsets)))
+	}
+}
+
+func TestComponentRegistry_SlurmAccountingMariaDB_NodeSchedulingPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	mariaDB := registry.Get("slurm-accounting-mariadb")
+	if mariaDB == nil {
+		t.Fatal("slurm-accounting-mariadb not found in registry")
+	}
+	if got := mariaDB.GetSystemNodeSelectorPaths(); !slices.Contains(got, "mariadb.nodeSelector") {
+		t.Errorf("slurm-accounting-mariadb system node selector paths missing %q (got %v)",
+			"mariadb.nodeSelector", got)
+	}
+	if got := mariaDB.GetSystemTolerationPaths(); !slices.Contains(got, "mariadb.tolerations") {
+		t.Errorf("slurm-accounting-mariadb system toleration paths missing %q (got %v)",
+			"mariadb.tolerations", got)
 	}
 }
 

@@ -375,7 +375,6 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 		}
 	})
-
 	tests := []struct {
 		name   string
 		method string
@@ -603,6 +602,146 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 			}
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleRecipes_SlurmAccountingModeRoutes(t *testing.T) {
+	h := newTestHandler(t, nil)
+
+	tests := []struct {
+		name        string
+		v2          bool
+		method      string
+		target      string
+		body        string
+		wantStatus  int
+		wantVersion string
+		wantMode    recipe.AccountingMode
+	}{
+		{
+			name:       "v1 GET rejects accounting mode",
+			method:     http.MethodGet,
+			target:     "/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=customer-managed",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "v1 POST rejects accounting mode",
+			method:     http.MethodPost,
+			target:     "/v1/recipe?slurmAccountingMode=customer-managed",
+			body:       `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","intent":"training","os":"ubuntu","platform":"slurm"}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:        "v1 GET keeps legacy Slurm response",
+			method:      http.MethodGet,
+			target:      "/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm",
+			wantStatus:  http.StatusOK,
+			wantVersion: recipe.RecipeAPIVersion,
+		},
+		{
+			name:        "v2 GET accepts accounting mode",
+			v2:          true,
+			method:      http.MethodGet,
+			target:      "/v2/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=customer-managed",
+			wantStatus:  http.StatusOK,
+			wantVersion: recipe.ConfiguredRecipeResultAPIVersion,
+			wantMode:    recipe.AccountingModeCustomerManaged,
+		},
+		{
+			name:        "v2 POST accepts accounting mode",
+			v2:          true,
+			method:      http.MethodPost,
+			target:      "/v2/recipe?slurmAccountingMode=customer-managed",
+			body:        `{"criteria":{"service":"eks","accelerator":"h100","intent":"training","os":"ubuntu","platform":"slurm"}}`,
+			wantStatus:  http.StatusOK,
+			wantVersion: recipe.ConfiguredRecipeResultAPIVersion,
+			wantMode:    recipe.AccountingModeCustomerManaged,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.target, strings.NewReader(tt.body))
+			if tt.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			w := httptest.NewRecorder()
+			if tt.v2 {
+				h.HandleRecipesV2(w, req)
+			} else {
+				h.HandleRecipes(w, req)
+			}
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+			var result recipe.RecipeResult
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			mode, present := result.AccountingMode()
+			if tt.wantMode == "" {
+				if present {
+					t.Fatalf("AccountingMode() = %q, true; want absent", mode)
+				}
+			} else if !present || mode != tt.wantMode {
+				t.Fatalf("AccountingMode() = %q, %v; want %q, true", mode, present, tt.wantMode)
+			}
+			if result.APIVersion != tt.wantVersion {
+				t.Errorf("apiVersion = %q, want %q", result.APIVersion, tt.wantVersion)
+			}
+		})
+	}
+}
+
+func TestHandleQuery_SlurmAccountingModeRoutes(t *testing.T) {
+	h := newTestHandler(t, nil)
+
+	tests := []struct {
+		name       string
+		v2         bool
+		target     string
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "v1 rejects accounting mode",
+			target:     "/v1/query?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=customer-managed&selector=apiVersion",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "v1 keeps legacy Slurm response",
+			target:     "/v1/query?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&selector=apiVersion",
+			wantStatus: http.StatusOK,
+			wantBody:   `"aicr.run/v1alpha2"`,
+		},
+		{
+			name:       "v2 accepts accounting mode",
+			v2:         true,
+			target:     "/v2/query?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=customer-managed&selector=configuration.slurm.accounting.mode",
+			wantStatus: http.StatusOK,
+			wantBody:   `"customer-managed"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			w := httptest.NewRecorder()
+			if tt.v2 {
+				h.HandleQueryV2(w, req)
+			} else {
+				h.HandleQuery(w, req)
+			}
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantBody != "" && strings.TrimSpace(w.Body.String()) != tt.wantBody {
+				t.Fatalf("body = %q, want %q", strings.TrimSpace(w.Body.String()), tt.wantBody)
 			}
 		})
 	}
@@ -928,6 +1067,37 @@ func TestHandleQuery_AllowListRejection(t *testing.T) {
 	errResp := decodeErrorBody(t, w.Body.Bytes())
 	if errResp.Message != "accelerator type not allowed" {
 		t.Errorf("message = %q, want %q", errResp.Message, "accelerator type not allowed")
+	}
+}
+
+func TestNormalizeLegacyRecipeResultDoesNotMutateBorrowedResult(t *testing.T) {
+	original := &recipe.RecipeResult{
+		APIVersion: recipe.ConfiguredRecipeResultAPIVersion,
+		Configuration: &recipe.RecipeConfiguration{
+			Slurm: &recipe.SlurmConfiguration{
+				Accounting: &recipe.SlurmAccountingConfiguration{
+					Mode: recipe.AccountingModeDisabled,
+				},
+			},
+		},
+	}
+	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	original.BindDataProvider(provider)
+
+	projected := normalizeLegacyRecipeResult(original, false)
+	if projected == original {
+		t.Fatal("normalizeLegacyRecipeResult() returned borrowed result, want independent projection")
+	}
+	if original.Configuration == nil ||
+		original.APIVersion != recipe.ConfiguredRecipeResultAPIVersion {
+
+		t.Fatal("normalizeLegacyRecipeResult() mutated borrowed result")
+	}
+	if projected.Configuration != nil || projected.APIVersion != recipe.RecipeAPIVersion {
+		t.Errorf("legacy projection = %#v, want v1alpha2 without configuration", projected)
+	}
+	if projected.DataProvider() != provider {
+		t.Error("legacy projection did not preserve the bound DataProvider instance")
 	}
 }
 

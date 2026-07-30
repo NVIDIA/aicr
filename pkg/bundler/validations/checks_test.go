@@ -1523,6 +1523,104 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 	}
 }
 
+func TestCheckMariaDBOperatorOwnershipCoherence(t *testing.T) {
+	t.Parallel()
+
+	result := func(mode recipe.AccountingMode, state string) *recipe.RecipeResult {
+		r := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: "mariadb-operator"}},
+			Configuration: &recipe.RecipeConfiguration{
+				Slurm: &recipe.SlurmConfiguration{
+					Accounting: &recipe.SlurmAccountingConfiguration{Mode: mode},
+				},
+			},
+		}
+		r.Metadata.MariaDBOperatorState = state
+		return r
+	}
+	noComponent := result(recipe.AccountingModeAICRProvided, recipe.MariaDBOperatorStateCRsDetected)
+	noComponent.ComponentRefs = nil
+	disabledComponent := result(recipe.AccountingModeAICRProvided, recipe.MariaDBOperatorStateCRsDetected)
+	disabledComponent.ComponentRefs[0].Overrides = map[string]any{"install": false}
+	tests := []struct {
+		name         string
+		recipeResult *recipe.RecipeResult
+		wantWarnings int
+		wantErrors   int
+		wantContains string
+		wantCode     aicrerrors.ErrorCode
+	}{
+		{name: "nil recipe skipped"},
+		{name: "missing component skipped", recipeResult: noComponent},
+		{name: "disabled component skipped", recipeResult: disabledComponent},
+		{
+			name:         "customer-managed ignores detected CRs",
+			recipeResult: result(recipe.AccountingModeCustomerManaged, recipe.MariaDBOperatorStateCRsDetected),
+		},
+		{
+			name:         "no snapshot metadata warns and preserves criteria-only flow",
+			recipeResult: result(recipe.AccountingModeAICRProvided, ""),
+			wantWarnings: 1,
+			wantContains: "current snapshot",
+		},
+		{
+			name:         "conclusive absence is silent",
+			recipeResult: result(recipe.AccountingModeAICRProvided, recipe.MariaDBOperatorStateAbsent),
+		},
+		{
+			name:         "API detected warns and allows",
+			recipeResult: result(recipe.AccountingModeAICRProvided, recipe.MariaDBOperatorStateAPIDetected),
+			wantWarnings: 1,
+			wantContains: "customer-managed",
+		},
+		{
+			name:         "CRs detected blocks",
+			recipeResult: result(recipe.AccountingModeAICRProvided, recipe.MariaDBOperatorStateCRsDetected),
+			wantErrors:   1,
+			wantContains: "customer-managed",
+			wantCode:     aicrerrors.ErrCodeConflict,
+		},
+		{
+			name:         "unknown blocks",
+			recipeResult: result(recipe.AccountingModeAICRProvided, recipe.MariaDBOperatorStateUnknown),
+			wantErrors:   1,
+			wantContains: "customer-managed",
+			wantCode:     aicrerrors.ErrCodeConflict,
+		},
+		{
+			name:         "unrecognized state fails closed",
+			recipeResult: result(recipe.AccountingModeAICRProvided, "typo"),
+			wantErrors:   1,
+			wantContains: "not recognized",
+			wantCode:     aicrerrors.ErrCodeInvalidRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			warnings, errs := CheckMariaDBOperatorOwnershipCoherence(
+				context.Background(), "mariadb-operator", tt.recipeResult, nil, nil)
+			if len(warnings) != tt.wantWarnings {
+				t.Fatalf("warnings = %d (%v), want %d", len(warnings), warnings, tt.wantWarnings)
+			}
+			if len(errs) != tt.wantErrors {
+				t.Fatalf("errors = %d (%v), want %d", len(errs), errs, tt.wantErrors)
+			}
+			if tt.wantCode != "" && !stderrors.Is(errs[0], aicrerrors.New(tt.wantCode, "")) {
+				t.Errorf("error = %v, want code %s", errs[0], tt.wantCode)
+			}
+			combined := strings.Join(warnings, "\n")
+			for _, err := range errs {
+				combined += "\n" + err.Error()
+			}
+			if tt.wantContains != "" && !strings.Contains(combined, tt.wantContains) {
+				t.Errorf("result missing %q:\n%s", tt.wantContains, combined)
+			}
+		})
+	}
+}
+
 // TestEffectiveComponentValues_PreservesResolverCode pins the
 // error-classification contract of the fail-closed resolution path: when
 // GetValuesForComponentWithContext returns an already-coded structured

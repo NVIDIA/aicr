@@ -40,6 +40,10 @@ const RecipeResultKind = "RecipeResult"
 // It aliases the canonical header.GroupVersion (single source of truth).
 const RecipeAPIVersion = header.GroupVersion
 
+// ConfiguredRecipeResultAPIVersion is the strict RecipeResult schema used
+// when typed desired-state configuration is present.
+const ConfiguredRecipeResultAPIVersion = header.RecipeResultGroupVersion
+
 // GPUDriverState values recorded in RecipeResult.Metadata.GPUDriverState
 // by snapshot-driven resolution (see pkg/client/v1 gpu_driver_state.go).
 // An empty field means the snapshot carried no usable driver-loaded
@@ -53,6 +57,16 @@ const (
 	// driver loaded (e.g. an AKS `--gpu-driver none` pool before any
 	// driver install).
 	GPUDriverStateAbsent = "absent"
+)
+
+// MariaDBOperatorState values recorded in
+// RecipeResult.Metadata.MariaDBOperatorState by snapshot-driven resolution
+// for AICR-provided Slurm accounting.
+const (
+	MariaDBOperatorStateAbsent      = "absent"
+	MariaDBOperatorStateAPIDetected = "api-detected"
+	MariaDBOperatorStateCRsDetected = "crs-detected"
+	MariaDBOperatorStateUnknown     = "unknown"
 )
 
 // ComponentType represents the type of component deployment.
@@ -169,20 +183,27 @@ type ComponentRef struct {
 }
 
 // IsEnabled returns whether this component is enabled for deployment.
-// A component is disabled when its Overrides map contains enabled: false.
-// Components without an explicit enabled override are enabled by default.
+// A component is disabled when its Overrides map contains enabled: false or
+// install: false. The install gate keeps a component in the resolved recipe
+// inventory while suppressing it before any deployer, mirror, BOM, or health
+// path sees it. Components without either gate are enabled by default.
 func (c ComponentRef) IsEnabled() bool {
-	v, ok := c.Overrides["enabled"]
-	if !ok {
-		return true
+	for _, key := range []string{componentEnabledOverrideKey, componentInstallOverrideKey} {
+		v, ok := c.Overrides[key]
+		if !ok {
+			continue
+		}
+		enabled, ok := v.(bool)
+		if !ok {
+			slog.Warn("component deployment gate is not a bool, treating component as enabled",
+				"component", c.Name, "key", key, "value", v)
+			continue
+		}
+		if !enabled {
+			return false
+		}
 	}
-	enabled, ok := v.(bool)
-	if !ok {
-		slog.Warn("overrides.enabled is not a bool, treating component as enabled",
-			"component", c.Name, "value", v)
-		return true
-	}
-	return enabled
+	return true
 }
 
 // ApplyRegistryDefaults fills in ComponentRef fields from ComponentConfig defaults.
@@ -622,6 +643,13 @@ func (r *RecipeResult) ValidateCoherence() error {
 	if r == nil {
 		return nil
 	}
+	if r.APIVersion != "" && !header.IsSupportedRecipeResultAPIVersion(r.APIVersion) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("RecipeResult apiVersion %q is not supported", r.APIVersion))
+	}
+	if err := r.validateAccountingConfiguration(); err != nil {
+		return err
+	}
 	var problems []string
 	for i := range r.ComponentRefs {
 		if !r.ComponentRefs[i].IsEnabled() {
@@ -857,6 +885,12 @@ type RecipeResultMetadata struct {
 	// SelectedProfile records the generation-time configuration choice and
 	// its declaration-wide lock surface.
 	SelectedProfile *SelectedProfile `json:"selectedProfile,omitempty" yaml:"selectedProfile,omitempty"`
+
+	// MariaDBOperatorState records official MariaDB Operator API/CR conflict
+	// evidence from the snapshot used to resolve AICR-provided Slurm
+	// accounting. Consumed by the bundle-time
+	// CheckMariaDBOperatorOwnershipCoherence validation.
+	MariaDBOperatorState string `json:"mariaDBOperatorState,omitempty" yaml:"mariaDBOperatorState,omitempty"`
 }
 
 // RecipeResult represents the final merged recipe output.
@@ -872,6 +906,10 @@ type RecipeResult struct {
 
 	// Criteria is the input criteria used to generate this result.
 	Criteria *Criteria `json:"criteria" yaml:"criteria"`
+
+	// Configuration records typed desired-state choices that affect rendering
+	// and validation without participating in catalog matching.
+	Configuration *RecipeConfiguration `json:"configuration,omitempty" yaml:"configuration,omitempty"`
 
 	// Constraints is the merged list of constraints.
 	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
@@ -1039,10 +1077,11 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// read but not consumed via ownership-checked entry points.
 	}
 
-	// Metadata: scalar Version and GPUDriverState, the SelectedProfile
+	// Metadata: scalar fields, the SelectedProfile
 	// pointer (cloned with its OwnedPaths map), plus three slices.
 	out.Metadata.Version = r.Metadata.Version
 	out.Metadata.GPUDriverState = r.Metadata.GPUDriverState
+	out.Metadata.MariaDBOperatorState = r.Metadata.MariaDBOperatorState
 	if r.Metadata.SelectedProfile != nil {
 		selected := *r.Metadata.SelectedProfile
 		selected.OwnedPaths = cloneOwnedPaths(r.Metadata.SelectedProfile.OwnedPaths)
@@ -1066,6 +1105,17 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 	if r.Criteria != nil {
 		c := *r.Criteria
 		out.Criteria = &c
+	}
+
+	if r.Configuration != nil {
+		out.Configuration = &RecipeConfiguration{}
+		if r.Configuration.Slurm != nil {
+			out.Configuration.Slurm = &SlurmConfiguration{}
+			if r.Configuration.Slurm.Accounting != nil {
+				accounting := *r.Configuration.Slurm.Accounting
+				out.Configuration.Slurm.Accounting = &accounting
+			}
+		}
 	}
 
 	if r.Constraints != nil {

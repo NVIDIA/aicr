@@ -70,6 +70,9 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 				result.Metadata.SelectedProfile.Advertiser
 		}
 	}
+	if result.Metadata.MariaDBOperatorState != "" {
+		metadata["mariaDBOperatorState"] = result.Metadata.MariaDBOperatorState
+	}
 
 	hydrated := map[string]any{
 		"kind":            result.Kind,
@@ -87,6 +90,19 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 			"platform":    string(result.Criteria.Platform),
 			"nodes":       result.Criteria.Nodes,
 		}
+	}
+	if result.Configuration != nil {
+		configuration := make(map[string]any)
+		if result.Configuration.Slurm != nil {
+			slurm := make(map[string]any)
+			if result.Configuration.Slurm.Accounting != nil {
+				slurm["accounting"] = map[string]any{
+					"mode": string(result.Configuration.Slurm.Accounting.Mode),
+				}
+			}
+			configuration["slurm"] = slurm
+		}
+		hydrated["configuration"] = configuration
 	}
 
 	if len(result.Constraints) > 0 {

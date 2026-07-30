@@ -97,7 +97,8 @@ Use in shell scripts:
     --selector components.gpu-operator.values.driver.version)`,
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", flagProfile, "snapshot", "config", "format", "selector"); err != nil {
+			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform",
+				flagProfile, flagSlurmAccountingMode, "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 
@@ -167,6 +168,13 @@ Use in shell scripts:
 func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
 	reg := client.CriteriaRegistry()
 	profile := stringFlagOrConfig(cmd, flagProfile, cfg.Recipe().ProfileSelection())
+	resolveOpts, err := accountingResolveOptions(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if profile != "" {
+		resolveOpts = append(resolveOpts, aicr.WithProfile(profile))
+	}
 
 	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.Recipe().SnapshotPath())
 
@@ -209,22 +217,20 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		// ResolveRecipeFromSnapshot builds the constraint evaluator
 		// internally (constraints.Evaluate against snap), mirroring the
 		// pre-facade BuildFromCriteriaWithEvaluator path.
-		result, err := client.ResolveRecipeFromSnapshotWithProfile(
-			ctx, aicr.WrapCriteria(criteria), aicr.WrapSnapshot(snap), profile,
-		)
-		if err == nil {
+		result, resolveErr := client.ResolveRecipeFromSnapshotWithOptions(
+			ctx, aicr.WrapCriteria(criteria), aicr.WrapSnapshot(snap), resolveOpts...)
+		if resolveErr == nil {
 			return result, nil
 		}
 
-		relaxed, ok := relaxSnapshotDerivedCoverage(err, criteria, touched)
+		relaxed, ok := relaxSnapshotDerivedCoverage(resolveErr, criteria, touched)
 		if !ok {
-			return nil, err
+			return nil, resolveErr
 		}
 
 		slog.Info("retrying recipe resolution with snapshot-derived criteria relaxed", "criteria", relaxed.String())
-		return client.ResolveRecipeFromSnapshotWithProfile(
-			ctx, aicr.WrapCriteria(relaxed), aicr.WrapSnapshot(snap), profile,
-		)
+		return client.ResolveRecipeFromSnapshotWithOptions(
+			ctx, aicr.WrapCriteria(relaxed), aicr.WrapSnapshot(snap), resolveOpts...)
 	}
 
 	criteria, err := mergeCriteriaFromCmdAndConfig(cmd, cfg, reg)
@@ -238,7 +244,28 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 	}
 
 	slog.Info("building recipe from criteria", "criteria", criteria.String())
-	return client.ResolveRecipeFromCriteriaWithProfile(ctx, aicr.WrapCriteria(criteria), profile)
+	return client.ResolveRecipeFromCriteriaWithOptions(ctx, aicr.WrapCriteria(criteria), resolveOpts...)
+}
+
+func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+	value := cmd.String(flagSlurmAccountingMode)
+	if !cmd.IsSet(flagSlurmAccountingMode) {
+		if cfg == nil {
+			return nil, nil
+		}
+		mode, present, err := cfg.Spec.Recipe.ResolveAccountingMode()
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, nil
+		}
+		value = string(mode)
+	}
+	if _, err := recipe.ParseAccountingMode(value); err != nil {
+		return nil, err
+	}
+	return []aicr.RecipeResolveOption{aicr.WithAccountingMode(value)}, nil
 }
 
 // relaxSnapshotDerivedCoverage inspects a recipe-resolution error for the

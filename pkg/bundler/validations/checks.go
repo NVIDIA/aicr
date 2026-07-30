@@ -48,6 +48,7 @@ func init() {
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
+	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -1114,4 +1115,67 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 		slog.Warn(msg, logKeyComponent, componentName)
 	}
 	return msgs, errs
+}
+
+// CheckMariaDBOperatorOwnershipCoherence enforces the snapshot-driven
+// installation-safety policy for AICR-provided Slurm accounting. Existing
+// MariaDB CRs and inconclusive discovery block bundling; an API with no
+// detected CRs produces a warning; conclusive absence is silent. An empty
+// state means no snapshot evidence was recorded and produces a non-blocking
+// warning so criteria-only and older-snapshot workflows remain compatible.
+func CheckMariaDBOperatorOwnershipCoherence(_ context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+	mode, configured := recipeResult.AccountingMode()
+	if !configured || mode != recipe.AccountingModeAICRProvided {
+		return nil, nil
+	}
+
+	state := recipeResult.Metadata.MariaDBOperatorState
+	switch state {
+	case "":
+		return []string{fmt.Sprintf(
+			"%s: no metadata.mariaDBOperatorState snapshot evidence was recorded. "+
+				"Bundling AICR-provided accounting is allowed, but MariaDB Operator conflicts "+
+				"were not evaluated. Regenerate the recipe from a current snapshot to verify "+
+				"the target cluster before deployment",
+			componentName)}, nil
+	case recipe.MariaDBOperatorStateAbsent:
+		return nil, nil
+	case recipe.MariaDBOperatorStateAPIDetected:
+		return []string{fmt.Sprintf(
+			"%s: the snapshot detected the official MariaDB Operator API but no MariaDB resources. "+
+				"Bundling AICR-provided accounting is allowed, but verify that installing another "+
+				"operator instance will not conflict; otherwise regenerate with "+
+				"--slurm-accounting-mode customer-managed",
+			componentName)}, nil
+	case recipe.MariaDBOperatorStateCRsDetected:
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeConflict, fmt.Sprintf(
+			"%s: the snapshot detected existing official MariaDB resources. "+
+				"AICR-provided accounting would install a competing database stack. "+
+				"Regenerate the recipe with --slurm-accounting-mode customer-managed "+
+				"to use the existing database",
+			componentName))}
+	case recipe.MariaDBOperatorStateUnknown:
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeConflict, fmt.Sprintf(
+			"%s: MariaDB Operator conflict evidence is inconclusive, so AICR-provided "+
+				"accounting cannot be installed safely. Capture a fresh snapshot with sufficient "+
+				"Kubernetes discovery permissions, or regenerate the recipe with "+
+				"--slurm-accounting-mode customer-managed",
+			componentName))}
+	default:
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: metadata.mariaDBOperatorState=%q is not recognized. Regenerate the recipe "+
+				"with this AICR version before bundling AICR-provided accounting",
+			componentName, state))}
+	}
 }

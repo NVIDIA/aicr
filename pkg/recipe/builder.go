@@ -107,15 +107,26 @@ func (b *Builder) DataProvider() DataProvider {
 // BuildFromCriteria creates a RecipeResult payload for the provided criteria.
 // It loads the metadata store, applies matching overlays, and returns
 // a RecipeResult with merged components and computed deployment order.
-func (b *Builder) BuildFromCriteria(ctx context.Context, c *Criteria) (*RecipeResult, error) {
-	return b.BuildFromCriteriaWithProfile(ctx, c, "")
+func (b *Builder) BuildFromCriteria(
+	ctx context.Context,
+	c *Criteria,
+	opts ...BuildOption,
+) (*RecipeResult, error) {
+
+	return b.BuildFromCriteriaWithProfile(ctx, c, "", opts...)
 }
 
 // BuildFromCriteriaWithProfile creates a RecipeResult using an explicit
 // name=value profile selection, or the declaration's default when profile is
 // empty.
-func (b *Builder) BuildFromCriteriaWithProfile(ctx context.Context, c *Criteria, profile string) (*RecipeResult, error) {
-	return b.buildWithStore(ctx, c, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
+func (b *Builder) BuildFromCriteriaWithProfile(
+	ctx context.Context,
+	c *Criteria,
+	profile string,
+	opts ...BuildOption,
+) (*RecipeResult, error) {
+
+	return b.buildWithStore(ctx, c, opts, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
 		return store.BuildRecipeResultWithProfile(buildCtx, c, profile)
 	})
 }
@@ -139,8 +150,14 @@ func (b *Builder) BuildFromCriteriaWithProfile(ctx context.Context, c *Criteria,
 // applied by the facade after this returns. A non-facade caller that
 // invokes BuildFromCriteriaWithEvaluator directly and wants those
 // measurement-driven overrides must apply them itself.
-func (b *Builder) BuildFromCriteriaWithEvaluator(ctx context.Context, c *Criteria, evaluator ConstraintEvaluatorFunc) (*RecipeResult, error) {
-	return b.BuildFromCriteriaWithEvaluatorAndProfile(ctx, c, evaluator, "")
+func (b *Builder) BuildFromCriteriaWithEvaluator(
+	ctx context.Context,
+	c *Criteria,
+	evaluator ConstraintEvaluatorFunc,
+	opts ...BuildOption,
+) (*RecipeResult, error) {
+
+	return b.BuildFromCriteriaWithEvaluatorAndProfile(ctx, c, evaluator, "", opts...)
 }
 
 // BuildFromCriteriaWithEvaluatorAndProfile is the snapshot-filtered variant
@@ -150,26 +167,31 @@ func (b *Builder) BuildFromCriteriaWithEvaluatorAndProfile(
 	c *Criteria,
 	evaluator ConstraintEvaluatorFunc,
 	profile string,
+	opts ...BuildOption,
 ) (*RecipeResult, error) {
 
-	return b.buildWithStore(ctx, c, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
+	return b.buildWithStore(ctx, c, opts, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
 		return store.BuildRecipeResultWithEvaluatorAndProfile(buildCtx, c, evaluator, profile)
 	})
 }
 
-func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, buildFn func(*MetadataStore, context.Context) (*RecipeResult, error)) (*RecipeResult, error) {
+func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, opts []BuildOption, buildFn func(*MetadataStore, context.Context) (*RecipeResult, error)) (*RecipeResult, error) {
 	if c == nil {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "criteria cannot be nil")
+	}
+	buildCfg, err := resolveBuildConfig(c, opts...)
+	if err != nil {
+		return nil, err
 	}
 
 	buildCtx, cancel := context.WithTimeout(ctx, defaults.RecipeBuildTimeout)
 	defer cancel()
 
-	if err := buildCtx.Err(); err != nil {
+	if ctxErr := buildCtx.Err(); ctxErr != nil {
 		return nil, aicrerrors.WrapWithContext(
 			aicrerrors.ErrCodeTimeout,
 			"recipe build context cancelled during initialization",
-			err,
+			ctxErr,
 			map[string]any{
 				keyStage: stageInitialization,
 			},
@@ -197,9 +219,22 @@ func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, buildFn func(
 	if err != nil {
 		return nil, err
 	}
+	// Metadata stores are cached and their ComponentRefs contain mutable maps
+	// and slices. Detach the build result before any option-driven mutation so
+	// sequential or concurrent builds cannot contaminate each other or the
+	// cached store.
+	for i := range result.ComponentRefs {
+		result.ComponentRefs[i] = cloneComponentRef(result.ComponentRefs[i])
+	}
 
 	if b.Version != "" {
 		result.Metadata.Version = b.Version
+	}
+	if err := applyBuildConfig(result, buildCfg); err != nil {
+		return nil, err
+	}
+	if err := result.ValidateCoherence(); err != nil {
+		return nil, err
 	}
 
 	// Stamp owner so cross-Builder result mixing is rejected at the

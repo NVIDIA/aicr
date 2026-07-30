@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -76,6 +77,9 @@ const (
 
 	// recipeFileName is the resolved recipe copied into Helm bundles.
 	recipeFileName = "recipe.yaml"
+
+	accountingDatabaseUsername = "slurm"
+	componentInstallKey        = "install"
 )
 
 // errCtxKeyComponent is the structured-error context key carrying the
@@ -270,6 +274,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	recipeResult = &validated
 	profileBaseline := recipeResult
 
+	if err := b.enforceAccountingOwnership(recipeResult); err != nil {
+		return nil, err
+	}
+
 	enabledRefs, filteredOrder, filterErr := b.filterEnabledComponents(recipeResult)
 	if filterErr != nil {
 		return nil, filterErr
@@ -297,6 +305,9 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to extract component values", err)
+	}
+	if validationErr := ValidateAccountingValues(recipeResult, componentValues); validationErr != nil {
+		return nil, validationErr
 	}
 
 	// Bundler-derived annotations that must reflect the final resolved
@@ -362,6 +373,274 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, err
 	}
 	return b.runDeployer(ctx, d, recipeResult, dir, dataFiles, start)
+}
+
+// ValidateAccountingValues verifies that resolved component values preserve
+// the ownership contract selected by configuration.slurm.accounting.mode.
+// Bundle producers must call it after all enabled component values are
+// resolved and before emitting deployable output.
+func ValidateAccountingValues(result *recipe.RecipeResult, values map[string]map[string]any) error {
+	mode, present := result.AccountingMode()
+	if !present {
+		return nil
+	}
+	slurmValues, ok := values["slinky-slurm"]
+	if mode == recipe.AccountingModeDisabled {
+		if ok {
+			return requireAccountingValue(slurmValues, "accounting.enabled", false)
+		}
+		return nil
+	}
+	if !ok {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"selected accounting mode requires slinky-slurm in the deployable component inventory")
+	}
+	if err := requireAccountingValue(slurmValues, "accounting.enabled", true); err != nil {
+		return err
+	}
+
+	requiredStrings := []string{
+		"accounting.storageConfig.host",
+		"accounting.storageConfig.database",
+		"accounting.storageConfig.username",
+		"accounting.storageConfig.passwordKeyRef.name",
+		"accounting.storageConfig.passwordKeyRef.key",
+	}
+	for _, valuePath := range requiredStrings {
+		value, found := component.GetValueByPath(slurmValues, valuePath)
+		text, isString := value.(string)
+		if !found || !isString || strings.TrimSpace(text) == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("accounting mode %s requires non-empty string %s", mode, valuePath))
+		}
+	}
+	port, found := component.GetValueByPath(slurmValues, "accounting.storageConfig.port")
+	if !found || !validAccountingPort(port) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("accounting mode %s requires accounting.storageConfig.port to be an integer from 1 to 65535", mode))
+	}
+
+	if mode != recipe.AccountingModeAICRProvided {
+		return nil
+	}
+	for valuePath, expected := range slurmAICRProvidedContract() {
+		if err := requireAccountingValue(slurmValues, valuePath, expected); err != nil {
+			return err
+		}
+	}
+
+	mariaDBValues, ok := values["slurm-accounting-mariadb"]
+	if !ok {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"AICR-provided accounting requires slurm-accounting-mariadb in the deployable component inventory")
+	}
+	for valuePath, expected := range mariaDBAICRProvidedContract() {
+		if err := requireAccountingValue(mariaDBValues, valuePath, expected); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func slurmAICRProvidedContract() map[string]any {
+	return map[string]any{
+		"accounting.storageConfig.host":                "mariadb",
+		"accounting.storageConfig.port":                3306,
+		"accounting.storageConfig.database":            "slurm_acct_db",
+		"accounting.storageConfig.username":            accountingDatabaseUsername,
+		"accounting.storageConfig.passwordKeyRef.name": "mariadb-password",
+		"accounting.storageConfig.passwordKeyRef.key":  "password",
+	}
+}
+
+func mariaDBAICRProvidedContract() map[string]any {
+	return map[string]any{ //nolint:gosec // values are Secret object/key identifiers, not credentials
+		"fullnameOverride":                          "mariadb",
+		"namespaceOverride":                         "slurm",
+		"mariadb.rootPasswordSecretKeyRef.name":     "mariadb-root-password",
+		"mariadb.rootPasswordSecretKeyRef.key":      "root",
+		"mariadb.rootPasswordSecretKeyRef.generate": true,
+		"mariadb.username":                          accountingDatabaseUsername,
+		"mariadb.database":                          "slurm_acct_db",
+		"mariadb.passwordSecretKeyRef.name":         "mariadb-password",
+		"mariadb.passwordSecretKeyRef.key":          "password",
+		"mariadb.passwordSecretKeyRef.generate":     true,
+		"mariadb.cleanupPolicy":                     "Skip",
+		"users":                                     []any{},
+		"databases":                                 []any{},
+		"grants":                                    []any{},
+	}
+}
+
+func validAccountingPort(value any) bool {
+	switch port := value.(type) {
+	case int:
+		return port >= 1 && port <= 65535
+	case int32:
+		return port >= 1 && port <= 65535
+	case int64:
+		return port >= 1 && port <= 65535
+	case float64:
+		return port >= 1 && port <= 65535 && float64(int64(port)) == port
+	default:
+		return false
+	}
+}
+
+func requireAccountingValue(values map[string]any, valuePath string, expected any) error {
+	actual, found := component.GetValueByPath(values, valuePath)
+	if !found || !accountingValuesEqual(actual, expected) {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"accounting-owned value %s must be %v for the selected mode (got %v)",
+			valuePath, expected, actual))
+	}
+	return nil
+}
+
+func accountingValuesEqual(actual, expected any) bool {
+	switch value := expected.(type) {
+	case bool:
+		actualBool, ok := actual.(bool)
+		return ok && actualBool == value
+	case string:
+		actualString, ok := actual.(string)
+		return ok && actualString == value
+	case int:
+		switch actualNumber := actual.(type) {
+		case int:
+			return actualNumber == value
+		case int32:
+			return int64(actualNumber) == int64(value)
+		case int64:
+			return actualNumber == int64(value)
+		case float64:
+			return actualNumber == float64(value)
+		default:
+			return false
+		}
+	default:
+		return reflect.DeepEqual(actual, expected)
+	}
+}
+
+// enforceAccountingOwnership prevents bundle-time inputs from becoming a
+// second representation of the typed ownership mode recorded in the recipe.
+// It runs before component filtering so a required component cannot disappear
+// before the check observes it.
+func (b *DefaultBundler) enforceAccountingOwnership(result *recipe.RecipeResult) error {
+	mode, present := result.AccountingMode()
+	if b.Config == nil {
+		return nil
+	}
+	if !present {
+		return b.warnLegacyAccountingOverride(result.DataProvider())
+	}
+
+	protected := recipe.AccountingOwnership(mode).Paths
+
+	aliases := make(map[string]string)
+	registry, err := recipe.GetComponentRegistryFor(result.DataProvider())
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for accounting ownership validation")
+	}
+	for canonical := range protected {
+		aliases[canonical] = canonical
+		if componentConfig := registry.Get(canonical); componentConfig != nil {
+			for _, alias := range componentConfig.ValueOverrideKeys {
+				aliases[alias] = canonical
+			}
+		}
+	}
+
+	checkPath := func(componentName, valuePath, source string) error {
+		canonical, ok := aliases[componentName]
+		if !ok {
+			return nil
+		}
+		for _, ownedPath := range protected[canonical] {
+			if recipe.PathsIntersect(valuePath, ownedPath) {
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"%s cannot override %s:%s: the path is owned by configuration.slurm.accounting.mode=%s",
+					source, componentName, valuePath, mode))
+			}
+		}
+		return nil
+	}
+
+	for componentName, paths := range b.Config.ValueOverrides() {
+		for valuePath := range paths {
+			if err := checkPath(componentName, valuePath, "--set"); err != nil {
+				return err
+			}
+		}
+	}
+	for componentName, paths := range b.Config.ValueOverridesTyped() {
+		for valuePath := range paths {
+			if err := checkPath(componentName, valuePath, "--set-json/--set-file"); err != nil {
+				return err
+			}
+		}
+	}
+	for componentName, paths := range b.Config.DynamicValues() {
+		for _, valuePath := range paths {
+			if err := checkPath(componentName, valuePath, "--dynamic"); err != nil {
+				return err
+			}
+		}
+	}
+
+	if requested := b.Config.Bundlers(); len(requested) > 0 {
+		if mode == recipe.AccountingModeDisabled {
+			return nil
+		}
+		required := map[string]struct{}{"slinky-slurm": {}}
+		if mode == recipe.AccountingModeAICRProvided {
+			required["mariadb-operator-crds"] = struct{}{}
+			required["mariadb-operator"] = struct{}{}
+			required["slurm-accounting-mariadb"] = struct{}{}
+		}
+		selected := make(map[string]struct{}, len(requested))
+		for _, name := range requested {
+			selected[name] = struct{}{}
+		}
+		for name := range required {
+			if _, ok := selected[name]; !ok {
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"bundlers filter cannot omit accounting-required component %q for mode %s",
+					name, mode))
+			}
+		}
+	}
+
+	return nil
+}
+
+func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvider) error {
+	const accountingEnabledPath = "accounting.enabled"
+	_, scalarPresent := b.getValueOverridesForComponent(
+		"slinky-slurm", provider)[accountingEnabledPath]
+	_, typedPresent := b.getTypedValueOverridesForComponent(
+		"slinky-slurm", provider)[accountingEnabledPath]
+	dynamicValues, err := b.buildDynamicValuesMap(provider)
+	if err != nil {
+		return err
+	}
+	dynamicPresent := false
+	for _, path := range dynamicValues["slinky-slurm"] {
+		if path == accountingEnabledPath {
+			dynamicPresent = true
+			break
+		}
+	}
+	if scalarPresent || typedPresent || dynamicPresent {
+		warning := "deprecated: bundle-time slinky-slurm:accounting.enabled on a legacy recipe " +
+			"selects only customer-managed accounting and is not recorded in recipe evidence; " +
+			"regenerate the Slurm recipe with --slurm-accounting-mode customer-managed"
+		slog.Warn(warning)
+		b.appendWarning(warning)
+	}
+	return nil
 }
 
 // buildDeployer constructs the appropriate deployer.Deployer based on config.

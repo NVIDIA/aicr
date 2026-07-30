@@ -1,0 +1,11 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# AICR deployment gate. It is consumed before Helm rendering and is therefore
+# safe even though the upstream chart does not define an install value.
+install: false

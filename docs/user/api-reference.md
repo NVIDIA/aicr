@@ -26,10 +26,10 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 
 | Feature | API | CLI |
 |---------|-----|-----|
-| Recipe generation | ✅ GET `/v1/recipe`; profile-aware GET/POST `/v2/recipe` | ✅ `aicr recipe` |
-| Value query | ✅ GET `/v1/query`; profile-aware GET/POST `/v2/query` | ✅ `aicr query` |
-| Bundle creation | ✅ POST `/v1/bundle`; profile-aware POST `/v2/bundle` | ✅ `aicr bundle` |
-| Bundle attestation | ✅ POST `/v1/bundle?attest=true`; profile-aware POST `/v2/bundle?attest=true` (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
+| Recipe generation | ✅ GET/POST `/v1/recipe`; profile- and Slurm-accounting-aware GET/POST `/v2/recipe` | ✅ `aicr recipe` |
+| Value query | ✅ GET/POST `/v1/query`; profile- and Slurm-accounting-aware GET/POST `/v2/query` | ✅ `aicr query` |
+| Bundle creation | ✅ POST `/v1/bundle`; profile- and Slurm-accounting-aware POST `/v2/bundle` | ✅ `aicr bundle` |
+| Bundle attestation | ✅ POST `/v1/bundle?attest=true`; profile- and Slurm-accounting-aware POST `/v2/bundle?attest=true` (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
 | Snapshot capture | ❌ Use CLI | ✅ `aicr snapshot` |
 | ConfigMap I/O | ❌ Use CLI | ✅ `cm://` URIs |
 | Agent deployment | ❌ Use CLI | ✅ `aicr snapshot` |
@@ -323,6 +323,8 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 
 `metadata.gpuDriverState` is optional and appears only for snapshot-driven recipes. It records the NVIDIA kernel driver state observed on the sampled GPU node — `preinstalled` or `absent` — and is omitted when no snapshot was provided or the snapshot carried no usable driver-loaded reading. The bundle-time `CheckDriverOwnershipCoherence` validation consumes it: a recipe whose snapshot observed no driver (`absent`) is blocked from bundling with the preinstalled-driver assumption, since that would leave GPU nodes driverless.
 
+`metadata.mariaDBOperatorState` is optional and appears when a snapshot supplies MariaDB Operator conflict evidence during resolution of AICR-provided Slurm accounting. It records `absent`, `api-detected`, `crs-detected`, or `unknown`; query-generated recipes and older snapshots without the collector subtype omit the field. Recipe generation remains observational: `api-detected`, `crs-detected`, and `unknown` emit warnings but still produce a recipe. At bundle time, `crs-detected` and `unknown` block AICR-provided installation, while `api-detected` or omitted evidence warns but proceeds; `absent` proceeds silently.
+
 ---
 
 ### GET /v1/query
@@ -394,36 +396,44 @@ The response format matches `GET /v1/query`: scalar values are returned as plain
 
 ---
 
-### Profile-aware v2 endpoints
+### Configured v2 endpoints
 
 `v2` in the route and `apiVersion` in a recipe document are independent
 version axes. The route segment versions the transient HTTP contract;
 `aicr.run/v1alpha2` and `aicr.run/v1alpha3` identify persisted recipe schemas.
 Therefore, `/v2/recipe` can return either artifact version and `/v2/bundle`
-accepts both, plus versionless legacy artifacts. Whether resolution selects a
-profile explicitly or through a declared default—not the route number—
-determines whether the artifact uses `v1alpha3`.
+accepts both, plus versionless legacy artifacts. Selecting a profile or resolving
+a Slurm accounting mode—not the route number—determines whether the artifact
+uses `v1alpha3`.
 
-`/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the profile-aware HTTP
-contract. The AKS family is the first embedded adopter (`gpuStack`), so
+`/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the configured HTTP contract
+for profiles and Slurm accounting. The AKS family is the first embedded profile
+adopter (`gpuStack`), so
 **`/v1` workflows with `service=aks` now reject and must move to `/v2`**
 (see the AKS cut-over note below); `/v1` remains unchanged for families
 without a profile.
 
 **GET `/v2/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
-optional `profile=name=value`. Omission applies the resolved declaration's
-required default. The v2 route rejects unknown query parameters and
-conflicting repeated profile values.
+optional `profile=name=value` and `slurmAccountingMode`. Profile omission
+applies the resolved declaration's required default. Slurm accounting accepts
+`disabled`, `customer-managed`, or `aicr-provided`; omission defaults a Slurm
+recipe to `disabled`. The setting is recorded at
+`configuration.slurm.accounting.mode` in an `aicr.run/v1alpha3` RecipeResult.
+The v2 route rejects unknown query parameters and conflicting repeated values.
 
 ```shell
 # AKS, non-default value (omit profile= for the azure-managed default):
 curl "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
+
+# Slurm with AICR-provided accounting
+curl "http://localhost:8080/v2/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=aicr-provided"
 ```
 
 **POST `/v2/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
 the plain criteria object, not a `RecipeCriteria` resource. Profile selection
 may be supplied in the envelope, as the `profile` query parameter, or in both
-places when the values agree. Conflicting selections are rejected:
+places when the values agree. `slurmAccountingMode` is supplied as the same
+query parameter used by GET. Conflicting selections are rejected:
 
 ```yaml
 criteria:
@@ -439,7 +449,8 @@ INVALID_REQUEST`. POST envelopes require `Content-Type: application/json` or
 `Content-Type: application/x-yaml`; missing, aliased, or unsupported media
 types are rejected.
 
-**GET and POST `/v2/query`.** GET accepts the v2 recipe parameters plus
+**GET and POST `/v2/query`.** GET accepts the v2 recipe parameters, including
+`slurmAccountingMode`, plus
 `selector`. POST accepts the same strict envelope with a required selector.
 POST profile selection follows the same query/envelope agreement rule as
 `/v2/recipe`:
@@ -456,7 +467,8 @@ selector: metadata.selectedProfile
 `POST /v1/bundle`. It carries no profile-selection field because its body is
 an already-selected `RecipeResult`. It accepts legacy
 `aicr.run/v1alpha2` recipes, including older artifacts that omit
-`apiVersion`, and strictly decodes profiled `aicr.run/v1alpha3` recipes. The
+`apiVersion`, and strictly decodes profiled or accounting-configured
+`aicr.run/v1alpha3` recipes. The
 request requires `Content-Type: application/json` or `Content-Type:
 application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
@@ -469,16 +481,19 @@ curl -s \
     -H "Content-Type: application/json" -d @- -o bundles.zip
 ```
 
-Profile-bearing responses record `metadata.selectedProfile` and use recipe
-apiVersion `aicr.run/v1alpha3`. Their owned paths are immutable across AICR's
-supported override surfaces: divergent static values, intersecting dynamic
-paths, owned-component removal, and argocd-helm install-time values fail
-closed before output.
+Profile-bearing responses record `metadata.selectedProfile`; accounting-aware
+responses record `configuration.slurm.accounting`. Both use recipe apiVersion
+`aicr.run/v1alpha3`. Their owned paths are immutable across AICR's supported
+override surfaces: divergent static values, intersecting dynamic paths,
+owned-component removal, and argocd-helm install-time values fail closed before
+output.
 
-The `/v1` routes remain the legacy contract. Explicit profile input is
-rejected, `/v1/recipe` and `/v1/query` reject a composition after it adopts a
-profile even when the request omits selection, and `/v1/bundle` rejects a
-profile-bearing body. Migrate a converted recipe family to v2 as one cut-over.
+The `/v1` routes remain the legacy contract. Explicit profile and
+`slurmAccountingMode` input is rejected; Slurm recipes remain implicitly
+disabled and use the `aicr.run/v1alpha2` response shape. `/v1/recipe` and
+`/v1/query` reject a composition after it adopts a profile even when the request
+omits selection, and `/v1/bundle` rejects a profile-bearing body. Migrate a
+converted workflow to v2 as one cut-over.
 
 **AKS cut-over:** the AKS family is the first embedded adopter, so
 `/v1/recipe` and `/v1/query` requests with `service=aks` now reject —
@@ -515,8 +530,12 @@ Generate deployment bundles from a recipe.
 **Request Body:**
 
 The request body is the recipe (`RecipeResult`) directly. No wrapper object is
-needed. Current artifacts carry `apiVersion: aicr.run/v1alpha2` and
-`kind: RecipeResult`, and new clients should send that versioned form.
+needed. Current artifacts carry `apiVersion: aicr.run/v1alpha2` or
+`aicr.run/v1alpha3` and `kind: RecipeResult`. The v1alpha3 form identifies
+recipes carrying `metadata.selectedProfile`, typed
+`configuration.slurm.accounting`, or both; profile-bearing artifacts must use
+`/v2/bundle`. New clients should preserve the version emitted by recipe
+resolution.
 
 For backward compatibility, the endpoint also accepts:
 
@@ -588,6 +607,9 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `slinky-slurm` | Slinky-managed Slurm cluster instance (Controller, LoginSet, NodeSet, RestApi); reconciled by `slinky-slurm-operator` |
 | `slinky-slurm-operator` | SchedMD Slinky Slurm operator and admission webhook |
 | `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
+| `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
+| `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
+| `slurm-accounting-mariadb` | Installation-managed MariaDB instance and Secret generation contract for Slurm accounting; installed only for AICR-provided Slurm accounting |
 
 **Examples:**
 
@@ -608,6 +630,12 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 > `dependencyRefs`. The filter prunes those edges safely (a filtered-out
 > dependency is assumed satisfied externally) and rejects unknown or disabled
 > component names with HTTP 400.
+> Slurm accounting adds required-component checks: customer-managed mode
+> requires `slinky-slurm`, while AICR-provided mode also requires
+> `mariadb-operator-crds`, `mariadb-operator`, and
+> `slurm-accounting-mariadb`. A `bundlers` filter that omits any required
+> component is rejected with HTTP 400; required components are not
+> automatically added to the selection.
 >
 > Enabled Helm refs must reference a deployable primary: an external chart
 > (a `source` repository plus an effective `version` — empty, whitespace-only,

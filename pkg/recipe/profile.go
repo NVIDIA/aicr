@@ -35,7 +35,7 @@ import (
 // RecipeProfileAPIVersion is the RecipeMetadata and RecipeResult version used
 // when a configuration profile is present. Other AICR artifact kinds remain on
 // header.GroupVersion.
-const RecipeProfileAPIVersion = header.APIGroup + "/v1alpha3"
+const RecipeProfileAPIVersion = header.RecipeResultGroupVersion
 
 const (
 	profileAdvertiserExternal   = "external"
@@ -81,6 +81,14 @@ type SelectedProfile struct {
 	Value      string              `json:"value" yaml:"value"`
 	Advertiser string              `json:"advertiser,omitempty" yaml:"advertiser,omitempty"`
 	OwnedPaths map[string][]string `json:"ownedPaths" yaml:"ownedPaths"`
+}
+
+// OwnershipDomain identifies one closed configuration owner and the component
+// value paths it controls. Paths use canonical component names and dot notation;
+// the synthetic "enabled" path represents ownership of component presence.
+type OwnershipDomain struct {
+	Name  string
+	Paths map[string][]string
 }
 
 // ProfileSummary is the compact catalog projection of an effective profile.
@@ -572,18 +580,21 @@ func (r *RecipeResult) ValidateProfileContract() error {
 		}
 		return r.validateInlineDeepCopyCycles()
 	case RecipeProfileAPIVersion:
+		if err := r.validateProfileMetadataItems(); err != nil {
+			return err
+		}
 		if r.Metadata.SelectedProfile == nil {
+			if _, accountingConfigured := r.AccountingMode(); accountingConfigured {
+				return r.validateInlineDeepCopyCycles()
+			}
 			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("recipe apiVersion %q requires metadata.selectedProfile", RecipeProfileAPIVersion))
+				fmt.Sprintf("recipe apiVersion %q requires metadata.selectedProfile or configuration.slurm.accounting",
+					RecipeProfileAPIVersion))
 		}
 	default:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe has unsupported apiVersion %q; expected %q or %q",
 				r.APIVersion, RecipeAPIVersion, RecipeProfileAPIVersion))
-	}
-
-	if err := r.validateProfileMetadataItems(); err != nil {
-		return err
 	}
 
 	selected := r.Metadata.SelectedProfile
@@ -903,6 +914,36 @@ func PathsIntersect(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// ValidateOwnershipDisjoint rejects exact, ancestor, or descendant path
+// intersection between two independent configuration owners. Components are
+// compared by canonical name; iteration is sorted so the first reported
+// conflict is deterministic.
+func ValidateOwnershipDisjoint(first, second OwnershipDomain) error {
+	components := make([]string, 0, len(first.Paths))
+	for component := range first.Paths {
+		if _, ok := second.Paths[component]; ok {
+			components = append(components, component)
+		}
+	}
+	sort.Strings(components)
+	for _, component := range components {
+		firstPaths := append([]string(nil), first.Paths[component]...)
+		secondPaths := append([]string(nil), second.Paths[component]...)
+		sort.Strings(firstPaths)
+		sort.Strings(secondPaths)
+		for _, firstPath := range firstPaths {
+			for _, secondPath := range secondPaths {
+				if PathsIntersect(firstPath, secondPath) {
+					return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"configuration ownership conflict: %q owns %s.%s, which intersects %q path %s.%s",
+						first.Name, component, firstPath, second.Name, component, secondPath))
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ValidateProfileLock compares the final candidate values and component set

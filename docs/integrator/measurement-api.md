@@ -230,10 +230,11 @@ multiple CRs are valid and use the same state. `unknown` means discovery or
 List was inconclusive. No state proves that an operator is running or a
 database is healthy, reachable, or customer-provided.
 
-This subtype never selects `accounting.databaseSource`. A future
-`aicr-provided` installation may require
-`K8s.mariadb-operator.collection-state == absent` as a fresh fail-closed
-preflight; `absent` is permission to proceed, not installation intent.
+This subtype never selects `accounting.databaseSource`. Snapshot-driven
+resolution records the state as recipe metadata for AICR-provided accounting.
+Bundle generation blocks `crs-detected` and `unknown`, warns and allows
+`api-detected`, and silently allows `absent`; the state is conflict evidence,
+not installation intent.
 
 Both `slinky-slurm` and `mariadb-operator` remain in raw snapshots and
 `--full` evidence. The default minimal evidence policy drops both subtypes,

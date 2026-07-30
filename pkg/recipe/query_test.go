@@ -294,6 +294,30 @@ func TestHydrateResult(t *testing.T) {
 		}
 	})
 
+	t.Run("typed configuration", func(t *testing.T) {
+		result := &RecipeResult{
+			Configuration: &RecipeConfiguration{
+				Slurm: &SlurmConfiguration{
+					Accounting: &SlurmAccountingConfiguration{
+						Mode: AccountingModeAICRProvided,
+					},
+				},
+			},
+		}
+		hydrated, err := HydrateResult(result)
+		if err != nil {
+			t.Fatalf("HydrateResult() error = %v", err)
+		}
+		got, err := Select(hydrated, "configuration.slurm.accounting.mode")
+		if err != nil {
+			t.Fatalf("Select() error = %v", err)
+		}
+		if got != string(AccountingModeAICRProvided) {
+			t.Errorf("configuration.slurm.accounting.mode = %v, want %q",
+				got, AccountingModeAICRProvided)
+		}
+	})
+
 	t.Run("source-only helm ref exposes the effective chart", func(t *testing.T) {
 		// A source-only ref deploys the component-name chart (the deployers'
 		// EffectiveChart fallback); the hydrated projection must expose it so
@@ -341,7 +365,7 @@ func TestHydrateResult(t *testing.T) {
 		}
 	})
 
-	t.Run("gpuDriverState projected when recorded, omitted when empty", func(t *testing.T) {
+	t.Run("observed metadata states projected when recorded, omitted when empty", func(t *testing.T) {
 		// metadata.gpuDriverState is omitempty in the recipe schema; the
 		// hand-built hydrated projection must match the recipe YAML and
 		// the OpenAPI schema so `aicr query` can select it.
@@ -351,6 +375,7 @@ func TestHydrateResult(t *testing.T) {
 			DeploymentOrder: []string{},
 		}
 		result.Metadata.GPUDriverState = GPUDriverStateAbsent
+		result.Metadata.MariaDBOperatorState = MariaDBOperatorStateAPIDetected
 
 		hydrated, err := HydrateResult(result)
 		if err != nil {
@@ -363,8 +388,12 @@ func TestHydrateResult(t *testing.T) {
 		if got := metadata["gpuDriverState"]; got != GPUDriverStateAbsent {
 			t.Errorf("gpuDriverState = %v, want %q", got, GPUDriverStateAbsent)
 		}
+		if got := metadata["mariaDBOperatorState"]; got != MariaDBOperatorStateAPIDetected {
+			t.Errorf("mariaDBOperatorState = %v, want %q", got, MariaDBOperatorStateAPIDetected)
+		}
 
 		result.Metadata.GPUDriverState = ""
+		result.Metadata.MariaDBOperatorState = ""
 		hydrated, err = HydrateResult(result)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -375,6 +404,10 @@ func TestHydrateResult(t *testing.T) {
 		}
 		if _, exists := metadata["gpuDriverState"]; exists {
 			t.Errorf("gpuDriverState = %v, want absent (omitempty contract)", metadata["gpuDriverState"])
+		}
+		if _, exists := metadata["mariaDBOperatorState"]; exists {
+			t.Errorf("mariaDBOperatorState = %v, want absent (omitempty contract)",
+				metadata["mariaDBOperatorState"])
 		}
 	})
 

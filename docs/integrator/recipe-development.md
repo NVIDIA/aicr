@@ -603,6 +603,27 @@ nodes. AICR warns when both `driver-loaded=true` and a gpu-operator
 ClusterPolicy are present in the snapshot. See
 [Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
 
+### Typed Slurm accounting configuration
+
+Slurm accounting ownership is resolved after catalog matching; it is not a
+criteria dimension and overlays must not author
+`configuration.slurm.accounting`. Every Slurm leaf declares stable refs for
+`mariadb-operator-crds`, `mariadb-operator`, and
+`slurm-accounting-mariadb`. The resolver derives their root `install` gates and
+`slinky-slurm.accounting.enabled` from one typed mode:
+
+| Mode | Slinky accounting | MariaDB components |
+| --- | --- | --- |
+| `disabled` | false | install false |
+| `customer-managed` | true | install false |
+| `aicr-provided` | true | install true |
+
+The AICR install gate is consumed by `ComponentRef.IsEnabled` before deployer,
+mirror, BOM, and health paths. It is not an upstream chart value. Mode-owned
+paths are immutable at bundle time. See
+[ADR-016](../design/016-slurm-accounting-enablement.md) and the
+[Slurm Accounting guide](../user/slinky-slurm-accounting.md).
+
 ## Disable a Component in an Overlay
 
 Set `overrides.enabled: false` on a `componentRef` to drop a component a base

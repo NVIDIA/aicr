@@ -69,10 +69,11 @@ func FormatFromPath(filePath string) Format {
 //
 // Supported formats: JSON, YAML (Table format is write-only)
 type Reader struct {
-	format Format
-	input  io.Reader
-	closer io.Closer
-	strict bool
+	format           Format
+	input            io.Reader
+	closer           io.Closer
+	strict           bool
+	strictAPIVersion string
 }
 
 // ReaderOption configures a Reader.
@@ -85,6 +86,16 @@ type ReaderOption func(*Reader)
 func WithStrict() ReaderOption {
 	return func(r *Reader) {
 		r.strict = true
+	}
+}
+
+// WithStrictAPIVersion enables strict decoding only when the input document's
+// top-level apiVersion matches version. The document is buffered once, so
+// callers can make a version-dependent compatibility decision without reading
+// a local file, URL, or ConfigMap twice.
+func WithStrictAPIVersion(version string) ReaderOption {
+	return func(r *Reader) {
+		r.strictAPIVersion = version
 	}
 }
 
@@ -320,16 +331,21 @@ func (r *Reader) Deserialize(v any) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "input source is nil")
 	}
 
+	strict, err := r.resolveStrictMode()
+	if err != nil {
+		return err
+	}
+
 	switch r.format {
 	case FormatJSON:
 		decoder := json.NewDecoder(r.input)
-		if r.strict {
+		if strict {
 			decoder.DisallowUnknownFields()
 		}
 		if err := decoder.Decode(v); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode JSON", err)
 		}
-		if r.strict {
+		if strict {
 			var trailing any
 			if err := decoder.Decode(&trailing); !stderrors.Is(err, io.EOF) {
 				if err == nil {
@@ -344,13 +360,13 @@ func (r *Reader) Deserialize(v any) error {
 
 	case FormatYAML:
 		decoder := yaml.NewDecoder(r.input)
-		if r.strict {
+		if strict {
 			decoder.KnownFields(true)
 		}
 		if err := decoder.Decode(v); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode YAML", err)
 		}
-		if r.strict {
+		if strict {
 			var trailing any
 			if err := decoder.Decode(&trailing); !stderrors.Is(err, io.EOF) {
 				if err == nil {
@@ -369,6 +385,47 @@ func (r *Reader) Deserialize(v any) error {
 	default:
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unsupported format for deserialization: %s", r.format))
 	}
+}
+
+func (r *Reader) resolveStrictMode() (bool, error) {
+	strictAPIVersion := r.strictAPIVersion
+	if r.strict || strictAPIVersion == "" {
+		return r.strict, nil
+	}
+
+	data, err := io.ReadAll(io.LimitReader(r.input, defaults.MaxSpecFileBytes+1))
+	if err != nil {
+		return false, errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect apiVersion for strict decoding", err)
+	}
+	if int64(len(data)) > defaults.MaxSpecFileBytes {
+		return false, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("input exceeds maximum allowed size of %d bytes", defaults.MaxSpecFileBytes))
+	}
+	r.input = bytes.NewReader(data)
+
+	var header struct {
+		APIVersion string `json:"apiVersion" yaml:"apiVersion"`
+	}
+	switch r.format {
+	case FormatJSON:
+		if err := json.NewDecoder(bytes.NewReader(data)).Decode(&header); err != nil {
+			return false, errors.Wrap(errors.ErrCodeInvalidRequest,
+				"failed to inspect JSON apiVersion", err)
+		}
+	case FormatYAML:
+		if err := yaml.Unmarshal(data, &header); err != nil {
+			return false, errors.Wrap(errors.ErrCodeInvalidRequest,
+				"failed to inspect YAML apiVersion", err)
+		}
+	case FormatTable:
+		return false, errors.New(errors.ErrCodeInvalidRequest,
+			"table format is not supported for apiVersion inspection")
+	default:
+		return false, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("unsupported format for apiVersion inspection: %s", r.format))
+	}
+	return header.APIVersion == strictAPIVersion, nil
 }
 
 // Close releases any resources held by the Reader.
@@ -521,6 +578,10 @@ func ReadFileBytesWithKubeconfigContext(
 // FromFileWithKubeconfig. The context bounds the ConfigMap read when path is
 // a cm:// URI.
 func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig string, opts ...ReaderOption) (*T, error) {
+	return fromFileWithKubeconfigContext[T](ctx, path, kubeconfig, opts...)
+}
+
+func fromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig string, opts ...ReaderOption) (*T, error) {
 	// Check for ConfigMap URI
 	if strings.HasPrefix(path, ConfigMapURIScheme) {
 		namespace, name, err := pod.ParseConfigMapURI(path)
@@ -548,7 +609,6 @@ func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 		slog.Error("reader is unexpectedly nil despite no error", "path", path, "format", fileFormat)
 		return nil, errors.New(errors.ErrCodeInternal, fmt.Sprintf("reader is nil for %q", path))
 	}
-
 	defer func() {
 		if closeErr := ser.Close(); closeErr != nil {
 			slog.Warn("failed to close serializer", "error", closeErr)

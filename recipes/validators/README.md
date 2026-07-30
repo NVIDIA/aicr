@@ -73,7 +73,7 @@ or, when its fabric matches no embedded template, with the
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify Dynamo operator controller and webhooks | 5m |
 | `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts) | 10m |
-| `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, and GPU container execution health | 5m |
+| `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, GPU execution, and enabled accounting health | 8m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |
 | `platform-health` | Verify platform component health (conformance diagnostic) | 5m |
@@ -81,6 +81,11 @@ or, when its fabric matches no embedded template, with the
  `slinky-slurm-health` expects a GPU-requesting NodeSet and fails
 if none is present; for `kind` or CPU-only recipes it runs CPU-only checks and
 skips the GPU container check.
+
+When accounting is enabled, `slinky-slurm-health` also submits a bounded batch
+job and polls `sacct` until the completed `0:0` allocation record appears.
+Recipes with disabled or legacy unspecified accounting retain the original
+health commands without this probe.
 
 On GPU-backed NodeSets, `slinky-slurm-health` launches
 `docker.io/library/alpine:3.23.3` through Pyxis. The check rewrites only the

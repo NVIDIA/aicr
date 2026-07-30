@@ -41,8 +41,15 @@ const (
 	// APIVersionV1Alpha2 is the current artifact API version segment.
 	APIVersionV1Alpha2 = "v1alpha2"
 
+	// APIVersionV1Alpha3 is the strict RecipeResult schema carrying typed
+	// desired-state configuration. Other artifact kinds remain on v1alpha2.
+	APIVersionV1Alpha3 = "v1alpha3"
+
 	// GroupVersion is the canonical "group/version" string for AICR artifacts.
 	GroupVersion = APIGroup + "/" + APIVersionV1Alpha2
+
+	// RecipeResultGroupVersion is the current configured RecipeResult schema.
+	RecipeResultGroupVersion = APIGroup + "/" + APIVersionV1Alpha3
 )
 
 // IsSupportedAPIVersion reports whether v is an artifact apiVersion this binary
@@ -56,6 +63,18 @@ const (
 func IsSupportedAPIVersion(v string) bool {
 	switch v {
 	case GroupVersion:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsSupportedRecipeResultAPIVersion reports whether v is a RecipeResult
+// version understood by this binary. v1alpha2 remains readable for legacy
+// recipes; newly configured Slurm recipes use v1alpha3.
+func IsSupportedRecipeResultAPIVersion(v string) bool {
+	switch v {
+	case GroupVersion, RecipeResultGroupVersion:
 		return true
 	default:
 		return false
