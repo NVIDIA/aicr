@@ -16,15 +16,74 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
+
+func TestNvidiaSMICoverageExtra(t *testing.T) {
+	tests := []struct {
+		name          string
+		validated     int
+		total         int
+		wantValidated string
+		wantTotal     string
+	}{
+		{"full coverage", 2, 2, "2", "2"},
+		{"reduced coverage one cordoned", 1, 2, "1", "2"},
+		{"single node", 1, 1, "1", "1"},
+		{"partial failure", 1, 2, "1", "2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extra := nvidiaSMICoverageExtra(tt.validated, tt.total)
+			if extra["nodesValidated"] != tt.wantValidated {
+				t.Errorf("nodesValidated = %q, want %q", extra["nodesValidated"], tt.wantValidated)
+			}
+			if got := extra["nodesTotal"]; got != tt.wantTotal {
+				t.Errorf("nodesTotal = %q, want %q", got, tt.wantTotal)
+			}
+			if len(extra) != 2 {
+				t.Errorf("coverage extra must carry exactly the two count keys, got %v", extra)
+			}
+			// The emitted transport line must be valid low-cardinality JSON that
+			// the orchestrator can parse back — mirror the EmitExtra contract.
+			data, err := json.Marshal(extra)
+			if err != nil {
+				t.Fatalf("coverage extra must marshal to JSON: %v", err)
+			}
+			payload, ok := strings.CutPrefix(ctrf.ExtraLinePrefix+string(data), ctrf.ExtraLinePrefix)
+			if !ok {
+				t.Fatalf("emitted line missing sentinel prefix")
+			}
+			var got map[string]string
+			if err := json.Unmarshal([]byte(payload), &got); err != nil {
+				t.Fatalf("emitted payload is not valid JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestNvidiaSMISkipExtra(t *testing.T) {
+	for _, reason := range []string{skipReasonNoGPUNodes, skipReasonNoSchedulableGPUNodes, skipReasonNodesBusy} {
+		t.Run(reason, func(t *testing.T) {
+			extra := nvidiaSMISkipExtra(reason)
+			if extra["skipReason"] != reason {
+				t.Errorf("skipReason = %q, want %q", extra["skipReason"], reason)
+			}
+			if len(extra) != 1 {
+				t.Errorf("skip extra must carry exactly skipReason, got %v", extra)
+			}
+		})
+	}
+}
 
 func TestVerifyNvidiaSMILogs(t *testing.T) {
 	t.Parallel()

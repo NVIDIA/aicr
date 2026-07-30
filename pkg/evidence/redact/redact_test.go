@@ -364,9 +364,13 @@ func sampleReport() *ctrf.Report {
 			Summary: ctrf.Summary{Tests: 2, Passed: 1, Failed: 1},
 			Tests: []ctrf.TestResult{
 				{Name: "t1", Status: ctrf.StatusPassed, Duration: 10, Suite: []string{"deploy"},
-					Stdout: []string{"connected to 10.0.0.5", "https://internal.example.com"}},
+					Stdout: []string{"connected to 10.0.0.5", "https://internal.example.com"},
+					// Mix of allowlisted counts and an unknown, node-identifying key.
+					Extra: map[string]string{"nodesValidated": "1", "nodesTotal": "2", "podName": "nvidia-smi-verify-ip-10-0-0-5"}},
 				{Name: "t2", Status: ctrf.StatusFailed, Duration: 20,
-					Message: "cert secret my-tls-secret not found", Stdout: []string{"line"}},
+					Message: "cert secret my-tls-secret not found", Stdout: []string{"line"},
+					// Only non-allowlisted keys → must drop to nil (no empty extra:{}).
+					Extra: map[string]string{"internalIP": "10.0.0.5"}},
 			},
 		},
 	}
@@ -404,11 +408,127 @@ func TestCTRFPreservesSignal(t *testing.T) {
 	}
 }
 
+func TestCTRFAllowlistsExtra(t *testing.T) {
+	tests := []struct {
+		name string
+		in   map[string]string
+		want map[string]string // nil means Extra must drop to nil (no empty map)
+	}{
+		{
+			name: "allowlisted counts survive, unknown key dropped",
+			in:   map[string]string{"nodesValidated": "1", "nodesTotal": "2", "podName": "nvidia-smi-verify-ip-10-0-0-5"},
+			want: map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
+		},
+		{
+			name: "valid skip reason enum survives",
+			in:   map[string]string{"skipReason": "no-gpu-nodes"},
+			want: map[string]string{"skipReason": "no-gpu-nodes"},
+		},
+		{
+			name: "another listed skip code survives",
+			in:   map[string]string{"skipReason": "no-schedulable-gpu-nodes"},
+			want: map[string]string{"skipReason": "no-schedulable-gpu-nodes"},
+		},
+		{
+			name: "well-formed but unlisted skip code is dropped",
+			in:   map[string]string{"skipReason": "customer-prod-cluster"},
+			want: nil,
+		},
+		{
+			name: "only non-allowlisted keys drop to nil",
+			in:   map[string]string{"internalIP": "10.0.0.5"},
+			want: nil,
+		},
+		{
+			name: "IP smuggled under a count key is dropped",
+			in:   map[string]string{"nodesValidated": "1", "nodesTotal": "10.0.0.5"},
+			want: map[string]string{"nodesValidated": "1"},
+		},
+		{
+			name: "hostname smuggled under skipReason is dropped",
+			in:   map[string]string{"skipReason": "node-a.example"},
+			want: nil,
+		},
+		{
+			name: "negative and non-decimal counts are dropped",
+			in:   map[string]string{"nodesValidated": "-1", "nodesTotal": "1.5"},
+			want: nil,
+		},
+		{
+			name: "over-long count exceeding the digit bound is dropped",
+			in:   map[string]string{"nodesValidated": "2", "nodesTotal": "123456"},
+			want: map[string]string{"nodesValidated": "2"},
+		},
+		{
+			name: "uppercase / free-text enum code is dropped",
+			in:   map[string]string{"skipReason": "No GPU Nodes"},
+			want: nil,
+		},
+		{
+			name: "all allowed keys with invalid values drop to nil (no empty map)",
+			in:   map[string]string{"nodesTotal": "1.5", "skipReason": "10.0.0.5"},
+			want: nil,
+		},
+		{
+			name: "empty extra drops to nil",
+			in:   map[string]string{},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, _ := redact.CTRF(reportWithExtra(tt.in))
+			got := out.Results.Tests[0].Extra
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("redacted Extra = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// reportWithExtra builds a minimal one-test CTRF report carrying extra, for
+// exercising the Extra allowlist in isolation.
+func reportWithExtra(extra map[string]string) *ctrf.Report {
+	return &ctrf.Report{
+		ReportFormat: ctrf.ReportFormatCTRF,
+		SpecVersion:  ctrf.SpecVersion,
+		GeneratedBy:  "aicr",
+		Results: ctrf.Results{
+			Tool:    ctrf.Tool{Name: "chainsaw", Version: "0.2.0"},
+			Summary: ctrf.Summary{Tests: 1, Passed: 1},
+			Tests: []ctrf.TestResult{
+				{Name: "t", Status: ctrf.StatusPassed, Suite: []string{"deploy"}, Extra: extra},
+			},
+		},
+	}
+}
+
+func TestCTRFAppliedRulesIncludeExtraAllowlist(t *testing.T) {
+	_, rules := redact.CTRF(sampleReport())
+	found := false
+	for _, r := range rules {
+		if r == "ctrf.tests.extra.allowlist" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("applied rules must include ctrf.tests.extra.allowlist, got %v", rules)
+	}
+}
+
 func TestCTRFDoesNotMutateInput(t *testing.T) {
 	in := sampleReport()
 	_, _ = redact.CTRF(in)
 	if in.Results.Tests[0].Stdout == nil || in.Results.Tests[1].Message == "" {
 		t.Errorf("CTRF must not mutate its input")
+	}
+	// The input Extra maps must be untouched (rebuilt fresh, not filtered in place).
+	if _, ok := in.Results.Tests[0].Extra["podName"]; !ok {
+		t.Errorf("CTRF must not mutate input Extra: podName was removed from t1")
+	}
+	if in.Results.Tests[1].Extra["internalIP"] != "10.0.0.5" {
+		t.Errorf("CTRF must not mutate input Extra: t2 internalIP altered")
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -33,6 +34,17 @@ const (
 	nvidiaSMIPodTemplateFile = "testdata/nvidia-smi-verify-pod.yaml"
 	gpuCheckSuccessMsg       = "GPU_CHECK_SUCCESS"
 	nvidiaSMILogContextLines = 20
+
+	// skipReason* are the low-cardinality enum codes emitted via EmitExtra when
+	// the check skips. Unlike the human-readable RESULT/enumeration stdout lines
+	// (which the default redaction policy strips), these survive minimal
+	// redaction (see pkg/evidence/redact), so a signed bundle records WHY a check
+	// was skipped. Each must accurately describe the observed condition and be
+	// mirrored in redact.ctrfSkipReasons — a code missing from that closed set is
+	// dropped from the published bundle.
+	skipReasonNoGPUNodes            = "no-gpu-nodes"             // cluster has no GPU nodes at all
+	skipReasonNoSchedulableGPUNodes = "no-schedulable-gpu-nodes" // GPU nodes exist but all cordoned/unschedulable
+	skipReasonNodesBusy             = "nodes-busy"               // schedulable GPU nodes exist but are busy with workloads
 )
 
 // gpuNodeCoverage partitions check-nvidia-smi's discovered GPU nodes into the
@@ -126,18 +138,26 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 
 	if len(allNodes) == 0 {
 		printLines(coverage.coverageLine(0))
+		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNoGPUNodes))
 		return validators.Skip("no GPU nodes found in the cluster")
 	}
 
 	gpuNodes := coverage.schedulable
 	if len(gpuNodes) == 0 {
 		printLines(coverage.coverageLine(0))
+		// GPU nodes exist but all cordoned — a distinct, accurate code, never a
+		// false "no-gpu-nodes" in the signed evidence.
+		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNoSchedulableGPUNodes))
 		return validators.Skip(fmt.Sprintf(
 			"all %d GPU node(s) are cordoned; nothing to verify", len(coverage.cordoned)))
 	}
 
 	// Check if any nodes are busy
+	// A probe error is treated as busy (fail-safe: don't run on a node we can't
+	// clear), but tracked separately from CONFIRMED occupancy so an all-errors
+	// skip is not signed as "nodes-busy".
 	var busyNodes []string
+	confirmedBusy := false
 	for _, node := range gpuNodes {
 		busy, busyErr := helper.IsNodeGpuBusy(ctx.Ctx, ctx.Clientset, node.Name)
 		if busyErr != nil {
@@ -147,11 +167,18 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 		}
 		if busy {
 			busyNodes = append(busyNodes, node.Name)
+			confirmedBusy = true
 		}
 	}
 
 	if len(busyNodes) > 0 {
 		printLines(coverage.coverageLine(0))
+		// Only sign nodes-busy when at least one node was CONFIRMED occupied; a
+		// skip driven solely by probe errors must not masquerade as occupancy in
+		// the signed evidence (the error is already logged above).
+		if confirmedBusy {
+			emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNodesBusy))
+		}
 		return validators.Skip(fmt.Sprintf("GPU nodes busy with existing workloads: %v", busyNodes))
 	}
 
@@ -181,6 +208,11 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 		validated++
 	}
 
+	// Emit the structured coverage disclosure (survives minimal redaction)
+	// alongside the human RESULT line, on BOTH the pass and fail paths, so a
+	// signed bundle records how many of the cluster's GPU nodes were verified.
+	emitExtraOrWarn(nvidiaSMICoverageExtra(validated, coverage.total))
+
 	if len(failedNodes) > 0 {
 		printLines(coverage.coverageLine(validated))
 		return errors.New(errors.ErrCodeInternal,
@@ -191,6 +223,31 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 	printLines(coverage.coverageLine(validated))
 	fmt.Printf("Successfully verified GPU on all %d schedulable node(s)\n", len(gpuNodes))
 	return nil
+}
+
+// nvidiaSMICoverageExtra builds the structured coverage disclosure: how many GPU
+// nodes passed verification (validated) out of the total present incl. cordoned
+// (from the same node snapshot). Unlike the RESULT stdout line it survives
+// minimal redaction. Values are counts only — never node names or IPs.
+func nvidiaSMICoverageExtra(validated, total int) map[string]string {
+	return map[string]string{
+		"nodesValidated": strconv.Itoa(validated),
+		"nodesTotal":     strconv.Itoa(total),
+	}
+}
+
+// nvidiaSMISkipExtra builds the structured skip disclosure carrying only the
+// low-cardinality reason enum code.
+func nvidiaSMISkipExtra(reason string) map[string]string {
+	return map[string]string{"skipReason": reason}
+}
+
+// emitExtraOrWarn emits structured extra evidence, logging (never failing) on
+// error — a failed stdout write must not flip the check's verdict.
+func emitExtraOrWarn(extra map[string]string) {
+	if err := validators.EmitExtra(extra); err != nil {
+		slog.Warn("failed to emit validator extra", "error", err)
+	}
 }
 
 func verifySingleGPUNode(ctx *validators.Context, nodeName string) error {

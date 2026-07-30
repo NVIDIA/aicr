@@ -17,6 +17,7 @@ package job
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -596,6 +597,111 @@ func TestHandleTimeoutSidecarOnlyNoValidator(t *testing.T) {
 	}
 	if !strings.Contains(result.TerminationMsg, "not found") {
 		t.Errorf("TerminationMsg = %q, want message containing 'not found'", result.TerminationMsg)
+	}
+}
+
+func TestParseExtraSentinels(t *testing.T) {
+	const p = ctrf.ExtraLinePrefix
+	tests := []struct {
+		name        string
+		logs        string
+		wantCleaned string
+		wantExtra   map[string]string
+	}{
+		{
+			name:        "no sentinel leaves logs intact and extra nil",
+			logs:        "Found 2 GPU node(s):\nAll OK",
+			wantCleaned: "Found 2 GPU node(s):\nAll OK",
+			wantExtra:   nil,
+		},
+		{
+			name:        "valid sentinel populates extra and is stripped",
+			logs:        "Found 2 GPU node(s):\n" + p + `{"nodesValidated":"1","nodesTotal":"2"}` + "\nSuccessfully verified",
+			wantCleaned: "Found 2 GPU node(s):\nSuccessfully verified",
+			wantExtra:   map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
+		},
+		{
+			name:        "malformed sentinel drops extra but is still stripped",
+			logs:        "line before\n" + p + `{"nodesValidated":` + "\nline after",
+			wantCleaned: "line before\nline after",
+			wantExtra:   nil,
+		},
+		{
+			name:        "multiple sentinels: last wins",
+			logs:        p + `{"skipReason":"stale"}` + "\nwork\n" + p + `{"skipReason":"nodes-busy"}`,
+			wantCleaned: "work",
+			wantExtra:   map[string]string{"skipReason": "nodes-busy"},
+		},
+		{
+			name:        "valid then malformed: last valid payload is kept",
+			logs:        p + `{"nodesValidated":"1","nodesTotal":"2"}` + "\nwork\n" + p + `{"nodesValidated":`,
+			wantCleaned: "work",
+			wantExtra:   map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
+		},
+		{
+			name:        "empty-object sentinel yields nil extra",
+			logs:        "work\n" + p + `{}`,
+			wantCleaned: "work",
+			wantExtra:   nil,
+		},
+		{
+			// Prefix mid-line (not line-initial) is human stdout, never parsed.
+			name:        "prefix mid-line is kept, not stripped",
+			logs:        "note: " + p + "appears mid-line\nreal",
+			wantCleaned: "note: " + p + "appears mid-line\nreal",
+			wantExtra:   nil,
+		},
+		{
+			// The prefix requires its trailing space: a line-initial "##AICR-EXTRA##"
+			// without the space is not a sentinel and stays in stdout.
+			name:        "prefix without trailing space is not a sentinel",
+			logs:        p + `{"skipReason":"nodes-busy"}` + "\n" + `##AICR-EXTRA##nospace`,
+			wantCleaned: `##AICR-EXTRA##nospace`,
+			wantExtra:   map[string]string{"skipReason": "nodes-busy"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleaned, extra := parseExtraSentinels(tt.logs)
+			if cleaned != tt.wantCleaned {
+				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
+			}
+			if len(extra) != len(tt.wantExtra) {
+				t.Fatalf("extra = %v, want %v", extra, tt.wantExtra)
+			}
+			for k, v := range tt.wantExtra {
+				if extra[k] != v {
+					t.Errorf("extra[%q] = %q, want %q", k, extra[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestProcessValidatorLogs(t *testing.T) {
+	const p = ctrf.ExtraLinePrefix
+	// Emit the sentinel AFTER more than ValidatorMaxStdoutLines of output: the
+	// invariant is that Extra is parsed from the full logs before truncation, so
+	// a parse-after-truncate regression would silently drop this evidence.
+	var b strings.Builder
+	for i := 0; i < defaults.ValidatorMaxStdoutLines+100; i++ {
+		fmt.Fprintf(&b, "log line %d\n", i)
+	}
+	b.WriteString(p + `{"nodesValidated":"1","nodesTotal":"2"}`)
+
+	extra, stdout := processValidatorLogs(b.String())
+
+	if extra["nodesValidated"] != "1" || extra["nodesTotal"] != "2" {
+		t.Fatalf("late sentinel beyond truncation window was lost: extra=%v", extra)
+	}
+	if len(stdout) > defaults.ValidatorMaxStdoutLines {
+		t.Errorf("stdout not truncated: %d lines > max %d", len(stdout), defaults.ValidatorMaxStdoutLines)
+	}
+	for _, line := range stdout {
+		if strings.Contains(line, p) {
+			t.Errorf("sentinel transport line leaked into stdout: %q", line)
+		}
 	}
 }
 

@@ -33,7 +33,19 @@
 //     service config are dropped.
 //   - CTRF: per-test Stdout and Message (free-form log text that can leak IPs,
 //     DNS names, secret/cert names, internal URLs) are omitted; the pass/fail
-//     signal (name, status, duration, suite, summary counts) is preserved.
+//     signal (name, status, duration, suite, summary counts) is preserved. The
+//     structured per-test Extra map is rebuilt against a fail-closed key AND
+//     value allowlist (ctrfExtraAllowlist): only enumerated low-cardinality
+//     keys survive, and each surviving value must additionally pass its key's
+//     validator (non-negative decimal count, or a closed set of known skip
+//     codes) — so an identifier smuggled under an allowed key (e.g. an IP in
+//     nodesTotal, a hostname or unminted code in skipReason) is dropped, not
+//     published. This is
+//     the publication boundary: emission-side validation alone is bypassable
+//     via raw prefixed stdout. A signed bundle can still distinguish a
+//     1-of-2-node pass from 2-of-2 and preserve a skip reason without shipping
+//     free-form log text. An Extra map that retains nothing is dropped rather
+//     than shipped as an empty object.
 //
 // Both functions are pure and non-mutating: they build fresh structures and
 // never alter their inputs, so the full (unredacted) artifacts remain
@@ -42,6 +54,9 @@
 package redact
 
 import (
+	"regexp"
+	"strconv"
+
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -54,7 +69,11 @@ const (
 
 	// PolicyVersion is the allowlist/scrub-rule version. Bump on any change
 	// to what survives redaction so verifiers can tell which rules ran.
-	PolicyVersion = "v1"
+	//
+	// v2 added the per-test CTRF Extra allowlist (ctrfExtraAllowlist):
+	// allowlisted structured keys whose values match the key's canonical shape
+	// (count / enum code) now survive minimal redaction.
+	PolicyVersion = "v2"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -145,8 +164,59 @@ var snapshotAppliedRules = []string{
 	"snapshot.measurements.allowlist",
 }
 
+// ctrfExtraValidator reports whether v is a safe published value for its key.
+// It is the value half of the fail-closed contract: an allowlisted key alone is
+// not enough — the value must also match the key's canonical shape, so a value
+// that structurally looks like an identifier (IP, hostname, FQDN, free text)
+// never survives under an allowed key.
+type ctrfExtraValidator func(v string) bool
+
+// maxCountDigits bounds a published count value. Five digits (up to 99,999)
+// comfortably covers realistic node/GPU counts while keeping the attacker-
+// chosen numeric channel narrow — the premise is that only LOW-cardinality
+// counts cross the publication boundary, and EmitExtra itself does no value
+// validation, so this allowlist regex is the defense.
+const maxCountDigits = 5
+
+// ctrfCountValue matches a bare non-negative decimal count — no sign, dot, or
+// separator — so an IP or instance id smuggled into a count key (e.g.
+// "10.0.0.5") fails closed. The digit bound (maxCountDigits) caps the value.
+var ctrfCountValue = regexp.MustCompile(`^[0-9]{1,` + strconv.Itoa(maxCountDigits) + `}$`)
+
+func isCountValue(v string) bool { return ctrfCountValue.MatchString(v) }
+
+// ctrfSkipReasons is the CLOSED set of skipReason codes safe to publish. A
+// regex on kebab-case shape is not enough — it would still pass an arbitrary
+// low-cardinality identifier like "customer-prod-cluster". Only codes minted by
+// a check (see validators/deployment/nvidia_smi.go's skipReason* constants) are
+// listed; any other value, including a well-formed but unlisted code, is dropped
+// fail-closed. A new skip code must be added here in the same change that emits
+// it — same discipline as the key allowlist.
+var ctrfSkipReasons = map[string]struct{}{
+	"no-gpu-nodes":             {}, // cluster has no GPU nodes at all
+	"no-schedulable-gpu-nodes": {}, // GPU nodes exist but all cordoned/unschedulable
+	"nodes-busy":               {}, // schedulable GPU nodes exist but are busy with workloads
+}
+
+func isSkipReason(v string) bool { _, ok := ctrfSkipReasons[v]; return ok }
+
+// ctrfExtraAllowlist is the fail-closed set of TestResult.Extra keys safe to
+// publish in a minimal (default) evidence bundle, each paired with the
+// validator its value must pass. Every key carries only low-cardinality counts
+// or a closed-set enum code — never node names, IPs, or other operator-
+// identifying text — because unlike Stdout/Message these values are NOT stripped
+// by default. A key a future check adds is dropped until listed here; a value
+// that fails its validator is dropped even under an allowed key. Keep the map
+// keys mirrored in the ctrf godoc and docs/contributor/validator.md.
+var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
+	"nodesValidated": isCountValue, // count of nodes a coverage check actually verified
+	"nodesTotal":     isCountValue, // count of candidate nodes (validated + skipped/cordoned)
+	"skipReason":     isSkipReason, // closed-set code for why a check skipped
+}
+
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.
 var ctrfAppliedRules = []string{
+	"ctrf.tests.extra.allowlist",
 	"ctrf.tests.omit:message",
 	"ctrf.tests.omit:stdout",
 }
@@ -240,8 +310,9 @@ func redactHeader(h header.Header) header.Header {
 }
 
 // CTRF returns a redacted deep copy of in with per-test Stdout and Message
-// omitted, and the sorted list of applied rule identifiers. It never mutates
-// in. Returns (nil, nil) when in is nil.
+// omitted and each per-test Extra map rebuilt against ctrfExtraAllowlist, plus
+// the sorted list of applied rule identifiers. It never mutates in. Returns
+// (nil, nil) when in is nil.
 func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 	if in == nil {
 		return nil, nil
@@ -257,10 +328,34 @@ func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 		for i, tr := range in.Results.Tests {
 			tr.Stdout = nil
 			tr.Message = ""
+			tr.Extra = allowlistExtra(tr.Extra)
 			tests[i] = tr
 		}
 		out.Results.Tests = tests
 	}
 
 	return &out, append([]string(nil), ctrfAppliedRules...)
+}
+
+// allowlistExtra returns a fresh map containing only the ctrfExtraAllowlist
+// entries of in whose value also passes the key's validator — every other key
+// (including any a future check adds) and every ill-shaped value (an identifier
+// smuggled under an allowed key) is dropped fail-closed. Returns nil when in is
+// empty or nothing survives, so no empty `extra: {}` ships. It never mutates in.
+func allowlistExtra(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	var out map[string]string
+	for k, v := range in {
+		validate, ok := ctrfExtraAllowlist[k]
+		if !ok || !validate(v) {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string, len(ctrfExtraAllowlist))
+		}
+		out[k] = v
+	}
+	return out
 }
