@@ -16,6 +16,7 @@ package validators
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,42 @@ func TestSkipIsNotGenericError(t *testing.T) {
 	plain := errors.New("some other error")
 	if errors.Is(plain, errSkip) {
 		t.Error("plain error should not match errSkip")
+	}
+}
+
+// TestIsSkip proves IsSkip gives external packages (and their tests) a
+// robust, non-string-matching way to classify a Skip() error, including
+// through a real wrap chain (fmt.Errorf %w) — not just a direct Skip() call.
+func TestIsSkip(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil error", err: nil, want: false},
+		{name: "direct Skip", err: Skip("no GPU nodes found"), want: true},
+		{
+			name: "Skip wrapped in a real error chain",
+			err:  fmt.Errorf("outer: %w", Skip("inner reason")),
+			want: true,
+		},
+		{
+			// A plain error whose message happens to mention "skip" text
+			// (as opposed to actually wrapping errSkip) must not match —
+			// this is exactly the false-positive isSkipError-by-string-
+			// matching would risk.
+			name: "plain error merely mentioning skip text",
+			err:  errors.New("outer: " + Skip("inner reason").Error()),
+			want: false,
+		},
+		{name: "plain non-skip error", err: errors.New("some other error"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSkip(tt.err); got != tt.want {
+				t.Errorf("IsSkip(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 

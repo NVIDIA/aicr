@@ -40,7 +40,7 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `operator-health` | Verify GPU operator pods are running and healthy | 2m |
 | `expected-resources` | Verify expected Kubernetes resources exist and are healthy (runs ExpectedResources + Chainsaw assert paths side-by-side) | 8m |
 | `gpu-operator-version` | Validate GPU Operator version against recipe constraints | 2m |
-| `check-nvidia-smi` | Verify nvidia-smi works on all GPU nodes | 10m |
+| `check-nvidia-smi` | Verify nvidia-smi works on all schedulable GPU nodes (cordoned nodes are disclosed, not silently skipped) | 10m |
 
 ### Performance Phase
 

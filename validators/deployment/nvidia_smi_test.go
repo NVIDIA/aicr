@@ -15,10 +15,15 @@
 package main
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func TestVerifyNvidiaSMILogs(t *testing.T) {
@@ -107,5 +112,160 @@ func TestVerifyNvidiaSMILogs(t *testing.T) {
 				t.Fatalf("verifyNvidiaSMILogs() error = %q, want %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestCheckNvidiaSMI_SkipScenarios covers the enumeration/disclosure paths
+// that return before any pod is scheduled: no GPU nodes at all must give a
+// different, more generic skip reason than every GPU node being cordoned
+// (issue #1668 — a cordon narrows scope, it must never look identical to
+// "nothing to check"), and non-GPU nodes must never count toward either the
+// schedulable or cordoned tally.
+func TestCheckNvidiaSMI_SkipScenarios(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		nodes       []runtime.Object
+		wantErrSubs []string
+	}{
+		{
+			name:        "no GPU nodes at all",
+			nodes:       []runtime.Object{},
+			wantErrSubs: []string{"no GPU nodes found in the cluster"},
+		},
+		{
+			name: "all GPU nodes cordoned",
+			nodes: []runtime.Object{
+				cordon(gpuNode("cordoned-1", 8, -1)),
+				cordon(gpuNode("cordoned-2", 8, -1)),
+			},
+			wantErrSubs: []string{"all 2 GPU node(s) are cordoned"},
+		},
+		{
+			name: "cordoned GPU node plus unrelated non-GPU node",
+			nodes: []runtime.Object{
+				cordon(gpuNode("cordoned-1", 8, -1)),
+				gpuNode("non-gpu-1", -1, -1),
+			},
+			wantErrSubs: []string{"all 1 GPU node(s) are cordoned"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t, tt.nodes, nil, nil)
+
+			err := checkNvidiaSMI(ctx)
+			if !validators.IsSkip(err) {
+				t.Fatalf("checkNvidiaSMI() error = %v, want a skip", err)
+			}
+			for _, sub := range tt.wantErrSubs {
+				if !strings.Contains(err.Error(), sub) {
+					t.Errorf("checkNvidiaSMI() error = %v, want it to contain %q", err, sub)
+				}
+			}
+		})
+	}
+}
+
+// TestGpuNodeCoverage_MixedCordonedAndSchedulable exercises the headline
+// behavior of this change directly: a cluster with both a schedulable and a
+// cordoned GPU node must list the schedulable node plainly, mark the
+// cordoned node "skipped (cordoned)" rather than omitting it, and report a
+// nodesValidated coverage line reflecting the actual validated count. This is
+// a pure function of the partition (no fake clientset or pod lifecycle
+// needed), factored out of checkNvidiaSMI specifically so this scenario is
+// testable without simulating a full pod-watch/log round trip.
+func TestGpuNodeCoverage_MixedCordonedAndSchedulable(t *testing.T) {
+	t.Parallel()
+
+	allNodes := []helper.GpuNode{
+		{Node: v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "schedulable-1"}}, Cordoned: false},
+		{Node: v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "cordoned-1"}}, Cordoned: true},
+	}
+
+	coverage, err := partitionGpuNodes(context.Background(), allNodes)
+	if err != nil {
+		t.Fatalf("partitionGpuNodes() error = %v", err)
+	}
+
+	wantEnumeration := []string{
+		"Found 2 GPU node(s), 1 schedulable, 1 cordoned:",
+		"  schedulable-1",
+		"  cordoned-1: skipped (cordoned)",
+	}
+	gotEnumeration := coverage.enumerationLines()
+	if len(gotEnumeration) != len(wantEnumeration) {
+		t.Fatalf("enumerationLines() = %v, want %v", gotEnumeration, wantEnumeration)
+	}
+	for i, want := range wantEnumeration {
+		if gotEnumeration[i] != want {
+			t.Errorf("enumerationLines()[%d] = %q, want %q", i, gotEnumeration[i], want)
+		}
+	}
+
+	if got, want := coverage.coverageLine(1), "RESULT: nodesValidated: 1/2 (1 cordoned, skipped)"; got != want {
+		t.Errorf("coverageLine(1) = %q, want %q", got, want)
+	}
+	// The busy/all-cordoned/failed-before-completion exit paths report 0
+	// validated even though a schedulable node exists — validated tracks
+	// nodes actually confirmed, not nodes attempted.
+	if got, want := coverage.coverageLine(0), "RESULT: nodesValidated: 0/2 (1 cordoned, skipped)"; got != want {
+		t.Errorf("coverageLine(0) = %q, want %q", got, want)
+	}
+}
+
+// TestGpuNodeCoverage_EdgeCasePhrasing proves the two zero-count phrasing
+// nits: an empty cluster gets a plain "Found 0 GPU node(s)." instead of a
+// header with a trailing colon over an empty list, and a coverage line with
+// no cordoned nodes omits the "(0 cordoned, skipped)" parenthetical instead
+// of stating a count of zero as if it were informative.
+func TestGpuNodeCoverage_EdgeCasePhrasing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero total nodes", func(t *testing.T) {
+		t.Parallel()
+		coverage, err := partitionGpuNodes(context.Background(), nil)
+		if err != nil {
+			t.Fatalf("partitionGpuNodes() error = %v", err)
+		}
+		if got, want := coverage.enumerationLines(), []string{"Found 0 GPU node(s)."}; len(got) != 1 || got[0] != want[0] {
+			t.Errorf("enumerationLines() = %v, want %v", got, want)
+		}
+		if got, want := coverage.coverageLine(0), "RESULT: nodesValidated: 0/0"; got != want {
+			t.Errorf("coverageLine(0) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nodes present but none cordoned", func(t *testing.T) {
+		t.Parallel()
+		coverage, err := partitionGpuNodes(context.Background(), []helper.GpuNode{
+			{Node: v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "schedulable-1"}}, Cordoned: false},
+		})
+		if err != nil {
+			t.Fatalf("partitionGpuNodes() error = %v", err)
+		}
+		if got, want := coverage.coverageLine(1), "RESULT: nodesValidated: 1/1"; got != want {
+			t.Errorf("coverageLine(1) = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestPartitionGpuNodes_ContextCanceled proves the partition loop honors
+// cancellation instead of silently finishing over an already-fetched slice.
+func TestPartitionGpuNodes_ContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := partitionGpuNodes(ctx, []helper.GpuNode{
+		{Node: v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1"}}},
+	})
+	if !strings.Contains(err.Error(), "canceled while partitioning GPU nodes") {
+		t.Errorf("partitionGpuNodes() error = %v, want cancellation error", err)
 	}
 }
