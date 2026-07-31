@@ -218,6 +218,42 @@ func TestGpuNodeCoverage_MixedCordonedAndSchedulable(t *testing.T) {
 	}
 }
 
+// TestGpuNodeCoverage_EdgeCasePhrasing proves the two zero-count phrasing
+// nits: an empty cluster gets a plain "Found 0 GPU node(s)." instead of a
+// header with a trailing colon over an empty list, and a coverage line with
+// no cordoned nodes omits the "(0 cordoned, skipped)" parenthetical instead
+// of stating a count of zero as if it were informative.
+func TestGpuNodeCoverage_EdgeCasePhrasing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero total nodes", func(t *testing.T) {
+		t.Parallel()
+		coverage, err := partitionGpuNodes(context.Background(), nil)
+		if err != nil {
+			t.Fatalf("partitionGpuNodes() error = %v", err)
+		}
+		if got, want := coverage.enumerationLines(), []string{"Found 0 GPU node(s)."}; len(got) != 1 || got[0] != want[0] {
+			t.Errorf("enumerationLines() = %v, want %v", got, want)
+		}
+		if got, want := coverage.coverageLine(0), "RESULT: nodesValidated: 0/0"; got != want {
+			t.Errorf("coverageLine(0) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nodes present but none cordoned", func(t *testing.T) {
+		t.Parallel()
+		coverage, err := partitionGpuNodes(context.Background(), []helper.GpuNode{
+			{Node: v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "schedulable-1"}}, Cordoned: false},
+		})
+		if err != nil {
+			t.Fatalf("partitionGpuNodes() error = %v", err)
+		}
+		if got, want := coverage.coverageLine(1), "RESULT: nodesValidated: 1/1"; got != want {
+			t.Errorf("coverageLine(1) = %q, want %q", got, want)
+		}
+	})
+}
+
 // TestPartitionGpuNodes_ContextCanceled proves the partition loop honors
 // cancellation instead of silently finishing over an already-fetched slice.
 func TestPartitionGpuNodes_ContextCanceled(t *testing.T) {

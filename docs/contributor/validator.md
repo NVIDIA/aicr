@@ -423,9 +423,13 @@ tagged with its cordon state, and:
    unschedulable.
 2. Report cordoned nodes explicitly in the check's stdout evidence
    (`<node>: skipped (cordoned)`), never omit them from the node count.
-3. Print a coverage line (`RESULT: nodesValidated: <schedulable>/<total>`)
+3. Print a coverage line (`RESULT: nodesValidated: <validated>/<total>`)
    on every exit path (skip, failure, and success), not only the
    success path, so a pass *or* a failure on reduced scope is visible.
+   `<validated>` is the count actually confirmed working, not the
+   schedulable count: it is `0` on the all-cordoned and busy-skip
+   paths (nothing was attempted yet) and the successful-node count on
+   the failure path (a partial pass is not conflated with a full one).
    The `RESULT:` prefix is `pkg/validator/validator.go`'s
    `resultSummaryPrefix` convention: the validator runtime echoes the
    trailing text of any such stdout line into live CLI output via

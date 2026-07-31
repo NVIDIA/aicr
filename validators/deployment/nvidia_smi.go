@@ -70,6 +70,9 @@ func partitionGpuNodes(ctx context.Context, allNodes []helper.GpuNode) (gpuNodeC
 // cordoned counts, each schedulable node by name, and each cordoned node
 // explicitly marked "skipped (cordoned)" rather than omitted from the count.
 func (c gpuNodeCoverage) enumerationLines() []string {
+	if c.total == 0 {
+		return []string{"Found 0 GPU node(s)."}
+	}
 	lines := make([]string, 0, 1+len(c.schedulable)+len(c.cordoned))
 	lines = append(lines, fmt.Sprintf("Found %d GPU node(s), %d schedulable, %d cordoned:",
 		c.total, len(c.schedulable), len(c.cordoned)))
@@ -90,6 +93,9 @@ func (c gpuNodeCoverage) enumerationLines() []string {
 // level, not just the CTRF report's Stdout array — without it this line is
 // only visible after the run, in the (possibly redacted) report.
 func (c gpuNodeCoverage) coverageLine(validated int) string {
+	if len(c.cordoned) == 0 {
+		return fmt.Sprintf("RESULT: nodesValidated: %d/%d", validated, c.total)
+	}
 	return fmt.Sprintf("RESULT: nodesValidated: %d/%d (%d cordoned, skipped)",
 		validated, c.total, len(c.cordoned))
 }
