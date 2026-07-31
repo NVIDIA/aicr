@@ -30,6 +30,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // fixtureBundleAttester returns fixed, non-nil bundle JSON from Attest so the
@@ -93,6 +95,237 @@ func resolveEmbeddedBundleBody(t *testing.T) []byte {
 		t.Fatalf("marshal recipe: %v", err)
 	}
 	return body
+}
+
+func profileBundleBody(t *testing.T) []byte {
+	t.Helper()
+	result := &recipe.RecipeResult{
+		APIVersion: recipe.RecipeProfileAPIVersion,
+		Kind:       recipe.RecipeResultKind,
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceAKS,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Intent:      recipe.CriteriaIntentTraining,
+		},
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:    "gpu-operator",
+			Version: "v25.3.3",
+			Type:    recipe.ComponentTypeHelm,
+			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Chart:   "gpu-operator",
+			Overrides: map[string]any{
+				"driver": map[string]any{"enabled": false},
+			},
+		}},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+	result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+		Name:  "gpuStack",
+		Value: "driver-installed",
+		OwnedPaths: map[string][]string{
+			"gpu-operator": {"driver.enabled", "enabled"},
+		},
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal profile recipe: %v", err)
+	}
+	return body
+}
+
+func TestDecodeBundleRecipeV2ContentType(t *testing.T) {
+	body := profileBundleBody(t)
+	tests := []struct {
+		name        string
+		contentType string
+		wantErr     string
+	}{
+		{
+			name:        "JSON parameter containing yaml remains JSON",
+			contentType: "application/json; note=yaml",
+		},
+		{
+			name:    "missing content type",
+			wantErr: "Content-Type is required",
+		},
+		{
+			name:        "unsupported content type",
+			contentType: "text/plain",
+			wantErr:     `unsupported Content-Type "text/plain"`,
+		},
+		{
+			name:        "undeclared application YAML alias",
+			contentType: "application/yaml",
+			wantErr:     `unsupported Content-Type "application/yaml"`,
+		},
+		{
+			name:        "undeclared text YAML alias",
+			contentType: "text/yaml",
+			wantErr:     `unsupported Content-Type "text/yaml"`,
+		},
+		{
+			name:        "vendor JSON is not declared",
+			contentType: "application/vnd.example+json",
+			wantErr:     `unsupported Content-Type "application/vnd.example+json"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decodeBundleRecipe(bytes.NewReader(body), tt.contentType, true)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("decodeBundleRecipe() error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("decodeBundleRecipe() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestProfileAwareBundleEndpoints(t *testing.T) {
+	h := newTestBundleHandler(t)
+	post := func(t *testing.T, v2 bool, query string, body []byte) *httptest.ResponseRecorder {
+		t.Helper()
+		path := "/v1/bundle"
+		if v2 {
+			path = "/v2/bundle"
+		}
+		path += query
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		if v2 {
+			h.HandleBundlesV2(w, req)
+		} else {
+			h.HandleBundles(w, req)
+		}
+		return w
+	}
+
+	t.Run("v1 rejects profile artifact", func(t *testing.T) {
+		w := post(t, false, "", profileBundleBody(t))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 accepts profile artifact", func(t *testing.T) {
+		w := post(t, true, "", profileBundleBody(t))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		if w.Header().Get("Content-Type") != "application/zip" {
+			t.Fatalf("Content-Type = %q, want application/zip", w.Header().Get("Content-Type"))
+		}
+	})
+
+	t.Run("v2 accepts legacy artifact", func(t *testing.T) {
+		w := post(t, true, "", resolveEmbeddedBundleBody(t))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 strictly rejects unknown artifact field", func(t *testing.T) {
+		body := profileBundleBody(t)
+		body = bytes.Replace(body, []byte(`"componentRefs"`), []byte(`"profie":true,"componentRefs"`), 1)
+		w := post(t, true, "", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 strictly rejects unknown excluded overlay field", func(t *testing.T) {
+		body := profileBundleBody(t)
+		body = bytes.Replace(
+			body,
+			[]byte(`"metadata":{`),
+			[]byte(`"metadata":{"excludedOverlays":[{"name":"overlay-a","reasn":"constraint-failed"}],`),
+			1,
+		)
+		w := post(t, true, "", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	invalidMetadataItems := []struct {
+		name        string
+		fixtureBody func(*testing.T) []byte
+		replacement string
+	}{
+		{
+			name:        "v2 rejects incomplete profile metadata item",
+			fixtureBody: profileBundleBody,
+			replacement: `"metadata":{"excludedOverlays":[{"reason":"constraint-failed"}],`,
+		},
+		{
+			name:        "v2 rejects null legacy excluded overlay",
+			fixtureBody: resolveEmbeddedBundleBody,
+			replacement: `"metadata":{"excludedOverlays":[null],`,
+		},
+	}
+	for _, tt := range invalidMetadataItems {
+		t.Run(tt.name, func(t *testing.T) {
+			body := bytes.Replace(
+				tt.fixtureBody(t),
+				[]byte(`"metadata":{`),
+				[]byte(tt.replacement),
+				1,
+			)
+			w := post(t, true, "", body)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	t.Run("v2 rejects profile version without selection", func(t *testing.T) {
+		var result recipe.RecipeResult
+		if err := json.Unmarshal(profileBundleBody(t), &result); err != nil {
+			t.Fatalf("decode fixture: %v", err)
+		}
+		result.Metadata.SelectedProfile = nil
+		body, err := json.Marshal(result)
+		if err != nil {
+			t.Fatalf("marshal fixture: %v", err)
+		}
+		w := post(t, true, "", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("v2 rejects unknown query parameter", func(t *testing.T) {
+		w := post(t, true, "?profie=gpuStack%3Ddriver-installed", profileBundleBody(t))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	for _, tt := range []struct {
+		name  string
+		query string
+	}{
+		{
+			name:  "v2 rejects set override of profile-owned path",
+			query: "?set=gpu-operator:driver.enabled=true",
+		},
+		{
+			name:  "v2 rejects dynamic override of profile-owned path",
+			query: "?dynamic=gpu-operator:driver.enabled",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := post(t, true, tt.query, profileBundleBody(t))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
 }
 
 // TestBundleHandler_Attest pins the ?attest=true signing seam: a configured
@@ -341,7 +574,7 @@ func TestBundleHandler_EmptyComponentRefs(t *testing.T) {
 	t.Parallel()
 	h := newTestBundleHandler(t)
 
-	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "Recipe", "componentRefs": []}`
+	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "RecipeResult", "componentRefs": []}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -359,7 +592,7 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 	t.Parallel()
 	h := newTestBundleHandler(t)
 
-	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "Recipe", "componentRefs": [` +
+	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "RecipeResult", "componentRefs": [` +
 		`{"name": "gpu-operator", "type": "Helm", "version": "v1", "tag": "v2"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -367,6 +600,130 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 	h.HandleBundles(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+// TestBundleHandler_LegacyRecipeHeaders pins the backward compatibility the
+// BundleRecipeRequest schema advertises: POST /v1/bundle accepts a recipe whose
+// header fields are absent, empty, or carry the legacy Recipe kind this
+// contract published through v0.18.0.
+//
+// The handler validates no header field, so without this test the promise is
+// enforced only by TestOpenAPIV1BundleRecipeContract parsing the spec against
+// itself — a later header check would break the documented contract while every
+// test stayed green. The canonical case is included deliberately as a control:
+// it proves a 200 here means the body was accepted, not that the assertion is
+// vacuous.
+func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
+	t.Parallel()
+
+	canonical := resolveEmbeddedBundleBody(t)
+
+	// Fail closed if the fixture ever stops being the canonical shape: a
+	// "legacy" case below must differ from the baseline to be meaningful.
+	var fixture map[string]any
+	if err := json.Unmarshal(canonical, &fixture); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	if got := fixture["kind"]; got != recipe.RecipeResultKind {
+		t.Fatalf("fixture kind = %v, want %q", got, recipe.RecipeResultKind)
+	}
+	if got := fixture["apiVersion"]; got != recipe.RecipeAPIVersion {
+		t.Fatalf("fixture apiVersion = %v, want %q", got, recipe.RecipeAPIVersion)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name:   "canonical headers (control)",
+			mutate: func(map[string]any) {},
+		},
+		{
+			name: "both headers absent",
+			mutate: func(body map[string]any) {
+				delete(body, "kind")
+				delete(body, "apiVersion")
+			},
+		},
+		{
+			name: "both headers empty-string",
+			mutate: func(body map[string]any) {
+				body["kind"] = ""
+				body["apiVersion"] = ""
+			},
+		},
+		// The schema constrains apiVersion and kind independently — neither is
+		// in a required[] and each admits its own empty value — and
+		// pkg/recipe/loader.go tolerates each one missing on its own ("empty
+		// kind allowed", "empty apiVersion allowed for backward compat" in
+		// loader_test.go). Mutating both together would leave a paired check
+		// ("either both canonical or both absent") passing every case above
+		// while it broke the single-field forms below.
+		{
+			name: "kind absent, apiVersion canonical",
+			mutate: func(body map[string]any) {
+				delete(body, "kind")
+			},
+		},
+		{
+			name: "apiVersion absent, kind canonical",
+			mutate: func(body map[string]any) {
+				delete(body, "apiVersion")
+			},
+		},
+		{
+			name: "kind empty, apiVersion canonical",
+			mutate: func(body map[string]any) {
+				body["kind"] = ""
+			},
+		},
+		{
+			name: "apiVersion empty, kind canonical",
+			mutate: func(body map[string]any) {
+				body["apiVersion"] = ""
+			},
+		},
+		{
+			name: "legacy Recipe kind with apiVersion absent",
+			mutate: func(body map[string]any) {
+				body["kind"] = string(header.KindRecipe)
+				delete(body, "apiVersion")
+			},
+		},
+		{
+			name: "legacy Recipe kind",
+			mutate: func(body map[string]any) {
+				body["kind"] = string(header.KindRecipe)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var body map[string]any
+			if err := json.Unmarshal(canonical, &body); err != nil {
+				t.Fatalf("unmarshal fixture: %v", err)
+			}
+			tt.mutate(body)
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal body: %v", err)
+			}
+
+			h := newTestBundleHandler(t)
+			req := httptest.NewRequest(http.MethodPost, "/v1/bundle", bytes.NewReader(encoded))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.HandleBundles(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+			}
+		})
 	}
 }
 

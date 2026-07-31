@@ -84,7 +84,7 @@ spec:
     repository: nvcr.io/nvidia/mellanox
     image: k8s-rdma-shared-dev-plugin
     # Tag follows network-operator release: network-operator-v<version>
-    version: network-operator-v26.1.0
+    version: network-operator-v26.4.1
     # Config propagates directly to the k8s-rdma-shared-dev-plugin.
     # resourceName hca_shared_devices_a matches the working cluster; pods
     # request rdma/hca_shared_devices_a. rdmaHcaMax 1000 allows up to 1000

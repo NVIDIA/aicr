@@ -16,9 +16,53 @@ package recipe
 
 import (
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 const testQueryService = "eks"
+
+func TestQueryRequestBodyFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		want        serializer.Format
+	}{
+		{
+			name:        "JSON",
+			contentType: "application/json",
+			want:        serializer.FormatJSON,
+		},
+		{
+			name:        "vendor JSON",
+			contentType: "application/vnd.aicr+json",
+			want:        serializer.FormatJSON,
+		},
+		{
+			name:        "empty defaults to YAML",
+			contentType: "",
+			want:        serializer.FormatYAML,
+		},
+		{
+			name:        "YAML",
+			contentType: "application/yaml",
+			want:        serializer.FormatYAML,
+		},
+		{
+			name:        "legacy matching is case sensitive",
+			contentType: "APPLICATION/JSON",
+			want:        serializer.FormatYAML,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := QueryRequestBodyFormat(tt.contentType); got != tt.want {
+				t.Fatalf("QueryRequestBodyFormat(%q) = %q, want %q", tt.contentType, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestSelect(t *testing.T) {
 	hydrated := map[string]any{

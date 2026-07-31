@@ -22,11 +22,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // readBoundedFile reads a file up to maxBytes. It returns ErrCodeInvalidRequest
@@ -48,23 +48,6 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 	return data, nil
 }
 
-// recipeFile is the minimal subset of recipe.yaml we need for coordinate
-// resolution. Field names match the on-disk YAML schema.
-type recipeFile struct {
-	Criteria struct {
-		Service     string `yaml:"service"`
-		Accelerator string `yaml:"accelerator"`
-		OS          string `yaml:"os"`
-		Intent      string `yaml:"intent"`
-		Platform    string `yaml:"platform"`
-	} `yaml:"criteria"`
-	// k8s constraint lives outside criteria in the recipe spec.
-	Constraints []struct {
-		Name  string `yaml:"name"`
-		Value string `yaml:"value"`
-	} `yaml:"constraints"`
-}
-
 // parseCriteria reads recipe.yaml from bundleDir and returns a
 // RecipeCriteria suitable for CoordinateFor.
 func parseCriteria(bundleDir string) (RecipeCriteria, error) {
@@ -78,20 +61,28 @@ func parseCriteria(bundleDir string) (RecipeCriteria, error) {
 		return RecipeCriteria{}, err // already structured (e.g. ErrCodeInvalidRequest for size limit)
 	}
 
-	var r recipeFile
-	if err := yaml.Unmarshal(data, &r); err != nil {
-		return RecipeCriteria{}, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"failed to parse recipe.yaml", err)
+	r, err := recipe.DecodeRecipeResult(data, serializer.FormatYAML)
+	if err != nil {
+		return RecipeCriteria{}, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"failed to parse recipe.yaml")
+	}
+	if r.Criteria == nil {
+		return RecipeCriteria{}, errors.New(errors.ErrCodeInvalidRequest,
+			"recipe.yaml has no criteria")
+	}
+	if r.Metadata.SelectedProfile != nil {
+		return RecipeCriteria{}, errors.New(errors.ErrCodeInvalidRequest,
+			"profile-bearing TestGrid publication is deferred to the profile adoption rollout")
 	}
 
 	// Normalize: trim whitespace and lowercase so "EKS" and " eks " both
 	// map to the same GCS group path as the config-gen taxonomy expects.
 	c := r.Criteria
-	service := strings.ToLower(strings.TrimSpace(c.Service))
-	accelerator := strings.ToLower(strings.TrimSpace(c.Accelerator))
-	os_ := strings.ToLower(strings.TrimSpace(c.OS))
-	intent := strings.ToLower(strings.TrimSpace(c.Intent))
-	platform := strings.ToLower(strings.TrimSpace(c.Platform))
+	service := strings.ToLower(strings.TrimSpace(string(c.Service)))
+	accelerator := strings.ToLower(strings.TrimSpace(string(c.Accelerator)))
+	os_ := strings.ToLower(strings.TrimSpace(string(c.OS)))
+	intent := strings.ToLower(strings.TrimSpace(string(c.Intent)))
+	platform := strings.ToLower(strings.TrimSpace(string(c.Platform)))
 
 	if service == "" || accelerator == "" || os_ == "" || intent == "" {
 		return RecipeCriteria{}, errors.New(errors.ErrCodeInvalidRequest,

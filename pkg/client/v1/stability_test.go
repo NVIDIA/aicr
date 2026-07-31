@@ -55,7 +55,8 @@ func TestStability_Client(t *testing.T) {
 func TestStability_RecipeResolution(t *testing.T) {
 	t.Parallel()
 
-	_ = aicr.RecipeRequest{}
+	var req aicr.RecipeRequest
+	_ = req.Profile
 
 	_ = func(c *aicr.Client, ctx context.Context, req aicr.RecipeRequest) (*aicr.RecipeResult, error) {
 		return c.ResolveRecipe(ctx, req)
@@ -63,8 +64,21 @@ func TestStability_RecipeResolution(t *testing.T) {
 	_ = func(c *aicr.Client, ctx context.Context, cr *aicr.Criteria) (*aicr.RecipeResult, error) {
 		return c.ResolveRecipeFromCriteria(ctx, cr)
 	}
+	_ = func(c *aicr.Client, ctx context.Context, cr *aicr.Criteria, profile string) (*aicr.RecipeResult, error) {
+		return c.ResolveRecipeFromCriteriaWithProfile(ctx, cr, profile)
+	}
 	_ = func(c *aicr.Client, ctx context.Context, cr *aicr.Criteria, s *aicr.Snapshot) (*aicr.RecipeResult, error) {
 		return c.ResolveRecipeFromSnapshot(ctx, cr, s)
+	}
+	_ = func(
+		c *aicr.Client,
+		ctx context.Context,
+		cr *aicr.Criteria,
+		s *aicr.Snapshot,
+		profile string,
+	) (*aicr.RecipeResult, error) {
+
+		return c.ResolveRecipeFromSnapshotWithProfile(ctx, cr, s, profile)
 	}
 	_ = func(c *aicr.Client, ctx context.Context, path, kubeconfig string) (*aicr.RecipeResult, error) {
 		return c.LoadRecipe(ctx, path, kubeconfig)
@@ -83,7 +97,31 @@ func TestStability_RecipeResult(t *testing.T) {
 	_ = r.Name
 	_ = r.Version
 	_ = r.Components
+	_ = r.SelectedProfile
 	_ = r.Resolved()
+}
+
+// TestStability_Profile pins the profile resolution and catalog projections.
+func TestStability_Profile(t *testing.T) {
+	t.Parallel()
+
+	var selected aicr.SelectedProfile
+	_ = selected.Name
+	_ = selected.Value
+	_ = selected.Advertiser
+	_ = selected.OwnedPaths
+
+	var summary aicr.ProfileSummary
+	_ = summary.Name
+	_ = summary.Description
+	_ = summary.Default
+	_ = summary.Values
+
+	var entry aicr.CatalogEntry
+	_ = entry.Profile
+	_ = func(c *aicr.Client, ctx context.Context, filter *aicr.Criteria) ([]aicr.CatalogEntry, error) {
+		return c.ListCatalog(ctx, filter)
+	}
 }
 
 // TestStability_Bundle pins the bundle surface: options shape, MakeBundle /

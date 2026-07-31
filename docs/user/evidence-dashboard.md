@@ -44,24 +44,48 @@ The dashboard shares its first four CSP-first addressing levels with the
 | **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-ready` |
 | **Source column** | one signer | one allowlisted party (or a verified-but-unknown reported signer) |
 
-From the catalog overview you navigate: pick a group → pick a dashboard → pick
-a tab to reach the **consensus grid** for that recipe. Every cell in the grid
-shows the row's consensus state alongside a **source dot-strip** — one
-dot per signer, coloured by source class (see [Source classes](#source-classes)
-below). Clicking a dot opens the **per-source drilldown**: that signer's
-build-by-build history for the recipe, with a link to the signed evidence
-artifact for each build.
+The overview defaults to service cards. Switch **Overview layout** to
+**all recipes** to scan every matching recipe in one page-scrolling grid. That
+grid keeps full recipe names, uses filled status cells for overall and
+per-phase state, and keeps its column headers visible while the page scrolls.
+As recipe selectors are applied, the grid regroups from services to
+accelerator/OS sections and fades the already-selected portions of each recipe
+name so the remaining distinctions stand out.
 
-The facet controls (aicr-version, k8s) let you scope the view. The default is
-the **all-versions** view: each signer's single most recent run is folded into
-one consensus grid, version-blind. Selecting a specific `aicr` version switches
-to that version's **strict same-version consensus** — only runs from the same
-release corroborate one another (cross-version agreement is not reproduction),
-scoped latest-per-signer at that version. In both views a signer's older builds
-never dilute its latest, and the strict view additionally refuses to let a
-different `aicr` release corroborate a current one. (Kubernetes minor is not a
-consensus dimension: the k8s facet only dims mismatched columns for display —
-see [Facets](#facets) — it never removes them from consensus.)
+You can navigate through either overview, the collapsible dashboard list, or
+the recipe selectors: pick a group → pick a dashboard → pick a tab to reach the
+**consensus grid** for that recipe. Group and dashboard headings link to their
+intermediate views, so reaching an accelerator/OS dashboard does not require
+opening a recipe and navigating back. The dashboard list is expanded by
+default and its panel-level control collapses or restores the full tree.
+
+In a recipe's consensus grid, the consensus column and every source result
+fill their cells with the corresponding state color for fast scanning. Phase
+headers can be collapsed, column headers stay visible while the grid scrolls,
+and source headers include a **history** affordance. Selecting a source header
+goes directly to that signer's build-by-build history for the recipe. Selecting
+an individual result cell opens that run's evidence details; from there,
+**open this source's run history** opens the same history focused on that test.
+Each build's details link to its signed evidence artifact.
+
+The control strip separates recipe selection from evidence filtering. The
+service, accelerator, OS, intent, and platform selectors choose or narrow a
+recipe destination. The `aicr`-version and Kubernetes filters scope the
+evidence within that destination. The default is the **all-versions** view:
+each signer's single most recent run is folded into one consensus grid,
+version-blind. Selecting a specific `aicr` version switches to that version's
+**strict same-version consensus** — only runs from the same release corroborate
+one another (cross-version agreement is not reproduction), scoped
+latest-per-signer at that version. In both views a signer's older builds never
+dilute its latest, and the strict view additionally refuses to let a different
+`aicr` release corroborate a current one. (Kubernetes minor is not a consensus
+dimension: its evidence filter only dims mismatched columns for display — see
+[Facets](#facets) — it never removes them from consensus.)
+
+On narrow screens the dashboard list becomes an off-canvas drawer, selectors
+use touch-sized controls, and wide evidence grids scroll horizontally without
+shrinking their cells. Opening cell details overlays the grid instead of
+resizing it.
 
 ### The coordinate and stable URLs
 
@@ -75,10 +99,12 @@ valid across Kubernetes upgrades and is safe to bookmark or link.
 
 The `#/` is a **client-side hash route**, not a server path: the dashboard is
 a single static `index.html` with no server-side routing, so navigation state
-lives entirely in the URL fragment (`#/<group>/<dashboard>/<tab>[/<signer>]`).
-The fragment is never sent to the server, so the same link resolves correctly
-on any static host — GitHub Pages included — with no rewrite rules needed. A
-path-based URL (without the `#/`) does **not** resolve.
+lives entirely in the URL fragment. Intermediate destinations are addressable
+as `#/<group>` and `#/<group>/<dashboard>`; recipe and source history routes
+extend that to `#/<group>/<dashboard>/<tab>[/<signer>]`. The fragment is never
+sent to the server, so the same link resolves correctly on any static host —
+GitHub Pages included — with no rewrite rules needed. A path-based URL (without
+the `#/`) does **not** resolve.
 
 ## Consensus model
 
@@ -170,10 +196,9 @@ per-run pointer to `main` (which would churn the repo nightly). Community and
 partner submissions land their pointer via PR, reviewed under `CODEOWNERS`.
 
 A verified signer that is **not** in the allowlist is admitted as a zero-weight
-**reported** dot: it appears on the dot-strip with a distinct visual indicator
-but is never counted toward `CONFIRMED`, `SINGLE`, `CONTESTED`, or `FAILING`.
-Its reported count is shown as metadata only. See
-[Sybil resistance](#sybil-resistance) below.
+**reported** source column: its header is labeled `not counted` and its results
+remain inspectable, but it is never counted toward `CONFIRMED`, `SINGLE`,
+`CONTESTED`, or `FAILING`. See [Sybil resistance](#sybil-resistance) below.
 
 ## What corroboration proves — and does not prove
 
@@ -212,9 +237,9 @@ Two controls work together:
 
 1. **Allowlisted signers only carry corroboration weight.** The allowlist
    (`recipes/evidence/allowlist.yaml`) entries are PR-reviewed under
-   `CODEOWNERS`. A new signer can appear on the dot-strip as a zero-weight
-   reported dot without an allowlist entry; only a maintainer-merged allowlist
-   edit promotes it to a weighted source.
+   `CODEOWNERS`. A new signer can appear as a zero-weight `not counted` source
+   column without an allowlist entry; only a maintainer-merged allowlist edit
+   promotes it to a weighted source.
 
 2. **Distinct-signer counting on canonical identity.** The dashboard keys the
    signer count on the verified `(issuer, identity)` pair, never the
@@ -226,27 +251,33 @@ The allowlist also enforces that entries do not overlap (one verified
 identity matches at most one entry) and that regex patterns are not
 over-broad (an unbounded wildcard org/repo segment is rejected at load
 time). A verified-but-unknown community signer can never promote a row to
-`CONFIRMED` by itself: it is a zero-weight reported dot.
+`CONFIRMED` by itself: it is a zero-weight reported source column.
 
 ## Facets
 
-Two facets let you slice the view:
+The control strip has two distinct jobs:
 
-- **aicr-version** — the `aicr` release that produced the run. This is a
-  whole-dashboard **consensus lens**, not a parallel dimming filter: consensus
-  is baked both as a cross-version all-versions grid and per version, and the
-  lens selects which one you see. The default (**all versions**) is the
-  cross-version grid — each signer's single latest run, version-blind; picking a
-  specific version switches every summary (grid, overview, catalog) to that
-  version's strict same-version consensus. In the per-source drilldown the lens
-  hard-**filters** columns to the selected version. Because UAT release cells
-  run several `aicr` releases per coordinate, the lens is already meaningful
-  today.
-- **k8s** (Kubernetes `major.minor`) — the cluster version observed in the run.
-  Unlike the version lens, k8s only **dims** non-matching build columns (in both
-  the matrix and the per-source drilldown) — it never removes them — so an old
-  Kubernetes minor is visually distinguished but never silently fused with a
-  current-version result.
+- **Select recipe** — service, accelerator, OS, intent, and platform identify
+  the recipe coordinate. Partial selections narrow and regroup the overview or
+  service catalog; a complete selection opens the matching recipe directly.
+- **Filter evidence** — `aicr` and Kubernetes versions change how the evidence
+  for the selected recipes is presented:
+
+  - **aicr version** — the `aicr` release that produced the run. This is a
+    whole-dashboard **consensus lens**, not a parallel dimming filter: consensus
+    is baked both as a cross-version all-versions grid and per version, and the
+    lens selects which one you see. The default (**all versions**) is the
+    cross-version grid — each signer's single latest run, version-blind;
+    picking a specific version switches every summary (grid, overview, catalog)
+    to that version's strict same-version consensus. In the per-source
+    drilldown the lens hard-**filters** columns to the selected version. Because
+    UAT release cells run several `aicr` releases per coordinate, the lens is
+    already meaningful today.
+  - **k8s version** (Kubernetes `major.minor`) — the cluster version observed in
+    the run. Unlike the version lens, k8s only **dims** non-matching build
+    columns (in both the matrix and the per-source drilldown) — it never removes
+    them — so an old Kubernetes minor is visually distinguished but never
+    silently fused with a current-version result.
 
 The two controls compose but are not symmetric: the `aicr` version lens chooses
 *which* consensus grid you are viewing (and filters drilldown columns), while

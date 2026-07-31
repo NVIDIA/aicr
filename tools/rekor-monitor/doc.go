@@ -39,7 +39,13 @@
 //
 // The work splits into three cohesive pieces:
 //   - checkpointStore (checkpoint.go) owns the cursor: restore it from the
-//     fetched artifact zip, read the last checkpoint, write the new one.
+//     fetched artifact zip, read the last checkpoint, write the new one. It also
+//     persists a scan-progress companion so a large identity-scan backlog is
+//     caught up in bounded slices across several runs (observe advances the
+//     signed checkpoint only once the scan reaches head) instead of re-scanning
+//     and timing out on the whole window every pass, plus a scan-trend companion
+//     so a catch-up that never converges (the log outpacing the scan) degrades
+//     loudly rather than reporting clean forever.
 //   - monitor (monitor.go) owns the resolved v2 shards and the watched identity,
 //     and exposes the two checks: checkConsistency and scanIdentity.
 //   - outcome (monitor.go) carries the result of one pass so run() can report it
@@ -51,9 +57,11 @@
 // workflow can distinguish a security signal from infrastructure noise: 0 clean,
 // 1 security (tamper = a failed consistency proof, or identity = an entry under
 // the release identity for a tag with no corresponding release), 3 operational
-// (transport/timeout/setup, retried a few times first), 2 a pre-run input error
-// (invalid arguments or an unreadable --known-tags-file). On a completed run
-// (exit 0/1/3) it prints a CLASSIFICATION=<value> line for the workflow to
+// (transport/timeout/setup, retried a few times first) or degraded (the identity
+// catch-up is not converging -- a completed but non-security failure, not
+// retried), 2 a pre-run input error (invalid arguments or an unreadable
+// --known-tags-file). On a completed run (exit 0/1/3) it prints a
+// CLASSIFICATION=<value> line for the workflow to
 // branch on; a pre-run input error (exit 2) returns before the run and prints
 // none. Identity matches for known release tags are suppressed via
 // --known-tags-file.

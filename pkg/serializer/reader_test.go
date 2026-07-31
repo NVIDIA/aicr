@@ -22,12 +22,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // Test data structures
@@ -192,6 +195,98 @@ func TestFromConfigMapPreservesKubeconfigErrorCode(t *testing.T) {
 		t.Context(),
 		"cm://default/test",
 		kubeconfig,
+	)
+	assertOutermostErrorCode(t, err, errors.ErrCodeInvalidRequest)
+}
+
+func TestReadFileBytesWithKubeconfigContext(t *testing.T) {
+	type input struct {
+		path       string
+		kubeconfig string
+	}
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T) input
+		wantData    []byte
+		wantFormat  Format
+		wantErrCode errors.ErrorCode
+	}{
+		{
+			name: "local file",
+			setup: func(t *testing.T) input {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "recipe.yaml")
+				if err := os.WriteFile(path, []byte("name: test\nvalue: 1\n"), 0o600); err != nil {
+					t.Fatalf("write input: %v", err)
+				}
+				return input{path: path}
+			},
+			wantData:   []byte("name: test\nvalue: 1\n"),
+			wantFormat: FormatYAML,
+		},
+		{
+			name: "missing local file",
+			setup: func(t *testing.T) input {
+				t.Helper()
+				return input{path: filepath.Join(t.TempDir(), "missing.json")}
+			},
+			wantErrCode: errors.ErrCodeNotFound,
+		},
+		{
+			name: "invalid ConfigMap URI",
+			setup: func(t *testing.T) input {
+				t.Helper()
+				return input{path: "cm://missing-name"}
+			},
+			wantErrCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "ConfigMap kubeconfig error",
+			setup: func(t *testing.T) input {
+				t.Helper()
+				return input{
+					path:       "cm://default/test",
+					kubeconfig: writeInvalidKubeconfig(t),
+				}
+			},
+			wantErrCode: errors.ErrCodeInvalidRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := tt.setup(t)
+			got, format, err := ReadFileBytesWithKubeconfigContext(
+				t.Context(), in.path, in.kubeconfig,
+			)
+			if tt.wantErrCode != "" {
+				assertOutermostErrorCode(t, err, tt.wantErrCode)
+				return
+			}
+			if err != nil {
+				t.Fatalf("ReadFileBytesWithKubeconfigContext() error = %v", err)
+			}
+			if !bytes.Equal(got, tt.wantData) {
+				t.Fatalf("data = %q, want %q", got, tt.wantData)
+			}
+			if format != tt.wantFormat {
+				t.Fatalf("format = %q, want %q", format, tt.wantFormat)
+			}
+		})
+	}
+}
+
+func TestFromFilePreservesDecodeErrorCode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "strict.yaml")
+	if err := os.WriteFile(path, []byte("name: test\nunknown: value\n"), 0o600); err != nil {
+		t.Fatalf("write strict input: %v", err)
+	}
+
+	_, err := FromFileWithKubeconfigContext[testConfig](
+		t.Context(),
+		path,
+		"",
+		WithStrict(),
 	)
 	assertOutermostErrorCode(t, err, errors.ErrCodeInvalidRequest)
 }
@@ -1127,8 +1222,8 @@ func TestFromFile_Errors(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for invalid JSON")
 		}
-		if !strings.Contains(err.Error(), "failed to deserialize") {
-			t.Errorf("Expected deserialization error, got: %v", err)
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("Expected ErrCodeInvalidRequest, got: %v", err)
 		}
 	})
 
@@ -1148,6 +1243,78 @@ func TestFromFile_Errors(t *testing.T) {
 			t.Fatal("Expected error for type mismatch")
 		}
 	})
+}
+
+func TestClassifyConfigMapGetError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		wantCode errors.ErrorCode
+	}{
+		{
+			name:     "deadline exceeded",
+			err:      context.DeadlineExceeded,
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name:     "wrapped cancellation",
+			err:      fmt.Errorf("ConfigMap get interrupted: %w", context.Canceled),
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name:     "Kubernetes timeout status",
+			err:      apierrors.NewTimeoutError("request timed out", 1),
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name: "Kubernetes server timeout status",
+			err: apierrors.NewServerTimeout(
+				schema.GroupResource{Resource: "configmaps"},
+				"get",
+				1,
+			),
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name: "not found",
+			err: apierrors.NewNotFound(
+				schema.GroupResource{Resource: "configmaps"},
+				"missing",
+			),
+			wantCode: errors.ErrCodeNotFound,
+		},
+		{
+			name:     "unauthorized",
+			err:      apierrors.NewUnauthorized("authentication required"),
+			wantCode: errors.ErrCodeUnauthorized,
+		},
+		{
+			name: "forbidden",
+			err: apierrors.NewForbidden(
+				schema.GroupResource{Resource: "configmaps"},
+				"snapshot",
+				stderrors.New("permission denied"),
+			),
+			wantCode: errors.ErrCodeUnauthorized,
+		},
+		{
+			name:     "API unavailable",
+			err:      stderrors.New("apiserver unavailable"),
+			wantCode: errors.ErrCodeUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := classifyConfigMapGetError("default", "snapshot", tt.err)
+			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				t.Errorf("classifyConfigMapGetError() error = %v, want code %s", err, tt.wantCode)
+			}
+		})
+	}
 }
 
 func TestReader_DeserializeTableFormat(t *testing.T) {
@@ -1398,6 +1565,84 @@ func TestFormatFromPath_EdgeCases(t *testing.T) {
 			result := FormatFromPath(tt.path)
 			if result != tt.expected {
 				t.Errorf("FormatFromPath(%q) = %v, want %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestReader_Strict(t *testing.T) {
+	tests := []struct {
+		name    string
+		format  Format
+		input   string
+		strict  bool
+		wantErr bool
+	}{
+		{
+			name:   "strict JSON",
+			format: FormatJSON,
+			input:  `{"name":"test","value":1}`,
+			strict: true,
+		},
+		{
+			name:    "strict JSON rejects unknown field",
+			format:  FormatJSON,
+			input:   `{"name":"test","value":1,"typo":true}`,
+			strict:  true,
+			wantErr: true,
+		},
+		{
+			name:    "strict JSON rejects trailing document",
+			format:  FormatJSON,
+			input:   `{"name":"test","value":1} {"name":"other","value":2}`,
+			strict:  true,
+			wantErr: true,
+		},
+		{
+			name:   "strict YAML",
+			format: FormatYAML,
+			input:  "name: test\nvalue: 1\n",
+			strict: true,
+		},
+		{
+			name:    "strict YAML rejects unknown field",
+			format:  FormatYAML,
+			input:   "name: test\nvalue: 1\ntypo: true\n",
+			strict:  true,
+			wantErr: true,
+		},
+		{
+			name:    "strict YAML rejects trailing document",
+			format:  FormatYAML,
+			input:   "name: test\nvalue: 1\n---\nname: other\nvalue: 2\n",
+			strict:  true,
+			wantErr: true,
+		},
+		{
+			name:   "legacy non-strict JSON remains additive",
+			format: FormatJSON,
+			input:  `{"name":"test","value":1,"future":true}`,
+		},
+		{
+			name:   "legacy non-strict JSON accepts trailing document",
+			format: FormatJSON,
+			input:  `{"name":"test","value":1} {"name":"other","value":2}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var opts []ReaderOption
+			if tt.strict {
+				opts = append(opts, WithStrict())
+			}
+			reader, err := NewReader(tt.format, strings.NewReader(tt.input), opts...)
+			if err != nil {
+				t.Fatalf("NewReader() error = %v", err)
+			}
+			var result testConfig
+			err = reader.Deserialize(&result)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Deserialize() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

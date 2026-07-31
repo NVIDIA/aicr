@@ -22,6 +22,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -139,6 +140,19 @@ func (c *Client) adoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 	c.mu.RUnlock()
 	defer c.inflight.Done()
 
+	// Profile-bearing artifacts hydrate their owned component values during
+	// adoption. Bound that provider-backed I/O even when an SDK caller passes
+	// context.Background; a tighter caller deadline remains authoritative.
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	// Validate the no-I/O profile contract before DeepCopy. In particular,
+	// canonical inline maps and slices must be acyclic because DeepCopy
+	// recursively copies those containers.
+	if err := rec.ValidateProfileContract(); err != nil {
+		return nil, err
+	}
+
 	// Deep-copy the caller-supplied recipe BEFORE binding the provider.
 	// BindDataProvider mutates the receiver's unexported provider field, and
 	// the input is caller-owned: a caller reusing one recipe.RecipeResult
@@ -158,7 +172,7 @@ func (c *Client) adoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 	// back-fills missing types from the registry first (this boundary does not
 	// run ApplyRegistryDefaults) so a type-less registry ref — valid before
 	// #1584 — still resolves rather than being rejected. See issue #1584.
-	if err := cp.PrepareAndValidate(); err != nil {
+	if err := cp.PrepareAndValidateWithContext(ctx); err != nil {
 		return nil, err
 	}
 

@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **34**
-- Unique images: **87**
+- Unique images: **96**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -45,11 +45,11 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
-| kai-scheduler | helm | kai-scheduler | v0.14.1 | 2 |
+| kai-scheduler | helm | kai-scheduler | v0.14.1 | 11 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.18.2 | 1 |
-| network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
+| network-operator | helm | nvidia/network-operator | 26.4.1 | 5 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
@@ -164,8 +164,17 @@ _No images extracted._
 
 ### kai-scheduler
 
+- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.14.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.14.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.14.1`
 
 ### kube-prometheus-stack
 
@@ -191,10 +200,10 @@ _No images extracted._
 ### network-operator
 
 - `docker.io/library/busybox:1.38.0@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d`
-- `nvcr.io/nvidia/cloud-native/network-operator:v26.1.1`
+- `nvcr.io/nvidia/cloud-native/network-operator:v26.4.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
-- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.1.0`
+- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1`
 
 ### network-operator-ocp
 

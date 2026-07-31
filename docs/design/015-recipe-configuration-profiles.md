@@ -2,7 +2,9 @@
 
 ## Status
 
-**Accepted** — 2026-07-21 (proposed 2026-07-14).
+**Accepted** — 2026-07-21 (proposed 2026-07-14). Amended
+2026-07-27 to stage the service-agnostic mechanism through an AKS-first,
+GKE-second rollout.
 
 Originated from an internal GKE device-plugin ownership discussion
 (2026-07-14) and
@@ -22,9 +24,10 @@ stack — the cloud service or the GPU Operator**:
   with `--gpu-driver none` (operator installs driver + toolkit) vs. the AKS
   **"Driver only"** install profile with driver and toolkit preinstalled
   (gpu-operator needs `driver.enabled=false`, `toolkit.enabled=false`,
-  `operator.runtimeClass=nvidia-container-runtime`, all three together —
-  mixing modes leaves containerd without a working `nvidia` runtime
-  handler). Fully AKS-managed GPU node pools (`--enable-managed-gpu=true`,
+  `operator.runtimeClass=nvidia-container-runtime`, and DRA needs
+  `nvidiaDriverRoot=/`, all four together — mixing modes leaves containerd
+  without a working `nvidia` runtime handler or DRA without the driver
+  userspace). Fully AKS-managed GPU node pools (`--enable-managed-gpu=true`,
   preview) additionally own the device plugin, DCGM exporter, and health
   tooling; that mode conflicts with the operands AICR deploys and stays
   **out of scope** here, as the AKS guide already states.
@@ -122,13 +125,17 @@ ownership record.
 A profile value's effect is a **recipe fragment reusing existing syntax**
 (`componentRefs[].overrides` and `constraints`) — exactly mixin-shaped,
 kept as a distinct profile fragment so existing component merge, registry
-defaulting, and dependency validation apply unchanged. The one
-profile-specific field not inherited from existing fragment syntax is
-`advertiser` (see the #1327 amendment below): a value that hands
-`nvidia.com/gpu` advertisement to a provider-managed plugin declares
-`advertiser: external`. It is optional and `external` is its only value —
-operator ownership is never declared, it is read from the effective
-values (`devicePlugin.enabled`) as today. Two consumers, same shape:
+defaulting, and dependency validation apply unchanged.
+
+The first roll-in accepts only those two fragment fields. The GKE adoption
+extends the closed fragment with `advertiser` (see the #1327 amendment
+below): a value that hands `nvidia.com/gpu` advertisement to a
+provider-managed plugin declares `advertiser: external`. The core wire type
+reserves that field, but its validator rejects it until the GKE extension
+lands. This stages the policy-specific machinery without making the ADR or
+the profile mechanism AKS-specific.
+
+Two consumers, same shape:
 
 ```yaml
 # recipes/overlays/aks.yaml — driver/toolkit ownership (unmanaged pools only;
@@ -137,7 +144,7 @@ spec:
   profile:
     name: gpuStack
     description: Who installs the GPU driver and container toolkit.
-    default: operator
+    default: driver-only
     values:
       operator:            # node pools created with --gpu-driver none
         componentRefs:
@@ -145,8 +152,11 @@ spec:
             overrides:
               driver:  {enabled: true}
               toolkit: {enabled: true}
-              operator: {runtimeClass: null}   # authored absence — union
-                                               # totality, see below
+              operator: {runtimeClass: nvidia}
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /run/nvidia/driver
+        # PR 2 adds the symmetric gpuProfile.driver=None constraint.
       driver-only:         # AKS "Driver only" install profile:
                            # driver + toolkit preinstalled on the node
         componentRefs:
@@ -155,33 +165,40 @@ spec:
               driver:  {enabled: false}
               toolkit: {enabled: false}
               operator: {runtimeClass: nvidia-container-runtime}
-        # constraints: TBD — see note below; no snapshot signal exists yet.
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /
+        # PR 2 adds the symmetric gpuProfile.driver=Install constraint.
 ```
 
-The `driver-only` value deliberately shows no constraint: AICR's GPU
-collector is driver-free by design, and the only driver signal it
-captures is a
-`GPU.hardware.driver-loaded` boolean (`pkg/collector/gpu`), which proves
-driver *presence*, not which mode owns it. No *node-level
-installed-driver* or node-pool-mode reading exists in snapshots today —
-the snapshot's `K8s.policy.driver.version` is the ClusterPolicy-
-*configured* value, post-deployment intent rather than node state.
+AKS is the first consumer because its current recipe already defaults to
+the four-path `driver-only` tuple shown above. The alternative override
+documented by the merged AKS change flips all four paths together.
+Moving that existing qualified split behind a profile removes the
+bundle-time flag tuple without requiring the GKE-only advertiser model.
+
+AICR's existing GPU collector is driver-free by design, and its
+`GPU.hardware.driver-loaded` boolean proves driver *presence*, not which
+mode owns it. The AKS adoption therefore adds a provider reading projected
+from each GPU agent pool's durable
+[`gpuProfile.driver`](https://learn.microsoft.com/en-us/rest/api/aks/agent-pools/get?view=rest-aks-2026-04-01)
+property:
+`Install` selects `driver-only`, while `None` selects `operator`. An
+unavailable provider reading, an unknown value, or mixed GPU-pool values
+fails closed. Both profile values carry symmetric constraints over that
+reading.
 
 The shipped `gpuDriverState` heuristic is a legacy value-level
 optimization on unprofiled compositions, never profile selection, and
 not the authoritative signal this value needs — it samples a single
 node and is ambiguous once any installer has run.
 
-The *authoritative*
-node-pool-mode signal (an AKS-set node label, the `gpuProfile` surface, or
-a new collector reading) must be identified and documented before this
-profile value ships. The rule, precisely: a profile value must carry a
-validation signal that **distinguishes its configuration from every
-sibling value's** — a value without one (no signal at all, or
-constraints identical to a sibling's) does not satisfy this ADR's
-"validated against deployed config" claim and must not be declared.
-Values shown in this document without such a signal are target state,
-gated by this rule.
+The rule remains general: a profile value must carry a validation signal
+that **distinguishes its configuration from every sibling value's**. A
+value without one (no signal at all, or constraints identical to a
+sibling's) does not satisfy this ADR's "validated against deployed config"
+claim and must not be declared. Values shown without such a signal are
+target state, gated by this rule.
 
 ```yaml
 # recipes/overlays/gke-cos.yaml — device-plugin ownership
@@ -262,6 +279,13 @@ the surviving composition is known (catalog load cannot see snapshot
 exclusions). A profile changes how existing components are configured,
 never the component set — in either direction.
 
+A value-bearing fragment may reference only a **Helm** component.
+Kustomize deployment consumes source, path, and tag rather than Helm
+values, so accepting an override there would record a selected profile
+without changing the generated manifests. A Kustomize component may
+appear only as a valueless reference when the declaration needs the
+synthetic `enabled` presence lock.
+
 A fragment override therefore must not set the root `enabled` key
 (rejected at catalog load): the component model reads
 `overrides.enabled: false` as component removal, which would mutate
@@ -291,10 +315,12 @@ once conditional installation is values-gated, and admitting it would
 pull addition and ordering-declaration semantics into the fragment
 schema ahead of any user.
 
-**The fragment schema is closed: a profile value permits `advertiser`,
-`constraints`, and `componentRefs` only, and each `componentRef`
-permits only `name` and `overrides` — every other `ComponentRef` field
-is rejected at catalog load** (full field inventory in #1761).
+**The fragment schema is closed.** The core roll-in permits
+`constraints` and `componentRefs` only, and each `componentRef` permits
+only `name` and `overrides`. Every other `ComponentRef` field is rejected
+at catalog load. The GKE extension admits only the already-reserved
+`advertiser` field in addition to that core shape (full field inventory in
+[#1761](https://github.com/NVIDIA/aicr/issues/1761)).
 
 The operative criterion: a fragment field is permitted only when its
 effect is either representable in `ownedPaths` (value paths plus the
@@ -367,9 +393,11 @@ once, inherited by accelerator/intent leaves.
   name must name the precise
   ownership split it encodes (see Consequences), and only qualified,
   validatable configurations may be declared.
-- The single piece of **reserved vocabulary** is `advertiser`: an
-  optional marker whose only value is `external`, feeding #1327 policy
-  resolution and rejected at every boundary when unknown.
+- The single piece of **reserved vocabulary** is `advertiser`: the GKE
+  extension's optional marker whose only value is `external`, feeding
+  #1327 policy resolution. The core roll-in rejects the field even when
+  its value is `external`; after the extension lands, every unknown value
+  remains rejected at every boundary.
 
 ### Resolution algorithm
 
@@ -516,7 +544,10 @@ to the surviving composition:
   artifact** (the generate-first workflow). **Direct overlay hydration
   (`aicr bundle -r <overlay.yaml>`) deliberately exposes no selection
   surface and applies the declared default** — selecting a non-default
-  value means generating the recipe first.
+  value means generating the recipe first. Hydration resolves the file's
+  criteria against the active catalog and fails closed unless the effective
+  declaration structurally matches the file's declaration after JSON
+  normalization; the overlay name itself need not match.
 - Discovery surfaces the **effective declaration after inheritance and
   co-match resolution** — the declaration typically lives on an
   ancestor (`gke-cos`), so a criteria-filtered listing of leaves must
@@ -539,11 +570,19 @@ to the surviving composition:
   recorded selection — a single selection-less hydration matches only
   the declared default (wiring in #1761).
 
+  The core roll-in does not publish or project profiled evidence. Those
+  boundaries strictly decode the new artifact and reject it rather than
+  dropping profile identity. Generic per-value evidence partitioning and
+  the new predicate type land with the first consumer. The
+  canonical-descriptor identity and currentness expansion described below
+  are GKE-only policy work and land with GKE.
+
 ### Override locking
 
-Profile-owned paths are locked. At bundle time the **effective lock set**
-is `selectedProfile.ownedPaths` **plus the recomputed canonical #1327
-closure** when the closure trigger applies (see the amendment below).
+Profile-owned paths are locked. In the core roll-in, the **effective lock
+set** is `selectedProfile.ownedPaths`. The GKE extension adds the
+recomputed canonical #1327 closure when its trigger applies (see the
+amendment below).
 `aicr bundle` **rejects** (`ErrCodeInvalidRequest`) any override —
 static `--set`/`--set-json`/`--set-file` or config-file — whose result
 **diverges from the selected recipe at a locked path** (a redundant
@@ -696,7 +735,8 @@ matcher semantics for zero enforcement weight — **schema validation is
 skippable, templates always render**; the chart's existing
 `deployer.*` schema is unchanged (guard mechanics in #1761).
 
-**Descriptor expansion and frozen outputs.** One boundary caveat: the
+**Descriptor expansion and frozen outputs.** This subsection applies when
+the GKE extension activates the canonical closure. One boundary caveat: the
 emitted guard **freezes the generation-time closure** — a rendered
 chart is not a boundary where an AICR binary can recompute it. After a
 canonical-descriptor expansion, an existing authentic argocd-helm
@@ -792,7 +832,13 @@ locking defends against flag misuse, not artifact forgery — the digest
 makes an edit observable, and a signature or evidence record anchored to
 the expected digest detects it.
 
-### Amendment to the #1327 allocation-policy model
+### GKE amendment to the #1327 allocation-policy model
+
+This amendment is part of the accepted service-agnostic design, but not the
+core roll-in. The core validator rejects `advertiser` and explicit
+allocation-policy selector paths in profile fragments. GKE adoption enables
+them only after the canonical descriptor, shared evaluator, and evidence
+currentness work in this section lands together.
 
 The #1327 resolver (`pkg/validator/v1/allocation_policy.go`) currently
 treats externally managed advertisers as an explicit non-goal: with
@@ -1029,7 +1075,9 @@ profile: gpuStack=csp-managed   # optional
 GET carries the same string in the `profile` parameter.
 `/v2` requests are **strict**: an unknown query parameter or envelope
 field is rejected (`ErrCodeInvalidRequest`) — a typo (`?profie=…`)
-must not silently select the default. `/v1` keeps its lenient parsing
+must not silently select the default. POST envelopes require
+`Content-Type: application/json` or `Content-Type: application/x-yaml`;
+missing or unsupported media types are rejected. `/v1` keeps its lenient parsing
 for unknown inputs, with one reserved exception: new servers **reject
 explicit profile input on `/v1`** — a `profile` GET parameter or
 top-level POST field on `/v1/recipe` and `/v1/query`, regardless of
@@ -1210,21 +1258,20 @@ recurrence — the shape the Problem section expects.
   family-wide `/v1` rejection of ordinary criteria requests, evidence
   re-signing — is deferred to a family's explicit conversion (below),
   never triggered by the mechanism landing.
-- One-time feature cost: declaration/resolution in `pkg/recipe`, the
+- The core feature cost is declaration/resolution in `pkg/recipe`, the
   ownership record and new artifact apiVersion, selection plumbing and
-  the `/v2` endpoints, override locking across bundle/mirror/argocd-helm,
-  and docs. After this lands, new configurations are per-overlay edits.
-  The full implementation inventory and acceptance criteria live in
-  [#1761](https://github.com/NVIDIA/aicr/issues/1761).
-- Validation needs the constraint forms the fragments reference: the
-  GKE consumer depends on the node-set label check from
-  [#1755](https://github.com/NVIDIA/aicr/issues/1755) — a new
-  reading/evaluator capability, scope confirmation is Deferred
-  Decision 2 — **and** on the #1327 amendment above; part of the
-  mechanism cost, not an optional follow-up. The AKS
-  consumer's authoritative node-pool-mode signal must be identified and
-  documented first; whether it needs new collector or evaluator machinery
-  depends on that signal (see Declaration).
+  the `/v2` endpoints, override locking across
+  bundle/mirror/argocd-helm, and docs. It deliberately has no adopter.
+  `advertiser`, allocation-policy profile paths, and profiled evidence
+  publication fail closed at this stage.
+
+  Consumer-specific capabilities land with the consumer that needs them.
+  AKS adds the `gpuProfile.driver` provider reading and generic per-value
+  evidence support. GKE then adds the node-set label check from
+  [#1755](https://github.com/NVIDIA/aicr/issues/1755), the #1327
+  advertiser/canonical-descriptor extension, and descriptor-bound evidence
+  currentness. The full implementation inventory and acceptance criteria
+  live in [#1761](https://github.com/NVIDIA/aicr/issues/1761).
 - Every declared profile value is a supported configuration and must be
   qualified (KWOK lanes / UAT coverage where feasible); values we cannot
   test — or cannot validate against the cluster — do not get declared
@@ -1277,11 +1324,13 @@ recurrence — the shape the Problem section expects.
   policy keys are GPU *advertisement* keys (`devicePlugin.enabled`, DRA
   `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, component
   `enabled`) — not
-  `driver.enabled`/`toolkit.enabled`/`operator.runtimeClass`. Profile
-  locking therefore changes AKS driver paths from allowed/silent to
-  rejected; it does not interact with the allocation-policy WARN. Where a
-  profile triggers the policy closure, all #1327 policy paths join the
-  lock (see the amendment). Graduating the
+  `driver.enabled`/`toolkit.enabled`/`operator.runtimeClass`/
+  `nvidiaDriverRoot`. Profile locking therefore changes all four
+  coordinated AKS driver-ownership paths from allowed/silent to rejected
+  when a write would diverge. A redundant same-value write remains
+  accepted. This does not interact with the allocation-policy WARN. Where
+  a GKE profile triggers the policy closure, all #1327 policy paths join
+  the lock (see the amendment). Graduating the
   allocation-policy static-override WARN to REJECT globally remains a
   **separate decision** outside this ADR.
 - Rule of thumb, to keep profiles from sprawling: a profile value encodes
@@ -1295,45 +1344,52 @@ recurrence — the shape the Problem section expects.
 
 1. Land the profile mechanism (declaration, composition-wide uniqueness,
    resolution ordering, ownership-record + apiVersion stamping, override
-   locking) + docs.
-2. First consumer: GKE `gpuStack: [operator (default), csp-managed,
+   locking) and docs, with no adopter. The accepted core fragment is
+   `constraints` plus `componentRefs{name,overrides}`. The core rejects
+   `advertiser`, allocation-policy selector paths, and profiled evidence
+   projection until their consumer stage.
+2. First consumer: AKS
+   `gpuStack: [driver-only (default), operator]` for unmanaged pools.
+   It moves the existing qualified four-path tuple
+   (`driver.enabled`, `toolkit.enabled`, `operator.runtimeClass`, and
+   `nvidiaDriverRoot`) behind profile selection and removes the documented
+   bundle-time override workflow, including the air-gap mirror guidance.
+   This step adds the `gpuProfile.driver` provider reading, symmetric
+   constraints for `Install` and `None`, and generic per-value evidence
+   partitioning. An unavailable provider reading, an unknown value, or
+   mixed GPU-pool ownership values fails closed. Fully AKS-managed pools
+   remain out of scope.
+3. Second consumer: GKE
+   `gpuStack: [operator (default), csp-managed,
    operator-selfdriver]` — device-plugin and driver-provisioning
    ownership, gated on the #1755 label check and the #1327
-   external-advertiser amendment. The `operator-selfdriver` value
-   additionally requires the `gcp-driver-installer` component
-   (values-gated chart, new public registry entry) and is declared only
-   once its durable ownership-mode distinguishing signal is identified
-   (Deferred Decision 5) — the other two values do not wait on it. The
-   dormant component and the third value land **together**, in one
-   event: declaring the value later is an ownership-surface expansion
-   (`install` joins the union and the installer's synthetic `enabled`
-   joins `ownedPaths`), which is a family-wide
-   re-qualification and evidence re-signing event by the
-   Recording rules — budget for it when DD5 resolves. Any dcgm-exporter GPU-ID-mapping
-   adjustment for `csp-managed` is an external GKE behavior not
-   verifiable from this repository — it is verified and added during
-   this step if required, with the upstream citations (NVIDIA GPU
-   Operator GKE guidance; GKE device-plugin documentation) recorded in
-   that step's PR. GKE goes first because it exercises the full
-   mechanism end-to-end: effects, opposite constraints, policy amendment,
-   locking, and evidence. Because conversion rejects the family's
-   ordinary criteria requests on `/v1` (see the compatibility gate),
-   this step also checks the family's `/v1` usage — or announces a
-   deprecation window — **before** converting, so clients do not
-   discover the rejection at cut-over.
-3. Second consumer: AKS `gpuStack: [operator (default), driver-only]` —
-   driver/toolkit ownership on unmanaged pools, replacing the documented
-   `--set` guidance **including the air-gap mirror guidance**
-   (`docs/user/air-gap-mirror.md` recommends
-   `--set gpuoperator:driver.enabled=false`, which migrates to profile
-   selection); gated on identifying and documenting the authoritative
-   node-pool-mode validation signal. Fully AKS-managed pools remain out
-   of scope.
-4. Internal recipes (DGXC/NKX): once `operator-selfdriver` is declared,
-   the internal cos-gpu-installer arrangement (internal MR #27)
-   migrates to the public value — the values-gated
+   external-advertiser amendment. This step activates the reserved
+   `advertiser` field, canonical descriptor/evaluator, and
+   descriptor-bound evidence currentness together.
+
+   The `operator-selfdriver` value additionally requires the
+   `gcp-driver-installer` component (values-gated chart, new public
+   registry entry) and is declared only once its durable ownership-mode
+   distinguishing signal is identified (Deferred Decision 5). The other
+   two values do not wait on it. The dormant component and the third value
+   land **together**, in one event: declaring the value later is an
+   ownership-surface expansion (`install` joins the union and the
+   installer's synthetic `enabled` joins `ownedPaths`), which is a
+   family-wide re-qualification and evidence re-signing event.
+
+   Any dcgm-exporter GPU-ID-mapping adjustment for `csp-managed` is an
+   external GKE behavior not verifiable from this repository. It is
+   verified and added during this step if required, with upstream
+   citations recorded in that PR. Before conversion, this step also
+   checks the family's `/v1` usage or announces a deprecation window so
+   clients do not discover the `/v1` rejection at cut-over.
+4. Other consumers: once `operator-selfdriver` is declared, internal
+   recipes (DGXC/NKX) migrate the cos-gpu-installer arrangement
+   (internal MR #27) to the public value. The values-gated
    `gcp-driver-installer` component makes the case expressible without
-   an internal-only component or a component-addition amendment.
+   an internal-only component or a component-addition amendment. Other
+   services adopt the mechanism only when a qualified, distinguishable
+   ownership mode appears.
 
 ## Deferred Adoption Decisions
 
@@ -1351,16 +1407,15 @@ work that resolves it.
 2. **#1755 scope confirmation.** This ADR reads #1755 as delivering the
    node-set constraint *form* (every GPU node has label X, including
    the negated form) — a new reading/evaluator capability. **Proposed:
-   confirm on the issue before implementation; the GKE consumer is
-   gated on it.**
-3. **AKS node-pool-mode signal** — an AKS-set node label, the
-   `gpuProfile` surface, or a new collector reading? Gates declaring
-   the `driver-only` value at all. Like DD5, the signal must be a
-   **durable ownership-mode marker** — profile constraints are
-   re-evaluated post-deployment. When identified, it lands as
-   symmetric constraints on both values — `operator` asserts the
-   opposite of `driver-only` — not on `driver-only` alone. **Proposed:
-   resolve during adoption step 3; nothing else waits on it.**
+   confirm during GKE adoption; the GKE consumer is gated on it.**
+3. **AKS node-pool-mode signal — resolved by the 2026-07-27 amendment.**
+   The provider-facing AgentPool `gpuProfile.driver` property is the
+   durable ownership marker. AKS adoption projects it into a snapshot
+   reading across GPU pools: `Install` maps to `driver-only`, `None` maps
+   to `operator`, and an absent field in a successful supported API response
+   follows the provider's documented `Install` default. Unavailable API
+   data, mixed values, and unknown values fail closed. Both profile values
+   receive symmetric constraints over the projection.
 4. **Catalog compatibility follow-up.** A general catalog compatibility
    contract (the `--data` path has no apiVersion gate) is deferred.
    **Filed as

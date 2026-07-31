@@ -62,11 +62,14 @@ jobs:
               // Target 14-29 day window (before stale bot at 30 days)
               if (daysInactive < 14 || daysInactive >= 30) continue;
 
-              // Check if we already left a reminder
-              const { data: comments } = await github.rest.issues.listComments({
+              // Check if we already left a reminder. Paginate: an unpaginated
+              // call returns only the 30 oldest comments, so on a busy PR the
+              // reminder falls off page one and a duplicate goes out.
+              const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.number,
+                per_page: 100,
               });
               const alreadyReminded = comments.some(c =>
                 c.user.type === 'Bot' && c.body.includes('inactive for')

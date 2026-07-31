@@ -69,10 +69,18 @@ spec:
       try:
         - script:
             content: |
+              # Each check below carries its own `|| { …; exit 1; }`, which is
+              # what makes it fail closed — `set -e` does not apply to the left
+              # side of `||`. set -eu is defence in depth for anything added
+              # later without that guard: a bare `test -f` returns 1 without
+              # terminating, and Chainsaw reads only the script's final exit
+              # status, so an unguarded check would pass silently.
+              set -eu
               WORK="/tmp/chainsaw-bundle-ocp"
-              test -f "${WORK}/bundle/deploy.sh"
-              test -f "${WORK}/bundle/README.md"
-              test -f "${WORK}/bundle/recipe.yaml"
+              for f in deploy.sh README.md recipe.yaml; do
+                test -f "${WORK}/bundle/${f}" \
+                  || { echo "missing scaffold file: ${f}" >&2; exit 1; }
+              done
               ls "${WORK}"/bundle/[0-9][0-9][0-9]-*/ >/dev/null 2>&1 \
                 || { echo "no numbered component folders found" >&2; exit 1; }
             check:
@@ -136,6 +144,57 @@ spec:
                 [ "${rdns_seq}" -lt "${cr_seq}" ] \
                   || { echo "readiness gate (${rdns_seq}) must precede CR ${cr_name} (${cr_seq})" >&2; exit 1; }
               done
+            check:
+              ($error == null): true
+
+    - name: generate-argocd-helm-bundle
+      description: >-
+        Bundle the same OCP recipe with --deployer argocd-helm. Every OCP
+        component is a local chart, so none contributes a static/ values file.
+        Emitting that directory anyway made it empty, and the bundle inventory
+        validator rejects a directory contributing no files, which failed
+        generation outright. See issue #1942.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-ocp"
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --output "${WORK}/bundle-argocd-helm" \
+                --deployer argocd-helm
+            check:
+              ($error == null): true
+
+    - name: assert-argocd-helm-omits-empty-static
+      description: >-
+        The bundle must be emitted without a static/ directory rather than with
+        an empty one, and must still carry its chart scaffold.
+      try:
+        - script:
+            content: |
+              # As above: the explicit `|| { …; exit 1; }` on each check is
+              # the safeguard, and set -eu covers anything added later without
+              # one. That matters most here, where the script ends in an `if`
+              # that yields 0 whenever static/ is absent, so an unguarded
+              # scaffold check would never fail the step.
+              set -eu
+              WORK="/tmp/chainsaw-bundle-ocp"
+              BUNDLE="${WORK}/bundle-argocd-helm"
+              for f in Chart.yaml values.yaml; do
+                test -f "${BUNDLE}/${f}" \
+                  || { echo "missing scaffold file: ${f}" >&2; exit 1; }
+              done
+              ls "${BUNDLE}"/[0-9][0-9][0-9]-*/ >/dev/null 2>&1 \
+                || { echo "no numbered component folders found" >&2; exit 1; }
+              # -e dereferences, so it reads false for a dangling symlink;
+              # -L catches that case and keeps the assertion honest about any
+              # entry at this path, not just a resolvable one.
+              if [ -e "${BUNDLE}/static" ] || [ -L "${BUNDLE}/static" ]; then
+                echo "static/ present; expected omitted for an all-local recipe" >&2
+                ls -la "${BUNDLE}/static" >&2
+                exit 1
+              fi
             check:
               ($error == null): true
       cleanup:

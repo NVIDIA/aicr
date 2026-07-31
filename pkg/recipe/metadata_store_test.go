@@ -224,6 +224,7 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 		wantPassed   bool
 		wantWarnings int
 		wantErr      bool
+		wantErrCode  aicrerrors.ErrorCode
 	}{
 		{
 			name:        "no constraints passes",
@@ -317,6 +318,32 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "empty constraint name fails closed",
+			constraints: []Constraint{
+				{Value: ">= 1.30"},
+			},
+			evaluator: func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{
+					Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found"),
+				}
+			},
+			wantErr:     true,
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "empty constraint value fails closed",
+			constraints: []Constraint{
+				{Name: "k8s"},
+			},
+			evaluator: func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{
+					Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found"),
+				}
+			},
+			wantErr:     true,
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+		},
 	}
 
 	for _, tt := range tests {
@@ -331,6 +358,9 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrCode != "" && !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+					t.Fatalf("error = %v, want code %s", err, tt.wantErrCode)
 				}
 				return
 			}
@@ -2083,6 +2113,50 @@ func TestEvaluateMixinConstraintsReturnsErrorWhenConstraintCannotBeMappedToCandi
 	}
 }
 
+func TestEvaluateMixinConstraintsRejectsIncompleteConstraint(t *testing.T) {
+	tests := []struct {
+		name       string
+		constraint Constraint
+	}{
+		{
+			name:       "missing name",
+			constraint: Constraint{Value: ">= 6.8"},
+		},
+		{
+			name:       "missing value",
+			constraint: Constraint{Name: "OS.kernel"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overlay := &RecipeMetadata{}
+			overlay.Metadata.Name = "candidate"
+			overlay.Spec.Mixins = []string{"os-gate"}
+			mixin := &RecipeMixin{}
+			mixin.Metadata.Name = "os-gate"
+			mixin.Spec.Constraints = []Constraint{tt.constraint}
+			store := &MetadataStore{
+				Overlays: map[string]*RecipeMetadata{"candidate": overlay},
+				Mixins:   map[string]*RecipeMixin{"os-gate": mixin},
+			}
+
+			_, err := store.evaluateMixinConstraints(
+				&RecipeMetadataSpec{Constraints: []Constraint{tt.constraint}},
+				func(_ Constraint) ConstraintEvalResult {
+					return ConstraintEvalResult{
+						Error: aicrerrors.New(aicrerrors.ErrCodeNotFound, "value not found"),
+					}
+				},
+				map[string]bool{tt.constraint.Name: true},
+				[]string{"candidate"},
+			)
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("error = %v, want code %s", err, aicrerrors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}
+
 // TestMalformedMixinRejected verifies that mixin files with forbidden fields
 // (base, criteria, mixins, validation) are rejected at load time by
 // KnownFields(true) strict parsing.
@@ -2179,6 +2253,28 @@ func TestExcludedOverlayUnmarshalYAML(t *testing.T) {
 				{Name: "overlay-a"},
 			},
 		},
+		{
+			name:  "legacy object form accepts unknown field",
+			input: "- name: overlay-a\n  reasn: constraint-failed\n",
+			expected: []ExcludedOverlay{
+				{Name: "overlay-a"},
+			},
+		},
+		{
+			name:    "object form requires name",
+			input:   "- {}\n",
+			wantErr: true,
+		},
+		{
+			name:    "object form rejects null name",
+			input:   "- name: null\n",
+			wantErr: true,
+		},
+		{
+			name:    "scalar form requires string",
+			input:   "- 42\n",
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2186,6 +2282,9 @@ func TestExcludedOverlayUnmarshalYAML(t *testing.T) {
 			err := yaml.Unmarshal([]byte(tt.input), &got)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
 			}
 			if !reflect.DeepEqual(got, tt.expected) {
 				t.Errorf("got %+v, want %+v", got, tt.expected)
@@ -2224,6 +2323,28 @@ func TestExcludedOverlayUnmarshalJSON(t *testing.T) {
 				{Name: "overlay-a"},
 			},
 		},
+		{
+			name:  "legacy object form accepts unknown field",
+			input: `[{"name":"overlay-a","reasn":"constraint-failed"}]`,
+			expected: []ExcludedOverlay{
+				{Name: "overlay-a"},
+			},
+		},
+		{
+			name:    "object form requires name",
+			input:   `[{}]`,
+			wantErr: true,
+		},
+		{
+			name:    "object form rejects null name",
+			input:   `[{"name":null}]`,
+			wantErr: true,
+		},
+		{
+			name:    "null is neither legacy string nor object",
+			input:   `[null]`,
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2231,6 +2352,9 @@ func TestExcludedOverlayUnmarshalJSON(t *testing.T) {
 			err := json.Unmarshal([]byte(tt.input), &got)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
 			}
 			if !reflect.DeepEqual(got, tt.expected) {
 				t.Errorf("got %+v, want %+v", got, tt.expected)
@@ -2355,6 +2479,43 @@ spec:
 		"overlays/" + overlayName + ".yaml": overlayYAML,
 	}
 	return newInMemoryProvider(overlayName, files)
+}
+
+func TestLoadMetadataStore_ProfileMetadataRequiresKind(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	provider := newInMemoryProvider("missing-kind", map[string][]byte{
+		"overlays/base.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`),
+		"overlays/profile.yaml": []byte(`apiVersion: aicr.run/v1alpha3
+metadata:
+  name: profile
+spec:
+  criteria:
+    service: aks
+  profile:
+    name: gpuStack
+    default: driver-installed
+    values:
+      driver-installed: {}
+`),
+	})
+
+	_, err := LoadMetadataStoreFor(t.Context(), provider)
+	if err == nil {
+		t.Fatal("LoadMetadataStoreFor() error = nil, want missing-kind rejection")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), `requires kind "RecipeMetadata"`) {
+		t.Fatalf("error = %v, want RecipeMetadata kind requirement", err)
+	}
 }
 
 // TestLoadMetadataStore_PerProviderIsolation verifies that distinct
@@ -2670,13 +2831,23 @@ func TestGB200OKEFloorNotClobbered(t *testing.T) {
 }
 
 // TestH100AKSUbuntuTrainingSlurmFloorNotClobbered is a regression test for the
-// H100 AKS Slurm K8s floor. The leaf sets >= 1.34 (DRA GA in Kubernetes 1.34,
-// per the aks.yaml rationale), but resolves under last-writer-wins merge with
-// lower-valued ancestors (aks-training >= 1.30, h100-aks-ubuntu-training
-// >= 1.32.4). A future constraint edit on an ancestor could silently regress
-// the leaf floor — the same shape TestGB200OKEFloorNotClobbered guards against.
-// This locks the resolved floor and gives the AKS-family follow-up a place to
-// add sibling leaves as they are bumped.
+// AKS training K8s floor family (see #1772). Every AKS training leaf inherits
+// DRA (nvidia-dra-driver-gpu) via base.yaml, and DRA graduated to GA in
+// Kubernetes 1.34 (the aks.yaml rationale). Prior to #1772 the family drifted:
+// aks-training.yaml sat at >= 1.30 and the H100 leaves at >= 1.32.4, below the
+// >= 1.34 floor aks.yaml itself claims. #1772 fixed this by restating >= 1.34
+// on every AKS training leaf (aks-training, a100/h100 base, -ubuntu, and
+// -kubeflow overlays) rather than relying on inheritance — evaluateOverlayConstraints
+// only evaluates a candidate leaf's own Spec.Constraints (ancestors are
+// pruned by filterToMaximalLeaves before evaluation), so a leaf that omits
+// the restatement is NOT gated by an ancestor's floor at snapshot-evaluation
+// time even though the resolved/displayed recipe still shows the inherited
+// value. This test locks down both: (1) the resolved K8s.server.version
+// floor for each leaf's fully-composed recipe, and (2) that the leaf's own
+// overlay file actually declares the >= 1.34 constraint itself — the second
+// check is what actually drives snapshot-time exclusion and gives this test
+// discriminating power (removing the restatement from any leaf, leaving only
+// the ancestor's value, fails case 2 even though case 1 can still pass).
 func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
@@ -2686,11 +2857,13 @@ func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 
 	tests := []struct {
 		name         string
+		leafName     string
 		criteria     *Criteria
 		wantK8sFloor string
 	}{
 		{
-			name: "h100 aks ubuntu slurm training preserves >= 1.34 floor",
+			name:     "h100 aks ubuntu slurm training preserves >= 1.34 floor",
+			leafName: "h100-aks-ubuntu-training-slurm",
 			criteria: &Criteria{
 				Service:     CriteriaServiceAKS,
 				Accelerator: CriteriaAcceleratorH100,
@@ -2700,10 +2873,86 @@ func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 			},
 			wantK8sFloor: ">= 1.34",
 		},
+		{
+			name:     "h100 aks training preserves >= 1.34 floor",
+			leafName: "h100-aks-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "h100 aks ubuntu training preserves >= 1.34 floor",
+			leafName: "h100-aks-ubuntu-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "h100 aks ubuntu kubeflow training preserves >= 1.34 floor",
+			leafName: "h100-aks-ubuntu-training-kubeflow",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformKubeflow,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "a100 aks training preserves >= 1.34 floor",
+			leafName: "a100-aks-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorA100,
+				Intent:      CriteriaIntentTraining,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "a100 aks ubuntu training preserves >= 1.34 floor",
+			leafName: "a100-aks-ubuntu-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorA100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "a100 aks ubuntu kubeflow training preserves >= 1.34 floor",
+			leafName: "a100-aks-ubuntu-training-kubeflow",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorA100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformKubeflow,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "aks training (accelerator-generic) preserves >= 1.34 floor",
+			leafName: "aks-training",
+			criteria: &Criteria{
+				Service: CriteriaServiceAKS,
+				Intent:  CriteriaIntentTraining,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// (1) The resolved, fully-composed recipe carries the floor.
 			result, err := store.BuildRecipeResult(ctx, tt.criteria)
 			if err != nil {
 				t.Fatalf("BuildRecipeResult failed: %v", err)
@@ -2718,6 +2967,30 @@ func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 			if k8sFloor != tt.wantK8sFloor {
 				t.Errorf("K8s.server.version floor = %q, want %q (possible floor clobber regression)",
 					k8sFloor, tt.wantK8sFloor)
+			}
+
+			// (2) The leaf overlay itself restates the floor. This is what
+			// actually gates snapshot-time constraint evaluation — a leaf
+			// that dropped its own restatement (relying on the ancestor's
+			// value alone) would still pass check (1) via inheritance while
+			// silently escaping the DRA-GA gate. See TestGB200OKEFloorNotClobbered
+			// for the sibling shape and the package-level note on why
+			// restating (not inheriting) is required.
+			leaf, ok := store.GetRecipeByName(tt.leafName)
+			if !ok {
+				t.Fatalf("overlay %q not found in store", tt.leafName)
+			}
+			var leafFloor string
+			for _, c := range leaf.Spec.Constraints {
+				if c.Name == testK8sVersionConstant {
+					leafFloor = c.Value
+					break
+				}
+			}
+			if leafFloor != tt.wantK8sFloor {
+				t.Errorf("leaf %q own Spec.Constraints K8s.server.version = %q, want %q — "+
+					"the leaf must restate the floor itself, not rely on ancestor inheritance",
+					tt.leafName, leafFloor, tt.wantK8sFloor)
 			}
 		})
 	}

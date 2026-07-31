@@ -15,7 +15,9 @@
 package recipe
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -30,11 +32,24 @@ import (
 // default), and the returned result carries dp via its provider field. A nil
 // dp falls back to the embedded catalog.
 func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version string, dp DataProvider) (*RecipeResult, error) {
-	rec, err := serializer.FromFileWithKubeconfig[RecipeResult](path, kubeconfig)
+	sourceData, sourceFormat, err := serializer.ReadFileBytesWithKubeconfigContext(
+		ctx, path, kubeconfig,
+	)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 			fmt.Sprintf("failed to load recipe from %q", path))
 	}
+	sourceReader, err := serializer.NewReader(sourceFormat, bytes.NewReader(sourceData))
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to create recipe reader for %q", path))
+	}
+	var source RecipeResult
+	if deserializeErr := sourceReader.Deserialize(&source); deserializeErr != nil {
+		return nil, errors.PropagateOrWrap(deserializeErr, errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to load recipe from %q", path))
+	}
+	rec := &source
 
 	// Capture the apiVersion declared in the source file before any overlay
 	// hydration reassigns rec; otherwise an unsupported apiVersion on a
@@ -42,16 +57,44 @@ func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version str
 	// hydrated RecipeResult always carries a supported version).
 	inputAPIVersion := rec.APIVersion
 
+	// Reject an artifact stamped with an apiVersion this build does not
+	// understand before an overlay can trigger provider-backed hydration.
+	// Empty is tolerated for legacy files, while v1alpha3 is the strict
+	// profile artifact version introduced by ADR-015.
+	if inputAPIVersion != "" &&
+		!header.IsSupportedAPIVersion(inputAPIVersion) &&
+		inputAPIVersion != RecipeProfileAPIVersion {
+
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q or %q); "+
+				"regenerate the recipe with a matching aicr version",
+				inputAPIVersion, header.GroupVersion, RecipeProfileAPIVersion))
+	}
+
 	// Users often pass overlay files directly; auto-hydrate so they don't need
 	// a separate "aicr recipe" step before consuming the recipe.
 	if rec.Kind == RecipeMetadataKind {
 		slog.Info("input is a RecipeMetadata overlay; auto-hydrating via recipe builder",
 			"file", path)
 
-		overlay, parseErr := serializer.FromFileWithKubeconfig[RecipeMetadata](path, kubeconfig)
+		var readerOpts []serializer.ReaderOption
+		if inputAPIVersion == RecipeProfileAPIVersion {
+			readerOpts = append(readerOpts, serializer.WithStrict())
+		}
+		overlayReader, parseErr := serializer.NewReader(
+			sourceFormat, bytes.NewReader(sourceData), readerOpts...,
+		)
 		if parseErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to parse overlay from %q", path), parseErr)
+			return nil, errors.PropagateOrWrap(parseErr, errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("failed to create overlay reader for %q", path))
+		}
+		var overlay RecipeMetadata
+		if parseErr := overlayReader.Deserialize(&overlay); parseErr != nil {
+			return nil, errors.PropagateOrWrap(parseErr, errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("failed to parse overlay from %q", path))
+		}
+		if profileErr := ValidateRecipeMetadataProfile(&overlay); profileErr != nil {
+			return nil, profileErr
 		}
 
 		if overlay.Spec.Criteria == nil {
@@ -75,35 +118,40 @@ func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version str
 		if err != nil {
 			return nil, err
 		}
+		if profileErr := ensureDirectOverlayProfileApplied(ctx, path, &overlay, rec, dp); profileErr != nil {
+			return nil, profileErr
+		}
 
 		slog.Info("overlay hydrated successfully",
 			"appliedOverlays", rec.Metadata.AppliedOverlays)
-	} else if dp != nil {
-		// Already-hydrated RecipeResult: the builder never runs, so bind the
-		// caller's provider directly so downstream value/manifest reads route
-		// through dp rather than the embedded default.
-		rec.provider = dp
+	} else {
+		if inputAPIVersion == RecipeProfileAPIVersion {
+			rec, err = DecodeRecipeResult(sourceData, sourceFormat)
+			if err != nil {
+				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("failed to strictly decode profile recipe from %q", path))
+			}
+		}
+		if dp != nil {
+			// Already-hydrated RecipeResult: the builder never runs, so bind the
+			// caller's provider directly so downstream value/manifest reads route
+			// through dp rather than the embedded default.
+			rec.provider = dp
+		}
 	}
 
-	// Empty kind is allowed for backward compatibility with older RecipeResult files
-	// that may omit the field; they fall through to existing downstream validation.
+	// The strict profile artifact version requires its discriminator. Empty
+	// kind remains allowed only for legacy RecipeResult files that predate it.
+	if rec.Kind == "" && inputAPIVersion == RecipeProfileAPIVersion {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe file apiVersion %q requires kind %q",
+				RecipeProfileAPIVersion, RecipeResultKind))
+	}
 	if rec.Kind != "" && rec.Kind != RecipeResultKind {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe file has kind %q, but %q is required; "+
 				"run \"aicr recipe\" to generate a hydrated RecipeResult first",
 				rec.Kind, RecipeResultKind))
-	}
-
-	// Reject a recipe stamped with an apiVersion this build does not understand.
-	// Empty is tolerated (older files predate the field); a non-empty unknown
-	// value means the recipe was produced by an incompatible aicr version, so
-	// fail closed rather than risk a schema mismatch downstream. Checked against
-	// the source file's declared version, not the (always-supported) hydrated one.
-	if inputAPIVersion != "" && !header.IsSupportedAPIVersion(inputAPIVersion) {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q); "+
-				"regenerate the recipe with a matching aicr version",
-				inputAPIVersion, header.GroupVersion))
 	}
 
 	// Back-fill missing types from the registry (this boundary does not run
@@ -113,9 +161,69 @@ func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version str
 	// Kustomize tag/path would reach the bundler/attestation unchecked, and a
 	// lowercase type would deploy inconsistently — while a type-less registry
 	// ref (valid before #1584) must still resolve, not be rejected. See #1584.
-	if err := rec.PrepareAndValidate(); err != nil {
+	if err := rec.PrepareAndValidateWithContext(ctx); err != nil {
 		return nil, err
 	}
 
 	return rec, nil
+}
+
+func ensureDirectOverlayProfileApplied(
+	ctx context.Context,
+	path string,
+	overlay *RecipeMetadata,
+	result *RecipeResult,
+	dp DataProvider,
+) error {
+
+	if overlay == nil || overlay.Spec.Profile == nil {
+		return nil
+	}
+
+	store, err := LoadMetadataStoreFor(ctx, dp)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			fmt.Sprintf("failed to verify profile declaration from directly loaded overlay %q", path))
+	}
+	var selected *SelectedProfile
+	var effective *effectiveProfileDeclaration
+	if result != nil {
+		selected = result.Metadata.SelectedProfile
+		effective, err = store.resolveAppliedProfileDeclaration(result.Metadata.AppliedOverlays)
+		if err != nil {
+			return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("failed to resolve the profile applied for directly loaded overlay %q", path))
+		}
+	}
+	declarationMatches := false
+	if effective != nil {
+		declarationMatches, err = profileDeclarationsEqual(effective.Declaration, overlay.Spec.Profile)
+		if err != nil {
+			return err
+		}
+	}
+	if !declarationMatches ||
+		selected == nil ||
+		selected.Name != overlay.Spec.Profile.Name ||
+		selected.Value != overlay.Spec.Profile.Default {
+
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile declaration from directly loaded overlay %q was not applied; "+
+				"add a structurally matching declaration to the active catalog before loading it directly", path))
+	}
+	return nil
+}
+
+func profileDeclarationsEqual(first, second *ProfileDeclaration) (bool, error) {
+	firstJSON, err := json.Marshal(first)
+	if err != nil {
+		return false, errors.Wrap(
+			errors.ErrCodeInternal, "failed to canonicalize resolved profile declaration", err)
+	}
+	secondJSON, err := json.Marshal(second)
+	if err != nil {
+		return false, errors.Wrap(
+			errors.ErrCodeInternal, "failed to canonicalize directly loaded profile declaration", err)
+	}
+	return bytes.Equal(firstJSON, secondJSON), nil
 }

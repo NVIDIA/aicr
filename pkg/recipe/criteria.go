@@ -1016,6 +1016,29 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string, reg *Crite
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
+// CriteriaBodyFormat returns the format ParseCriteriaFromBody uses for a
+// Content-Type value. Recognized YAML media types select YAML; empty, JSON, and
+// unrecognized media types select JSON for legacy compatibility.
+func CriteriaBodyFormat(contentType string) serializer.Format {
+	format, _ := criteriaBodyFormat(contentType)
+	return format
+}
+
+func criteriaBodyFormat(contentType string) (serializer.Format, bool) {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	switch ct {
+	case "application/x-yaml", "application/yaml", "text/yaml":
+		return serializer.FormatYAML, true
+	case "application/json", "":
+		return serializer.FormatJSON, true
+	default:
+		return serializer.FormatJSON, false
+	}
+}
+
 // ParseCriteriaFromBody parses criteria from an io.Reader (HTTP request body).
 // Supports JSON and YAML based on the Content-Type header.
 // All fields are optional and default to "any" if not specified.
@@ -1054,27 +1077,18 @@ func ParseCriteriaFromBody(body io.Reader, contentType string, reg *CriteriaRegi
 
 	var raw rawRecipeCriteria
 
-	// Determine format from Content-Type header
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	// Extract media type (strip charset and other params)
-	if idx := strings.Index(ct, ";"); idx != -1 {
-		ct = strings.TrimSpace(ct[:idx])
-	}
-
-	switch ct {
-	case "application/x-yaml", "application/yaml", "text/yaml":
+	format, recognized := criteriaBodyFormat(contentType)
+	if format == serializer.FormatYAML {
 		if err := yaml.Unmarshal(data, &raw); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse YAML body", err)
 		}
-	case "application/json", "":
-		// Default to JSON for empty or unrecognized content type
+	} else {
 		if err := json.Unmarshal(data, &raw); err != nil {
+			if !recognized {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("unsupported content type %q and failed to parse as JSON", contentType), err)
+			}
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse JSON body", err)
-		}
-	default:
-		// Try JSON first for unrecognized types
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("unsupported content type %q and failed to parse as JSON", contentType), err)
 		}
 	}
 

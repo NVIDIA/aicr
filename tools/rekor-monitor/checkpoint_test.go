@@ -17,10 +17,13 @@ package main
 import (
 	"archive/zip"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // writeZip creates a zip at path containing the given name->content entries.
@@ -244,5 +247,126 @@ func TestExtractCheckpointFromZipCanceled(t *testing.T) {
 	cancel() // pre-canceled
 	if err := extractCheckpointFromZip(ctx, zp, filepath.Join(dir, "cp.txt")); err == nil {
 		t.Error("expected a cancellation error")
+	}
+}
+
+// TestCheckpointStoreRestoreProgress verifies the scan-progress companion round
+// trips through the artifact zip: when present it is restored (so the next run
+// resumes), and when absent restore is a no-op (progress reads as 0).
+func TestCheckpointStoreRestoreProgress(t *testing.T) {
+	t.Run("companion present is restored", func(t *testing.T) {
+		dir := t.TempDir()
+		dest := filepath.Join(dir, "restored.txt")
+		zp := filepath.Join(dir, "artifact.zip")
+		writeZip(t, zp, map[string]string{
+			"restored.txt":       "origin\n7\nh\n",
+			"restored.txt.scan":  "424242\n",
+			"restored.txt.stall": "5000 2 4\n",
+		})
+		s := checkpointStore{path: dest, restoreZip: zp}
+		if err := s.restore(context.Background()); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		n, err := s.readProgress()
+		if err != nil {
+			t.Fatalf("readProgress: %v", err)
+		}
+		if n != 424242 {
+			t.Errorf("restored progress = %d, want 424242", n)
+		}
+		tr, err := s.readScanTrend()
+		if err != nil {
+			t.Fatalf("readScanTrend: %v", err)
+		}
+		if tr != (scanTrend{5000, 2, 4}) {
+			t.Errorf("restored trend = %+v, want {5000 2 4}", tr)
+		}
+	})
+
+	t.Run("companion absent leaves progress at 0", func(t *testing.T) {
+		dir := t.TempDir()
+		dest := filepath.Join(dir, "restored.txt")
+		zp := filepath.Join(dir, "artifact.zip")
+		writeZip(t, zp, map[string]string{"restored.txt": "origin\n7\nh\n"})
+		s := checkpointStore{path: dest, restoreZip: zp}
+		if err := s.restore(context.Background()); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		n, err := s.readProgress()
+		if err != nil {
+			t.Fatalf("readProgress: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("progress = %d, want 0 (no companion)", n)
+		}
+	})
+}
+
+// TestAdvanceCheckpointResetsProgressBeforeWrite pins advanceCheckpoint's
+// fail-closed ordering: progress and the trend are reset BEFORE the signed
+// checkpoint is written, so a failed checkpoint write can never leave the
+// dangerous (new checkpoint, stale old-window progress) pair on disk. Forced by
+// making the checkpoint path a directory, so store.write fails while the
+// sibling .scan/.stall companions remain writable.
+func TestAdvanceCheckpointResetsProgressBeforeWrite(t *testing.T) {
+	dir := t.TempDir()
+	cpDir := filepath.Join(dir, "cp") // a directory AT the checkpoint path -> store.write fails
+	if err := os.Mkdir(cpDir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	store := checkpointStore{path: cpDir}
+	if err := store.writeProgress(123456); err != nil { // stale mid-window progress
+		t.Fatalf("seed progress: %v", err)
+	}
+	if err := store.writeScanTrend(scanTrend{bestRemaining: 500, stall: 2, passes: 5}); err != nil {
+		t.Fatalf("seed trend: %v", err)
+	}
+	if err := advanceCheckpoint(store, testCheckpoint(100), testCheckpoint(200)); err == nil {
+		t.Fatal("advanceCheckpoint() = nil, want the checkpoint write to fail (path is a directory)")
+	}
+	if n, _ := store.readProgress(); n != 0 {
+		t.Errorf("progress = %d, want 0 (reset before the failed checkpoint write)", n)
+	}
+	if tr, _ := store.readScanTrend(); tr != (scanTrend{}) {
+		t.Errorf("trend = %+v, want zero (reset before the failed checkpoint write)", tr)
+	}
+}
+
+// TestRealMainRestoresOnceAcrossRetries pins the restore hoist: the artifact is
+// restored a single time in realMain, so an operational retry resumes from the
+// progress the failed attempt saved rather than re-restoring the (older) archived
+// value. Re-restoring per attempt (the round-1 clobber bug) would make attempt 2
+// read 100 again instead of 150.
+func TestRealMainRestoresOnceAcrossRetries(t *testing.T) {
+	dir := t.TempDir()
+	cp := filepath.Join(dir, "cp.txt")
+	zp := filepath.Join(dir, "artifact.zip")
+	writeZip(t, zp, map[string]string{
+		"cp.txt":      "checkpoint-bytes\n", // restore only extracts; content is not parsed here
+		"cp.txt.scan": "100\n",
+	})
+	var reads []int64
+	attempt := 0
+	fn := func(_ context.Context, opts options, _ io.Writer) error {
+		attempt++
+		s := checkpointStore{path: opts.checkpointFile}
+		n, err := s.readProgress()
+		if err != nil {
+			t.Fatalf("attempt %d readProgress: %v", attempt, err)
+		}
+		reads = append(reads, n)
+		if attempt == 1 {
+			if werr := s.writeProgress(n + 50); werr != nil {
+				t.Fatalf("writeProgress: %v", werr)
+			}
+			return errors.New(errors.ErrCodeUnavailable, "blip")
+		}
+		return nil
+	}
+	if code := realMain([]string{"--file", cp, "--restore-zip", zp}, fn, io.Discard); code != 0 {
+		t.Errorf("realMain() = %d, want 0", code)
+	}
+	if len(reads) != 2 || reads[0] != 100 || reads[1] != 150 {
+		t.Errorf("progress reads across attempts = %v, want [100 150] (restored once, no clobber)", reads)
 	}
 }

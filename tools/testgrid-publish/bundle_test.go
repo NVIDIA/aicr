@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,15 +28,16 @@ import (
 
 func TestParseCriteria(t *testing.T) {
 	tests := []struct {
-		name           string
-		recipeYAML     string
-		wantService    string
-		wantAccel      string
-		wantOS         string
-		wantIntent     string
-		wantPlatform   string
-		wantConstraint string
-		wantErr        bool
+		name            string
+		recipeYAML      string
+		wantService     string
+		wantAccel       string
+		wantOS          string
+		wantIntent      string
+		wantPlatform    string
+		wantConstraint  string
+		wantErr         bool
+		wantErrContains string
 	}{
 		{
 			name: "full criteria with k8s constraint",
@@ -117,6 +119,24 @@ criteria:
 			recipeYAML: "this: is: not: valid: yaml: : :",
 			wantErr:    true,
 		},
+		{
+			name: "profile artifact rejected until publication support lands",
+			recipeYAML: `apiVersion: aicr.run/v1alpha3
+kind: RecipeResult
+metadata:
+  selectedProfile:
+    name: gpuStack
+    value: driver-installed
+    ownedPaths: {}
+criteria:
+  service: aks
+  accelerator: h100
+  os: ubuntu
+  intent: training
+`,
+			wantErr:         true,
+			wantErrContains: "profile-bearing TestGrid publication is deferred to the profile adoption rollout",
+		},
 	}
 
 	for _, tt := range tests {
@@ -132,6 +152,9 @@ criteria:
 				t.Fatalf("parseCriteria() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
+				if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Fatalf("parseCriteria() error = %v, want containing %q", err, tt.wantErrContains)
+				}
 				return
 			}
 			if got.Service != tt.wantService {

@@ -1,0 +1,53 @@
+# Test fixture: a profiled leaf overlay layered over the embedded catalog.
+#
+# It shadows the embedded overlay of the same name so the resolution path runs
+# end to end — criteria match, profile declaration discovery, value selection,
+# ownership locking — without the shipped catalog declaring a profile.
+#
+# This is deliberately NOT a shippable declaration: ADR-015 requires each value
+# to carry a constraint distinguishing it from its siblings, and the driver
+# ownership signal does not exist yet (the AKS gpuProfile.driver projection is
+# the planned one). Test input only; see docs/integrator/recipe-development.md.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha3
+
+metadata:
+  name: h100-aks-ubuntu-training-kubeflow
+
+spec:
+  base: h100-aks-ubuntu-training
+
+  criteria:
+    service: aks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+    platform: kubeflow
+
+  mixins:
+    - os-ubuntu
+    - platform-kubeflow
+
+  profile:
+    name: gpuStack
+    description: Which component owns the GPU driver lifecycle.
+    default: preinstalled
+    values:
+      preinstalled:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: false
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /run/nvidia/driver

@@ -70,20 +70,19 @@ func TestConstants(t *testing.T) {
 }
 
 // TestRouteConfiguration verifies that the correct routes are set up,
-// mirroring how Serve wires them: /v1/recipe and /v1/query are backed by the
-// aicr.Client-based recipeHandler, and /v1/bundle by the aicr.Client-based
-// bundleHandler.
+// mirroring how Serve wires them: v1 and v2 recipe/query routes are backed by
+// the aicr.Client-based recipeHandler, and both bundle routes by the
+// aicr.Client-based bundleHandler.
 func TestRouteConfiguration(t *testing.T) {
 	h := newTestHandler(t, nil)
 	bh := newTestBundleHandler(t)
 
-	routes := map[string]http.HandlerFunc{
-		"/v1/recipe": h.HandleRecipes,
-		"/v1/query":  h.HandleQuery,
-		"/v1/bundle": bh.HandleBundles,
-	}
+	routes := newRoutes(h, bh)
 
-	for _, path := range []string{"/v1/recipe", "/v1/query", "/v1/bundle"} {
+	for _, path := range []string{
+		"/v1/recipe", "/v1/query", "/v1/bundle",
+		"/v2/recipe", "/v2/query", "/v2/bundle",
+	} {
 		if handler, exists := routes[path]; !exists {
 			t.Errorf("expected %s route to exist", path)
 		} else if handler == nil {
@@ -92,8 +91,8 @@ func TestRouteConfiguration(t *testing.T) {
 	}
 
 	// Verify no extra routes
-	if len(routes) != 3 {
-		t.Errorf("expected exactly 3 routes, got %d", len(routes))
+	if len(routes) != 6 {
+		t.Errorf("expected exactly 6 routes, got %d", len(routes))
 	}
 }
 

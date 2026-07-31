@@ -623,6 +623,26 @@ func TestApplyMapOverrides(t *testing.T) {
 	}
 }
 
+func TestApplyMapOverrides_OverlappingPathsAreDeterministic(t *testing.T) {
+	const attempts = 50
+	overrides := map[string]string{
+		"driver":         "true",
+		"driver.enabled": "false",
+	}
+	for range attempts {
+		target := map[string]any{}
+		err := ApplyMapOverrides(target, overrides)
+		if err == nil || !strings.Contains(err.Error(), "driver.enabled=false") ||
+			!strings.Contains(err.Error(), "exists but is not a map") {
+
+			t.Fatalf("ApplyMapOverrides() error = %v, want deterministic blocked-child rejection", err)
+		}
+		if got := target["driver"]; got != true {
+			t.Fatalf("driver = %#v, want parent override true before child rejection", got)
+		}
+	}
+}
+
 func TestSetNodeSelectorAtPath(t *testing.T) {
 	tests := []struct {
 		name         string

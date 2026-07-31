@@ -65,6 +65,11 @@ func recipeCmdFlags() []cli.Flag {
 			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.GetCriteriaPlatformTypes),
+		&cli.StringFlag{
+			Name:     flagProfile,
+			Usage:    "Configuration profile selection in name=value form",
+			Category: catQueryParameters,
+		},
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
@@ -137,7 +142,7 @@ Override snapshot-detected criteria:
 		},
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS, flagPlatform, "snapshot", "config", flagOutput, flagFormat); err != nil {
+			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS, flagPlatform, flagProfile, "snapshot", "config", flagOutput, flagFormat); err != nil {
 				return err
 			}
 

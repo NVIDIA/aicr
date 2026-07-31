@@ -799,11 +799,104 @@ func TestResolveRecipeFromCriteriaLossless(t *testing.T) {
 	}
 }
 
+func TestResolveRecipeWithProfile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o755); err != nil {
+		t.Fatalf("setup overlays directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
+		[]byte("components: []\n"), 0o600); err != nil {
+		t.Fatalf("setup registry.yaml: %v", err)
+	}
+	overlay := []byte(`apiVersion: aicr.run/v1alpha3
+kind: RecipeMetadata
+metadata:
+  name: profile-aks
+spec:
+  criteria:
+    service: aks
+  profile:
+    name: gpuStack
+    default: driver-installed
+    values:
+      driver-installed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: false
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+`)
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "profile-aks.yaml"),
+		overlay, 0o600); err != nil {
+		t.Fatalf("setup profile overlay: %v", err)
+	}
+
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.FilesystemSource(dir)),
+		aicr.WithVersion("v1.2.3"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	criteria, err := recipe.BuildCriteriaWithRegistry(client.CriteriaRegistry(),
+		recipe.WithServiceRegistry("aks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteriaWithRegistry: %v", err)
+	}
+	result, err := client.ResolveRecipeFromCriteriaWithProfile(
+		t.Context(), aicr.WrapCriteria(criteria), "gpuStack=operator-managed",
+	)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteriaWithProfile: %v", err)
+	}
+	if result.SelectedProfile == nil ||
+		result.SelectedProfile.Value != "operator-managed" ||
+		result.Resolved().APIVersion != recipe.RecipeProfileAPIVersion {
+
+		t.Fatalf("profile result = %#v, apiVersion=%q",
+			result.SelectedProfile, result.Resolved().APIVersion)
+	}
+	values, err := result.Resolved().GetValuesForComponentWithContext(t.Context(), "gpu-operator")
+	if err != nil {
+		t.Fatalf("GetValuesForComponentWithContext: %v", err)
+	}
+	if enabled := values["driver"].(map[string]any)["enabled"]; enabled != true {
+		t.Fatalf("driver.enabled = %v, want true", enabled)
+	}
+
+	entries, err := client.ListCatalog(t.Context(), &aicr.Criteria{Service: "aks"})
+	if err != nil {
+		t.Fatalf("ListCatalog: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Name == "profile-aks" {
+			if entry.Profile == nil || entry.Profile.Default != "driver-installed" {
+				t.Fatalf("catalog profile = %#v", entry.Profile)
+			}
+			return
+		}
+	}
+	t.Fatal("profile-aks catalog entry not found")
+}
+
 // TestResolveRecipeFromSnapshot proves the snapshot-evaluator resolve path:
 // ResolveRecipeFromSnapshot builds a recipe from explicit Criteria while
 // evaluating its resolution constraints against an observed cluster Snapshot
 // (mirroring `aicr recipe --snapshot`). A snapshot reporting K8s server
-// version v1.33.0 satisfies the strictest readiness constraint on the
+// version v1.34.0 satisfies the strictest readiness constraint on the
 // h100-eks-training chain (">= 1.32.4"), so the OS-pinned/version-gated
 // overlays are NOT excluded and the resolved recipe carries ComponentRefs —
 // proving the constraint evaluator ran without error against the snapshot.
@@ -825,7 +918,7 @@ func TestResolveRecipeFromSnapshot(t *testing.T) {
 		t.Fatalf("BuildCriteria: %v", err)
 	}
 
-	// k8sVersionSnapshot() reports v1.33.0, which clears the
+	// k8sVersionSnapshot() reports v1.34.0, which clears the
 	// h100-eks-training chain's strictest readiness constraint (">= 1.32.4").
 	snap := k8sVersionSnapshot()
 
@@ -1497,11 +1590,11 @@ componentRefs: []
 // reading satisfies the readiness constraints carried by the embedded
 // h100-eks-training chain (the strictest is ">= 1.32.4").
 func k8sVersionSnapshot() *aicr.Snapshot {
-	// v1.33.0 clears the strictest readiness constraint on the
+	// v1.34.0 clears the strictest readiness constraint on the
 	// h100-eks-training chain (">= 1.32.4"). All current callers want a
 	// satisfying version, so it is a fixed constant here rather than a
 	// parameter (unparam would flag a param that never varies).
-	const version = "v1.33.0"
+	const version = "v1.34.0"
 	return aicr.WrapSnapshot(&snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
 			measurement.NewMeasurement(measurement.TypeK8s).
@@ -1520,7 +1613,7 @@ func k8sVersionSnapshot() *aicr.Snapshot {
 // Used to drive the snapshot-based auto-detection of the GPU Operator's
 // driver.enabled Helm value (see gpu_driver_state.go).
 func gpuHardwareSnapshot(driverLoaded bool) *aicr.Snapshot {
-	const version = "v1.33.0"
+	const version = "v1.34.0"
 	return aicr.WrapSnapshot(&snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
 			measurement.NewMeasurement(measurement.TypeK8s).

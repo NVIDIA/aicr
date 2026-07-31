@@ -26,13 +26,13 @@ spec:
     accelerator: a100
     intent: training
 
-  # Specific constraints for A100 on AKS training workloads.
-  # A100 has no IMEX/NVLink ComputeDomain requirement, so the recipe keeps
-  # the AKS training baseline rather than the H100 1.32.4 floor.
+  # DRA (nvidia-dra-driver-gpu) is inherited via base.yaml on every AKS
+  # recipe, and DRA graduated to GA in Kubernetes 1.34 — restate that floor
+  # here rather than relying on inheritance (see aks.yaml and #1772).
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.34"
 
   componentRefs:
     # GPU Operator dependency ordering (inherits valuesFile from aks-training;
