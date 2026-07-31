@@ -1,0 +1,31 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# Automatically generated directly into source by GKE Version Vector Export Engine.
+# Authoritative single source of truth resides in GKE Version Vector registry and GCE SoT.
+
+apiVersion: aicr.run/v1alpha2
+kind: KWOKNodeProfile
+metadata:
+  name: a4x-maxgpu-4g-metal
+  labels:
+    provider: gke
+    nodeType: accelerated
+    accelerator: gb300
+    machineFamily: a4x-maxgpu-4g-metal
+
+spec:
+  instanceType: a4x-maxgpu-4g-metal
+  arch: arm64
+  osImage: Container-Optimized OS (COS)
+
+  resources:
+    cpu: "144"
+    memory: 960Gi
+    storage: 12000Gi
+
+  gpu:
+    product: NVIDIA-GB300
+    count: 4
+    memory: 245760
+    driver: "580.95.05"
+    driverMajor: "580"
+    driverMinor: "95"

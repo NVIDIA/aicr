@@ -86,6 +86,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.3.2      |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| gke     | gb300        | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
 
 {/* END AICR-TUNING */}

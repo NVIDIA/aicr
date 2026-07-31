@@ -1,0 +1,96 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# Automatically generated directly into source by GKE Version Vector Export Engine.
+# Authoritative single source of truth resides in GKE Version Vector registry.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb300-gke-cos-training
+
+spec:
+  base: gke-cos-training
+
+  criteria:
+    service: gke
+    accelerator: gb300
+    os: cos
+    intent: training
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34.3-gke.1318000"
+
+  componentRefs:
+    # GKE COS Driver Host Mapping & GPU Operator Alignment:
+    # On Container-Optimized OS (COS), NVIDIA GPU drivers are natively pre-installed
+    # or host-mounted at /home/kubernetes/bin/nvidia. We set driver.enabled: false
+    # to instruct GPU Operator NOT to deploy redundant containerized driver daemonsets,
+    # avoiding overlapping driver control and preserving GKE Version Vector validation.
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        cdi:
+          enabled: true
+        gdrcopy:
+          enabled: true
+        driver:
+          version: 580.95.05
+          enabled: false
+          nvidiaDriverRoot: /home/kubernetes/bin/nvidia
+
+    # GKE A4/A4X/A5X Managed RDMA & GDRCopy Networking Topology:
+    # On GKE Blackwell and Vera systems, high-bandwidth inter-node communication over RoCE
+    # utilizes GPU Operator with GDRCopy enabled (`gdrcopy: enabled: true`) across GKE's
+    # native multi-NIC optical fabric. When node pools operate under GKE Managed RDMA
+    # (`--gpudirect-strategy=rdma`), GKE natively automates the lifecycle and host
+    # installation of Google InfiniBand (gIB) plugins and NCCL tuners (/usr/local/gib/).
+    # Consequently, standalone networking installer DaemonSets (gke-nccl-roce or
+    # gke-nccl-tcpxo) are intentionally bypassed to prevent overriding GKE managed networking.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-gke.yaml
+      overrides:
+        service: gke
+        accelerator: gb300
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
+    performance:
+      # Performance phase check (nccl-all-reduce-bw) is intentionally omitted on GKE
+      # A4/A4X/A5X Blackwell and Vera architectures until runtime testbed characterization
+      # is certified. Standalone static literals fail to reflect dynamic RoCE network topologies.
+      checks: []
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

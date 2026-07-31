@@ -1,0 +1,58 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Automatically generated directly into source by GKE Version Vector Export Engine.
+# Authoritative single source of truth resides in GKE Version Vector registry and GCE SoT.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb300-gke-cos-training-kubeflow
+
+spec:
+  # Inherits from gb300-gke-cos-training recipe and layers Kubeflow Training Operator
+  base: gb300-gke-cos-training
+
+  criteria:
+    service: gke
+    accelerator: gb300
+    os: cos
+    intent: training
+    platform: kubeflow
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34.3-gke.1318000"
+
+  componentRefs:
+    # GKE Distributed Training & RoCE Network Tuning:
+    # Configures PyTorch distributed runtime with NCCL debug instrumentation and GDRCopy
+    # Level 5 acceleration, leveraging GPUDirect RDMA over RoCE across GKE optical rails.
+    - name: kubeflow-trainer
+      type: Helm
+      valuesFile: components/kubeflow-trainer/values.yaml
+      manifestFiles:
+        - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
+      dependencyRefs:
+        - cert-manager
+        - kube-prometheus-stack
+        - gpu-operator
+      overrides:
+        runtime:
+          image: "nvcr.io/nvidia/pytorch:25.01-py3-arm64"
+          env:
+            - name: NCCL_DEBUG
+              value: "INFO"
+            - name: NCCL_NET_GDR_LEVEL
+              value: "5"

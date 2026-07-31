@@ -1,0 +1,22 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# Automatically generated directly into source by GKE Version Vector Export Engine.
+# Authoritative single source of truth resides in GKE Version Vector registry and GCE SoT.
+
+apiVersion: aicr.run/v1alpha2
+kind: KWOKNodeProfile
+metadata:
+  name: system-n2
+  labels:
+    provider: gke
+    nodeType: system
+    machineFamily: n2-standard-16
+
+spec:
+  instanceType: n2-standard-16
+  arch: amd64
+  osImage: Container-Optimized OS (COS)
+
+  resources:
+    cpu: "16"
+    memory: 64Gi
+    storage: 9000Gi
