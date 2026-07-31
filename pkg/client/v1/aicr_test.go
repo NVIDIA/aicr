@@ -896,7 +896,7 @@ spec:
 // ResolveRecipeFromSnapshot builds a recipe from explicit Criteria while
 // evaluating its resolution constraints against an observed cluster Snapshot
 // (mirroring `aicr recipe --snapshot`). A snapshot reporting K8s server
-// version v1.33.0 satisfies the strictest readiness constraint on the
+// version v1.34.0 satisfies the strictest readiness constraint on the
 // h100-eks-training chain (">= 1.32.4"), so the OS-pinned/version-gated
 // overlays are NOT excluded and the resolved recipe carries ComponentRefs —
 // proving the constraint evaluator ran without error against the snapshot.
@@ -918,7 +918,7 @@ func TestResolveRecipeFromSnapshot(t *testing.T) {
 		t.Fatalf("BuildCriteria: %v", err)
 	}
 
-	// k8sVersionSnapshot() reports v1.33.0, which clears the
+	// k8sVersionSnapshot() reports v1.34.0, which clears the
 	// h100-eks-training chain's strictest readiness constraint (">= 1.32.4").
 	snap := k8sVersionSnapshot()
 
@@ -1590,11 +1590,11 @@ componentRefs: []
 // reading satisfies the readiness constraints carried by the embedded
 // h100-eks-training chain (the strictest is ">= 1.32.4").
 func k8sVersionSnapshot() *aicr.Snapshot {
-	// v1.33.0 clears the strictest readiness constraint on the
+	// v1.34.0 clears the strictest readiness constraint on the
 	// h100-eks-training chain (">= 1.32.4"). All current callers want a
 	// satisfying version, so it is a fixed constant here rather than a
 	// parameter (unparam would flag a param that never varies).
-	const version = "v1.33.0"
+	const version = "v1.34.0"
 	return aicr.WrapSnapshot(&snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
 			measurement.NewMeasurement(measurement.TypeK8s).
@@ -1613,7 +1613,7 @@ func k8sVersionSnapshot() *aicr.Snapshot {
 // Used to drive the snapshot-based auto-detection of the GPU Operator's
 // driver.enabled Helm value (see gpu_driver_state.go).
 func gpuHardwareSnapshot(driverLoaded bool) *aicr.Snapshot {
-	const version = "v1.33.0"
+	const version = "v1.34.0"
 	return aicr.WrapSnapshot(&snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
 			measurement.NewMeasurement(measurement.TypeK8s).

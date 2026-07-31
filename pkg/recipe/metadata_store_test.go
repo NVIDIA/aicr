@@ -2831,13 +2831,23 @@ func TestGB200OKEFloorNotClobbered(t *testing.T) {
 }
 
 // TestH100AKSUbuntuTrainingSlurmFloorNotClobbered is a regression test for the
-// H100 AKS Slurm K8s floor. The leaf sets >= 1.34 (DRA GA in Kubernetes 1.34,
-// per the aks.yaml rationale), but resolves under last-writer-wins merge with
-// lower-valued ancestors (aks-training >= 1.30, h100-aks-ubuntu-training
-// >= 1.32.4). A future constraint edit on an ancestor could silently regress
-// the leaf floor — the same shape TestGB200OKEFloorNotClobbered guards against.
-// This locks the resolved floor and gives the AKS-family follow-up a place to
-// add sibling leaves as they are bumped.
+// AKS training K8s floor family (see #1772). Every AKS training leaf inherits
+// DRA (nvidia-dra-driver-gpu) via base.yaml, and DRA graduated to GA in
+// Kubernetes 1.34 (the aks.yaml rationale). Prior to #1772 the family drifted:
+// aks-training.yaml sat at >= 1.30 and the H100 leaves at >= 1.32.4, below the
+// >= 1.34 floor aks.yaml itself claims. #1772 fixed this by restating >= 1.34
+// on every AKS training leaf (aks-training, a100/h100 base, -ubuntu, and
+// -kubeflow overlays) rather than relying on inheritance — evaluateOverlayConstraints
+// only evaluates a candidate leaf's own Spec.Constraints (ancestors are
+// pruned by filterToMaximalLeaves before evaluation), so a leaf that omits
+// the restatement is NOT gated by an ancestor's floor at snapshot-evaluation
+// time even though the resolved/displayed recipe still shows the inherited
+// value. This test locks down both: (1) the resolved K8s.server.version
+// floor for each leaf's fully-composed recipe, and (2) that the leaf's own
+// overlay file actually declares the >= 1.34 constraint itself — the second
+// check is what actually drives snapshot-time exclusion and gives this test
+// discriminating power (removing the restatement from any leaf, leaving only
+// the ancestor's value, fails case 2 even though case 1 can still pass).
 func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
@@ -2847,11 +2857,13 @@ func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 
 	tests := []struct {
 		name         string
+		leafName     string
 		criteria     *Criteria
 		wantK8sFloor string
 	}{
 		{
-			name: "h100 aks ubuntu slurm training preserves >= 1.34 floor",
+			name:     "h100 aks ubuntu slurm training preserves >= 1.34 floor",
+			leafName: "h100-aks-ubuntu-training-slurm",
 			criteria: &Criteria{
 				Service:     CriteriaServiceAKS,
 				Accelerator: CriteriaAcceleratorH100,
@@ -2861,10 +2873,86 @@ func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 			},
 			wantK8sFloor: ">= 1.34",
 		},
+		{
+			name:     "h100 aks training preserves >= 1.34 floor",
+			leafName: "h100-aks-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "h100 aks ubuntu training preserves >= 1.34 floor",
+			leafName: "h100-aks-ubuntu-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "h100 aks ubuntu kubeflow training preserves >= 1.34 floor",
+			leafName: "h100-aks-ubuntu-training-kubeflow",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformKubeflow,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "a100 aks training preserves >= 1.34 floor",
+			leafName: "a100-aks-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorA100,
+				Intent:      CriteriaIntentTraining,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "a100 aks ubuntu training preserves >= 1.34 floor",
+			leafName: "a100-aks-ubuntu-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorA100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "a100 aks ubuntu kubeflow training preserves >= 1.34 floor",
+			leafName: "a100-aks-ubuntu-training-kubeflow",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorA100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformKubeflow,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "aks training (accelerator-generic) preserves >= 1.34 floor",
+			leafName: "aks-training",
+			criteria: &Criteria{
+				Service: CriteriaServiceAKS,
+				Intent:  CriteriaIntentTraining,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// (1) The resolved, fully-composed recipe carries the floor.
 			result, err := store.BuildRecipeResult(ctx, tt.criteria)
 			if err != nil {
 				t.Fatalf("BuildRecipeResult failed: %v", err)
@@ -2879,6 +2967,30 @@ func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 			if k8sFloor != tt.wantK8sFloor {
 				t.Errorf("K8s.server.version floor = %q, want %q (possible floor clobber regression)",
 					k8sFloor, tt.wantK8sFloor)
+			}
+
+			// (2) The leaf overlay itself restates the floor. This is what
+			// actually gates snapshot-time constraint evaluation — a leaf
+			// that dropped its own restatement (relying on the ancestor's
+			// value alone) would still pass check (1) via inheritance while
+			// silently escaping the DRA-GA gate. See TestGB200OKEFloorNotClobbered
+			// for the sibling shape and the package-level note on why
+			// restating (not inheriting) is required.
+			leaf, ok := store.GetRecipeByName(tt.leafName)
+			if !ok {
+				t.Fatalf("overlay %q not found in store", tt.leafName)
+			}
+			var leafFloor string
+			for _, c := range leaf.Spec.Constraints {
+				if c.Name == testK8sVersionConstant {
+					leafFloor = c.Value
+					break
+				}
+			}
+			if leafFloor != tt.wantK8sFloor {
+				t.Errorf("leaf %q own Spec.Constraints K8s.server.version = %q, want %q — "+
+					"the leaf must restate the floor itself, not rely on ancestor inheritance",
+					tt.leafName, leafFloor, tt.wantK8sFloor)
 			}
 		})
 	}

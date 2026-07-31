@@ -52,7 +52,7 @@ func TestComputeGPUDriverState(t *testing.T) {
 					measurement.NewMeasurement(measurement.TypeK8s).
 						WithSubtypeBuilder(
 							measurement.NewSubtypeBuilder("server").
-								SetString(measurement.KeyVersion, "v1.33.0"),
+								SetString(measurement.KeyVersion, "v1.34.0"),
 						).
 						Build(),
 				},
@@ -253,7 +253,7 @@ func TestHasGPUOperatorClusterPolicy(t *testing.T) {
 					measurement.NewMeasurement(measurement.TypeK8s).
 						WithSubtypeBuilder(
 							measurement.NewSubtypeBuilder("server").
-								SetString(measurement.KeyVersion, "v1.33.0"),
+								SetString(measurement.KeyVersion, "v1.34.0"),
 						).
 						Build(),
 				},
