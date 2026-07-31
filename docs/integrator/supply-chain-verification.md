@@ -750,6 +750,11 @@ which is worth reading even if you end up driving the binary yourself. Sigstore'
 covers the same ground in more depth, including the split between its consistency
 check and its identity search, and the key-fingerprint mode below.
 
+Read the block below for the shape of `monitoredValues` only. It is not a
+turnkey recipe: against the public-good Rekor v1 the identity search cannot keep
+up, and it carries no `url` because pointing it at a private log fails at
+verifier setup for the reason given above.
+
 ```yaml
 name: Signer identity monitor (Rekor v1)
 on:
@@ -770,8 +775,9 @@ jobs:
     with:
       file_issue: true
       artifact_retention_days: 14
-      # Omit `url` for the public-good Rekor v1; set it to reach a private one.
-      url: https://rekor.internal.example.com
+      # No `url`: it defaults to the public-good Rekor v1, and a private log
+      # cannot be reached through this workflow at all. Drive the binary
+      # directly with --tuf-repository / --tuf-root-path instead.
       config: |
         monitoredValues:
           certIdentities:
