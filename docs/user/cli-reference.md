@@ -100,6 +100,7 @@ aicr snapshot [flags]
 | `--requests` | | string | | Override agent container resource requests as a comma-separated list of `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. Reads `AICR_REQUESTS` env when unset. |
 | `--limits` | | string | | Override agent container resource limits as a comma-separated list of `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when `--limits` does not already contain that key — an explicit `--limits nvidia.com/gpu=N` wins. Reads `AICR_LIMITS` env when unset. |
 | `--cluster-config` | | string | | Path to a pre-existing k8s-launch-kit (l8k) `cluster-config.yaml`. Ingests the file's per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) into the snapshot as a `NetworkTopology` Measurement. **Local agent mode only for now** (`AICR_AGENT_MODE=true`) — Job-mode rejects this flag with an `INVALID_REQUEST` error until ConfigMap mounting is implemented. Mutually exclusive with `--discover-network` at the collector level — file path wins when both are set, so callers can default discovery from a flag without inadvertent cluster contact. Reads `AICR_CLUSTER_CONFIG_PATH` env when unset. |
+| `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each NVIDIA GPU agent pool's `gpuProfile.driver` into the `K8s.aks-gpu-pools.gpu-driver` snapshot reading (`Install` / `None`); mixed or AKS-managed pools project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state (ADR-015 DD3). AMD GPU pools (NG family, MI300X-class ND sizes, Radeon NV sizes) are excluded. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode; a bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json && aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml`. |
 | `--discover-network` | | bool | false | Opt into live k8s-launch-kit (l8k) discovery: bootstraps an in-cluster nic-configuration daemon, walks the cluster's NICs, and emits a `NetworkTopology` Measurement. **NOT read-only** — writes `nvidia.kubernetes-launch-kit.machine` / `.gpu` labels on matched nodes and patches `NicClusterPolicy` via server-side apply. Job-mode is supported (the snapshot Job's ClusterRole gains discovery-specific RBAC when this flag is set). Reads `AICR_DISCOVER_NETWORK` env when unset. |
 
 **Output Destinations:**
@@ -320,7 +321,7 @@ aicr recipe [flags]
 
 `aicr recipe` resolves a recipe from **criteria** — `service`, `accelerator`, `os`, `intent`, `platform`, `nodes`. You can supply those criteria three ways, composed with the precedence **CLI flags > `--config` file > `--snapshot`**:
 
-- **Snapshot** (`--snapshot`) — criteria are auto-detected from a captured cluster snapshot: accelerator from the `nvidia.com/gpu.product` GFD label (primary — cluster-wide, so it surfaces heterogeneous clusters) or the per-node PCI device ID (fallback — maps the device ID to a SKU, e.g. `h100`, with no driver or GFD label required); service from the node's cloud-provider ID; OS from the node's OS release; node count from cluster topology. Use this when you already have a running cluster: you don't hand-specify the hardware, AICR reads it. (A detected SKU fills `criteria.accelerator` only when it's in the supported accelerator set; an unsupported GPU is recorded descriptively but not as a recipe criterion.) On the snapshot path AICR also reads the sampled GPU node's `driver-loaded` reading and, when the resolved overlay already declares the coordinated preinstalled-driver profile, injects `gpu-operator.overrides.driver.enabled=false` into the resolved recipe; the inverse mismatch — a preinstalled-driver overlay (e.g. the AKS driver-only default) resolved against a snapshot with *no* driver loaded — warns at resolution with the bundle-time GPU-Operator-managed override set. See [Component Catalog › GPU Operator Driver Auto-Detect](component-catalog.md#gpu-operator-driver-auto-detect) for the gate, warnings, and the pre-deploy-snapshot requirement.
+- **Snapshot** (`--snapshot`) — criteria are auto-detected from a captured cluster snapshot: accelerator from the `nvidia.com/gpu.product` GFD label (primary — cluster-wide, so it surfaces heterogeneous clusters) or the per-node PCI device ID (fallback — maps the device ID to a SKU, e.g. `h100`, with no driver or GFD label required); service from the node's cloud-provider ID; OS from the node's OS release; node count from cluster topology. Use this when you already have a running cluster: you don't hand-specify the hardware, AICR reads it. (A detected SKU fills `criteria.accelerator` only when it's in the supported accelerator set; an unsupported GPU is recorded descriptively but not as a recipe criterion.) On the snapshot path AICR also reads the sampled GPU node's `driver-loaded` reading; on unprofiled/legacy compositions whose resolved values already carry the coordinated preinstalled-driver configuration, it injects `gpu-operator.overrides.driver.enabled=false` into the resolved recipe, while on a profiled AKS composition the snapshot only *qualifies* the explicit-or-default `gpuStack` selection — the injector skips profile-owned paths and never mutates them; the inverse mismatch — a preinstalled-driver overlay resolved against a snapshot with *no* driver loaded — is handled per family: on profiled AKS it either fails closed at the profile constraint (pools not reading `Install`) or records `gpuDriverState: absent` for the bundle-time gate whose remedy is pool repair/recreation + recapture + `--profile`; on non-profiled families and legacy artifacts it warns with the bundle-time override set. See [Component Catalog › GPU Operator Driver Auto-Detect](component-catalog.md#gpu-operator-driver-auto-detect) for the gate, warnings, and the pre-deploy-snapshot requirement.
 - **Config file** (`--config`) — criteria (and bundle settings) from an `AICRConfig` document; good for reproducible, version-controlled workflows.
 - **Query flags** (`--service`, `--accelerator`, …) — state the criteria directly. Use this when there is **no cluster to snapshot yet** — the common case when you generate a recipe in order to *provision* a cluster, or build one offline/ahead of time for hardware you can't reach.
 
@@ -339,10 +340,22 @@ configuration choice. Select a non-default value with
 default. A selection against a composition with no declaration, a wrong name,
 or an unknown value fails closed. Profile-bearing output records
 `metadata.selectedProfile`, uses recipe apiVersion `aicr.run/v1alpha3`, and
-locks every declared owned path against divergent bundle, mirror, and
-argocd-helm install-time overrides. The core mechanism ships without an
-embedded cloud adopter; a profile can initially be exercised through a
-versioned external overlay.
+locks every declared owned path: divergent `aicr bundle`/`aicr mirror`
+static overrides are rejected (identical values accepted), and
+argocd-helm install-time values are rejected on key *presence* alone —
+even when the value is identical to the selected one. The AKS family is the first embedded
+adopter: `gpuStack` with values `azure-managed` (default) and `operator-managed` —
+see [AKS GPU setup](../integrator/aks-gpu-setup.md#gpu-driver-setup).
+Profiles can also be exercised through a versioned external overlay.
+
+Selection and verification are independent: `--profile` (or the default)
+always decides the selected value — never the snapshot — and a supplied
+`--snapshot` always verifies the selection against the cluster's recorded
+readings (fail-closed on mismatch or a missing reading; on AKS, the pool
+mode from `--aks-gpu-pools`). Without a snapshot no check can run at
+generation; the recorded constraint is enforced at `aicr validate`
+readiness instead. See the with/without matrix in
+[AKS GPU setup](../integrator/aks-gpu-setup.md#gpu-driver-setup).
 
 **Every stated criteria dimension must be honored:** for `service`, `accelerator`, `intent`, `os`, and `platform`, resolution now enforces a coverage post-condition — if you state a value for one of these dimensions, at least one applied overlay must carry that exact value, or the request fails with an actionable `INVALID_REQUEST` error instead of silently returning a recipe that ignores what you asked for. The error names the uncovered dimension and, where possible, the additional criteria that would make the request resolvable (e.g. `platform 'kubeflow' ... requires os (valid: ubuntu)`). `--nodes` is exempt from this check — it is advisory only, since no overlay gates on node count, and stating it never requires matching node-count-specific recipe content to exist.
 
@@ -384,12 +397,18 @@ spec:
 Individual CLI flags always override config file values. For slice/map flags, presence on the CLI replaces the file's value (no append).
 
 For a composition that declares a profile, the equivalent config field is
-`spec.recipe.profile`. The CLI flag takes precedence:
+`spec.recipe.profile`. The CLI flag takes precedence. For example, on the
+AKS family (the embedded adopter):
 
 ```yaml
 spec:
   recipe:
-    profile: gpuStack=driver-installed
+    criteria:
+      service: aks
+      os: ubuntu
+      accelerator: h100
+      intent: training
+    profile: gpuStack=operator-managed
 ```
 
 ```shell
@@ -420,7 +439,7 @@ Generate recipes using direct system parameters:
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
-| `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
+| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on the AKS family); omit to use the declaration's default (`gpuStack=azure-managed` on AKS) |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -557,11 +576,16 @@ kind: RecipeResult
 metadata:
   selectedProfile:
     name: gpuStack
-    value: driver-installed
+    value: azure-managed
     ownedPaths:
       gpu-operator:
         - driver.enabled
         - enabled
+        - operator.runtimeClass
+        - toolkit.enabled
+      nvidia-dra-driver-gpu:
+        - enabled
+        - nvidiaDriverRoot
 ```
 
 ---
@@ -900,6 +924,7 @@ aicr validate [flags]
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
 | `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
+| `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem, projected into the `K8s.aks-gpu-pools.gpu-driver` reading when validate captures a live snapshot (ADR-015 DD3). Ignored when `--snapshot` supplies a pre-captured snapshot — capture that snapshot with the same flag instead. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. |
 | `--no-cluster` | | bool | false | Skip cluster access (test mode): skips RBAC and Job deployment, reports checks as skipped. An offline dry-run does not sign or push a recipe-evidence attestation, so `--emit-attestation`/`--push` and `spec.validate.evidence.attestation` are ignored in this mode. Cannot be combined with `--cncf-submission` (that collector requires a live cluster); `--evidence-dir` conformance markdown is still rendered locally |
 | `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
 | `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
@@ -1544,6 +1569,7 @@ Override any value in the generated bundle files using dot notation:
 - **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes a component the recipe enabled. A component the recipe **disabled** (`overrides.enabled: false`) cannot be re-enabled this way — `--set <component>:enabled=true` on such a component is rejected, since re-enabling a platform-provided component would install a conflicting second copy. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
 - **Aliases merge**: overrides supplied under both a component's canonical name and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are **combined, not dropped**; the canonical name wins on any shared path. (Same alias-merge behavior as [`--set-json` / `--set-file`](#list-and-object-value-overrides).)
 - **GPU allocation-policy keys are deprecated at bundle time**: static overrides of the nested policy values — `nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride` and `gpu-operator`(`-ocp`) `devicePlugin.enabled` — still work via `--set`, `--set-json`, or `--set-file` but log a deprecation warning; the component-level `enabled` toggle of those components is honored **only via scalar `--set`** (the typed `--set-json`/`--set-file` path rejects `enabled` for every component, as described above) and likewise warns. Validators verify the recipe-resolved allocation policy, so a bundle-time change surfaces as recipe/cluster drift; move the allocation mode to a recipe overlay. `--dynamic` on any of these keys is **rejected** (the value would be unknowable when the policy is resolved). This boundary covers only what the bundler renders: **post-generation changes — `argocd-helm` / Argo CD parameter overrides, install-time `helm --set`, and manual edits to generated bundles — cannot be intercepted by AICR** and are outside the guarantee; they surface later as recipe/cluster drift when validation verifies the recipe-resolved policy. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
+- **Profile-owned paths are locked**: on a recipe carrying `metadata.selectedProfile` (ADR-015; the AKS `gpuStack` family), a static override on a profile-owned path is accepted only when identical to the selected value — a divergent value is rejected, `--set-json`/`--set-file` are always rejected for an owned component's `enabled` presence key, and `--dynamic` is rejected on any intersection with an owned path.
 - **Repeat to add; commas are literal**: To supply multiple overrides, repeat the flag (`--set a:x=1 --set b:y=2`). On the `bundle` command, commas inside a single slice-flag value are taken **literally** (not treated as a value separator), so a value containing a comma — and the comma-heavy JSON passed to `--set-json` — is preserved intact. This applies to all repeatable `bundle` flags (`--set`, `--set-json`, `--set-file`, `--dynamic`, `--*-node-selector`, `--*-node-toleration`, `--workload-selector`).
 
 **Examples:**
@@ -2835,6 +2861,7 @@ aicr evidence digest -r <recipe-or-overlay> [flags]
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--recipe` | `-r` | string | | Path/URI to a recipe or overlay file (file, HTTP/HTTPS, or `cm://namespace/name`). Required. |
+| `--profile` | | string | | Profile selection in exact `name=value` form for overlay inputs on a profiled family (e.g. `gpuStack=operator-managed` on AKS); omit for the declaration default. Rejected when the input is a hydrated `RecipeResult` — its selection is already baked into `metadata.selectedProfile`. |
 | `--kubeconfig` | | string | | Kubeconfig path; consulted only when the input is a `cm://` URI. |
 
 **Exit codes:**
@@ -2850,11 +2877,21 @@ aicr evidence digest -r <recipe-or-overlay> [flags]
 # Print the digest of a hydrated overlay.
 aicr evidence digest -r recipes/overlays/h100-eks-ubuntu-training.yaml
 
+# Profiled family: the selection changes the digest. Omit --profile for the
+# declaration default; pass it for a non-default value. --profile is rejected
+# when the input is a hydrated RecipeResult (the selection is already baked).
+aicr evidence digest -r recipes/overlays/h100-aks-ubuntu-training.yaml \
+  --profile gpuStack=operator-managed
+
 # CI drift gate: compare the digest pinned in a signed evidence bundle
-# against the recipe currently on the PR branch.
-signed=$(aicr evidence verify recipes/evidence/<slug>/<src>/<digest>.yaml --format json \
+# against the recipe currently on the PR branch. For a profiled pointer,
+# replay its recorded selection — recomputing without it hydrates the
+# declaration default and false-stales every non-default value.
+ptr=recipes/evidence/<slug>/<src>/<digest>.yaml
+prof=$(yq -r '.profile // ""' "$ptr")
+signed=$(aicr evidence verify "$ptr" --format json \
          | jq -r .predicate.recipe.digest)
-current=$(aicr evidence digest -r recipes/overlays/<file>.yaml)
+current=$(aicr evidence digest -r recipes/overlays/<file>.yaml ${prof:+--profile "$prof"})
 [[ "$signed" == "$current" ]] || echo "evidence is stale"
 ```
 

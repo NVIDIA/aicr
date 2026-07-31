@@ -340,3 +340,40 @@ func TestPrintDryRun(t *testing.T) {
 		t.Errorf("output missing aicr_version:\n%s", output)
 	}
 }
+
+// TestLocalBundleDigest pins the build-ID separation contract for local
+// bundles: the digest derives from manifest.json content (so two bundles of
+// one recipe with different validation results diverge), errors propagate
+// outside --dry-run, and the "local" placeholder survives only under it.
+func TestLocalBundleDigest(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(dirA, attestation.ManifestFilename), []byte(`{"files":{"a":"1"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirB, attestation.ManifestFilename), []byte(`{"files":{"a":"2"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	da, err := localBundleDigest(dirA, false)
+	if err != nil {
+		t.Fatalf("digest A: %v", err)
+	}
+	db, err := localBundleDigest(dirB, false)
+	if err != nil {
+		t.Fatalf("digest B: %v", err)
+	}
+	if da == db {
+		t.Fatalf("different manifests share digest %s", da)
+	}
+	if !strings.HasPrefix(da, "sha256:") {
+		t.Fatalf("digest %q lacks sha256: prefix", da)
+	}
+
+	if _, missErr := localBundleDigest(t.TempDir(), false); missErr == nil {
+		t.Fatal("missing manifest accepted outside dry-run")
+	}
+	placeholder, err := localBundleDigest(t.TempDir(), true)
+	if err != nil || placeholder != "local" {
+		t.Fatalf("dry-run fallback = (%q, %v), want (local, nil)", placeholder, err)
+	}
+}

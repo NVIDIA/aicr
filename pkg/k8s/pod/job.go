@@ -16,15 +16,122 @@ package pod
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
+
+// jobWatchResumeBackoff paces each watch re-establishment in rewatchJob. It is
+// a package var (not the constant directly) only so tests can drop it to a
+// negligible value and exercise the resume path without a real sleep;
+// production code never reassigns it.
+var jobWatchResumeBackoff = defaults.K8sJobWatchResumeBackoff
+
+// jobWatchResumeJitterFactor spreads the resume backoff by up to +20% so that
+// many validators whose watches were all closed by the same apiserver rollout
+// do not reconnect in lockstep and produce a synchronized thundering herd.
+const jobWatchResumeJitterFactor = 0.2
+
+// resumeContext builds the structured-error context shared by the resume
+// helper so a resume failure names the Job, mirroring the sibling pod-wait
+// helpers.
+func resumeContext(namespace, name string) map[string]any {
+	return map[string]any{keyNamespace: namespace, keyName: name}
+}
+
+// isRetryableWatchError reports whether a watch.Error event is a routine,
+// resumable signal (HTTP 410 Gone / ResourceExpired — the apiserver compacted
+// past the watch's ResourceVersion) rather than a fatal stream error. Callers
+// treat a retryable error like a channel close and re-establish the watch;
+// anything else aborts the wait.
+//
+// Against a real apiserver this is the *common* shape of a stale-ResourceVersion
+// rejection: the Watch call itself succeeds and the 410 arrives as the stream's
+// first ERROR event, not as a synchronous call error.
+func isRetryableWatchError(event watch.Event) bool {
+	if event.Type != watch.Error {
+		return false
+	}
+	err := apierrors.FromObject(event.Object)
+	return apierrors.IsResourceExpired(err) || apierrors.IsGone(err)
+}
+
+// resumeJobWatch reconnects a Job watch that ended — the channel closed or the
+// apiserver emitted a retryable 410 — before the Job reached a terminal state.
+//
+// It resyncs via a field-selected List rather than a Get, which is load-bearing:
+//   - The List's collection ResourceVersion (metadata.resourceVersion) is the
+//     current cluster revision, so the re-established watch always starts from a
+//     live RV. Re-watching from the Job's own object ResourceVersion is unsafe:
+//     a Job that runs untouched past the apiserver's watch-cache window keeps
+//     reporting the same aged-out object RV, so every watch from it 410s
+//     immediately and the wait degrades to paced polling for the rest of the run
+//     (the exact long-running-validator case issue #1966 targets).
+//   - The List still returns the Job, so a terminal transition that landed while
+//     the watch was down is observed here and not missed. Because the new watch
+//     starts from the List's collection RV, any transition after the List is
+//     replayed by the watch — there is no List-to-Watch gap (an empty
+//     ResourceVersion would reopen that gap and is deliberately not used).
+//
+// A jittered bounded backoff precedes every attempt so a stream that keeps
+// ending immediately (flapping LB, apiserver rollout) cannot make the loop spin,
+// and fleets sharing one apiserver do not reconnect in lockstep. The backoff
+// honors ctx cancellation, so the caller's context deadline remains the sole
+// give-up authority.
+//
+// It returns exactly one of:
+//   - terminal != nil: the Job was terminal in the resync List; the caller
+//     returns it (w is nil, nothing to continue).
+//   - w != nil: a fresh watch to continue consuming (terminal is nil).
+//   - err != nil: give up. Transient List/Watch failures are classified as
+//     ErrCodeUnavailable (vs ErrCodeTimeout when the context is done) via
+//     classifyReGetError, matching the sibling pod-wait helpers.
+func resumeJobWatch(ctx context.Context, client kubernetes.Interface, namespace, name string) (terminal *batchv1.Job, w watch.Interface, err error) {
+	select {
+	case <-time.After(wait.Jitter(jobWatchResumeBackoff, jobWatchResumeJitterFactor)):
+	case <-ctx.Done():
+		return nil, nil, errors.WrapWithContext(errors.ErrCodeTimeout,
+			"context canceled before Job watch resume", ctx.Err(), resumeContext(namespace, name))
+	}
+
+	// Resync via List: its collection ResourceVersion is current, and its result
+	// lets us catch a terminal transition that landed while the watch was down.
+	list, listErr := client.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: "metadata.name=" + name,
+	})
+	if listErr != nil {
+		return nil, nil, classifyReGetError(ctx, "job watch closed and Job re-list failed", listErr)
+	}
+	if len(list.Items) == 0 {
+		// The Job no longer exists — deleted while the watch was down.
+		return nil, nil, errors.NewWithContext(errors.ErrCodeInternal,
+			"Job not found during watch resume", resumeContext(namespace, name))
+	}
+	job := &list.Items[0]
+	if isJobTerminal(job) {
+		return job, nil, nil
+	}
+
+	// Re-establish the watch from the current collection ResourceVersion so it
+	// starts from a live revision and replays any change after the List.
+	w, watchErr := client.BatchV1().Jobs(namespace).Watch(ctx, metav1.ListOptions{
+		FieldSelector:   "metadata.name=" + name,
+		ResourceVersion: list.ResourceVersion,
+	})
+	if watchErr != nil {
+		return nil, nil, classifyReGetError(ctx, "failed to re-establish Job watch after resync", watchErr)
+	}
+	return nil, w, nil
+}
 
 // WaitForJobCompletion waits for a Kubernetes Job to complete successfully or fail.
 // Returns nil if job completes successfully, error if job fails or context deadline exceeded.
@@ -57,40 +164,46 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to watch Job", err)
 	}
-	defer watcher.Stop()
+	// Closure form so a re-established watch (reassigning watcher below) stops
+	// the current stream rather than leaking the original.
+	defer func() { watcher.Stop() }()
 
 	for {
 		select {
 		case <-timeoutCtx.Done():
 			return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", timeoutCtx.Err())
 		case event, ok := <-watcher.ResultChan():
-			if !ok {
+			// The watch stream ended when the channel closes or the apiserver
+			// emits a retryable 410 (it compacted past our ResourceVersion).
+			// kube-apiserver closes every watch after --min-request-timeout
+			// (30-60m); rolling restarts and LB drops close them early. Re-Get
+			// the Job to catch a terminal transition during the gap, then
+			// re-establish the watch and keep waiting — the context deadline
+			// remains the sole give-up authority.
+			if !ok || isRetryableWatchError(event) {
 				if ctxErr := timeoutCtx.Err(); ctxErr != nil {
 					return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", ctxErr)
 				}
-				// Watch channel closed without context cancellation —
-				// apiserver hiccups (rolling restart, LB drop) commonly
-				// cause this. Re-Get the Job directly to see whether it
-				// raced to a terminal state during the closure window.
-				recheck, recheckErr := client.BatchV1().Jobs(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
-				if recheckErr != nil {
+				terminal, newWatcher, resumeErr := resumeJobWatch(timeoutCtx, client, namespace, name)
+				if resumeErr != nil {
 					if ctxErr := timeoutCtx.Err(); ctxErr != nil {
 						return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", ctxErr)
 					}
-					return errors.Wrap(errors.ErrCodeInternal,
-						"watch closed and Job re-check failed", recheckErr)
+					return resumeErr
 				}
-				if done, checkErr := checkJobStatus(recheck); done {
+				if terminal != nil {
+					_, checkErr := checkJobStatus(terminal)
 					return checkErr
 				}
-				return errors.New(errors.ErrCodeUnavailable,
-					"watch channel closed before Job reached terminal state")
+				slog.Debug("job watch closed before terminal state, re-established",
+					keyNamespace, namespace, keyName, name)
+				watcher.Stop()
+				watcher = newWatcher
+				continue
 			}
 			if event.Type == watch.Error {
-				if statusErr, isErr := event.Object.(error); isErr {
-					return errors.Wrap(errors.ErrCodeInternal, "watch stream error", statusErr)
-				}
-				return errors.New(errors.ErrCodeInternal, "watch stream error")
+				return errors.Wrap(errors.ErrCodeInternal, "watch stream error",
+					apierrors.FromObject(event.Object))
 			}
 
 			job, ok := event.Object.(*batchv1.Job)
@@ -116,9 +229,15 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 // legitimate completions).
 //
 // Returns ErrCodeInternal if the initial Get or Watch call fails, or if the
-// Job is deleted while being watched. Returns ErrCodeTimeout on context
-// deadline exceeded. Returns ErrCodeUnavailable if the watch channel closes
-// without a terminal state being observed (after one re-Get fast-path retry).
+// Job is deleted while being watched. Returns ErrCodeUnavailable when a
+// re-check Get fails transiently while resuming a closed watch, and
+// ErrCodeTimeout on context deadline exceeded — the context deadline is the
+// sole give-up authority.
+//
+// When the watch ends without the Job being terminal (routine on kube-apiserver
+// --min-request-timeout expiry, rolling restarts, and LB drops), this resyncs
+// via a field-selected List and re-establishes the watch from the current
+// collection ResourceVersion, waiting through the closure rather than failing.
 //
 // Performs an initial Get to catch already-terminal Jobs, then uses the watch
 // API for efficient monitoring.
@@ -145,39 +264,46 @@ func WaitForJobTerminal(ctx context.Context, client kubernetes.Interface, namesp
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to watch Job", err)
 	}
-	defer watcher.Stop()
+	// Closure form so a re-established watch (reassigning watcher below) stops
+	// the current stream rather than leaking the original.
+	defer func() { watcher.Stop() }()
 
 	for {
 		select {
 		case <-timeoutCtx.Done():
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", timeoutCtx.Err())
 		case event, ok := <-watcher.ResultChan():
-			if !ok {
+			// The watch stream ended when the channel closes or the apiserver
+			// emits a retryable 410 (it compacted past our ResourceVersion) —
+			// routine on --min-request-timeout expiry, rolling restarts, and LB
+			// drops. Re-check the Job, then re-establish the watch and keep
+			// waiting rather than declaring failure; the context deadline is the
+			// sole give-up authority.
+			if !ok || isRetryableWatchError(event) {
 				// If the parent context already expired, classify the
 				// failure as a timeout rather than a generic recheck error.
 				if ctxErr := timeoutCtx.Err(); ctxErr != nil {
 					return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", ctxErr)
 				}
-				// Watch channel closed — re-check Job status directly before giving up.
-				recheck, recheckErr := client.BatchV1().Jobs(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
-				if recheckErr != nil {
+				terminal, newWatcher, resumeErr := resumeJobWatch(timeoutCtx, client, namespace, name)
+				if resumeErr != nil {
 					if ctxErr := timeoutCtx.Err(); ctxErr != nil {
 						return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", ctxErr)
 					}
-					return nil, errors.Wrap(errors.ErrCodeInternal,
-						"watch closed and Job re-check failed", recheckErr)
+					return nil, resumeErr
 				}
-				if isJobTerminal(recheck) {
-					return recheck, nil
+				if terminal != nil {
+					return terminal, nil
 				}
-				return nil, errors.New(errors.ErrCodeUnavailable,
-					"watch channel closed before Job reached terminal state")
+				slog.Debug("job watch closed before terminal state, re-established",
+					keyNamespace, namespace, keyName, name)
+				watcher.Stop()
+				watcher = newWatcher
+				continue
 			}
 			if event.Type == watch.Error {
-				if statusErr, isErr := event.Object.(error); isErr {
-					return nil, errors.Wrap(errors.ErrCodeInternal, "watch stream error", statusErr)
-				}
-				return nil, errors.New(errors.ErrCodeInternal, "watch stream error")
+				return nil, errors.Wrap(errors.ErrCodeInternal, "watch stream error",
+					apierrors.FromObject(event.Object))
 			}
 			if event.Type == watch.Deleted {
 				return nil, errors.New(errors.ErrCodeInternal, "Job was deleted before reaching terminal state")

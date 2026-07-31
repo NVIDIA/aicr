@@ -192,9 +192,93 @@ validators.Run(map[string]validators.CheckFunc{
 
 | Channel | Captured as |
 |---------|-------------|
-| **stdout** | CTRF `message` (human-readable evidence) — use `fmt.Printf` |
+| **stdout** | CTRF `stdout` (human-readable evidence) — use `fmt.Printf` |
 | **stderr** | Streamed live to the user — use `slog.*` |
 | `/dev/termination-log` | Failure reason (≤ 4096 bytes), written on `return error` |
+| **stdout sentinel lines** | Structured/side-channel data — see [Stdout sentinels](#stdout-sentinels) |
+
+### Stdout sentinels
+
+A check runs inside a pod; the only channels that reach the orchestrator are the
+exit code, `/dev/termination-log`, and the captured stdout (pod logs). To move
+*more* than a pass/fail verdict across that boundary, checks emit **sentinel
+lines** — stdout lines with a reserved prefix that a specific parser recognizes
+and pulls out. Plain (non-prefixed) stdout is unaffected and flows into the CTRF
+`stdout` array as before.
+
+Two sentinels exist today, with deliberately different lifecycles:
+
+| Prefix | Emitted by | Parsed by | Payload | Kept in CTRF `stdout`? | Survives minimal redaction? |
+|--------|-----------|-----------|---------|------------------------|-----------------------------|
+| `RESULT:` + one space | any check (`fmt.Printf`) | `extractResultSummaries` (`pkg/validator/validator.go`) | free-form human text (throughput, bandwidth, TTFT…) | **yes** — line stays; trailing text is *also* echoed to the live CLI at INFO | **no** — dies with `stdout` under the default policy |
+| `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
+
+Both are parsed with `strings.CutPrefix` and both parsers are pure, unit-tested
+functions. They are separate channels on purpose: `RESULT:` surfaces live
+metrics to a human watching a run, so it carries unbounded free-form text and is
+correctly redacted with the rest of `stdout`; `##AICR-EXTRA##` carries structured
+data that must *outlive* redaction, so it is low-cardinality, allowlisted, and
+stripped from the human evidence. Do not route structured outcome data through
+`RESULT:` (it would not survive publication) or human prose through
+`##AICR-EXTRA##` (it would be dropped by the allowlist or leak identifiers).
+
+### Structured evidence that survives redaction
+
+`stdout` and `message` are free-form log text: they can leak node names, IPs,
+DNS names, and secret/cert names, so the default **minimal** redaction policy
+(`pkg/evidence/redact`) strips them from a published, signed evidence bundle —
+only `--full` keeps them. A check that reports on `stdout` alone therefore shows
+as `passed` with no detail in the artifact a downstream consumer verifies by
+default: a 1-of-2-node pass is indistinguishable from 2-of-2, and a skip loses
+its reason.
+
+To carry outcome data that *does* survive minimal redaction, emit it into the
+CTRF `extra` map (`ctrf.TestResult.Extra`, mirroring the CTRF spec's `extra`
+object) via `validators.EmitExtra`:
+
+```go
+// Emit failures are non-fatal — warn, but never flip the check's verdict on a
+// failed stdout write (checkNvidiaSMI wraps this as the emitExtraOrWarn helper):
+emit := func(extra map[string]string) {
+    if err := validators.EmitExtra(extra); err != nil {
+        slog.Warn("failed to emit validator extra", "error", err)
+    }
+}
+// Success path — coverage disclosure (counts only, never node names/IPs):
+emit(map[string]string{"nodesValidated": "1", "nodesTotal": "2"})
+// Skip path — reason enum code:
+emit(map[string]string{"skipReason": "no-gpu-nodes"})
+```
+
+**Transport.** `EmitExtra` marshals the map to one JSON line prefixed with
+`ctrf.ExtraLinePrefix` (`##AICR-EXTRA##` followed by one space) on stdout — the
+only channel that crosses the pod boundary besides the exit code and termination
+log. The orchestrator (`pkg/validator/job.ExtractResult`) parses each sentinel
+line, keeps the **last valid non-empty** payload as `TestResult.Extra`, and
+strips every sentinel line from the stored `stdout` (transport, not human
+evidence). A malformed line is non-fatal: it is logged and skipped without
+discarding an earlier valid payload — a garbled line never flips a pass to an
+error, nor clears a coverage line that preceded it. Keep the human `fmt.Printf`
+lines too; they still feed `--full` and live `aicr validate` output.
+
+**Low-cardinality + allowlist contract.** `extra` values MUST be counts or enum
+codes only (`"2"`, `"no-schedulable-gpu-nodes"`) — never node names, IPs, or hostnames.
+`pkg/evidence/redact`'s `ctrfExtraAllowlist` enforces this at the **publication
+boundary** (not just at emission, which raw prefixed stdout could bypass) with a
+fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`,
+`nodesTotal`, `skipReason`) survive, and each surviving value must pass its key's
+validator — a non-negative decimal count for the `nodes*` keys, and for
+`skipReason` a **closed set** of known codes (`ctrfSkipReasons`, currently
+`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`). A closed set rather
+than a shape regex is deliberate: a kebab-case regex would still pass an
+arbitrary low-cardinality identifier like `customer-prod-cluster`. A value that
+is ill-shaped or unlisted (an IP under `nodesTotal`, a hostname or unminted code
+under `skipReason`) is dropped even though its key is allowed. Every other key is
+dropped too, and if nothing survives the map ships as absent (no empty
+`extra: {}`). Adding a new key (with its value validator) or a new `skipReason`
+code means adding it to that allowlist (and bumping `redact.PolicyVersion`) in
+the same change; there is no CTRF schema in `api/`, so the `pkg/validator/ctrf`
+godoc and this page are the contract.
 
 **Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/validation/validation.yaml`
 (override via `AICR_SNAPSHOT_PATH`, `AICR_VALIDATION_PATH`).

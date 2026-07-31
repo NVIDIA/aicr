@@ -175,7 +175,15 @@ func LivePaths(idx *corroborate.Index) map[string]struct{} {
 				if err != nil {
 					continue
 				}
-				present[co.Path()] = struct{}{}
+				path := co.Path()
+				// Profiled tabs live at the suffixed route; report the
+				// path as the dashboard actually serves it so the
+				// committed presence manifest is compared against
+				// reality, not the criteria-only spelling.
+				if tab.Profile != "" {
+					path += "-" + tab.Profile
+				}
+				present[path] = struct{}{}
 			}
 		}
 	}

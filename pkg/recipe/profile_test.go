@@ -2085,3 +2085,21 @@ func TestPathsIntersect(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateProfileDeclaration_CaseInsensitiveValueUniqueness pins the
+// evidence-path invariant: lowercase segments are derived from value names,
+// so names differing only by case must be rejected at catalog load.
+func TestValidateProfileDeclaration_CaseInsensitiveValueUniqueness(t *testing.T) {
+	decl := &ProfileDeclaration{
+		Name:    "gpuStack",
+		Default: "operator",
+		Values: map[string]ProfileValue{
+			"operator": {},
+			"Operator": {},
+		},
+	}
+	_, err := ValidateProfileDeclaration(decl)
+	if err == nil || !strings.Contains(err.Error(), "differ only by case") {
+		t.Fatalf("ValidateProfileDeclaration() error = %v, want case-uniqueness rejection", err)
+	}
+}

@@ -37,6 +37,16 @@ const (
 
 	// StatusOther indicates an unexpected outcome (crash, OOM, timeout, etc.).
 	StatusOther = "other"
+
+	// ExtraLinePrefix marks a single stdout line as the transport for a check's
+	// structured TestResult.Extra map. An in-pod check emits one such line via
+	// EmitExtra; pkg/validator/job.ExtractResult parses the last one and strips
+	// all prefixed lines from the human-readable Stdout evidence.
+	//
+	// The prefix lives here (not in validators/ or pkg/validator/job) because it
+	// is the shared contract between the in-pod producer and the orchestrator
+	// consumer, and both packages import ctrf.
+	ExtraLinePrefix = "##AICR-EXTRA## "
 )
 
 // IsFailingStatus reports whether a check or phase status must block progress
@@ -141,6 +151,21 @@ type TestResult struct {
 
 	// Stdout contains standard output lines from test execution.
 	Stdout []string `json:"stdout,omitempty"`
+
+	// Extra carries structured, low-cardinality outcome data that survives the
+	// default "minimal" redaction policy (unlike Stdout and Message, which are
+	// free-form log text stripped by default). It mirrors the CTRF spec's
+	// `extra` object.
+	//
+	// CONTRACT: values MUST be low-cardinality counts or enum codes only —
+	// e.g. "1", "2", "no-schedulable-gpu-nodes", "no-gpu-nodes". NEVER node names, IPs,
+	// hostnames, or any operator-identifying free text; those belong in Stdout,
+	// which is redacted by default. The redact package enforces this at the
+	// publication boundary with a fail-closed key AND value allowlist: only
+	// listed keys survive, and only values matching the key's canonical shape
+	// (decimal count / kebab-case enum code) — so an identifier smuggled under
+	// an allowed key is dropped, not published (see pkg/evidence/redact).
+	Extra map[string]string `json:"extra,omitempty"`
 }
 
 // Environment describes the execution environment and build context.

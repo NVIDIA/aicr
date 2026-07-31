@@ -141,6 +141,7 @@ aicr snapshot \
 - `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`). Selects the per-OS pod configuration and service collector backend.
 - `--requests` / `--limits`: Override agent container resource requests/limits (comma-separated `name=quantity` pairs).
 - `--cluster-config`: Path to a pre-existing k8s-launch-kit cluster-config.yaml to ingest network topology (local agent mode only).
+- `--aks-gpu-pools`: Path to an `az aks nodepool list -o json` dump, projected into the `K8s.aks-gpu-pools.gpu-driver` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
 - `--discover-network`: Enable live l8k discovery to populate the NetworkTopology measurement. **Not read-only** — writes `nvidia.kubernetes-launch-kit.*` node labels and may patch `NicClusterPolicy`.
 
 ### 4. Check Agent Logs (Debugging)

@@ -245,8 +245,13 @@ deployers have no supported install-time value surface.
 
 Unprofiled compositions retain the legacy apiVersion and byte shape.
 Generation-side driver auto-detection skips a path owned by the selected
-profile. Evidence projection also rejects profiled artifacts until generic
-per-value evidence support lands with the first adopter.
+profile. Evidence projection accepts profiled artifacts: the selected
+value joins the evidence path name and the corroboration tab as a
+lowercase `-<name>-<value>` segment (shared helper
+`attestation.ProfileSegment`), pointers record the selection, and the
+repo evidence gate recomputes each pointer's digest with its recorded
+selection. The TestGrid coordinate is deliberately unsuffixed — its
+digest-bound build ID already partitions per value.
 
 ## Mixin Composition
 

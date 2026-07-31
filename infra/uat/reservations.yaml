@@ -124,7 +124,7 @@ reservations:
     # actual first-fixed tag differs.
     #
     # Training is gated to the same release for a different reason: the AKS
-    # driver-only default flip changed cluster-config.yaml to
+    # azure-managed default flip changed cluster-config.yaml to
     # gpuDriverInstall: true, and release cells provision from main's config
     # while running the released binary. v0.17.0 and older embed the
     # pre-flip AKS profile (GPU-Operator-managed driver + toolkit), so on a

@@ -15,9 +15,12 @@
 # NIM Operator Health Check
 #
 # Validates that the NVIDIA NIM Operator is running and healthy in the
-# nvidia-nim namespace. Checks that the k8s-nim-operator deployment has
-# at least one available replica and that no pods in the namespace are
-# stuck in Pending, Failed, or Unknown phases.
+# nvidia-nim namespace. Also asserts nimservices / nimcaches /
+# nimpipelines.apps.nvidia.com are Established=True (verified against
+# chart 3.1.0; re-verify on defaultVersion bump). Checks that the
+# k8s-nim-operator deployment has at least one available replica and
+# that no pods in the namespace are stuck in Pending, Failed, or
+# Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -26,6 +29,35 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-crds-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: nimservices.apps.nvidia.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: nimcaches.apps.nvidia.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: nimpipelines.apps.nvidia.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-deployment-exists
       try:
         # Guard against vacuous pass on empty namespace: verify the

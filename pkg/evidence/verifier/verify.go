@@ -105,6 +105,22 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	}
 	r.Predicate = pred
 	r.RecipeName = pred.Recipe.Name
+	// Early pointer-to-predicate name check (fast fail with clear step
+	// attribution). The AUTHORITATIVE identity binding — including the
+	// profile claim, which suffix rules alone cannot secure against
+	// name-collision spoofs — is checkRecipeIdentity after CheckInventory,
+	// which derives name/selection/digest from the manifest-verified
+	// recipe bytes.
+	if pointer != nil && pointer.Recipe != pred.Recipe.Name {
+		berr := errors.New(errors.ErrCodeInvalidRequest,
+			"pointer.recipe "+pointer.Recipe+" does not match the predicate's recipe name "+
+				pred.Recipe.Name+" — the pointer's identity (including any profile claim) must "+
+				"be the signed bundle's identity")
+		record(r, stepPredicate, StepFailed, berr.Error(), nil)
+		setFailureCause(r, stepPredicate, berr)
+		r.Exit = ExitInvalid
+		return r, nil
+	}
 	source := "unsigned statement.intoto.json"
 	if verifiedPredicate != nil {
 		source = "verified DSSE payload"
@@ -127,9 +143,17 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 		record(r, stepInventory, StepFailed, phaseErr.Error(), phaseRows)
 		setFailureCause(r, stepInventory, phaseErr)
 		r.Exit = ExitInvalid
+	} else if idErr := checkRecipeIdentity(mat.BundleDir, pointer, pred); idErr != nil {
+		// Content-bound identity: the pointer/predicate recipe name,
+		// profile claim, and digest must all derive from the
+		// manifest-verified recipe bytes (suffix heuristics are
+		// name-spoofable).
+		record(r, stepInventory, StepFailed, idErr.Error(), nil)
+		setFailureCause(r, stepInventory, idErr)
+		r.Exit = ExitInvalid
 	} else {
 		record(r, stepInventory, StepPassed,
-			"manifest digest matches predicate; all bundle files and phase report digests verified", nil)
+			"manifest digest matches predicate; bundle files, phase digests, and recipe identity (name/profile/digest) verified", nil)
 	}
 
 	// Surface recorded phase failures as the informational exit-1 signal.

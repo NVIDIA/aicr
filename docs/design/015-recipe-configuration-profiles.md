@@ -144,9 +144,9 @@ spec:
   profile:
     name: gpuStack
     description: Who installs the GPU driver and container toolkit.
-    default: driver-only
+    default: azure-managed
     values:
-      operator:            # node pools created with --gpu-driver none
+      operator-managed:    # node pools created with --gpu-driver none
         componentRefs:
           - name: gpu-operator
             overrides:
@@ -156,8 +156,10 @@ spec:
           - name: nvidia-dra-driver-gpu
             overrides:
               nvidiaDriverRoot: /run/nvidia/driver
-        # PR 2 adds the symmetric gpuProfile.driver=None constraint.
-      driver-only:         # AKS "Driver only" install profile:
+        constraints:
+          - name: K8s.aks-gpu-pools.gpu-driver
+            value: None
+      azure-managed:         # AKS "Driver only" install profile:
                            # driver + toolkit preinstalled on the node
         componentRefs:
           - name: gpu-operator
@@ -168,11 +170,13 @@ spec:
           - name: nvidia-dra-driver-gpu
             overrides:
               nvidiaDriverRoot: /
-        # PR 2 adds the symmetric gpuProfile.driver=Install constraint.
+        constraints:
+          - name: K8s.aks-gpu-pools.gpu-driver
+            value: Install
 ```
 
 AKS is the first consumer because its current recipe already defaults to
-the four-path `driver-only` tuple shown above. The alternative override
+the four-path `azure-managed` tuple shown above. The alternative override
 documented by the merged AKS change flips all four paths together.
 Moving that existing qualified split behind a profile removes the
 bundle-time flag tuple without requiring the GKE-only advertiser model.
@@ -183,9 +187,16 @@ mode owns it. The AKS adoption therefore adds a provider reading projected
 from each GPU agent pool's durable
 [`gpuProfile.driver`](https://learn.microsoft.com/en-us/rest/api/aks/agent-pools/get?view=rest-aks-2026-04-01)
 property:
-`Install` selects `driver-only`, while `None` selects `operator`. An
-unavailable provider reading, an unknown value, or mixed GPU-pool values
-fails closed. Both profile values carry symmetric constraints over that
+The reading **qualifies** a selection; it never makes one. The selected
+value always comes from explicit `--profile` input or the declaration's
+default, and its recorded constraint is then verified against the
+reading: `azure-managed` requires `Install`, `operator-managed` requires `None`. A
+mismatch fails generation closed naming the observed pool state — there
+is no silent switch to the "matching" value, because selection is
+explicit intent (see the Decision section: selection resolves from
+explicit input or the declared default, never from observed state). An unavailable provider reading, an
+unknown value, or mixed GPU-pool values fails closed against either
+selection. Both profile values carry symmetric constraints over that
 reading.
 
 The shipped `gpuDriverState` heuristic is a legacy value-level
@@ -383,8 +394,12 @@ once, inherited by accelerator/intent leaves.
   "no `default`, no `--profile`" state: the no-flag workflow always
   resolves to exactly one value.
 - Profile and value names (`gpuStack`, `operator`, `csp-managed`,
-  `driver-only`) are **overlay-scoped identifiers, not reserved
+  `azure-managed`) are **overlay-scoped identifiers, not reserved
   keywords**: validity is membership in the declaring overlay's enum.
+  Value names are additionally case-insensitively unique per declaration
+  (catalog-load rejection): evidence storage and the corroboration
+  projection derive lowercase path segments from the selected value, so
+  names differing only by case would collapse onto one location.
   Both are lexically constrained at catalog load so the single
   `name=value` wire form carried by every selection surface is always
   unambiguous (grammar in #1761).
@@ -572,10 +587,13 @@ to the surviving composition:
 
   The core roll-in does not publish or project profiled evidence. Those
   boundaries strictly decode the new artifact and reject it rather than
-  dropping profile identity. Generic per-value evidence partitioning and
-  the new predicate type land with the first consumer. The
-  canonical-descriptor identity and currentness expansion described below
-  are GKE-only policy work and land with GKE.
+  dropping profile identity. Generic per-value evidence partitioning lands
+  with the first consumer (the AKS adopter) **under the existing v1
+  predicate** — the selected value and ownedPaths are already recipe-digest
+  inputs, so currentness stays digest-authoritative. The new
+  descriptor-bound predicate type is deferred to the GKE rollout stage
+  (see #1761), together with the canonical-descriptor identity and
+  currentness expansion described below, which are GKE-only policy work.
 
 ### Override locking
 
@@ -1336,9 +1354,11 @@ recurrence — the shape the Problem section expects.
 - Rule of thumb, to keep profiles from sprawling: a profile value encodes
   *ownership of a stack layer on an existing recipe*; new workload/product
   surfaces remain criteria. Value names must name the precise ownership
-  split (`driver-only`, `csp-managed` for GKE's device-plugin handoff) —
-  a name that overstates the delegation (calling AKS "Driver only" mode
-  `csp-managed`) misdescribes what is qualified.
+  split, scoped to the layer the profile declares (`azure-managed` /
+  `operator-managed` for AKS's driver+toolkit install ownership,
+  `csp-managed` for GKE's device-plugin handoff) — a name that overstates
+  the delegation (a wholesale `csp-managed` for AKS, where Azure owns only
+  the driver/toolkit preinstall) misdescribes what is qualified.
 
 ## Adoption plan
 
@@ -1349,7 +1369,7 @@ recurrence — the shape the Problem section expects.
    `advertiser`, allocation-policy selector paths, and profiled evidence
    projection until their consumer stage.
 2. First consumer: AKS
-   `gpuStack: [driver-only (default), operator]` for unmanaged pools.
+   `gpuStack: [azure-managed (default), operator-managed]` for unmanaged pools.
    It moves the existing qualified four-path tuple
    (`driver.enabled`, `toolkit.enabled`, `operator.runtimeClass`, and
    `nvidiaDriverRoot`) behind profile selection and removes the documented
@@ -1411,8 +1431,10 @@ work that resolves it.
 3. **AKS node-pool-mode signal — resolved by the 2026-07-27 amendment.**
    The provider-facing AgentPool `gpuProfile.driver` property is the
    durable ownership marker. AKS adoption projects it into a snapshot
-   reading across GPU pools: `Install` maps to `driver-only`, `None` maps
-   to `operator`, and an absent field in a successful supported API response
+   reading across GPU pools. The reading qualifies the explicit-or-default
+   selection, never makes one: `azure-managed`'s recorded constraint requires
+   `Install`, `operator-managed`'s requires `None`, and an absent field in a
+   successful supported API response
    follows the provider's documented `Install` default. Unavailable API
    data, mixed values, and unknown values fail closed. Both profile values
    receive symmetric constraints over the projection.

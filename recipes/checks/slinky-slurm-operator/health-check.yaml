@@ -18,6 +18,13 @@
 # running and healthy in the `slinky` namespace. Checks that both
 # deployments have at least one available replica and that no pods in
 # the namespace are stuck in Pending, Failed, or Unknown phases.
+#
+# No CRD Established=True block here (negative finding for #1246): the
+# slinky-slurm-operator chart is deployed with crds.enabled: false (see
+# the `crds.enabled: false` key in
+# components/slinky-slurm-operator/values.yaml; registry.yaml's
+# slinky-slurm-operator entry only carries the same flag as a prose
+# reminder to re-verify it on version bumps).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:

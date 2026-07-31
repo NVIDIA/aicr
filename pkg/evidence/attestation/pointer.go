@@ -67,6 +67,7 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 	return &Pointer{
 		SchemaVersion: PointerSchemaVersion,
 		Recipe:        in.Bundle.RecipeName,
+		Profile:       in.Bundle.Profile,
 		Attestations:  []PointerAttestation{att},
 	}, nil
 }

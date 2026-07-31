@@ -226,6 +226,81 @@ with only pre-manifests is rejected as having no deployable primary.
 When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 (`embedded` / `external` / `merged`) for every loaded file.
 
+## Converting a family to a configuration profile (AKS example)
+
+`recipes/overlays/aks.yaml` declares the `gpuStack` configuration profile
+(`azure-managed` default, `operator-managed` alternative) over the GPU driver/toolkit
+ownership paths (see
+[Configuration Profiles](recipe-development.md#configuration-profiles)).
+When an external data directory replaces a declaring overlay, or converts a
+family to a profile, the replacement rules above interact with the profile
+mechanics:
+
+- **A same-path replacement replaces the declaration too.** An external
+  `overlays/aks.yaml` completely replaces the embedded file — including its
+  `spec.profile` block. Keep the declaration in the replacement — dropping it
+  while keeping `apiVersion: aicr.run/v1alpha3` fails catalog validation
+  (the version⟺declaration cross-check). That guardrail protects an
+  integrator *editing* a v1alpha3 file: de-profiling one requires BOTH
+  removing the declaration AND downgrading the overlay to the legacy
+  apiVersion. It does NOT protect the upgrade path — a pre-existing legacy
+  (`aicr.run/v1alpha2`) external `overlays/aks.yaml`, authored before the
+  family's conversion, already satisfies both conditions. Upgrading AICR
+  with such a catalog in `--data` silently preserves the unprofiled family:
+  resolution succeeds with no error, no `selectedProfile` on the recipe, and
+  no `K8s.aks-gpu-pools.gpu-driver` constraint. **On upgrade, diff each
+  external overlay against its embedded counterpart** and port the
+  `spec.profile` declaration plus the `apiVersion` bump (or consciously keep
+  the fork unprofiled). A load-time detection of an external overlay
+  shadowing an embedded profile declaration (with an explicit opt-out) is a
+  candidate follow-up; it is not shipped.
+- **Static assignments to now-owned paths are superseded.** Descendant or
+  external overlays that statically assign profile-owned paths (for the AKS
+  declaration: `gpu-operator` `driver.enabled`, `operator.runtimeClass`,
+  `toolkit.enabled`; `nvidia-dra-driver-gpu` `nvidiaDriverRoot`) are
+  overwritten by the selected value's fragment at resolution. The `enabled`
+  entries in `ownedPaths` are different: they are the SYNTHETIC
+  component-presence locks — fragments are forbidden from assigning
+  `enabled`, and the lock instead rejects removing (or bundle-subsetting
+  away) an owned component. Review those overlays when converting a family — a
+  static assignment that used to take effect no longer does.
+- **Owned paths lock per surface.** The enforcement matrix:
+  1. *`aicr bundle` static overrides* (ANY static source — `--set`,
+     `--set-json`, `--set-file`, or a config-file override) on an
+     ordinary owned value path (e.g. `driver.enabled`,
+     `operator.runtimeClass`): a divergent value fails closed; an
+     identical value is accepted. For the synthetic `enabled` presence
+     key, typed sources (`--set-json`, `--set-file`) are ALWAYS rejected
+     — even when the value is identical to the selected one — because
+     routing the toggle through a typed flag would write a stray literal
+     `enabled:` chart value instead of toggling the component
+     (`pkg/cli/bundle_config.go`). `aicr mirror list` exposes only the
+     repeatable scalar `--set` (no typed flags), with the same
+     identical-accepted / divergent-rejected rule; it does not apply a
+     config file's `spec.bundle.deployment.set` overrides
+     (`pkg/cli/mirror.go`).
+  2. *`--dynamic` exports*: rejected on mere INTERSECTION with an owned
+     path, regardless of value — install-time mutability of a locked path
+     is itself the violation.
+  3. *argocd-helm install-time values*: ANY install-time key whose path
+     equals, contains, or is contained by an owned path fails closed at
+     Helm render time, even when the value is identical — key presence
+     alone trips the guard
+     (`pkg/bundler/deployer/argocdhelm/argocdhelm.go`).
+  4. *Component presence (the synthetic `enabled` owned path)*: not
+     changeable by profile reselection — fragments cannot assign
+     `enabled`, so no `--profile` choice adds or removes a component;
+     the lock rejects removing (or bundle-subsetting away) an owned
+     component. Presence changes are catalog/composition changes.
+     Reselecting a profile changes owned VALUE paths only.
+- **Selection is explicit.** Pick a value with `aicr recipe --profile
+  name=value` (or `spec.recipe.profile` in `--config`); omission applies the
+  declared default.
+- **Evidence identity gains a profile path segment.** A profiled recipe's
+  evidence identity appends a lowercase `-<name>-<value>` segment, so
+  per-value evidence lands in distinct directories rather than colliding on
+  the criteria-only path.
+
 ## Strict mode — gating the OSS catalog
 
 `--criteria-strict` (or `AICR_CRITERIA_STRICT=1`, or

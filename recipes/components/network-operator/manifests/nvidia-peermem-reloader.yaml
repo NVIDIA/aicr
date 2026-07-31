@@ -15,7 +15,7 @@
 # nvidia-peermem reloader for GPUDirect RDMA on AKS.
 #
 # GPUDirect RDMA requires the nvidia-peermem kernel module. Under the
-# AKS driver-only default (driver.enabled=false) no GPU Operator driver
+# AKS azure-managed default (driver.enabled=false) no GPU Operator driver
 # DaemonSet exists to load it, and the AKS-managed driver install does
 # NOT load it automatically — Azure's RDMA guidance requires a reloader
 # in that mode. The retry loop keeps re-asserting the module so it is
@@ -27,8 +27,8 @@
 # immediately and the module load is retried in-loop. Deployers helm-wait
 # on the network-operator-post wrapper BEFORE gpu-operator installs, so a
 # readiness gate tied to modprobe would deadlock the documented
-# GPU-Operator-managed fallback profile (--gpu-driver none + the override
-# tuple), where no driver exists until the gpu-operator driver DaemonSet
+# GPU-Operator-managed mode (--gpu-driver none pools + the gpuStack
+# profile's operator-managed value), where no driver exists until the gpu-operator driver DaemonSet
 # — which deploys later — provides it. Under that profile the driver pod
 # loads nvidia-peermem itself (driver.rdma.enabled=true) and this loop
 # simply confirms the already-loaded module.

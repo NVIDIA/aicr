@@ -120,7 +120,7 @@ func TestEmit_MinimalByDefault_RedactsSnapshotAndRecordsPolicy(t *testing.T) {
 	if res.Bundle.Predicate.Redaction == nil {
 		t.Fatalf("minimal bundle must record a redaction policy")
 	}
-	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != "v1" {
+	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != "v2" {
 		t.Errorf("unexpected redaction provenance: %+v", res.Bundle.Predicate.Redaction)
 	}
 	if len(res.Bundle.Predicate.Redaction.Applied) == 0 {

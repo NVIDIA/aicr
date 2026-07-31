@@ -570,3 +570,50 @@ func TestWritePointer_WritesValidYAML(t *testing.T) {
 		t.Errorf("written pointer is empty")
 	}
 }
+
+func TestBuildPointer_RecordsProfile(t *testing.T) {
+	newBundle := func(profile string) *Bundle {
+		return &Bundle{
+			RecipeName: "h100-aks-ubuntu-training-gpustack-operator-managed",
+			Profile:    profile,
+			Predicate: &Predicate{
+				SchemaVersion: PredicateSchemaVersion,
+				AttestedAt:    time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+			},
+		}
+	}
+
+	t.Run("profiled bundle records exact selection", func(t *testing.T) {
+		p, err := BuildPointer(PointerInputs{Bundle: newBundle("gpuStack=operator-managed")})
+		if err != nil {
+			t.Fatalf("BuildPointer: %v", err)
+		}
+		if p.Profile != "gpuStack=operator-managed" {
+			t.Errorf("Profile = %q, want %q", p.Profile, "gpuStack=operator-managed")
+		}
+		body, err := MarshalPointer(p)
+		if err != nil {
+			t.Fatalf("MarshalPointer: %v", err)
+		}
+		if !strings.Contains(string(body), "profile: gpuStack=operator-managed") {
+			t.Errorf("marshaled pointer missing profile field:\n%s", body)
+		}
+	})
+
+	t.Run("unprofiled bundle omits profile field", func(t *testing.T) {
+		p, err := BuildPointer(PointerInputs{Bundle: newBundle("")})
+		if err != nil {
+			t.Fatalf("BuildPointer: %v", err)
+		}
+		if p.Profile != "" {
+			t.Errorf("Profile = %q, want empty", p.Profile)
+		}
+		body, err := MarshalPointer(p)
+		if err != nil {
+			t.Fatalf("MarshalPointer: %v", err)
+		}
+		if strings.Contains(string(body), "profile:") {
+			t.Errorf("marshaled unprofiled pointer must omit profile field:\n%s", body)
+		}
+	})
+}

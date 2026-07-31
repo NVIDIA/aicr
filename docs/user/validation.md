@@ -37,6 +37,7 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 - `aicr` CLI installed (see [installation](installation.md)).
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Cluster service account with RBAC to create Jobs, ConfigMaps, and read cluster state (AICR creates its own `aicr-validation` namespace on first run).
+- **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
 
 ## Training performance validation
 
@@ -721,9 +722,12 @@ After the command finishes:
 The bundle is **minimized by default**: `snapshot.yaml` keeps only an
 allowlisted set of fields (dropping node names, provider instance IDs, the
 node label/taint set, OS tuning, loaded modules, and systemd config) and the
-CTRF reports omit per-test stdout/message. The signed predicate records the
-applied policy in a `redaction` block, and the bundle self-verifies exactly
-like a full one. Pass `--full` to publish the raw payloads instead.
+CTRF reports omit per-test stdout/message — while *preserving* a small
+allowlisted set of structured, low-cardinality outcome fields (the CTRF `extra`
+object: coverage counts and skip-reason codes, never node names or IPs) so a
+signed bundle still distinguishes e.g. a reduced-node pass. The signed predicate
+records the applied policy in a `redaction` block, and the bundle self-verifies
+exactly like a full one. Pass `--full` to publish the raw payloads instead.
 
 Commit `pointer.yaml` to its per-source path
 `recipes/evidence/<recipe>/<src>/<digest>.yaml` — the emit output prints

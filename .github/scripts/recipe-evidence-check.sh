@@ -84,6 +84,68 @@ log_sanitize() {
   printf '%s' "$1" | tr '\n\r' '  ' | sed 's/::/:_:/g'
 }
 
+# _strip_profile_suffix <dirslug> <profile> — when profile is a name=value
+# selection whose lowercased "-<name>-<value>" suffix terminates dirslug,
+# print the overlay slug (dirslug minus that suffix) and succeed; otherwise
+# print nothing and fail.
+_strip_profile_suffix() {
+  local dirslug="$1" prof="$2" name value suffix
+  if [[ -z "$prof" || "$prof" == "null" || "$prof" != *=* ]]; then return 1; fi
+  name=$(printf '%s' "${prof%%=*}" | tr '[:upper:]' '[:lower:]')
+  value=$(printf '%s' "${prof#*=}" | tr '[:upper:]' '[:lower:]')
+  suffix="-${name}-${value}"
+  if [[ -z "$name" || -z "$value" || "$dirslug" != *"$suffix" || "$dirslug" == "$suffix" ]]; then
+    return 1
+  fi
+  printf '%s\n' "${dirslug%"$suffix"}"
+}
+
+# evidence_dir_overlay <dirslug> — map an evidence directory slug under
+# recipes/evidence/ to the overlay slug it belongs to. An unprofiled dir
+# maps to itself (today's behavior). A profile-bearing recipe's dir carries
+# the "-<name>-<value>" suffix that RecipeNameFor appends; suffix *parsing*
+# is ambiguous because profile names/values may themselves contain '-', so
+# instead read the recorded `profile: name=value` from any pointer inside
+# the dir (falling back to the PR base for a dir deleted at HEAD) and strip
+# the exact lowercased suffix to recover the overlay slug.
+evidence_dir_overlay() {
+  local dirslug="$1" pf prof
+  shopt -s nullglob
+  local pfs=( "recipes/evidence/${dirslug}"/*/*.yaml )
+  shopt -u nullglob
+  for pf in "${pfs[@]}"; do
+    prof=$(yq eval '.profile // ""' "$pf" 2>/dev/null || true)
+    if _strip_profile_suffix "$dirslug" "$prof"; then return 0; fi
+  done
+  if [[ "${#pfs[@]}" -eq 0 ]]; then
+    while IFS= read -r pf; do
+      if [[ -z "$pf" ]]; then continue; fi
+      prof=$(git show "${BASE_SHA}:${pf}" 2>/dev/null | yq eval '.profile // ""' - 2>/dev/null || true)
+      if _strip_profile_suffix "$dirslug" "$prof"; then return 0; fi
+    done < <(git ls-tree -r --name-only "${BASE_SHA}" -- "recipes/evidence/${dirslug}/" 2>/dev/null || true)
+  fi
+  printf '%s\n' "$dirslug"
+}
+
+# pointer_dirs_for_slug <slug> — print the evidence directory slugs under
+# recipes/evidence/ that hold pointers for this overlay at HEAD: the exact
+# slug dir plus any profiled "<slug>-<name>-<value>" dir whose recorded
+# profile maps back to it. A sibling overlay's dir that merely shares the
+# slug as a prefix maps to itself and is excluded.
+pointer_dirs_for_slug() {
+  local slug="$1" d dslug
+  if [[ -d "recipes/evidence/${slug}" ]]; then printf '%s\n' "$slug"; fi
+  shopt -s nullglob
+  local dirs=( "recipes/evidence/${slug}-"*/ )
+  shopt -u nullglob
+  for d in "${dirs[@]}"; do
+    dslug=$(basename "$d")
+    if [[ "$(evidence_dir_overlay "$dslug")" == "$slug" ]]; then
+      printf '%s\n' "$dslug"
+    fi
+  done
+}
+
 # Three-dot range so we only see what the PR actually changed (relative
 # to its merge base) — not main commits that landed after PR open.
 if ! changed_files=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>&1); then
@@ -91,6 +153,21 @@ if ! changed_files=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>&1); the
   echo "git diff output: ${changed_files}"
   exit 1
 fi
+
+# Overlays whose per-source evidence pointers this PR touches, resolved
+# through evidence_dir_overlay so a profiled pointer dir
+# (recipes/evidence/<slug>-<name>-<value>/) is attributed to its overlay.
+# Feeds Rule 4 below.
+changed_ptr_overlays=""
+while IFS= read -r pf; do
+  if [[ -z "$pf" ]]; then continue; fi
+  case "$pf" in
+    recipes/evidence/*/*/*.yaml) ;;
+    *) continue ;;
+  esac
+  changed_ptr_overlays="${changed_ptr_overlays}$(evidence_dir_overlay "$(echo "$pf" | cut -d/ -f3)")"$'\n'
+done < <(printf '%s\n' "$changed_files")
+changed_ptr_overlays=$(printf '%s' "$changed_ptr_overlays" | sort -u)
 
 # A change to recipes/overlays/base.yaml is genuinely broad — it sits at
 # the root of (almost) every base chain — so it still promotes all leaf
@@ -263,12 +340,12 @@ for overlay in recipes/overlays/*.yaml; do
 
   # Rule 4: a per-source evidence pointer for the recipe was added or
   # modified. Pointers live at recipes/evidence/<slug>/<source>/<digest>.yaml
-  # (#1347 Option A), so any changed file under recipes/evidence/<slug>/
-  # counts. Without this rule a pointer-only "refresh evidence" PR would
-  # slip through unverified. Recipe slugs are [a-z0-9-], so the prefix is a
-  # safe literal anchor.
-  if [[ "$include" == "false" ]]; then
-    if printf '%s\n' "$changed_files" | grep -qE "^recipes/evidence/${name}/.+\.yaml$"; then
+  # (#1347 Option A) or, for a profiled recipe, under the suffixed
+  # recipes/evidence/<slug>-<name>-<value>/ dir; changed_ptr_overlays maps
+  # every changed pointer dir back to its overlay slug. Without this rule a
+  # pointer-only "refresh evidence" PR would slip through unverified.
+  if [[ "$include" == "false" && -n "$changed_ptr_overlays" ]]; then
+    if printf '%s\n' "$changed_ptr_overlays" | grep -qxF "$name"; then
       include=true
     fi
   fi
@@ -300,6 +377,40 @@ done
 count=$(echo "$affected" | jq 'length')
 echo "Affected leaf overlays: ${count}"
 
+# base_pointer_dirs_for_slug: BASE-side twin of pointer_dirs_for_slug.
+# Prints each evidence dir slug that held at least one pointer for this
+# overlay at BASE: the slug's exact dir plus any profiled
+# "<slug>-<name>-<value>" dir that maps back to the slug via its recorded
+# profile (evidence_dir_overlay's BASE fallback covers a dir deleted at
+# HEAD). Without the suffixed-dir leg, deleting the sole pointer of a
+# profiled recipe would silently demote it to "no evidence yet" instead of
+# surfacing the "evidence pointer removed" de-protection row.
+base_pointer_dirs_for_slug() {
+  local slug="$1" d
+  if [[ -n "$(git ls-tree -r --name-only "${BASE_SHA}" -- "recipes/evidence/${slug}/" 2>/dev/null)" ]]; then
+    printf '%s\n' "$slug"
+  fi
+  while IFS= read -r d; do
+    [[ -z "$d" || "$d" == "$slug" ]] && continue
+    case "$d" in
+      "${slug}"-*)
+        if [[ -n "$(git ls-tree -r --name-only "${BASE_SHA}" -- "recipes/evidence/${d}/" 2>/dev/null)" ]] \
+          && [[ "$(evidence_dir_overlay "$d")" == "$slug" ]]; then
+          printf '%s\n' "$d"
+        fi
+        ;;
+    esac
+  done < <(git ls-tree -d --name-only "${BASE_SHA}" -- recipes/evidence/ 2>/dev/null              | sed -e 's#^recipes/evidence/##' -e 's#/$##')
+}
+
+# base_has_pointers_for_slug: true when BASE holds any pointer for the slug
+# in any of its evidence dirs (exact or profiled-suffixed). Capture-and-test
+# rather than `| grep -q .`: under pipefail, grep -q's early exit can SIGPIPE
+# the producer and fail the pipeline even though a match was found.
+base_has_pointers_for_slug() {
+  [[ -n "$(base_pointer_dirs_for_slug "$1")" ]]
+}
+
 # Partition affected recipes into "protected" (at least one committed
 # pointer exists under recipes/evidence/<slug>/) and "other" (affected but
 # no evidence yet). The gate actively verifies the protected set; the others
@@ -317,11 +428,17 @@ protected="[]"
 others="[]"
 while IFS= read -r slug; do
   [[ -z "$slug" ]] && continue
-  shopt -s nullglob
-  head_ptrs=( "recipes/evidence/${slug}"/*/*.yaml )
-  shopt -u nullglob
-  if [[ "${#head_ptrs[@]}" -gt 0 ]] \
-     || git ls-tree -r --name-only "${BASE_SHA}" -- "recipes/evidence/${slug}/" 2>/dev/null | grep -q .; then
+  # HEAD pointers across all of the slug's evidence dirs (exact dir plus
+  # profiled "<slug>-<name>-<value>" dirs mapped back via their recorded
+  # profile).
+  head_ptrs=()
+  while IFS= read -r d; do
+    [[ -z "$d" ]] && continue
+    shopt -s nullglob
+    head_ptrs+=( "recipes/evidence/${d}"/*/*.yaml )
+    shopt -u nullglob
+  done < <(pointer_dirs_for_slug "$slug")
+  if [[ "${#head_ptrs[@]}" -gt 0 ]] || base_has_pointers_for_slug "$slug"; then
     protected=$(echo "$protected" | jq -c --arg r "$slug" '. + [$r]')
   else
     others=$(echo "$others" | jq -c --arg r "$slug" '. + [$r]')
@@ -349,12 +466,16 @@ while IFS= read -r pf; do
     recipes/evidence/*/*/*.yaml) ;;
     *) continue ;;
   esac
-  # recipes/evidence/<slug>/<source>/<file>.yaml — the recipe slug is field 3.
-  pslug=$(echo "$pf" | cut -d/ -f3)
-  # De-dup: many per-source pointers can share one slug; report it once.
-  if [[ -f "$pf" && ! -f "recipes/overlays/${pslug}.yaml" && "$seen_orphans" != *" ${pslug} "* ]]; then
-    orphans=$(echo "$orphans" | jq -c --arg s "$pslug" '. + [$s]')
-    seen_orphans="${seen_orphans}${pslug} "
+  # recipes/evidence/<slug>/<source>/<file>.yaml — the directory slug is
+  # field 3; a profiled dir resolves to its overlay via the recorded
+  # profile (evidence_dir_overlay), so a suffixed dir is not an orphan
+  # when its stripped overlay exists.
+  pdir=$(echo "$pf" | cut -d/ -f3)
+  pslug=$(evidence_dir_overlay "$pdir")
+  # De-dup: many per-source pointers can share one dir; report it once.
+  if [[ -f "$pf" && ! -f "recipes/overlays/${pslug}.yaml" && "$seen_orphans" != *" ${pdir} "* ]]; then
+    orphans=$(echo "$orphans" | jq -c --arg s "$pdir" '. + [$s]')
+    seen_orphans="${seen_orphans}${pdir} "
   fi
 done < <(printf '%s\n' "$changed_files")
 orphan_count=$(echo "$orphans" | jq 'length')
@@ -420,13 +541,20 @@ while IFS= read -r slug; do
   overlay="recipes/overlays/${slug}.yaml"
 
   # Discover the recipe's per-source pointers (#1347 Option A):
-  # recipes/evidence/<slug>/<source>/<bundle-digest>.yaml. Each is an
+  # recipes/evidence/<slug>/<source>/<bundle-digest>.yaml, plus — for a
+  # profile-bearing recipe — the suffixed
+  # recipes/evidence/<slug>-<name>-<value>/<source>/<bundle-digest>.yaml
+  # dirs mapped back via each pointer's recorded profile. Each is an
   # immutable single-attestation pointer; verify them all and emit one row
   # per source. nullglob so a recipe whose pointers were all deleted by this
   # PR yields an empty array.
-  shopt -s nullglob
-  pointers=( "recipes/evidence/${slug}"/*/*.yaml )
-  shopt -u nullglob
+  pointers=()
+  while IFS= read -r pdirslug; do
+    [[ -z "$pdirslug" ]] && continue
+    shopt -s nullglob
+    pointers+=( "recipes/evidence/${pdirslug}"/*/*.yaml )
+    shopt -u nullglob
+  done < <(pointer_dirs_for_slug "$slug")
 
   # Protected via BASE pointers that this PR deletes (none left at HEAD).
   # Removing evidence from a previously protected recipe is a de-protection
@@ -439,26 +567,53 @@ while IFS= read -r slug; do
     continue
   fi
 
-  # Compute the recipe's current canonical digest once; every per-source row
-  # compares its signed digest against this.
-  digest_err=$(mktemp)
-  current_digest=""
-  if ! current_digest=$(timeout "$AICR_TIMEOUT" "$AICR" evidence digest -r "$overlay" 2>"$digest_err"); then
-    if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then
-      rows_truncated=$((rows_truncated + 1)); rm -f "$digest_err"; continue
+  # Per-dir de-protection: even when the slug still holds pointers overall
+  # (so the all-gone row above does not fire), a single evidence dir — e.g.
+  # one profile value's recipes/evidence/<slug>-<name>-<value>/ — that had
+  # pointers at BASE but none at HEAD is a de-protection to surface, not
+  # something to silently fold into the sibling dirs' verified rows.
+  while IFS= read -r bdir; do
+    [[ -z "$bdir" ]] && continue
+    shopt -s nullglob
+    bdir_head_ptrs=( "recipes/evidence/${bdir}"/*/*.yaml )
+    shopt -u nullglob
+    if [[ "${#bdir_head_ptrs[@]}" -eq 0 ]]; then
+      if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then rows_truncated=$((rows_truncated + 1)); continue; fi
+      echo "| \`$(md_escape "$bdir")\` | — | — | :warning: evidence pointer removed | — |" >> "$REPORT_OUT"
+      warnings=$((warnings + 1))
+      rows_written=$((rows_written + 1))
     fi
-    echo "::warning::digest failed for $(log_sanitize "$overlay"): $(log_sanitize "$(head -c 500 "$digest_err")")"
-    echo "| \`$(md_escape "$slug")\` | — | — | — | :warning: could not compute current digest |" >> "$REPORT_OUT"
-    warnings=$((warnings + 1))
-    rows_written=$((rows_written + 1))
-    rm -f "$digest_err"
-    continue
-  fi
-  rm -f "$digest_err"
+  done < <(base_pointer_dirs_for_slug "$slug")
+
+  # The recipe's current canonical digest, computed lazily once per
+  # recorded profile selection ("" = unprofiled): a profiled pointer's
+  # signed digest was produced with `--profile name=value`, so the
+  # recompute must hydrate the same selection. Keys are prefixed ("p:")
+  # because bash rejects an empty associative-array subscript.
+  unset digest_by_profile
+  declare -A digest_by_profile=()
 
   for pointer in "${pointers[@]}"; do
     if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then rows_truncated=$((rows_truncated + 1)); continue; fi
     source=$(basename "$(dirname "$pointer")")
+    row_slug=$(echo "$pointer" | cut -d/ -f3)
+
+    ptr_profile=$(yq eval '.profile // ""' "$pointer" 2>/dev/null || true)
+    [[ "$ptr_profile" == "null" ]] && ptr_profile=""
+    profile_key="p:${ptr_profile}"
+    if [[ -z "${digest_by_profile[$profile_key]+x}" ]]; then
+      digest_args=( evidence digest -r "$overlay" )
+      if [[ -n "$ptr_profile" ]]; then digest_args+=( --profile "$ptr_profile" ); fi
+      digest_err=$(mktemp)
+      if d_out=$(timeout "$AICR_TIMEOUT" "$AICR" "${digest_args[@]}" 2>"$digest_err"); then
+        digest_by_profile[$profile_key]="$d_out"
+      else
+        echo "::warning::digest failed for $(log_sanitize "$overlay") (profile '$(log_sanitize "$ptr_profile")'): $(log_sanitize "$(head -c 500 "$digest_err")")"
+        digest_by_profile[$profile_key]=""
+      fi
+      rm -f "$digest_err"
+    fi
+    current_digest="${digest_by_profile[$profile_key]}"
     # Pointer identifier = bundle-digest filename (the immutable <bundle-digest>
     # leaf), so two pointers committed under the same source remain
     # distinguishable. Strip the .yaml suffix; the basename is already the
@@ -547,7 +702,10 @@ while IFS= read -r slug; do
       esac
     fi
 
-    if [[ -n "$signed_digest" ]]; then
+    if [[ -z "$current_digest" ]]; then
+      digest_cell=":warning: could not compute current digest"
+      warnings=$((warnings + 1))
+    elif [[ -n "$signed_digest" ]]; then
       if [[ "$signed_digest" == "$current_digest" ]]; then
         digest_cell=":white_check_mark: matches"
       else
@@ -563,7 +721,7 @@ while IFS= read -r slug; do
       fi
     fi
 
-    echo "| \`$(md_escape "$slug")\` | \`$(md_escape "$source")\` | \`$(md_escape "$pointer_id")\` | ${verify_cell} | ${digest_cell} |" >> "$REPORT_OUT"
+    echo "| \`$(md_escape "$row_slug")\` | \`$(md_escape "$source")\` | \`$(md_escape "$pointer_id")\` | ${verify_cell} | ${digest_cell} |" >> "$REPORT_OUT"
     rows_written=$((rows_written + 1))
   done
 done < <(echo "$protected" | jq -r '.[]')
@@ -638,6 +796,18 @@ fi
     echo
     echo '```shell'
     echo "aicr snapshot -o snapshot.yaml"
+    echo "# Profiled families (AKS gpuStack): capture the pool projection and"
+    echo "# hydrate the recipe with the pointer's recorded 'profile:' selection"
+    echo "# first — validating the raw overlay resolves only the declaration"
+    echo "# default, and 'aicr validate' has no --profile flag:"
+    echo "#   az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json"
+    echo "#   aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml"
+    echo "#   aicr recipe -s snapshot.yaml --intent <intent> [--platform <platform>] \\"
+    echo "#     --profile <name>=<value> -o recipe.yaml"
+    echo "# State the target leaf's intent/platform explicitly (the snapshot"
+    echo "# fingerprint supplies service/accelerator/OS but intent and platform"
+    echo "# default to 'any') and pass -r recipe.yaml below instead of the raw"
+    echo "# overlay."
     echo "aicr validate \\"
     echo "  -r recipes/overlays/<slug>.yaml \\"
     echo "  -s snapshot.yaml \\"

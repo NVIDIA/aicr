@@ -70,12 +70,28 @@ const gkeGPUOperatorManagedOverrideSet = gpuOperatorManagedOverrideSet +
 // unknown, any, or one GKE does not offer — keeps the combined wording;
 // anything else gets the generic reprovision wording plus the override
 // set.
-func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType) string {
+func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType, profiled bool) string {
 	switch service { //nolint:exhaustive // only AKS and GKE have provider-specific wording; every other service takes the generic default
 	case recipe.CriteriaServiceAKS:
-		return "Either recreate the GPU node pools without --gpu-driver none " +
-			"(AKS installs the NVIDIA driver by default), or bundle in " +
-			"GPU-Operator-managed mode: " + gpuOperatorManagedOverrideSet + "."
+		if !profiled {
+			// Legacy pre-profile artifact: the ownership lock does not
+			// apply (no metadata.selectedProfile), so the four-flag
+			// bundle-time tuple remains this artifact's supported flip.
+			return "Either recreate the GPU node pools without --gpu-driver " +
+				"none (AKS installs the NVIDIA driver by default), or bundle " +
+				"in GPU-Operator-managed mode: " + gpuOperatorManagedOverrideSet + "."
+		}
+		return "Either repair the AKS-managed driver install (recreate the " +
+			"GPU node pools without --gpu-driver none; AKS installs the " +
+			"NVIDIA driver by default) and recapture the snapshot, or switch " +
+			"to operator-managed mode end to end: recreate the pools WITH " +
+			"--gpu-driver none, recapture the snapshot, and regenerate with " +
+			"--profile gpuStack=operator-managed. The operator-managed value's " +
+			"constraint " +
+			"requires the pools to read gpu-driver=None, so regenerating " +
+			"against the current snapshot alone fails closed; and the " +
+			"gpuStack profile owns the driver-ownership paths, so flipping " +
+			"them via per-path --set overrides is rejected."
 	case recipe.CriteriaServiceGKE:
 		switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
 		case recipe.CriteriaOSCOS:
@@ -163,9 +179,12 @@ const (
 	// the deployed bundle would leave GPU nodes driverless. Resolution
 	// warns and records the state in Metadata.GPUDriverState; the
 	// bundle-time CheckDriverOwnershipCoherence validation fails the
-	// bundle unless the GPU-Operator-managed --set overrides are
-	// supplied. Overlays whose operator installs the driver (base,
-	// inherited by EKS) proceed unchanged.
+	// bundle. Legacy pre-profile artifacts unblock with the
+	// GPU-Operator-managed --set overrides; ADR-015-profiled recipes
+	// (AKS gpuStack) cannot — ownership paths are locked — and remedy
+	// out-of-band (fix/recreate pools, recapture, regenerate; see
+	// driverAbsentRemedy). Overlays whose operator installs the driver
+	// (base, inherited by EKS) proceed unchanged.
 	gpuDriverAbsent
 )
 
@@ -362,12 +381,12 @@ func isDisambiguatedLabelKey(k string) bool {
 }
 
 // hasPreinstalledDriverProfile reports whether the resolved recipe's
-// gpu-operator component values (base + valuesFile, before the
-// snapshot-driven Overrides mutation) already declare
+// gpu-operator component values (base + valuesFile + recorded
+// Overrides, via GetValuesForComponentWithContext) already declare
 // driver.enabled=false. That is the marker for a preinstalled-driver
 // overlay — one that also carries the coordinated toolkit / gdrcopy /
-// hostPaths.driverInstallDir settings the AKS driver-only-install
-// profile documents as required together.
+// hostPaths.driverInstallDir settings the AKS azure-managed
+// profile value documents as required together.
 //
 // Bare EKS overlays lack this marker; auto-detect skips them so
 // callers get a warning instead of a half-configured Operator (driver
@@ -427,15 +446,20 @@ func hasPreinstalledDriverProfile(ctx context.Context, r *recipe.RecipeResult) b
 // The inverse mismatch is enforced at bundle generation: the observed
 // driver state is recorded in the result's Metadata.GPUDriverState, and
 // when the sampled GPU node has NO driver loaded but the resolved
-// overlay declares the preinstalled-driver profile (e.g. the AKS
-// driver-only default on a cluster whose GPU pools were created with
-// `--gpu-driver none`) this function emits a slog.Warn here and the
-// bundle-time CheckDriverOwnershipCoherence validation (severity
-// error, recipes/registry.yaml) fails the bundle unless the
-// GPU-Operator-managed `--set` overrides are supplied. The check cannot
-// hard-fail at resolution: `aicr recipe` has no `--set`, so erroring
-// here would leave supported GPU-Operator-managed clusters with no way
-// to reach the bundle-time overrides intended for them.
+// overlay declares the preinstalled-driver profile, this function emits
+// a slog.Warn here and the bundle-time CheckDriverOwnershipCoherence
+// validation (severity error, recipes/registry.yaml) fails the bundle.
+// On ADR-015-profiled recipes (the AKS gpuStack family) the reachable
+// shape is Install-mode pools whose sampled node has no loaded driver
+// (failed AKS install, mid-reimage) — a None-pool snapshot never gets
+// here, failing the profile constraint at resolution — and the remedy
+// is out-of-band (repair or recreate pools, recapture, regenerate; the
+// ownership paths are profile-owned so per-path --set flips are
+// rejected). On legacy pre-profile artifacts the bundle unblocks with
+// the GPU-Operator-managed --set overrides. The check cannot hard-fail
+// at resolution: `aicr recipe` has no --set, so erroring here would
+// leave supported legacy GPU-Operator-managed clusters with no way to
+// reach the bundle-time overrides intended for them.
 //
 // Merge precedence for the final Helm values is
 // base values.yaml → ValuesFile → Overrides (see pkg/recipe/adapter.go).
@@ -473,11 +497,11 @@ func applyGPUDriverAutoOverride(ctx context.Context, r *recipe.RecipeResult, sna
 		}
 		slog.Warn("gpu-operator driver mismatch: the resolved recipe assumes a "+
 			"platform-preinstalled NVIDIA driver and container toolkit "+
-			"(gpu-operator driver.enabled=false — e.g. the AKS driver-only "+
+			"(gpu-operator driver.enabled=false — e.g. the AKS azure-managed "+
 			"default), but the sampled GPU node reports no NVIDIA kernel "+
 			"driver loaded. Deploying this configuration would leave GPU "+
 			"nodes driverless, so `aicr bundle` will fail for this recipe "+
-			"(CheckDriverOwnershipCoherence). "+driverAbsentRemedy(service, osCriteria),
+			"(CheckDriverOwnershipCoherence). "+driverAbsentRemedy(service, osCriteria, r.Metadata.SelectedProfile != nil),
 			"component", gpuOperatorComponentName,
 			"state", state.String())
 		return

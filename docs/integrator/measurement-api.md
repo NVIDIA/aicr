@@ -240,6 +240,65 @@ Both `slinky-slurm` and `mariadb-operator` remain in raw snapshots and
 including all Slinky items. Constraint evaluation consumes the raw snapshot
 before evidence packaging.
 
+## K8s aks-gpu-pools shape
+
+`K8s.aks-gpu-pools` projects AKS GPU agent-pool driver ownership for ADR-015
+profile qualification. It is not produced by a cluster collector: the
+projection is attached at the snapshot orchestration layer from the
+operator-supplied `az aks nodepool list -o json` dump passed to
+`aicr snapshot --aks-gpu-pools` (merged controller-side in both agent Job mode
+and local mode). A missing, truncated, or malformed dump fails the command —
+a file error is never degraded into a "reading unavailable" measurement.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: aks-gpu-pools
+    data:
+      gpu-driver: Install
+      gpu-pool-count: 2
+      gpu-pools: gpupool1=Install,gpupool2=Install
+```
+
+The fields are:
+
+- `gpu-driver` (`string`) — the aggregated driver-ownership mode across all
+  NVIDIA GPU pools. When every pool agrees, the shared mode is emitted:
+  `Install` (AKS "Driver only" preinstall; also the projection for a pool
+  whose `gpuProfile` is absent or `null`, the documented Azure default),
+  `None` (pool created with `--gpu-driver none`), `Managed` (fully
+  AKS-managed pool: `gpuProfile.nvidia` present with `managementMode`
+  `Managed`, unknown, or empty — `Unmanaged` instead follows the `driver`
+  field), or an unrecognized `gpuProfile.driver` string preserved verbatim.
+  Disagreeing pools aggregate to `Mixed`. The key is **omitted entirely**
+  when the dump contains no NVIDIA GPU pools.
+- `gpu-pool-count` (`int`) — the number of NVIDIA GPU agent pools. Always
+  emitted, including `0`.
+- `gpu-pools` (`string`) — a sorted, comma-joined `name=mode` roster of the
+  NVIDIA GPU pools (e.g. `gpupool1=Install,gpupool2=None`). Emitted only when
+  at least one NVIDIA GPU pool exists.
+
+NVIDIA GPU pools are identified by VM size family: the `Standard_NC`,
+`Standard_ND`, and `Standard_NV` prefixes (case-insensitive). The AMD-GPU
+`NG` family is excluded by prefix, and AMD accelerators living inside the
+NVIDIA-dominated families are excluded by size marker: `_mi300x`, `_mi325x`
+(ND sizes), `_v620`, `_v710` (NV sizes). Without the marker exclusion, an AMD
+pool — which AKS requires creating with `--gpu-driver none` — beside an
+NVIDIA `Install` pool would falsely aggregate to `Mixed`.
+
+Interpretation is fail-closed: `Install` and `None` are the only values a
+declared `gpuStack` profile constraint accepts. `Managed`, `Mixed`, and
+verbatim-unknown values match no constraint, so profile-qualified resolution
+fails closed with the observed value as the actual. **Snapshot-qualified AKS
+profile resolution requires this reading**: when the subtype or the
+`gpu-driver` key is absent (no `--aks-gpu-pools` dump, or a dump with no
+NVIDIA GPU pools), constraint evaluation reports the reading unavailable and
+fails closed rather than guessing a mode.
+
+The constraint path is `K8s.aks-gpu-pools.gpu-driver` in profile value
+constraints; `K8s.aks-gpu-pools.gpu-pool-count` and
+`K8s.aks-gpu-pools.gpu-pools` use the same non-item path form.
+
 ## NetworkTopology shape
 
 `TypeNetworkTopology` describes one hardware group's network layout (PFs,

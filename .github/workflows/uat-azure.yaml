@@ -516,6 +516,42 @@ jobs:
           echo "::error::cluster connection failed after 10 attempts (role assignment not propagated?)"
           exit 1
 
+      # AKS recipes carry the gpuStack profile (ADR-015), whose constraint
+      # qualifies against the K8s.aks-gpu-pools.gpu-driver snapshot reading.
+      # Every `aicr snapshot` / live-capture `aicr validate` below must carry
+      # the pool projection or recipe generation and the readiness pre-flight
+      # fail closed. Dump the pool modes once and export the path — the CLI
+      # picks it up via the AICR_AKS_GPU_POOLS_PATH env var in every
+      # subsequent step (prep, install gate, conformance, CUJ chainsaw).
+      - name: Dump AKS GPU pool modes
+        id: pools
+        if: steps.client.outcome == 'success' && inputs.skip_tests != true
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same bounded retry as the client-connect step above: this file
+          # feeds AICR_AKS_GPU_POOLS_PATH for every downstream phase, so one
+          # transient az throttle must not red an otherwise-green burn-in.
+          dumped=false
+          for attempt in 1 2 3 4 5; do
+            if az aks nodepool list \
+              --cluster-name "${DEPLOYMENT_ID}" \
+              --resource-group "${DEPLOYMENT_ID}-rg" \
+              -o json > "${GITHUB_WORKSPACE}/aks-gpu-pools.json"; then
+              dumped=true
+              break
+            fi
+            echo "az aks nodepool list failed (attempt ${attempt}/5); retrying in 30s..."
+            sleep 30
+          done
+          if [ "${dumped}" != "true" ]; then
+            echo "::error::az aks nodepool list failed after 5 attempts"
+            exit 1
+          fi
+          jq -r '.[] | "\(.name) vmSize=\(.vmSize) gpuProfile=\(.gpuProfile // "null")"' \
+            "${GITHUB_WORKSPACE}/aks-gpu-pools.json"
+          echo "AICR_AKS_GPU_POOLS_PATH=${GITHUB_WORKSPACE}/aks-gpu-pools.json" >> "${GITHUB_ENV}"
+
       # UAT phases — each step invokes tests/uat/azure/run so the demo
       # (demos/cuj1-training.md) and CI stay in lockstep, and per-phase
       # failures surface as discrete steps in the GitHub Actions UI. Phases
@@ -706,8 +742,10 @@ jobs:
       # the readiness gate keys off of), and operator/check-Job pod logs.
       # Best-effort (the collector guards every kubectl call) and bounded so it
       # never eats the teardown budget or leaks the GPU node.
+      # Also fire when prep never ran because an earlier post-client step
+      # (e.g. the pool dump) failed — the cluster is up and worth capturing.
       - name: Collect cluster debug bundle
-        if: failure() && steps.prep.outcome != 'skipped'
+        if: failure() && (steps.prep.outcome != 'skipped' || steps.client.outcome == 'success')
         timeout-minutes: 8
         shell: bash
         env:
@@ -716,13 +754,14 @@ jobs:
         run: ./tests/uat/azure/run debug "${TEST_CONFIG}" || true
 
       - name: Upload failure debug
-        if: failure() && steps.prep.outcome != 'skipped'
+        if: failure() && (steps.prep.outcome != 'skipped' || steps.client.outcome == 'success')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: uat-azure-debug-${{ github.run_id }}
           path: |
             snapshot.yaml
             recipe.yaml
+            aks-gpu-pools.json
             dry-run.json
             report.json
             evidence-result.json

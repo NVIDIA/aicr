@@ -106,6 +106,11 @@ type snapshotCmdOptions struct {
 	// ingest a pre-existing l8k cluster-config.yaml. Local-mode only in
 	// this iteration — Job-mode would need ConfigMap mounting.
 	clusterConfigPath string
+	// aksGPUPoolsPath, when non-empty, projects an AKS GPU pool dump
+	// into the aks-gpu-pools subtype at the snapshot orchestration
+	// layer. Works in both agent Job mode (controller-side merge) and
+	// local mode; the file never enters the pod.
+	aksGPUPoolsPath string
 	// discoverNetwork enables the network collector's live-discovery
 	// path. The collector calls l8k.Discover against the resolved
 	// kubeconfig; discovery is NOT read-only.
@@ -138,6 +143,7 @@ func (o *snapshotCmdOptions) toAgentConfig() *snapshotter.AgentConfig {
 		MaxNodesPerEntry:   o.maxNodesPerEntry,
 		OS:                 o.os,
 		ClusterConfigPath:  o.clusterConfigPath,
+		AKSGPUPoolsPath:    o.aksGPUPoolsPath,
 		DiscoverNetwork:    o.discoverNetwork,
 		Requests:           o.requests,
 		Limits:             o.limits,
@@ -149,7 +155,7 @@ func (o *snapshotCmdOptions) toAgentConfig() *snapshotter.AgentConfig {
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
 // can pass to the snapshotter without further parsing.
 func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapshotCmdOptions, error) {
-	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config"); err != nil {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools"); err != nil {
 		return nil, err
 	}
 
@@ -234,6 +240,7 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		os:                 osVal,
 		maxNodesPerEntry:   intFlagOrConfig(cmd, "max-nodes-per-entry", resolved.MaxNodesPerEntry),
 		clusterConfigPath:  cmd.String("cluster-config"),
+		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
 		discoverNetwork:    cmd.Bool("discover-network"),
 		requests:           resourceRequests,
 		limits:             resourceLimits,
@@ -401,6 +408,12 @@ func snapshotCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_CLUSTER_CONFIG_PATH"),
 			Category: catAgentDeployment,
 		},
+		&cli.StringFlag{
+			Name:     "aks-gpu-pools",
+			Usage:    "Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each GPU agent pool's gpuProfile.driver into the K8s aks-gpu-pools subtype (Install/None; mixed or AKS-managed pools project a value no profile constraint accepts, ADR-015 DD3). The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
+			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
+			Category: catAgentDeployment,
+		},
 		&cli.BoolFlag{
 			Name:     "discover-network",
 			Usage:    "Enable live l8k discovery to populate the NetworkTopology Measurement. NOT read-only — discovery writes nvidia.kubernetes-launch-kit.* node labels and may patch NicClusterPolicy via server-side-apply.",
@@ -524,10 +537,11 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 
 			// Build snapshotter configuration
 			ns := snapshotter.NodeSnapshotter{
-				Version:    version,
-				Factory:    factory,
-				Serializer: ser,
-				RequireGPU: opts.requireGPU,
+				Version:         version,
+				Factory:         factory,
+				Serializer:      ser,
+				RequireGPU:      opts.requireGPU,
+				AKSGPUPoolsPath: opts.aksGPUPoolsPath,
 			}
 
 			// When running inside an agent Job, collect locally instead of

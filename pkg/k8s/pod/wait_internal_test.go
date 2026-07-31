@@ -18,11 +18,115 @@ import (
 	"context"
 	stderrors "errors"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+// The watch-resume backoff paces reconnects against a degraded API server in
+// production, but a multi-second sleep would blow the sub-second deadlines the
+// resume tests use to drive the fake watcher. Shrink it to a negligible value
+// for the whole test binary — a single pre-test write, so no race with the
+// parallel resume tests that only read it.
+func init() {
+	jobWatchResumeBackoff = time.Millisecond
+}
+
+// TestResumeJobWatch_ContextCanceledDuringBackoff pins the backoff guard: when
+// the context is already done, resumeJobWatch must abandon the resume during the
+// backoff wait and report ErrCodeTimeout rather than issuing a List/Watch
+// against an apiserver the caller has already given up on.
+func TestResumeJobWatch_ContextCanceledDuringBackoff(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		t.Error("List must not be attempted once the context is canceled")
+		return true, &batchv1.JobList{}, nil
+	})
+
+	terminal, w, err := resumeJobWatch(canceledCtx, client, "default", "j")
+	if w != nil || terminal != nil {
+		t.Fatalf("expected no watcher/terminal on canceled context, got w=%v terminal=%v", w, terminal)
+	}
+	assertStructuredCode(t, err, errors.ErrCodeTimeout)
+}
+
+// TestResumeJobWatch_ListFailsTransient covers the resync-List failure branch:
+// a transient (non-context) List error is classified ErrCodeUnavailable so an
+// apiserver hiccup is not mistaken for a defect.
+func TestResumeJobWatch_ListFailsTransient(t *testing.T) {
+	client := fake.NewSimpleClientset() //nolint:staticcheck
+	client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver down")
+	})
+
+	terminal, w, err := resumeJobWatch(context.Background(), client, "default", "j")
+	if w != nil || terminal != nil {
+		t.Fatalf("expected no watcher/terminal on List failure, got w=%v terminal=%v", w, terminal)
+	}
+	assertStructuredCode(t, err, errors.ErrCodeUnavailable)
+}
+
+// TestResumeJobWatch_JobDeleted covers the empty-List branch: the Job vanished
+// while the watch was down, so the resume reports it is gone rather than
+// re-establishing a watch on a nonexistent object.
+func TestResumeJobWatch_JobDeleted(t *testing.T) {
+	client := fake.NewSimpleClientset() //nolint:staticcheck
+	client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &batchv1.JobList{ListMeta: metav1.ListMeta{ResourceVersion: "9"}}, nil
+	})
+
+	terminal, w, err := resumeJobWatch(context.Background(), client, "default", "j")
+	if w != nil || terminal != nil {
+		t.Fatalf("expected no watcher/terminal when Job is gone, got w=%v terminal=%v", w, terminal)
+	}
+	assertStructuredCode(t, err, errors.ErrCodeInternal)
+}
+
+// TestResumeJobWatch_WatchFailsTransient covers the re-establish-Watch failure
+// branch: a transient Watch error after a successful resync List is classified
+// ErrCodeUnavailable, consistent with the List path (CodeRabbit job.go:98).
+func TestResumeJobWatch_WatchFailsTransient(t *testing.T) {
+	client := fake.NewSimpleClientset() //nolint:staticcheck
+	client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &batchv1.JobList{
+			ListMeta: metav1.ListMeta{ResourceVersion: "42"},
+			Items:    []batchv1.Job{{ObjectMeta: metav1.ObjectMeta{Name: "j", Namespace: "default", ResourceVersion: "1"}}},
+		}, nil
+	})
+	client.PrependWatchReactor("jobs", func(_ k8stesting.Action) (bool, watch.Interface, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver down")
+	})
+
+	terminal, w, err := resumeJobWatch(context.Background(), client, "default", "j")
+	if w != nil || terminal != nil {
+		t.Fatalf("expected no watcher/terminal on Watch failure, got w=%v terminal=%v", w, terminal)
+	}
+	assertStructuredCode(t, err, errors.ErrCodeUnavailable)
+}
+
+// assertStructuredCode fails the test unless err is a *StructuredError with the
+// wanted code.
+func assertStructuredCode(t *testing.T, err error, want errors.ErrorCode) {
+	t.Helper()
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is not StructuredError: %v", err)
+	}
+	if se.Code != want {
+		t.Errorf("code = %q, want %q", se.Code, want)
+	}
+}
 
 // TestClassifyReGetError pins the wait-loop re-Get classifier so a deadline
 // race between watch-channel close and the re-Get surfaces as ErrCodeTimeout,

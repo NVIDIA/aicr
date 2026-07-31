@@ -18,14 +18,20 @@
 # --os ubuntu --platform kubeflow` produces a valid recipe with correct criteria,
 # kubeflow-specific components, and standard GPU stack components.
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1alpha3
 criteria:
   service: aks
   accelerator: h100
   intent: training
   os: ubuntu
   platform: kubeflow
+metadata:
+  selectedProfile:
+    name: gpuStack
+    value: azure-managed
 constraints:
+  - name: K8s.aks-gpu-pools.gpu-driver
+    value: Install
   - name: K8s.server.version
     value: '>= 1.34'
   - name: OS.release.ID
@@ -34,7 +40,7 @@ constraints:
     value: "24.04"
   - name: OS.sysctl./proc/sys/kernel/osrelease
     value: '>= 6.8'
-componentRefs: ## alphabetically sorted
+componentRefs: ## emitted order (as generated) — chainsaw list asserts are per-index
   - name: cert-manager
   - name: gpu-operator
   - name: k8s-ephemeral-storage-metrics
@@ -43,16 +49,19 @@ componentRefs: ## alphabetically sorted
   - name: kubeflow-trainer
   - name: network-operator
   - name: nfd
+  - name: nodewright-customizations
   - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
   - name: prometheus-operator-crds
+
 deploymentOrder:
   - cert-manager
   - nfd
   - network-operator
   - nodewright-operator
+  - nodewright-customizations
   - prometheus-operator-crds
   - kube-prometheus-stack
   - gpu-operator

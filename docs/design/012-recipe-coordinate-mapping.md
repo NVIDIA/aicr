@@ -103,10 +103,13 @@ rename of either silently corrupt the other.
   in the tab.
 - **Purity:** the function is pure — no clock, no maps, no registry, no I/O. The
   same Criteria always yields the same Coordinate.
-- **Join key:** the value by which recipes are *addressed* across systems is the
-  overlay `metadata.name`. The coordinate is the *placement*; the name is the
-  *identity*. (`CoordinateFor` does not read the name — addressing happens at the
-  caller, which already holds both the name and the resolved criteria.)
+- **Join key:** the overlay `metadata.name` is the *catalog identity*; the
+  coordinate is the *placement*. The criteria-only coordinate and the evidence
+  recipe slug both derive from the same leaf — see
+  [Reconciliation with ADR-009](#reconciliation-with-adr-009--coexist-not-identity)
+  for the three identities in play and which surface uses which.
+  (`CoordinateFor` does not read the name — addressing happens at the caller,
+  which already holds both the name and the resolved criteria.)
 
 This matches the shipped `Coordinate` struct: `Group = service`,
 `Dashboard = accelerator + "-" + os`, `Tab = intent` (or `intent-platform`).
@@ -161,11 +164,17 @@ separator is the single character whose presence would change the segment count
 and silently mis-place the recipe — the exact ambiguous-placement failure this
 ADR exists to prevent.
 
-This string is the canonical coordinate that RQ1 deep-links to and that TG4a / GP
-expose. **The host and the navigation scheme (path vs. fragment) are owned by the
-consumer** (GP5 / TG4a), not by this mapping. `pkg/recipe` emits only the
-canonical segments; it makes no assumption about scheme, host, or trailing
-decoration.
+This string is the canonical **criteria-only base coordinate** that RQ1
+deep-links to and that TG4a / GP expose. **The host, the navigation scheme
+(path vs. fragment), and any consumer-specific route-key refinement are
+owned by the consumer** (GP5 / TG4a), not by this mapping. `pkg/recipe`
+emits only the canonical segments; it makes no assumption about scheme,
+host, or trailing decoration. For ADR-015 profile-bearing recipes the two
+consumers refine the base coordinate differently, by design: the Golden
+Path corroboration route appends the lowercase `-<name>-<value>` profile
+segment to the `<tab>` component (two values of one family must hold
+separate results), while TestGrid keeps the unsuffixed base coordinate and
+partitions per value through its digest-bound build ID.
 
 ## Pinned column-metadata key schema
 
@@ -217,14 +226,34 @@ fused score." This coordinate board *is* the home of the deferred
 validation-posture axis — it is a *separate* surface, not a richer rendering of
 the structural matrix.
 
-The two surfaces share exactly one thing: the **`metadata.name` join key**. Both
-enumerate recipes by overlay name — recipe-health (`pkg/health`) via
-`MetadataStore.ListCatalog` filtered to leaf overlays (`CatalogEntry.IsLeaf`),
-which yields the resolved criteria + leaf name per maximal-leaf overlay, the
-[leaf-driven (not cartesian) enumeration](009-recipe-health-tracking.md#enumeration-is-leaf-driven-not-cartesian)
-ADR-009 specifies. The coordinate board addresses the same recipes by the same
-name, and the coordinate itself is derived from the *resolved criteria* of that
-same leaf — so the two surfaces line up on identity without sharing computation.
+The two surfaces line up on recipe identity — but not on one shared key.
+Three distinct identities are in play:
+
+- **The catalog leaf overlay name** — `metadata.name` of the overlay file.
+  recipe-health (`pkg/health`) enumerates recipes by this name via
+  `MetadataStore.ListCatalog` filtered to leaf overlays
+  (`CatalogEntry.IsLeaf`), which yields the resolved criteria + leaf name
+  per maximal-leaf overlay, the
+  [leaf-driven (not cartesian) enumeration](009-recipe-health-tracking.md#enumeration-is-leaf-driven-not-cartesian)
+  ADR-009 specifies. Overlay `metadata.name` never carries a profile
+  suffix.
+- **The criteria-only coordinate** — `CoordinateFor` over the leaf's
+  resolved criteria; `Coordinate.Path()` stays unsuffixed regardless of
+  profile.
+- **The evidence recipe slug** — `attestation.RecipeNameFor` over the
+  resolved criteria, with a lowercase `-<name>-<value>` profile segment
+  appended for a profile-bearing recipe. Evidence directories and the
+  corroborate board (`Tab.Recipe` / `Series.Recipe`, the series-file
+  slug) use this slug.
+
+The profiled suffix applies to the evidence slug **and** to the Golden
+Path value-dashboard route (which appends the profile segment to the
+tab) — never to overlay `metadata.name`, the criteria-only base
+coordinate, or the TestGrid coordinate (TestGrid keeps the base
+coordinate and partitions values by digest-bound build ID). The
+coordinate board derives its coordinate from the *resolved criteria* of
+the same leaf, so the surfaces line up on identity without sharing
+computation.
 
 ## GP ⇄ TG — interim and live, sharing one foundation
 
@@ -258,8 +287,8 @@ Operator-facing detail for each surface lives in
 
 ## #1224 cross-link contract
 
-recipe-health's **Evidence** column will **link** into this coordinate URL — it
-will **never duplicate** the board's content. The interface is:
+recipe-health's **Evidence** column **links** into this coordinate URL — it
+**never duplicates** the board's content. The interface is:
 
 - recipe-health computes a recipe's `metadata.name` and its resolved criteria,
   calls `CoordinateFor`, and emits `Coordinate.Path()` as a link target (the deep
@@ -270,11 +299,13 @@ will **never duplicate** the board's content. The interface is:
 
 **Status of the recipe-health side:** the structural matrix has **shipped** —
 `pkg/health` computes it and [`docs/user/recipe-health.md`](../user/recipe-health.md)
-publishes it. Its **Evidence** column is a literal `pending` for every recipe
-today: no coordinate deep-link exists yet. This contract is precisely the
-*interface* that column will adopt — when the evidence-derived Evidence column
-lands (RQ1 / #1283), it consumes `CoordinateFor` + `Coordinate.Path()` exactly as
-described here.
+publishes it — and the health generator (`tools/health/markdown.go`) emits
+presence-gated deep-links today, consuming `CoordinateFor` +
+`Coordinate.Path()` exactly as described here. The committed
+`recipe-health.md` carries live links for unprofiled recipes with a
+committed dashboard presence; a recipe without a committed presence stays a
+literal `pending`, and profiled families' presence entries are deliberately
+withheld until profile-aware links land.
 
 ## Consumers
 

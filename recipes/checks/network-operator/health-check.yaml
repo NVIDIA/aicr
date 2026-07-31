@@ -14,10 +14,17 @@
 
 # Network Operator Health Check
 #
-# Validates that the NVIDIA Network Operator is running and healthy in the
-# nvidia-network-operator namespace. Checks that the network-operator
-# deployment has at least one available replica and that no pods in the
-# namespace are stuck in Pending, Failed, or Unknown phases.
+# Validates that the NVIDIA Network Operator is running and healthy in
+# the nvidia-network-operator namespace. Also asserts
+# nicclusterpolicies.mellanox.com is Established=True (verified against
+# chart 26.4.1; re-verify on defaultVersion bump). Chart 26.4.1 also
+# ships nicnodepolicies.mellanox.com, deliberately NOT asserted here:
+# no in-tree recipe instantiates a CR against it, so it fails the same
+# load-bearing-only bar the rest of this PR's assertions are held to.
+# Checks that the
+# network-operator deployment has at least one available replica and
+# that no pods in the namespace are stuck in Pending, Failed, or
+# Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -26,6 +33,17 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-crds-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: nicclusterpolicies.mellanox.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-deployment-exists
       try:
         # Guard against vacuous pass on empty namespace: verify the

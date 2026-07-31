@@ -405,8 +405,10 @@ profile explicitly or through a declared default—not the route number—
 determines whether the artifact uses `v1alpha3`.
 
 `/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the profile-aware HTTP
-contract. The core mechanism exposes these routes before any embedded cloud
-recipe declares a profile, so existing `/v1` workflows remain unchanged.
+contract. The AKS family is the first embedded adopter (`gpuStack`), so
+**`/v1` workflows with `service=aks` now reject and must move to `/v2`**
+(see the AKS cut-over note below); `/v1` remains unchanged for families
+without a profile.
 
 **GET `/v2/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
 optional `profile=name=value`. Omission applies the resolved declaration's
@@ -414,8 +416,8 @@ required default. The v2 route rejects unknown query parameters and
 conflicting repeated profile values.
 
 ```shell
-# Contract example; substitute a family after its profile adopter lands.
-curl "http://localhost:8080/v2/recipe?service=SERVICE&profile=NAME=VALUE"
+# AKS, non-default value (omit profile= for the azure-managed default):
+curl "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
 ```
 
 **POST `/v2/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
@@ -428,7 +430,7 @@ criteria:
   service: aks
   accelerator: h100
   intent: training
-profile: gpuStack=driver-only
+profile: gpuStack=azure-managed
 ```
 
 Unknown fields, duplicate or trailing documents, malformed selections, and
@@ -446,7 +448,7 @@ POST profile selection follows the same query/envelope agreement rule as
 criteria:
   service: aks
   accelerator: h100
-profile: gpuStack=driver-only
+profile: gpuStack=azure-managed
 selector: metadata.selectedProfile
 ```
 
@@ -460,9 +462,9 @@ application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
 
 ```shell
-# Contract example; substitute a family after its profile adopter lands.
+# The AKS family is the first embedded adopter (gpuStack profile).
 curl -s \
-  "http://localhost:8080/v2/recipe?service=SERVICE&profile=NAME=VALUE" |
+  "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed" |
   curl -X POST "http://localhost:8080/v2/bundle" \
     -H "Content-Type: application/json" -d @- -o bundles.zip
 ```
@@ -477,6 +479,13 @@ The `/v1` routes remain the legacy contract. Explicit profile input is
 rejected, `/v1/recipe` and `/v1/query` reject a composition after it adopts a
 profile even when the request omits selection, and `/v1/bundle` rejects a
 profile-bearing body. Migrate a converted recipe family to v2 as one cut-over.
+
+**AKS cut-over:** the AKS family is the first embedded adopter, so
+`/v1/recipe` and `/v1/query` requests with `service=aks` now reject —
+move AKS clients to `GET /v2/recipe` / `GET /v2/query` (identical query
+parameters, plus optional `profile=gpuStack=azure-managed|operator-managed`), and
+POST AKS `aicr.run/v1alpha3` recipes to `/v2/bundle`. Other families are
+unaffected on `/v1` until they adopt a profile.
 
 ---
 

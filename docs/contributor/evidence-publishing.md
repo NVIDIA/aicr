@@ -46,6 +46,33 @@ aicr validate \
 cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
 ```
 
+**Profiled families (the AKS `gpuStack` recipes)** need two adjustments,
+because validating the raw overlay resolves only the declaration default
+and `aicr validate` has no `--profile` flag:
+
+```shell
+az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json
+aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
+aicr recipe -s snapshot.yaml \
+  --intent <training|inference> \
+  --platform <kubeflow|dynamo|slurm> \
+  --profile gpuStack=<value> \
+  -o recipe.yaml
+aicr validate -r recipe.yaml -s snapshot.yaml ... # rest as above
+```
+
+Capture the snapshot with the pool projection (resolution fails closed
+without the `K8s.aks-gpu-pools.gpu-driver` reading), then hydrate the
+recipe with the target leaf's criteria AND the selection recorded in the
+pointer you are refreshing (its `profile:` field), and validate that
+recipe — this is the only way to regenerate `operator-managed` evidence.
+State `--intent` (and `--platform` when the leaf pins one — omit it
+otherwise) explicitly: the snapshot fingerprint supplies service,
+accelerator, and OS, but intent and platform are author-selected and
+default to `any`, so omitting them hydrates a different recipe identity
+than the slug you mean to refresh. Read them off the target overlay's
+`criteria:` block (or the pointer's recipe slug).
+
 `--no-sign` skips all OIDC/Fulcio/Rekor work, so this runs even where
 Sigstore egress is blocked. It pushes the content-addressed bundle and
 writes a pointer with an empty `signer` block.
@@ -179,6 +206,12 @@ hotspot), you can run the signing leg there instead of in Actions:
 ```shell
 # On VPN, where the cluster is: produce an unsigned bundle.
 aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml --emit-attestation ./out
+# Profiled families (AKS gpuStack): validate the hydrated recipe instead,
+# built from an --aks-gpu-pools snapshot with the target leaf's criteria
+# and the pointer's recorded --profile selection (see above):
+#   aicr recipe -s snapshot.yaml --intent <intent> [--platform <platform>] \
+#     --profile gpuStack=<value> -o recipe.yaml
+#   aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out
 
 # Off VPN, where Sigstore is reachable: sign, push, and write the pointer.
 aicr evidence publish ./out --push ghcr.io/<your-fork-owner>/aicr-evidence

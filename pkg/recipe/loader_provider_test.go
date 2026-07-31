@@ -132,7 +132,7 @@ metadata:
   name: direct-profile
 spec:
   criteria:
-    service: eks
+    service: oke
     accelerator: h100
     intent: training
   profile:
@@ -156,7 +156,7 @@ metadata:
   name: alternate-profile
 spec:
   criteria:
-    service: aks
+    service: eks
     accelerator: h100
     intent: training
   profile:
@@ -212,7 +212,7 @@ spec:
 		}
 
 		stalePath := filepath.Join(t.TempDir(), "stale-profile.yaml")
-		stale := strings.Replace(content, "service: eks", "service: aks", 1)
+		stale := strings.Replace(content, "service: oke", "service: eks", 1)
 		if err := os.WriteFile(stalePath, []byte(stale), 0o600); err != nil {
 			t.Fatalf("write stale profile overlay: %v", err)
 		}
@@ -277,6 +277,121 @@ spec:
 		}
 		if !strings.Contains(err.Error(), "duplicate") {
 			t.Errorf("error should mention the duplicate, got: %v", err)
+		}
+	})
+}
+
+func TestLoadFromFileWithProviderProfile(t *testing.T) {
+	t.Setenv(strictModeEnvVar, "")
+
+	// External catalog with a two-value profile declaration on the leaf
+	// overlay, so an explicit non-default selection is observable.
+	newProfileCatalog := func(t *testing.T) (*LayeredDataProvider, string) {
+		t.Helper()
+		externalDir := t.TempDir()
+		registry := `apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components: []
+`
+		if err := os.WriteFile(filepath.Join(externalDir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+			t.Fatalf("write registry.yaml: %v", err)
+		}
+		overlaysDir := filepath.Join(externalDir, "overlays")
+		if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
+			t.Fatalf("create overlays directory: %v", err)
+		}
+		overlay := `kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha3
+metadata:
+  name: two-value-profile
+spec:
+  criteria:
+    service: oke
+    accelerator: h100
+    intent: training
+  profile:
+    name: gpuStack
+    default: azure-managed
+    values:
+      azure-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: false
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+`
+		path := filepath.Join(overlaysDir, "two-value-profile.yaml")
+		if err := os.WriteFile(path, []byte(overlay), 0o600); err != nil {
+			t.Fatalf("write profile overlay: %v", err)
+		}
+		layered, err := NewLayeredDataProvider(
+			NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
+			LayeredProviderConfig{ExternalDir: externalDir},
+		)
+		if err != nil {
+			t.Fatalf("NewLayeredDataProvider: %v", err)
+		}
+		t.Cleanup(func() {
+			EvictCachedStore(layered)
+			EvictCachedRegistry(layered)
+			EvictCachedCriteriaRegistry(layered)
+		})
+		return layered, path
+	}
+
+	t.Run("explicit non-default selection is applied", func(t *testing.T) {
+		layered, path := newProfileCatalog(t)
+		rec, err := LoadFromFileWithProviderProfile(t.Context(), path, "", "vtest", layered, "gpuStack=operator-managed")
+		if err != nil {
+			t.Fatalf("LoadFromFileWithProviderProfile() error: %v", err)
+		}
+		if rec.Metadata.SelectedProfile == nil {
+			t.Fatal("SelectedProfile = nil, want explicit selection applied")
+		}
+		if got := rec.Metadata.SelectedProfile.Name + "=" + rec.Metadata.SelectedProfile.Value; got != "gpuStack=operator-managed" {
+			t.Errorf("SelectedProfile = %q, want %q", got, "gpuStack=operator-managed")
+		}
+	})
+
+	t.Run("empty selection keeps declaration default", func(t *testing.T) {
+		layered, path := newProfileCatalog(t)
+		rec, err := LoadFromFileWithProviderProfile(t.Context(), path, "", "vtest", layered, "")
+		if err != nil {
+			t.Fatalf("LoadFromFileWithProviderProfile() error: %v", err)
+		}
+		if rec.Metadata.SelectedProfile == nil || rec.Metadata.SelectedProfile.Value != "azure-managed" {
+			t.Errorf("SelectedProfile = %+v, want default value azure-managed", rec.Metadata.SelectedProfile)
+		}
+	})
+
+	t.Run("malformed selection is rejected before I/O", func(t *testing.T) {
+		layered, path := newProfileCatalog(t)
+		_, err := LoadFromFileWithProviderProfile(t.Context(), path, "", "vtest", layered, "not-a-selection")
+		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("error = %v, want ErrCodeInvalidRequest for malformed selection", err)
+		}
+	})
+
+	t.Run("hydrated RecipeResult input rejects an explicit selection", func(t *testing.T) {
+		layered := newTestLayeredProvider(t)
+		dir := t.TempDir()
+		path := filepath.Join(dir, "recipe.yaml")
+		content := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write recipe: %v", err)
+		}
+		_, err := LoadFromFileWithProviderProfile(t.Context(), path, "", "vtest", layered, "gpuStack=operator-managed")
+		if err == nil || !strings.Contains(err.Error(), "already baked") {
+			t.Fatalf("error = %v, want baked-in selection rejection", err)
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
 }
