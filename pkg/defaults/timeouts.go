@@ -185,6 +185,16 @@ const (
 	// Must exceed the default Kubernetes terminationGracePeriodSeconds (30s).
 	K8sPodTerminationWaitTimeout = 60 * time.Second
 
+	// K8sJobWatchResumeBackoff paces each watch re-establishment after a Job
+	// watch channel closes without the Job being terminal. Routine closures
+	// (apiserver --min-request-timeout expiry) are isolated, but a flapping
+	// load balancer or an apiserver rollout can close the stream immediately
+	// on every reconnect; without pacing the resume loop would re-fire
+	// Get+Watch back-to-back and hammer an already-degraded API server. A
+	// small fixed delay bounds that call rate while staying negligible against
+	// the multi-hour validator budgets the resume logic protects.
+	K8sJobWatchResumeBackoff = 2 * time.Second
+
 	// PodAffinitySelectorLookupTimeout bounds the per-namespace List call
 	// the deployer makes to verify a dependencyAffinity selector matches at
 	// least one running pod. Short because the lookup is a best-effort
@@ -946,6 +956,12 @@ const (
 	// number of dropped characters. Prevents oversized report output from
 	// inline JSON payloads (e.g., Prometheus metric scrapes).
 	ValidatorMaxStdoutLineLength = 512
+
+	// ValidatorMaxTerminationMsgBytes bounds the container termination message
+	// copied into a validator result. kubelet caps the message at 4 KiB
+	// upstream, but the result flows into ConfigMaps and rendered reports, so
+	// this bounds it defensively at the source regardless of upstream behavior.
+	ValidatorMaxTerminationMsgBytes = 4096
 
 	// ValidatorDefaultCPU is the default CPU request/limit for validator containers
 	// when not specified in the catalog entry.

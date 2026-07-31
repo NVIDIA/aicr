@@ -37,6 +37,13 @@ type ValidatorResult struct {
 	// Stdout contains the standard output lines from the container.
 	Stdout []string
 
+	// Extra carries structured, low-cardinality outcome data parsed from the
+	// container's EmitExtra sentinel line (see ctrf.ExtraLinePrefix). It maps
+	// into TestResult.Extra and, unlike Stdout/TerminationMsg, survives the
+	// minimal redaction policy for allowlisted keys. Values are counts/enum
+	// codes only — never node names or IPs.
+	Extra map[string]string
+
 	// Duration is the wall-clock execution time.
 	Duration time.Duration
 
@@ -157,6 +164,16 @@ func (b *Builder) AddResult(r *ValidatorResult) {
 
 	if len(r.Stdout) > 0 {
 		tr.Stdout = r.Stdout
+	}
+
+	if len(r.Extra) > 0 {
+		// Defensive copy: r.Extra is caller-owned mutable state, so aliasing it
+		// would let a later mutation of ValidatorResult.Extra alter the built
+		// report after AddResult returns.
+		tr.Extra = make(map[string]string, len(r.Extra))
+		for key, value := range r.Extra {
+			tr.Extra[key] = value
+		}
 	}
 
 	b.tests = append(b.tests, tr)

@@ -430,9 +430,12 @@ func (v *Validator) runPhase(
 
 		var result *ctrf.ValidatorResult
 		if waitErr != nil {
-			// Timeout or infra error — extract what we can with a fresh context
+			// Timeout or infra error — extract what we can with a fresh context.
+			// Thread waitErr so the rendered message reflects the ACTUAL cause
+			// (infra/unavailable vs a genuine deadline), not always the
+			// configured catalog timeout (issue #1966).
 			captureCtx, captureCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout) //nolint:contextcheck // Fresh context: parent may be canceled
-			result = deployer.HandleTimeout(captureCtx)                                                        //nolint:contextcheck // Uses fresh context above
+			result = deployer.HandleTimeout(captureCtx, waitErr)                                               //nolint:contextcheck // Uses fresh context above
 			captureCancel()
 		} else {
 			// Normal completion — extract exit code, termination msg, stdout

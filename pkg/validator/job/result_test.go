@@ -16,10 +16,15 @@ package job
 
 import (
 	"context"
+	stderrors "errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	corev1 "k8s.io/api/core/v1"
@@ -305,7 +310,7 @@ func TestHandleTimeoutPodNotFound(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	d := deployTestJob(t, ns, testEntry())
 
-	result := d.HandleTimeout(context.Background())
+	result := d.HandleTimeout(context.Background(), context.DeadlineExceeded)
 
 	if result.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
@@ -315,26 +320,112 @@ func TestHandleTimeoutPodNotFound(t *testing.T) {
 	}
 }
 
+// TestHandleTimeoutContainerNotTerminated verifies that a validator whose
+// container never reached a terminal state renders a message reflecting the
+// ACTUAL wait cause: a genuine context-deadline expiry reports the configured
+// timeout, while an infra/unavailable cause reports that failure verbatim and
+// must NOT masquerade as the catalog timeout (issue #1966).
 func TestHandleTimeoutContainerNotTerminated(t *testing.T) {
-	ns := createUniqueNamespace(t)
-	d := deployTestJob(t, ns, testEntry())
+	tests := []struct {
+		name          string
+		cause         error
+		wantContains  []string // substrings that MUST all appear
+		wantExclusion string   // substring that must NOT appear
+	}{
+		{
+			name:         "genuine deadline (stdlib sentinel)",
+			cause:        context.DeadlineExceeded,
+			wantContains: []string{"timeout: validator did not complete within"},
+		},
+		{
+			name:         "genuine deadline (ErrCodeTimeout)",
+			cause:        errors.New(errors.ErrCodeTimeout, "wait deadline exceeded"),
+			wantContains: []string{"timeout: validator did not complete within"},
+		},
+		{
+			name:         "nil cause falls back to timeout wording",
+			cause:        nil,
+			wantContains: []string{"timeout: validator did not complete within"},
+		},
+		{
+			name:          "infra/unavailable cause is surfaced verbatim",
+			cause:         errors.New(errors.ErrCodeUnavailable, "apiserver watch closed: connection refused"),
+			wantContains:  []string{"validation failed:", "apiserver watch closed: connection refused"},
+			wantExclusion: "timeout: validator did not complete within",
+		},
+		{
+			// Production shape: WaitForJobTerminal wraps the context error under
+			// ErrCodeTimeout — isDeadlineCause must see through the wrap chain.
+			name:         "wrapped ErrCodeTimeout (production wait shape)",
+			cause:        errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", context.DeadlineExceeded),
+			wantContains: []string{"timeout: validator did not complete within"},
+		},
+		{
+			// Production shape: a transient re-check Get failure classified as
+			// ErrCodeUnavailable and wrapped by classifyReGetError — must render
+			// verbatim, not as the catalog timeout.
+			name:          "wrapped ErrCodeUnavailable (production resume shape)",
+			cause:         errors.Wrap(errors.ErrCodeUnavailable, "job watch closed and Job re-check failed", stderrors.New("connection refused")),
+			wantContains:  []string{"validation failed:", "connection refused"},
+			wantExclusion: "timeout: validator did not complete within",
+		},
+	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := createUniqueNamespace(t)
+			d := deployTestJob(t, ns, testEntry())
+
+			createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name: ValidatorContainerName,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				}},
+			})
+
+			result := d.HandleTimeout(context.Background(), tt.cause)
+
+			if result.ExitCode != -1 {
+				t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(result.TerminationMsg, want) {
+					t.Errorf("TerminationMsg = %q, want substring %q", result.TerminationMsg, want)
+				}
+			}
+			if tt.wantExclusion != "" && strings.Contains(result.TerminationMsg, tt.wantExclusion) {
+				t.Errorf("TerminationMsg = %q, must NOT contain %q", result.TerminationMsg, tt.wantExclusion)
+			}
+		})
+	}
+}
+
+// TestHandleTimeoutZeroTimeoutRendersDefault verifies that a catalog entry with
+// no explicit timeout renders the effective default runPhase applies
+// (ValidatorDefaultTimeout), not a misleading "within 0s".
+func TestHandleTimeoutZeroTimeoutRendersDefault(t *testing.T) {
+	entry := testEntry()
+	entry.Timeout = 0
+
+	ns := createUniqueNamespace(t)
+	d := deployTestJob(t, ns, entry)
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: ValidatorContainerName,
-			State: corev1.ContainerState{
-				Running: &corev1.ContainerStateRunning{},
-			},
+			Name:  ValidatorContainerName,
+			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 		}},
 	})
 
-	result := d.HandleTimeout(context.Background())
+	result := d.HandleTimeout(context.Background(), context.DeadlineExceeded)
 
-	if result.ExitCode != -1 {
-		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+	wantTimeout := defaults.ValidatorDefaultTimeout.String()
+	if !strings.Contains(result.TerminationMsg, wantTimeout) {
+		t.Errorf("TerminationMsg = %q, want effective timeout %q", result.TerminationMsg, wantTimeout)
 	}
-	if result.TerminationMsg == "" {
-		t.Error("TerminationMsg should contain timeout message")
+	if strings.Contains(result.TerminationMsg, "within 0s") {
+		t.Errorf("TerminationMsg = %q, must not render a bare 0s timeout", result.TerminationMsg)
 	}
 }
 
@@ -358,7 +449,7 @@ func TestHandleTimeoutContainerTerminated(t *testing.T) {
 		}},
 	})
 
-	result := d.HandleTimeout(context.Background())
+	result := d.HandleTimeout(context.Background(), context.DeadlineExceeded)
 
 	if result.ExitCode != 137 {
 		t.Errorf("ExitCode = %d, want 137", result.ExitCode)
@@ -471,7 +562,7 @@ func TestHandleTimeoutWithSidecar(t *testing.T) {
 		},
 	})
 
-	result := d.HandleTimeout(context.Background())
+	result := d.HandleTimeout(context.Background(), context.DeadlineExceeded)
 
 	if result.ExitCode != 137 {
 		t.Errorf("ExitCode = %d, want 137", result.ExitCode)
@@ -496,7 +587,7 @@ func TestHandleTimeoutSidecarOnlyNoValidator(t *testing.T) {
 		},
 	})
 
-	result := d.HandleTimeout(context.Background())
+	result := d.HandleTimeout(context.Background(), context.DeadlineExceeded)
 
 	if result.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
@@ -506,6 +597,111 @@ func TestHandleTimeoutSidecarOnlyNoValidator(t *testing.T) {
 	}
 	if !strings.Contains(result.TerminationMsg, "not found") {
 		t.Errorf("TerminationMsg = %q, want message containing 'not found'", result.TerminationMsg)
+	}
+}
+
+func TestParseExtraSentinels(t *testing.T) {
+	const p = ctrf.ExtraLinePrefix
+	tests := []struct {
+		name        string
+		logs        string
+		wantCleaned string
+		wantExtra   map[string]string
+	}{
+		{
+			name:        "no sentinel leaves logs intact and extra nil",
+			logs:        "Found 2 GPU node(s):\nAll OK",
+			wantCleaned: "Found 2 GPU node(s):\nAll OK",
+			wantExtra:   nil,
+		},
+		{
+			name:        "valid sentinel populates extra and is stripped",
+			logs:        "Found 2 GPU node(s):\n" + p + `{"nodesValidated":"1","nodesTotal":"2"}` + "\nSuccessfully verified",
+			wantCleaned: "Found 2 GPU node(s):\nSuccessfully verified",
+			wantExtra:   map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
+		},
+		{
+			name:        "malformed sentinel drops extra but is still stripped",
+			logs:        "line before\n" + p + `{"nodesValidated":` + "\nline after",
+			wantCleaned: "line before\nline after",
+			wantExtra:   nil,
+		},
+		{
+			name:        "multiple sentinels: last wins",
+			logs:        p + `{"skipReason":"stale"}` + "\nwork\n" + p + `{"skipReason":"nodes-busy"}`,
+			wantCleaned: "work",
+			wantExtra:   map[string]string{"skipReason": "nodes-busy"},
+		},
+		{
+			name:        "valid then malformed: last valid payload is kept",
+			logs:        p + `{"nodesValidated":"1","nodesTotal":"2"}` + "\nwork\n" + p + `{"nodesValidated":`,
+			wantCleaned: "work",
+			wantExtra:   map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
+		},
+		{
+			name:        "empty-object sentinel yields nil extra",
+			logs:        "work\n" + p + `{}`,
+			wantCleaned: "work",
+			wantExtra:   nil,
+		},
+		{
+			// Prefix mid-line (not line-initial) is human stdout, never parsed.
+			name:        "prefix mid-line is kept, not stripped",
+			logs:        "note: " + p + "appears mid-line\nreal",
+			wantCleaned: "note: " + p + "appears mid-line\nreal",
+			wantExtra:   nil,
+		},
+		{
+			// The prefix requires its trailing space: a line-initial "##AICR-EXTRA##"
+			// without the space is not a sentinel and stays in stdout.
+			name:        "prefix without trailing space is not a sentinel",
+			logs:        p + `{"skipReason":"nodes-busy"}` + "\n" + `##AICR-EXTRA##nospace`,
+			wantCleaned: `##AICR-EXTRA##nospace`,
+			wantExtra:   map[string]string{"skipReason": "nodes-busy"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleaned, extra := parseExtraSentinels(tt.logs)
+			if cleaned != tt.wantCleaned {
+				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
+			}
+			if len(extra) != len(tt.wantExtra) {
+				t.Fatalf("extra = %v, want %v", extra, tt.wantExtra)
+			}
+			for k, v := range tt.wantExtra {
+				if extra[k] != v {
+					t.Errorf("extra[%q] = %q, want %q", k, extra[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestProcessValidatorLogs(t *testing.T) {
+	const p = ctrf.ExtraLinePrefix
+	// Emit the sentinel AFTER more than ValidatorMaxStdoutLines of output: the
+	// invariant is that Extra is parsed from the full logs before truncation, so
+	// a parse-after-truncate regression would silently drop this evidence.
+	var b strings.Builder
+	for i := 0; i < defaults.ValidatorMaxStdoutLines+100; i++ {
+		fmt.Fprintf(&b, "log line %d\n", i)
+	}
+	b.WriteString(p + `{"nodesValidated":"1","nodesTotal":"2"}`)
+
+	extra, stdout := processValidatorLogs(b.String())
+
+	if extra["nodesValidated"] != "1" || extra["nodesTotal"] != "2" {
+		t.Fatalf("late sentinel beyond truncation window was lost: extra=%v", extra)
+	}
+	if len(stdout) > defaults.ValidatorMaxStdoutLines {
+		t.Errorf("stdout not truncated: %d lines > max %d", len(stdout), defaults.ValidatorMaxStdoutLines)
+	}
+	for _, line := range stdout {
+		if strings.Contains(line, p) {
+			t.Errorf("sentinel transport line leaked into stdout: %q", line)
+		}
 	}
 }
 
@@ -600,6 +796,59 @@ func TestFilterStdoutLines(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Errorf("line[%d]:\n  got:  %q\n  want: %q", i, got[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+func TestBoundTerminationMsg(t *testing.T) {
+	tests := []struct {
+		name         string
+		msg          string
+		maxBytes     int
+		wantLen      int    // expected exact length, 0 = compute from msg
+		wantContains string // substring that must appear (empty = none)
+	}{
+		{
+			name:     "under limit passes through unchanged",
+			msg:      "container exited with code 1",
+			maxBytes: 4096,
+		},
+		{
+			name:     "exactly at limit passes through unchanged",
+			msg:      strings.Repeat("x", 100),
+			maxBytes: 100,
+		},
+		{
+			name:         "over limit is truncated with byte-count suffix",
+			msg:          strings.Repeat("y", 5000),
+			maxBytes:     4096,
+			wantContains: "... [truncated 904 bytes]",
+		},
+		{
+			// Cut lands mid-rune: "€" is 3 bytes, so a maxBytes that splits it
+			// must trim back to the rune boundary and never emit an invalid rune.
+			name:         "cut mid multibyte rune trims to boundary",
+			msg:          strings.Repeat("€", 10), // 30 bytes
+			maxBytes:     10,                      // splits the 4th rune (bytes 9-11)
+			wantContains: "... [truncated",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := boundTerminationMsg(tt.msg, tt.maxBytes)
+			if len(tt.msg) <= tt.maxBytes {
+				if got != tt.msg {
+					t.Errorf("expected passthrough, got %q", got)
+				}
+				return
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("truncated output is not valid UTF-8: %q", got)
+			}
+			if tt.wantContains != "" && !strings.Contains(got, tt.wantContains) {
+				t.Errorf("output missing suffix %q, got %q", tt.wantContains, got)
 			}
 		})
 	}

@@ -482,6 +482,77 @@ func TestIsFailingStatus(t *testing.T) {
 	}
 }
 
+func TestBuilderAddResultCopiesExtra(t *testing.T) {
+	b := NewBuilder("aicr", "1.0.0", testPhase)
+	// Caller-owned map that we mutate AFTER AddResult to prove the builder took
+	// a defensive copy rather than aliasing it.
+	src := map[string]string{"nodesValidated": "1", "nodesTotal": "2"}
+	b.AddResult(&ValidatorResult{
+		Name:     "check-nvidia-smi",
+		Phase:    testPhase,
+		ExitCode: 0,
+		Extra:    src,
+	})
+	// A result with no Extra must leave TestResult.Extra nil (omitempty).
+	b.AddResult(&ValidatorResult{
+		Name:     "no-extra",
+		Phase:    testPhase,
+		ExitCode: 0,
+	})
+
+	// Mutating the source after insertion must not reach into the built report.
+	src["nodesValidated"] = "999"
+	src["injected"] = "10.0.0.5"
+	delete(src, "nodesTotal")
+
+	report := b.Build()
+
+	got := report.Results.Tests[0].Extra
+	if got["nodesValidated"] != "1" || got["nodesTotal"] != "2" {
+		t.Errorf("Extra = %v, want {nodesValidated:1 nodesTotal:2} (defensive copy not taken?)", got)
+	}
+	if _, ok := got["injected"]; ok {
+		t.Errorf("post-insert key injection leaked into report: %v", got)
+	}
+	if report.Results.Tests[1].Extra != nil {
+		t.Errorf("Extra should be nil when ValidatorResult carries none, got %v", report.Results.Tests[1].Extra)
+	}
+}
+
+func TestTestResultExtraJSONRoundTrip(t *testing.T) {
+	b := NewBuilder("aicr", "1.0.0", testPhase)
+	b.AddResult(&ValidatorResult{
+		Name:     "check-nvidia-smi",
+		Phase:    testPhase,
+		ExitCode: 2,
+		Extra:    map[string]string{"skipReason": "no-gpu-nodes"},
+	})
+	b.AddResult(&ValidatorResult{Name: "plain", Phase: testPhase, ExitCode: 0})
+
+	data, err := json.Marshal(b.Build())
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var decoded Report
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if decoded.Results.Tests[0].Extra["skipReason"] != "no-gpu-nodes" {
+		t.Errorf("Extra survived round-trip incorrectly: %v", decoded.Results.Tests[0].Extra)
+	}
+
+	// extra must be omitted entirely when empty.
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	tests := raw["results"].(map[string]any)["tests"].([]any)
+	if _, exists := tests[1].(map[string]any)["extra"]; exists {
+		t.Error("extra should be omitted when empty")
+	}
+}
+
 func TestBuilderStdoutNotCapturedWhenEmpty(t *testing.T) {
 	b := NewBuilder("aicr", "1.0.0", testPhase)
 	b.AddResult(&ValidatorResult{
