@@ -103,8 +103,41 @@ runs:
         fi
         echo "image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
+    # `crane digest <ref>` returns the multi-arch *index* digest, which is the
+    # right subject for provenance and VEX but the wrong one for an SBOM: an
+    # SBOM describes exactly one root filesystem. `crane digest --platform`
+    # resolves the index to that platform's child manifest and errors out
+    # ("no child with platform ...") if the platform is absent, so a release
+    # that silently lost an architecture fails here instead of shipping two
+    # SBOMs pinned to the same subject (#1957).
+    - name: Resolve per-platform manifest digests
+      id: platforms
+      shell: bash
+      env:
+        IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
+        INDEX_DIGEST: ${{ steps.digest.outputs.image_digest }}
+      run: |
+        set -euo pipefail
+        for arch in amd64 arm64; do
+          platform_digest="$(timeout --foreground 120s crane digest \
+            --platform "linux/${arch}" "${IMAGE_NAME}@${INDEX_DIGEST}")"
+          if [[ ! "${platform_digest}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::unexpected linux/${arch} manifest digest format: ${platform_digest}"
+            exit 1
+          fi
+          # crane returns the reference's own digest when it is a plain image
+          # manifest, so equality here means the release image is single-arch.
+          if [[ "${platform_digest}" == "${INDEX_DIGEST}" ]]; then
+            echo "::error::linux/${arch} resolved to the index digest; ${IMAGE_NAME} is not a multi-platform index"
+            exit 1
+          fi
+          echo "${arch}_digest=${platform_digest}" >> "$GITHUB_OUTPUT"
+        done
+
     - name: Generate SBOM and attestations
       uses: ./.github/actions/sbom-and-attest
       with:
         image_name: ${{ steps.validate.outputs.image_name }}
         image_digest: ${{ steps.validate.outputs.expected_digest }}
+        amd64_digest: ${{ steps.platforms.outputs.amd64_digest }}
+        arm64_digest: ${{ steps.platforms.outputs.arm64_digest }}

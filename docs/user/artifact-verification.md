@@ -24,6 +24,56 @@ verified, but it cannot reach the higher trust levels described below.
 
 AICR treats a deployment bundle as a closed-world inventory. `checksums.txt` contains one SHA256 entry for every regular payload file, including `recipe.yaml` when present. Verification derives the required directories from those paths and rejects every additional file or directory, symlink, and other non-regular filesystem object. Only `checksums.txt`, `attestation/bundle-attestation.sigstore.json`, and `attestation/aicr-attestation.sigstore.json` may exist outside the manifest; they remain part of the verified inventory. Inventory validation accepts valid manifest entries in any order, while AICR generates them sorted by canonical slash-relative path. AICR ZIP and CLI OCI publication revalidate a private snapshot and publish only that inventory. Legacy bundles with incomplete manifests report `unknown` trust and must be regenerated.
 
+## Released Container Image Metadata
+
+The artifacts above are the ones *you* produce with `aicr`. The container images
+NVIDIA publishes carry their own metadata, and all of it is retrievable from the
+registry as signed OCI referrers on the image: SLSA build provenance, an SPDX
+SBOM per platform, and an OpenVEX document recording the CVEs AICR has triaged
+as not affected. One command per kind:
+
+```shell
+export IMAGE="ghcr.io/nvidia/aicr"
+export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+export DIGEST=$(crane digest "${IMAGE}:${TAG}")
+export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}:${TAG}")
+export AICR_ISSUER="https://token.actions.githubusercontent.com"
+export AICR_SIGNER='^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$'
+
+# Build provenance (attached to the multi-platform index digest)
+gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml
+
+# SPDX SBOM (attached to the per-platform manifest digest)
+cosign verify-attestation --type spdxjson \
+  --certificate-oidc-issuer "${AICR_ISSUER}" \
+  --certificate-identity-regexp "${AICR_SIGNER}" \
+  "${IMAGE}@${DIGEST_AMD64}" | jq -r '.payload' | base64 -d | jq '.predicate' > sbom.spdx.json
+
+# OpenVEX triage document (attached to the index digest)
+cosign verify-attestation --type openvex \
+  --certificate-oidc-issuer "${AICR_ISSUER}" \
+  --certificate-identity-regexp "${AICR_SIGNER}" \
+  "${IMAGE}@${DIGEST}" | jq -r '.payload' | base64 -d | jq '.predicate' > aicr-openvex.json
+```
+
+Pass the VEX document to your scanner so it suppresses the same findings AICR's
+own release scan suppresses, instead of re-reporting CVEs that have already been
+analyzed as unreachable:
+
+```shell
+grype "${IMAGE}@${DIGEST}" --vex aicr-openvex.json --only-fixed --fail-on high
+trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST}"
+```
+
+Each statement carries a `justification` and an `impact_statement` explaining
+why the vulnerable code is not reachable. Read those before adopting a
+suppression: the analysis is specific to how AICR invokes the affected
+component. Verification of these attestations needs Cosign v3.0.1 or newer. For
+the full walkthrough, including the remaining release images and the signed
+binary SBOMs, see
+[Supply Chain Verification](../integrator/supply-chain-verification.md#unified-metadata-retrieval).
+
 ## Trust Levels
 
 `aicr verify` computes a trust level for a bundle. The levels are ordered;

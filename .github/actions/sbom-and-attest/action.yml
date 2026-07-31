@@ -13,14 +13,42 @@
 # limitations under the License.
 
 name: 'Generate SBOM and Attest'
-description: 'Generates SBOM and build provenance attestation for container images'
+description: 'Generates SBOM, OpenVEX and build provenance attestations for container images'
+
+# Attestation subject policy (see NVIDIA/aicr#1957):
+#
+#   SPDX SBOM  -> the PER-PLATFORM manifest digest. An SBOM describes one
+#                 root filesystem, so attaching both platform SBOMs to the
+#                 shared index digest made them indistinguishable without
+#                 parsing the predicate body.
+#   OpenVEX    -> the INDEX digest. `.openvex.json` is a single, platform
+#                 independent document whose statements are keyed by product
+#                 PURL (`pkg:oci/<image>`), not by architecture, so one copy
+#                 per released image is the correct cardinality. Consumers
+#                 resolve a tag with `crane digest` (which returns the index
+#                 digest) and query VEX there.
+#   Provenance -> the INDEX digest, via actions/attest-build-provenance. It
+#                 describes the build that produced the whole release image.
+#
+# ghcr.io does not implement the OCI 1.1 `/v2/<name>/referrers/<digest>`
+# endpoint (it answers 404 MANIFEST_UNKNOWN), so every one of these lands
+# through the spec's referrers *tag fallback* (`sha256-<hex>`). That is
+# transparent to cosign/oras clients but is why the retrieval commands in
+# docs/integrator/supply-chain-verification.md use cosign rather than a raw
+# referrers API call.
 
 inputs:
   image_name:
     description: 'Full image name (without tag or digest)'
     required: true
   image_digest:
-    description: 'Image digest (sha256:...)'
+    description: 'Multi-platform index digest (sha256:...); subject for VEX and provenance'
+    required: true
+  amd64_digest:
+    description: 'linux/amd64 manifest digest (sha256:...); subject for the amd64 SBOM'
+    required: true
+  arm64_digest:
+    description: 'linux/arm64 manifest digest (sha256:...); subject for the arm64 SBOM'
     required: true
 
 runs:
@@ -32,20 +60,38 @@ runs:
       env:
         INPUT_IMAGE_NAME: ${{ inputs.image_name }}
         INPUT_IMAGE_DIGEST: ${{ inputs.image_digest }}
+        INPUT_AMD64_DIGEST: ${{ inputs.amd64_digest }}
+        INPUT_ARM64_DIGEST: ${{ inputs.arm64_digest }}
       run: |
         set -euo pipefail
         # shellcheck source=.github/actions/release-input-validation.sh
         source "${GITHUB_ACTION_PATH}/../release-input-validation.sh"
         reject_newline image_name "${INPUT_IMAGE_NAME}"
         reject_newline image_digest "${INPUT_IMAGE_DIGEST}"
+        reject_newline amd64_digest "${INPUT_AMD64_DIGEST}"
+        reject_newline arm64_digest "${INPUT_ARM64_DIGEST}"
         require_release_image "${INPUT_IMAGE_NAME}"
-        if [[ ! "${INPUT_IMAGE_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-          echo "::error::image_digest must be in the form sha256:<64 hex>"
+        for pair in \
+          "image_digest=${INPUT_IMAGE_DIGEST}" \
+          "amd64_digest=${INPUT_AMD64_DIGEST}" \
+          "arm64_digest=${INPUT_ARM64_DIGEST}"; do
+          if [[ ! "${pair#*=}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::${pair%%=*} must be in the form sha256:<64 hex>"
+            exit 1
+          fi
+        done
+        # A multi-platform release image must yield two distinct child
+        # manifests. Equal digests mean the caller resolved the index instead
+        # of a platform, or the image lost a platform. Fail closed either way.
+        if [[ "${INPUT_AMD64_DIGEST}" == "${INPUT_ARM64_DIGEST}" ]]; then
+          echo "::error::amd64_digest and arm64_digest are identical; the image is not a multi-platform index"
           exit 1
         fi
         {
           echo "image_name=${INPUT_IMAGE_NAME}"
           echo "image_digest=${INPUT_IMAGE_DIGEST}"
+          echo "amd64_digest=${INPUT_AMD64_DIGEST}"
+          echo "arm64_digest=${INPUT_ARM64_DIGEST}"
         } >> "$GITHUB_OUTPUT"
 
     - name: Authenticate to registry
@@ -66,7 +112,7 @@ runs:
       env:
         SYFT_PLATFORM: linux/amd64
       with:
-        image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.image_digest }}"
+        image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.amd64_digest }}"
         format: spdx-json
         artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-amd64-attempt-${{ github.run_attempt }}.spdx.json
         output-file: sbom-${{ steps.name.outputs.safe }}-linux-amd64.spdx.json
@@ -78,7 +124,7 @@ runs:
       env:
         SYFT_PLATFORM: linux/arm64
       with:
-        image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.image_digest }}"
+        image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.arm64_digest }}"
         format: spdx-json
         artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-arm64-attempt-${{ github.run_attempt }}.spdx.json
         output-file: sbom-${{ steps.name.outputs.safe }}-linux-arm64.spdx.json
@@ -99,35 +145,91 @@ runs:
           fi
         done
 
+    - name: Load versions
+      id: versions
+      uses: ./.github/actions/load-versions
+
     - name: Install Cosign
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
+      with:
+        # Pin from .settings.yaml (>= v3.1.0) so cosign logs DSSE attestations
+        # to Rekor v2 as hashedrekord/PAE, matching the binary-attestation path
+        # in on-tag.yaml. Leaving this unset let the installer's own default
+        # decide both the cosign version and, with it, the on-registry bundle
+        # format, an implicit dependency this action must not carry (#1957).
+        cosign-release: ${{ steps.versions.outputs.cosign }}
 
+    - name: Verify OpenVEX document
+      id: vex
+      shell: bash
+      run: |
+        set -euo pipefail
+        vex_file="${GITHUB_WORKSPACE}/.openvex.json"
+        if [[ ! -s "${vex_file}" ]]; then
+          echo "::error::OpenVEX document not found or empty: ${vex_file}"
+          exit 1
+        fi
+        # Fail closed on a malformed document rather than publishing a VEX
+        # attestation that no scanner can apply.
+        if ! jq -e '(.["@context"] | type == "string") and (.statements | type == "array")' \
+          "${vex_file}" > /dev/null; then
+          echo "::error::OpenVEX document is missing @context or statements"
+          exit 1
+        fi
+        echo "file=${vex_file}" >> "$GITHUB_OUTPUT"
+
+    # --new-bundle-format is set explicitly on every attest call: it is what
+    # publishes the attestation through the OCI referrers API (tag fallback on
+    # ghcr.io) instead of a legacy `.att` tag, and it must be our decision, not
+    # an inherited installer default that can move between cosign releases.
     - name: Cosign amd64 SBOM attestation
       shell: bash
       env:
         IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
-        IMAGE_DIGEST: ${{ steps.validate.outputs.image_digest }}
+        PLATFORM_DIGEST: ${{ steps.validate.outputs.amd64_digest }}
         SAFE_NAME: ${{ steps.name.outputs.safe }}
       run: |
         set -euo pipefail
         timeout --foreground 120s cosign attest \
           --yes \
+          --new-bundle-format=true \
           --predicate "sbom-${SAFE_NAME}-linux-amd64.spdx.json" \
           --type spdxjson \
-          "${IMAGE_NAME}@${IMAGE_DIGEST}"
+          "${IMAGE_NAME}@${PLATFORM_DIGEST}"
 
     - name: Cosign arm64 SBOM attestation
       shell: bash
       env:
         IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
-        IMAGE_DIGEST: ${{ steps.validate.outputs.image_digest }}
+        PLATFORM_DIGEST: ${{ steps.validate.outputs.arm64_digest }}
         SAFE_NAME: ${{ steps.name.outputs.safe }}
       run: |
         set -euo pipefail
         timeout --foreground 120s cosign attest \
           --yes \
+          --new-bundle-format=true \
           --predicate "sbom-${SAFE_NAME}-linux-arm64.spdx.json" \
           --type spdxjson \
+          "${IMAGE_NAME}@${PLATFORM_DIGEST}"
+
+    # Publish the triaged vulnerability posture alongside the SBOM. `openvex`
+    # is a natively supported cosign predicate type (predicateType
+    # https://openvex.dev/ns), so no custom URI is needed. The same document is
+    # still fed to Grype as scanner input in on-tag.yaml and
+    # vuln-scan-images.yaml; this step only publishes it.
+    - name: Cosign OpenVEX attestation
+      shell: bash
+      env:
+        IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
+        IMAGE_DIGEST: ${{ steps.validate.outputs.image_digest }}
+        VEX_FILE: ${{ steps.vex.outputs.file }}
+      run: |
+        set -euo pipefail
+        timeout --foreground 120s cosign attest \
+          --yes \
+          --new-bundle-format=true \
+          --predicate "${VEX_FILE}" \
+          --type openvex \
           "${IMAGE_NAME}@${IMAGE_DIGEST}"
 
     - name: Attest build provenance
