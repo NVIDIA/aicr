@@ -15,12 +15,31 @@
 package helper
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
+
+// gpuTestNode builds a node with `gpu` allocatable nvidia.com/gpu (gpu < 0
+// omits the resource entirely, producing a non-GPU node). unschedulable
+// marks the node cordoned.
+func gpuTestNode(name string, gpu int64, unschedulable bool) *v1.Node {
+	alloc := v1.ResourceList{}
+	if gpu >= 0 {
+		alloc[v1.ResourceName(GpuResourceName)] = *resource.NewQuantity(gpu, resource.DecimalSI)
+	}
+	return &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1.NodeSpec{Unschedulable: unschedulable},
+		Status:     v1.NodeStatus{Allocatable: alloc},
+	}
+}
 
 func TestLoadPodFromTemplate(t *testing.T) {
 	validTemplate := `apiVersion: v1
@@ -142,5 +161,91 @@ func TestCheckPodRunningOrTerminal(t *testing.T) {
 				t.Errorf("checkPodRunningOrTerminal() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestFindGpuNodes proves FindGpuNodes reports every GPU node — schedulable
+// and cordoned alike — tagged with its cordon state, so callers that must
+// disclose cordoned nodes (rather than silently drop them, issue #1668) have
+// the full set to work from.
+func TestFindGpuNodes(t *testing.T) {
+	t.Parallel()
+
+	clientset := k8sfake.NewSimpleClientset(
+		gpuTestNode("schedulable-1", 8, false),
+		gpuTestNode("cordoned-1", 8, true),
+		gpuTestNode("non-gpu", -1, false),
+		gpuTestNode("zero-gpu", 0, false),
+	)
+
+	got, err := FindGpuNodes(context.Background(), clientset)
+	if err != nil {
+		t.Fatalf("FindGpuNodes() error = %v", err)
+	}
+
+	// want tracks expected presence; non-gpu (resource absent) and zero-gpu
+	// (allocatable quantity 0, not IsZero()-excluded) must both be absent.
+	want := map[string]bool{"schedulable-1": false, "cordoned-1": true}
+	seen := make(map[string]bool, len(got))
+	for _, n := range got {
+		// A duplicate result could mask a missing expected node if only
+		// checked by membership, so duplicates are caught explicitly here
+		// rather than relying on a bare length comparison.
+		if seen[n.Node.Name] {
+			t.Fatalf("FindGpuNodes() returned duplicate node %q", n.Node.Name)
+		}
+		seen[n.Node.Name] = true
+
+		wantCordoned, ok := want[n.Node.Name]
+		if !ok {
+			t.Errorf("FindGpuNodes() returned unexpected node %q", n.Node.Name)
+			continue
+		}
+		if n.Cordoned != wantCordoned {
+			t.Errorf("FindGpuNodes() node %q Cordoned = %v, want %v", n.Node.Name, n.Cordoned, wantCordoned)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("FindGpuNodes() missing expected node %q", name)
+		}
+	}
+}
+
+// TestFindSchedulableGpuNodes proves the schedulable-only view still excludes
+// cordoned GPU nodes, preserving existing callers' behavior after
+// FindSchedulableGpuNodes was rebuilt on top of FindGpuNodes.
+func TestFindSchedulableGpuNodes(t *testing.T) {
+	t.Parallel()
+
+	clientset := k8sfake.NewSimpleClientset(
+		gpuTestNode("schedulable-1", 8, false),
+		gpuTestNode("schedulable-2", 8, false),
+		gpuTestNode("cordoned-1", 8, true),
+	)
+
+	got, err := FindSchedulableGpuNodes(context.Background(), clientset)
+	if err != nil {
+		t.Fatalf("FindSchedulableGpuNodes() error = %v", err)
+	}
+
+	want := map[string]bool{"schedulable-1": true, "schedulable-2": true}
+	seen := make(map[string]bool, len(got))
+	for _, n := range got {
+		if seen[n.Name] {
+			t.Fatalf("FindSchedulableGpuNodes() returned duplicate node %q", n.Name)
+		}
+		seen[n.Name] = true
+
+		if n.Name == "cordoned-1" {
+			t.Errorf("FindSchedulableGpuNodes() must not include cordoned node %q", n.Name)
+		} else if !want[n.Name] {
+			t.Errorf("FindSchedulableGpuNodes() returned unexpected node %q", n.Name)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("FindSchedulableGpuNodes() missing expected node %q", name)
+		}
 	}
 }

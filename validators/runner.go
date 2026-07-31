@@ -42,6 +42,14 @@ func Skip(reason string) error {
 	return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, reason, errSkip)
 }
 
+// IsSkip reports whether err (or anything in its Unwrap chain) came from
+// Skip. errSkip is unexported, so this is the supported way for callers and
+// tests outside this package to classify a skip without matching on
+// rendered error text.
+func IsSkip(err error) bool {
+	return errors.Is(err, errSkip)
+}
+
 // CheckFunc is the signature for a v2 validator check function.
 // Return nil for pass, non-nil error for fail, Skip() for skip.
 // Evidence goes to stdout, debug logs to stderr.

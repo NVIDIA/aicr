@@ -46,20 +46,62 @@ const AKSRdmaSharedResource = "rdma/hca_shared_devices_a"
 // can ever advertise AKSRdmaSharedResource.
 const PCIMellanoxPresentLabel = "feature.node.kubernetes.io/pci-15b3.present"
 
-// FindSchedulableGpuNodes finds nodes that are schedulable and have allocatable GPU resources.
-func FindSchedulableGpuNodes(ctx context.Context, clientset kubernetes.Interface) ([]v1.Node, error) {
+// GpuNode pairs a GPU-capable node with its cordon (Spec.Unschedulable) state.
+// Node-scoped checks that enumerate every GPU node (rather than only the
+// schedulable cohort) need this to disclose cordoned nodes instead of
+// silently narrowing coverage — see FindGpuNodes.
+type GpuNode struct {
+	Node     v1.Node
+	Cordoned bool
+}
+
+// FindGpuNodes finds every node with allocatable GPU resources, schedulable
+// or cordoned. Use this (not FindSchedulableGpuNodes) for checks that report
+// per-node results: a cordon must appear in the check's evidence as an
+// explicit "skipped: cordoned" entry, not vanish from the node count —
+// a spuriously narrowed passing check is the dangerous direction (#1668).
+// Deliberate, durable exclusion from GPU service should instead be
+// expressed via the GPU Operator's nvidia.com/gpu.deploy.operands=false
+// node label, which removes the node from allocatable nvidia.com/gpu
+// entirely (see docs/contributor/validator.md).
+func FindGpuNodes(ctx context.Context, clientset kubernetes.Interface) ([]GpuNode, error) {
 	nodeList, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list nodes", err)
 	}
 
-	var gpuNodes []v1.Node
+	var gpuNodes []GpuNode
 	for _, node := range nodeList.Items {
-		if node.Spec.Unschedulable {
-			continue
+		select {
+		case <-ctx.Done():
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+				"canceled while scanning nodes for allocatable GPU resources", ctx.Err())
+		default:
 		}
 		if q, ok := node.Status.Allocatable[v1.ResourceName(GpuResourceName)]; ok && !q.IsZero() {
-			gpuNodes = append(gpuNodes, node)
+			gpuNodes = append(gpuNodes, GpuNode{Node: node, Cordoned: node.Spec.Unschedulable})
+		}
+	}
+	return gpuNodes, nil
+}
+
+// FindSchedulableGpuNodes finds nodes that are schedulable and have allocatable GPU resources.
+func FindSchedulableGpuNodes(ctx context.Context, clientset kubernetes.Interface) ([]v1.Node, error) {
+	all, err := FindGpuNodes(ctx, clientset)
+	if err != nil {
+		return nil, err
+	}
+
+	var gpuNodes []v1.Node
+	for _, n := range all {
+		select {
+		case <-ctx.Done():
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+				"canceled while filtering schedulable GPU nodes", ctx.Err())
+		default:
+		}
+		if !n.Cordoned {
+			gpuNodes = append(gpuNodes, n.Node)
 		}
 	}
 	return gpuNodes, nil

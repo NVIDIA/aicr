@@ -393,6 +393,72 @@ constraint, which is an explicit anti-pattern in CLAUDE.md.
 The `dependencyAffinity` pre-flight (validator catalog entries
 declaring a required dependency) follows the same rule.
 
+### Node-scoped checks: cordoned GPU nodes
+
+A cordon (`Node.Spec.Unschedulable`) means "do not schedule new pods,"
+not "exclude this node from GPU service" — it is commonly transient
+maintenance, not deliberate exclusion. A node-scoped check that
+enumerates only the schedulable cohort (e.g. via
+`helper.FindSchedulableGpuNodes`) can pass while silently validating
+fewer nodes than the cluster has, with nothing in the evidence
+indicating reduced coverage. That is the spuriously-passing-check
+failure mode CLAUDE.md's anti-pattern table calls out, applied to node
+enumeration instead of a single boolean.
+
+Checks that deploy a per-node test pod (`check-nvidia-smi`) must
+instead call `helper.FindGpuNodes`, which returns every GPU node
+tagged with its cordon state, and:
+
+1. Validate only the schedulable subset. Note this is a **deliberate
+   policy choice, not a technical necessity**: `check-nvidia-smi`'s
+   probe pod is pinned via `nodeName` and tolerates all taints
+   (`testdata/nvidia-smi-verify-pod.yaml`), so it bypasses the
+   scheduler and *could* run on a cordoned node — `Unschedulable` is a
+   scheduler-side predicate that kubelet admission of a directly-bound
+   pod never consults. The check still excludes cordoned nodes because
+   a cordon signals operator intent to keep workloads off the node
+   during maintenance, even when a specific pod could technically slip
+   past it. A future check with a different tradeoff should say so
+   explicitly rather than assume cordons are unconditionally
+   unschedulable.
+2. Report cordoned nodes explicitly in the check's stdout evidence
+   (`<node>: skipped (cordoned)`), never omit them from the node count.
+3. Print a coverage line (`RESULT: nodesValidated: <validated>/<total>`)
+   on every exit path (skip, failure, and success), not only the
+   success path, so a pass *or* a failure on reduced scope is visible.
+   `<validated>` is the count actually confirmed working, not the
+   schedulable count: it is `0` on the all-cordoned and busy-skip
+   paths (nothing was attempted yet) and the successful-node count on
+   the failure path (a partial pass is not conflated with a full one).
+   The `RESULT:` prefix is `pkg/validator/validator.go`'s
+   `resultSummaryPrefix` convention: the validator runtime echoes the
+   trailing text of any such stdout line into live CLI output via
+   `slog.Info`, unconditionally — without it, the line is only visible
+   after the run, inside the (possibly redacted) report.
+   Caveat: the line still also lands in `TestResult.Stdout`/`.Message`
+   in the CTRF report, which the default ("minimal") redaction policy
+   (`pkg/evidence/redact`) strips from a signed evidence bundle. The
+   `RESULT:` prefix makes the coverage figure visible during a live
+   `aicr validate` run regardless of redaction, but it is not
+   guaranteed to survive into the artifact a downstream consumer
+   verifies by default. See #1951 for carrying this kind of outcome
+   data in a structured field that survives redaction instead.
+
+This pattern is not yet applied everywhere it could be. Cluster-aggregate
+checks that assert on an operator's aggregate status
+(`gpu-operator-health`) are unaffected — DaemonSet operands ignore
+cordons — but `expected-resources`' `rdmaFabricProbe` is itself
+node-scoped (it calls `helper.FindSchedulableGpuNodes` to build its
+RDMA-capable cohort) and has the same undisclosed narrowing; it has not
+been updated to this pattern. See #1952.
+
+For *deliberate*, durable exclusion of a node from GPU service (as
+opposed to transient cordon-for-maintenance), use the GPU Operator's
+`nvidia.com/gpu.deploy.operands=false` node label instead of a cordon.
+It removes the node from allocatable `nvidia.com/gpu` entirely, so the
+node drops out of both node-scoped checks and ClusterPolicy
+aggregation consistently — a cordon does neither reliably.
+
 ### Performance benchmark tuning
 
 Performance checks ship validation *methodology* knobs as env vars on
