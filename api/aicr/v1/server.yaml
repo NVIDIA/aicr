@@ -860,12 +860,13 @@ paths:
   /v2/recipe:
     get:
       tags: [Recipes]
-      summary: Resolve a profile-aware recipe
+      summary: Resolve a configured recipe
       operationId: getRecipeV2
       description: >
-        Resolves criteria with an optional name=value profile selection. An
-        omitted profile applies the declaration's required default. Unknown
-        query parameters and conflicting repeated profile values are rejected.
+        Resolves criteria with optional profile and Slurm accounting selections.
+        An omitted profile applies the declaration's required default; an
+        omitted Slurm accounting mode defaults to disabled. Unknown query
+        parameters and conflicting repeated values are rejected.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/Service"
@@ -876,9 +877,10 @@ paths:
         - $ref: "#/components/parameters/Platform"
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/SlurmAccountingMode"
       responses:
         "200":
-          description: Resolved legacy or profile-bearing recipe
+          description: Resolved legacy, profile-bearing, or accounting-configured recipe
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -942,7 +944,7 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       tags: [Recipes]
-      summary: Resolve a profile-aware recipe from a strict envelope
+      summary: Resolve a configured recipe from a strict envelope
       operationId: createRecipeV2
       description: >
         Accepts a strict criteria/profile envelope and an optional profile
@@ -953,6 +955,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/SlurmAccountingMode"
       requestBody:
         required: true
         content:
@@ -1039,7 +1042,7 @@ paths:
   /v2/query:
     get:
       tags: [Recipes]
-      summary: Query a profile-aware hydrated recipe
+      summary: Query a configured hydrated recipe
       operationId: getQueryV2
       description: >
         Resolves criteria and an optional profile, hydrates the recipe, and
@@ -1054,6 +1057,7 @@ paths:
         - $ref: "#/components/parameters/Platform"
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/SlurmAccountingMode"
         - $ref: "#/components/parameters/Selector"
       responses:
         "200":
@@ -1130,7 +1134,7 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       tags: [Recipes]
-      summary: Query a profile-aware recipe from a strict envelope
+      summary: Query a configured recipe from a strict envelope
       operationId: createQueryV2
       description: >
         Accepts a strict criteria/profile/selector envelope and an optional
@@ -1141,6 +1145,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/SlurmAccountingMode"
       requestBody:
         required: true
         content:
@@ -1396,7 +1401,8 @@ paths:
         This design enables a simple workflow: pipe the output from GET /v1/recipe directly
         to POST /v1/bundle.
 
-        Current recipes carry apiVersion aicr.run/v1alpha2 and kind RecipeResult.
+        Current recipes carry apiVersion aicr.run/v1alpha2 or
+        aicr.run/v1alpha3 and kind RecipeResult.
         For backward compatibility, legacy artifacts may omit either header field,
         carry it as an empty string after a decode/remarshal round trip, or carry
         the kind Recipe published by this contract through v0.18.0.
@@ -2002,6 +2008,15 @@ components:
       schema:
         type: string
         pattern: "^$|^[A-Za-z0-9._-]+=[A-Za-z0-9._-]+$"
+    SlurmAccountingMode:
+      name: slurmAccountingMode
+      in: query
+      required: false
+      description: Slurm accounting database ownership mode. Valid only when platform=slurm.
+      schema:
+        type: string
+        enum: [disabled, customer-managed, aicr-provided]
+        default: disabled
     Selector:
       name: selector
       in: query
@@ -2531,9 +2546,32 @@ components:
                     type: array
                     items:
                       type: string
+            mariaDBOperatorState:
+              type: string
+              description: >
+                Official MariaDB Operator API/CR conflict evidence recorded
+                during snapshot-driven resolution of AICR-provided Slurm
+                accounting. Existing CRs and inconclusive discovery block
+                bundling; API-only detection or omitted evidence produces a
+                non-blocking warning.
+              enum: [absent, api-detected, crs-detected, unknown]
         criteria:
           $ref: "#/components/schemas/Criteria"
           description: Original criteria parameters
+        configuration:
+          type: object
+          description: Typed desired state that affects rendering without participating in criteria matching
+          properties:
+            slurm:
+              type: object
+              properties:
+                accounting:
+                  type: object
+                  required: [mode]
+                  properties:
+                    mode:
+                      type: string
+                      enum: [disabled, customer-managed, aicr-provided]
         componentRefs:
           type: array
           items:
@@ -2702,8 +2740,10 @@ components:
 
     RecipeResponse:
       description: >
-        Complete legacy or profile-aware recipe response with metadata and
-        component references.
+        Complete legacy, profile-aware, or Slurm-accounting-aware recipe
+        response with metadata and component references. Recipes without typed
+        configuration use aicr.run/v1alpha2; profile-bearing recipes and
+        recipes carrying configuration.slurm.accounting use aicr.run/v1alpha3.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
@@ -2717,6 +2757,27 @@ components:
               type: string
               enum: [RecipeResult]
               example: RecipeResult
+
+    ConfiguredRecipeConfiguration:
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponseBase/properties/configuration"
+        - type: object
+          required: [slurm]
+          additionalProperties: false
+          properties:
+            slurm:
+              type: object
+              required: [accounting]
+              additionalProperties: false
+              properties:
+                accounting:
+                  type: object
+                  required: [mode]
+                  additionalProperties: false
+                  properties:
+                    mode:
+                      type: string
+                      enum: [disabled, customer-managed, aicr-provided]
 
     ProfileRecipeResponse:
       allOf:
@@ -2744,8 +2805,12 @@ components:
                   - excludedOverlays
                   - constraintWarnings
                   - gpuDriverState
+                  - mariaDBOperatorState
                   - selectedProfile
               properties:
+                mariaDBOperatorState:
+                  type: string
+                  enum: [absent, api-detected, crs-detected, unknown]
                 excludedOverlays:
                   type: array
                   items:
@@ -2766,6 +2831,8 @@ components:
                     required: [advertiser]
             criteria:
               $ref: "#/components/schemas/CriteriaV2"
+            configuration:
+              $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
             constraints:
               type: array
               items:
@@ -2857,6 +2924,152 @@ components:
                   infrastructure:
                     type: string
 
+    ConfiguredRecipeResponse:
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponse"
+        - type: object
+          description: >
+            Closed accounting-configured aicr.run/v1alpha3 RecipeResult shape
+            without a selected profile.
+          required: [metadata, configuration, componentRefs]
+          additionalProperties: false
+          properties:
+            apiVersion:
+              type: string
+              enum: [aicr.run/v1alpha3]
+            kind:
+              type: string
+              enum: [RecipeResult]
+            metadata:
+              allOf:
+                - $ref: "#/components/schemas/RecipeResponseBase/properties/metadata"
+                - type: object
+                  propertyNames:
+                    enum:
+                      - version
+                      - appliedOverlays
+                      - excludedOverlays
+                      - constraintWarnings
+                      - gpuDriverState
+                      - mariaDBOperatorState
+                      - selectedProfile
+                  not:
+                    required: [selectedProfile]
+                  properties:
+                    mariaDBOperatorState:
+                      type: string
+                      enum: [absent, api-detected, crs-detected, unknown]
+                    excludedOverlays:
+                      type: array
+                      items:
+                        type: object
+                        required: [name]
+                        propertyNames:
+                          enum: [name, reason]
+                    constraintWarnings:
+                      type: array
+                      items:
+                        type: object
+                        required: [overlay, constraint, expected, reason]
+                        propertyNames:
+                          enum: [overlay, constraint, expected, actual, reason]
+                    selectedProfile:
+                      type: object
+                      not:
+                        required: [advertiser]
+            criteria:
+              $ref: "#/components/schemas/CriteriaV2"
+            configuration:
+              $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
+            componentRefs:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [name]
+                propertyNames:
+                  enum:
+                    - name
+                    - namespace
+                    - chart
+                    - type
+                    - source
+                    - version
+                    - tag
+                    - valuesFile
+                    - overrides
+                    - patches
+                    - dependencyRefs
+                    - manifestFiles
+                    - preManifestFiles
+                    - path
+                    - cleanup
+                    - expectedResources
+                    - healthCheckAsserts
+                    - healthCheckSkip
+                properties:
+                  expectedResources:
+                    type: array
+                    items:
+                      type: object
+                      required: [kind, name]
+                      additionalProperties: false
+                      properties:
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+            deploymentOrder:
+              $ref: "#/components/schemas/RecipeResponseBase/properties/deploymentOrder"
+            constraints:
+              type: array
+              items:
+                type: object
+                required: [name, value]
+                propertyNames:
+                  enum: [name, value, severity, remediation, unit]
+            validation:
+              type: object
+              propertyNames:
+                enum: [readiness, deployment, performance, conformance]
+              additionalProperties:
+                type: object
+                propertyNames:
+                  enum: [timeout, constraints, checks, nodeSelection, infrastructure]
+                properties:
+                  timeout:
+                    type: string
+                  constraints:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, value]
+                      propertyNames:
+                        enum: [name, value, severity, remediation, unit]
+                  checks:
+                    type: array
+                    items:
+                      type: string
+                  nodeSelection:
+                    type: object
+                    propertyNames:
+                      enum: [selector, maxNodes, excludeNodes]
+                    properties:
+                      selector:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      maxNodes:
+                        type: integer
+                      excludeNodes:
+                        type: array
+                        items:
+                          type: string
+                  infrastructure:
+                    type: string
+
     LegacyRecipeResponse:
       description: >
         Additive legacy recipe shape. Unknown fields remain accepted for
@@ -2886,9 +3099,13 @@ components:
         apiVersion v1alpha2 with kind absent). The legacy kind Recipe is
         v1-only: the strict v2 decode path rejects it.
         metadata.selectedProfile remains reserved for v1alpha3.
+        configuration is likewise reserved for v1alpha3; legacy request
+        headers cannot carry typed Slurm accounting configuration.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
+          not:
+            required: [configuration]
           properties:
             apiVersion:
               type: string
@@ -2910,18 +3127,21 @@ components:
       description: >
         Version-partitioned RecipeResult accepted by POST /v2/bundle.
         Legacy input with apiVersion aicr.run/v1alpha2 or no apiVersion remains
-        additive; v1alpha3 input is closed and requires
-        metadata.selectedProfile. The branches are disjoint on apiVersion:
+        additive; v1alpha3 input is closed and requires either
+        metadata.selectedProfile or configuration.slurm.accounting. The
+        branches are disjoint on apiVersion:
         the legacy branch admits only absent/empty/v1alpha2 and prohibits
-        selectedProfile, while the profile branch requires v1alpha3.
+        selectedProfile, while both configured branches require v1alpha3.
       oneOf:
         - $ref: "#/components/schemas/LegacyBundleRecipeV2Request"
         - $ref: "#/components/schemas/ProfileRecipeResponse"
+        - $ref: "#/components/schemas/ConfiguredRecipeResponse"
 
     BundleRecipeRequest:
       description: >
         RecipeResult accepted by POST /v1/bundle. Current aicr.run/v1alpha2
-        artifacts and legacy artifacts with absent or empty header fields are
+        and aicr.run/v1alpha3 artifacts, plus legacy artifacts with absent or
+        empty header fields, are
         accepted. The kind value Recipe is also accepted: it was the value this
         contract published through v0.18.0, and the handler performs no kind
         validation, so clients written against that spec must keep working.
@@ -2943,18 +3163,32 @@ components:
         admitted as the legacy shape.
 
         metadata.selectedProfile remains reserved for aicr.run/v1alpha3 and
-        is rejected on this route.
+        is rejected on this route. Typed configuration is accepted only when
+        apiVersion is aicr.run/v1alpha3. Bodies stamped aicr.run/v1alpha3 are
+        decoded strictly; unknown fields are rejected with a 400 response.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
+          if:
+            anyOf:
+              - not:
+                  required: [apiVersion]
+              - required: [apiVersion]
+                properties:
+                  apiVersion:
+                    enum: ["", aicr.run/v1alpha2]
+          then:
+            not:
+              required: [configuration]
           properties:
             apiVersion:
               type: string
               description: >
-                Current API version, or empty after a legacy struct round trip.
+                Supported RecipeResult API version, or empty after a legacy
+                struct round trip.
                 Prior group/versions are not accepted — see the schema
                 description for the hard-break policy.
-              enum: ["", aicr.run/v1alpha2]
+              enum: ["", aicr.run/v1alpha2, aicr.run/v1alpha3]
             kind:
               type: string
               description: >

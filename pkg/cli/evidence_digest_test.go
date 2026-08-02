@@ -39,7 +39,7 @@ func TestEvidenceCmd_RegistersDigestSubcommand(t *testing.T) {
 
 func TestEvidenceDigestCmd_HasExpectedFlags(t *testing.T) {
 	cmd := evidenceDigestCmd()
-	wanted := []string{"recipe", "kubeconfig"}
+	wanted := []string{"recipe", "profile", "kubeconfig"}
 	for _, name := range wanted {
 		found := false
 		for _, f := range cmd.Flags {
@@ -139,5 +139,52 @@ func TestEvidenceDigestCmd_DiffersOnContentChange(t *testing.T) {
 
 	if run(a) == run(b) {
 		t.Errorf("digest did not change when recipe content changed")
+	}
+}
+
+func TestEvidenceDigestCmd_ProfileSelectionChangesDigest(t *testing.T) {
+	// The embedded catalog's profile-bearing AKS overlay, relative to this
+	// package directory. --profile must be a digest input: the operator
+	// value hydrates different profile-owned paths than the default.
+	overlay := filepath.Join("..", "..", "recipes", "overlays", "h100-aks-ubuntu-training.yaml")
+
+	run := func(args ...string) string {
+		t.Helper()
+		root := newRootCmd()
+		var out bytes.Buffer
+		root.Writer = &out
+		if err := root.Run(context.Background(), append([]string{"aicr", "evidence", "digest"}, args...)); err != nil {
+			t.Fatalf("Run %v: %v", args, err)
+		}
+		return strings.TrimSpace(out.String())
+	}
+
+	defaultDigest := run("-r", overlay)
+	operatorDigest := run("-r", overlay, "--profile", "gpuStack=operator-managed")
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(operatorDigest) {
+		t.Fatalf("profiled output is not a hex sha256: %q", operatorDigest)
+	}
+	if defaultDigest == operatorDigest {
+		t.Errorf("digest with --profile gpuStack=operator-managed equals the default digest %q", defaultDigest)
+	}
+}
+
+func TestEvidenceDigestCmd_RejectsProfileOnFullResultInput(t *testing.T) {
+	dir := t.TempDir()
+	recipeFile := filepath.Join(dir, "recipe.yaml")
+	body := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: aks\n"
+	if err := os.WriteFile(recipeFile, []byte(body), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.Writer = &out
+	root.ErrWriter = &out
+	err := root.Run(context.Background(), []string{
+		"aicr", "evidence", "digest", "-r", recipeFile, "--profile", "gpuStack=operator-managed",
+	})
+	if err == nil || !strings.Contains(err.Error(), "already baked") {
+		t.Fatalf("error = %v, want baked-in selection rejection", err)
 	}
 }

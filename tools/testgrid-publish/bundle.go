@@ -70,10 +70,6 @@ func parseCriteria(bundleDir string) (RecipeCriteria, error) {
 		return RecipeCriteria{}, errors.New(errors.ErrCodeInvalidRequest,
 			"recipe.yaml has no criteria")
 	}
-	if r.Metadata.SelectedProfile != nil {
-		return RecipeCriteria{}, errors.New(errors.ErrCodeInvalidRequest,
-			"profile-bearing TestGrid publication is deferred to the profile adoption rollout")
-	}
 
 	// Normalize: trim whitespace and lowercase so "EKS" and " eks " both
 	// map to the same GCS group path as the config-gen taxonomy expects.
@@ -96,6 +92,19 @@ func parseCriteria(bundleDir string) (RecipeCriteria, error) {
 		OS:          os_,
 		Intent:      intent,
 		Platform:    platform,
+	}
+
+	// A profiled recipe (metadata.selectedProfile — already contract-
+	// validated by the strict DecodeRecipeResult above) records the shared
+	// profile segment for consumers that need it; the TestGrid coordinate
+	// itself deliberately stays unsuffixed (the digest-bound build ID
+	// partitions per value — see RecipeCriteria.ProfileSegment).
+	if r.Metadata.SelectedProfile != nil {
+		segment, segErr := attestation.ProfileSegment(r.Metadata.SelectedProfile)
+		if segErr != nil {
+			return RecipeCriteria{}, segErr
+		}
+		criteria.ProfileSegment = segment
 	}
 
 	// Extract k8s constraint from recipe constraints list.

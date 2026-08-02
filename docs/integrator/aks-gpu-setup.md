@@ -134,7 +134,7 @@ advertise zero `nvidia.com/gpu`.
 
 | Mode | Nodepool | GPU Operator values |
 |------|----------|---------------------|
-| AKS driver-only (default) | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` (recipe defaults) |
+| AKS azure-managed (default) | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` (recipe defaults) |
 | GPU Operator-managed | `--gpu-driver none` (AKS "None/BYO" install profile) | `driver.enabled=true`, `toolkit.enabled=true`, `operator.runtimeClass=nvidia`, plus `dradriver:nvidiaDriverRoot=/run/nvidia/driver` (all together) |
 
 AICR's default follows the CSP default: an `az aks nodepool add` without GPU
@@ -148,7 +148,83 @@ its own device plugin, DCGM exporter, and GPU health tooling, which duplicate
 and conflict with the GPU Operator operands AICR deploys. See
 [AKS install profiles](https://learn.microsoft.com/en-us/azure/aks/aks-managed-gpu-nodes#install-profiles).
 
-### Default: Use the AKS Driver-Only Profile
+**Recording the pool mode in snapshots.** The ownership mode lives in the
+Azure control plane (AgentPool `gpuProfile.driver`), not in any Kubernetes
+API object, so a snapshot cannot observe it from inside the cluster. To
+record it, dump the node pools and pass the file to `aicr snapshot`:
+
+```shell
+az aks nodepool list \
+  --cluster-name <cluster> \
+  --resource-group <rg> \
+  -o json > pools.json
+
+aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
+```
+
+The GPU pools' driver modes are projected into the snapshot's
+`K8s.aks-gpu-pools.gpu-driver` reading (`Install` for azure-managed pools,
+`None` for `--gpu-driver none` pools; disagreeing or AKS-managed pools
+project a value that fails recipe qualification closed). `aicr validate`
+accepts the same `--aks-gpu-pools` flag when it captures a live snapshot.
+The projection runs on the machine invoking the CLI — the file never
+enters the cluster — and a malformed or missing file fails the command
+before any cluster work.
+
+**End-to-end flow.** Three steps; the pool dump is consumed only at step 2
+(the snapshot carries the reading from then on — recipe takes the snapshot,
+bundle takes the recipe):
+
+```shell
+# 1. Dump the node pools (the mode lives in the Azure control plane).
+az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json
+
+# 2. Snapshot with the projection (agent Job or local mode).
+aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
+
+# 3. Generate the recipe with the profile value your pools call for,
+#    then bundle. Selection is explicit; the reading VERIFIES it.
+aicr recipe --service aks --accelerator h100 --os ubuntu --intent training \
+  --snapshot snapshot.yaml -o recipe.yaml                 # azure-managed default
+#   ... or, for --gpu-driver none pools:
+#   --profile gpuStack=operator-managed
+aicr bundle -r recipe.yaml -o ./bundles
+```
+
+The reading qualifies the selection — it does not choose for you. Every
+combination is deterministic:
+
+| Pools read | Default (`azure-managed`) | `--profile gpuStack=operator-managed` |
+|---|---|---|
+| `Install` (AKS installs the driver) | ✅ resolves | ❌ fails closed: constraint expects `None` |
+| `None` (`--gpu-driver none`) | ❌ fails closed: constraint expects `Install` | ✅ resolves |
+| `Mixed` / `Managed` | ❌ fails closed naming the observed state | ❌ fails closed |
+| no reading (snapshot captured without `--aks-gpu-pools`) | ❌ fails closed: reading **unavailable** — recapture the snapshot with the pool dump | ❌ same |
+
+A wrong selection can never silently produce a mismatched recipe — the
+error names the observed pool state, and fixing it means changing the
+selection, the pools, or recapturing, never overriding the values by hand.
+
+**Selection and verification are independent axes.** `--profile` (or its
+absence) decides the selection; `--snapshot` (or its absence) decides
+whether the selection is verified now or later. The selection is NEVER
+derived from the snapshot, and the check is NEVER skipped when a snapshot
+is present:
+
+| Invocation | Selected value | Pool-mode check |
+|---|---|---|
+| no `--profile`, no `--snapshot` | declaration default (`azure-managed`) | none possible (no cluster data) — the constraint is still recorded in the recipe and enforced at `aicr validate` readiness |
+| `--profile gpuStack=operator-managed`, no `--snapshot` | `operator-managed` | same — deferred to validate |
+| no `--profile`, `--snapshot` | default (`azure-managed`) | checked at generation: pools must read `Install`, else generation fails closed naming the observed state |
+| `--profile gpuStack=operator-managed`, `--snapshot` | `operator-managed` | checked at generation: pools must read `None`, else fails closed |
+
+A snapshot without the pool reading (captured without `--aks-gpu-pools`)
+fails closed for either selection — never a silent skip. If you need an
+unverified recipe deliberately, generate criteria-only (drop
+`--snapshot`): the artifact is honest about being unqualified, and
+validate re-checks when a snapshot exists.
+
+### Default: Use the AKS Azure-Managed Profile
 
 Create nodepools with the AKS **Driver only** install profile — the AKS
 default, so simply omit `--gpu-driver none`:
@@ -162,7 +238,9 @@ az aks nodepool add \
   --node-count 1
 ```
 
-No changes to AICR recipes are needed — this is the default configuration.
+No changes to AICR recipes are needed — this is the AKS family's `gpuStack`
+configuration profile at its default value, `azure-managed` (the resolved
+recipe records `metadata.selectedProfile: gpuStack=azure-managed`).
 The AKS node image preinstalls the NVIDIA driver and container toolkit and
 preconfigures containerd, so the recipe defaults (`driver.enabled=false`,
 `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime`)
@@ -182,7 +260,7 @@ preconfigured on the AKS node image; NVIDIA's AKS example uses
 change from reviving the `nvidia_peermem` symbol-mismatch bug (see the comment
 in `recipes/components/gpu-operator/values-aks.yaml`).
 
-**GPUDirect RDMA (`nvidia-peermem`) under the driver-only profile.** With
+**GPUDirect RDMA (`nvidia-peermem`) under the azure-managed profile.** With
 `driver.enabled=false` there is no GPU Operator driver DaemonSet to load the
 `nvidia-peermem` kernel module (`driver.rdma.enabled` is inert), and the
 AKS-managed driver install does not load it automatically. Azure's RDMA
@@ -250,7 +328,7 @@ was raised). Two remedies: override the catalog entry via `--data` (see
 in tandem, or point `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` at a
 faster class (for example premium SSD v2).
 
-**Device-isolation hardening under the driver-only profile.** The AKS node
+**Device-isolation hardening under the azure-managed profile.** The AKS node
 image preinstalls the NVIDIA container toolkit with the upstream permissive
 defaults in `/etc/nvidia-container-runtime/config.toml`
 (`accept-nvidia-visible-devices-envvar-when-unprivileged = true`,
@@ -276,7 +354,7 @@ repaired by the next `--in-place` re-assert within ≤60s (the re-assert
 succeeds, so Ready never flips — the config is corrected, not flagged as
 drift).
 
-The DaemonSet renders **only** in the driver-only profile
+The DaemonSet renders **only** in the azure-managed profile
 (`toolkit.enabled=false`). Under the GPU-Operator-managed fallback
 (`--gpu-driver none` + `toolkit.enabled=true`) it is omitted, because the
 operator owns the toolkit there — the AKS values set the same hardened keys via
@@ -318,27 +396,49 @@ default flip resolves the new `driver.enabled=false` / `toolkit.enabled=false`
 values on its next `aicr bundle` while retaining its old baked overrides —
 in particular, the DRA driver root stays at the operator container path and
 the resulting bundle is incoherent. **Regenerate pre-flip AKS recipes**
-(`aicr recipe ...`) before bundling with this AICR version, or supply the
-complete GPU Operator-managed override set (all four `--set` flags from the
-alternative profile below) if the cluster's GPU pools were created with
-`--gpu-driver none`. `aicr bundle` now fails closed on this combination:
+(`aicr recipe ...`) before bundling with this AICR version — for GPU pools
+created with `--gpu-driver none`, regenerate with
+`--profile gpuStack=operator-managed`. (A legacy pre-profile artifact may instead
+supply the complete GPU Operator-managed override set:
+`--set gpuoperator:driver.enabled=true --set gpuoperator:toolkit.enabled=true
+--set gpuoperator:operator.runtimeClass=nvidia
+--set dradriver:nvidiaDriverRoot=/run/nvidia/driver` — rejected on profiled
+recipes when it diverges from the selected value; the ownership lock
+accepts only identical values.) `aicr bundle` now fails closed on this combination:
 the `CheckDriverOwnershipCoherence` validation detects the incoherent
 driver root (`driver.enabled=false` with the DRA driver root still at the
 operator container path) on the final effective values and blocks the
-bundle until the recipe is regenerated or the full override set is
-supplied ([#1757](https://github.com/NVIDIA/aicr/issues/1757)).
+bundle until the recipe is regenerated (profiled recipes select the other
+`gpuStack` value; legacy pre-profile artifacts may instead supply the full
+override set) ([#1757](https://github.com/NVIDIA/aicr/issues/1757)).
 
-**Mismatch warning:** resolving an AKS recipe from a snapshot
-(`aicr recipe --snapshot`) warns when the sampled GPU node reports no NVIDIA
-driver loaded — the signature of a `--gpu-driver none` pool resolved against
-the driver-only recipe defaults. Deploying that combination would leave GPU
-nodes driverless (nothing on the node provides a driver and the recipe does
-not install one). The observation is also recorded in the recipe
-(`metadata.gpuDriverState: absent`), and `aicr bundle` fails closed on it
-(`CheckDriverOwnershipCoherence`) unless the bundle is flipped to GPU
-Operator-managed mode with the complete override set below. Either supply
-those overrides at bundle time, or reprovision the pool with the AKS default
-driver install and re-snapshot. Criteria-only resolves
+**Driver-absent mismatch (profiled recipes):** resolving an AKS recipe from
+a snapshot now takes one of two fail-closed paths, neither of which is a
+bundle-time `--set` flip:
+
+- Pools reading `None` under the azure-managed default: the constraint
+  rejects the recipe at resolution, before any driver-state recording —
+  but `None` **qualifies** `--profile gpuStack=operator-managed`, so simply rerun
+  with that selection against the same snapshot (no pool change or
+  recapture needed). `Mixed`, `Managed`, or a missing reading reject
+  either selection; fix the pools (or capture with `--aks-gpu-pools`) and
+  recapture.
+- Pools reading `Install` while the sampled node has no loaded driver
+  (failed AKS driver install, mid-reimage): the constraint passes — pool
+  mode is the ownership contract, not live state — and resolution records
+  `metadata.gpuDriverState: absent`; `aicr bundle` then fails closed
+  (`CheckDriverOwnershipCoherence`). Repair the AKS-managed install and
+  recapture, or switch the pools to `--gpu-driver none`, recapture, and
+  regenerate with `--profile gpuStack=operator-managed`. The driver-ownership paths
+  are profile-owned, so the pre-profile per-path `--set` tuple is rejected.
+
+Legacy pre-profile AKS artifacts (no `metadata.selectedProfile`) keep the
+old behavior: warn at resolution, record `absent`, and unblock at bundle
+time with the complete legacy override set (`--set gpuoperator:driver.enabled=true
+--set gpuoperator:toolkit.enabled=true --set gpuoperator:operator.runtimeClass=nvidia
+--set dradriver:nvidiaDriverRoot=/run/nvidia/driver` — accepted only on
+legacy artifacts; on profiled recipes these paths are owned and flags
+diverging from the selected value are rejected). Criteria-only resolves
 (`aicr recipe --service aks ...`) have no cluster signal and record no state —
 the deployment-phase `gpu-operator-health` validation is the backstop.
 
@@ -363,15 +463,17 @@ Azure. Private or egress-restricted AKS clusters must allow registry egress to
 ACR) before running the performance phase; otherwise the benchmark workers
 fail at image pull and the check fails without measuring anything.
 
-**GDRCopy in the driver-only profile.** The AKS recipes set
+**GDRCopy in the azure-managed profile.** The AKS recipes set
 `gdrcopy.enabled: false` because the operator deploys GDRCopy as a sidecar
 container in the operator-managed driver pod; with `driver.enabled=false` that
 pod is never created, so the setting is inert against the preinstalled driver.
 Note that using GDRCopy requires both the `gdrdrv` kernel module on the node
 and the userspace library in the workload image; whether the Azure-managed
 node image ships `gdrdrv` remains unverified. To get operator-deployed
-GDRCopy, switch to the GPU-Operator-managed profile below and add
-`--set gpuoperator:gdrcopy.enabled=true` alongside the four overrides.
+GDRCopy, switch to the GPU-Operator-managed profile below (regenerate with
+`--profile gpuStack=operator-managed`) and add `--set gpuoperator:gdrcopy.enabled=true`
+at bundle time — `gdrcopy.enabled` is not a profile-owned path, so the
+override is accepted.
 
 ### Alternative: Let GPU Operator Manage the Driver
 
@@ -390,35 +492,31 @@ az aks nodepool add \
   --node-count 1
 ```
 
-This requires **all four** overrides together — never set only one side,
-because a partial configuration either leaves containerd without a working
-`nvidia` runtime, conflicts with a preinstalled driver, or points the DRA
-kubelet plugin at the wrong driver root:
+Then select the mode at recipe generation time with the `gpuStack`
+configuration profile — one flag flips every ownership path together:
 
 ```shell
-aicr bundle -r recipe.yaml \
-  --set gpuoperator:driver.enabled=true \
-  --set gpuoperator:toolkit.enabled=true \
-  --set gpuoperator:operator.runtimeClass=nvidia \
-  --set dradriver:nvidiaDriverRoot=/run/nvidia/driver
+aicr recipe --service aks --accelerator h100 --os ubuntu --intent training \
+  --profile gpuStack=operator-managed -o recipe.yaml
+aicr bundle -r recipe.yaml -o ./bundles
 ```
 
-Or, for the gpu-operator side, add to your values override file:
+The `operator-managed` value sets `driver.enabled=true`, `toolkit.enabled=true`,
+`operator.runtimeClass=nvidia`, and retargets `nvidia-dra-driver-gpu`'s
+`nvidiaDriverRoot` from the AKS default (`/`, the host-installed driver
+location) to the GPU Operator driver container's install root
+(`/run/nvidia/driver`) — nothing installs a driver at the host root in this
+mode. A partial configuration is impossible by construction: the profile
+owns all four paths, so per-path `--set` overrides that diverge from the
+selected value are rejected at bundle time (identical values are accepted;
+legacy pre-profile recipes without `metadata.selectedProfile` still take
+the old four-flag `--set` tuple).
 
-```yaml
-driver:
-  enabled: true
-toolkit:
-  enabled: true
-operator:
-  runtimeClass: nvidia
-```
-
-The `dradriver:nvidiaDriverRoot` override retargets `nvidia-dra-driver-gpu`
-from the AKS recipe default (`/`, the host-installed driver location) to the
-GPU Operator driver container's install root — the operator populates
-`/run/nvidia/driver`; nothing installs a driver at the host root in this
-mode.
+When generating from a snapshot, capture the pool mode first (see
+"Recording the pool mode in snapshots" above): the `operator-managed` value's
+recorded constraint requires the pools to read `gpu-driver: None`, so
+resolution fails closed if the pools were not actually created with
+`--gpu-driver none`.
 
 This gives the GPU Operator ownership of the full stack: it installs the
 driver and configures the containerd `nvidia` runtime handler through its

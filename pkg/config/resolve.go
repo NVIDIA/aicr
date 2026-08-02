@@ -719,6 +719,23 @@ func (r *RecipeSpec) ResolveCriteriaWithRegistry(reg *recipe.CriteriaRegistry) (
 	return out, nil
 }
 
+// ResolveAccountingMode parses spec.recipe.configuration.slurm.accounting.mode.
+// The bool reports whether the field was explicitly present; Slurm recipe
+// generation materializes disabled when it is absent.
+func (r *RecipeSpec) ResolveAccountingMode() (recipe.AccountingMode, bool, error) {
+	if r == nil || r.Configuration == nil || r.Configuration.Slurm == nil ||
+		r.Configuration.Slurm.Accounting == nil {
+
+		return "", false, nil
+	}
+	mode, err := recipe.ParseAccountingMode(r.Configuration.Slurm.Accounting.Mode)
+	if err != nil {
+		return "", false, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"invalid spec.recipe.configuration.slurm.accounting.mode")
+	}
+	return mode, true, nil
+}
+
 // boolPtrOrFalse dereferences a *bool, treating nil (absent in
 // YAML/JSON) as false. Used at the spec → resolved boundary so the
 // resolved layer can stay plain bool for downstream consumers.

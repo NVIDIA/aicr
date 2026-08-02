@@ -462,3 +462,84 @@ func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
 		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 	}
 }
+
+// TestClassifyIgnoredAKSGPUPools pins the provenance matrix of the
+// ignored-projection note: explicit CLI presence (either flag form) always
+// warns; a purely ambient env source is demoted to debug; nothing logs
+// unless both a pre-captured snapshot and a pools path are in play.
+func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		envValue      string
+		poolsPath     string
+		snapshotPath  string
+		wantShouldLog bool
+		wantAtWarn    bool
+	}{
+		{
+			name:         "no snapshot: silent",
+			args:         []string{"--aks-gpu-pools", "p.json"},
+			poolsPath:    "p.json",
+			snapshotPath: "",
+		},
+		{
+			name:         "no pools path: silent",
+			snapshotPath: "snap.yaml",
+		},
+		{
+			name:          "explicit flag (space form): warn",
+			args:          []string{"validate", "--aks-gpu-pools", "p.json", "--snapshot", "snap.yaml"},
+			poolsPath:     "p.json",
+			snapshotPath:  "snap.yaml",
+			wantShouldLog: true,
+			wantAtWarn:    true,
+		},
+		{
+			name:          "explicit flag (= form): warn",
+			args:          []string{"validate", "--aks-gpu-pools=p.json", "-s", "snap.yaml"},
+			poolsPath:     "p.json",
+			snapshotPath:  "snap.yaml",
+			wantShouldLog: true,
+			wantAtWarn:    true,
+		},
+		{
+			name:          "ambient env only: debug",
+			args:          []string{"validate", "-s", "snap.yaml"},
+			envValue:      "p.json",
+			poolsPath:     "p.json",
+			snapshotPath:  "snap.yaml",
+			wantShouldLog: true,
+			wantAtWarn:    false,
+		},
+		{
+			name:          "explicit flag beats identical env: warn",
+			args:          []string{"validate", "--aks-gpu-pools", "p.json", "-s", "snap.yaml"},
+			envValue:      "p.json",
+			poolsPath:     "p.json",
+			snapshotPath:  "snap.yaml",
+			wantShouldLog: true,
+			wantAtWarn:    true,
+		},
+		{
+			name: "similarly-prefixed flag is not a false positive",
+			args: []string{"validate", "--aks-gpu-pools-extra", "x", "-s", "snap.yaml"},
+			// pools path resolvable only via env in this shape.
+			envValue:      "p.json",
+			poolsPath:     "p.json",
+			snapshotPath:  "snap.yaml",
+			wantShouldLog: true,
+			wantAtWarn:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shouldLog, atWarn := classifyIgnoredAKSGPUPools(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath)
+			if shouldLog != tt.wantShouldLog || atWarn != tt.wantAtWarn {
+				t.Fatalf("classify = (log=%v, warn=%v), want (log=%v, warn=%v)",
+					shouldLog, atWarn, tt.wantShouldLog, tt.wantAtWarn)
+			}
+		})
+	}
+}

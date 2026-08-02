@@ -298,6 +298,64 @@ sane).
 Treat it as the template for any future cluster-scoped collector —
 not for per-node ones.
 
+## Provider Node-Pool Projections (Offline Input)
+
+[`pkg/collector/k8s/aksgpupools.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/aksgpupools.go)
+is a different animal from the live collectors above: it projects an
+**operator-supplied cloud-provider dump** (an `az aks nodepool list
+-o json` file passed via `aicr snapshot --aks-gpu-pools`) into the
+`K8s` measurement. The signal it carries — AKS AgentPool
+`gpuProfile.driver`, i.e. who owns the GPU driver (ADR-015 DD3) —
+lives in the cloud control plane, not in any Kubernetes API object,
+so it cannot be collected live without cloud SDK and auth coupling.
+
+Because the projection is pure file processing, it does NOT run
+inside a collector: the snapshot orchestration layer
+(`pkg/snapshotter`) projects the file up front on the caller's
+machine — failing the run in milliseconds on a bad file, before any
+cluster work — and attaches the subtype to the K8s measurement. In
+agent Job mode the file never enters the pod; the controller-side
+CLI merges the projection into the snapshot the Job returns and
+rewrites the Job's result ConfigMap with the merged bytes (Cleanup
+never deletes that ConfigMap, so a stale pre-merge artifact must not
+persist there). `aicr validate` accepts the same flag for its
+live-capture path.
+
+The design generalizes to other providers, but along a deliberate
+split:
+
+- **Per-provider, never shared: the projection itself.** Each cloud
+  expresses driver ownership in a different object with different
+  semantics (GKE: node-pool `gpuDriverInstallationConfig`). A new
+  provider gets its own projector reading that provider's documented
+  output format and emitting its own namespaced subtype
+  (`aks-gpu-pools` today; a GKE analog adds `gke-gpu-pools` beside
+  it). Do not widen an existing provider's subtype or invent a
+  cross-provider pools schema — unified schemas blur the fail-closed
+  constraint semantics profile declarations depend on.
+- **Shared: everything around the projection.** The bounded,
+  fail-loud file reader (`readBoundedPoolsFile` in
+  `providerpools.go`: Lstat regular-file gate + `os.Open` +
+  `io.LimitReader` cap), the orchestration-layer project-then-attach
+  flow in `pkg/snapshotter` (`attachAKSGPUPools` /
+  `mergeAKSGPUPools`), and the up-front projection that keeps
+  explicit operator input out of the snapshotter's degrade-to-warning
+  collector policy.
+- **Additive flags.** New providers add sibling flags
+  (`--gke-gpu-pools`, ...), never a generic flag with a provider
+  discriminator — the flag name tells the operator exactly which
+  cloud CLI command produces the input, and the parser knows the
+  schema without sniffing.
+
+Because the input arrives via an explicit flag, every failure is an
+error, never a degraded measurement — the opposite of the live
+collectors' non-fatal policy. A typoed path must not masquerade as
+"reading unavailable" and steer a profile decision. Vendor detection
+is prefix + marker based (NC/ND/NV families, minus AMD markers such
+as MI300X); a hypothetical future NVIDIA family outside those
+prefixes would be skipped — a documented limitation recorded on the
+marker list in `aksgpupools.go`.
+
 ## Testing
 
 | What | How |

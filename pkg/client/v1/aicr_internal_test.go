@@ -17,6 +17,7 @@ package aicr
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator"
@@ -78,7 +80,7 @@ func (b *blockingDataProvider) Source(path string) string {
 func newRecipeResultForBundleTest(owner *Client, refs []recipe.ComponentRef, facadeComponents []ComponentRef) *RecipeResult {
 	internal := &recipe.RecipeResult{
 		Kind:          "RecipeResult",
-		APIVersion:    "v1",
+		APIVersion:    recipe.RecipeAPIVersion,
 		ComponentRefs: refs,
 	}
 	return &RecipeResult{
@@ -104,6 +106,103 @@ func newClientForBundleTest(t *testing.T) *Client {
 	return &Client{
 		builder: recipe.NewBuilder(),
 		dp:      recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "."),
+	}
+}
+
+type concurrencyTrackingProvider struct {
+	active  atomic.Int64
+	maximum atomic.Int64
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *concurrencyTrackingProvider) ReadFile(ctx context.Context, _ string) ([]byte, error) {
+	active := p.active.Add(1)
+	defer p.active.Add(-1)
+	for {
+		maximum := p.maximum.Load()
+		if active <= maximum || p.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	select {
+	case p.started <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-p.release:
+		return []byte("value: true\n"), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (p *concurrencyTrackingProvider) WalkDir(
+	ctx context.Context,
+	_ string,
+	_ fs.WalkDirFunc,
+) error {
+
+	return ctx.Err()
+}
+
+func (p *concurrencyTrackingProvider) Source(path string) string { return path }
+
+func TestResolveHelmComponentValuesBoundsConcurrency(t *testing.T) {
+	t.Parallel()
+
+	const settleTimeout = 100 * time.Millisecond
+	componentCount := defaults.HelmValueResolutionConcurrency + 2
+	provider := &concurrencyTrackingProvider{
+		started: make(chan struct{}, componentCount),
+		release: make(chan struct{}),
+	}
+	refs := make([]recipe.ComponentRef, componentCount)
+	components := make([]ComponentRef, componentCount)
+	for index := range componentCount {
+		name := fmt.Sprintf("component-%d", index)
+		refs[index] = recipe.ComponentRef{
+			Name:       name,
+			ValuesFile: fmt.Sprintf("components/%s/values.yaml", name),
+		}
+		components[index] = ComponentRef{Name: name, Kind: "Helm"}
+	}
+	internal := &recipe.RecipeResult{ComponentRefs: refs}
+	internal.BindDataProvider(provider)
+	result := &RecipeResult{Components: components, internal: internal}
+
+	ctx, cancel := context.WithTimeout(t.Context(), defaults.FileReadTimeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := resolveHelmComponentValues(ctx, result)
+		done <- err
+	}()
+
+	for range defaults.HelmValueResolutionConcurrency {
+		select {
+		case <-provider.started:
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for value-resolution workers: %v", ctx.Err())
+		}
+	}
+	select {
+	case <-provider.started:
+		t.Fatal("value resolution exceeded its concurrency limit before workers were released")
+	case <-time.After(settleTimeout):
+	}
+	close(provider.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("resolveHelmComponentValues() error = %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("resolveHelmComponentValues() did not finish: %v", ctx.Err())
+	}
+	if got := provider.maximum.Load(); got != defaults.HelmValueResolutionConcurrency {
+		t.Errorf("maximum concurrent reads = %d, want %d", got, defaults.HelmValueResolutionConcurrency)
 	}
 }
 

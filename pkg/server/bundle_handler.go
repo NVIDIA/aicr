@@ -15,6 +15,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	stderrors "errors"
@@ -108,7 +109,7 @@ func decodeBundleRecipe(
 
 	var result recipe.RecipeResult
 	if !v2 {
-		if err := json.NewDecoder(input).Decode(&result); err != nil {
+		if err := decodeRecipeResultRequest(input, &result); err != nil {
 			return result, aicrerrors.PropagateOrWrap(
 				err, aicrerrors.ErrCodeInvalidRequest, "failed to decode bundle recipe")
 		}
@@ -324,6 +325,39 @@ func validateV2BundleQueryParameters(r *http.Request) error {
 	allowed := bundler.SupportedBundleQueryParameters()
 	allowed["attest"] = struct{}{}
 	return validateV2QueryParameters(r, allowed)
+}
+
+func decodeRecipeResultRequest(body io.Reader, result *recipe.RecipeResult) error {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+			"failed to read request body", err)
+	}
+	var header struct {
+		APIVersion string `json:"apiVersion"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&header); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+			"failed to inspect request apiVersion", err)
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if header.APIVersion == recipe.ConfiguredRecipeResultAPIVersion {
+		decoder.DisallowUnknownFields()
+	}
+	if err := decoder.Decode(result); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+			"failed to decode RecipeResult", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !stderrors.Is(err, io.EOF) {
+		if err == nil {
+			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				"request body must contain exactly one RecipeResult")
+		}
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+			"failed to validate trailing request content", err)
+	}
+	return nil
 }
 
 // resolveAttestRequest parses the ?attest query parameter and validates it

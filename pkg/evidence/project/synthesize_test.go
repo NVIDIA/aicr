@@ -150,6 +150,16 @@ func TestSynthesize_HappyPath(t *testing.T) {
 		t.Errorf("meta.rekorLogIndex = %v, want 1947959470", m.RekorLogIndex)
 	}
 
+	// Unprofiled run: the omitempty profile field must be absent from the
+	// written meta.json, not serialized as an empty string.
+	raw, err := os.ReadFile(filepath.Join(res.RunDir, MetaFilename))
+	if err != nil {
+		t.Fatalf("read meta.json: %v", err)
+	}
+	if strings.Contains(string(raw), `"profile"`) {
+		t.Errorf("unprofiled meta.json unexpectedly carries a profile key:\n%s", raw)
+	}
+
 	// Only the produced phases are present; performance was omitted.
 	for _, phase := range []string{"deployment", "conformance"} {
 		if _, err := os.Stat(filepath.Join(res.RunDir, "ctrf", phase+".json")); err != nil {
@@ -161,7 +171,10 @@ func TestSynthesize_HappyPath(t *testing.T) {
 	}
 }
 
-func TestSynthesize_RejectsProfileRecipeUntilProjectionSupportLands(t *testing.T) {
+func TestSynthesize_ProfiledRecipeSuffixedTab(t *testing.T) {
+	// A profile-bearing recipe lands under a tab suffixed with the shared
+	// lowercase profile segment, so runs from two values of one profile
+	// family occupy distinct tabs instead of overwriting each other.
 	in := baseInput(t)
 	in.BundleDir = writeBundle(t, `apiVersion: aicr.run/v1alpha3
 kind: RecipeResult
@@ -177,9 +190,40 @@ criteria:
   intent: training
 `, map[string]string{"deployment": "{}"})
 
-	_, err := Synthesize(context.Background(), in)
-	if err == nil || !strings.Contains(err.Error(), "profile-bearing evidence projection") {
-		t.Fatalf("Synthesize() error = %v, want deferred profile projection rejection", err)
+	res, err := Synthesize(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+	if res.Coordinate.Path() != "aks/h100-ubuntu/training-gpustack-driver-installed" {
+		t.Errorf("coordinate path = %q, want %q",
+			res.Coordinate.Path(), "aks/h100-ubuntu/training-gpustack-driver-installed")
+	}
+	wantRunDir := filepath.Join(in.OutRoot, "results", "aks", "h100-ubuntu",
+		"training-gpustack-driver-installed",
+		SignerIDHash(in.SignerIssuer, in.SignerIdentity), "run-20260625T0557")
+	if res.RunDir != wantRunDir {
+		t.Errorf("RunDir = %q, want %q", res.RunDir, wantRunDir)
+	}
+	m := readMeta(t, res.RunDir)
+	if m.Coordinate.Tab != "training-gpustack-driver-installed" {
+		t.Errorf("meta.coordinate.tab = %q, want suffixed tab", m.Coordinate.Tab)
+	}
+	if m.Profile != "gpustack-driver-installed" {
+		t.Errorf("meta.profile = %q, want %q", m.Profile, "gpustack-driver-installed")
+	}
+	// The written meta.json carries the profile field verbatim (the GP4
+	// consumer strips "-"+profile from the tab before criteria inversion).
+	raw, err := os.ReadFile(filepath.Join(res.RunDir, MetaFilename))
+	if err != nil {
+		t.Fatalf("read meta.json: %v", err)
+	}
+	if !strings.Contains(string(raw), `"profile": "gpustack-driver-installed"`) {
+		t.Errorf("meta.json missing profile field:\n%s", raw)
+	}
+	// The exact-case wire selection rides alongside the lossy segment so
+	// the dashboard's copy-CLI/copy-config generators can reconstruct it.
+	if !strings.Contains(string(raw), `"profileSelection": "gpuStack=driver-installed"`) {
+		t.Errorf("meta.json missing profileSelection field:\n%s", raw)
 	}
 }
 

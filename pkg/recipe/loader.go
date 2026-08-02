@@ -31,7 +31,36 @@ import (
 // dp (so external --data overlays resolve against dp, not the embedded
 // default), and the returned result carries dp via its provider field. A nil
 // dp falls back to the embedded catalog.
+//
+// Overlay hydration applies the declaration's default profile selection;
+// use LoadFromFileWithProviderProfile to hydrate with an explicit
+// name=value selection.
 func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version string, dp DataProvider) (*RecipeResult, error) {
+	return LoadFromFileWithProviderProfile(ctx, path, kubeconfig, version, dp, "")
+}
+
+// LoadFromFileWithProviderProfile is LoadFromFileWithProvider with an
+// explicit name=value profile selection (same semantics as
+// `aicr recipe --profile`). The selection applies only to overlay inputs
+// (kind: RecipeMetadata), which are hydrated through the builder with the
+// selection; an empty profile keeps the declaration's default. A hydrated
+// RecipeResult input already carries its selection baked into
+// metadata.selectedProfile, so combining it with a non-empty profile is
+// rejected as invalid.
+func LoadFromFileWithProviderProfile(
+	ctx context.Context,
+	path, kubeconfig, version string,
+	dp DataProvider,
+	profile string,
+) (*RecipeResult, error) {
+
+	// Validate the selection's wire form up front so a malformed --profile
+	// fails with the profile-core error before any file I/O results are
+	// misattributed to it.
+	selection, err := ParseProfileSelection(profile)
+	if err != nil {
+		return nil, err
+	}
 	sourceData, sourceFormat, err := serializer.ReadFileBytesWithKubeconfigContext(
 		ctx, path, kubeconfig,
 	)
@@ -114,17 +143,23 @@ func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version str
 			opts = append(opts, WithDataProvider(dp))
 		}
 		builder := NewBuilder(opts...)
-		rec, err = builder.BuildFromCriteria(ctx, overlay.Spec.Criteria)
+		rec, err = builder.BuildFromCriteriaWithProfile(ctx, overlay.Spec.Criteria, profile)
 		if err != nil {
 			return nil, err
 		}
-		if profileErr := ensureDirectOverlayProfileApplied(ctx, path, &overlay, rec, dp); profileErr != nil {
+		if profileErr := ensureDirectOverlayProfileApplied(ctx, path, &overlay, rec, dp, selection); profileErr != nil {
 			return nil, profileErr
 		}
 
 		slog.Info("overlay hydrated successfully",
 			"appliedOverlays", rec.Metadata.AppliedOverlays)
 	} else {
+		if profile != "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("recipe file %q is a hydrated RecipeResult whose profile selection "+
+					"is already baked into metadata.selectedProfile; a profile selection applies "+
+					"only to overlay inputs", path))
+		}
 		if inputAPIVersion == RecipeProfileAPIVersion {
 			rec, err = DecodeRecipeResult(sourceData, sourceFormat)
 			if err != nil {
@@ -174,6 +209,7 @@ func ensureDirectOverlayProfileApplied(
 	overlay *RecipeMetadata,
 	result *RecipeResult,
 	dp DataProvider,
+	selection *ProfileSelection,
 ) error {
 
 	if overlay == nil || overlay.Spec.Profile == nil {
@@ -202,10 +238,17 @@ func ensureDirectOverlayProfileApplied(
 			return err
 		}
 	}
+	// The expected recorded value is the declaration's default, unless the
+	// caller supplied an explicit selection — then the hydrated result must
+	// carry exactly that value.
+	expectedValue := overlay.Spec.Profile.Default
+	if selection != nil {
+		expectedValue = selection.Value
+	}
 	if !declarationMatches ||
 		selected == nil ||
 		selected.Name != overlay.Spec.Profile.Name ||
-		selected.Value != overlay.Spec.Profile.Default {
+		selected.Value != expectedValue {
 
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("profile declaration from directly loaded overlay %q was not applied; "+

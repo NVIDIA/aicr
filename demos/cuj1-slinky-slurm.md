@@ -25,7 +25,7 @@ CLI reference.
 1. **Generate recipe** — direct criteria or snapshot-derived infrastructure criteria plus `--platform slurm` resolve a Slurm leaf overlay to `recipe.yaml`.
 2. **Generate bundle** — apply `--system-*` / `--accelerated-*` scheduling and optional `--set` / `--set-json` on `slinkyslurm`.
 3. **Install** — run `deploy.sh`; cert-manager and Slinky operator come up, then the cluster chart in `slurm`.
-4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (`slinky-slurm-health` from the login pod). **Performance validation is not supported yet** on slurm leaves.
+4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (`slinky-slurm-health` from the login pod, including a conditional `sacct` probe when accounting is enabled). **Performance validation is not supported yet** on slurm leaves.
 5. **Smoke job** — `kubectl exec` into the login pod and run `srun` to confirm scheduling.
 
 ## Generate Recipe
@@ -56,6 +56,17 @@ aicr recipe \
   --platform slurm \
   -o recipe.yaml
 ```
+
+> **AKS:** capture the snapshot with the GPU pool projection or the
+> snapshot-qualified resolve (and validate readiness) fails closed:
+> `az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json`
+> then `aicr snapshot --aks-gpu-pools pools.json -o system.yaml`; add
+> `--profile gpuStack=operator-managed` to `aicr recipe` when the GPU pools were
+> created with `--gpu-driver none`. Criteria-only generation (the AKS row
+> above) needs no pool dump, but the `--profile gpuStack=operator-managed` flag is
+> still required for `--gpu-driver none` pools — the default profile is
+> azure-managed, and without a snapshot nothing catches the mismatch until
+> `aicr validate`.
 
 The `K8s.slinky-slurm` summary distinguishes absent, detected,
 unsupported-multicluster, and unknown outcomes. It does not prove operator/runtime
@@ -195,13 +206,19 @@ If nodewright is already installed, skip those sections in `deploy.sh` to avoid 
 
 ## Validate Cluster
 
+> **AKS note:** the validate commands below capture cluster state inline, and the
+> gpuStack profile qualifies against the `K8s.aks-gpu-pools.gpu-driver` reading. On
+> AKS either pass the already-captured `system.yaml` via `--snapshot`, or export
+> `AICR_AKS_GPU_POOLS_PATH` (or pass `--aks-gpu-pools`) so live capture carries the
+> reading — otherwise the profiled readiness check fails closed.
+
 Use **deployment** and **conformance**. Performance validation is **not supported yet** on slurm leaves — there is no Slurm-native NCCL (or equivalent) check in AICR today; a K8s Pod benchmark would bypass slurmd and is the wrong path on a Slinky-managed cluster.
 
 
 | Phase         | What it checks                                                                                                         |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `deployment`  | Component Chainsaw health (CRs, Deployments, DaemonSets ready), including `slinky-slurm` readiness (long retry budget) |
-| `conformance` | `slinky-slurm-health`: `scontrol ping`, idle/mix node gate, bounded `srun --immediate=5 --time=0:03 hostname`          |
+| `conformance` | `slinky-slurm-health`: controller and node health, bounded `srun`, and completed-job persistence through `sacct` when accounting is enabled |
 | `performance` | **Not supported yet** on slurm leaves                                                                                  |
 | `all`         | Runs deployment → conformance → performance in sequence; the performance step has nothing to run on slurm leaves       |
 

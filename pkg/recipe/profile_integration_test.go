@@ -45,7 +45,7 @@ func profiledBuilder(t *testing.T) *Builder {
 
 func profiledCriteria() *Criteria {
 	return &Criteria{
-		Service:     CriteriaServiceAKS,
+		Service:     CriteriaServiceEKS,
 		Accelerator: CriteriaAcceleratorH100,
 		OS:          CriteriaOSUbuntu,
 		Intent:      CriteriaIntentTraining,
@@ -185,6 +185,9 @@ func TestProfileSelectionIsolatesOwnedPaths(t *testing.T) {
 		if !reflect.DeepEqual(a, b) {
 			t.Fatalf("unowned component %q differs between profile values", a.Name)
 		}
+	}
+	if first.Metadata.SelectedProfile == nil || second.Metadata.SelectedProfile == nil {
+		t.Fatal("selectedProfile is nil for an explicitly selected profile")
 	}
 	firstOwned := first.Metadata.SelectedProfile.OwnedPaths
 	secondOwned := second.Metadata.SelectedProfile.OwnedPaths

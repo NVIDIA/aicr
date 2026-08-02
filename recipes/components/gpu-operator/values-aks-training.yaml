@@ -16,7 +16,7 @@
 # AKS Training configuration overrides
 #
 # This file REPLACES values-aks.yaml in the merge chain (an overlay's
-# valuesFile supersedes its base's), so the AKS driver-only ownership
+# valuesFile supersedes its base's), so the AKS azure-managed ownership
 # profile is restated here: driver.enabled=false, toolkit.enabled=false,
 # operator.runtimeClass=nvidia-container-runtime — always the three
 # together. See values-aks.yaml and docs/integrator/aks-gpu-setup.md
@@ -38,15 +38,17 @@ cdi:
 # driver.enabled=false it is inert, but the correct value prevents a
 # future ownership-mode change from reviving the bug.
 driver:
-  # AKS driver-only profile: the node image preinstalls the driver.
+  # AKS azure-managed profile: the node image preinstalls the driver.
   enabled: false
   rdma:
     enabled: true
     useHostMofed: false
 
 # The operator deploys gdrcopy as a sidecar container in the operator-managed
-# driver pod, so it is inert under driver.enabled=false; re-enable with the
-# GPU-Operator-managed override set (see docs/integrator/aks-gpu-setup.md).
+# driver pod, so it is inert under driver.enabled=false; to enable it,
+# select the operator profile (aicr recipe ... --profile gpuStack=operator-managed)
+# and add --set gpuoperator:gdrcopy.enabled=true at bundle time — the path
+# is not profile-owned (see docs/integrator/aks-gpu-setup.md).
 gdrcopy:
   enabled: false
 
@@ -61,7 +63,7 @@ validator:
       - name: WITH_WORKLOAD
         value: "false"
 
-# AKS driver-only profile: the node image preinstalls the container
+# AKS azure-managed profile: the node image preinstalls the container
 # toolkit and preconfigures containerd, so the operator's toolkit
 # DaemonSet stays off. The RUNTIME_CONFIG_SOURCE env is inert while
 # enabled=false but kept correct for a GPU-Operator-managed flip
@@ -71,7 +73,7 @@ toolkit:
   enabled: false
   # Device-isolation hardening for the operator-managed toolkit (the
   # GPU-Operator-managed fallback profile, --gpu-driver none + toolkit.enabled
-  # =true). Inert while toolkit.enabled=false (the driver-only default — there
+  # =true). Inert while toolkit.enabled=false (the azure-managed default — there
   # the node-image toolkit is hardened by the nvidia-toolkit-hardening
   # DaemonSet instead). The toolkit installer reads these uppercase env names
   # and writes the lowercase config.toml keys; RUNTIME_CONFIG_SOURCE=file does

@@ -1,37 +1,70 @@
 # Slurm Accounting
 
 Slurm accounting records job, user, and association data for commands such as
-`sacct`, `sreport`, and `sacctmgr`. It also enables accounting-backed Slurm
-policies such as fairshare and QoS.
+`sacct`, `sreport`, and `sacctmgr`. AICR supports three ownership modes:
 
-AICR keeps Slinky Slurm accounting disabled by default. Accounting requires a
-MariaDB database, its credentials, and ongoing database operations. Keeping it
-opt-in lets a default Slinky deployment run without assuming ownership of a
-customer's accounting data or database.
+| Mode | SlurmDBD | MariaDB installed by AICR |
+| --- | --- | --- |
+| `disabled` | No | No |
+| `customer-managed` | Yes | No |
+| `aicr-provided` | Yes | Yes |
 
-## Bring your own MariaDB
+The mode is selected while generating the recipe, not while generating the
+bundle. It is recorded in the resolved recipe and covered by the recipe digest.
+If omitted for a Slurm recipe, the mode defaults to `disabled`.
 
-You can enable accounting with either:
+```shell
+aicr recipe \
+  --service eks \
+  --accelerator h100 \
+  --os ubuntu \
+  --intent training \
+  --platform slurm \
+  --slurm-accounting-mode customer-managed \
+  --output recipe.yaml
+```
 
-- An in-cluster MariaDB exposed using Mariadb-Operator.
-- A cloud-managed MySQL/MariaDB-compatible endpoint, such as Amazon RDS.
+The equivalent `AICRConfig` input is:
 
-In both cases, the customer operates the database. AICR configures Slinky to
-connect to the supplied endpoint and read its password from a Kubernetes
-Secret.
+```yaml
+kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+spec:
+  recipe:
+    criteria:
+      service: eks
+      accelerator: h100
+      os: ubuntu
+      intent: training
+      platform: slurm
+    configuration:
+      slurm:
+        accounting:
+          mode: customer-managed
+```
 
-### Database contract
+Configured Slurm recipes use the `aicr.run/v1alpha3` `RecipeResult` schema and
+record:
 
-Before deploying the bundle, provide a MariaDB database, an accounting user,
-and a password Secret in the `slurm` namespace. Grant the accounting user full
-privileges scoped to the accounting database, including DDL permissions, so
-SlurmDBD can create and upgrade its schema.
+```yaml
+configuration:
+  slurm:
+    accounting:
+      mode: customer-managed
+```
 
-Slinky reads the username from its accounting configuration and the password
-from the referenced Secret. Do not place passwords in a recipe, values file, or
-generated bundle for security.
+Direct overrides of `slinkyslurm:accounting.enabled` and the MariaDB install
+gates are rejected. Regenerate the recipe to change modes.
 
-The default in-cluster contract is:
+## Customer-managed database
+
+Use `customer-managed` for either an in-cluster database or an external
+MariaDB/MySQL-compatible service. The customer owns database availability,
+backups, upgrades, capacity, credentials, and incident response. AICR renders
+SlurmDBD and configures it to use a Kubernetes Secret; it does not place a
+password in the recipe or bundle.
+
+The default connection contract is:
 
 | Setting | Default |
 | --- | --- |
@@ -42,84 +75,125 @@ The default in-cluster contract is:
 | Password Secret | `mariadb-password` |
 | Password key | `password` |
 
-For example, create the `slurm` namespace if necessary, then create the
-password Secret from a value supplied by your secret manager:
-
-```shell
-kubectl create namespace slurm --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n slurm create secret generic mariadb-password \
-  --from-literal=password="${SLURM_DB_PASSWORD}"
-```
-
-For an in-cluster database using the defaults above, ensure that the
-`mariadb` Service and the Secret exist in the `slurm` namespace before
-deployment.
-
-### Enable accounting
-
-Generate a bundle with accounting enabled:
+The Secret must be in the `slurm` namespace. To use another endpoint or Secret,
+override only the non-secret connection metadata during bundle generation:
 
 ```shell
 aicr bundle \
   --recipe recipe.yaml \
-  --set slinkyslurm:accounting.enabled=true \
-  --output bundle
-```
-
-This command uses the default database contract. Install the generated bundle
-only after the database endpoint and password Secret are available.
-For node-placement flags, storage-class, and deployment configuration,
-see the [Slinky Slurm guided demo](https://github.com/NVIDIA/aicr/blob/main/demos/cuj1-slinky-slurm.md#generate-bundle).
-
-### Override the database connection
-
-For a managed database or another non-default contract, override only the
-fields that differ. This example connects SlurmDBD to a MariaDB-compatible
-Amazon RDS endpoint and uses a customer-managed Secret:
-
-```shell
-aicr bundle \
-  --recipe recipe.yaml \
-  --set slinkyslurm:accounting.enabled=true \
   --set slinkyslurm:accounting.storageConfig.host=accounting-db.example.com \
-  --set slinkyslurm:accounting.storageConfig.port=3306 \
   --set slinkyslurm:accounting.storageConfig.database=slurm_acct_db \
   --set slinkyslurm:accounting.storageConfig.username=slurm \
   --set slinkyslurm:accounting.storageConfig.passwordKeyRef.name=accounting-db-password \
-  --set slinkyslurm:accounting.storageConfig.passwordKeyRef.key=password \
   --output bundle
 ```
 
-Create `accounting-db-password` in the `slurm` namespace before deployment.
-The endpoint must be reachable from the SlurmDBD workload.
-
-If several non-secret settings differ, you can instead pass an accounting
-object from a local file:
+For several settings, use a typed file:
 
 ```yaml
-# accounting.yaml
-enabled: true
-storageConfig:
-  host: accounting-db.example.com
-  port: 3306
-  database: slurm_acct_db
-  username: slurm
-  passwordKeyRef:
-    name: accounting-db-password
-    key: password
+# accounting-storage.yaml
+host: accounting-db.example.com
+port: 3306
+database: slurm_acct_db
+username: slurm
+passwordKeyRef:
+  name: accounting-db-password
+  key: password
 ```
 
 ```shell
 aicr bundle \
   --recipe recipe.yaml \
-  --set-file slinkyslurm:accounting=./accounting.yaml \
+  --set-file slinkyslurm:accounting.storageConfig=./accounting-storage.yaml \
   --output bundle
 ```
 
-The file contains connection metadata only; its Secret reference must not be
-replaced with a password value.
+## AICR-provided database
+
+Use `aicr-provided` when AICR should install the database during bundle
+installation:
+
+```shell
+aicr recipe \
+  --service eks \
+  --accelerator h100 \
+  --os ubuntu \
+  --intent training \
+  --platform slurm \
+  --slurm-accounting-mode aicr-provided \
+  --output recipe.yaml
+
+aicr bundle --recipe recipe.yaml --output bundle
+```
+
+This mode installs the pinned MariaDB Operator CRDs, MariaDB Operator, and a
+single-replica MariaDB instance with a 20 GiB persistent volume in the `slurm`
+namespace before Slinky Slurm. Select the cluster's StorageClass and adjust
+capacity without changing the ownership contract:
+
+```shell
+aicr bundle \
+  --recipe recipe.yaml \
+  --storage-class fast-rwo \
+  --set slurmaccountingmariadb:mariadb.storage.size=100Gi \
+  --output bundle
+```
+
+The MariaDB container requests 1 CPU and 6 GiB of memory, with limits of 2 CPUs
+and 8 GiB. AICR configures a 4 GiB InnoDB buffer pool, a 1 GiB redo log, a
+900-second lock wait, and a 16 MiB maximum packet following
+[Slurm's MySQL and MariaDB recommendations](https://slurm.schedmd.com/accounting.html#slurm-accounting-configuration-before-build).
+
+The bundle's `--system-node-selector` and `--system-node-toleration` settings
+apply to the MariaDB Operator controllers, the MariaDB database pod, and the
+Slinky SlurmDBD accounting pod. Ensure the selected system nodes are compatible
+with the MariaDB persistent volume's topology.
+
+The MariaDB resource asks the operator to create the initial `slurm_acct_db`
+database, grant its initial `slurm` user all privileges on that database, and
+generate `mariadb-password/password`; the generated credential is not present in
+the bundle. Its `cleanupPolicy: Skip` preserves the SQL database if the
+operator-generated Database resource is removed; this is not a substitute for
+backups.
+
+### Conflict detection requires snapshot evidence
+
+Snapshot-driven recipe generation records official MariaDB Operator conflict
+evidence in `metadata.mariaDBOperatorState` without blocking recipe creation.
+`crs-detected` and `unknown` warn during generation and block AICR-provided
+bundling; `api-detected` warns but allows bundling; `absent` proceeds silently.
+
+Criteria-only recipes generated without `--snapshot` and older snapshots
+without this evidence cannot evaluate target-cluster conflicts. Bundling warns
+that conflicts were not evaluated and proceeds for compatibility. Capture a
+current snapshot before deployment when you need conflict detection. A blocking
+bundle error directs users who intend to reuse an existing database to
+regenerate with `customer-managed`.
+
+This is installation-managed, not a managed database service. The customer
+still owns the StorageClass and capacity choice, backups and restore testing,
+monitoring, day-two credential rotation, availability requirements, and the
+decision to apply future upgrades.
+
+## Stable recipe inventory
+
+Every generated Slurm recipe declares `mariadb-operator-crds`,
+`mariadb-operator`, and `slurm-accounting-mariadb`. In `disabled` and
+`customer-managed` modes their recipe-owned `install: false` gate suppresses
+them before deployer, mirror, BOM, and health processing. They therefore render
+no runtime resources in those modes while remaining visible as recipe
+evidence.
 
 ## Verify accounting
+
+Enabled modes specialize the Slinky health check to require
+`Accounting/Ready=True`; AICR-provided mode additionally requires the MariaDB
+resource and its operator-generated initial User, Database, and Grant resources
+to be ready, and requires the generated Service and Secret key to exist.
+When accounting is enabled, the `slinky-slurm-health` conformance check also
+submits a bounded batch job and retries `sacct` until the completed `0:0`
+allocation record appears, proving that SlurmDBD persisted the job through the
+configured database. Disabled accounting skips this conditional probe.
 
 After deployment, verify that the Accounting custom resource exists and the
 SlurmDBD StatefulSet is ready:
@@ -130,8 +204,7 @@ kubectl -n slurm rollout status \
   statefulset/slinky-slurm-accounting --timeout=10m
 ```
 
-Submit a small job, wait for it to complete, then query its accounting record
-from the login deployment:
+Submit a small job, then query its accounting record:
 
 ```shell
 JOB_ID="$(kubectl -n slurm exec deploy/slinky-slurm-login-slinky -- \
@@ -141,16 +214,5 @@ kubectl -n slurm exec deploy/slinky-slurm-login-slinky -- \
   sacct --jobs="${JOB_ID}" --format=JobID,State,ExitCode
 ```
 
-`aicr validate` currently validates the Slinky control plane and Slurm
-scheduling behavior; it does not verify an external MariaDB connection or
-accounting records. Treat the readiness and `sacct` checks above as the
-accounting verification path.
-
-## Database ownership
-
-Customers select and operate their MariaDB deployment, whether it is
-in-cluster or managed by a cloud provider. AICR's responsibility is limited to
-configuring Slinky Slurm to use the documented endpoint and Secret contract.
-
-For Slurm-specific database requirements and configuration details, see the
+For Slurm-specific database requirements, see the
 [Slinky Slurm Operator documentation](https://slinky.schedmd.com/slurm-operator/v1.2.0/index.html).

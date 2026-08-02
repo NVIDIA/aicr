@@ -101,11 +101,12 @@ type SnapshotExecutionSpec struct {
 
 // RecipeSpec captures the inputs to `aicr recipe`.
 type RecipeSpec struct {
-	Criteria *CriteriaSpec     `yaml:"criteria,omitempty" json:"criteria,omitempty"`
-	Input    *RecipeInputSpec  `yaml:"input,omitempty" json:"input,omitempty"`
-	Output   *RecipeOutputSpec `yaml:"output,omitempty" json:"output,omitempty"`
-	Data     string            `yaml:"data,omitempty" json:"data,omitempty"`
-	Profile  string            `yaml:"profile,omitempty" json:"profile,omitempty"`
+	Criteria      *CriteriaSpec            `yaml:"criteria,omitempty" json:"criteria,omitempty"`
+	Configuration *RecipeConfigurationSpec `yaml:"configuration,omitempty" json:"configuration,omitempty"`
+	Input         *RecipeInputSpec         `yaml:"input,omitempty" json:"input,omitempty"`
+	Output        *RecipeOutputSpec        `yaml:"output,omitempty" json:"output,omitempty"`
+	Data          string                   `yaml:"data,omitempty" json:"data,omitempty"`
+	Profile       string                   `yaml:"profile,omitempty" json:"profile,omitempty"`
 
 	// CriteriaStrict, when true, rejects criteria values not in the
 	// embedded OSS catalog (i.e., hides registry entries contributed by
@@ -115,6 +116,22 @@ type RecipeSpec struct {
 	// distinguish nil (absent in YAML/JSON) from &false (explicit
 	// opt-out); the resolved layer flattens to plain bool.
 	CriteriaStrict *bool `yaml:"criteriaStrict,omitempty" json:"criteriaStrict,omitempty"`
+}
+
+// RecipeConfigurationSpec contains typed desired-state inputs that do not
+// participate in recipe catalog matching.
+type RecipeConfigurationSpec struct {
+	Slurm *SlurmConfigurationSpec `yaml:"slurm,omitempty" json:"slurm,omitempty"`
+}
+
+// SlurmConfigurationSpec contains Slurm-specific desired-state inputs.
+type SlurmConfigurationSpec struct {
+	Accounting *SlurmAccountingSpec `yaml:"accounting,omitempty" json:"accounting,omitempty"`
+}
+
+// SlurmAccountingSpec selects ownership of the Slurm accounting database.
+type SlurmAccountingSpec struct {
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 // CriteriaSpec mirrors the recipe query parameters. Field names and string

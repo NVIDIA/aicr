@@ -40,6 +40,14 @@
 #   # recipe criteria — what to attest. REQUIRED: SERVICE ACCELERATOR OS INTENT.
 #   # PLATFORM is optional (omitted when empty). e.g. eks gb200 ubuntu inference dynamo
 #   SERVICE=eks  ACCELERATOR=gb200  OS=ubuntu  INTENT=inference  PLATFORM=dynamo
+#   AKS_GPU_POOLS=""                          optional az nodepool dump path passed to
+#                                             aicr snapshot --aks-gpu-pools (required on
+#                                             AKS for profile-qualified resolution)
+#   AICR_PROFILE=""                           optional profile selection passed to
+#                                             `aicr recipe` as --profile, e.g.
+#                                             AICR_PROFILE="gpuStack=operator-managed" for AKS
+#                                             --gpu-driver none pools ("" applies the
+#                                             declaration default on profiled families)
 #
 #   # snapshot node targeting (heterogeneous clusters)
 #   NODE_SELECTOR=nvidia.com/gpu.present=true pin the snapshot Job to a GPU node
@@ -70,6 +78,10 @@ ACCELERATOR="${ACCELERATOR:-}"
 OS="${OS:-}"
 INTENT="${INTENT:-}"
 PLATFORM="${PLATFORM:-}"
+# Optional profile selection ("name=value"), e.g. gpuStack=operator-managed for AKS
+# GPU pools created with --gpu-driver none. Empty = the declaration default
+# is applied on profiled families (unprofiled recipes are unaffected).
+AICR_PROFILE="${AICR_PROFILE:-}"
 
 # Snapshot node targeting. On a mixed CPU+GPU cluster the snapshot Job must land
 # on a GPU node, or PCI/NFD enumeration finds nothing and the accelerator
@@ -203,6 +215,9 @@ for _c in SERVICE ACCELERATOR OS INTENT; do
 done
 recipe_args=(--service "$SERVICE" --accelerator "$ACCELERATOR" --os "$OS" --intent "$INTENT" --output "$RECIPE")
 [ -n "$PLATFORM" ] && recipe_args+=(--platform "$PLATFORM")
+# Profiled recipes (e.g. AKS gpuStack=operator-managed for --gpu-driver none pools)
+# need the selection at generation time; unset keeps today's behavior.
+[ -n "$AICR_PROFILE" ] && recipe_args+=(--profile "$AICR_PROFILE")
 pause "Press Enter to generate the recipe"
 run "$AICR" recipe "${recipe_args[@]}"
 
@@ -214,6 +229,10 @@ note "Targets a GPU node so the GPU is detected via PCI/NFD (NODE_SELECTOR / RUN
 snapshot_args=(--output "$SNAPSHOT")
 [ -n "$NODE_SELECTOR" ] && snapshot_args+=(--node-selector "$NODE_SELECTOR")
 [ -n "$RUNTIME_CLASS" ] && snapshot_args+=(--runtime-class "$RUNTIME_CLASS")
+# AKS: the gpuStack profile qualifies against the pool projection — set
+# AKS_GPU_POOLS to an `az aks nodepool list -o json` dump or the profiled
+# readiness on this snapshot fails closed.
+[ -n "${AKS_GPU_POOLS:-}" ] && snapshot_args+=(--aks-gpu-pools "$AKS_GPU_POOLS")
 pause "Press Enter to snapshot the cluster"
 run "$AICR" snapshot "${snapshot_args[@]}"
 

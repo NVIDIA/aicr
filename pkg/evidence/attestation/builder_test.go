@@ -382,3 +382,115 @@ func indexOf(haystack, needle []byte) int {
 	}
 	return -1
 }
+
+func TestRecipeNameFor_Profiled(t *testing.T) {
+	tests := []struct {
+		name   string
+		recipe *recipe.RecipeResult
+		want   string
+	}{
+		{
+			name: "profiled recipe appends lowercase segment",
+			recipe: &recipe.RecipeResult{
+				Criteria: &recipe.Criteria{
+					Service: "aks", Accelerator: "h100", OS: "ubuntu", Intent: "training",
+				},
+				Metadata: recipe.RecipeResultMetadata{SelectedProfile: &recipe.SelectedProfile{
+					Name: "gpuStack", Value: "operator-managed",
+				}},
+			},
+			want: "h100-aks-ubuntu-training-gpustack-operator-managed",
+		},
+		{
+			name: "default profile value still suffixed",
+			recipe: &recipe.RecipeResult{
+				Criteria: &recipe.Criteria{
+					Service: "aks", Accelerator: "h100", OS: "ubuntu", Intent: "training",
+				},
+				Metadata: recipe.RecipeResultMetadata{SelectedProfile: &recipe.SelectedProfile{
+					Name: "gpuStack", Value: "azure-managed",
+				}},
+			},
+			want: "h100-aks-ubuntu-training-gpustack-azure-managed",
+		},
+		{
+			name: "invalid selection fails closed to empty name",
+			recipe: &recipe.RecipeResult{
+				Criteria: &recipe.Criteria{
+					Service: "aks", Accelerator: "h100", Intent: "training",
+				},
+				Metadata: recipe.RecipeResultMetadata{SelectedProfile: &recipe.SelectedProfile{
+					Name: "gpu stack", Value: "operator",
+				}},
+			},
+			want: "",
+		},
+		{
+			name: "unprofiled recipe unchanged",
+			recipe: &recipe.RecipeResult{
+				Criteria: &recipe.Criteria{
+					Service: "aks", Accelerator: "h100", OS: "ubuntu", Intent: "training",
+				},
+			},
+			want: "h100-aks-ubuntu-training",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RecipeNameFor(tt.recipe); got != tt.want {
+				t.Errorf("RecipeNameFor() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProfileSegment(t *testing.T) {
+	tests := []struct {
+		name    string
+		sp      *recipe.SelectedProfile
+		want    string
+		wantErr bool
+	}{
+		{"nil selection is empty", nil, "", false},
+		{"mixed case lowered", &recipe.SelectedProfile{Name: "gpuStack", Value: "Azure-Managed"}, "gpustack-azure-managed", false},
+		{"already lowercase", &recipe.SelectedProfile{Name: "gpustack", Value: "operator-managed"}, "gpustack-operator-managed", false},
+		{"invalid characters rejected", &recipe.SelectedProfile{Name: "gpu stack", Value: "operator"}, "", true},
+		{"embedded equals rejected", &recipe.SelectedProfile{Name: "gpu=stack", Value: "operator"}, "", true},
+		{"empty value rejected", &recipe.SelectedProfile{Name: "gpuStack", Value: ""}, "", true},
+		{"empty name rejected", &recipe.SelectedProfile{Name: "", Value: "operator"}, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ProfileSegment(tt.sp)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ProfileSegment() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(err, apperrors.New(apperrors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ProfileSegment() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProfileSelectionString(t *testing.T) {
+	if got := ProfileSelectionString(nil); got != "" {
+		t.Errorf("nil recipe: got %q, want empty", got)
+	}
+	if got := ProfileSelectionString(&recipe.RecipeResult{}); got != "" {
+		t.Errorf("unprofiled recipe: got %q, want empty", got)
+	}
+	profiled := &recipe.RecipeResult{
+		Metadata: recipe.RecipeResultMetadata{SelectedProfile: &recipe.SelectedProfile{
+			Name: "gpuStack", Value: "operator-managed",
+		}},
+	}
+	if got := ProfileSelectionString(profiled); got != "gpuStack=operator-managed" {
+		t.Errorf("profiled recipe: got %q, want %q", got, "gpuStack=operator-managed")
+	}
+}

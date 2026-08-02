@@ -218,9 +218,17 @@ type ManifestFile struct {
 // Pointer is the on-disk file at recipes/evidence/<recipe>.yaml that
 // binds the repo to the OCI bundle by content hash.
 type Pointer struct {
-	SchemaVersion string               `json:"schemaVersion" yaml:"schemaVersion"`
-	Recipe        string               `json:"recipe" yaml:"recipe"`
-	Attestations  []PointerAttestation `json:"attestations" yaml:"attestations"`
+	SchemaVersion string `json:"schemaVersion" yaml:"schemaVersion"`
+	Recipe        string `json:"recipe" yaml:"recipe"`
+
+	// Profile is the exact name=value selection baked into the attested
+	// recipe (metadata.selectedProfile), or empty/omitted for an
+	// unprofiled recipe. The repo evidence gate replays it via
+	// `aicr evidence digest --profile <profile>` so the digest recompute
+	// hydrates the overlay with the same selection the bundle attested.
+	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
+
+	Attestations []PointerAttestation `json:"attestations" yaml:"attestations"`
 }
 
 // PointerAttestation is one entry in the pointer's attestations list.

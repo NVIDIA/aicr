@@ -34,7 +34,7 @@ spec:
 
   componentRefs:
     # GPU Operator dependency ordering (inherits valuesFile from aks-training;
-    # gdrcopy stays disabled there — inert under the driver-only profile).
+    # gdrcopy stays disabled there — inert under the azure-managed profile).
     - name: gpu-operator
       type: Helm
       dependencyRefs:

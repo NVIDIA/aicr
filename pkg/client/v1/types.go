@@ -111,6 +111,15 @@ type AgentConfig struct {
 	OS                 string
 	Requests           corev1.ResourceList
 	Limits             corev1.ResourceList
+
+	// AKSGPUPoolsPath points at an operator-supplied
+	// `az aks nodepool list -o json` dump on the machine running this
+	// client. The snapshotter projects it into the snapshot's
+	// K8s.aks-gpu-pools.gpu-driver reading (ADR-015 DD3) — controller-
+	// side, before any cluster work; the file never enters the cluster.
+	// Required for AKS profile-qualified resolution from a collected
+	// snapshot; empty disables the projection.
+	AKSGPUPoolsPath string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution
@@ -244,6 +253,11 @@ type RecipeRequest struct {
 	// Empty applies the resolved declaration's mandatory default.
 	Profile string
 
+	// AccountingMode selects the Slurm accounting database ownership model.
+	// It is valid only when Platform is "slurm". Empty defaults to "disabled"
+	// for newly resolved Slurm recipes.
+	AccountingMode string
+
 	// PinnedName reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable; set the criteria
 	// fields above instead.
@@ -252,6 +266,38 @@ type RecipeRequest struct {
 	// PinnedVersion reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable.
 	PinnedVersion string
+}
+
+// RecipeResolveOption configures one recipe resolution request.
+type RecipeResolveOption func(*recipeResolveConfig)
+
+type recipeResolveConfig struct {
+	profile           string
+	accountingMode    *recipe.AccountingMode
+	accountingModeErr error
+}
+
+// WithProfile selects a name=value configuration profile for a criteria- or
+// snapshot-based resolve call. Empty applies the declaration default.
+func WithProfile(profile string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		cfg.profile = profile
+	}
+}
+
+// WithAccountingMode selects the Slurm accounting ownership model for a
+// criteria- or snapshot-based resolve call. It is valid only when the resolved
+// platform is Slurm. An empty or invalid mode is rejected when the resolve call
+// runs; omit this option to keep the recipe default.
+func WithAccountingMode(mode string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseAccountingMode(mode)
+		if err != nil {
+			cfg.accountingModeErr = err
+			return
+		}
+		cfg.accountingMode = &parsed
+	}
 }
 
 // RecipeResult is the stable external result shape.

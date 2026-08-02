@@ -657,9 +657,14 @@ When choosing between approaches, prioritize in this order:
 ```bash
 # Capture system state
 aicr snapshot --output snapshot.yaml
+# AKS only: include the GPU pool projection or snapshot-qualified recipe
+# generation / validate readiness fails closed (ADR-015 gpuStack profile):
+#   az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json
+#   aicr snapshot --aks-gpu-pools pools.json --output snapshot.yaml
 
 # Generate recipe from snapshot
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
+# (AKS with --gpu-driver none pools: add --profile gpuStack=operator-managed)
 
 # Generate recipe from query parameters
 aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --platform kubeflow

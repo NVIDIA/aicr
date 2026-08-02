@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -713,6 +714,182 @@ func TestAggregateResilience(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Errorf("aggregate returned %d recipes, want 1 (others skipped with a warning)", len(got))
+	}
+}
+
+// TestGenerateProfiledRun pins the profile plumbing end-to-end: a run whose
+// meta.json carries "profile" and a profile-suffixed coordinate tab must
+// aggregate with the suffix stripped BEFORE criteria inversion (platform stays
+// empty — the segment must never be misread as a phantom platform), while the
+// emitted Tab keeps the profile as display/route identity.
+func TestGenerateProfiledRun(t *testing.T) {
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "results", "aks", "h100-ubuntu", "training-gpustack-operator-managed", "s1", "run-1")
+	if err := os.MkdirAll(filepath.Join(runDir, "ctrf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"schemaVersion":"aicr-corroboration-meta/v1",` +
+		`"coordinate":{"group":"aks","dashboard":"h100-ubuntu","tab":"training-gpustack-operator-managed"},` +
+		`"recipe":"h100-aks-ubuntu-training-gpustack-operator-managed",` +
+		`"profile":"gpustack-operator-managed",` +
+		`"profileSelection":"gpuStack=operator-managed",` +
+		`"signer":{"idHash":"s1","identity":"https://github.com/x/y/.github/workflows/a.yaml@refs/heads/main",` +
+		`"issuer":"https://token.actions.githubusercontent.com","class":"community","allowlisted":true},` +
+		`"runId":"run-1","aicrVersion":"v1.0.0","attestedAt":"2026-06-20T03:14:07Z"}`
+	if err := os.WriteFile(filepath.Join(runDir, "meta.json"), []byte(meta), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctrf := `{"reportFormat":"CTRF","results":{"tool":{"name":"aicr"},"summary":{},` +
+		`"tests":[{"name":"operator-health","status":"passed"}]}}`
+	if err := os.WriteFile(filepath.Join(runDir, "ctrf", "deployment.json"), []byte(ctrf), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := t.TempDir()
+	res, err := Generate(context.Background(), Options{InputDir: dir, OutputDir: out})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Recipes != 1 || res.Runs != 1 {
+		t.Fatalf("summary = %+v, want 1 recipe / 1 run (profiled run must aggregate)", res)
+	}
+
+	idx := readIndex(t, filepath.Join(out, "data", "index.json"))
+	tab := findTab(t, idx, "h100-aks-ubuntu-training-gpustack-operator-managed")
+	if tab.ProfileSelection != "gpuStack=operator-managed" {
+		t.Errorf("Tab.ProfileSelection = %q, want gpuStack=operator-managed", tab.ProfileSelection)
+	}
+	if tab.Profile != "gpustack-operator-managed" {
+		t.Errorf("tab.profile = %q, want gpustack-operator-managed", tab.Profile)
+	}
+	// Criteria invert to the UNSUFFIXED dimensions: the profile segment is
+	// not a platform.
+	if plat, ok := tab.Coord["platform"]; !ok || plat != "" {
+		t.Errorf("tab.coord[platform] = %q (present=%v), want empty (profile segment is not a platform)", plat, ok)
+	}
+	wantCoord := map[string]string{"service": "aks", "accelerator": "h100", "os": "ubuntu", "intent": "training"}
+	for ax, want := range wantCoord {
+		if got := tab.Coord[ax]; got != want {
+			t.Errorf("tab.coord[%s] = %q, want %q", ax, got, want)
+		}
+	}
+	// Facets stay profile-blind: no gpustack-* value leaks into any axis.
+	for ax, vals := range idx.Criteria {
+		for _, v := range vals {
+			if strings.Contains(v, "gpustack") {
+				t.Errorf("criteria facet %s carries profile-derived value %q", ax, v)
+			}
+		}
+	}
+}
+
+// TestAggregateProfile pins aggregate()'s profile handling on hand-built runs:
+// two runs identical except for the profile value must keep DISTINCT aggregate
+// (route) keys with their own profile identity, and a meta.profile whose tab
+// does not carry the suffix is skipped fail-closed (never inverted, no panic).
+func TestAggregateProfile(t *testing.T) {
+	mkSel := func(tab, profile, sel, recipeName, signerID string) *signerRun {
+		return &signerRun{
+			meta: RunMeta{
+				Coordinate:       RunMetaCoordinate{Group: "aks", Dashboard: "h100-ubuntu", Tab: tab},
+				Recipe:           recipeName,
+				Profile:          profile,
+				ProfileSelection: sel,
+				Signer:           RunMetaSigner{IDHash: signerID, Identity: "id-" + signerID},
+			},
+			statuses: map[string]map[string]string{},
+		}
+	}
+	mk := func(tab, profile, recipeName, signerID string) *signerRun {
+		sel := ""
+		if profile != "" {
+			sel = "gpuStack=" + strings.TrimPrefix(profile, "gpustack-")
+		}
+		return &signerRun{
+			meta: RunMeta{
+				Coordinate:       RunMetaCoordinate{Group: "aks", Dashboard: "h100-ubuntu", Tab: tab},
+				Recipe:           recipeName,
+				Profile:          profile,
+				ProfileSelection: sel,
+				Signer:           RunMetaSigner{IDHash: signerID, Identity: "id-" + signerID},
+			},
+			statuses: map[string]map[string]string{},
+		}
+	}
+	tests := []struct {
+		name string
+		runs []*signerRun
+		// want maps expected aggregate key -> (profile, platform) pinned on it.
+		want map[string]struct{ profile, platform string }
+	}{
+		{
+			name: "two profile values keep distinct route keys",
+			runs: []*signerRun{
+				mk("training-gpustack-azure-managed", "gpustack-azure-managed", "h100-aks-ubuntu-training-gpustack-azure-managed", "s1"),
+				mk("training-gpustack-operator-managed", "gpustack-operator-managed", "h100-aks-ubuntu-training-gpustack-operator-managed", "s2"),
+			},
+			want: map[string]struct{ profile, platform string }{
+				"aks/h100-ubuntu/training-gpustack-azure-managed":    {profile: "gpustack-azure-managed", platform: ""},
+				"aks/h100-ubuntu/training-gpustack-operator-managed": {profile: "gpustack-operator-managed", platform: ""},
+			},
+		},
+		{
+			// Same lossy segment, different exact selections (ambiguous
+			// "-" join): the aggregate is quarantined and dropped rather
+			// than keeping an order-dependent winner.
+			name: "colliding exact selections quarantine the coordinate",
+			runs: []*signerRun{
+				mkSel("training-gpu-stack-operator", "gpu-stack-operator", "gpu-stack=operator", "h100-aks-ubuntu-training-gpu-stack-operator", "s1"),
+				mkSel("training-gpu-stack-operator", "gpu-stack-operator", "gpu=stack-operator", "h100-aks-ubuntu-training-gpu-stack-operator", "s2"),
+			},
+			want: map[string]struct{ profile, platform string }{},
+		},
+		{
+			// A selection that cannot re-derive its own segment is
+			// inconsistent metadata — the run is skipped at intake.
+			name: "selection that does not derive the segment is skipped",
+			runs: []*signerRun{
+				mkSel("training-gpustack-operator-managed", "gpustack-operator-managed", "gpuStack=azure-managed", "h100-aks-ubuntu-training-gpustack-operator-managed", "s1"),
+			},
+			want: map[string]struct{ profile, platform string }{},
+		},
+		{
+			name: "profile without matching tab suffix is skipped fail-closed",
+			runs: []*signerRun{
+				mk("training", "gpustack-operator-managed", "h100-aks-ubuntu-training", "s1"),
+			},
+			want: map[string]struct{ profile, platform string }{},
+		},
+		{
+			name: "unprofiled run is unaffected",
+			runs: []*signerRun{
+				mk("training", "", "h100-aks-ubuntu-training", "s1"),
+			},
+			want: map[string]struct{ profile, platform string }{
+				"aks/h100-ubuntu/training": {profile: "", platform: ""},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := aggregate(tt.runs)
+			if len(got) != len(tt.want) {
+				t.Fatalf("aggregate returned %d recipes (%v), want %d", len(got), keysOf(got), len(tt.want))
+			}
+			for key, w := range tt.want {
+				agg, ok := got[key]
+				if !ok {
+					t.Errorf("aggregate key %q missing (got %v)", key, keysOf(got))
+					continue
+				}
+				if agg.profile != w.profile {
+					t.Errorf("agg[%q].profile = %q, want %q", key, agg.profile, w.profile)
+				}
+				if string(agg.criteria.Platform) != w.platform {
+					t.Errorf("agg[%q].criteria.platform = %q, want %q (profile must be stripped before inversion)", key, agg.criteria.Platform, w.platform)
+				}
+			}
+		})
 	}
 }
 

@@ -24,16 +24,13 @@ import (
 
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
@@ -56,6 +53,7 @@ type validateAgentConfig struct {
 	cleanup            bool
 	debug              bool
 	requireGPU         bool
+	aksGPUPoolsPath    string
 }
 
 // parseValidateAgentConfig builds the snapshot-capture agent's deployment
@@ -82,6 +80,7 @@ func parseValidateAgentConfig(
 		cleanup:            !shared.noCleanup,
 		debug:              cmd.Bool("debug"),
 		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", resolved.RequireGPU),
+		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
 	}
 }
 
@@ -153,23 +152,12 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 }
 
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
-// Creates the namespace if it does not exist.
+// The agent deployer creates the namespace itself (ensureNamespace, with the
+// managed-by label) using the same explicit kubeconfig (#1787), so no
+// pre-create happens here — deployAndWaitForResult's up-front pool-file
+// projection must run before ANY cluster mutation so a malformed
+// --aks-gpu-pools file fails without side effects.
 func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, error) {
-	// Ensure namespace exists before deploying the agent Job. Build the
-	// client from the same explicit kubeconfig the agent deploy below uses
-	// (#1787) — empty delegates to default discovery, so the default path
-	// is unchanged.
-	clientset, _, err := k8sclient.GetKubeClientWithConfig(cfg.kubeconfig)
-	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to create kubernetes client")
-	}
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.namespace}}
-	if _, nsErr := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); nsErr != nil {
-		if !apierrors.IsAlreadyExists(nsErr) {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", nsErr)
-		}
-	}
-
 	agentConfig := &snapshotter.AgentConfig{
 		Kubeconfig:         cfg.kubeconfig,
 		Namespace:          cfg.namespace,
@@ -184,11 +172,14 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 		Debug:              cfg.debug,
 		Privileged:         true,
 		RequireGPU:         cfg.requireGPU,
+		AKSGPUPoolsPath:    cfg.aksGPUPoolsPath,
 	}
 
 	snap, err := snapshotter.DeployAndGetSnapshot(ctx, agentConfig)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to capture snapshot", err)
+		// PropagateOrWrap: a structured error (e.g. ErrCodeInvalidRequest
+		// from a malformed --aks-gpu-pools file) keeps its code.
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to capture snapshot")
 	}
 
 	return snap, nil
@@ -485,6 +476,12 @@ func validateCmdFlags() []cli.Flag {
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
+			Name:     "aks-gpu-pools",
+			Usage:    "Path to an `az aks nodepool list -o json` dump on the local filesystem. When validate captures a live snapshot, the GPU pools' gpuProfile.driver values are projected into the K8s aks-gpu-pools subtype (ADR-015 DD3) so profile constraints recorded in AKS recipes can evaluate. Ignored when --snapshot supplies a pre-captured snapshot.",
+			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
 			Name:     "evidence-dir",
 			Usage:    "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
 			Category: catEvidence,
@@ -572,6 +569,51 @@ func validateCmdFlags() []cli.Flag {
 	}
 }
 
+// warnIgnoredAKSGPUPools notes that the pool projection only applies to live
+// capture: a pre-captured --snapshot must have been taken with the flag, or
+// the user later sees "reading unavailable" on a run where they did pass it.
+// When the value arrived via the ambient env var (e.g. a CI lane exporting
+// AICR_AKS_GPU_POOLS_PATH job-wide whose snapshots WERE captured with the
+// reading), log at debug — it is not an explicit per-invocation request.
+func warnIgnoredAKSGPUPools(cmd *cli.Command, snapshotFilePath string) {
+	shouldLog, atWarn := classifyIgnoredAKSGPUPools(
+		os.Args[1:], os.Getenv("AICR_AKS_GPU_POOLS_PATH"),
+		cmd.String("aks-gpu-pools"), snapshotFilePath)
+	if !shouldLog {
+		return
+	}
+	msg := "--aks-gpu-pools does not apply to a pre-captured --snapshot; " +
+		"the reading must already be in that snapshot (capture it with the same flag if missing)"
+	if atWarn {
+		slog.Warn(msg)
+		return
+	}
+	slog.Debug(msg)
+}
+
+// classifyIgnoredAKSGPUPools decides whether the ignored-projection note is
+// emitted and at which level. Provenance, not value equality: an explicit
+// CLI flag always warns — the user asked for the projection on THIS
+// invocation. Only a purely ambient env source (e.g. a CI lane exporting
+// AICR_AKS_GPU_POOLS_PATH job-wide whose snapshots WERE captured with the
+// reading) is demoted to debug. Pure function for testability.
+func classifyIgnoredAKSGPUPools(args []string, envValue, poolsPath, snapshotFilePath string) (shouldLog, atWarn bool) {
+	if snapshotFilePath == "" || poolsPath == "" {
+		return false, false
+	}
+	explicit := false
+	for _, arg := range args {
+		if arg == "--aks-gpu-pools" || strings.HasPrefix(arg, "--aks-gpu-pools=") {
+			explicit = true
+			break
+		}
+	}
+	if !explicit && envValue != "" {
+		return true, false
+	}
+	return true, true
+}
+
 func validateCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "validate",
@@ -609,7 +651,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", flagPush, flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", flagPush, flagIdentityToken); err != nil {
 				return err
 			}
 
@@ -685,6 +727,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			recipeFilePath := stringFlagOrConfig(cmd, "recipe", resolved.RecipePath)
 			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", resolved.SnapshotPath)
+			warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
 			kubeconfig := cmd.String("kubeconfig")
 
 			if recipeFilePath == "" {
