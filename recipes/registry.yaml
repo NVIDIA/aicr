@@ -613,18 +613,14 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "1.2.1"
+      defaultVersion: "<NEW_VERSION>"
       defaultNamespace: dynamo-system
-    storageClassPaths:
-      - nats.config.jetstream.fileStore.pvc.storageClassName
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - dynamo-operator.controllerManager.nodeSelector
-          - nats.podTemplate.merge.spec.nodeSelector
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
-          - nats.podTemplate.merge.spec.tolerations
 
   - name: agentgateway-crds
     displayName: agentgateway-crds

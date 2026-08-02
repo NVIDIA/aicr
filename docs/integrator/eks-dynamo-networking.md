@@ -1,30 +1,44 @@
 # EKS Dynamo Networking Prerequisites
 
 For `*-eks-ubuntu-inference-dynamo` recipes, AICR configures
-`dynamo-platform` with Kubernetes-native discovery and the standard NATS
-event plane for KV-cache and runtime events:
-- `nats` on TCP `4222`
+`dynamo-platform` with Kubernetes-native discovery. As of the Dynamo 1.4+
+bump, AICR no longer installs bundled NATS by default: the request plane
+defaults to TCP and the KV event plane defaults to ZMQ
+(`ai-dynamo/dynamo#11951`). This removes the old `4222` NATS requirement,
+but it does **not** remove the underlying cross-nodegroup networking
+requirement — the request plane and KV events are now **direct
+frontend↔worker pod-to-pod connections** instead of both sides talking to a
+`dynamo-platform-nats` StatefulSet on the system nodegroup, and Frontend
+pods still run on the system nodegroup while workers run on the GPU
+nodegroup, so traffic still crosses the same GPU↔system nodegroup SG
+boundary as before.
 
-This NATS dependency is new as of the Dynamo 1.2 bump, which switched discovery
-to the NATS event plane. A cluster whose system-node security group only
-allowlisted the pre-1.2 control-plane ports will not have `4222` open, so a
-bundle that worked on Dynamo 1.0.x can start failing purely from the version
-bump — add the `4222` rule below.
+> **TODO before merging (tracked in NVIDIA/aicr#1836):** the port(s) below
+> are not yet confirmed against a real Dynamo 1.4+ EKS deployment. What's
+> known from the AICR recipes: the ZMQ KV-event endpoint is set explicitly
+> per worker via `--kv-events-config`, e.g.
+> `{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}`
+> (see `tests/manifests/dynamo-vllm-smoke-test.yaml`), offset by `+dp_rank`
+> for dp_rank > 0. The TCP request plane does not have one fixed,
+> documented port the way NATS had `4222` — confirm the actual listening
+> port(s) on a live cluster before finalizing the SG rule below:
+> ```shell
+> kubectl exec -n dynamo-system <frontend-pod> -- ss -tlnp
+> kubectl exec -n dynamo-system <worker-pod> -- ss -tlnp
+> ```
 
-Frontend-to-worker inference request/response traffic is separate: Dynamo 1.2
-defaults `DYN_REQUEST_PLANE` to TCP, and AICR does not override it to NATS. The
-worker runtime relays local vLLM ZMQ KV-cache events onto the NATS-backed event
-plane so the KV router or EPP can consume live cache state.
-
-If system components and GPU workloads are on different node groups/security groups, these ports may be blocked from GPU nodes to system nodes. Typical symptoms:
-- `JetStream not available` (NATS unreachable)
-- Dynamo frontend and vLLM worker pods stuck in `CrashLoopBackOff`, with
-  `Exception: Failed to connect to NATS: timed out` in the frontend log
-- Worker startup probes failing with `connection refused` because the process
-  exits before serving
-- The `inference-perf` performance validator failing after its workload-readiness
-  (10 min) and health (5 min) gates lapse — roughly 15 min — while `deployment`
-  and `conformance` pass; the workload never reaches a ready state
+If the GPU and system node groups sit in different security groups, these
+ports may be blocked from GPU nodes to the frontend's node (and vice versa).
+Typical symptoms:
+- Dynamo frontend and vLLM worker pods stuck in `CrashLoopBackOff`, or a
+  frontend that starts cleanly but never successfully routes a request
+  through to a worker
+- Worker startup probes failing with `connection refused` because the
+  process exits before serving
+- The `inference-perf` performance validator failing after its
+  workload-readiness (10 min) and health (5 min) gates lapse — roughly
+  15 min — while `deployment` and `conformance` pass; the workload never
+  reaches a ready state
 
 You can confirm reachability directly from a GPU node before re-running. The
 toleration is required because the GPU node groups on these clusters are
@@ -32,9 +46,9 @@ tainted (`NoSchedule`/`NoExecute`); without it the probe pod stays `Pending`
 and never runs:
 
 ```shell
-kubectl run nats-probe --rm -i --restart=Never --image=busybox:1.36 \
+kubectl run tcp-probe --rm -i --restart=Never --image=busybox:1.36 \
   --overrides='{"spec":{"nodeSelector":{"<gpu-node-label-key>":"<value>"},"tolerations":[{"operator":"Exists"}]}}' \
-  -- sh -c 'nc -zv -w 5 dynamo-platform-nats.dynamo-system.svc.cluster.local 4222'
+  -- sh -c 'nc -zv -w 5 <worker-pod-ip-or-svc> <PORT>'
 ```
 
 The conformance validator's `ai-service-metrics` check adds a third requirement:
@@ -64,8 +78,9 @@ SG rule below remains the reliable cluster-side guarantee.
 
 ## Required Security Group Rules
 
-Allow ingress from the GPU node security group to the system node security group on:
-- TCP `4222` - NATS event plane (dynamo-platform)
+Allow ingress from the GPU node security group to the system node security
+group on:
+- TCP `<PORT>` - Dynamo request plane + KV events (dynamo-platform) — confirm exact port(s) on-cluster, see TODO above
 - TCP `9090` - Prometheus (required for the `ai-service-metrics` conformance check)
 
 The `9090` rule is required as a fallback guarantee: the orchestrator *prefers*
@@ -94,9 +109,9 @@ aws ec2 describe-instances \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
   --output text
 
-# 2) Allow NATS + Prometheus from GPU SG -> system SG
+# 2) Allow Dynamo request/event-plane + Prometheus from GPU SG -> system SG
 aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
-  --protocol tcp --port 4222 --source-group <gpu-sg-id>
+  --protocol tcp --port <PORT> --source-group <gpu-sg-id>
 
 aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
   --protocol tcp --port 9090 --source-group <gpu-sg-id>
