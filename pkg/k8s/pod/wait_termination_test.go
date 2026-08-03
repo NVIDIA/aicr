@@ -440,7 +440,6 @@ func TestWaitForJobTerminal_StaleObjectRVResyncsViaList(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default", ResourceVersion: "1"},
 	})
 
-	const freshCollectionRV = "100"
 	var lists, fromStale, fromFresh atomic.Int32
 	client.PrependReactor("list", "jobs", func(_ k8stesting.Action) (bool, runtime.Object, error) {
 		lists.Add(1)
@@ -449,23 +448,9 @@ func TestWaitForJobTerminal_StaleObjectRVResyncsViaList(t *testing.T) {
 			Items:    []batchv1.Job{{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default", ResourceVersion: "1"}}},
 		}, nil
 	})
-	client.PrependWatchReactor("jobs", func(action k8stesting.Action) (bool, watch.Interface, error) {
-		rv := action.(k8stesting.WatchActionImpl).WatchRestrictions.ResourceVersion
-		fw := watch.NewFake()
-		if rv == freshCollectionRV {
-			fromFresh.Add(1)
-			terminal := jobWithCondition(batchCond("Complete"))
-			terminal.ResourceVersion = "101"
-			go func() { fw.Modify(terminal) }()
-		} else {
-			fromStale.Add(1)
-			go func() {
-				expired := apierrors.NewResourceExpired("too old resource version: " + rv)
-				fw.Error(&expired.ErrStatus)
-			}()
-		}
-		return true, fw, nil
-	})
+	terminal := jobWithCondition(batchCond("Complete"))
+	terminal.ResourceVersion = "101"
+	client.PrependWatchReactor("jobs", staleRVWatchReactor(&fromStale, &fromFresh, terminal))
 
 	got, err := pod.WaitForJobTerminal(context.Background(), client, "default", "test-job", 3*time.Second)
 	if err != nil {

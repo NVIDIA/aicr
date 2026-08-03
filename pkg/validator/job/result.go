@@ -184,7 +184,11 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
 	if !found {
 		result.ExitCode = -1
-		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s (container %q not found - validator package contract)", effectiveTimeout(d.config.Entry.Timeout), ValidatorContainerName)
+		// Route through waitFailureMessage so an infra/unavailable waitCause is
+		// not misreported as the catalog timeout (see issue #1966); keep the
+		// container-contract detail as a suffix.
+		result.TerminationMsg = fmt.Sprintf("%s (container %q not found - validator package contract)",
+			waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout)), ValidatorContainerName)
 		return result
 	}
 
@@ -282,11 +286,23 @@ func boundTerminationMsg(msg string, maxBytes int) string {
 	if len(msg) <= maxBytes {
 		return msg
 	}
-	// Trim the cut back to a valid UTF-8 rune boundary so a multi-byte rune is
-	// never split into an invalid sequence in the emitted message.
+	// Trim only a trailing partial rune — a multi-byte rune the cut split — so it
+	// is never emitted as an incomplete sequence. Scan back to the final rune's
+	// start byte and drop those bytes only when they do NOT form a full rune.
+	// utf8.FullRuneInString distinguishes an incomplete sequence (dropped) from a
+	// complete-but-invalid byte such as a lone 0xFF (kept): the latter was in the
+	// original message, not an artifact of the cut, so it is preserved just like
+	// any invalid byte earlier in the readable prefix (see issue #1976).
 	head := msg[:maxBytes]
-	for len(head) > 0 && !utf8.ValidString(head) {
-		head = head[:len(head)-1]
+	start := len(head)
+	for start > 0 && start > len(head)-utf8.UTFMax {
+		start--
+		if utf8.RuneStart(head[start]) {
+			break
+		}
+	}
+	if start < len(head) && !utf8.FullRuneInString(head[start:]) {
+		head = head[:start]
 	}
 	return head + fmt.Sprintf("... [truncated %d bytes]", len(msg)-len(head))
 }
