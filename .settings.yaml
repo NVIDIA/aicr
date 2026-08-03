@@ -45,7 +45,7 @@ security_tools:
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.2'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.49.0'
+  syft: 'v1.50.0'
 
 # E2E Testing Tools
 testing_tools:
