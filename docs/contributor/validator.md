@@ -44,9 +44,13 @@ spec:
           value: ">= 450"            # GB/s
 ```
 
-Top-level `constraints` are evaluated as a **pre-flight gate** before
-phase checks run; phase-specific `constraints` are evaluated against
-each container check's reported metrics.
+Top-level `constraints` — and any declared under
+`validation.readiness.constraints` — are evaluated as a **pre-flight
+gate** before phase checks run; other phases' `constraints` are
+evaluated against each container check's reported metrics. Readiness
+placement matters for gates that must not participate in
+generation-time overlay filtering (e.g. the GKE device-plugin
+ownership check, issue #1755).
 
 **Supported operators** (`pkg/constraints/constraint.go`):
 
@@ -67,6 +71,16 @@ falls back to string comparison.
 an error (not `false`) when a value claimed to be a version fails to
 parse — callers in `pkg/validator/validator.go::checkReadiness` treat
 parse errors as `ErrCodeInvalidRequest`, fail-closed.
+
+**One name bypasses the scalar flow entirely:** the node-set form
+`NodeTopology.gpu-nodes.label` ([#1755](https://github.com/NVIDIA/aicr/issues/1755))
+is dispatched by exact name in `constraints.Evaluate` *before*
+`ParseConstraintPath`, uses its own value grammar
+(`<label-key>=<value>` / `!<label-key>`, validated with the Kubernetes
+label validators), and quantifies the predicate over the GPU-node set
+synthesized from `NodeTopology.label` readings instead of comparing a
+single reading. See `pkg/constraints/gpu_nodes.go` for its fail-closed
+rules (truncation, empty universe, malformed or ambiguous encodings).
 
 **Adding a new operator:**
 
@@ -467,10 +481,10 @@ return; this is one of the two CLAUDE.md-sanctioned uses of `Background()`.
 
 ### Pre-flight gates are fail-closed
 
-`pkg/validator/validator.go::checkReadiness` evaluates top-level
-`validation.constraints` *before* any phase runs. A parse error or a
-failing constraint returns `ErrCodeInvalidRequest` and aborts the
-entire run. **Do not** `slog.Warn; continue` on an evaluator
+`pkg/validator/validator.go::checkReadiness` evaluates the recipe's
+top-level `constraints` plus any `validation.readiness.constraints`
+*before* any phase runs. A parse error or a failing constraint returns
+`ErrCodeInvalidRequest` and aborts the entire run. **Do not** `slog.Warn; continue` on an evaluator
 error — that masquerades a broken validation YAML as a passing
 constraint, which is an explicit anti-pattern in CLAUDE.md.
 
@@ -1060,6 +1074,12 @@ assert budget (`TestExpectedResourcesCatalogEnvelope` guards this).
 `pkg/constraints` is shared by surface 1, surface 2's recipe
 constraints, and the readiness pre-flight gate. The evaluation flow:
 
+0. **Name dispatch.** `constraints.Evaluate` first matches the
+   constraint name against the node-set form
+   `NodeTopology.gpu-nodes.label`
+   ([#1755](https://github.com/NVIDIA/aicr/issues/1755)), which has its
+   own value grammar and evaluator and never reaches the steps below.
+   Every other name proceeds through the scalar flow.
 1. **Parse.** `ParseConstraintExpression(expr)` strips whitespace,
    finds the **longest** matching operator prefix (so `>=` wins over
    `>`), splits into `{Operator, Value}`. Empty value → `ErrCodeInvalidRequest`.

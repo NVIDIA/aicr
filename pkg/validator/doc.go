@@ -17,7 +17,8 @@
 //
 // The validator runs in two phases:
 //
-//  1. Readiness pre-flight: top-level constraint expressions are evaluated
+//  1. Readiness pre-flight: top-level constraint expressions, plus any
+//     declared under validation.readiness.constraints, are evaluated
 //     against the snapshot inline (no cluster access required). A malformed
 //     expression fails closed so misconfigured rules cannot masquerade as
 //     passing.

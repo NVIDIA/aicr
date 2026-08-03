@@ -457,3 +457,30 @@ func TestLabelEncoding(t *testing.T) {
 		t.Errorf("nodes = %q, want worker-1", parts[1])
 	}
 }
+
+// TestIsTruncatedNodeListRoundTrip pins the truncation detector to
+// formatNodeList's actual output, so a change to the suffix wording breaks
+// this test instead of silently failing open in consumers that must reject
+// truncated membership lists (pkg/constraints' node-set form, issue #1755).
+func TestIsTruncatedNodeListRoundTrip(t *testing.T) {
+	nodes := []string{"node-a", "node-b", "node-c"}
+
+	tests := []struct {
+		name          string
+		maxNodes      int
+		wantTruncated bool
+	}{
+		{"truncated below count", 2, true},
+		{"no limit", 0, false},
+		{"limit equals count", 3, false},
+		{"limit above count", 4, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded := formatNodeList(nodes, tt.maxNodes)
+			if got := IsTruncatedNodeList(encoded); got != tt.wantTruncated {
+				t.Errorf("IsTruncatedNodeList(%q) = %v, want %v", encoded, got, tt.wantTruncated)
+			}
+		})
+	}
+}
