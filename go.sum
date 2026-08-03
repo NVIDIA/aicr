@@ -178,8 +178,8 @@ github.com/go-openapi/jsonreference v1.0.0 h1:jlmTr6torcd1YgDQvSfNmRtKzYDO4FGBkr
 github.com/go-openapi/jsonreference v1.0.0/go.mod h1:jtwdyGbJk0Xhe5Y+rwtglQP6Sb1WZST4rT32LWB+sv0=
 github.com/go-openapi/loads v0.25.0 h1:74Bc2snfaVlsHzwdQj/3gsA9XJz3daXTJVs+4ZaK7jI=
 github.com/go-openapi/loads v0.25.0/go.mod h1:JFBw4SIB9+PTIFHDfcXuSSy5h6aWzjtUCrPYyx3qWU8=
-github.com/go-openapi/runtime v0.32.6 h1:hrcTTF8P7ZZr2Majzq11I65QtL/s85o7Q+zJf+AvFN4=
-github.com/go-openapi/runtime v0.32.6/go.mod h1:+rsupH3+TFKqmFysqkmgBOTxpVJV8eV+j9myvvea2Xw=
+github.com/go-openapi/runtime v0.33.0 h1:Dd3Oj2ig+WH8ckK95l0Wn2V8a4bH/UqWPRZVT0vc8yU=
+github.com/go-openapi/runtime v0.33.0/go.mod h1:+rsupH3+TFKqmFysqkmgBOTxpVJV8eV+j9myvvea2Xw=
 github.com/go-openapi/runtime/server-middleware v0.32.6 h1:IGTYzybyFrUeSqQEwwO1y/9KnOk4QsabFNtAQtIHxDE=
 github.com/go-openapi/runtime/server-middleware v0.32.6/go.mod h1:OQHTBqMGquJShXhPYQ62yAqDMtC1rYpsEwldNWjYKhA=
 github.com/go-openapi/spec v0.22.9 h1:/vKIFDcGKp0ktZWGbym/tJEWbk6/XOEmAVU0kqKMH+w=
@@ -425,8 +425,8 @@ github.com/sigstore/rekor-tiles/v2 v2.3.0 h1:HhMgH61UP0t899V8Fjt7pz1YdgOBptbaQdn
 github.com/sigstore/rekor-tiles/v2 v2.3.0/go.mod h1:DEFiKSyQ4nF75QRVNdOPaIH3cmvMkO2B6xDZjNYngPc=
 github.com/sigstore/sigstore v1.10.8 h1:1Mgkxvkw4AXMfIP1DOjc6kw0GkUgA8pGVpveN/EfOq4=
 github.com/sigstore/sigstore v1.10.8/go.mod h1:f9+B/4iaYimvUkySyb2mvc73n3RLqNn24grHZM/ET8M=
-github.com/sigstore/sigstore-go v1.2.2 h1:xAJ8hxaoecC0HKBYVbrwUjkeAI+GJYu6vLqbxDlD2Q0=
-github.com/sigstore/sigstore-go v1.2.2/go.mod h1:MIFwBxAHJD+/lKgZzt9n/4Zhq/3T2+EuGX8iGrIsZgU=
+github.com/sigstore/sigstore-go v1.3.0 h1:hnIMHREyCNTYFtOE1o7ae3Axa9B5W5EjUSBJICP2NBE=
+github.com/sigstore/sigstore-go v1.3.0/go.mod h1:AyRQXfpH89py1twjE3kEZxlRersng90GSYqQV9zGJE8=
 github.com/sigstore/sigstore/pkg/signature/kms/aws v1.10.8 h1:tofVQ+UWJgad/69I5zbqxdFCN5gpIn9tRQP7iBzIpBw=
 github.com/sigstore/sigstore/pkg/signature/kms/aws v1.10.8/go.mod h1:73AfJE8H6w5KGCFPBu4x/OG+i1Yxgmh0L/FtV7prd88=
 github.com/sigstore/sigstore/pkg/signature/kms/azure v1.10.8 h1:8Mt7J36GcUEmbiJaiFhz2tud5ZIgkfVVCe2H/WJCHmw=
