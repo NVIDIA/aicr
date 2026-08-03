@@ -357,7 +357,7 @@ github.com/go-openapi/jsonreference/internal
 # github.com/go-openapi/loads v0.25.0
 ## explicit; go 1.25.0
 github.com/go-openapi/loads
-# github.com/go-openapi/runtime v0.32.6
+# github.com/go-openapi/runtime v0.33.0
 ## explicit; go 1.25.0
 github.com/go-openapi/runtime
 github.com/go-openapi/runtime/client
@@ -823,7 +823,7 @@ github.com/sigstore/sigstore/pkg/signature/kms/cliplugin/encoding
 github.com/sigstore/sigstore/pkg/signature/kms/cliplugin/internal/signerverifier
 github.com/sigstore/sigstore/pkg/signature/options
 github.com/sigstore/sigstore/pkg/signature/payload
-# github.com/sigstore/sigstore-go v1.2.2
+# github.com/sigstore/sigstore-go v1.3.0
 ## explicit; go 1.25.8
 github.com/sigstore/sigstore-go/internal/certificate
 github.com/sigstore/sigstore-go/internal/limits
