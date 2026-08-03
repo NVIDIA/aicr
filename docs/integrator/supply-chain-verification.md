@@ -469,7 +469,8 @@ Everything above is consumer-side: it proves that an artifact you already hold
 came from the identity you expect. It cannot tell you that somebody else signed
 something *as you*. That is the producer-side question, and the transparency log
 is the only place it can be answered. An entry under your signing identity that
-you did not produce means your identity was used without you.
+you did not produce may indicate that the identity was used without you, and it
+is the only signal that will tell you.
 
 The gap is sharpest for keyless signing, which leaves no local trace. The Fulcio
 certificate is short-lived, there is no private key on disk whose use you could
@@ -555,10 +556,17 @@ watched identity as flags, so it monitors your identity as readily as AICR's:
 # checkout is a separate step.
 git clone https://github.com/NVIDIA/aicr && cd aicr
 git checkout --detach d4f7bef460dc8d1ef7ea0334a6935c0038de88e4
+
+# Allowlist the tags a real release actually signed, so a legitimate release
+# does not alert. Derive it from your release workflow's completed run history,
+# never from `git tag --list`: an attacker-pushed or never-signed tag present in
+# the repository would be pre-suppressed. The workflow example below shows the
+# query; run it once ahead of the monitor.
 GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
   --file checkpoint_v2.txt \
   --cert-subject '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.*$' \
-  --cert-issuer '^https://token\.actions\.githubusercontent\.com$'
+  --cert-issuer '^https://token\.actions\.githubusercontent\.com$' \
+  --known-tags-file known-tags.txt
 ```
 
 The two halves of the identity must come off the same certificate. Under the
@@ -572,10 +580,12 @@ monitor reports clean forever while watching an identity that cannot exist.
 certificate's SAN and OIDC issuer extension; anchor them, or a lookalike
 identity matches. `--file` is the cursor: the first run baselines at the current
 tree head and scans nothing, and every later run scans only the window added
-since. The tool writes two companions alongside it, `<file>.scan` and
-`<file>.stall`, holding partial progress and catch-up trend so that a large
-backlog is scanned across several bounded runs; all three must survive between
-runs or the scan restarts. `--timeout` bounds a single pass. Exit `0` is clean,
+since. The tool writes two companions alongside it. `<file>.scan` holds how far
+the current window has been scanned, so a large backlog is caught up across
+several bounded runs; it must survive between runs alongside the checkpoint, or
+the window is rescanned from the start. `<file>.stall` holds only the catch-up
+convergence history that feeds the `degraded` classification, so losing it costs
+stall detection, not scan progress. `--timeout` bounds a single pass. Exit `0` is clean,
 `1` is a security finding (`tamper` or `identity`), and `3` is a non-security
 failure (`operational` for Sigstore, Rekor, or network trouble; `degraded` when
 the log is outpacing the per-run scan). Every completed run prints a matching
@@ -597,6 +607,15 @@ first legitimate signature after the baseline leaves the monitor permanently
 alerting, and closing that out needs an acknowledgment mechanism the tool does
 not have yet.
 
+Both examples here watch a tag-bearing release identity, so both pass
+`--known-tags-file`. Two residual gaps come with that suppression. An attacker
+who re-signs an *existing* release tag is suppressed, because that tag is
+legitimately on the allowlist. And the allowlist keys on a completed release run
+rather than on proof that the run's signing step succeeded, since signing happens
+mid-run and a release that flaked afterwards still produced a real entry. Closing
+both tightly needs a per-tag entry-count or provenance check, tracked in
+[#1887](https://github.com/NVIDIA/aicr/issues/1887).
+
 On a schedule, in your own repository:
 
 ```yaml
@@ -617,13 +636,17 @@ concurrency:
 env:
   CERT_SUBJECT: '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.*$'
   CERT_ISSUER: '^https://token\.actions\.githubusercontent\.com$'
+  # Must name the same workflow as CERT_SUBJECT: the SAN is
+  # <this-workflow>@refs/tags/<tag>, so this workflow's run history is the
+  # authoritative record of which tags a real release signed. Change both together.
+  RELEASE_WORKFLOW_FILE: release.yaml
 jobs:
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
       contents: read
-      actions: read   # read the prior run's checkpoint artifact
+      actions: read   # prior checkpoint artifact + release workflow run history
     steps:
       - uses: actions/checkout@v7
         with:
@@ -674,13 +697,39 @@ jobs:
           echo "Re-arm deliberately with a workflow_dispatch run and bootstrap=true."
           exit 1
 
+      - name: Fetch signed release tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The suppression allowlist must come from an authoritative record of
+          # what actually signed, NOT from `git tag --list`: an attacker-pushed or
+          # never-signed tag sitting in the repository would be pre-suppressed.
+          # The SAN is <workflow>@refs/tags/<tag>, so a tag-push run of
+          # RELEASE_WORKFLOW_FILE is the proof that a real release signed <tag>.
+          # Run history also persists after a tag or release is deleted, so an
+          # ephemeral release candidate stays recognised. head_branch is the tag
+          # for a tag-push run. Require status=completed but accept any
+          # conclusion: signing happens mid-run, so a release that flaked in a
+          # later step still produced a legitimate entry.
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${RELEASE_WORKFLOW_FILE}/runs?event=push&status=completed&per_page=100" \
+            > runs.json
+          jq -rs '[.[].workflow_runs[] | select(.head_branch != null) | .head_branch] | unique | .[]' \
+            runs.json > known-tags.txt
+          echo "Allowlisted $(wc -l < known-tags.txt) signed release tags."
+
       - name: Scan for our signing identity
         run: |
+          # Without --known-tags-file every legitimate release alerts, and the
+          # tool holds the cursor on a match, so the first real release after
+          # baseline would suspend the scan until triaged.
           GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
             --file checkpoint_v2.txt \
             --restore-zip checkpoint.zip \
             --cert-subject "${CERT_SUBJECT}" \
-            --cert-issuer "${CERT_ISSUER}"
+            --cert-issuer "${CERT_ISSUER}" \
+            --known-tags-file known-tags.txt
 
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
