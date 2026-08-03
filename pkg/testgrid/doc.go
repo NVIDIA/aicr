@@ -17,7 +17,11 @@
 // dashboard presence?" — the two facts RQ1 (#1283) and RQ2 (#1284) share.
 //
 // It is deliberately thin and owns no mapping of its own: the recipe →
-// coordinate mapping is pkg/recipe.CoordinateFor (the single shared function
+// coordinate mapping is pkg/recipe.CoordinateFor — the criteria-only base
+// coordinate; profile-bearing recipes' live dashboard routes append the
+// lowercase "-<name>-<value>" segment to the tab (LivePaths reports the
+// suffixed form; the criteria-only Health link generator therefore keeps
+// profiled families' cells pending until profile-aware links land) —
 // consumed by GP4/GP5/TG2/RQ1). testgrid only adds the dashboard host, the
 // hash-routed deep-link scheme built around Coordinate.Path, and the committed
 // presence manifest.

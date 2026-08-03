@@ -640,11 +640,13 @@ func TestCommittedRegistryValid(t *testing.T) {
 		// acceptance run (29125390442); inference joined after a green
 		// manual intent=inference dispatch.
 		"azure-h100": {IntentTraining, IntentInference},
-		// aws-gb200 is OPTED OUT of the nightly batch during bring-up (explicit
-		// empty list). Locked here so an accidental edit to a bare
-		// `nightly-intents:` (which defaults to [training]) — provisioning real
-		// GB200 Capacity-Block capacity nightly — fails this guard instead.
-		"aws-gb200": {},
+		// aws-gb200 enrolled with both intents once the GB200 EKS UAT lane
+		// shipped (v0.18.0) and the Capacity Block was confirmed booked active
+		// through 2029 (cr-0e2f3833a602809a6). Release cells are gated to
+		// v0.18.0 via nightly-intent-min-versions (the config first shipped
+		// there), so only `main` runs GB200 nightly until v0.18.0 ages into the
+		// window.
+		"aws-gb200": {IntentTraining, IntentInference},
 		// kind-h100 (nvkind real-silicon lane, DC5 #1278) enrolled with both
 		// intents after green manual H100 acceptance runs (training 29954092703,
 		// inference 29965464868). Release cells are gated to v0.18.0 via
@@ -668,10 +670,12 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// a future edit cannot silently drop a gate — which would let a release cell
 	// run a pre-fix aicr and emit failing/unusable evidence. azure-h100 gates its
 	// AKS perf + driver-only fixes; kind-h100 gates the uat-kind lane + the
-	// os-agnostic coordinate fix (#1851). Both landed post-v0.17.0.
+	// os-agnostic coordinate fix (#1851); aws-gb200 gates the GB200 EKS UAT
+	// config, which first shipped in v0.18.0. All landed post-v0.17.0.
 	wantMinVersions := map[string]map[string]string{
 		"azure-h100": {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
 		"kind-h100":  {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
+		"aws-gb200":  {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
 	}
 	for name, want := range wantMinVersions {
 		res, lookupErr := reg.Lookup(name)

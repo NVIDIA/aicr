@@ -103,26 +103,38 @@ flurry of ingests into a single coalesced rebuild rather than a backlog.
 
 Each run directory carries one `meta.json` (schema
 `aicr-corroboration-meta/v1`). It is the **authoritative** coordinate
-source — the directory layout is organizational only. Every field traces
-to the verified predicate or certificate; there is no clock and no
-randomness, so output is byte-identical across runs from identical input.
+source — the directory layout is organizational only. There is no clock
+and no randomness, so output is byte-identical across runs from
+identical input. Fields fall into five provenance classes:
 
-| Field | Source |
-|---|---|
-| `schemaVersion` | constant `aicr-corroboration-meta/v1` |
-| `coordinate.{group,dashboard,tab}` | `recipe.CoordinateFor` over the bundle recipe's criteria |
-| `recipe` | predicate `recipe.name` |
-| `signer.idHash` | `SignerIDHash(issuer, identity)` — the source dedup key |
-| `signer.identity` / `signer.issuer` | the **verified** cert SAN + OIDC issuer |
-| `signer.class` / `signer.allowlisted` | classification (below) |
-| `runId` | `--run-id`, else `run-<attestedAt:YYYYMMDDThhmm>` |
-| `aicrVersion` | predicate `aicrVersion` |
-| `k8sVersion` | predicate `fingerprint.k8sVersion.value` |
-| `k8sConstraint` | the recipe's `K8s.server.version` constraint |
-| `bundleDigest` | predicate `manifest.digest` |
-| `evidenceRef` | OCI ref of the signed bundle |
-| `rekorLogIndex` | verified Rekor index (omitted when absent) |
-| `attestedAt` | predicate `attestedAt` (the only timestamp) |
+- **content-verified** — from the verified predicate or the verified
+  bundle's recipe bytes.
+- **certificate-verified** — from the verified Fulcio certificate.
+- **workflow-derived** — produced by the verification workflow itself
+  (the Rekor lookup).
+- **allowlist-derived** — the `Allowlist.Classify` verdict over the
+  verified signer.
+- **caller-supplied** — operational metadata the ingest caller passes
+  in; recorded as-is, not covered by the signature.
+
+| Field | Class | Source |
+|---|---|---|
+| `schemaVersion` | constant | `aicr-corroboration-meta/v1` |
+| `coordinate.{group,dashboard,tab}` | content-verified | `recipe.CoordinateFor` over the bundle recipe's criteria |
+| `recipe` | content-verified | predicate `recipe.name` |
+| `profile` | content-verified | lowercase profile path segment (`<name>-<value>`) appended to `coordinate.tab` for profile-bearing recipes; omitted for unprofiled runs. Consumers inverting the coordinate back to criteria strip `-<profile>` from the tab first |
+| `profileSelection` | content-verified | exact-case `name=value` wire-form selection for profile-bearing recipes (omitted otherwise) — the lowercase `profile` segment is lossy, so consumers reconstructing the selection (the dashboard's copy-CLI/copy-config generators) read this field |
+| `signer.idHash` | certificate-verified | `SignerIDHash(issuer, identity)` — the source dedup key |
+| `signer.identity` / `signer.issuer` | certificate-verified | the **verified** cert SAN + OIDC issuer |
+| `signer.class` / `signer.allowlisted` | allowlist-derived | classification (below) |
+| `runId` | caller-supplied (default content-verified) | `--run-id` when passed; else derived as `run-<attestedAt:YYYYMMDDThhmm>` |
+| `aicrVersion` | content-verified | predicate `aicrVersion` |
+| `k8sVersion` | content-verified | predicate `fingerprint.k8sVersion.value` |
+| `k8sConstraint` | content-verified | the recipe's `K8s.server.version` constraint |
+| `bundleDigest` | content-verified | predicate `manifest.digest` |
+| `evidenceRef` | caller-supplied | OCI ref of the signed bundle, as passed by the ingest caller |
+| `rekorLogIndex` | workflow-derived | verified Rekor index (omitted when absent) |
+| `attestedAt` | content-verified | predicate `attestedAt` (the only timestamp) |
 
 `ctrf/<phase>.json` reports are copied for each phase the run produced
 (`deployment`, `performance`, `conformance`); a phase the run did not

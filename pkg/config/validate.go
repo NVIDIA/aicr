@@ -109,6 +109,9 @@ func (r *RecipeSpec) validate() error {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"invalid spec.recipe.profile")
 	}
+	if _, _, err := r.ResolveAccountingMode(); err != nil {
+		return err
+	}
 	if r.Output != nil && r.Output.Format != "" {
 		if serializer.Format(r.Output.Format).IsUnknown() {
 			return errors.New(errors.ErrCodeInvalidRequest,

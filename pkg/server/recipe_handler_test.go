@@ -60,10 +60,10 @@ func newProfileTestHandler(t *testing.T) *recipeHandler {
 	overlay := []byte(`apiVersion: aicr.run/v1alpha3
 kind: RecipeMetadata
 metadata:
-  name: profile-aks
+  name: profile-eks
 spec:
   criteria:
-    service: aks
+    service: eks
   profile:
     name: gpuStack
     default: driver-installed
@@ -81,7 +81,7 @@ spec:
               driver:
                 enabled: true
 `)
-	if err := os.WriteFile(filepath.Join(dir, "overlays", "profile-aks.yaml"),
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "profile-eks.yaml"),
 		overlay, 0o600); err != nil {
 		t.Fatalf("setup profile overlay: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 
 	t.Run("v2 GET selects explicit value", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
-			"/v2/recipe?service=aks&accelerator=h100&intent=training&profile=gpuStack%3Doperator-managed",
+			"/v2/recipe?service=eks&accelerator=h100&intent=training&profile=gpuStack%3Doperator-managed",
 			nil,
 		)
 		w := httptest.NewRecorder()
@@ -197,7 +197,7 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 	})
 
 	t.Run("v2 POST applies default", func(t *testing.T) {
-		body := `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"}}`
+		body := `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"}}`
 		req := httptest.NewRequest(http.MethodPost, "/v2/recipe", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -224,12 +224,12 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 		{
 			name:   "v2 POST selects profile from query",
 			target: "/v2/recipe?profile=gpuStack%3Doperator-managed",
-			body:   `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"}}`,
+			body:   `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"}}`,
 		},
 		{
 			name:   "v2 POST accepts agreeing query and body profiles",
 			target: "/v2/recipe?profile=gpuStack%3Doperator-managed",
-			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+			body: `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},` +
 				`"profile":"gpuStack=operator-managed"}`,
 		},
 	} {
@@ -256,7 +256,7 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 
 	t.Run("v2 query exposes selected profile", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
-			"/v2/query?service=aks&accelerator=h100&intent=training&"+
+			"/v2/query?service=eks&accelerator=h100&intent=training&"+
 				"profile=gpuStack%3Doperator-managed&selector=metadata.selectedProfile.value",
 			nil,
 		)
@@ -275,13 +275,13 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 		{
 			name:   "v2 POST query selects profile from query",
 			target: "/v2/query?profile=gpuStack%3Doperator-managed",
-			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+			body: `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},` +
 				`"selector":"metadata.selectedProfile.value"}`,
 		},
 		{
 			name:   "v2 POST query accepts agreeing query and body profiles",
 			target: "/v2/query?profile=gpuStack%3Doperator-managed",
-			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+			body: `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},` +
 				`"profile":"gpuStack=operator-managed","selector":"metadata.selectedProfile.value"}`,
 		},
 	} {
@@ -321,7 +321,7 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 
 	t.Run("v2 query accepts an explicitly empty selector", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
-			"/v2/query?service=aks&accelerator=h100&intent=training&selector=",
+			"/v2/query?service=eks&accelerator=h100&intent=training&selector=",
 			nil,
 		)
 		w := httptest.NewRecorder()
@@ -339,7 +339,7 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 	})
 
 	t.Run("v2 POST query accepts an explicitly empty selector", func(t *testing.T) {
-		body := `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},"selector":""}`
+		body := `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},"selector":""}`
 		req := httptest.NewRequest(http.MethodPost, "/v2/query", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -358,7 +358,7 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 
 	t.Run("v1 rejects resolved profiled composition", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
-			"/v1/recipe?service=aks&accelerator=h100&intent=training", nil)
+			"/v1/recipe?service=eks&accelerator=h100&intent=training", nil)
 		w := httptest.NewRecorder()
 		h.HandleRecipes(w, req)
 		if w.Code != http.StatusBadRequest {
@@ -375,7 +375,6 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 		}
 	})
-
 	tests := []struct {
 		name   string
 		method string
@@ -390,7 +389,7 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 		{
 			name:   "v2 rejects malformed raw query",
 			method: http.MethodGet,
-			target: "/v2/recipe?service=aks&profile=gpuStack%3Doperator-managed;ignored=x",
+			target: "/v2/recipe?service=eks&profile=gpuStack%3Doperator-managed;ignored=x",
 		},
 		{
 			name:   "v2 rejects conflicting repeated profile",
@@ -413,13 +412,13 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 			name:   "v2 rejects conflicting POST profile surfaces",
 			method: http.MethodPost,
 			target: "/v2/recipe?profile=gpuStack%3Doperator-managed",
-			body:   `{"criteria":{"service":"aks"},"profile":"gpuStack=driver-installed"}`,
+			body:   `{"criteria":{"service":"eks"},"profile":"gpuStack=driver-installed"}`,
 		},
 		{
 			name:   "v2 rejects negative nodes in POST criteria",
 			method: http.MethodPost,
 			target: "/v2/recipe",
-			body:   `{"criteria":{"service":"aks","nodes":-1}}`,
+			body:   `{"criteria":{"service":"eks","nodes":-1}}`,
 		},
 		{
 			name:   "v1 rejects top-level POST profile",
@@ -463,21 +462,21 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 			name:   "v2 query rejects unknown POST query parameter",
 			v2:     true,
 			target: "/v2/query?profie=gpuStack%3Dx",
-			body: `{"criteria":{"service":"aks"},"selector":` +
+			body: `{"criteria":{"service":"eks"},"selector":` +
 				`"metadata.selectedProfile.value"}`,
 		},
 		{
 			name:   "v2 query rejects conflicting POST profile surfaces",
 			v2:     true,
 			target: "/v2/query?profile=gpuStack%3Doperator-managed",
-			body: `{"criteria":{"service":"aks"},"profile":"gpuStack=driver-installed",` +
+			body: `{"criteria":{"service":"eks"},"profile":"gpuStack=driver-installed",` +
 				`"selector":"metadata.selectedProfile.value"}`,
 		},
 		{
 			name:   "v2 query rejects negative nodes in POST criteria",
 			v2:     true,
 			target: "/v2/query",
-			body: `{"criteria":{"service":"aks","nodes":-1},` +
+			body: `{"criteria":{"service":"eks","nodes":-1},` +
 				`"selector":"metadata.selectedProfile.value"}`,
 		},
 		{
@@ -511,24 +510,24 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 	}{
 		{
 			name: "v2 recipe rejects missing content type",
-			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"}}`,
+			body: `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"}}`,
 		},
 		{
 			name:        "v2 recipe rejects unsupported content type",
 			contentType: "text/plain",
-			body:        `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"}}`,
+			body:        `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"}}`,
 		},
 		{
 			name:  "v2 query rejects missing content type",
 			query: true,
-			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+			body: `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},` +
 				`"selector":"metadata.selectedProfile.value"}`,
 		},
 		{
 			name:        "v2 query rejects unsupported content type",
 			query:       true,
 			contentType: "text/plain",
-			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+			body: `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},` +
 				`"selector":"metadata.selectedProfile.value"}`,
 		},
 	}
@@ -563,27 +562,27 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 		{
 			name:        "v2 recipe rejects JSON null profile",
 			contentType: "application/json",
-			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+			body: `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},` +
 				`"profile":null}`,
 		},
 		{
 			name:        "v2 recipe rejects YAML null profile",
 			contentType: "application/x-yaml",
-			body: "criteria:\n  service: aks\n  accelerator: h100\n  intent: training\n" +
+			body: "criteria:\n  service: eks\n  accelerator: h100\n  intent: training\n" +
 				"profile: null\n",
 		},
 		{
 			name:        "v2 query rejects JSON null profile",
 			query:       true,
 			contentType: "application/json",
-			body: `{"criteria":{"service":"aks","accelerator":"h100","intent":"training"},` +
+			body: `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"},` +
 				`"profile":null,"selector":"metadata.selectedProfile.value"}`,
 		},
 		{
 			name:        "v2 query rejects YAML null profile",
 			query:       true,
 			contentType: "application/x-yaml",
-			body: "criteria:\n  service: aks\n  accelerator: h100\n  intent: training\n" +
+			body: "criteria:\n  service: eks\n  accelerator: h100\n  intent: training\n" +
 				"profile: null\nselector: metadata.selectedProfile.value\n",
 		},
 	}
@@ -603,6 +602,146 @@ func TestProfileAwareRecipeEndpoints(t *testing.T) {
 			}
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleRecipes_SlurmAccountingModeRoutes(t *testing.T) {
+	h := newTestHandler(t, nil)
+
+	tests := []struct {
+		name        string
+		v2          bool
+		method      string
+		target      string
+		body        string
+		wantStatus  int
+		wantVersion string
+		wantMode    recipe.AccountingMode
+	}{
+		{
+			name:       "v1 GET rejects accounting mode",
+			method:     http.MethodGet,
+			target:     "/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=customer-managed",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "v1 POST rejects accounting mode",
+			method:     http.MethodPost,
+			target:     "/v1/recipe?slurmAccountingMode=customer-managed",
+			body:       `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","intent":"training","os":"ubuntu","platform":"slurm"}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:        "v1 GET keeps legacy Slurm response",
+			method:      http.MethodGet,
+			target:      "/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm",
+			wantStatus:  http.StatusOK,
+			wantVersion: recipe.RecipeAPIVersion,
+		},
+		{
+			name:        "v2 GET accepts accounting mode",
+			v2:          true,
+			method:      http.MethodGet,
+			target:      "/v2/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=customer-managed",
+			wantStatus:  http.StatusOK,
+			wantVersion: recipe.ConfiguredRecipeResultAPIVersion,
+			wantMode:    recipe.AccountingModeCustomerManaged,
+		},
+		{
+			name:        "v2 POST accepts accounting mode",
+			v2:          true,
+			method:      http.MethodPost,
+			target:      "/v2/recipe?slurmAccountingMode=customer-managed",
+			body:        `{"criteria":{"service":"eks","accelerator":"h100","intent":"training","os":"ubuntu","platform":"slurm"}}`,
+			wantStatus:  http.StatusOK,
+			wantVersion: recipe.ConfiguredRecipeResultAPIVersion,
+			wantMode:    recipe.AccountingModeCustomerManaged,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.target, strings.NewReader(tt.body))
+			if tt.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			w := httptest.NewRecorder()
+			if tt.v2 {
+				h.HandleRecipesV2(w, req)
+			} else {
+				h.HandleRecipes(w, req)
+			}
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+			var result recipe.RecipeResult
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			mode, present := result.AccountingMode()
+			if tt.wantMode == "" {
+				if present {
+					t.Fatalf("AccountingMode() = %q, true; want absent", mode)
+				}
+			} else if !present || mode != tt.wantMode {
+				t.Fatalf("AccountingMode() = %q, %v; want %q, true", mode, present, tt.wantMode)
+			}
+			if result.APIVersion != tt.wantVersion {
+				t.Errorf("apiVersion = %q, want %q", result.APIVersion, tt.wantVersion)
+			}
+		})
+	}
+}
+
+func TestHandleQuery_SlurmAccountingModeRoutes(t *testing.T) {
+	h := newTestHandler(t, nil)
+
+	tests := []struct {
+		name       string
+		v2         bool
+		target     string
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "v1 rejects accounting mode",
+			target:     "/v1/query?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=customer-managed&selector=apiVersion",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "v1 keeps legacy Slurm response",
+			target:     "/v1/query?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&selector=apiVersion",
+			wantStatus: http.StatusOK,
+			wantBody:   `"aicr.run/v1alpha2"`,
+		},
+		{
+			name:       "v2 accepts accounting mode",
+			v2:         true,
+			target:     "/v2/query?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=customer-managed&selector=configuration.slurm.accounting.mode",
+			wantStatus: http.StatusOK,
+			wantBody:   `"customer-managed"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			w := httptest.NewRecorder()
+			if tt.v2 {
+				h.HandleQueryV2(w, req)
+			} else {
+				h.HandleQuery(w, req)
+			}
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantBody != "" && strings.TrimSpace(w.Body.String()) != tt.wantBody {
+				t.Fatalf("body = %q, want %q", strings.TrimSpace(w.Body.String()), tt.wantBody)
 			}
 		})
 	}
@@ -689,7 +828,7 @@ func TestV1ProfileDetectionPreservesLegacyContracts(t *testing.T) {
 			target: "/v1/recipe",
 			body: "profile: gpuStack=driver-installed\n" +
 				"spec:\n" +
-				"  service: aks\n",
+				"  service: eks\n",
 			handle:    h.HandleRecipes,
 			wantError: "[INVALID_REQUEST] failed to parse JSON body: invalid character 'p' looking for beginning of value",
 		},
@@ -698,7 +837,7 @@ func TestV1ProfileDetectionPreservesLegacyContracts(t *testing.T) {
 			target: "/v1/query",
 			body: "profile: gpuStack=driver-installed\n" +
 				"criteria:\n" +
-				"  service: aks\n" +
+				"  service: eks\n" +
 				"selector: components.gpu-operator.values.driver.enabled\n",
 			handle:    h.HandleQuery,
 			wantError: "[INVALID_REQUEST] profile selection is available only on /v2/query",
@@ -928,6 +1067,37 @@ func TestHandleQuery_AllowListRejection(t *testing.T) {
 	errResp := decodeErrorBody(t, w.Body.Bytes())
 	if errResp.Message != "accelerator type not allowed" {
 		t.Errorf("message = %q, want %q", errResp.Message, "accelerator type not allowed")
+	}
+}
+
+func TestNormalizeLegacyRecipeResultDoesNotMutateBorrowedResult(t *testing.T) {
+	original := &recipe.RecipeResult{
+		APIVersion: recipe.ConfiguredRecipeResultAPIVersion,
+		Configuration: &recipe.RecipeConfiguration{
+			Slurm: &recipe.SlurmConfiguration{
+				Accounting: &recipe.SlurmAccountingConfiguration{
+					Mode: recipe.AccountingModeDisabled,
+				},
+			},
+		},
+	}
+	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	original.BindDataProvider(provider)
+
+	projected := normalizeLegacyRecipeResult(original, false)
+	if projected == original {
+		t.Fatal("normalizeLegacyRecipeResult() returned borrowed result, want independent projection")
+	}
+	if original.Configuration == nil ||
+		original.APIVersion != recipe.ConfiguredRecipeResultAPIVersion {
+
+		t.Fatal("normalizeLegacyRecipeResult() mutated borrowed result")
+	}
+	if projected.Configuration != nil || projected.APIVersion != recipe.RecipeAPIVersion {
+		t.Errorf("legacy projection = %#v, want v1alpha2 without configuration", projected)
+	}
+	if projected.DataProvider() != provider {
+		t.Error("legacy projection did not preserve the bound DataProvider instance")
 	}
 }
 

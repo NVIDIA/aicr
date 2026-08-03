@@ -42,6 +42,16 @@ Each stage transforms input data into a different format:
   projection of associated NodeSet, LoginSet, RestApi, and Accounting CRs
 - **mariadb-operator**: Official `k8s.mariadb.com/mariadbs` API conflict
   evidence (not database availability or health)
+- **aks-gpu-pools**: Orchestration-layer projection, not a collector —
+  produced from the explicit operator-supplied pool dump passed to
+  `aicr snapshot --aks-gpu-pools <file>` (per-pool `gpu-driver` install
+  modes). The pool file is parsed and validated up front — before any
+  collector runs (local mode, `pkg/snapshotter/snapshot.go`) or before
+  the agent Job is deployed (Job mode, `pkg/snapshotter/agent.go`) — so
+  a malformed file fails loud. The resulting K8s subtype is then
+  attached to the snapshot after the parallel collectors finish (local
+  mode) or merged into the snapshot the Job returns after retrieval
+  (Job mode)
 
 **GPU Hardware:**
 - Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
@@ -69,7 +79,8 @@ Each stage transforms input data into a different format:
 │   │                                                     │
 │   ├─ K8s                                                │
 │   │   └─ subtypes: [server, image, policy, node,        │
-│   │                 slinky-slurm, mariadb-operator]      │
+│   │                 slinky-slurm, mariadb-operator,      │
+│   │                 aks-gpu-pools (with --aks-gpu-pools)]│
 │   │       ├─ data: map[string]Reading                   │
 │   │       └─ slinky-slurm.items: []ItemEntry            │
 │   │             (allowlisted resource context + data)   │
@@ -160,6 +171,12 @@ type Reading interface {
   orchestrator runs under `errgroup.WithContext` so a future
   cancel-on-error collector is supported, but today per-collector errors
   are swallowed.)
+- Provider projections follow the opposite failure policy: the
+  `aks-gpu-pools` projection is explicit operator input, so a malformed
+  pool file ABORTS the snapshot before any collector runs
+  (`pkg/snapshotter/snapshot.go`) — it must never ride the
+  degrade-to-warning path and masquerade as a snapshot whose reading is
+  merely unavailable.
 - Each collector sets its own timeout rather than sharing a universal
   one — e.g. 10s (OS, systemd), 60s (Kubernetes), 90s (node topology),
   5s (NFD GPU detection), up to 10m (network discovery)

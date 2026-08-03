@@ -65,8 +65,10 @@ func preamble(m Matrix) string {
 	b.WriteString("recipe-health matrix (ADR-009 `declared_coverage`): that column counts ")
 	b.WriteString("declared named checks per validation phase for a single recipe, whereas this ")
 	b.WriteString("matrix answers \"which journeys and CLI verbs are exercised, where, and how ")
-	b.WriteString("often.\" The reverse cross-link from the recipe-health page is added by RQ1 ")
-	b.WriteString("(#1283) once that page ships. See also the [CLI reference](./cli-reference.md).\n\n")
+	b.WriteString("often.\" The recipe-health page cross-links the other way through its ")
+	b.WriteString("presence-gated Evidence column (RQ1, #1283): a recipe with a published ")
+	b.WriteString("dashboard coordinate deep-links to it, and shows `pending` only when none ")
+	b.WriteString("exists. See also the [CLI reference](./cli-reference.md).\n\n")
 
 	b.WriteString("**AICR-version axis.** Scheduled UAT builds only the current checkout, so ")
 	b.WriteString("the live axis today is `")

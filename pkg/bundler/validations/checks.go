@@ -48,6 +48,7 @@ func init() {
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
+	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -397,12 +398,28 @@ func legacyRecipeAlternativeRemedy(service recipe.CriteriaServiceType, os recipe
 // set. Mirrors pkg/client/v1's resolution-time helper of the same name
 // (see gpuOperatorManagedOverrideSet above for why the duplication
 // exists).
-func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType) string {
+func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType, profiled bool) string {
 	switch service { //nolint:exhaustive // only AKS and GKE have provider-specific wording; every other service takes the generic default
 	case recipe.CriteriaServiceAKS:
-		return "Either recreate the GPU node pools without --gpu-driver none " +
-			"(AKS installs the NVIDIA driver by default), or bundle in " +
-			"GPU-Operator-managed mode: " + gpuOperatorManagedOverrideSet + "."
+		if !profiled {
+			// Legacy pre-profile artifact: the ownership lock does not
+			// apply (no metadata.selectedProfile), so the four-flag
+			// bundle-time tuple remains this artifact's supported flip.
+			return "Either recreate the GPU node pools without --gpu-driver " +
+				"none (AKS installs the NVIDIA driver by default), or bundle " +
+				"in GPU-Operator-managed mode: " + gpuOperatorManagedOverrideSet + "."
+		}
+		return "Either repair the AKS-managed driver install (recreate the " +
+			"GPU node pools without --gpu-driver none; AKS installs the " +
+			"NVIDIA driver by default) and recapture the snapshot, or switch " +
+			"to operator-managed mode end to end: recreate the pools WITH " +
+			"--gpu-driver none, recapture the snapshot, and regenerate with " +
+			"--profile gpuStack=operator-managed. The operator-managed value's " +
+			"constraint " +
+			"requires the pools to read gpu-driver=None, so regenerating " +
+			"against the current snapshot alone fails closed; and the " +
+			"gpuStack profile owns the driver-ownership paths, so flipping " +
+			"them via per-path --set overrides is rejected."
 	case recipe.CriteriaServiceGKE:
 		switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
 		case recipe.CriteriaOSCOS:
@@ -921,8 +938,12 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 // The check runs at bundle generation — not at snapshot-driven recipe
 // resolution, which only warns — because this is the first point where
 // the user's --set ownership overrides are known: `aicr recipe` has no
-// --set, so a resolution-time hard failure would leave supported
+// --set, so a resolution-time hard failure would leave supported LEGACY
 // GPU-Operator-managed clusters unable to reach the documented override.
+// On ADR-015-profiled recipes (AKS gpuStack) the --set escape does not
+// apply — ownership paths are profile-owned and per-path flips are
+// rejected — so the profiled remedy is out-of-band (fix/recreate pools,
+// recapture, regenerate with --profile); see driverAbsentRemedy.
 // Registered with severity error on gpu-operator (recipes/registry.yaml),
 // which converts the returned messages into a blocking
 // ErrCodeInvalidRequest in RunValidations. The check returns hard
@@ -1053,7 +1074,7 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 				"but the snapshot that produced this recipe observed no NVIDIA kernel "+
 				"driver on the sampled GPU node. Deploying this bundle would leave GPU "+
 				"nodes driverless. %s",
-			componentName, driverAbsentRemedy(service, osCriteria)))
+			componentName, driverAbsentRemedy(service, osCriteria, recipeResult.Metadata.SelectedProfile != nil)))
 	}
 
 	installDir, installDirDeclared, hostPathMsgs := resolveInstallDir(values, componentName)
@@ -1094,4 +1115,67 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 		slog.Warn(msg, logKeyComponent, componentName)
 	}
 	return msgs, errs
+}
+
+// CheckMariaDBOperatorOwnershipCoherence enforces the snapshot-driven
+// installation-safety policy for AICR-provided Slurm accounting. Existing
+// MariaDB CRs and inconclusive discovery block bundling; an API with no
+// detected CRs produces a warning; conclusive absence is silent. An empty
+// state means no snapshot evidence was recorded and produces a non-blocking
+// warning so criteria-only and older-snapshot workflows remain compatible.
+func CheckMariaDBOperatorOwnershipCoherence(_ context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+	mode, configured := recipeResult.AccountingMode()
+	if !configured || mode != recipe.AccountingModeAICRProvided {
+		return nil, nil
+	}
+
+	state := recipeResult.Metadata.MariaDBOperatorState
+	switch state {
+	case "":
+		return []string{fmt.Sprintf(
+			"%s: no metadata.mariaDBOperatorState snapshot evidence was recorded. "+
+				"Bundling AICR-provided accounting is allowed, but MariaDB Operator conflicts "+
+				"were not evaluated. Regenerate the recipe from a current snapshot to verify "+
+				"the target cluster before deployment",
+			componentName)}, nil
+	case recipe.MariaDBOperatorStateAbsent:
+		return nil, nil
+	case recipe.MariaDBOperatorStateAPIDetected:
+		return []string{fmt.Sprintf(
+			"%s: the snapshot detected the official MariaDB Operator API but no MariaDB resources. "+
+				"Bundling AICR-provided accounting is allowed, but verify that installing another "+
+				"operator instance will not conflict; otherwise regenerate with "+
+				"--slurm-accounting-mode customer-managed",
+			componentName)}, nil
+	case recipe.MariaDBOperatorStateCRsDetected:
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeConflict, fmt.Sprintf(
+			"%s: the snapshot detected existing official MariaDB resources. "+
+				"AICR-provided accounting would install a competing database stack. "+
+				"Regenerate the recipe with --slurm-accounting-mode customer-managed "+
+				"to use the existing database",
+			componentName))}
+	case recipe.MariaDBOperatorStateUnknown:
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeConflict, fmt.Sprintf(
+			"%s: MariaDB Operator conflict evidence is inconclusive, so AICR-provided "+
+				"accounting cannot be installed safely. Capture a fresh snapshot with sufficient "+
+				"Kubernetes discovery permissions, or regenerate the recipe with "+
+				"--slurm-accounting-mode customer-managed",
+			componentName))}
+	default:
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: metadata.mariaDBOperatorState=%q is not recognized. Regenerate the recipe "+
+				"with this AICR version before bundling AICR-provided accounting",
+			componentName, state))}
+	}
 }

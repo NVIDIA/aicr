@@ -71,6 +71,21 @@ func validatePointer(p *attestation.Pointer) error {
 	if p.Recipe == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "pointer.recipe is required")
 	}
+	if p.Profile != "" {
+		// A profiled pointer's recipe name must carry the profile path
+		// segment (RecipeNameFor appends it for every profiled recipe).
+		// Accepting an unsuffixed name would let two profile values share
+		// one evidence directory, defeating per-value protection.
+		sp, perr := attestation.ParsePointerProfile(p.Profile)
+		if perr != nil {
+			return perr
+		}
+		if !strings.HasSuffix(p.Recipe, "-"+sp) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"pointer.recipe "+p.Recipe+" does not carry the profile path segment -"+sp+
+					" required by pointer.profile "+p.Profile)
+		}
+	}
 	switch len(p.Attestations) {
 	case 0:
 		return errors.New(errors.ErrCodeInvalidRequest,

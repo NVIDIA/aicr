@@ -43,6 +43,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	stderrors "errors"
 	"flag"
 	"fmt"
@@ -118,14 +120,45 @@ type runConfig struct {
 	dryRun      bool
 }
 
+// localBundleDigest derives a content digest for a pre-materialized bundle
+// (already summary-dir-resolved) from its canonical manifest.json — the
+// manifest carries the per-file digests of the whole bundle, so two bundles
+// for the same recipe with different validation results diverge here even
+// when their AttestedAt shares a second (the digest is the only build-ID
+// component separating them on the deliberately unsuffixed TestGrid
+// coordinate). The read is bounded and errors propagate; a deterministic
+// "local" fallback is permitted only under --dry-run for manifest-less
+// development inputs.
+func localBundleDigest(dir string, dryRun bool) (string, error) {
+	data, err := readBoundedFile(filepath.Join(dir, attestation.ManifestFilename), defaults.MaxRecipePOSTBytes)
+	if err != nil {
+		if dryRun {
+			slog.Warn("bundle manifest.json unreadable; using placeholder digest (dry-run only)",
+				"dir", dir, "error", err)
+			return "local", nil
+		}
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"local bundle publication requires a readable manifest.json for the build-ID digest")
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
 func run(ctx context.Context, cfg runConfig) error {
 	var dir, digest string
 	var cleanup func()
 
 	if cfg.bundleDir != "" {
-		// Pre-materialized bundle directory — skip OCI pull.
+		// Pre-materialized bundle directory — skip OCI pull. The digest
+		// feeds the build ID, which is the ONLY thing separating two
+		// bundles of one family on the deliberately unsuffixed TestGrid
+		// coordinate — a constant here would let two local bundles
+		// sharing a second-resolution AttestedAt overwrite each other's
+		// GCS prefix. localBundleDigest (after the summary-dir resolve
+		// below) hashes the bundle's canonical manifest.json and fails
+		// loudly when it is unreadable; the "local" placeholder is
+		// dry-run-only.
 		dir = cfg.bundleDir
-		digest = "local"
 		cleanup = func() {}
 		slog.Info("using pre-materialized bundle", "dir", dir)
 		// Auto-resolve a nested summary-bundle/ subdir: aicr validate writes
@@ -138,6 +171,11 @@ func run(ctx context.Context, cfg runConfig) error {
 				slog.Info("auto-resolved summary-bundle subdir", "dir", candidate)
 				dir = candidate
 			}
+		}
+		var digestErr error
+		digest, digestErr = localBundleDigest(dir, cfg.dryRun)
+		if digestErr != nil {
+			return digestErr
 		}
 	} else {
 		// ── 1. Materialize the OCI bundle to a local temp directory ───────────

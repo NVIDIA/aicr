@@ -44,6 +44,41 @@ aicr bundle --recipe recipe.yaml \
   --output ./bundles
 ```
 
+On recipes that carry an ADR-015 configuration profile
+(`metadata.selectedProfile`, e.g. the AKS family's `gpuStack`), the
+profile's owned paths are locked. The lock is enforced per surface:
+
+- **`aicr bundle` static overrides** (`--set`, `--set-json`,
+  `--set-file`, or a config-file override, from any of those sources):
+  a value identical to the selected one is accepted; a divergent value
+  is rejected. The typed sources (`--set-json`, `--set-file`) are
+  always rejected for the special `enabled` presence key — even when
+  the value matches — because they would write a stray literal
+  `enabled:` chart value instead of toggling the component.
+- **`aicr mirror list --set` overrides**: mirror exposes only the
+  repeatable scalar `--set` (no `--set-json`/`--set-file`), and the
+  same identical-accepted / divergent-rejected rule applies to it.
+  Note that `mirror list` does not apply a config file's
+  `spec.bundle.deployment.set` overrides — pass image-affecting
+  overrides to mirror via `--set` explicitly.
+- **`--dynamic` exports**: rejected whenever they merely intersect an
+  owned path, regardless of the current value — install-time mutability
+  of a locked path is itself the violation.
+- **argocd-helm install-time values**: any install-time key whose path
+  equals, contains, or is contained by an owned path is rejected at Helm
+  render time, even when the value is identical. Key presence alone
+  trips the guard.
+- **Component presence (the synthetic `enabled` owned path)**: not
+  changeable by selecting a different profile value — profile fragments
+  cannot assign `enabled`, so no `--profile` choice adds or removes a
+  component. The lock rejects removing (or bundle-subsetting away) an
+  owned component; changing which components are present is a
+  catalog/composition change.
+
+Change owned **value** paths by regenerating with
+`aicr recipe --profile name=value` instead; component presence is not
+affected by reselection.
+
 `--set` is scalar-only. For list or object values use `--set-json` (inline JSON)
 or `--set-file` (value read from a file); both deep-merge objects and replace
 lists/scalars, and take precedence over `--set` on the same path:

@@ -48,6 +48,104 @@ func TestNewClientRequiresRecipeSource(t *testing.T) {
 	}
 }
 
+func TestResolveRecipeAccountingMode(t *testing.T) {
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := client.Close(); closeErr != nil {
+			t.Errorf("Close() error = %v", closeErr)
+		}
+	})
+
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		Intent:      recipe.CriteriaIntentTraining,
+		OS:          recipe.CriteriaOSUbuntu,
+		Platform:    recipe.CriteriaPlatformSlurm,
+	}
+	result, err := client.ResolveRecipeFromCriteriaWithOptions(
+		t.Context(),
+		aicr.WrapCriteria(criteria),
+		aicr.WithAccountingMode("aicr-provided"),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteria() error = %v", err)
+	}
+	mode, present := result.Resolved().AccountingMode()
+	if !present || mode != recipe.AccountingModeAICRProvided {
+		t.Fatalf("AccountingMode() = %q, %v; want aicr-provided, true", mode, present)
+	}
+}
+
+func TestResolveRecipeFromSnapshotRecordsMariaDBOperatorState(t *testing.T) {
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		Intent:      recipe.CriteriaIntentTraining,
+		OS:          recipe.CriteriaOSUbuntu,
+		Platform:    recipe.CriteriaPlatformSlurm,
+	}
+	for _, state := range []string{
+		recipe.MariaDBOperatorStateAbsent,
+		recipe.MariaDBOperatorStateAPIDetected,
+		recipe.MariaDBOperatorStateCRsDetected,
+		recipe.MariaDBOperatorStateUnknown,
+	} {
+		t.Run(state, func(t *testing.T) {
+			snapshot := aicr.WrapSnapshot(&snapshotter.Snapshot{
+				Measurements: []*measurement.Measurement{
+					measurement.NewMeasurement(measurement.TypeK8s).
+						WithSubtypeBuilder(
+							measurement.NewSubtypeBuilder("server").
+								SetString(measurement.KeyVersion, "v1.34.0"),
+						).
+						WithSubtypeBuilder(
+							measurement.NewSubtypeBuilder("mariadb-operator").
+								SetString("collection-state", state),
+						).
+						Build(),
+					measurement.NewMeasurement(measurement.TypeOS).
+						WithSubtypeBuilder(
+							measurement.NewSubtypeBuilder("release").
+								SetString("ID", "ubuntu").
+								SetString("VERSION_ID", "24.04"),
+						).
+						WithSubtypeBuilder(
+							measurement.NewSubtypeBuilder("sysctl").
+								SetString("/proc/sys/kernel/osrelease", "6.8.0"),
+						).
+						Build(),
+				},
+			})
+			result, resolveErr := client.ResolveRecipeFromSnapshotWithOptions(
+				t.Context(),
+				aicr.WrapCriteria(criteria),
+				snapshot,
+				aicr.WithAccountingMode("aicr-provided"),
+			)
+			if resolveErr != nil {
+				t.Fatalf("ResolveRecipeFromSnapshot() error = %v, want observational success", resolveErr)
+			}
+			if got := result.Resolved().Metadata.MariaDBOperatorState; got != state {
+				t.Errorf("Metadata.MariaDBOperatorState = %q, want %q", got, state)
+			}
+		})
+	}
+}
+
 func TestNewClientRejectsMissingFilesystemDir(t *testing.T) {
 	t.Parallel()
 
@@ -813,10 +911,10 @@ func TestResolveRecipeWithProfile(t *testing.T) {
 	overlay := []byte(`apiVersion: aicr.run/v1alpha3
 kind: RecipeMetadata
 metadata:
-  name: profile-aks
+  name: profile-eks
 spec:
   criteria:
-    service: aks
+    service: eks
   profile:
     name: gpuStack
     default: driver-installed
@@ -834,7 +932,7 @@ spec:
               driver:
                 enabled: true
 `)
-	if err := os.WriteFile(filepath.Join(dir, "overlays", "profile-aks.yaml"),
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "profile-eks.yaml"),
 		overlay, 0o600); err != nil {
 		t.Fatalf("setup profile overlay: %v", err)
 	}
@@ -849,7 +947,7 @@ spec:
 	t.Cleanup(func() { _ = client.Close() })
 
 	criteria, err := recipe.BuildCriteriaWithRegistry(client.CriteriaRegistry(),
-		recipe.WithServiceRegistry("aks"),
+		recipe.WithServiceRegistry("eks"),
 		recipe.WithAcceleratorRegistry("h100"),
 		recipe.WithIntentRegistry("training"),
 	)
@@ -877,19 +975,19 @@ spec:
 		t.Fatalf("driver.enabled = %v, want true", enabled)
 	}
 
-	entries, err := client.ListCatalog(t.Context(), &aicr.Criteria{Service: "aks"})
+	entries, err := client.ListCatalog(t.Context(), &aicr.Criteria{Service: "eks"})
 	if err != nil {
 		t.Fatalf("ListCatalog: %v", err)
 	}
 	for _, entry := range entries {
-		if entry.Name == "profile-aks" {
+		if entry.Name == "profile-eks" {
 			if entry.Profile == nil || entry.Profile.Default != "driver-installed" {
 				t.Fatalf("catalog profile = %#v", entry.Profile)
 			}
 			return
 		}
 	}
-	t.Fatal("profile-aks catalog entry not found")
+	t.Fatal("profile-eks catalog entry not found")
 }
 
 // TestResolveRecipeFromSnapshot proves the snapshot-evaluator resolve path:
@@ -980,7 +1078,7 @@ func gpuOperatorDriverEnabled(t *testing.T, rec *aicr.RecipeResult) (bool, bool)
 // Post-M1 behavior matrix:
 //   - AKS + Preinstalled → INJECTED. This test asserts only the
 //     driver.enabled=false injection. The rest of the coordinated AKS
-//     driver-only profile (toolkit.enabled=false, operator.runtimeClass=
+//     azure-managed profile (toolkit.enabled=false, operator.runtimeClass=
 //     nvidia-container-runtime, gdrcopy.enabled=false) is pinned by
 //     TestAKSDriverOnlyProfileTuple in pkg/recipe, and the DRA driver-root
 //     half by TestDriverRootLockstep — the override is semantically
@@ -1014,9 +1112,15 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 		name         string
 		service      string
 		os           string // "" leaves criteria OS unset
+		profile      string // "" resolves the declaration default
 		snap         *aicr.Snapshot
 		wantInjected bool
 		wantState    string // expected Metadata.GPUDriverState ("" = not recorded)
+		// wantDriverEnabled, when set, asserts the exact final
+		// driver.enabled value — used to prove injector subordination
+		// where the profile fragment and the injector disagree.
+		wantDriverEnabled *bool
+		wantErr           string // non-empty: resolution must fail closed with this
 	}{
 		{
 			name:         "aks + preinstalled snapshot injects (profile gate satisfied)",
@@ -1026,10 +1130,47 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 			wantState:    recipe.GPUDriverStatePreinstalled,
 		},
 		{
-			name:      "aks + absent snapshot records state for the bundle-time gate",
-			service:   "aks",
-			snap:      gpuHardwareSnapshot(false),
-			wantState: recipe.GPUDriverStateAbsent,
+			// Pre-profile behavior recorded GPUDriverStateAbsent and deferred
+			// to the bundle-time gate. The gpuStack profile supersedes that:
+			// a None-mode pool snapshot fails the default azure-managed value's
+			// distinguishing constraint at resolution. Select
+			// gpuStack=operator-managed for these pools instead.
+			name:    "aks + absent snapshot fails the azure-managed constraint",
+			service: "aks",
+			snap:    gpuHardwareSnapshot(false),
+			wantErr: `constraint "K8s.aks-gpu-pools.gpu-driver" failed`,
+		},
+		{
+			// The pool reading and the sampled node can legitimately
+			// disagree: Install-mode pools during a failed AKS driver
+			// install or mid-reimage sample driver-loaded=false. The
+			// azure-managed constraint (gpu-driver=Install) still passes —
+			// pool mode is the ownership contract, not live state — and
+			// the legacy post-processing records GPUDriverStateAbsent for
+			// the bundle-time coherence gate. driver.enabled=false is
+			// present from the profile fragment itself (wantInjected here
+			// observes the final override, not its provenance).
+			name:         "aks + Install pools with driver absent passes constraint, records absent",
+			service:      "aks",
+			snap:         gpuHardwareSnapshotPools("Install", false),
+			wantInjected: true,
+			wantState:    recipe.GPUDriverStateAbsent,
+		},
+		{
+			// Subordination, pinned against the real embedded AKS
+			// declaration at its sharp case: gpuStack=operator-managed sets
+			// driver.enabled=true while the sampled node reports a loaded
+			// driver — the legacy auto-override wants to inject false on
+			// exactly that path. The profile owns it, so the injector
+			// must skip and the fragment's true must survive; an injector
+			// regression here would bake a divergence from the recipe's
+			// own recorded profile that no bundle-time lock can catch.
+			name:              "aks + operator profile + preinstalled driver: injector subordinated on owned path",
+			service:           "aks",
+			profile:           "gpuStack=operator-managed",
+			snap:              gpuHardwareSnapshotPools("None", true),
+			wantState:         recipe.GPUDriverStatePreinstalled,
+			wantDriverEnabled: func() *bool { b := true; return &b }(),
 		},
 		{
 			name:         "eks bare + preinstalled snapshot skips (no profile gate)",
@@ -1060,10 +1201,12 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 			wantState: recipe.GPUDriverStateAbsent,
 		},
 		{
-			name:         "aks + k8s-only snapshot is Unknown → no override",
-			service:      "aks",
-			snap:         k8sVersionSnapshot(),
-			wantInjected: false,
+			// A snapshot without the pool projection cannot qualify either
+			// value: DD3 fails closed on unavailable provider data.
+			name:    "aks + k8s-only snapshot fails closed (no pool reading)",
+			service: "aks",
+			snap:    k8sVersionSnapshot(),
+			wantErr: `reading "K8s.aks-gpu-pools.gpu-driver" is unavailable`,
 		},
 		{
 			name:         "gke-cos + k8s-only snapshot is Unknown → no override",
@@ -1097,7 +1240,13 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 				t.Fatalf("BuildCriteria: %v", err)
 			}
 
-			rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), tt.snap)
+			rec, err := c.ResolveRecipeFromSnapshotWithProfile(t.Context(), aicr.WrapCriteria(crit), tt.snap, tt.profile)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ResolveRecipeFromSnapshot error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
 			}
@@ -1107,6 +1256,15 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 			}
 
 			enabled, present := gpuOperatorDriverEnabled(t, rec)
+			if tt.wantDriverEnabled != nil {
+				if !present {
+					t.Fatal("driver.enabled override missing")
+				}
+				if enabled != *tt.wantDriverEnabled {
+					t.Fatalf("driver.enabled = %v, want %v (injector must not overwrite the profile-owned value)", enabled, *tt.wantDriverEnabled)
+				}
+				return
+			}
 			if tt.wantInjected {
 				if !present {
 					t.Fatal("driver.enabled override missing — expected the auto-detect injection")
@@ -1612,7 +1770,16 @@ func k8sVersionSnapshot() *aicr.Snapshot {
 // GPU/hardware subtype with driver-loaded set to the given value.
 // Used to drive the snapshot-based auto-detection of the GPU Operator's
 // driver.enabled Helm value (see gpu_driver_state.go).
+// gpuHardwareSnapshot builds the coherent cases: a preinstalled driver
+// means Install-mode pools, an unloaded driver means None-mode pools. Use
+// gpuHardwareSnapshotPools directly to decouple pool mode from the sampled
+// driver state (e.g. Install pools mid-reimage with no driver loaded).
 func gpuHardwareSnapshot(driverLoaded bool) *aicr.Snapshot {
+	return gpuHardwareSnapshotPools(
+		map[bool]string{true: "Install", false: "None"}[driverLoaded], driverLoaded)
+}
+
+func gpuHardwareSnapshotPools(poolMode string, driverLoaded bool) *aicr.Snapshot {
 	const version = "v1.34.0"
 	return aicr.WrapSnapshot(&snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
@@ -1620,6 +1787,13 @@ func gpuHardwareSnapshot(driverLoaded bool) *aicr.Snapshot {
 				WithSubtypeBuilder(
 					measurement.NewSubtypeBuilder("server").
 						SetString("version", version),
+				).
+				// The AKS gpuProfile.driver projection the pool-mode
+				// collector emits (Install = AKS preinstall, None =
+				// --gpu-driver none).
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("aks-gpu-pools").
+						SetString("gpu-driver", poolMode),
 				).
 				Build(),
 			measurement.NewMeasurement(measurement.TypeGPU).
@@ -2014,17 +2188,32 @@ func TestBundleComponents_DriverOwnershipPreflight(t *testing.T) {
 		return c, rec
 	}
 
-	t.Run("absent driver → BundleComponents blocked", func(t *testing.T) {
+	t.Run("absent driver → resolution fails the profile constraint", func(t *testing.T) {
 		t.Parallel()
-		c, rec := newAKSRecipe(t, gpuHardwareSnapshot(false))
-
-		if got := rec.Resolved().Metadata.GPUDriverState; got != recipe.GPUDriverStateAbsent {
-			t.Fatalf("precondition: GPUDriverState = %q, want %q", got, recipe.GPUDriverStateAbsent)
+		// Pre-profile, this state resolved with GPUDriverStateAbsent recorded
+		// and the driverless mismatch was caught by the bundle-time
+		// preflight. The AKS gpuStack profile moves that failure to
+		// generation: a None-mode pool snapshot cannot qualify the default
+		// azure-managed value, so BundleComponents is never reached.
+		c, err := aicr.NewClient(
+			aicr.WithRecipeSource(aicr.EmbeddedSource()),
+			aicr.WithVersion("test"),
+		)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
 		}
-
-		bundles, err := c.BundleComponents(t.Context(), rec)
+		t.Cleanup(func() { _ = c.Close() })
+		crit, err := recipe.BuildCriteriaWithRegistry(nil,
+			recipe.WithServiceRegistry("aks"),
+			recipe.WithAcceleratorRegistry("h100"),
+			recipe.WithIntentRegistry("training"),
+		)
+		if err != nil {
+			t.Fatalf("BuildCriteria: %v", err)
+		}
+		_, err = c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), gpuHardwareSnapshot(false))
 		if err == nil {
-			t.Fatalf("BundleComponents = nil error, want driver-ownership preflight failure (bundles: %d)", len(bundles))
+			t.Fatal("ResolveRecipeFromSnapshot = nil error, want profile constraint failure")
 		}
 		var se *aicrerrors.StructuredError
 		if !errors.As(err, &se) {
@@ -2033,8 +2222,8 @@ func TestBundleComponents_DriverOwnershipPreflight(t *testing.T) {
 		if se.Code != aicrerrors.ErrCodeInvalidRequest {
 			t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
 		}
-		if !strings.Contains(err.Error(), "driverless") {
-			t.Errorf("error missing driver-ownership context: %v", err)
+		if !strings.Contains(err.Error(), `constraint "K8s.aks-gpu-pools.gpu-driver" failed`) {
+			t.Errorf("error missing profile-constraint context: %v", err)
 		}
 	})
 
@@ -2050,4 +2239,41 @@ func TestBundleComponents_DriverOwnershipPreflight(t *testing.T) {
 			t.Fatal("BundleComponents returned no bundles")
 		}
 	})
+}
+
+func TestBundleComponentsValidatesEffectiveAccountingValues(t *testing.T) {
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	result, err := client.ResolveRecipeFromCriteriaWithOptions(
+		t.Context(),
+		aicr.WrapCriteria(&recipe.Criteria{
+			Service:     recipe.CriteriaServiceEKS,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Intent:      recipe.CriteriaIntentTraining,
+			OS:          recipe.CriteriaOSUbuntu,
+			Platform:    recipe.CriteriaPlatformSlurm,
+		}),
+		aicr.WithAccountingMode("aicr-provided"),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteriaWithOptions() error = %v", err)
+	}
+	slurm := result.Resolved().GetComponentRef("slinky-slurm")
+	if slurm == nil {
+		t.Fatal("resolved recipe missing slinky-slurm")
+	}
+	accounting, ok := slurm.Overrides["accounting"].(map[string]any)
+	if !ok {
+		t.Fatalf("slinky-slurm accounting override = %T, want map", slurm.Overrides["accounting"])
+	}
+	accounting["storageConfig"] = map[string]any{"database": "unexpected"}
+
+	_, err = client.BundleComponents(t.Context(), result)
+	if err == nil || !strings.Contains(err.Error(), "accounting-owned value") {
+		t.Fatalf("BundleComponents() error = %v, want accounting contract rejection", err)
+	}
 }

@@ -61,6 +61,14 @@ Exit codes:
 				Category: catInput,
 				Required: true,
 			},
+			&cli.StringFlag{
+				Name: flagProfile,
+				Usage: `Configuration profile selection in name=value form (same semantics as
+	"aicr recipe --profile"). Applies only to overlay inputs; a hydrated
+	RecipeResult input already carries its baked-in selection and rejects
+	the flag.`,
+				Category: catInput,
+			},
 			kubeconfigFlag(),
 		},
 		Action: runEvidenceDigestCmd,
@@ -68,7 +76,7 @@ Exit codes:
 }
 
 func runEvidenceDigestCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := validateSingleValueFlags(cmd, cmdNameRecipe, "kubeconfig"); err != nil {
+	if err := validateSingleValueFlags(cmd, cmdNameRecipe, flagProfile, "kubeconfig"); err != nil {
 		return err
 	}
 
@@ -79,7 +87,8 @@ func runEvidenceDigestCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	dp := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	digest, err := attestation.ComputeRecipeDigest(ctx, dp, path, cmd.String("kubeconfig"), version)
+	digest, err := attestation.ComputeRecipeDigestWithProfile(
+		ctx, dp, path, cmd.String("kubeconfig"), version, cmd.String(flagProfile))
 	if err != nil {
 		return err
 	}

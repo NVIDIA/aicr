@@ -24,6 +24,14 @@
 #     --emit-attestation ./out --push ghcr.io/<owner>/aicr-evidence --no-sign
 #   cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
 #
+# Profiled families (AKS gpuStack): snapshot with --aks-gpu-pools and pass
+# -r a recipe hydrated via `aicr recipe -s snapshot.yaml --intent <intent>
+# [--platform <platform>] --profile gpuStack=<value>` — the raw overlay
+# resolves only the declaration default, and intent/platform are
+# author-selected (not in the fingerprint), so state the target leaf's
+# intent and optional platform explicitly.
+# See docs/contributor/evidence-publishing.md.
+#
 # They then run THIS workflow from their fork's Actions tab. It scans every
 # flat pointer under recipes/evidence/ except allowlist.yaml and runs
 # `aicr evidence sign --relocate` on each: an unsigned pointer is signed with

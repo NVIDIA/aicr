@@ -26,10 +26,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/k8s/agent"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
+	"github.com/NVIDIA/aicr/pkg/k8s/pod"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -114,6 +118,14 @@ type AgentConfig struct {
 	// (AICR_AGENT_MODE=true) where the file lives on the caller's host.
 	ClusterConfigPath string
 
+	// AKSGPUPoolsPath, when set, points at an operator-supplied
+	// `az aks nodepool list -o json` dump on the CALLER's filesystem.
+	// The projection is pure file processing, so unlike ClusterConfigPath
+	// it never enters the pod: the controller-side CLI projects it before
+	// deploying (fail-loud on a bad file, before any cluster work) and
+	// merges the aks-gpu-pools subtype into the snapshot the Job returns.
+	AKSGPUPoolsPath string
+
 	// DiscoverNetwork enables the in-pod network collector's live l8k
 	// discovery path. Discovery is NOT read-only — it writes node labels
 	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
@@ -138,7 +150,7 @@ type AgentConfig struct {
 // deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
 // It creates the deployer, deploys RBAC and the Job, streams logs, waits for completion,
 // and retrieves the snapshot data from the result ConfigMap.
-func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string) ([]byte, error) {
+func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string, deliverViaConfigMap bool) ([]byte, error) {
 	// Job mode forwards --cluster-config as an env var into the pod
 	// (AICR_CLUSTER_CONFIG_PATH) without mounting the host file: the
 	// caller's filesystem isn't reachable from inside the Job, and the
@@ -152,6 +164,18 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"--cluster-config is not supported in agent Job mode (the host path is not visible to the in-pod CLI); use --discover-network for live cluster discovery, or run with AICR_AGENT_MODE=true to use --cluster-config locally",
 			map[string]any{"path": config.ClusterConfigPath})
+	}
+	// The pool projection is pure file processing on the caller's host —
+	// project it BEFORE deploying so a bad file fails in milliseconds,
+	// not after a Job round-trip, and merge it into the returned snapshot
+	// below. It deliberately does not ride the in-pod collector path.
+	var aksGPUPools *measurement.Subtype
+	if config.AKSGPUPoolsPath != "" {
+		subtype, err := k8scollector.ProjectAKSGPUPools(ctx, config.AKSGPUPoolsPath)
+		if err != nil {
+			return nil, err
+		}
+		aksGPUPools = &subtype
 	}
 
 	// Auto-inject GPU node selector when no placement constraints are set.
@@ -282,7 +306,95 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
 	}
 
+	if aksGPUPools != nil {
+		snapshotData, err = mergeAKSGPUPools(snapshotData, *aksGPUPools)
+		if err != nil {
+			return nil, err
+		}
+		// The Job stored the PRE-merge snapshot in the result ConfigMap,
+		// and Cleanup removes Job+RBAC but never that ConfigMap. Rewrite
+		// it with the merged bytes so no projection-less artifact
+		// persists — a later consumer of the ConfigMap must not see
+		// "reading unavailable" on a cluster whose operator supplied the
+		// pool file.
+		//
+		// The rewrite is load-bearing ONLY when the ConfigMap is the
+		// delivery vehicle (the user asked for cm:// output; agentOutput
+		// is that URI then) — there it fails the run. For file/stdout
+		// output and SDK callers the returned bytes already carry the
+		// merged reading, so a transient Apply failure on the internal
+		// hygiene rewrite must not discard an already-captured snapshot;
+		// warn loudly instead (the orphaned ConfigMap stays pre-merge).
+		if err := rewriteMergedSnapshotConfigMap(ctx, agentOutput, config.Kubeconfig,
+			snapshotData, deliverViaConfigMap); err != nil {
+			return nil, err
+		}
+	}
+
 	return snapshotData, nil
+}
+
+// mergeAKSGPUPools attaches the controller-side pool projection to the
+// snapshot the agent Job returned. The merge is performed on generic maps,
+// NOT through the controller's typed Snapshot struct: the agent image is
+// user-pinnable, so a newer agent may emit fields this binary's struct does
+// not declare, and a typed round-trip would silently drop them from both
+// the returned snapshot and the rewritten ConfigMap. The subtype cannot
+// affect the cluster fingerprint (fingerprint dimensions read no
+// aks-gpu-pools key), so merging after the in-pod derivation is sound.
+func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(snapshotData, &doc); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to parse agent snapshot for AKS GPU pools merge", err)
+	}
+	if doc == nil {
+		// An empty or `null` document unmarshals to a nil map without
+		// error (malfunctioning agent image); the fallback insertion
+		// below must not panic on it.
+		doc = make(map[string]any)
+	}
+
+	// Render the subtype through its own YAML tags so the inserted node is
+	// byte-shaped exactly like a collector-emitted one.
+	subtypeYAML, err := yaml.Marshal(subtype)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to serialize AKS GPU pools subtype", err)
+	}
+	var subtypeNode map[string]any
+	if reshapeErr := yaml.Unmarshal(subtypeYAML, &subtypeNode); reshapeErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to reshape AKS GPU pools subtype", reshapeErr)
+	}
+
+	measurements, _ := doc["measurements"].([]any)
+	attached := false
+	for _, m := range measurements {
+		mm, ok := m.(map[string]any)
+		if !ok || mm["type"] != string(measurement.TypeK8s) {
+			continue
+		}
+		subtypes, _ := mm["subtypes"].([]any)
+		mm["subtypes"] = append(subtypes, subtypeNode)
+		attached = true
+		break
+	}
+	if !attached {
+		doc["measurements"] = append(measurements, map[string]any{
+			"type":     string(measurement.TypeK8s),
+			"subtypes": []any{subtypeNode},
+		})
+	}
+
+	// Deterministic serializer: plain yaml.Marshal walks Go map order,
+	// so identical runs would produce byte-different snapshots.
+	merged, err := serializer.MarshalYAMLDeterministic(doc)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to serialize snapshot after AKS GPU pools merge", err)
+	}
+	return merged, nil
 }
 
 // getKubeClient returns a Kubernetes client, using the kubeconfig override if provided.
@@ -318,7 +430,8 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 
 	agentOutput := fmt.Sprintf("%s%s/aicr-snapshot", serializer.ConfigMapURIScheme, config.Namespace)
 
-	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, agentOutput)
+	// SDK path: the consumer uses the returned Snapshot; the ConfigMap is internal.
+	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, agentOutput, false)
 	if err != nil {
 		return nil, err
 	}
@@ -547,12 +660,13 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 	// Agent Job always writes to a ConfigMap internally.
 	// If user specified a ConfigMap URI, use that; otherwise use a default ConfigMap.
 	agentOutput := fmt.Sprintf("%s%s/aicr-snapshot", serializer.ConfigMapURIScheme, n.AgentConfig.Namespace)
-	if strings.HasPrefix(finalOutput, serializer.ConfigMapURIScheme) {
+	deliverViaConfigMap := strings.HasPrefix(finalOutput, serializer.ConfigMapURIScheme)
+	if deliverViaConfigMap {
 		// User explicitly wants ConfigMap output, use their URI
 		agentOutput = finalOutput
 	}
 
-	snapshotData, err := deployAndWaitForResult(ctx, clientset, n.AgentConfig, agentOutput)
+	snapshotData, err := deployAndWaitForResult(ctx, clientset, n.AgentConfig, agentOutput, deliverViaConfigMap)
 	if err != nil {
 		return err
 	}
@@ -581,7 +695,9 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to stdout", err)
 		}
 	case strings.HasPrefix(finalOutput, serializer.ConfigMapURIScheme):
-		// Already in ConfigMap (written by Job)
+		// Written by the Job; when --aks-gpu-pools was supplied,
+		// deployAndWaitForResult has already rewritten it with the
+		// merged bytes.
 		slog.Info("snapshot saved to ConfigMap", slog.String("uri", finalOutput))
 	default:
 		// Write to file
@@ -592,6 +708,76 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// rewriteSnapshotConfigMap re-serializes merged snapshot bytes into the
+// user-requested ConfigMap destination, replacing the pre-merge content the
+// agent Job stored there.
+// rewriteMergedSnapshotConfigMap applies the merged snapshot bytes back to
+// the result ConfigMap and encodes the delivery contract: when the ConfigMap
+// is the user's delivery vehicle (cm:// output) a rewrite failure fails the
+// run, otherwise it degrades to a loud warning — the returned bytes already
+// carry the merged reading, and a transient Apply failure on the internal
+// hygiene rewrite must not discard an already-captured snapshot.
+func rewriteMergedSnapshotConfigMap(ctx context.Context, uri, kubeconfig string, snapshotData []byte, deliverViaConfigMap bool) error {
+	err := rewriteSnapshotConfigMap(ctx, uri, kubeconfig, snapshotData)
+	if err == nil {
+		return nil
+	}
+	if deliverViaConfigMap {
+		return err
+	}
+	slog.Warn("failed to rewrite the internal snapshot ConfigMap with the merged pool projection; "+
+		"the returned snapshot carries the reading, but the orphaned ConfigMap remains pre-merge",
+		"uri", uri, "error", err)
+	return nil
+}
+
+func rewriteSnapshotConfigMap(ctx context.Context, uri, kubeconfig string, snapshotData []byte) error {
+	namespace, name, err := pod.ParseConfigMapURI(uri)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse snapshot ConfigMap URI", err)
+	}
+	// Generic-map round trip, same reason as mergeAKSGPUPools: the typed
+	// Snapshot struct would drop fields a newer agent image emitted. The
+	// rawSnapshotDoc wrapper keeps the ConfigMap's kind/version labels
+	// populated from the document header.
+	var doc map[string]any
+	if err := yaml.Unmarshal(snapshotData, &doc); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to parse merged snapshot for ConfigMap rewrite", err)
+	}
+	writer := serializer.NewConfigMapWriterWithKubeconfig(namespace, name, kubeconfig, serializer.FormatYAML)
+	if err := writer.Serialize(ctx, rawSnapshotDoc{doc: doc}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to rewrite snapshot ConfigMap with AKS GPU pools merge", err)
+	}
+	return nil
+}
+
+// rawSnapshotDoc lets a generic snapshot document flow through serializers
+// that extract header metadata: it marshals as the raw document (no typed
+// round trip, no field loss) while exposing kind and string metadata from
+// the document itself.
+type rawSnapshotDoc struct {
+	doc map[string]any
+}
+
+//nolint:unparam // the (any, error) shape is yaml.Marshaler's fixed contract
+func (r rawSnapshotDoc) MarshalYAML() (any, error) { return r.doc, nil }
+
+func (r rawSnapshotDoc) GetKind() header.Kind {
+	kind, _ := r.doc["kind"].(string)
+	return header.Kind(kind)
+}
+
+func (r rawSnapshotDoc) GetMetadata() map[string]string {
+	out := make(map[string]string)
+	meta, _ := r.doc["metadata"].(map[string]any)
+	for k, v := range meta {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
 }
 
 // processWithTemplate processes snapshot data through a Go template.

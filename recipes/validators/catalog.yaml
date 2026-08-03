@@ -234,9 +234,12 @@ validators:
     env: []
   - name: slinky-slurm-health
     phase: conformance
-    description: "Verify Slinky Slurm controller, node inventory, job submission, and GPU container execution health"
+    description: "Verify Slinky Slurm controller, scheduling, GPU execution, and enabled accounting health"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
-    timeout: 5m
+    # Includes the sbatch/sacct probe bounded by
+    # defaults.SlurmAccountingRecordTimeout. Keep this envelope aligned if
+    # that timeout increases.
+    timeout: 8m
     args: ["slinky-slurm-health"]
     env: []
   - name: slinky-slurm-imex-channel

@@ -15,18 +15,20 @@
 # GPU Operator Helm values
 # AKS base configuration overrides
 #
-# By default AICR follows the AKS driver-only install profile — the CSP
+# By default AICR follows the AKS azure-managed install profile — the CSP
 # default (`--enable-managed-gpu=false`, no `--gpu-driver none`): the AKS
 # node image preinstalls the NVIDIA driver and container toolkit, so the
 # GPU Operator runs with driver.enabled=false, toolkit.enabled=false, and
 # operator.runtimeClass=nvidia-container-runtime — always the three
 # together, never just one of them.
 # To let the GPU Operator manage the driver instead (nodepools created
-# with `--gpu-driver none`), flip all of these at bundle time:
-#   --set gpuoperator:driver.enabled=true \
-#   --set gpuoperator:toolkit.enabled=true \
-#   --set gpuoperator:operator.runtimeClass=nvidia \
-#   --set dradriver:nvidiaDriverRoot=/run/nvidia/driver
+# with `--gpu-driver none`), select the operator profile value at recipe
+# time:
+#   aicr recipe --service aks ... --profile gpuStack=operator-managed
+# The gpuStack profile declaration on the aks overlay owns these paths
+# (plus nvidia-dra-driver-gpu's nvidiaDriverRoot), so flipping them via
+# per-path --set overrides diverging from the selected value is rejected
+# at bundle time.
 # See docs/integrator/aks-gpu-setup.md and
 # https://learn.microsoft.com/en-us/azure/aks/nvidia-gpu-operator
 #
@@ -50,15 +52,17 @@ nfd:
 # driver.enabled=false it is inert, but the correct value prevents a
 # future ownership-mode change from reviving the bug.
 driver:
-  # AKS driver-only profile: the node image preinstalls the driver.
+  # AKS azure-managed profile: the node image preinstalls the driver.
   enabled: false
   rdma:
     enabled: true
     useHostMofed: false
 
 # The operator deploys gdrcopy as a sidecar container in the operator-managed
-# driver pod, so it is inert under driver.enabled=false; re-enable with the
-# GPU-Operator-managed override set (see docs/integrator/aks-gpu-setup.md).
+# driver pod, so it is inert under driver.enabled=false; to enable it,
+# select the operator profile (aicr recipe ... --profile gpuStack=operator-managed)
+# and add --set gpuoperator:gdrcopy.enabled=true at bundle time — the path
+# is not profile-owned (see docs/integrator/aks-gpu-setup.md).
 gdrcopy:
   enabled: false
 
@@ -91,7 +95,7 @@ operator:
 #     additionalLabels:
 #       release: kube-prometheus  # Must match kube-prometheus-stack Helm release name
 
-# AKS driver-only profile: the node image preinstalls the container
+# AKS azure-managed profile: the node image preinstalls the container
 # toolkit and preconfigures containerd, so the operator's toolkit
 # DaemonSet stays off. The RUNTIME_CONFIG_SOURCE env is inert while
 # enabled=false but kept correct for a GPU-Operator-managed flip:
@@ -108,7 +112,7 @@ toolkit:
   enabled: false
   # Device-isolation hardening for the operator-managed toolkit (the
   # GPU-Operator-managed fallback profile, --gpu-driver none + toolkit.enabled
-  # =true). Inert while toolkit.enabled=false (the driver-only default — there
+  # =true). Inert while toolkit.enabled=false (the azure-managed default — there
   # the node-image toolkit is hardened by the nvidia-toolkit-hardening
   # DaemonSet instead). The toolkit installer reads these uppercase env names
   # and writes the lowercase config.toml keys; RUNTIME_CONFIG_SOURCE=file does

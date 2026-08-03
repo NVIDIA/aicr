@@ -41,15 +41,18 @@ import (
 // facade-backed handlers stay byte-identical.
 var recipeCacheTTL = defaults.RecipeCacheTTL
 
+const slurmAccountingModeQueryParameter = "slurmAccountingMode"
+
 var v2CriteriaQueryParameters = map[string]struct{}{
-	keyService:    {},
-	"accelerator": {},
-	"gpu":         {},
-	"intent":      {},
-	"os":          {},
-	"platform":    {},
-	keyNodes:      {},
-	keyProfile:    {},
+	keyService:                        {},
+	"accelerator":                     {},
+	"gpu":                             {},
+	"intent":                          {},
+	"os":                              {},
+	"platform":                        {},
+	keyNodes:                          {},
+	keyProfile:                        {},
+	slurmAccountingModeQueryParameter: {},
 }
 
 // recipeHandler backs the recipe and query endpoints on both routes —
@@ -212,6 +215,11 @@ func (h *recipeHandler) handleRecipes(w http.ResponseWriter, r *http.Request, v2
 			"Recipe criteria cannot be empty", false, nil)
 		return
 	}
+	resolveOpts, err := recipeResolveOptions(r, profile, v2)
+	if err != nil {
+		WriteErrorFromErr(w, r, err, "Invalid Slurm accounting mode", nil)
+		return
+	}
 
 	logger.Debug("criteria",
 		keyService, criteria.Service,
@@ -232,9 +240,8 @@ func (h *recipeHandler) handleRecipes(w http.ResponseWriter, r *http.Request, v2
 		}
 	}
 
-	result, err := h.client.ResolveRecipeFromCriteriaWithProfile(
-		ctx, aicr.WrapCriteria(criteria), profile,
-	)
+	result, err := h.client.ResolveRecipeFromCriteriaWithOptions(
+		ctx, aicr.WrapCriteria(criteria), resolveOpts...)
 	if err != nil {
 		WriteErrorFromErr(w, r, err, "Failed to build recipe", nil)
 		return
@@ -244,6 +251,7 @@ func (h *recipeHandler) handleRecipes(w http.ResponseWriter, r *http.Request, v2
 			"Profiled recipes are available only on /v2/recipe", false, nil)
 		return
 	}
+	resolved := normalizeLegacyRecipeResult(result.Resolved(), v2)
 
 	// Set caching headers
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(recipeCacheTTL.Seconds())))
@@ -253,7 +261,7 @@ func (h *recipeHandler) handleRecipes(w http.ResponseWriter, r *http.Request, v2
 	// returns the borrowed upstream pointer the facade wraps; nil would mean
 	// the result lacks internal state (only possible from a hand-constructed
 	// RecipeResult, which ResolveRecipeFromCriteria never returns).
-	serializer.RespondJSON(w, http.StatusOK, result.Resolved())
+	serializer.RespondJSON(w, http.StatusOK, resolved)
 }
 
 // HandleQuery processes query requests. It resolves a recipe from criteria,
@@ -438,6 +446,11 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request, v2 b
 			"Query criteria cannot be empty", false, nil)
 		return
 	}
+	resolveOpts, err := recipeResolveOptions(r, profile, v2)
+	if err != nil {
+		WriteErrorFromErr(w, r, err, "Invalid Slurm accounting mode", nil)
+		return
+	}
 
 	logger.Debug("query",
 		keyService, criteria.Service,
@@ -458,9 +471,8 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request, v2 b
 		}
 	}
 
-	rec, err := h.client.ResolveRecipeFromCriteriaWithProfile(
-		ctx, aicr.WrapCriteria(criteria), profile,
-	)
+	rec, err := h.client.ResolveRecipeFromCriteriaWithOptions(
+		ctx, aicr.WrapCriteria(criteria), resolveOpts...)
 	if err != nil {
 		WriteErrorFromErr(w, r, err, "Failed to build recipe", nil)
 		return
@@ -470,13 +482,14 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request, v2 b
 			"Profiled recipes are available only on /v2/query", false, nil)
 		return
 	}
+	resolved := normalizeLegacyRecipeResult(rec.Resolved(), v2)
 
 	// Hydrate and select as two steps (rather than the combined
 	// aicr.SelectFromRecipe) to preserve the legacy handler's distinct error
 	// mapping: a hydrate failure surfaces via its own error code (5xx), while a
-	// missing selector path is a 404. rec.Resolved() returns the upstream
-	// pkg/recipe.RecipeResult that HydrateResult accepts.
-	hydrated, err := recipe.HydrateResultWithContext(ctx, rec.Resolved())
+	// missing selector path is a 404. The legacy projection preserves the
+	// resolved result's bound DataProvider so hydration uses the same source.
+	hydrated, err := recipe.HydrateResultWithContext(ctx, resolved)
 	if err != nil {
 		WriteErrorFromErr(w, r, err, "Failed to hydrate recipe", nil)
 		return
@@ -547,7 +560,10 @@ func resolvePOSTProfileSelection(
 		}
 		return "", nil
 	}
-	if err := validateV2QueryParameters(r, map[string]struct{}{keyProfile: {}}); err != nil {
+	if err := validateV2QueryParameters(r, map[string]struct{}{
+		keyProfile:                        {},
+		slurmAccountingModeQueryParameter: {},
+	}); err != nil {
 		return "", err
 	}
 	queryProfile, err := singleQueryValue(r, keyProfile)
@@ -670,4 +686,41 @@ func bodyHasTopLevelProfile(data []byte, format serializer.Format) (bool, error)
 			aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported profile field format %q", format))
 	}
+}
+
+func recipeResolveOptions(r *http.Request, profile string, v2 bool) ([]aicr.RecipeResolveOption, error) {
+	var opts []aicr.RecipeResolveOption
+	if profile != "" {
+		opts = append(opts, aicr.WithProfile(profile))
+	}
+	values, present := r.URL.Query()[slurmAccountingModeQueryParameter]
+	if !present {
+		return opts, nil
+	}
+	if !v2 {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			"slurmAccountingMode is available only on the /v2 endpoints")
+	}
+	if len(values) != 1 || values[0] == "" {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			"slurmAccountingMode must be provided exactly once with a non-empty value")
+	}
+	if _, err := recipe.ParseAccountingMode(values[0]); err != nil {
+		return nil, err
+	}
+	return append(opts, aicr.WithAccountingMode(values[0])), nil
+}
+
+func normalizeLegacyRecipeResult(result *recipe.RecipeResult, v2 bool) *recipe.RecipeResult {
+	if result == nil || v2 {
+		return result
+	}
+	if _, configured := result.AccountingMode(); !configured {
+		return result
+	}
+	projected := result.DeepCopy()
+	projected.BindDataProvider(result.DataProvider())
+	projected.Configuration = nil
+	projected.APIVersion = recipe.RecipeAPIVersion
+	return projected
 }

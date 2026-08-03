@@ -67,6 +67,51 @@ func newTestBundleHandler(t *testing.T) *bundleHandler {
 	return newBundleHandler(client, nil, nil)
 }
 
+func TestDecodeRecipeResultRequestStrictForConfiguredRecipes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{
+			name: "legacy permits unknown field",
+			body: `{"apiVersion":"aicr.run/v1alpha2","kind":"RecipeResult","legacyExtension":true}`,
+		},
+		{
+			name: "configured recipe succeeds",
+			body: `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}}}`,
+		},
+		{
+			name:    "configured rejects unknown field",
+			body:    `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}},"unknownField":true}`,
+			wantErr: true,
+		},
+		{
+			name:    "rejects trailing document",
+			body:    `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult"} {}`,
+			wantErr: true,
+		},
+		{
+			name:    "legacy rejects trailing document too",
+			body:    `{"apiVersion":"aicr.run/v1alpha2","kind":"RecipeResult"} {}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var result recipe.RecipeResult
+			err := decodeRecipeResultRequest(strings.NewReader(tt.body), &result)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("decodeRecipeResultRequest() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // resolveEmbeddedBundleBody resolves a known-good embedded recipe and returns
 // its wire-format JSON (the pkg/recipe.RecipeResult shape the bundle handler
 // decodes), so attest tests can drive a real, successful bundle end-to-end.
@@ -608,12 +653,10 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 // header fields are absent, empty, or carry the legacy Recipe kind this
 // contract published through v0.18.0.
 //
-// The handler validates no header field, so without this test the promise is
-// enforced only by TestOpenAPIV1BundleRecipeContract parsing the spec against
-// itself — a later header check would break the documented contract while every
-// test stayed green. The canonical case is included deliberately as a control:
-// it proves a 200 here means the body was accepted, not that the assertion is
-// vacuous.
+// The handler validates supported non-empty apiVersions while preserving this
+// explicit legacy window. The canonical case is included deliberately as a
+// control: it proves a 200 here means the body was accepted, not that the
+// assertion is vacuous.
 func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 	t.Parallel()
 

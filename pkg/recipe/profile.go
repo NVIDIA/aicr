@@ -35,7 +35,7 @@ import (
 // RecipeProfileAPIVersion is the RecipeMetadata and RecipeResult version used
 // when a configuration profile is present. Other AICR artifact kinds remain on
 // header.GroupVersion.
-const RecipeProfileAPIVersion = header.APIGroup + "/v1alpha3"
+const RecipeProfileAPIVersion = header.RecipeResultGroupVersion
 
 const (
 	profileAdvertiserExternal   = "external"
@@ -83,6 +83,14 @@ type SelectedProfile struct {
 	OwnedPaths map[string][]string `json:"ownedPaths" yaml:"ownedPaths"`
 }
 
+// OwnershipDomain identifies one closed configuration owner and the component
+// value paths it controls. Paths use canonical component names and dot notation;
+// the synthetic "enabled" path represents ownership of component presence.
+type OwnershipDomain struct {
+	Name  string
+	Paths map[string][]string
+}
+
 // ProfileSummary is the compact catalog projection of an effective profile.
 type ProfileSummary struct {
 	Name        string   `json:"name" yaml:"name"`
@@ -120,6 +128,29 @@ func validProfileIdentifier(value string) bool {
 	return profileIdentifierPattern.MatchString(value)
 }
 
+// caseUniqueValueNames returns the declaration's value names sorted,
+// rejecting names that differ only by case: evidence and corroboration
+// derive lowercase path segments from the selected value, so "Operator"
+// and "operator" would collapse onto one evidence directory and overwrite
+// each other's results.
+func caseUniqueValueNames(decl *ProfileDeclaration) ([]string, error) {
+	valueNames := make([]string, 0, len(decl.Values))
+	lowered := make(map[string]string, len(decl.Values))
+	for name := range decl.Values {
+		valueNames = append(valueNames, name)
+		lower := strings.ToLower(name)
+		if prev, dup := lowered[lower]; dup {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("profile %q values %q and %q differ only by case; "+
+					"evidence path segments are lowercase, so value names must be "+
+					"case-insensitively unique", decl.Name, prev, name))
+		}
+		lowered[lower] = name
+	}
+	sort.Strings(valueNames)
+	return valueNames, nil
+}
+
 // ValidateProfileDeclaration validates the closed v1 profile declaration and
 // returns its declaration-wide ownership record.
 func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, error) {
@@ -143,11 +174,10 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 			fmt.Sprintf("profile %q default %q is not a declared value", decl.Name, decl.Default))
 	}
 
-	valueNames := make([]string, 0, len(decl.Values))
-	for name := range decl.Values {
-		valueNames = append(valueNames, name)
+	valueNames, nameErr := caseUniqueValueNames(decl)
+	if nameErr != nil {
+		return nil, nameErr
 	}
-	sort.Strings(valueNames)
 
 	var expected []string
 	ownedSet := make(map[string]map[string]struct{})
@@ -550,18 +580,21 @@ func (r *RecipeResult) ValidateProfileContract() error {
 		}
 		return r.validateInlineDeepCopyCycles()
 	case RecipeProfileAPIVersion:
+		if err := r.validateProfileMetadataItems(); err != nil {
+			return err
+		}
 		if r.Metadata.SelectedProfile == nil {
+			if _, accountingConfigured := r.AccountingMode(); accountingConfigured {
+				return r.validateInlineDeepCopyCycles()
+			}
 			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("recipe apiVersion %q requires metadata.selectedProfile", RecipeProfileAPIVersion))
+				fmt.Sprintf("recipe apiVersion %q requires metadata.selectedProfile or configuration.slurm.accounting",
+					RecipeProfileAPIVersion))
 		}
 	default:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe has unsupported apiVersion %q; expected %q or %q",
 				r.APIVersion, RecipeAPIVersion, RecipeProfileAPIVersion))
-	}
-
-	if err := r.validateProfileMetadataItems(); err != nil {
-		return err
 	}
 
 	selected := r.Metadata.SelectedProfile
@@ -881,6 +914,36 @@ func PathsIntersect(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// ValidateOwnershipDisjoint rejects exact, ancestor, or descendant path
+// intersection between two independent configuration owners. Components are
+// compared by canonical name; iteration is sorted so the first reported
+// conflict is deterministic.
+func ValidateOwnershipDisjoint(first, second OwnershipDomain) error {
+	components := make([]string, 0, len(first.Paths))
+	for component := range first.Paths {
+		if _, ok := second.Paths[component]; ok {
+			components = append(components, component)
+		}
+	}
+	sort.Strings(components)
+	for _, component := range components {
+		firstPaths := append([]string(nil), first.Paths[component]...)
+		secondPaths := append([]string(nil), second.Paths[component]...)
+		sort.Strings(firstPaths)
+		sort.Strings(secondPaths)
+		for _, firstPath := range firstPaths {
+			for _, secondPath := range secondPaths {
+				if PathsIntersect(firstPath, secondPath) {
+					return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"configuration ownership conflict: %q owns %s.%s, which intersects %q path %s.%s",
+						first.Name, component, firstPath, second.Name, component, secondPath))
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ValidateProfileLock compares the final candidate values and component set

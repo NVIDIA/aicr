@@ -125,12 +125,29 @@ type Dashboard struct {
 // specific AICR version is selected. Versions are newest-first; a per-version
 // overview summarizes the newest (Versions[0]).
 type Tab struct {
-	// Recipe is the overlay metadata.name (the series-file slug).
+	// Recipe is the evidence recipe slug (the series-file slug):
+	// attestation.RecipeNameFor over the resolved criteria, plus the
+	// lowercase profile segment for a profile-bearing recipe. It is
+	// distinct from both the catalog leaf overlay's metadata.name and
+	// the criteria-only coordinate — the profiled suffix applies to
+	// this slug, never to overlay metadata.name.
 	Recipe string `json:"recipe"`
 
 	// Coord is the full five-dimension criteria for display and facet
 	// filtering (service, accelerator, os, intent, platform).
 	Coord map[string]string `json:"coord"`
+
+	// Profile is the lowercase profile path segment ("<name>-<value>")
+	// for a profile-bearing recipe, "" otherwise. The renderer appends it
+	// to the tab component of the hash route so two profile values of one
+	// family keep distinct routes (matching the on-disk suffixed
+	// coordinate); criteria facets stay profile-blind via Coord.
+	Profile string `json:"profile,omitempty"`
+
+	// ProfileSelection is the exact-case "name=value" selection for the
+	// copy-CLI/copy-config generators (the lowercase Profile segment is
+	// lossy and never reversed).
+	ProfileSelection string `json:"profileSelection,omitempty"`
 
 	// Versions holds one baked consensus grid per AICR version present in the
 	// evidence, newest-first.
@@ -204,7 +221,9 @@ type Latest struct {
 // per-source x per-build history the renderer loads on a source-column
 // drilldown.
 type Series struct {
-	// Recipe is the overlay metadata.name.
+	// Recipe is the evidence recipe slug (attestation.RecipeNameFor over
+	// criteria plus the lowercase profile segment) — the same identity as
+	// Tab.Recipe, not the catalog leaf overlay's metadata.name.
 	Recipe string `json:"recipe"`
 
 	// Rows is the phase-aware union of every row across ALL builds, ordered by

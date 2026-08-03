@@ -336,6 +336,65 @@ func TestRunComponentValidations(t *testing.T) {
 		}
 	})
 
+	aicrProvidedAccounting := func(state string) *recipe.RecipeResult {
+		r := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: "mariadb-operator"}},
+			Configuration: &recipe.RecipeConfiguration{
+				Slurm: &recipe.SlurmConfiguration{
+					Accounting: &recipe.SlurmAccountingConfiguration{
+						Mode: recipe.AccountingModeAICRProvided,
+					},
+				},
+			},
+		}
+		r.Metadata.MariaDBOperatorState = state
+		return r
+	}
+	tests := []struct {
+		name        string
+		state       string
+		wantErr     string
+		wantWarning string
+	}{
+		{
+			name:    "MariaDB CR conflict blocks with customer-managed remediation",
+			state:   recipe.MariaDBOperatorStateCRsDetected,
+			wantErr: "customer-managed",
+		},
+		{
+			name:        "MariaDB API-only state warns and allows",
+			state:       recipe.MariaDBOperatorStateAPIDetected,
+			wantWarning: "customer-managed",
+		},
+		{
+			name:        "missing MariaDB evidence warns and allows",
+			wantWarning: "current snapshot",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings, err := RunComponentValidations(
+				context.Background(), aicrProvidedAccounting(tt.state), nil)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("RunComponentValidations() error = nil, want containing %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("RunComponentValidations() error = %v, want containing %q",
+						err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RunComponentValidations() error = %v, want nil", err)
+			}
+			if len(warnings) != 1 || !strings.Contains(warnings[0], tt.wantWarning) {
+				t.Errorf("warnings = %v, want one advisory containing %q",
+					warnings, tt.wantWarning)
+			}
+		})
+	}
+
 	t.Run("cancelled context → timeout error", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()

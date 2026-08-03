@@ -62,6 +62,12 @@ const (
 	// the collector will read into memory. Used as the io.LimitReader bound
 	// per the project rule against unbounded os.ReadFile.
 	MaxClusterConfigBytes = int64(1 << 20) // 1 MiB
+
+	// MaxAKSGPUPoolsBytes caps the size of an --aks-gpu-pools JSON file
+	// (the `az aks nodepool list -o json` dump) read into memory. Same
+	// io.LimitReader rule as MaxClusterConfigBytes; a real pool list is
+	// a few KiB.
+	MaxAKSGPUPoolsBytes = int64(1 << 20) // 1 MiB
 )
 
 // Handler timeouts for HTTP request processing.
@@ -512,6 +518,14 @@ const (
 	// GangTestPodTimeout is the timeout for gang scheduling test pods to complete.
 	// Two pods must be co-scheduled, each pulling a CUDA image and running nvidia-smi.
 	GangTestPodTimeout = 5 * time.Minute
+
+	// SlurmAccountingRecordTimeout bounds the eventual-consistency window
+	// between a completed Slurm job and its appearance in sacct via SlurmDBD.
+	SlurmAccountingRecordTimeout = 2 * time.Minute
+
+	// SlurmAccountingRecordPollInterval is the delay between sacct queries
+	// while waiting for the completed job record to reach the accounting store.
+	SlurmAccountingRecordPollInterval = 5 * time.Second
 )
 
 // AI service metrics conformance validation.
@@ -1065,6 +1079,16 @@ const (
 	// Prevents unbounded memory allocation when reading attestation bundles.
 	// A typical Sigstore bundle is under 100KB; 10 MiB provides generous headroom.
 	MaxSigstoreBundleSize = 10 * 1024 * 1024 // 10 MiB
+)
+
+// Recipe component value-resolution defaults.
+const (
+	// HelmValueResolutionConcurrency caps concurrent values-file reads performed
+	// by the public client facade. External catalogs may contain many Helm
+	// components, so unbounded fan-out can exhaust file descriptors or overload a
+	// remote-backed DataProvider. Eight preserves useful parallelism while
+	// keeping per-request resource use predictable.
+	HelmValueResolutionConcurrency = 8
 )
 
 // Mirror discovery timeouts and defaults.

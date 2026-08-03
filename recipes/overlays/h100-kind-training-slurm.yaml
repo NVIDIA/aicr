@@ -47,6 +47,23 @@ spec:
   # no `slurmd.resources.limits.nvidia.com/gpu`, no DCGM. This makes the
   # leaf usable as a no-GPU CI smoke test for the operator + chart wiring.
   componentRefs:
+    - name: mariadb-operator-crds
+      type: Helm
+      valuesFile: components/mariadb-operator-crds/values.yaml
+
+    - name: mariadb-operator
+      type: Helm
+      valuesFile: components/mariadb-operator/values.yaml
+      dependencyRefs:
+        - mariadb-operator-crds
+
+    - name: slurm-accounting-mariadb
+      type: Helm
+      valuesFile: components/slurm-accounting-mariadb/values.yaml
+      dependencyRefs:
+        - mariadb-operator
+        - mariadb-operator-crds
+
     - name: slinky-slurm-operator-crds
       type: Helm
       valuesFile: components/slinky-slurm-operator-crds/values.yaml
@@ -200,6 +217,7 @@ spec:
       type: Helm
       valuesFile: components/slinky-slurm/values.yaml
       dependencyRefs:
+        - slurm-accounting-mariadb
         - slinky-slurm-operator
         - slinky-slurm-operator-crds
       overrides:

@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -126,8 +128,18 @@ func (r *signerRun) flatten() map[string]Result {
 type recipeAgg struct {
 	coord    recipe.Coordinate
 	criteria recipe.Criteria
-	name     string
-	bySigner map[string][]*signerRun
+	// profile is the lowercase profile path segment from meta.json
+	// ("<name>-<value>", "" when unprofiled). The route coordinate must
+	// carry it or two profile values of one family collapse onto a
+	// single dashboard route and overwrite each other's lookup entry.
+	profile          string
+	profileSelection string
+	// conflicted marks a coordinate whose runs disagree on the exact
+	// selection despite sharing the lossy route segment; the whole
+	// aggregate is dropped rather than keeping an order-dependent winner.
+	conflicted bool
+	name       string
+	bySigner   map[string][]*signerRun
 }
 
 // Generate reads the corroboration evidence under opts.InputDir, computes the
@@ -357,10 +369,48 @@ func aggregate(runs []*signerRun) map[string]*recipeAgg {
 			Dashboard: run.meta.Coordinate.Dashboard,
 			Tab:       run.meta.Coordinate.Tab,
 		}
+		// The profile segment is display/dedup identity (kept in the
+		// aggregate key and stored coordinate) but not a criteria
+		// dimension: strip it before inversion, failing closed when the
+		// meta claims a profile its own tab does not carry.
+		critCo := co
+		if p := run.meta.Profile; p != "" {
+			suffix := "-" + p
+			if !strings.HasSuffix(critCo.Tab, suffix) {
+				slog.Warn("meta.profile does not match coordinate tab; skipping run",
+					"tab", critCo.Tab, "profile", p, "signer", run.meta.Signer.Identity)
+				continue
+			}
+			critCo.Tab = strings.TrimSuffix(critCo.Tab, suffix)
+			// The exact selection must re-derive the segment: the
+			// lowercase segment is lossy, so runs whose selections
+			// merely COLLIDE on it (case-only variants, ambiguous "-"
+			// joins like gpu-stack=operator vs gpu=stack-operator) must
+			// not be conflated. A run whose selection cannot reproduce
+			// its own segment is inconsistent metadata — skip it.
+			seg, segErr := attestation.ParsePointerProfile(run.meta.ProfileSelection)
+			if segErr != nil || seg != p {
+				slog.Warn("meta.profileSelection does not derive meta.profile; skipping run",
+					"profile", p, "profileSelection", run.meta.ProfileSelection,
+					"signer", run.meta.Signer.Identity)
+				continue
+			}
+		}
 		key := co.Path()
 		signerID := canonicalSourceID(run.meta.Signer)
 
 		if agg := recipes[key]; agg != nil {
+			if agg.profileSelection != run.meta.ProfileSelection {
+				// Same lossy route, different exact selections: an
+				// order-dependent winner would fabricate consensus and
+				// emit a Copy-CLI selection invalid for part of the
+				// contributing evidence. Quarantine the coordinate.
+				agg.conflicted = true
+				slog.Warn("conflicting exact profile selections on one coordinate; quarantining aggregate",
+					"coordinate", key, "have", agg.profileSelection,
+					"got", run.meta.ProfileSelection, "signer", run.meta.Signer.Identity)
+				continue
+			}
 			agg.bySigner[signerID] = append(agg.bySigner[signerID], run)
 			continue
 		}
@@ -371,7 +421,7 @@ func aggregate(runs []*signerRun) map[string]*recipeAgg {
 				"recipe", name, "coordinate", key, "signer", run.meta.Signer.Identity)
 			continue
 		}
-		crit, err := criteriaFromCoordinate(co)
+		crit, err := criteriaFromCoordinate(critCo)
 		if err != nil {
 			slog.Warn("skipping run: coordinate does not invert to valid criteria",
 				"coordinate", key, "signer", run.meta.Signer.Identity, "error", err)
@@ -385,13 +435,22 @@ func aggregate(runs []*signerRun) map[string]*recipeAgg {
 
 		nameToCoord[name] = key
 		agg := &recipeAgg{
-			coord:    co,
-			criteria: crit,
-			name:     name,
-			bySigner: make(map[string][]*signerRun),
+			coord:            co,
+			criteria:         crit,
+			profile:          run.meta.Profile,
+			profileSelection: run.meta.ProfileSelection,
+			name:             name,
+			bySigner:         make(map[string][]*signerRun),
 		}
 		agg.bySigner[signerID] = append(agg.bySigner[signerID], run)
 		recipes[key] = agg
+	}
+	for k, agg := range recipes {
+		if agg.conflicted {
+			slog.Warn("dropping quarantined coordinate (conflicting exact profile selections)",
+				"coordinate", k, "profileSelection", agg.profileSelection)
+			delete(recipes, k)
+		}
 	}
 	return recipes
 }
@@ -577,10 +636,12 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 	}
 
 	tab := Tab{
-		Recipe:   agg.name,
-		Coord:    coordMap(agg.criteria),
-		Versions: tabVersions,
-		Combined: combined,
+		Recipe:           agg.name,
+		Coord:            coordMap(agg.criteria),
+		Profile:          agg.profile,
+		ProfileSelection: agg.profileSelection,
+		Versions:         tabVersions,
+		Combined:         combined,
 	}
 	// The time-series spans every build/version, so its union test set must come
 	// from ALL runs (not just each signer's newest), or a test that ran only in an

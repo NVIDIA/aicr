@@ -54,6 +54,14 @@ type NodeSnapshotter struct {
 
 	// RequireGPU when true causes the snapshot to fail if no GPU is detected.
 	RequireGPU bool
+
+	// AKSGPUPoolsPath, when set, points at an operator-supplied
+	// `az aks nodepool list -o json` dump. Local mode projects it into
+	// the K8s measurement's aks-gpu-pools subtype up front (fail-loud —
+	// explicit operator input never rides the collectSafe degrade-to-
+	// warning policy). Agent Job mode carries the equivalent field on
+	// AgentConfig and merges controller-side after retrieval.
+	AKSGPUPoolsPath string
 }
 
 // Measure collects configuration measurements and serializes the snapshot.
@@ -133,6 +141,19 @@ func parseDiscoverNetworkEnv() bool {
 
 // measure collects configuration measurements from the current node.
 func (n *NodeSnapshotter) measure(ctx context.Context) error {
+	// The pool projection is explicit operator input: project it before
+	// any collector runs so a bad file fails the snapshot immediately —
+	// it must never ride the collectSafe degrade-to-warning policy below
+	// and masquerade as a snapshot whose reading is merely unavailable.
+	var aksGPUPools *measurement.Subtype
+	if n.AKSGPUPoolsPath != "" {
+		subtype, err := k8s.ProjectAKSGPUPools(ctx, n.AKSGPUPoolsPath)
+		if err != nil {
+			return err
+		}
+		aksGPUPools = &subtype
+	}
+
 	if n.Factory == nil {
 		var opts []collector.Option
 		if maxNodes := parseMaxNodesPerEntryEnv(); maxNodes > 0 {
@@ -232,6 +253,10 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 
 	_ = g.Wait() // Individual collector errors are logged and swallowed today; reserved for future cancel-on-error.
 
+	if aksGPUPools != nil {
+		attachAKSGPUPools(snap, *aksGPUPools)
+	}
+
 	// Enforce GPU requirement if requested
 	if n.RequireGPU {
 		if err := verifyGPUCollected(snap); err != nil {
@@ -330,4 +355,19 @@ func warnOnGPUPlacementMismatch(snap *Snapshot) {
 		slog.String("fix_3", "--require-gpu (requests nvidia.com/gpu resource; needs Device Plugin)"),
 		slog.String("fix_4", "--runtime-class nvidia (nvidia-smi access without consuming a GPU slot)"),
 	)
+}
+
+// attachAKSGPUPools merges the operator-supplied AKS GPU pool projection
+// into the snapshot's K8s measurement. The projection is explicit input,
+// not cluster state, so a degraded collection (no K8s measurement at all)
+// still carries it — a minimal K8s measurement is created if needed.
+func attachAKSGPUPools(snap *Snapshot, subtype measurement.Subtype) {
+	for _, m := range snap.Measurements {
+		if m != nil && m.Type == measurement.TypeK8s {
+			m.Subtypes = append(m.Subtypes, subtype)
+			return
+		}
+	}
+	snap.Measurements = append(snap.Measurements,
+		measurement.NewMeasurement(measurement.TypeK8s).WithSubtype(subtype).Build())
 }

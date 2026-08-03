@@ -104,6 +104,11 @@ type Result struct {
 type recipeView struct {
 	Criteria    *recipe.Criteria    `yaml:"criteria"`
 	Constraints []recipe.Constraint `yaml:"constraints"`
+
+	// Profile is the recipe's selected profile, nil for unprofiled
+	// recipes. It suffixes the coordinate tab so runs from two values of
+	// one profile family land in distinct tabs.
+	Profile *recipe.SelectedProfile `yaml:"profile"`
 }
 
 // Synthesize verifies the inputs, derives the recipe coordinate and
@@ -138,6 +143,22 @@ func Synthesize(ctx context.Context, in In) (*Result, error) {
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "derive coordinate from bundle recipe", err)
 	}
+	// A profiled recipe suffixes the tab with the shared profile segment
+	// (attestation.ProfileSegment) so runs from two values of one profile
+	// family land in distinct tabs — mirroring the RecipeNameFor suffix.
+	// The TestGrid coordinate deliberately does NOT carry it (digest-bound
+	// build IDs partition per value there).
+	profileSegment := ""
+	profileSelection := ""
+	if view.Profile != nil {
+		profileSelection = view.Profile.Name + "=" + view.Profile.Value
+		segment, segErr := attestation.ProfileSegment(view.Profile)
+		if segErr != nil {
+			return nil, segErr
+		}
+		coord.Tab += "-" + segment
+		profileSegment = segment
+	}
 
 	recipeName := in.Predicate.Recipe.Name
 	if recipeName == "" {
@@ -158,9 +179,11 @@ func Synthesize(ctx context.Context, in In) (*Result, error) {
 	idHash := SignerIDHash(in.SignerIssuer, in.SignerIdentity)
 
 	meta := &Meta{
-		SchemaVersion: MetaSchemaVersion,
-		Coordinate:    Coordinate{Group: coord.Group, Dashboard: coord.Dashboard, Tab: coord.Tab},
-		Recipe:        recipeName,
+		SchemaVersion:    MetaSchemaVersion,
+		Profile:          profileSegment,
+		ProfileSelection: profileSelection,
+		Coordinate:       Coordinate{Group: coord.Group, Dashboard: coord.Dashboard, Tab: coord.Tab},
+		Recipe:           recipeName,
 		Signer: Signer{
 			IDHash:      idHash,
 			Identity:    in.SignerIdentity,
@@ -251,13 +274,10 @@ func readRecipeView(bundleDir string) (*recipeView, error) {
 	if result.Criteria == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "bundle recipe.yaml has no criteria")
 	}
-	if result.Metadata.SelectedProfile != nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"profile-bearing evidence projection is deferred to the profile adoption rollout")
-	}
 	return &recipeView{
 		Criteria:    result.Criteria,
 		Constraints: result.Constraints,
+		Profile:     result.Metadata.SelectedProfile,
 	}, nil
 }
 

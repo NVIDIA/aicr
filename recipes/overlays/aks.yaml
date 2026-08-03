@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1alpha3
 metadata:
   name: aks
 
@@ -33,20 +33,79 @@ spec:
     - name: K8s.server.version
       value: ">= 1.34"
 
+  # ADR-015 configuration profile: who installs the GPU driver and container
+  # toolkit on unmanaged GPU pools. Fully AKS-managed pools
+  # (gpuProfile.nvidia.managementMode: Managed) are out of scope
+  # (see docs/integrator/aks-gpu-setup.md).
+  #
+  # This replaces the bundle-time four-flag override tuple documented through
+  # AICR v0.x (--set gpuoperator:driver.enabled=true --set
+  # gpuoperator:toolkit.enabled=true --set gpuoperator:operator.runtimeClass=
+  # nvidia --set dradriver:nvidiaDriverRoot=/run/nvidia/driver): the mode is
+  # selected once at recipe generation (--profile gpuStack=...), recorded in
+  # metadata.selectedProfile, and the four paths below become profile-owned —
+  # a bundle-time --set diverging from the selected value is rejected instead
+  # of silently producing the unqualified hybrid (#1757).
+  #
+  # Each value carries the ADR-required distinguishing constraint over the
+  # K8s.aks-gpu-pools.gpu-driver snapshot reading — the projection of every
+  # GPU agent pool's management-plane gpuProfile.driver property (Install =
+  # AKS "Driver only" preinstall; None = BYO / operator-managed). Unavailable,
+  # unknown, or mixed pool values fail closed. Criteria-only generation
+  # (no --snapshot) selects explicitly and records the constraints without
+  # evaluating them.
+  profile:
+    name: gpuStack
+    description: Who installs the GPU driver and container toolkit.
+    default: azure-managed
+    values:
+      # AKS "Driver only" install profile (the Azure default): the node image
+      # preinstalls driver + toolkit at the host root; the operator owns the
+      # rest of the GPU stack.
+      azure-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver: {enabled: false}
+              toolkit: {enabled: false}
+              operator: {runtimeClass: nvidia-container-runtime}
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /
+        constraints:
+          - name: K8s.aks-gpu-pools.gpu-driver
+            value: Install
+      # GPU pools created with --gpu-driver none: the operator installs the
+      # driver and toolkit; DRA reads the driver from the operator container
+      # path.
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver: {enabled: true}
+              toolkit: {enabled: true}
+              operator: {runtimeClass: nvidia}
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /run/nvidia/driver
+        constraints:
+          - name: K8s.aks-gpu-pools.gpu-driver
+            value: None
+
   # AKS-specific components
   componentRefs:
     # No aws-ebs-csi-driver equivalent needed.
     # Azure Disk CSI is a built-in AKS addon (enabled by default since AKS 1.21).
 
     # AKS-specific GPU Operator overrides
-    # AKS driver-only mode (the Azure default): the AKS node image
+    # AKS azure-managed mode (the Azure default): the AKS node image
     # preinstalls the driver and container toolkit; the operator owns
     # the rest of the GPU stack (device plugin, DCGM, GFD, ...)
     # (see docs/integrator/aks-gpu-setup.md)
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-aks.yaml
-      # Device-isolation hardening for the driver-only profile: with
+      # Device-isolation hardening for the azure-managed profile: with
       # driver.enabled=false there is no gpu-operator toolkit DaemonSet to
       # write the hardened /etc/nvidia-container-runtime/config.toml keys, so
       # the AKS node image's permissive toolkit defaults would let any
@@ -64,7 +123,7 @@ spec:
     #   - NicClusterPolicy: MOFED driver, RDMA shared device plugin, DOCA telemetry
     #   - NFD NodeFeatureRule: labels IB-capable nodes (pci-15b3.present=true)
     #   - nvidia-peermem reloader: loads nvidia-peermem for GPUDirect RDMA —
-    #     required under the AKS driver-only default, where no GPU Operator
+    #     required under the AKS azure-managed default, where no GPU Operator
     #     driver DaemonSet exists to load it and the Azure-managed driver
     #     does not load it automatically
     # Host MEMLOCK limits and IB module loading moved to nodewright
@@ -106,11 +165,10 @@ spec:
                       storage: 50Gi
     # AKS has no control-plane nodes — remove the default nodeAffinity
     # that requires node-role.kubernetes.io/control-plane.
-    # nvidiaDriverRoot: the AKS driver-only profile preinstalls the NVIDIA
-    # driver on the node image at the host root (gpu-operator
-    # driver.enabled=false, so nothing populates the base default
-    # /run/nvidia/driver). Same pattern as OKE (values-oke.yaml) and
-    # kind; GKE-COS uses its own host path.
+    # nvidiaDriverRoot is profile-owned (gpuStack above): the azure-managed
+    # value pins the host root "/" the AKS node image populates; the operator-managed
+    # value supersedes it with /run/nvidia/driver. The baseline "/" below
+    # matches the default value and is superseded by the selected fragment.
     - name: nvidia-dra-driver-gpu
       type: Helm
       overrides:

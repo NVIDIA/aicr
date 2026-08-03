@@ -100,6 +100,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -108,6 +109,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/yaml"
 )
 
@@ -523,7 +525,14 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		return nil, err
 	}
 
-	internal, err := c.resolveCriteria(ctx, builder, criteria, req.Profile)
+	var resolveOpts []RecipeResolveOption
+	if req.Profile != "" {
+		resolveOpts = append(resolveOpts, WithProfile(req.Profile))
+	}
+	if req.AccountingMode != "" {
+		resolveOpts = append(resolveOpts, WithAccountingMode(req.AccountingMode))
+	}
+	internal, err := c.resolveCriteria(ctx, builder, criteria, resolveOpts...)
 	if err != nil {
 		// Don't re-wrap with ErrCodeInternal — the builder already
 		// returns a structured error with the appropriate code
@@ -556,13 +565,41 @@ func (c *Client) resolveCriteria(
 	ctx context.Context,
 	builder *recipe.Builder,
 	criteria *recipe.Criteria,
-	profile string,
+	opts ...RecipeResolveOption,
 ) (*recipe.RecipeResult, error) {
 
 	if err := c.enforceAllowLists(criteria); err != nil {
 		return nil, err
 	}
-	return builder.BuildFromCriteriaWithProfile(ctx, criteria, profile)
+	cfg, buildOpts, err := recipeBuildOptions(opts...)
+	if err != nil {
+		return nil, err
+	}
+	return builder.BuildFromCriteriaWithProfile(ctx, criteria, cfg.profile, buildOpts...)
+}
+
+func recipeBuildOptions(opts ...RecipeResolveOption) (*recipeResolveConfig, []recipe.BuildOption, error) {
+	cfg, err := resolveRecipeConfig(opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cfg.accountingMode == nil {
+		return cfg, nil, nil
+	}
+	return cfg, []recipe.BuildOption{recipe.WithAccountingMode(*cfg.accountingMode)}, nil
+}
+
+func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, error) {
+	cfg := &recipeResolveConfig{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+	if cfg.accountingModeErr != nil {
+		return nil, cfg.accountingModeErr
+	}
+	return cfg, nil
 }
 
 // ResolveRecipeFromCriteria resolves a facade Criteria into a facade
@@ -582,7 +619,7 @@ func (c *Client) resolveCriteria(
 // nil context, and nil criteria are rejected with ErrCodeInvalidRequest; a
 // closed Client is rejected; a facade-level timeout bounds the resolve.
 func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criteria) (*RecipeResult, error) {
-	return c.ResolveRecipeFromCriteriaWithProfile(ctx, criteria, "")
+	return c.ResolveRecipeFromCriteriaWithOptions(ctx, criteria)
 }
 
 // ResolveRecipeFromCriteriaWithProfile resolves criteria with an optional
@@ -591,6 +628,18 @@ func (c *Client) ResolveRecipeFromCriteriaWithProfile(
 	ctx context.Context,
 	criteria *Criteria,
 	profile string,
+) (*RecipeResult, error) {
+
+	return c.ResolveRecipeFromCriteriaWithOptions(ctx, criteria, WithProfile(profile))
+}
+
+// ResolveRecipeFromCriteriaWithOptions is ResolveRecipeFromCriteria with
+// optional per-resolution behavior such as profile selection and Slurm
+// accounting ownership.
+func (c *Client) ResolveRecipeFromCriteriaWithOptions(
+	ctx context.Context,
+	criteria *Criteria,
+	opts ...RecipeResolveOption,
 ) (*RecipeResult, error) {
 
 	if c == nil {
@@ -619,7 +668,7 @@ func (c *Client) ResolveRecipeFromCriteriaWithProfile(
 	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
 	defer cancel()
 
-	internal, err := c.resolveCriteria(ctx, builder, toInternalCriteria(criteria), profile)
+	internal, err := c.resolveCriteria(ctx, builder, toInternalCriteria(criteria), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -666,7 +715,7 @@ func (c *Client) ResolveRecipeFromCriteriaWithProfile(
 // bounds the resolve. Builder errors propagate as-is (they already carry the
 // appropriate pkg/errors code) rather than being re-wrapped.
 func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criteria, snap *Snapshot) (*RecipeResult, error) {
-	return c.ResolveRecipeFromSnapshotWithProfile(ctx, criteria, snap, "")
+	return c.ResolveRecipeFromSnapshotWithOptions(ctx, criteria, snap)
 }
 
 // ResolveRecipeFromSnapshotWithProfile is the snapshot-filtered profile
@@ -676,6 +725,19 @@ func (c *Client) ResolveRecipeFromSnapshotWithProfile(
 	criteria *Criteria,
 	snap *Snapshot,
 	profile string,
+) (*RecipeResult, error) {
+
+	return c.ResolveRecipeFromSnapshotWithOptions(ctx, criteria, snap, WithProfile(profile))
+}
+
+// ResolveRecipeFromSnapshotWithOptions is ResolveRecipeFromSnapshot with
+// optional per-resolution behavior such as profile selection and Slurm
+// accounting ownership.
+func (c *Client) ResolveRecipeFromSnapshotWithOptions(
+	ctx context.Context,
+	criteria *Criteria,
+	snap *Snapshot,
+	opts ...RecipeResolveOption,
 ) (*RecipeResult, error) {
 
 	if c == nil {
@@ -740,7 +802,12 @@ func (c *Client) ResolveRecipeFromSnapshotWithProfile(
 	// Don't re-wrap the builder's error — it already returns a structured
 	// error with the appropriate code (ErrCodeInvalidRequest for bad
 	// criteria, ErrCodeTimeout for context expiry, etc.).
-	internal, err := builder.BuildFromCriteriaWithEvaluatorAndProfile(ctx, internalCriteria, evaluator, profile)
+	resolveCfg, buildOpts, err := recipeBuildOptions(opts...)
+	if err != nil {
+		return nil, err
+	}
+	internal, err := builder.BuildFromCriteriaWithEvaluatorAndProfile(
+		ctx, internalCriteria, evaluator, resolveCfg.profile, buildOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -757,6 +824,12 @@ func (c *Client) ResolveRecipeFromSnapshotWithProfile(
 	// overrides are known (see gpu_driver_state.go and
 	// pkg/bundler/validations CheckDriverOwnershipCoherence).
 	applyGPUDriverAutoOverride(ctx, internal, internalSnap)
+	// MariaDB Operator conflict evidence is observational at recipe
+	// generation. Record it and warn here; bundle generation blocks only the
+	// unsafe AICR-provided states after the complete recipe is available.
+	if applyErr := applyMariaDBOperatorState(ctx, internal, internalSnap); applyErr != nil {
+		return nil, applyErr
+	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err
@@ -1131,6 +1204,17 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 			"recipe has no enabled components")
 	}
 
+	// Resolve the complete Helm-value inventory before emitting any component.
+	// Accounting ownership spans multiple charts, so validating one chart at a
+	// time could return a partial SDK bundle that DefaultBundler.Make rejects.
+	helmValues, err := resolveHelmComponentValues(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	if err := bundler.ValidateAccountingValues(r.internal, helmValues); err != nil {
+		return nil, err
+	}
+
 	bundles := make([]ComponentBundle, 0, len(r.Components))
 	for i := range r.Components {
 		// Bail on every iteration so a long recipe doesn't hold
@@ -1154,16 +1238,7 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		// empty ComponentBundle with no signal to the caller.
 		switch strings.ToLower(facade.Kind) {
 		case "helm":
-			// Per-Client isolation: r.internal carries the producing
-			// Client's recipe.DataProvider via its unexported `provider`
-			// field (set during ResolveRecipe → builder.BuildFromCriteria
-			// → LoadMetadataStoreFor). GetValuesForComponent uses that
-			// bound provider directly; no explicit dp arg needed here.
-			values, err := r.internal.GetValuesForComponentWithContext(ctx, facade.Name)
-			if err != nil {
-				return bundles, errors.Wrap(errors.ErrCodeInternal,
-					"resolve values for component "+facade.Name, err)
-			}
+			values := helmValues[facade.Name]
 			// Empty values map → nil HelmValues so callers can
 			// distinguish "no recipe-contributed values" from
 			// "explicit empty map" (the latter would marshal as
@@ -1220,6 +1295,51 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	}
 
 	return bundles, nil
+}
+
+func resolveHelmComponentValues(
+	ctx context.Context,
+	result *RecipeResult,
+) (map[string]map[string]any, error) {
+
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout,
+			"context cancelled while resolving bundle values", err)
+	}
+
+	type resolvedValues struct {
+		name   string
+		values map[string]any
+	}
+	resolved := make([]resolvedValues, len(result.Components))
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(defaults.HelmValueResolutionConcurrency)
+	for index := range result.Components {
+		facade := result.Components[index]
+		if !strings.EqualFold(facade.Kind, "helm") {
+			continue
+		}
+		group.Go(func() error {
+			values, valuesErr := result.internal.GetValuesForComponentWithContext(groupCtx, facade.Name)
+			if valuesErr != nil {
+				return errors.PropagateOrWrap(valuesErr, errors.ErrCodeInternal,
+					"resolve values for component "+facade.Name)
+			}
+			resolved[index] = resolvedValues{name: facade.Name, values: values}
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	helmValues := make(map[string]map[string]any)
+	for _, component := range resolved {
+		if component.name != "" {
+			helmValues[component.name] = component.values
+		}
+	}
+	return helmValues, nil
 }
 
 // CollectSnapshot deploys the snapshotter Job to the cluster identified

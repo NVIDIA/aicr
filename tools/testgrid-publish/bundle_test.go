@@ -36,6 +36,7 @@ func TestParseCriteria(t *testing.T) {
 		wantIntent      string
 		wantPlatform    string
 		wantConstraint  string
+		wantSegment     string
 		wantErr         bool
 		wantErrContains string
 	}{
@@ -120,7 +121,7 @@ criteria:
 			wantErr:    true,
 		},
 		{
-			name: "profile artifact rejected until publication support lands",
+			name: "profile artifact carries the lowercase profile segment",
 			recipeYAML: `apiVersion: aicr.run/v1alpha3
 kind: RecipeResult
 metadata:
@@ -134,8 +135,11 @@ criteria:
   os: ubuntu
   intent: training
 `,
-			wantErr:         true,
-			wantErrContains: "profile-bearing TestGrid publication is deferred to the profile adoption rollout",
+			wantService: "aks",
+			wantAccel:   "h100",
+			wantOS:      "ubuntu",
+			wantIntent:  "training",
+			wantSegment: "gpustack-driver-installed",
 		},
 	}
 
@@ -174,6 +178,9 @@ criteria:
 			}
 			if got.K8sConstraint != tt.wantConstraint {
 				t.Errorf("K8sConstraint = %q, want %q", got.K8sConstraint, tt.wantConstraint)
+			}
+			if got.ProfileSegment != tt.wantSegment {
+				t.Errorf("ProfileSegment = %q, want %q", got.ProfileSegment, tt.wantSegment)
 			}
 		})
 	}

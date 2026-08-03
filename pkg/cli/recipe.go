@@ -70,6 +70,11 @@ func recipeCmdFlags() []cli.Flag {
 			Usage:    "Configuration profile selection in name=value form",
 			Category: catQueryParameters,
 		},
+		withCompletions(&cli.StringFlag{
+			Name:     flagSlurmAccountingMode,
+			Usage:    fmt.Sprintf("Slurm accounting ownership mode (%s)", strings.Join(recipe.AccountingModes(), ", ")),
+			Category: catQueryParameters,
+		}, recipe.AccountingModes),
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
@@ -142,7 +147,9 @@ Override snapshot-detected criteria:
 		},
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS, flagPlatform, flagProfile, "snapshot", "config", flagOutput, flagFormat); err != nil {
+			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS,
+				flagPlatform, flagProfile, flagSlurmAccountingMode, "snapshot", "config", flagOutput,
+				flagFormat); err != nil {
 				return err
 			}
 

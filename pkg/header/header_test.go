@@ -58,6 +58,29 @@ func TestIsSupportedAPIVersion(t *testing.T) {
 	}
 }
 
+func TestIsSupportedRecipeResultAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{version: GroupVersion, want: true},
+		{version: RecipeResultGroupVersion, want: true},
+		{version: "", want: false},
+		{version: "aicr.run/v1alpha4", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			t.Parallel()
+			if got := IsSupportedRecipeResultAPIVersion(tt.version); got != tt.want {
+				t.Errorf("IsSupportedRecipeResultAPIVersion(%q) = %v, want %v",
+					tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestKind_String(t *testing.T) {
 	t.Parallel()
 

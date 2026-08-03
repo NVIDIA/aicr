@@ -122,8 +122,19 @@ func TestAllMetadataFilesHaveRequiredFields(t *testing.T) {
 			if metadata.Kind != RecipeMetadataKind {
 				t.Errorf("invalid kind: got %q, want %q", metadata.Kind, RecipeMetadataKind)
 			}
-			if metadata.APIVersion != RecipeAPIVersion {
-				t.Errorf("invalid apiVersion: got %q, want %q", metadata.APIVersion, RecipeAPIVersion)
+			switch metadata.APIVersion {
+			case RecipeAPIVersion:
+				if metadata.Spec.Profile != nil {
+					t.Errorf("overlay declares a profile but keeps apiVersion %q; want %q",
+						metadata.APIVersion, RecipeProfileAPIVersion)
+				}
+			case RecipeProfileAPIVersion:
+				if metadata.Spec.Profile == nil {
+					t.Errorf("apiVersion %q requires a profile declaration", metadata.APIVersion)
+				}
+			default:
+				t.Errorf("invalid apiVersion: got %q, want %q or %q",
+					metadata.APIVersion, RecipeAPIVersion, RecipeProfileAPIVersion)
 			}
 		})
 	}

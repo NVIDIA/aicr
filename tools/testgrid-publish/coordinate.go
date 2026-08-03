@@ -29,12 +29,29 @@ type RecipeCriteria struct {
 	Platform      string // optional, e.g. "kubeflow"
 	K8sVersion    string // full semver with leading "v" stripped, e.g. "1.33.4"
 	K8sConstraint string // declared constraint, e.g. ">=1.28"
+
+	// ProfileSegment is the shared lowercase "<name>-<value>" segment
+	// (attestation.ProfileSegment) for a profile-bearing recipe, or "".
+	// Deliberately NOT joined into the TestGrid coordinate: per ADR-015,
+	// the publisher's digest-bound build ID already partitions per value
+	// (selection changes the bundle digest), so profiled runs stay on the
+	// family's canonical tab. Recipe Health / presence links are NOT yet
+	// profile-aware — the AKS presence entries are withheld
+	// (pkg/testgrid/presence.yaml) until profile-aware Health links land.
+	// The corroboration projection (pkg/evidence/project) is where the
+	// segment is path-forming.
+	ProfileSegment string
 }
 
 // CoordinateFor delegates to pkg/recipe.CoordinateFor after converting the
-// plain-string RecipeCriteria to a typed *recipe.Criteria.
+// plain-string RecipeCriteria to a typed *recipe.Criteria. The profile
+// segment is intentionally not appended (see RecipeCriteria.ProfileSegment).
 func CoordinateFor(c RecipeCriteria) (recipe.Coordinate, error) {
-	return recipe.CoordinateFor(toRecipeCriteria(c))
+	coord, err := recipe.CoordinateFor(toRecipeCriteria(c))
+	if err != nil {
+		return recipe.Coordinate{}, err
+	}
+	return coord, nil
 }
 
 // toRecipeCriteria converts our local plain-string struct to the typed

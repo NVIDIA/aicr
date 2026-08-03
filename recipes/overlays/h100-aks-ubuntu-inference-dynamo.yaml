@@ -65,7 +65,7 @@ spec:
         - inference-perf
       # Conservative smoke gate mirrored from the H100 EKS/GKE Dynamo
       # overlays. An Azure baseline now exists (aicr-test6, 2026-07-21,
-      # single Standard_ND96isr_H100_v5 node, untuned driver-only
+      # single Standard_ND96isr_H100_v5 node, untuned azure-managed ("Driver only" preinstall)
       # profile): 148,004 tok/s throughput, 579.7 ms TTFT p99. The gates
       # deliberately remain conservative smoke thresholds well below that
       # baseline. Model + concurrency are pinned so the gate stays valid

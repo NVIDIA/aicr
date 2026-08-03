@@ -1,9 +1,12 @@
 # ADR-007: Verifiable Recipe Test Evidence
 
 > **Amended by [ADR-015](015-recipe-configuration-profiles.md).** For
-> profile-bearing recipes, evidence currentness requires both the recipe
-> digest and the canonical-descriptor identity in the signed predicate to
-> match, and profile-bearing evidence rides a new predicate type. Unprofiled
+> profile-bearing recipes, the selected value joins the evidence path and
+> is a recipe-digest input, so currentness stays digest-authoritative on
+> the existing v1 predicate during the AKS adoption stage. From the GKE
+> rollout stage (#1761), profile-bearing evidence rides a new predicate
+> type whose currentness additionally requires the canonical-descriptor
+> identity to match. Unprofiled
 > evidence keeps this ADR's digest-only currentness rule and the v1
 > predicate; the pointer layout and verification flow below are unchanged.
 
@@ -27,7 +30,13 @@ remain future intent, as detailed in the Update note immediately below.
 > and performs predicate/schema parse and manifest-inventory hash binding; an
 > *unsigned* bundle that otherwise passes those checks yields a `pending
 > signature` (exit 0) result, whereas an unsigned bundle that fails predicate,
-> inventory, or phase checks is reported as that failure, not pending. When a
+> inventory, or phase checks is reported as that failure, not pending. The
+> shipped verifier also binds recipe identity: it derives the recipe name,
+> the exact profile selection (including its absence), and the canonical
+> digest from the manifest-bound `recipe.yaml` itself, and requires the
+> pointer's and predicate's identity claims to match those derived values
+> (`pkg/evidence/verifier/identity.go`) — so neither surface can claim a
+> different recipe, profile value, or digest than the bundle carries. When a
 > pointer declares a signer, that claim
 > is **always** cross-checked against the bundle's certificate, so a pointer
 > cannot lie about who signed. What is **opt-in** is external issuer/SAN
@@ -716,7 +725,11 @@ snapshot and CTRF payloads that still ship in the summary bundle.
 # recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml
 # — schema 1.0, single-attestation list (see "Per-source pointer layout")
 schemaVersion: 1.0.0
-recipe: h100-eks-ubuntu-training
+recipe: h100-aks-ubuntu-training-gpustack-operator-managed
+profile: gpuStack=operator-managed   # optional; only for profile-bearing recipes.
+                             # When present, the recipe name MUST carry the
+                             # lowercase "-<name>-<value>" segment (the
+                             # verifier rejects the combination otherwise).
 attestations:
   - bundle:
       oci: ghcr.io/<owner>/aicr-evidence:<digest>
@@ -738,6 +751,12 @@ Statement; the predicate is the `predicate` field on the inner
 Statement object). Duplicating those fields in the pointer would
 create two sources of truth, and reviewers would have no good answer
 for which one to trust on mismatch.
+
+The optional top-level `profile: <name>=<value>` field records the profile
+selection the attested recipe was generated with; the repo evidence gate
+replays it (`aicr evidence digest --profile`) when recomputing the recipe's
+canonical digest, and uses it to map a suffixed evidence directory back to
+its overlay slug.
 
 `attestations` is a **list** from day one (length 1 in V1). Each
 committed file stays single-attestation; multi-source is expressed by the

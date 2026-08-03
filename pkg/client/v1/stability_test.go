@@ -57,6 +57,9 @@ func TestStability_RecipeResolution(t *testing.T) {
 
 	var req aicr.RecipeRequest
 	_ = req.Profile
+	_ = req.AccountingMode
+	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromCriteria)
+	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshot)
 
 	_ = func(c *aicr.Client, ctx context.Context, req aicr.RecipeRequest) (*aicr.RecipeResult, error) {
 		return c.ResolveRecipe(ctx, req)
@@ -66,6 +69,9 @@ func TestStability_RecipeResolution(t *testing.T) {
 	}
 	_ = func(c *aicr.Client, ctx context.Context, cr *aicr.Criteria, profile string) (*aicr.RecipeResult, error) {
 		return c.ResolveRecipeFromCriteriaWithProfile(ctx, cr, profile)
+	}
+	_ = func(c *aicr.Client, ctx context.Context, cr *aicr.Criteria, opts ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error) {
+		return c.ResolveRecipeFromCriteriaWithOptions(ctx, cr, opts...)
 	}
 	_ = func(c *aicr.Client, ctx context.Context, cr *aicr.Criteria, s *aicr.Snapshot) (*aicr.RecipeResult, error) {
 		return c.ResolveRecipeFromSnapshot(ctx, cr, s)
@@ -80,6 +86,9 @@ func TestStability_RecipeResolution(t *testing.T) {
 
 		return c.ResolveRecipeFromSnapshotWithProfile(ctx, cr, s, profile)
 	}
+	_ = func(c *aicr.Client, ctx context.Context, cr *aicr.Criteria, s *aicr.Snapshot, opts ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error) {
+		return c.ResolveRecipeFromSnapshotWithOptions(ctx, cr, s, opts...)
+	}
 	_ = func(c *aicr.Client, ctx context.Context, path, kubeconfig string) (*aicr.RecipeResult, error) {
 		return c.LoadRecipe(ctx, path, kubeconfig)
 	}
@@ -87,6 +96,8 @@ func TestStability_RecipeResolution(t *testing.T) {
 		return c.CollectSnapshot(ctx, &aicr.AgentConfig{})
 	}
 }
+
+func requireSignature[T any](_ T) {}
 
 // TestStability_RecipeResult pins the consumer-visible fields and methods
 // on the result returned by every resolve/load entry point.

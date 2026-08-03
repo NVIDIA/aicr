@@ -245,8 +245,13 @@ deployers have no supported install-time value surface.
 
 Unprofiled compositions retain the legacy apiVersion and byte shape.
 Generation-side driver auto-detection skips a path owned by the selected
-profile. Evidence projection also rejects profiled artifacts until generic
-per-value evidence support lands with the first adopter.
+profile. Evidence projection accepts profiled artifacts: the selected
+value joins the evidence path name and the corroboration tab as a
+lowercase `-<name>-<value>` segment (shared helper
+`attestation.ProfileSegment`), pointers record the selection, and the
+repo evidence gate recomputes each pointer's digest with its recorded
+selection. The TestGrid coordinate is deliberately unsuffixed — its
+digest-bound build ID already partitions per value.
 
 ## Mixin Composition
 
@@ -533,6 +538,7 @@ externally-visible product. Fields beyond `ComponentRefs` and
 | `Metadata.AppliedOverlays` | Ordered list of overlays merged into this result (base first, leaf last). |
 | `Metadata.ExcludedOverlays` | Overlays that matched criteria but were dropped (e.g., a mixin constraint failed against the snapshot). Each carries a typed `Reason` (`constraint-failed`, `mixin-constraint-failed`). |
 | `Metadata.ConstraintWarnings` | Per-constraint detail for excluded overlays (overlay, constraint name, expected vs actual, reason text). |
+| `Configuration` | Closed desired-state configuration that affects rendering without participating in overlay matching. Slurm accounting records exactly one ownership mode and derives its protected component gates. |
 | `Validation` | Multi-phase config (`readiness`, `deployment`, `performance`, `conformance`) inherited from overlay metadata. |
 | `owner` (unexported) | `*Builder` that produced this result. `AssertOwnedBy(b)` enforces — two builders bound to different `DataProvider`s must not cross-read each other's results. |
 | `provider` (unexported) | `DataProvider` that produced this result; accessed via `(*RecipeResult).DataProvider()`. Lets `GetValuesForComponent` route file reads through the originating provider, preserving per-Client isolation. |

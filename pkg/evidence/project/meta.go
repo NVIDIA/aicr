@@ -38,10 +38,12 @@ type Coordinate struct {
 	Tab       string `json:"tab"`
 }
 
-// Signer is the verified-signer block of meta.json. Every field is
-// derived from the cryptographically verified certificate/Rekor entry,
-// never from an unverified pointer claim. IDHash is the source-dedup
-// key (see SignerIDHash); Identity drives the display label in the grid.
+// Signer is the verified-signer block of meta.json. IDHash, Identity,
+// and Issuer are derived from the cryptographically verified
+// certificate, never from an unverified pointer claim; Class and
+// Allowlisted are the allowlist verdict over those verified values.
+// IDHash is the source-dedup key (see SignerIDHash); Identity drives
+// the display label in the grid.
 type Signer struct {
 	IDHash      string `json:"idHash"`
 	Identity    string `json:"identity"`
@@ -58,15 +60,33 @@ type Meta struct {
 	SchemaVersion string     `json:"schemaVersion"`
 	Coordinate    Coordinate `json:"coordinate"`
 	Recipe        string     `json:"recipe"`
-	Signer        Signer     `json:"signer"`
-	RunID         string     `json:"runId"`
-	AICRVersion   string     `json:"aicrVersion"`
-	K8sVersion    string     `json:"k8sVersion"`
-	K8sConstraint string     `json:"k8sConstraint"`
-	BundleDigest  string     `json:"bundleDigest"`
-	EvidenceRef   string     `json:"evidenceRef"`
-	RekorLogIndex *int64     `json:"rekorLogIndex,omitempty"`
-	AttestedAt    string     `json:"attestedAt"`
+	// Profile is the lowercase profile path segment ("<name>-<value>")
+	// appended to Coordinate.Tab for profile-bearing recipes; empty for
+	// unprofiled runs. Consumers inverting the coordinate back to
+	// criteria (GP4 corroborate) must strip "-" + Profile from the Tab
+	// before splitting intent/platform.
+	Profile string `json:"profile,omitempty"`
+	// ProfileSelection is the exact-case wire-form selection
+	// ("name=value") for profile-bearing recipes; empty otherwise. The
+	// lowercase Profile segment is lossy, so anything that must
+	// RECONSTRUCT the selection (the dashboard's copy-CLI/copy-config
+	// generators) reads this field, never the segment.
+	ProfileSelection string `json:"profileSelection,omitempty"`
+	Signer           Signer `json:"signer"`
+	// RunID is caller-supplied when an explicit run id is passed to
+	// Synthesize; otherwise it is derived deterministically from the
+	// verified predicate's attestedAt.
+	RunID         string `json:"runId"`
+	AICRVersion   string `json:"aicrVersion"`
+	K8sVersion    string `json:"k8sVersion"`
+	K8sConstraint string `json:"k8sConstraint"`
+	BundleDigest  string `json:"bundleDigest"`
+	// EvidenceRef is caller-provided operational metadata (the OCI ref
+	// of the signed bundle), recorded as-is — not covered by the
+	// signature verification the other fields trace to.
+	EvidenceRef   string `json:"evidenceRef"`
+	RekorLogIndex *int64 `json:"rekorLogIndex,omitempty"`
+	AttestedAt    string `json:"attestedAt"`
 }
 
 // MarshalDeterministic renders meta.json bytes that are byte-identical
