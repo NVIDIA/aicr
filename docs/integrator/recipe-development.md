@@ -483,6 +483,24 @@ Do not borrow paths from `validation.deployment.constraints`, such as
 evaluated against a live cluster, not snapshot readings, and `Deployment` is
 not a measurement type.
 
+**One name is a node-set form, not a reading path:**
+`NodeTopology.gpu-nodes.label`
+([#1755](https://github.com/NVIDIA/aicr/issues/1755)). No snapshot producer
+emits a `gpu-nodes` subtype; the evaluator synthesizes the GPU-node set from
+the snapshot's `NodeTopology.label` readings (nodes carrying
+`cloud.google.com/gke-accelerator`) and quantifies a label predicate over it.
+Its value grammar is also not the operator grammar:
+`<label-key>=<value>` asserts every GPU node carries the label with exactly
+that value, and `!<label-key>` asserts no GPU node carries the key. Both
+directions fail closed on a truncated node list (a snapshot captured with
+`--max-nodes-per-entry` whose cap actually truncated a participating
+reading), on an empty GPU-node universe, and on malformed or ambiguous
+label readings (an encoding collision between a disambiguated entry and a
+distinct dotted label name — see #2003). Declare it under
+`validation.readiness.constraints`, not `spec.constraints` — as a top-level
+constraint it would exclude the overlay during snapshot-based generation on
+the very cluster the diagnostic exists to fix.
+
 **Which signal qualifies a driver-ownership profile depends on the service.**
 The example above names none, which is why it is shape only. `GPU.hardware`
 readings do not settle it: `driver-loaded` proves a driver is *present*, not
@@ -823,7 +841,22 @@ spec:
                 state: ready
 ```
 
-When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`, which embeds Chainsaw). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
+When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
+
+**Supported operations.** The gate evaluates the Test in-process against its own read-only ServiceAccount — it ships no Chainsaw binary and shells out to nothing. Only `assert` and `error` are honored; every other operation (`apply`, `create`, `delete`, `patch`, `update`, `script`, `command`, `wait`, `sleep`, `get`, `describe`, `events`, `podLogs`, `proxy`) is rejected before evaluation, as are `catch`, `finally`, and `cleanup` blocks. A readiness test that declares one fails the gate with an invalid-request error naming the offending step.
+
+A Test declaring no `assert`/`error` operation at all is rejected rather than passing vacuously — a check that evaluates nothing must never report healthy. If the no-op is deliberate, because readiness for that component is enforced some other way, declare it with an annotation on the Test:
+
+```yaml
+metadata:
+  name: my-component-readiness
+  annotations:
+    aicr/no-op-check: "true"
+```
+
+The rule applies per document, so in a multi-document (`---`) stream each Test that carries no operations needs its own annotation.
+
+Resource blocks that omit `metadata.namespace` are scoped to the release namespace (the Job passes it via `--namespace`); cluster-scoped kinds, like the `ClusterPolicy` above, ignore it.
 
 ## Best Practices
 

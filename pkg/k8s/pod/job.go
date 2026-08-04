@@ -103,6 +103,15 @@ func resumeJobWatch(ctx context.Context, client kubernetes.Interface, namespace,
 			"context canceled before Job watch resume", ctx.Err(), resumeContext(namespace, name))
 	}
 
+	// The timer and ctx.Done() branches race when the backoff elapses at or near
+	// cancellation: select picks a ready case at random, so a canceled context can
+	// lose to an already-fired timer. Re-check so a caller that has given up
+	// deterministically wins before we List/Watch against its apiserver.
+	if err := ctx.Err(); err != nil {
+		return nil, nil, errors.WrapWithContext(errors.ErrCodeTimeout,
+			"context canceled before Job watch resume", err, resumeContext(namespace, name))
+	}
+
 	// Resync via List: its collection ResourceVersion is current, and its result
 	// lets us catch a terminal transition that landed while the watch was down.
 	list, listErr := client.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{
@@ -175,11 +184,12 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 		case event, ok := <-watcher.ResultChan():
 			// The watch stream ended when the channel closes or the apiserver
 			// emits a retryable 410 (it compacted past our ResourceVersion).
-			// kube-apiserver closes every watch after --min-request-timeout
-			// (30-60m); rolling restarts and LB drops close them early. Re-Get
-			// the Job to catch a terminal transition during the gap, then
-			// re-establish the watch and keep waiting — the context deadline
-			// remains the sole give-up authority.
+			// kube-apiserver closes every watch after a server-selected timeout
+			// at or above --min-request-timeout; rolling restarts and LB drops
+			// close them early. Resync the Job via a field-selected List to catch
+			// a terminal transition during the gap, then re-establish the watch
+			// and keep waiting — a watch closure alone never ends the wait; only
+			// the context deadline or a classified resync failure does.
 			if !ok || isRetryableWatchError(event) {
 				if ctxErr := timeoutCtx.Err(); ctxErr != nil {
 					return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", ctxErr)
@@ -229,10 +239,11 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 // legitimate completions).
 //
 // Returns ErrCodeInternal if the initial Get or Watch call fails, or if the
-// Job is deleted while being watched. Returns ErrCodeUnavailable when a
-// re-check Get fails transiently while resuming a closed watch, and
-// ErrCodeTimeout on context deadline exceeded — the context deadline is the
-// sole give-up authority.
+// Job is deleted while being watched. Returns ErrCodeUnavailable when the
+// resync List or its replacement Watch fails transiently while resuming a
+// closed watch, and ErrCodeTimeout on context deadline exceeded. A watch
+// closure alone never ends the wait; only the context deadline or a classified
+// resync failure does.
 //
 // When the watch ends without the Job being terminal (routine on kube-apiserver
 // --min-request-timeout expiry, rolling restarts, and LB drops), this resyncs
@@ -276,9 +287,10 @@ func WaitForJobTerminal(ctx context.Context, client kubernetes.Interface, namesp
 			// The watch stream ended when the channel closes or the apiserver
 			// emits a retryable 410 (it compacted past our ResourceVersion) —
 			// routine on --min-request-timeout expiry, rolling restarts, and LB
-			// drops. Re-check the Job, then re-establish the watch and keep
-			// waiting rather than declaring failure; the context deadline is the
-			// sole give-up authority.
+			// drops. Resync the Job via a field-selected List, then re-establish
+			// the watch and keep waiting rather than declaring failure; a watch
+			// closure alone never ends the wait, only the context deadline or a
+			// classified resync failure does.
 			if !ok || isRetryableWatchError(event) {
 				// If the parent context already expired, classify the
 				// failure as a timeout rather than a generic recheck error.

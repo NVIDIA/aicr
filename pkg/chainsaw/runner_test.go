@@ -59,6 +59,76 @@ kind: Test`,
 			raw:  "",
 			want: false,
 		},
+		{
+			name: "quoted kind is still Test format",
+			raw: `apiVersion: "chainsaw.kyverno.io/v1alpha1"
+kind: "Test"
+metadata:
+  name: gpu-operator-health`,
+			want: true,
+		},
+		{
+			name: "single-quoted kind is still Test format",
+			raw: `apiVersion: 'chainsaw.kyverno.io/v1alpha1'
+kind: 'Test'`,
+			want: true,
+		},
+		{
+			name: "future chainsaw API version still dispatches to the guarded path",
+			raw: `apiVersion: chainsaw.kyverno.io/v1alpha2
+kind: Test`,
+			want: true,
+		},
+		{
+			name: "raw k8s YAML mentioning the strings in a comment is not a Test",
+			raw: `# migrated from chainsaw.kyverno.io, formerly kind: Test
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator`,
+			want: false,
+		},
+		{
+			name: "raw k8s YAML carrying the strings in data is not a Test",
+			raw: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checks
+data:
+  note: |
+    apiVersion: chainsaw.kyverno.io/v1alpha1
+    kind: Test`,
+			want: false,
+		},
+		{
+			name: "multi-document stream with a Test in the second document",
+			raw: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gpu-operator-health`,
+			want: true,
+		},
+		{
+			name: "bare group without a version is not a Test",
+			raw: `apiVersion: chainsaw.kyverno.io
+kind: Test`,
+			want: false,
+		},
+		{
+			name: "unparseable YAML is not a Test",
+			raw:  "\tapiVersion: chainsaw.kyverno.io/v1alpha1\n  kind: Test\n:::",
+			want: false,
+		},
+		{
+			name: "scalar document is not a Test",
+			raw:  `"chainsaw.kyverno.io kind: Test"`,
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

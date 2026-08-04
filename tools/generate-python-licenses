@@ -1,0 +1,425 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""Collect third-party Python license notices for the aiperf-bench image.
+
+Renders a COMMITTED Markdown fragment that ``tools/generate-notices`` appends
+verbatim to ``THIRD_PARTY_NOTICES.md``.
+
+Usage::
+
+    make python-licenses
+    tools/generate-python-licenses [--requirements PATH] [--output PATH]
+
+Why ``pip download`` instead of installing
+------------------------------------------
+Everything an attribution record needs lives in each wheel's
+``*.dist-info/METADATA``: distribution name and version, an SPDX license
+expression, the names of the bundled license files, and a source URL. Reading
+that requires *fetching* the distributions, not installing them.
+
+That distinction removes the container. aiperf declares
+``requires-python <3.14``, so it cannot be installed by a venv on a 3.14 host,
+which is why an earlier version of this tool ran ``pip install`` inside a
+``python:3.13-slim`` container. ``pip download --python-version`` resolves and
+fetches *for* a target interpreter while running on any interpreter, so no
+container, no emulation, and no matching local Python is required.
+
+Why not pip-licenses or syft
+----------------------------
+Both were evaluated against these exact wheels. ``syft`` yields clean SPDX
+expressions but carries no source URL for Python packages and no license text.
+``pip-licenses`` yields text and URLs but reports Trove classifier strings
+(``"Mozilla Public License 2.0 (MPL 2.0)"``) where ``METADATA`` holds the clean
+expression (``MPL-2.0``), so it needs heuristic cleanup that reading METADATA
+directly does not. METADATA also names its license files explicitly via
+``License-File``, avoiding filename guesswork — tqdm ships ``LICENCE``, not
+``LICENSE``.
+
+Why one platform is collected, and what guards it
+-------------------------------------------------
+The image is released for linux/amd64 and linux/arm64, but the closure is
+resolved on amd64 only. Two facts make that correct:
+
+1. A wheel's architecture does not change its license. The same package at the
+   same version is under the same license whichever wheel is installed, so a
+   second architecture contributes no new attribution for a shared package.
+2. The only way a package can be present on one architecture and absent on the
+   other is an environment marker. ``check_arch_markers`` below fails the run
+   if any dependency carries a marker that discriminates on machine
+   architecture, so assumption (2) is enforced rather than trusted.
+
+Collecting on arm64 as well is not merely redundant, it is impossible with
+``--only-binary``: ``crick`` publishes no linux/arm64 wheel (it compiles from
+source in the image, which is why the builder stage carries build-essential),
+and pip aborts the whole resolution rather than skipping it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import email.parser
+import hashlib
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+
+# The interpreter the aiperf-bench builder stage uses. The resolved closure
+# depends on it: environment markers gate on python_version and wheel
+# availability varies by cpXX tag. Keep in sync with that stage's
+# `FROM python:3.13-slim AS builder`.
+PYTHON_VERSION = "3.13"
+
+# Several manylinux baselines are listed because projects publish against
+# different ones; a single tag silently fails to match wheels built for a newer
+# baseline.
+COLLECT_PLATFORM = "linux/amd64"
+COLLECT_TAGS = [
+    "manylinux2014_x86_64",
+    "manylinux_2_17_x86_64",
+    "manylinux_2_28_x86_64",
+]
+
+# Documented in the fragment so the record states its own scope.
+RELEASED_PLATFORMS = ["linux/amd64", "linux/arm64"]
+
+DEFAULT_REQUIREMENTS = pathlib.Path("validators/performance/requirements.txt")
+DEFAULT_OUTPUT = pathlib.Path("validators/performance/licenses/python-notices.md")
+
+IMAGE = "ghcr.io/nvidia/aicr-validators/aiperf-bench"
+
+# A few older distributions put an entire license text in the License field
+# rather than an identifier. Anything long or prose-shaped is replaced with a
+# pointer; the verbatim text is rendered below the entry regardless.
+_PROSE = re.compile(r"permission|copyright", re.IGNORECASE)
+_MAX_LICENSE_LEN = 60
+
+# License-shaped filenames inside dist-info, used when a wheel ships license
+# text without declaring it via License-File. Both spellings of "licence" are
+# matched, and the METADATA/RECORD/WHEEL bookkeeping files are excluded.
+_LICENSE_FILE = re.compile(
+    r"^(LICEN[CS]E|COPYING|COPYRIGHT|NOTICE|AUTHORS|PATENTS)([-._].*)?$",
+    re.IGNORECASE,
+)
+
+# Matches a marker pinning a specific machine architecture, e.g.
+# `platform_machine == "aarch64"`. A marker that merely *lists* architectures
+# inclusively (greenlet, hf-xet) resolves true on both targets and is fine; it
+# is the equality against a single value that would split the closure.
+_ARCH_MARKER = re.compile(
+    r"platform_machine\s*==\s*['\"](?P<arch>[^'\"]+)['\"]", re.IGNORECASE
+)
+_ARCH_TARGETS = {"x86_64", "amd64", "aarch64", "arm64"}
+
+
+def normalize(name: str) -> str:
+    """Normalize a distribution name per PEP 503."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def fence_for(text: str) -> str:
+    """Return a code fence long enough to contain ``text`` verbatim.
+
+    Some license files contain Markdown themselves — pillow's LICENSE has
+    triple-backtick lines. A fixed ```` ``` ```` fence would be closed early by
+    that content, so the remainder of the license would render as Markdown and
+    every following block would be inverted. CommonMark resolves this by
+    allowing a longer opening fence, so use one backtick more than the longest
+    run appearing in the text.
+    """
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    return "`" * max(3, longest + 1)
+
+
+def clean_license(raw: str) -> str:
+    """Reduce a METADATA License value to an identifier, or a pointer."""
+    first = (raw or "").split("\n")[0].strip()
+    if not first or first == "UNKNOWN":
+        return "See license text below"
+    if len(first) > _MAX_LICENSE_LEN:
+        return "See license text below"
+    if "\n" in (raw or "") and _PROSE.search(first):
+        return "See license text below"
+    return first
+
+
+def download(requirements: pathlib.Path, dest: pathlib.Path) -> None:
+    """Fetch the resolved closure as wheels for the collection platform."""
+    cmd = [
+        sys.executable, "-m", "pip", "download",
+        "--only-binary=:all:",
+        "--python-version", PYTHON_VERSION,
+        "--requirement", str(requirements),
+        "--dest", str(dest),
+    ]
+    for tag in COLLECT_TAGS:
+        cmd += ["--platform", tag]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        sys.stderr.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        raise SystemExit(
+            f"ERROR: pip download failed for {COLLECT_PLATFORM}.\n"
+            "A package with no wheel for this target needs an sdist fallback."
+        )
+
+
+def read_metadata(wheel: pathlib.Path) -> dict | None:
+    """Extract one wheel's attribution record from its dist-info."""
+    with zipfile.ZipFile(wheel) as archive:
+        names = archive.namelist()
+        meta_name = next((n for n in names if n.endswith(".dist-info/METADATA")), None)
+        if meta_name is None:
+            return None
+
+        raw = archive.read(meta_name).decode("utf-8", errors="replace")
+        msg = email.parser.Parser().parsestr(raw)
+        dist_info = meta_name.rsplit("/", 1)[0]
+
+        # Prefer the PEP 639 SPDX expression; fall back to the legacy field.
+        license_value = msg.get("License-Expression") or msg.get("License") or ""
+
+        # Source URL: Home-page, else the most repository-ish Project-URL.
+        url = msg.get("Home-page") or ""
+        if not url:
+            entries = {}
+            for item in msg.get_all("Project-URL") or []:
+                label, _, target = item.partition(",")
+                entries[label.strip().lower()] = target.strip()
+            for key in ("source", "repository", "homepage", "documentation"):
+                if key in entries:
+                    url = entries[key]
+                    break
+
+        # Prefer the License-File declarations: they name the files exactly, so
+        # no guessing (tqdm ships LICENCE, not LICENSE).
+        texts: dict[str, str] = {}
+        captured: set[str] = set()
+        for filename in msg.get_all("License-File") or []:
+            filename = filename.strip()
+            for candidate in (
+                f"{dist_info}/licenses/{filename}",
+                f"{dist_info}/license_files/{filename}",
+                f"{dist_info}/{filename}",
+            ):
+                if candidate in names:
+                    texts[filename] = archive.read(candidate).decode(
+                        "utf-8", errors="replace"
+                    )
+                    captured.add(candidate)
+                    break
+
+        # Fall back to scanning dist-info for license-shaped files. License-File
+        # is a relatively recent metadata field and plenty of wheels still ship
+        # a LICENSE without declaring it (blinker, matplotlib, pandas, rich,
+        # scipy among them here). Relying on the declaration alone silently
+        # dropped verbatim text for 18 of 130 packages.
+        for name in sorted(names):
+            if name in captured or not name.startswith(f"{dist_info}/"):
+                continue
+            if name.endswith("/"):
+                continue
+            base = name.rsplit("/", 1)[-1]
+            if not _LICENSE_FILE.match(base):
+                continue
+            # Key by path relative to dist-info so nested files (licenses/X)
+            # stay distinguishable from a same-named file at the root.
+            label = name[len(dist_info) + 1:]
+            texts.setdefault(
+                label, archive.read(name).decode("utf-8", errors="replace")
+            )
+
+        return {
+            "key": normalize(msg.get("Name") or wheel.name.split("-")[0]),
+            "version": msg.get("Version") or "unknown",
+            "license": clean_license(license_value),
+            "url": url or "n/a",
+            "texts": texts,
+            "requires": list(msg.get_all("Requires-Dist") or []),
+        }
+
+
+def check_arch_markers(packages: list[dict]) -> None:
+    """Fail if the closure could differ between the released architectures.
+
+    Collecting on one platform is only sound while no dependency is gated to a
+    single machine architecture. This enforces that rather than trusting it: an
+    aiperf bump that introduces such a dependency must not silently produce an
+    attribution record missing the other architecture's packages.
+    """
+    offenders: list[str] = []
+    for pkg in packages:
+        for requirement in pkg["requires"]:
+            found = {m.group("arch").lower() for m in _ARCH_MARKER.finditer(requirement)}
+            if not found & _ARCH_TARGETS:
+                continue
+            # A marker listing BOTH released architectures resolves true on
+            # each, so it cannot split the closure.
+            if {"x86_64", "amd64"} & found and {"aarch64", "arm64"} & found:
+                continue
+            offenders.append(f"{pkg['key']}: {requirement.strip()}")
+
+    if offenders:
+        print(
+            "ERROR: a dependency is gated to a single machine architecture, so a\n"
+            f"{COLLECT_PLATFORM}-only collection may be missing packages installed on\n"
+            "the other released architecture:",
+            file=sys.stderr,
+        )
+        for line in offenders:
+            print(f"  {line}", file=sys.stderr)
+        raise SystemExit(
+            "Collect both architectures (note crick has no linux/arm64 wheel) or\n"
+            "confirm the marker cannot split the closure, then update this guard."
+        )
+
+
+def collect(
+    requirements: pathlib.Path,
+    work: pathlib.Path,
+    wheels_dir: pathlib.Path | None = None,
+) -> list[dict]:
+    """Download the closure and read each wheel's attribution record.
+
+    ``wheels_dir`` bypasses the download and reads pre-supplied wheels. Fetching
+    and rendering are otherwise fused, which would make every rendering rule
+    (fence sizing, the License-File fallback, license sanitizing) reachable only
+    with live PyPI access and therefore untestable in CI. Tests pass fixture
+    wheels here; nothing in the normal path uses it.
+    """
+    if wheels_dir is not None:
+        dest = wheels_dir
+    else:
+        dest = work / "wheels"
+        dest.mkdir(parents=True, exist_ok=True)
+        print(f"Downloading closure for {COLLECT_PLATFORM} (python {PYTHON_VERSION})...",
+              file=sys.stderr)
+        download(requirements, dest)
+
+    wheels = sorted(dest.glob("*.whl"))
+    if not wheels:
+        raise SystemExit(f"ERROR: no wheels downloaded for {COLLECT_PLATFORM}.")
+
+    merged: dict[str, dict] = {}
+    for wheel in wheels:
+        record = read_metadata(wheel)
+        if record is None:
+            print(f"WARNING: no METADATA in {wheel.name}", file=sys.stderr)
+            continue
+        merged.setdefault(record["key"], record)
+
+    print(f"  {len(wheels)} wheels, {len(merged)} packages", file=sys.stderr)
+    return [merged[key] for key in sorted(merged)]
+
+
+def render(packages: list[dict], requirements: pathlib.Path, req_sha: str) -> str:
+    """Render the Markdown fragment appended to THIRD_PARTY_NOTICES.md."""
+    out: list[str] = []
+    add = out.append
+
+    add("## Python Package Index\n")
+    add(
+        "\nThe following Python packages are installed into the released\n"
+        f"`{IMAGE}` image, which ships the AIPerf benchmark runner and its full\n"
+        "transitive dependency closure. The image is released for "
+        + " and ".join(f"`{p}`" for p in RELEASED_PLATFORMS)
+        + ";\nthe closure is resolved on "
+        f"`{COLLECT_PLATFORM}`, which is sufficient because a wheel's\n"
+        "architecture does not change its license, and the generator fails closed if\n"
+        "any dependency is gated to a single architecture.\n"
+    )
+    add(
+        f"\nGenerated by `make python-licenses` from `{requirements}`\n"
+        f"(sha256 `{req_sha}`). Versions reflect the closure resolved at that time.\n"
+    )
+    add("\n| Package | Version | License | Source |")
+    add("|---------|---------|---------|--------|")
+    for pkg in packages:
+        add(f"| `{pkg['key']}` | {pkg['version']} | {pkg['license']} | {pkg['url']} |")
+
+    add("\n## Python Package License Texts\n")
+    for pkg in packages:
+        add(f"\n### {pkg['key']}\n")
+        add(f"* Version: {pkg['version']}")
+        add(f"* License: {pkg['license']}")
+        add(f"* Source: {pkg['url']}\n")
+
+        if pkg["texts"]:
+            for filename in sorted(pkg["texts"]):
+                body = pkg["texts"][filename].rstrip("\n")
+                fence = fence_for(body)
+                add(f"#### {filename}\n")
+                add(f"{fence}text")
+                add(body)
+                add(f"{fence}\n")
+        else:
+            add(
+                "License text unavailable in the distributed package. "
+                "See upstream source for the full license.\n"
+            )
+
+    return "\n".join(out) + "\n"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Collect Python license notices.")
+    parser.add_argument("--requirements", type=pathlib.Path, default=DEFAULT_REQUIREMENTS)
+    parser.add_argument("--output", type=pathlib.Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--wheels-dir",
+        type=pathlib.Path,
+        default=None,
+        help="Read wheels from this directory instead of downloading (tests only).",
+    )
+    args = parser.parse_args()
+
+    if args.wheels_dir is not None and not args.wheels_dir.is_dir():
+        raise SystemExit(f"ERROR: --wheels-dir is not a directory: {args.wheels_dir}")
+
+    if not args.requirements.is_file():
+        raise SystemExit(
+            f"ERROR: requirements file not found: {args.requirements}\n"
+            "Run 'make python-licenses' from the repo root."
+        )
+
+    # Recorded in the fragment so generate-notices can detect, offline, that
+    # the requirements changed without a license refresh. A hash covers every
+    # kind of edit, unlike matching a single version string.
+    req_sha = hashlib.sha256(args.requirements.read_bytes()).hexdigest()
+
+    work = pathlib.Path(tempfile.mkdtemp(prefix="aicr-pylicenses."))
+    try:
+        packages = collect(args.requirements, work, args.wheels_dir)
+        check_arch_markers(packages)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    if not packages:
+        raise SystemExit("ERROR: no packages collected — refusing to write an empty fragment.")
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(render(packages, args.requirements, req_sha), encoding="utf-8")
+
+    print(f"Wrote {args.output} ({len(packages)} packages)", file=sys.stderr)
+
+    # Report rather than fail: a distribution that ships no license file is
+    # common and is not something this repo can fix. Surfacing it keeps the gap
+    # reviewable — those entries point at the upstream source instead.
+    missing = [p["key"] for p in packages if not p["texts"]]
+    if missing:
+        print(f"WARNING: {len(missing)} package(s) ship no license text:", file=sys.stderr)
+        for key in missing:
+            print(f"  {key}", file=sys.stderr)
+
+    print("\nNext: run 'make notices' to fold this into THIRD_PARTY_NOTICES.md.",
+          file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

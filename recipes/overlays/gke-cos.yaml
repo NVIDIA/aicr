@@ -78,6 +78,20 @@ spec:
               reapplyOnReboot: "true"
 
   validation:
+    # The #1755 device-plugin ownership readiness gate is temporarily
+    # WITHDRAWN. It required gke-no-default-nvidia-gpu-device-plugin=true on
+    # every GPU node, but on GKE the managed driver install
+    # (gpu-driver-version=default) is finalized by an init container of the
+    # same DaemonSet that label disables — a labeled fresh pool comes up
+    # driverless, so the gate enforced a prerequisite GKE cannot satisfy
+    # alone (discovered on UAT run 30930940652). Until the gpuStack profile
+    # lands (#1761 rollout PR 3) the recipe runs on GKE-default pools, where
+    # GKE's managed plugin and the operator's plugin BOTH advertise
+    # nvidia.com/gpu — the documented latent #1755 conflict. The profile
+    # re-lands enforcement symmetrically: gcp-managed (default) requires the
+    # label absent; operator-managed requires it present plus a
+    # label-surviving driver path (Google's standalone
+    # nvidia-driver-installer DaemonSet).
     conformance:
       checks:
         - platform-health

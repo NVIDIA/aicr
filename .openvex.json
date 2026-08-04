@@ -3,14 +3,14 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-07-24T00:00:00Z",
-  "version": 9,
-  "tooling": "manual; aiperf-bench statements verified against aiperf v0.11.0 source (which pins pillow~=12.2.0) — the GHSA-whj4-6x5x-4v2j and GHSA-pwv6-vv43-88gr statements were dropped because their CVEs are fixed in pillow 12.2.0 and no longer present; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); aicr-gate statements suppress CVEs in the embedded upstream kyverno/chainsaw binary (affected packages identified via vuln.go.dev), justified by chainsaw's ephemeral cluster-internal readiness-gate usage",
+  "timestamp": "2026-08-04T00:00:00Z",
+  "version": 12,
+  "tooling": "manual; aiperf-bench statements verified against aiperf v0.11.0 source (which pins pillow~=12.2.0); the aiperf-bench runtime base moved from python:3.13-slim to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, adding 21 libexpat1 2.7.1-2 statements (4 High, 16 Medium, 1 Low) whose unreachability was verified by reading ELF DT_NEEDED across the built image (no binary links libexpat) and by confirming CPython's pyexpat statically bundles expat 2.8.1; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); v11 added aiperf-bench CVE-2026-11940 and CVE-2026-11972 (CPython 3.13.14 tarfile), justified vulnerable_code_not_in_execute_path after confirming aiperf 0.11.0 has zero tarfile references and that AICR's fixed `aiperf profile` argv lands in the synthetic-dataset branch of aiperf/dataset/dataset_manager.py, never downloading or extracting an archive; v12 removed ALL 47 pkg:oci/aicr-gate statements: #2038 deleted the embedded upstream kyverno/chainsaw binary from cmd/gate/Dockerfile (the gate now evaluates Chainsaw Test assertions in-process via pkg/chainsaw), so every package those statements scoped to that binary — including GO-2026-5942 (golang.org/x/net) and GO-2026-5970 (golang.org/x/text), the two HIGH findings the weekly scan reported on aicr-gate — is component_not_present rather than suppressed. The aicr-gate image now ships only the statically linked Go gate binary built from this module's pins, so a future finding on it must be fixed by a dependency bump, not re-suppressed. Confirmation is the first Weekly Image Vulnerability Scan run after merge: aicr-gate must report 0 HIGH+ and 0 VEX-suppressed.",
   "statements": [
     {
       "vulnerability": {
         "name": "CVE-2026-15308",
-        "description": "cpython CPU-exhaustion DoS in html.parser.HTMLParser incremental feed() via repeated unterminated markup declarations (PSF-2026-33, CWE-407, High CVSS 7.5/8.7). Fix merged to the cpython 3.13 branch on 2026-07-04 (PR #153040) but as of 2026-07-13 no released CPython contains it \u2014 v3.13.14 (2026-06-10), v3.14.6, and v3.15.0b3 all predate the fix, so no base-image bump can remediate yet."
+        "description": "cpython CPU-exhaustion DoS in html.parser.HTMLParser incremental feed() via repeated unterminated markup declarations (PSF-2026-33, CWE-407, High CVSS 7.5/8.7). Fix merged to the cpython 3.13 branch on 2026-07-04 (PR #153040) but as of 2026-07-13 no released CPython contains it — v3.13.14 (2026-06-10), v3.14.6, and v3.15.0b3 all predate the fix, so no base-image bump can remediate yet."
       },
       "products": [
         {
@@ -28,942 +28,7 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The trigger requires incrementally feeding attacker-controlled HTML containing repeated unterminated markup declarations into html.parser.HTMLParser.feed(). aiperf 0.11.0 source contains zero references to html.parser, HTMLParser, or any html stdlib import (verified with `grep -rn -E 'html\\.parser|HTMLParser|^(import|from) html'` against the aiperf 0.11.0 wheel \u2014 no hits). AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go); the workload exchanges only JSON over HTTP via aiohttp + msgspec/orjson and never parses HTML documents from the inference endpoint or any other source. No attacker-controlled markup can reach the vulnerable parser, so the quadratic-complexity code path is unreachable."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-jppx-rxg9-jmrx",
-        "description": "chainsaw (embedded kyverno binary): key constraints not enforced in golang.org/x/crypto/ssh/agent (CVE-2026-39833, GO-2026-5005)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5005",
-        "description": "chainsaw (embedded kyverno binary): key constraints not enforced in golang.org/x/crypto/ssh/agent (CVE-2026-39833, GO-2026-5005)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-f5wc-c3c7-36mc",
-        "description": "chainsaw (embedded kyverno binary): agent constraints dropped when forwarding keys in golang.org/x/crypto/ssh/agent (CVE-2026-39832, GO-2026-5006)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5006",
-        "description": "chainsaw (embedded kyverno binary): agent constraints dropped when forwarding keys in golang.org/x/crypto/ssh/agent (CVE-2026-39832, GO-2026-5006)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-q4h4-gmj2-qvw2",
-        "description": "chainsaw (embedded kyverno binary): byte arithmetic underflow and panic in golang.org/x/crypto/ssh (CVE-2026-46597, GO-2026-5013)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5013",
-        "description": "chainsaw (embedded kyverno binary): byte arithmetic underflow and panic in golang.org/x/crypto/ssh (CVE-2026-46597, GO-2026-5013)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-vgwf-h737-ff37",
-        "description": "chainsaw (embedded kyverno binary): client can cause server deadlock on unexpected responses in golang.org/x/crypto/ssh (CVE-2026-39830, GO-2026-5017)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5017",
-        "description": "chainsaw (embedded kyverno binary): client can cause server deadlock on unexpected responses in golang.org/x/crypto/ssh (CVE-2026-39830, GO-2026-5017)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-w879-237q-wc7r",
-        "description": "chainsaw (embedded kyverno binary): pathological RSA/DSA parameters may cause DoS in golang.org/x/crypto/ssh (CVE-2026-39829, GO-2026-5018)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5018",
-        "description": "chainsaw (embedded kyverno binary): pathological RSA/DSA parameters may cause DoS in golang.org/x/crypto/ssh (CVE-2026-39829, GO-2026-5018)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-89gr-r52h-f8rx",
-        "description": "chainsaw (embedded kyverno binary): bypass of FIDO/U2F security key physical interaction in golang.org/x/crypto/ssh (CVE-2026-39831, GO-2026-5019)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5019",
-        "description": "chainsaw (embedded kyverno binary): bypass of FIDO/U2F security key physical interaction in golang.org/x/crypto/ssh (CVE-2026-39831, GO-2026-5019)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-rm3j-f69w-wqmq",
-        "description": "chainsaw (embedded kyverno binary): infinite loop on large channel writes in golang.org/x/crypto/ssh (CVE-2026-39834, GO-2026-5020)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5020",
-        "description": "chainsaw (embedded kyverno binary): infinite loop on large channel writes in golang.org/x/crypto/ssh (CVE-2026-39834, GO-2026-5020)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-5cgq-3rg8-m6cv",
-        "description": "chainsaw (embedded kyverno binary): auth bypass via unenforced @revoked status in golang.org/x/crypto/ssh/knownhosts (CVE-2026-42508, GO-2026-5021)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5021",
-        "description": "chainsaw (embedded kyverno binary): auth bypass via unenforced @revoked status in golang.org/x/crypto/ssh/knownhosts (CVE-2026-42508, GO-2026-5021)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-x527-x647-q7gg",
-        "description": "chainsaw (embedded kyverno binary): VerifiedPublicKeyCallback permissions skip enforcement in golang.org/x/crypto/ssh (CVE-2026-46595, GO-2026-5023)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5023",
-        "description": "chainsaw (embedded kyverno binary): VerifiedPublicKeyCallback permissions skip enforcement in golang.org/x/crypto/ssh (CVE-2026-46595, GO-2026-5023)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw is a Kubernetes test runner and never establishes SSH client, server, or agent connections; the golang.org/x/crypto/ssh* code path is not reached during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-25679",
-        "description": "chainsaw (embedded kyverno binary): incorrect parsing of IPv6 host literals in net/url."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4601",
-        "description": "chainsaw (embedded kyverno binary): incorrect parsing of IPv6 host literals in net/url."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-27137",
-        "description": "chainsaw (embedded kyverno binary): incorrect enforcement of email constraints in crypto/x509."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4599",
-        "description": "chainsaw (embedded kyverno binary): incorrect enforcement of email constraints in crypto/x509."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-32280",
-        "description": "chainsaw (embedded kyverno binary): unexpected work during chain building in crypto/x509."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4947",
-        "description": "chainsaw (embedded kyverno binary): unexpected work during chain building in crypto/x509."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-32281",
-        "description": "chainsaw (embedded kyverno binary): inefficient policy validation in crypto/x509."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4946",
-        "description": "chainsaw (embedded kyverno binary): inefficient policy validation in crypto/x509."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-32283",
-        "description": "chainsaw (embedded kyverno binary): unauthenticated TLS 1.3 KeyUpdate record can cause connection retention and DoS in crypto/tls."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4870",
-        "description": "chainsaw (embedded kyverno binary): unauthenticated TLS 1.3 KeyUpdate record can cause connection retention and DoS in crypto/tls."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-33810",
-        "description": "chainsaw (embedded kyverno binary): case-sensitive excludedSubtrees name constraints cause auth bypass in crypto/x509."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4866",
-        "description": "chainsaw (embedded kyverno binary): case-sensitive excludedSubtrees name constraints cause auth bypass in crypto/x509."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The only TLS peer chainsaw connects to is the Kubernetes API server, whose certificate chain is trusted via the in-cluster kubeconfig CA. Triggering this requires an attacker-controlled certificate or TLS peer, which is not present on the gate's execution path."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-33811",
-        "description": "chainsaw (embedded kyverno binary): crash when handling long CNAME response in net."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4981",
-        "description": "chainsaw (embedded kyverno binary): crash when handling long CNAME response in net."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-33814",
-        "description": "chainsaw (embedded kyverno binary): infinite loop in HTTP/2 transport given bad SETTINGS_MAX_FRAME_SIZE (net/http, golang.org/x/net/http2)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw acts only as an HTTP/2 client of the trusted in-cluster API server; triggering this requires a hostile server or hostname, which the gate's usage does not present."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4918",
-        "description": "chainsaw (embedded kyverno binary): infinite loop in HTTP/2 transport given bad SETTINGS_MAX_FRAME_SIZE (net/http, golang.org/x/net/http2)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw acts only as an HTTP/2 client of the trusted in-cluster API server; triggering this requires a hostile server or hostname, which the gate's usage does not present."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-39820",
-        "description": "chainsaw (embedded kyverno binary): quadratic string concatenation in consumeComment in net/mail."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4986",
-        "description": "chainsaw (embedded kyverno binary): quadratic string concatenation in consumeComment in net/mail."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-39836",
-        "description": "chainsaw (embedded kyverno binary): panic in Dial and LookupPort on NUL byte (Windows-only) in net."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4971",
-        "description": "chainsaw (embedded kyverno binary): panic in Dial and LookupPort on NUL byte (Windows-only) in net."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-42499",
-        "description": "chainsaw (embedded kyverno binary): quadratic string concatenation in consumePhrase in net/mail."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4977",
-        "description": "chainsaw (embedded kyverno binary): quadratic string concatenation in consumePhrase in net/mail."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-42504",
-        "description": "chainsaw (embedded kyverno binary): quadratic complexity in WordDecoder.DecodeHeader in mime."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5038",
-        "description": "chainsaw (embedded kyverno binary): quadratic complexity in WordDecoder.DecodeHeader in mime."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. Triggering this requires attacker-controlled input to the affected parser; chainsaw parses only operator-authored recipe manifests and trusted API-server responses, so the adversarial-input path is not reached."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-27140",
-        "description": "chainsaw (embedded kyverno binary): code execution in SWIG code generation in cmd/go."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_present",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. This vulnerability is in the Go build toolchain (cmd/compile / cmd/go), not in any package linked into the runtime binary. The cmd/* packages are not present in the shipped chainsaw executable."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-27143",
-        "description": "chainsaw (embedded kyverno binary): missing bound checks can lead to memory corruption in cmd/compile."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_present",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. This vulnerability is in the Go build toolchain (cmd/compile / cmd/go), not in any package linked into the runtime binary. The cmd/* packages are not present in the shipped chainsaw executable."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-27144",
-        "description": "chainsaw (embedded kyverno binary): miscompilation allows memory corruption via CONVNOP-wrapped array copy in cmd/compile."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_present",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. This vulnerability is in the Go build toolchain (cmd/compile / cmd/go), not in any package linked into the runtime binary. The cmd/* packages are not present in the shipped chainsaw executable."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-42501",
-        "description": "chainsaw (embedded kyverno binary): malicious module proxy can bypass the checksum database in cmd/go."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_present",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. This vulnerability is in the Go build toolchain (cmd/compile / cmd/go), not in any package linked into the runtime binary. The cmd/* packages are not present in the shipped chainsaw executable."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5026",
-        "description": "chainsaw (embedded kyverno binary): failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna (CVE-2026-39821)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw acts only as an HTTP/2 client of the trusted in-cluster API server; triggering this requires a hostile server or hostname, which the gate's usage does not present."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5037",
-        "description": "chainsaw (embedded kyverno binary): inefficient candidate hostname parsing in crypto/x509 (GO-2026-5037 / CVE-2026-27145)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain (go 1.26.0; crypto/x509 fixed in 1.26.4); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected crypto/x509 candidate-hostname parsing runs only during TLS certificate verification of the in-cluster API server, whose hostname (the operator-configured endpoint) and presented certificate are trusted inputs. An adversary cannot supply the crafted hostname or certificate needed to trigger the inefficient-parsing slowdown, so the code is reachable but its inputs are not attacker-controlled."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-27145",
-        "description": "chainsaw (embedded kyverno binary): inefficient candidate hostname parsing in crypto/x509 (GO-2026-5037 / CVE-2026-27145)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain (go 1.26.0; crypto/x509 fixed in 1.26.4); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected crypto/x509 candidate-hostname parsing runs only during TLS certificate verification of the in-cluster API server, whose hostname (the operator-configured endpoint) and presented certificate are trusted inputs. An adversary cannot supply the crafted hostname or certificate needed to trigger the inefficient-parsing slowdown, so the code is reachable but its inputs are not attacker-controlled."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-78mq-xcr3-xm33",
-        "description": "chainsaw (embedded kyverno binary): server panic during CheckHostKey/Authenticate in golang.org/x/crypto/ssh (CVE-2026-39835, GO-2026-5015)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) bundles golang.org/x/crypto v0.49.0 (fixed in v0.52.0); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected code path is server-side golang.org/x/crypto/ssh handshake handling (CheckHostKey/Authenticate). chainsaw operates no SSH server and never invokes golang.org/x/crypto/ssh; the panic is reachable only by an SSH server processing a malicious client, which the gate's readiness-check workload does not present."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5015",
-        "description": "chainsaw (embedded kyverno binary): server panic during CheckHostKey/Authenticate in golang.org/x/crypto/ssh (CVE-2026-39835, GO-2026-5015)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) bundles golang.org/x/crypto v0.49.0 (fixed in v0.52.0); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected code path is server-side golang.org/x/crypto/ssh handshake handling (CheckHostKey/Authenticate). chainsaw operates no SSH server and never invokes golang.org/x/crypto/ssh; the panic is reachable only by an SSH server processing a malicious client, which the gate's readiness-check workload does not present."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-45gg-vh54-h5m9",
-        "description": "chainsaw (embedded kyverno binary): bypass of certificate restrictions in golang.org/x/crypto/ssh (CVE-2026-39828, GO-2026-5014)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) bundles golang.org/x/crypto v0.49.0 (fixed in v0.52.0); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected code path is golang.org/x/crypto/ssh certificate-restriction enforcement. chainsaw performs no SSH authentication and never invokes golang.org/x/crypto/ssh; with no SSH server or client in the gate's readiness-check workload, the restriction-bypass is not reachable."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-5014",
-        "description": "chainsaw (embedded kyverno binary): bypass of certificate restrictions in golang.org/x/crypto/ssh (CVE-2026-39828, GO-2026-5014)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.5, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) bundles golang.org/x/crypto v0.49.0 (fixed in v0.52.0); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected code path is golang.org/x/crypto/ssh certificate-restriction enforcement. chainsaw performs no SSH authentication and never invokes golang.org/x/crypto/ssh; with no SSH server or client in the gate's readiness-check workload, the restriction-bypass is not reachable."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-39822",
-        "description": "chainsaw (embedded kyverno binary): root escape via symlink plus trailing slash in os (CVE-2026-39822, GO-2026-4970)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary, which upstream built with Go 1.26.0 -- the AICR gate binary is clean (built with Go 1.26.5, where this issue is fixed). chainsaw v0.2.15 (the latest release) has not been rebuilt by kyverno with a patched toolchain. The vulnerability is an os.Root escape via a symlink plus trailing slash, requiring the process to open attacker-controlled paths under an os.Root. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, reading only operator-authored test manifests baked into the bundle ConfigMap and trusted in-cluster Kubernetes API-server responses. No attacker-influenced filesystem paths are opened, so the symlink-escape precondition is not reachable during `chainsaw test`."
-    },
-    {
-      "vulnerability": {
-        "name": "GO-2026-4970",
-        "description": "chainsaw (embedded kyverno binary): root escape via symlink plus trailing slash in os (CVE-2026-39822, GO-2026-4970)."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-gate",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary, which upstream built with Go 1.26.0 -- the AICR gate binary is clean (built with Go 1.26.5, where this issue is fixed). chainsaw v0.2.15 (the latest release) has not been rebuilt by kyverno with a patched toolchain. The vulnerability is an os.Root escape via a symlink plus trailing slash, requiring the process to open attacker-controlled paths under an os.Root. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, reading only operator-authored test manifests baked into the bundle ConfigMap and trusted in-cluster Kubernetes API-server responses. No attacker-influenced filesystem paths are opened, so the symlink-escape precondition is not reachable during `chainsaw test`."
+      "impact_statement": "The trigger requires incrementally feeding attacker-controlled HTML containing repeated unterminated markup declarations into html.parser.HTMLParser.feed(). aiperf 0.11.0 source contains zero references to html.parser, HTMLParser, or any html stdlib import (verified with `grep -rn -E 'html\\.parser|HTMLParser|^(import|from) html'` against the aiperf 0.11.0 wheel — no hits). AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go); the workload exchanges only JSON over HTTP via aiohttp + msgspec/orjson and never parses HTML documents from the inference endpoint or any other source. No attacker-controlled markup can reach the vulnerable parser, so the quadratic-complexity code path is unreachable."
     },
     {
       "vulnerability": {
@@ -1055,7 +120,7 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. `grep -rnE '\\.paste\\(|\\.crop\\(' aiperf/ (the 0.11.0 wheel)` returns zero hits \u2014 aiperf never calls the vulnerable methods."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. `grep -rnE '\\.paste\\(|\\.crop\\(' aiperf/ (the 0.11.0 wheel)` returns zero hits — aiperf never calls the vulnerable methods."
     },
     {
       "vulnerability": {
@@ -1083,7 +148,7 @@
     {
       "vulnerability": {
         "name": "GHSA-45hq-cxwh-f6vc",
-        "description": "pillow BdfFontFile: Image.new() called without decompression-bomb check \u2014 bomb protection bypass via BDF font loading (CVE-2026-55379, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow BdfFontFile: Image.new() called without decompression-bomb check — bomb protection bypass via BDF font loading (CVE-2026-55379, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1101,7 +166,7 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError — `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
     },
     {
       "vulnerability": {
@@ -1124,7 +189,7 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError — `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
     },
     {
       "vulnerability": {
@@ -1147,12 +212,12 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. GD images are not auto-registered with Image.open; the vulnerable path requires explicit PIL.GdImageFile usage \u2014 `grep -rn 'GdImageFile' aiperf/ (the 0.11.0 wheel)` returns zero hits."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. GD images are not auto-registered with Image.open; the vulnerable path requires explicit PIL.GdImageFile usage — `grep -rn 'GdImageFile' aiperf/ (the 0.11.0 wheel)` returns zero hits."
     },
     {
       "vulnerability": {
         "name": "GHSA-8v84-f9pq-wr9x",
-        "description": "pillow PcfFontFile._load_bitmaps(): Image.frombytes() called without decompression-bomb check \u2014 bomb protection bypass via PCF font loading (CVE-2026-54059, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
+        "description": "pillow PcfFontFile._load_bitmaps(): Image.frombytes() called without decompression-bomb check — bomb protection bypass via PCF font loading (CVE-2026-54059, High). Fixed in pillow 12.3.0, which is unreachable: aiperf 0.11.0 pins pillow~=12.2.0."
       },
       "products": [
         {
@@ -1170,7 +235,7 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError \u2014 `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
+      "impact_statement": "The aiperf-bench workload is the text-LLM benchmark `aiperf profile <model> --url ...` invoked by validators/performance/inference_perf_constraint.go; pillow is imported only by aiperf.dataset modules (dataset/utils.py, dataset/dataset_manager.py, dataset/generator/{image,video}.py, dataset/loader/base_hf_dataset.py) for synthetic multimodal dataset generation and HF dataset loading, neither of which the AICR text-LLM workload configures. The vulnerable path is pillow's external font-file parsing; aiperf imports only PIL.Image, PIL.ImageDraw, and PIL.UnidentifiedImageError — `grep -rnE 'ImageFont|BdfFontFile|PcfFontFile|FontFile' aiperf/ (the 0.11.0 wheel)` returns zero hits, so no external font file is ever parsed."
     },
     {
       "vulnerability": {
@@ -1197,20 +262,532 @@
     },
     {
       "vulnerability": {
-        "name": "GHSA-hrxh-6v49-42gf",
-        "description": "chainsaw (embedded kyverno binary): gRPC-Go xDS RBAC authorization bypass / server panic and HTTP/2 Rapid Reset mitigation bypass in google.golang.org/grpc v1.79.3 (GHSA-hrxh-6v49-42gf; no GO- or CVE ID assigned yet). Fixed in grpc 1.82.1; chainsaw v0.2.15 (the latest release) ships v1.79.3."
+        "name": "CVE-2025-59375",
+        "description": "libexpat before 2.7.2 allows attackers to trigger large dynamic memory allocations via a small document submitted for parsing (CVSS 3.1 AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1."
       },
       "products": [
         {
-          "@id": "pkg:oci/aicr-gate",
+          "@id": "pkg:oci/aicr-aiperf-bench",
           "identifiers": {
-            "purl": "pkg:oci/aicr-gate"
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
           }
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (this module pins google.golang.org/grpc v1.82.1, the fixed version). All three vulnerabilities are in gRPC SERVER-side components: the xDS RBAC authorization engine (internal/xds/rbac) and the HTTP/2 transport server stream-reset handling (internal/transport). chainsaw is a CLI Kubernetes test runner: it never instantiates a gRPC server (zero grpc.NewServer call sites in kyverno/chainsaw source; grpc is a transitive dependency of its Kubernetes client libraries) and never configures xDS-managed clients (no xDS bootstrap). Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job talking only to the trusted in-cluster Kubernetes API server; it exposes no network listener, so neither the RBAC fail-open, the RBAC parse panic, nor the Rapid Reset server DoS is reachable. Drop this statement when kyverno ships a chainsaw release built with grpc >= 1.82.1 and CHAINSAW_VERSION is bumped."
+      "impact_statement": "Reaching the allocation amplification requires feeding a crafted XML document to expat's parser. The aiperf-bench runtime base moved to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, which ships Debian libexpat1 2.7.1-2 (fixed upstream in 2.8.2-1~deb13u1). The package cannot be bumped from this repo: it comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, so no base-image bump remediates it today. Two independent facts make the vulnerable build unreachable. (1) Nothing in the image links it: reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 (2.7.1-2) is never loaded. (2) The one XML path that does execute does not use it: CPython routes xml.parsers.expat through lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled at EXPAT_VERSION 2.8.1. So the 14 venv packages that import xml.* (PIL, matplotlib, pandas, fontTools, pyarrow, datasets, ...) exercise that bundled build, not the flagged 2.7.1-2 package. Whether 2.8.1 is itself patched varies by CVE and is stated per statement below. aiperf itself imports no XML module at all: scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits. AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP; no XML document from any source reaches a parser. The statically bundled expat is 2.8.1, above this CVE's 2.7.2 fix threshold, so even the reachable XML path is already patched."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-45186",
+        "description": "libexpat before 2.8.1: the computational complexity of attribute name collision checks allows denial of service via moderately sized crafted XML input (CVSS 3.1 AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger requires parsing crafted XML with colliding attribute names. The aiperf-bench runtime base moved to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, which ships Debian libexpat1 2.7.1-2 (fixed upstream in 2.8.2-1~deb13u1). The package cannot be bumped from this repo: it comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, so no base-image bump remediates it today. Two independent facts make the vulnerable build unreachable. (1) Nothing in the image links it: reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 (2.7.1-2) is never loaded. (2) The one XML path that does execute does not use it: CPython routes xml.parsers.expat through lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled at EXPAT_VERSION 2.8.1. So the 14 venv packages that import xml.* (PIL, matplotlib, pandas, fontTools, pyarrow, datasets, ...) exercise that bundled build, not the flagged 2.7.1-2 package. Whether 2.8.1 is itself patched varies by CVE and is stated per statement below. aiperf itself imports no XML module at all: scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits. AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP; no XML document from any source reaches a parser. The statically bundled expat is exactly 2.8.1, this CVE's fix threshold, so the reachable XML path is already patched."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-41080",
+        "description": "libexpat before 2.8.0 uses insufficient entropy, allowing hash flooding via a crafted XML document (CVSS 3.1 AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Hash flooding requires the attacker to supply a crafted XML document to the parser. The aiperf-bench runtime base moved to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, which ships Debian libexpat1 2.7.1-2 (fixed upstream in 2.8.2-1~deb13u1). The package cannot be bumped from this repo: it comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, so no base-image bump remediates it today. Two independent facts make the vulnerable build unreachable. (1) Nothing in the image links it: reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 (2.7.1-2) is never loaded. (2) The one XML path that does execute does not use it: CPython routes xml.parsers.expat through lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled at EXPAT_VERSION 2.8.1. So the 14 venv packages that import xml.* (PIL, matplotlib, pandas, fontTools, pyarrow, datasets, ...) exercise that bundled build, not the flagged 2.7.1-2 package. Whether 2.8.1 is itself patched varies by CVE and is stated per statement below. aiperf itself imports no XML module at all: scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits. AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP; no XML document from any source reaches a parser. The statically bundled expat is 2.8.1, above this CVE's 2.8.0 fix threshold, so even the reachable XML path is already patched."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-25210",
+        "description": "libexpat before 2.7.4: doContent does not correctly determine bufSize because the tag buffer reallocation lacks an integer overflow check (CVSS 3.1 AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Overflowing the tag buffer requires driving expat's doContent with crafted XML element content. The aiperf-bench runtime base moved to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, which ships Debian libexpat1 2.7.1-2 (fixed upstream in 2.8.2-1~deb13u1). The package cannot be bumped from this repo: it comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, so no base-image bump remediates it today. Two independent facts make the vulnerable build unreachable. (1) Nothing in the image links it: reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 (2.7.1-2) is never loaded. (2) The one XML path that does execute does not use it: CPython routes xml.parsers.expat through lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled at EXPAT_VERSION 2.8.1. So the 14 venv packages that import xml.* (PIL, matplotlib, pandas, fontTools, pyarrow, datasets, ...) exercise that bundled build, not the flagged 2.7.1-2 package. Whether 2.8.1 is itself patched varies by CVE and is stated per statement below. aiperf itself imports no XML module at all: scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits. AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP; no XML document from any source reaches a parser. The statically bundled expat is 2.8.1, above this CVE's 2.7.4 fix threshold, so even the reachable XML path is already patched."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-24515",
+        "description": "In libexpat before 2.7.4, XML_ExternalEntityParserCreate does not copy unknown encoding handler user data. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Independently, the statically bundled expat is EXPAT_VERSION 2.8.1, at or above this CVE's 2.7.4 fix threshold, so even the XML path that does execute is already patched."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32776",
+        "description": "libexpat before 2.7.5 allows a NULL pointer dereference with empty external parameter entity content. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Independently, the statically bundled expat is EXPAT_VERSION 2.8.1, at or above this CVE's 2.7.5 fix threshold, so even the XML path that does execute is already patched."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32777",
+        "description": "libexpat before 2.7.5 allows an infinite loop while parsing DTD content. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Independently, the statically bundled expat is EXPAT_VERSION 2.8.1, at or above this CVE's 2.7.5 fix threshold, so even the XML path that does execute is already patched."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32778",
+        "description": "libexpat before 2.7.5 allows a NULL pointer dereference in the function setContext on retry after an earlier ouf-of-memory condition. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Independently, the statically bundled expat is EXPAT_VERSION 2.8.1, at or above this CVE's 2.7.5 fix threshold, so even the XML path that does execute is already patched."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-50219",
+        "description": "libexpat before 2.8.2 lacks handler call depth tracking for calls to XML_GetBuffer, XML_Parse, XML_ParseBuffer, XML_ParserFree, or XML_ParserReset from within handlers in cases of a policy violation. Thus, a use-after-free can occur, Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56131",
+        "description": "libexpat before 2.8.2 lacks handler call depth tracking for calls to XML_ResumeParser from within handlers in cases of a policy violation. Thus, a use-after-free can occur (similar to the CVE-2026-50219 situation). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56132",
+        "description": "In libexpat before 2.8.2, there is a heap-based buffer overflow in doProlog in xmlparse.c because scaffold backing array reallocation is mishandled when there is data-structure sharing across parsers. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56403",
+        "description": "libexpat before 2.8.2 has an integer overflow in storeAtts. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56404",
+        "description": "libexpat before 2.8.2 has an integer overflow in addBinding. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56405",
+        "description": "libexpat before 2.8.2 has an integer overflow in getAttributeId. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56406",
+        "description": "libexpat before 2.8.2 has an integer overflow in XML_ParseBuffer because it lacked a check that was present in XML_Parse. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56407",
+        "description": "libexpat before 2.8.2 has an integer overflow in doProlog that is related to storeEntityValue and entity textLen. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56408",
+        "description": "libexpat before 2.8.2 has an integer overflow in copyString. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56409",
+        "description": "xmlwf in libexpat before 2.8.2 has an integer overflow for the output filename when -d outputDir is used. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56410",
+        "description": "xmlwf in libexpat before 2.8.2 has an integer overflow in resolveSystemId. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56411",
+        "description": "xmlwf in libexpat before 2.8.2 has an integer overflow in endDoctypeDecl via NOTATION declarations. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56412",
+        "description": "libexpat before 2.8.2 does not consider XML_TOK_DATA_CHARS in doCdataSection and thus lacks handler call depth tracking for various calls from within handlers in cases of a policy violation. Thus, a use-after-free can occur. NOTE: this issue exists because of an incomplete fix for CVE-2026-50219. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-11940",
+        "description": "cpython: tarfile.extractall() under the 'data' or 'tar' filter can be bypassed by a crafted archive in which a hardlink references a symlink stored at a deeper name than the hardlink itself, letting the recreated symlink escape the destination directory (GHSA-9mc4-rqmq-h467, High; incomplete fix of CVE-2025-4330). Present via CPython 3.13.14 in the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base. No bump remediates: 3.13.14 is the newest CPython 3.13 release, 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, grype's only known fixed version is 3.15.0b4 (an unreleased beta), and scanning the newest 3.14-line tag (3.14-v4.0.9, CPython 3.14.6) reports this same finding, so no minor-version move escapes it either."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Triggering this requires extracting an attacker-supplied tar archive with tarfile.extractall(). aiperf 0.11.0 never touches tarfile: grepping the installed package at /opt/venv/lib/python3.13/site-packages/aiperf for 'tarfile|extractall' returns zero hits. Across the entire venv (297 installed distributions) exactly one tar extraction exists -- datasets/utils/extract.py:130-131, TarExtractor.extract, which does `tarfile.open(input_path)` then `tar_file.extractall(output_path, members=TarExtractor.safemembers(tar_file, output_path))` -- inside the HuggingFace `datasets` package. aiperf declares that dependency (Requires-Dist: datasets>=3.0) but imports it from only two regions: the HuggingFace dataset loaders (aiperf/dataset/loader/base_hf_dataset.py, aiperf/dataset/loader/hf_asr.py) and the accuracy benchmark suites (aiperf/accuracy/benchmarks/{mmlu,gsm8k,aime,aime24,aime25,hellaswag,gpqa_diamond,math_500}.py). AICR reaches neither. buildAIPerfJob (validators/performance/inference_perf_constraint.go) launches the image with a fixed argv -- `aiperf profile --model <model> --url <endpoint> --endpoint-type chat --streaming --concurrency N --request-count N --warmup-request-count N --prompt-input-tokens-mean 128 --prompt-input-tokens-stddev 0 --prompt-output-tokens-mean 128 --prompt-output-tokens-stddev 0 --num-dataset-entries 100 --random-seed 100 --extra-inputs temperature:0 --output-artifact-dir /tmp/aiperf --export-level summary` -- with no --input-file, no public-dataset selector, and no accuracy flag. aiperf's dataset dispatch (aiperf/dataset/dataset_manager.py:444-456) therefore falls past the accuracy-enabled, PublicDataset, and FileDataset branches into _load_synthetic_dataset(), which generates prompts in-process from --random-seed and --num-dataset-entries. No archive is fetched and no tar is opened anywhere in the benchmark run. Note on the CVE's precondition: it describes a bypass of the 'data'/'tar' extraction filter, and that single call site passes no filter= argument at all (it screens members itself via safemembers), so the filter the CVE defeats is not the mechanism in use there -- but the operative reason this image is unaffected is that the call site is never executed by AICR's workload."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-11972",
+        "description": "cpython: when the tarfile module is used with a file opened in streaming mode (mode='r|'), tarfile does not properly handle EOF, so a crafted archive can be parsed in an infinite loop (GHSA-wqxf-pjxh-hh4h, High). Present via CPython 3.13.14 in the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base. No bump remediates: 3.13.14 is the newest CPython 3.13 release, 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, grype's only known fixed version is 3.15.0b4 (an unreleased beta), and the newest 3.14-line tag (3.14-v4.0.9, CPython 3.14.6) reports this same finding."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Triggering this requires feeding a crafted archive to tarfile with the file opened in streaming mode (mode='r|' / 'r|*'). aiperf 0.11.0 contains no tarfile usage at all: grepping the installed package at /opt/venv/lib/python3.13/site-packages/aiperf for 'tarfile|extractall' returns zero hits. Across the entire venv (297 installed distributions) exactly two streaming-mode opens exist, and neither is reachable from the benchmark. The first is datasets/utils/file_utils.py:1360, `tarfile.open(fileobj=f, mode='r|*')`, on the HuggingFace `datasets` streaming-download path; aiperf declares datasets as a dependency (Requires-Dist: datasets>=3.0) but imports it only from the HuggingFace dataset loaders (aiperf/dataset/loader/base_hf_dataset.py, aiperf/dataset/loader/hf_asr.py) and the accuracy benchmark suites (aiperf/accuracy/benchmarks/*.py). AICR invokes neither: buildAIPerfJob (validators/performance/inference_perf_constraint.go) runs a fixed argv -- `aiperf profile --model <model> --url <endpoint> --endpoint-type chat --streaming --num-dataset-entries 100 --random-seed 100 --prompt-input-tokens-mean 128 --output-artifact-dir /tmp/aiperf --export-level summary` and the remaining concurrency/token-count flags -- with no --input-file, no public-dataset selector, and no accuracy flag, so aiperf's dataset dispatch (aiperf/dataset/dataset_manager.py:444-456) falls through to _load_synthetic_dataset() and generates prompts in-process from --random-seed. Note that the --streaming flag here is an HTTP/SSE response-streaming option for the inference endpoint and has nothing to do with tarfile stream mode. The second call site is setuptools/_vendor/jaraco/context/__init__.py:79, a build-time helper in vendored setuptools; the runtime stage is distroless with no shell, no compiler, and no pip invocation -- the venv is copied in fully installed from the builder stage (validators/performance/aiperf-bench.Dockerfile), so setuptools is never executed. No tar stream from any source is parsed during a benchmark run."
     }
   ]
 }

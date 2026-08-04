@@ -16,26 +16,31 @@
 // standalone `gate` CLI. It owns:
 //
 //   - Evaluate: run all components of a bundle once, aggregate per-component results
-//   - RunComponent: a single chainsaw exec with a timeout
 //   - LoadBundleDir: read a directory of *.yaml files into a name -> content map
 //   - ComputeReadyState / ApplyDeadline: the pure stability-window and deadline
 //     state machine driving the aggregate Ready condition
 //
-// The package intentionally does not depend on any Kubernetes API types so it
-// stays usable from any context (CLI, local dev, ad-hoc scripts) without
-// pulling extra dependencies.
+// Assertions are evaluated in-process by pkg/chainsaw — the same executor the
+// deployment validator has used since #1236. The gate previously shelled out
+// to a `chainsaw` binary embedded in the aicr-gate image; that binary was the
+// image's only source of HIGH CVEs and could not be upgraded past them
+// upstream, so #2038 removed it. The state machine and bundle loading remain
+// free of Kubernetes types; only Evaluate touches the cluster, through the
+// caller-supplied fetcher.
 package runner
 
 import (
-	"bytes"
 	"context"
+	stderrors "errors"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/NVIDIA/aicr/pkg/chainsaw"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -84,10 +89,14 @@ func TruncTail(s string, n int) string {
 // CLI populates all fields from its flags; the runner reads each field as
 // described below.
 type Options struct {
-	// Namespace is the chainsaw --namespace flag value.
+	// Namespace is the default namespace for assertions whose resource
+	// block omits metadata.namespace. It preserves the behavior the
+	// `chainsaw --namespace` flag provided: without it, a namespace-less
+	// assertion would silently widen to every namespace. Cluster-scoped
+	// kinds ignore it (the fetcher resolves scope via the RESTMapper).
 	Namespace string
 
-	// Timeout is the per-component chainsaw exec timeout.
+	// Timeout is the per-component assertion budget.
 	Timeout time.Duration
 
 	// PollInterval is the cadence at which the caller re-evaluates the bundle.
@@ -102,12 +111,10 @@ type Options struct {
 	// for the bundle to pass before giving up. 0 disables the ceiling.
 	MaxWait time.Duration
 
-	// ConfigPath, when non-empty, is passed to chainsaw via --config. It pins
-	// chainsaw's runtime behavior (e.g. cleanup.skipDelete) so the gate's
-	// contract does not drift with the base image's chainsaw defaults across
-	// version bumps. Empty omits the flag, so local/CLI runs without a
-	// baked-in config still work.
-	ConfigPath string
+	// Fetcher reads cluster state for the assertions. Required: Evaluate
+	// rejects a nil fetcher rather than reporting components it never
+	// evaluated.
+	Fetcher chainsaw.ResourceFetcher
 }
 
 // ComponentResult is the outcome of running one component's chainsaw test once.
@@ -127,83 +134,131 @@ type EvalResult struct {
 	AllPass bool
 }
 
-// runComponentFn is exposed for tests to swap in a stub for chainsaw exec.
-// Production code should not assign to it.
-var runComponentFn = RunComponent
+// runBundleFn is exposed for tests to swap in a stub for the in-process
+// assertion engine. Production code should not assign to it.
+var runBundleFn = chainsaw.Run
 
 // Evaluate runs each entry in bundle against the cluster once and returns the
-// aggregate. It writes each component's test YAML to a temp directory under
-// its own subdir and execs chainsaw against that subdir.
+// aggregate. Assertions are evaluated in-process against opts.Fetcher, with
+// bounded parallelism across components (pkg/chainsaw applies
+// defaults.ChainsawMaxParallel).
 //
 // bundle is a name -> chainsaw-test-YAML map (typically the data field of a
 // bundle ConfigMap, or the contents of a LoadBundleDir directory).
 func Evaluate(ctx context.Context, bundle map[string]string, opts Options) (EvalResult, error) {
-	tmpDir, err := os.MkdirTemp("", "aicr-gate-")
-	if err != nil {
-		return EvalResult{}, errors.Wrap(errors.ErrCodeInternal, "create temp dir", err)
+	if opts.Fetcher == nil {
+		return EvalResult{}, errors.New(errors.ErrCodeInvalidRequest, "no resource fetcher configured")
 	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
+	// Honor cancellation before doing any work so a SIGINT/SIGTERM (or a
+	// caller deadline) surfaces as an interrupt rather than a bundle of
+	// context-tainted component failures. The caller distinguishes this from
+	// a config error via ctx.
+	if err := ctx.Err(); err != nil {
+		return EvalResult{}, errors.Wrap(errors.ErrCodeTimeout, "evaluation canceled", err)
+	}
 
-	components := make(map[string]ComponentResult, len(bundle))
+	names := make([]string, 0, len(bundle))
+	for key := range bundle {
+		names = append(names, key)
+	}
+	sort.Strings(names) // deterministic dispatch order keeps logs reproducible
+
+	asserts := make([]chainsaw.ComponentAssert, 0, len(names))
+	for _, key := range names {
+		asserts = append(asserts, chainsaw.ComponentAssert{
+			Name:       strings.TrimSuffix(key, ".yaml"),
+			AssertYAML: bundle[key],
+		})
+	}
+
+	fetcher := opts.Fetcher
+	if opts.Namespace != "" {
+		fetcher = defaultNamespaceFetcher{inner: fetcher, namespace: opts.Namespace}
+	}
+
+	// A zero budget is not "no limit" downstream — it makes every assertion
+	// deadline expire immediately, so a component that is merely still
+	// rolling out fails on the first evaluation with no retry. Callers that
+	// leave Timeout unset get the same budget the deployment validator uses.
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaults.ChainsawAssertTimeout
+	}
+
+	results := runBundleFn(ctx, asserts, timeout, fetcher)
+
+	components := make(map[string]ComponentResult, len(results))
 	allPass := true
-
-	for key, testYAML := range bundle {
-		// Honor cancellation between components so a SIGINT/SIGTERM (or a
-		// caller deadline) stops the loop instead of spawning more chainsaw
-		// execs. The caller distinguishes this from a config error via ctx.
-		if err := ctx.Err(); err != nil {
-			return EvalResult{}, errors.Wrap(errors.ErrCodeTimeout, "evaluation canceled", err)
-		}
-
-		comp := strings.TrimSuffix(key, ".yaml")
-		compDir := filepath.Join(tmpDir, comp)
-		if mkErr := os.MkdirAll(compDir, 0o700); mkErr != nil {
-			return EvalResult{}, errors.Wrap(errors.ErrCodeInternal, "create component dir "+compDir, mkErr)
-		}
-		if wErr := os.WriteFile(filepath.Join(compDir, "chainsaw-test.yaml"), []byte(testYAML), 0o600); wErr != nil {
-			return EvalResult{}, errors.Wrap(errors.ErrCodeInternal, "write test file for "+comp, wErr)
-		}
-		res := runComponentFn(ctx, opts.Timeout, opts.Namespace, opts.ConfigPath, compDir)
-		components[comp] = res
-		if res.Result != ResultPass {
+	for _, r := range results {
+		cr := toComponentResult(r)
+		components[r.Component] = cr
+		if cr.Result != ResultPass {
 			allPass = false
 		}
+	}
+
+	// A canceled context makes every unfinished component look failed. Report
+	// the interruption instead of a verdict the run never actually reached.
+	if err := ctx.Err(); err != nil {
+		return EvalResult{}, errors.Wrap(errors.ErrCodeTimeout, "evaluation canceled", err)
 	}
 
 	return EvalResult{Components: components, AllPass: allPass}, nil
 }
 
-// RunComponent execs `chainsaw test --no-color --namespace <ns> [--config
-// <configPath>] <compDir>` with the given timeout. A non-empty configPath pins
-// chainsaw's behavior via --config. On failure, Message holds up to maxMsgLen
-// trailing bytes of combined stdout+stderr. On context timeout, Result is
-// ResultUnknown.
-func RunComponent(ctx context.Context, timeout time.Duration, namespace, configPath, compDir string) ComponentResult {
-	tctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	args := []string{"test", "--no-color", "--namespace", namespace}
-	if configPath != "" {
-		args = append(args, "--config", configPath)
+// toComponentResult maps one in-process assertion outcome onto the gate's
+// per-component verdict. A cancellation or expired budget is ResultUnknown —
+// the component's true state was never established — while a substantive
+// assertion failure is ResultFail.
+func toComponentResult(r chainsaw.Result) ComponentResult {
+	if r.Passed {
+		return ComponentResult{Result: ResultPass}
 	}
-	args = append(args, compDir)
 
-	var buf bytes.Buffer
-	// G204: the command is a constant ("chainsaw"); namespace, configPath, and
-	// compDir are operator-/runner-controlled inputs (flag values and a temp
-	// dir), not attacker-reachable shell strings.
-	cmd := exec.CommandContext(tctx, "chainsaw", args...) //nolint:gosec // see comment above
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-
-	if err := cmd.Run(); err != nil {
-		out := TruncTail(buf.String(), maxMsgLen)
-		if tctx.Err() != nil {
-			return ComponentResult{Result: ResultUnknown, Message: "chainsaw timed out: " + out}
-		}
-		return ComponentResult{Result: ResultFail, Message: out}
+	msg := r.Output
+	if msg == "" && r.Error != nil {
+		msg = r.Error.Error()
 	}
-	return ComponentResult{Result: ResultPass}
+	msg = TruncTail(strings.TrimSpace(msg), maxMsgLen)
+
+	if isBudgetExhausted(r.Error) {
+		return ComponentResult{Result: ResultUnknown, Message: "assertion budget exhausted: " + msg}
+	}
+	return ComponentResult{Result: ResultFail, Message: msg}
+}
+
+// isBudgetExhausted reports whether err is the assertion run being cut short
+// (per-component budget expired, or the process interrupted) rather than a
+// component that was actually observed to be unhealthy.
+func isBudgetExhausted(err error) bool {
+	return err != nil &&
+		(stderrors.Is(err, context.DeadlineExceeded) || stderrors.Is(err, context.Canceled))
+}
+
+// defaultNamespaceFetcher supplies Options.Namespace to assertions whose
+// resource block omits metadata.namespace, matching what `chainsaw
+// --namespace` did for the exec-based gate. Without it, a namespace-less
+// assertion would widen to every namespace — a silent scope change, and the
+// wrong direction for a readiness gate. Cluster-scoped kinds are unaffected:
+// the cluster fetcher resolves scope through the RESTMapper and ignores the
+// namespace argument for them.
+type defaultNamespaceFetcher struct {
+	inner     chainsaw.ResourceFetcher
+	namespace string
+}
+
+func (f defaultNamespaceFetcher) Fetch(ctx context.Context, apiVersion, kind, namespace, name string) (map[string]interface{}, error) {
+	if namespace == "" {
+		namespace = f.namespace
+	}
+	return f.inner.Fetch(ctx, apiVersion, kind, namespace, name)
+}
+
+func (f defaultNamespaceFetcher) List(ctx context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]interface{}, error) {
+	if namespace == "" {
+		namespace = f.namespace
+	}
+	return f.inner.List(ctx, apiVersion, kind, namespace, labels)
 }
 
 // LoadBundleDir reads every *.yaml file in dir into a name -> content map.

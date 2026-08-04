@@ -1901,12 +1901,16 @@ HELM_REPOSITORY_PASSWORD=secret \
 
 The `--readiness-hooks` flag makes a deploy block on **component-specific readiness signals** rather than just the chart's own resources reporting Ready. A component opts in by shipping a `recipes/components/<name>/readiness.yaml` Chainsaw test that asserts the signal that actually means "ready" — for example, `gpu-operator` waits for its `ClusterPolicy` to reach `status.state: ready`, which Helm and Argo CD cannot assess natively.
 
-With the flag set, the bundler emits an extra folder, `NNN-<name>-readiness/`, immediately after each opted-in component. The folder is a small chart containing a Kubernetes `Job` (plus the ServiceAccount/RBAC and a ConfigMap holding the Chainsaw test). The Job runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`, which embeds Chainsaw), which polls the test until it passes continuously for a stability window or a `--max-wait` ceiling elapses. The deploy blocks on that Job:
+With the flag set, the bundler emits an extra folder, `NNN-<name>-readiness/`, immediately after each opted-in component. The folder is a small chart containing a Kubernetes `Job` (plus the ServiceAccount/RBAC and a ConfigMap holding the Chainsaw test). The Job runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`), which polls the test until it passes continuously for a stability window or a `--max-wait` ceiling elapses. The deploy blocks on that Job:
 
 - **`helm`** — `deploy.sh` runs the readiness folder with `helm upgrade --install --wait`. The gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`, so the latter is not needed. Helm's own `--timeout` is derived by the bundler from the gate's `--max-wait` plus a buffer, so the gate owns the deadline (Helm never preempts it).
 - **`argocd` / `argocd-helm`** — the readiness folder inherits the next sync-wave after its component, and Argo CD blocks that wave on the gate Job via its built-in `batch/Job` health (Progressing → Healthy on success, Degraded on failure). No custom health Lua and no direct `ClusterPolicy` watch — the readiness logic stays encapsulated in the Chainsaw test the Job runs.
 
-`flux` and `helmfile` are not yet supported and `--readiness-hooks` is rejected for them. Components without a `readiness.yaml` are unaffected. The gate image tracks the Chainsaw version pinned in `.settings.yaml`, so the in-cluster gate runs the same Chainsaw AICR validates with.
+`flux` and `helmfile` are not yet supported and `--readiness-hooks` is rejected for them. Components without a `readiness.yaml` are unaffected.
+
+The gate evaluates the test **in-process**: it reads cluster state through its own ServiceAccount and applies the assertions itself, using the same executor `aicr validate --phase deployment` uses. The image ships no Chainsaw binary.
+
+Two independent controls keep a readiness test read-only. First, the executor honors only the `assert` and `error` operations — every state-changing or side-effecting operation is rejected before evaluation, and the check fails. Second, the gate's ServiceAccount is bound to a ClusterRole granting only `get`, `list`, and `watch`, so a mutating call would be denied by the API server even if one were somehow issued.
 
 ```bash
 # Deploy and block on each component's readiness gate (helm)

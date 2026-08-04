@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -183,6 +184,20 @@ func encodeLabels(labels map[labelID][]string, maxNodes int) map[string]measurem
 		data[mapKey] = measurement.Str(fmt.Sprintf("%s|%s", id.Value, nodeStr))
 	}
 	return data
+}
+
+// truncatedNodeListRE matches the suffix formatNodeList appends when a node
+// list is truncated. Kept next to formatNodeList so the format and its
+// detector cannot drift apart; consumers that must fail closed on truncated
+// membership lists (pkg/constraints' node-set form, issue #1755) call
+// IsTruncatedNodeList instead of re-encoding this knowledge. A structured
+// marker is tracked in #2002.
+var truncatedNodeListRE = regexp.MustCompile(`\(\+\d+ more\)$`)
+
+// IsTruncatedNodeList reports whether an encoded node list carries the
+// truncation suffix formatNodeList appends under --max-nodes-per-entry.
+func IsTruncatedNodeList(nodes string) bool {
+	return truncatedNodeListRE.MatchString(nodes)
 }
 
 // formatNodeList joins sorted node names with commas, optionally truncating.

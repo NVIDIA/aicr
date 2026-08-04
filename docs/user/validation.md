@@ -38,6 +38,7 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Cluster service account with RBAC to create Jobs, ConfigMaps, and read cluster state (AICR creates its own `aicr-validation` namespace on first run).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
+- **GKE recipes**: the #1755 device-plugin ownership readiness gate is temporarily withdrawn — on GKE the opt-out label also forfeits the managed driver install (the installer rides the same DaemonSet), so the gate enforced a prerequisite a fresh `gpu-driver-version=default` pool cannot satisfy. It returns per-value with the `gpuStack` profile (#1761): the node-set constraint form itself (`NodeTopology.gpu-nodes.label`, both predicate directions, fail-closed on truncation/empty-universe/ambiguous readings) remains available and unchanged.
 
 ## Training performance validation
 

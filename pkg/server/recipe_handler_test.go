@@ -1002,25 +1002,59 @@ func TestHandleQuery_SelectorNotFound(t *testing.T) {
 	}
 }
 
-// TestHandleQuery_NoSelector verifies a query with no selector returns the
-// entire hydrated recipe structure (as the legacy handler does).
-func TestHandleQuery_NoSelector(t *testing.T) {
+// TestHandleQuery_SelectorPresence verifies an omitted selector is rejected
+// while an explicitly empty selector returns the entire hydrated recipe.
+func TestHandleQuery_SelectorPresence(t *testing.T) {
 	h := newTestHandler(t, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/query?service=eks&accelerator=h100&intent=training", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleQuery(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	tests := []struct {
+		name       string
+		target     string
+		wantStatus int
+		wantError  string
+	}{
+		{
+			name:       "missing selector",
+			target:     "/v1/query?service=eks&accelerator=h100&intent=training",
+			wantStatus: http.StatusBadRequest,
+			wantError:  "[INVALID_REQUEST] selector is required on /v1/query",
+		},
+		{
+			name:       "explicitly empty selector",
+			target:     "/v1/query?service=eks&accelerator=h100&intent=training&selector=",
+			wantStatus: http.StatusOK,
+		},
 	}
-	var hydrated map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &hydrated); err != nil {
-		t.Fatalf("failed to decode hydrated recipe: %v; body: %s", err, w.Body.String())
-	}
-	if _, ok := hydrated["components"]; !ok {
-		t.Errorf("expected hydrated recipe to contain a components key; got keys %v", keysOf(hydrated))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			w := httptest.NewRecorder()
+
+			h.HandleQuery(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantError != "" {
+				errResp := decodeErrorBody(t, w.Body.Bytes())
+				if errResp.Code != "INVALID_REQUEST" {
+					t.Errorf("code = %q, want INVALID_REQUEST", errResp.Code)
+				}
+				if got := errResp.Details[keyError]; got != tt.wantError {
+					t.Errorf("details.error = %q, want %q", got, tt.wantError)
+				}
+				return
+			}
+
+			var hydrated map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &hydrated); err != nil {
+				t.Fatalf("failed to decode hydrated recipe: %v; body: %s", err, w.Body.String())
+			}
+			if _, ok := hydrated["components"]; !ok {
+				t.Errorf("expected hydrated recipe to contain a components key; got keys %v", keysOf(hydrated))
+			}
+		})
 	}
 }
 

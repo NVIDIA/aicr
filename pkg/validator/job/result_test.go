@@ -402,6 +402,63 @@ func TestHandleTimeoutContainerNotTerminated(t *testing.T) {
 	}
 }
 
+// TestHandleTimeoutContainerNotFoundReflectsCause verifies the validator-
+// container-absent branch routes through the actual wait cause (issue #1976
+// item 3): a genuine deadline still reports the configured timeout, while an
+// infra/unavailable cause is surfaced verbatim rather than misreported as the
+// catalog timeout. The container-contract detail is retained as a suffix in
+// both cases.
+func TestHandleTimeoutContainerNotFoundReflectsCause(t *testing.T) {
+	tests := []struct {
+		name          string
+		cause         error
+		wantContains  []string
+		wantExclusion string
+	}{
+		{
+			name:         "genuine deadline reports configured timeout",
+			cause:        context.DeadlineExceeded,
+			wantContains: []string{"timeout: validator did not complete within", "not found - validator package contract"},
+		},
+		{
+			name:          "infra/unavailable cause surfaced verbatim",
+			cause:         errors.New(errors.ErrCodeUnavailable, "apiserver watch closed: connection refused"),
+			wantContains:  []string{"validation failed:", "apiserver watch closed: connection refused", "not found - validator package contract"},
+			wantExclusion: "timeout: validator did not complete within",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := createUniqueNamespace(t)
+			d := deployTestJob(t, ns, testEntry())
+
+			// Pod exists but carries only a non-validator container status, so
+			// findContainerStatus reports the validator container as absent.
+			createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name:  "sidecar",
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				}},
+			})
+
+			result := d.HandleTimeout(context.Background(), tt.cause)
+
+			if result.ExitCode != -1 {
+				t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(result.TerminationMsg, want) {
+					t.Errorf("TerminationMsg = %q, want substring %q", result.TerminationMsg, want)
+				}
+			}
+			if tt.wantExclusion != "" && strings.Contains(result.TerminationMsg, tt.wantExclusion) {
+				t.Errorf("TerminationMsg = %q, must NOT contain %q", result.TerminationMsg, tt.wantExclusion)
+			}
+		})
+	}
+}
+
 // TestHandleTimeoutZeroTimeoutRendersDefault verifies that a catalog entry with
 // no explicit timeout renders the effective default runPhase applies
 // (ValidatorDefaultTimeout), not a misleading "within 0s".
@@ -803,11 +860,11 @@ func TestFilterStdoutLines(t *testing.T) {
 
 func TestBoundTerminationMsg(t *testing.T) {
 	tests := []struct {
-		name         string
-		msg          string
-		maxBytes     int
-		wantLen      int    // expected exact length, 0 = compute from msg
-		wantContains string // substring that must appear (empty = none)
+		name          string
+		msg           string
+		maxBytes      int
+		wantContains  string // substring that must appear (empty = none)
+		wantPrefixLen int    // exact retained prefix length, 0 = only bounded check
 	}{
 		{
 			name:     "under limit passes through unchanged",
@@ -828,10 +885,35 @@ func TestBoundTerminationMsg(t *testing.T) {
 		{
 			// Cut lands mid-rune: "€" is 3 bytes, so a maxBytes that splits it
 			// must trim back to the rune boundary and never emit an invalid rune.
-			name:         "cut mid multibyte rune trims to boundary",
-			msg:          strings.Repeat("€", 10), // 30 bytes
-			maxBytes:     10,                      // splits the 4th rune (bytes 9-11)
-			wantContains: "... [truncated",
+			// Only the 1-byte partial is dropped (10 → 9), nothing more.
+			name:          "cut mid multibyte rune trims to boundary",
+			msg:           strings.Repeat("€", 10), // 30 bytes
+			maxBytes:      10,                      // splits the 4th rune (bytes 9-11)
+			wantContains:  "... [truncated",
+			wantPrefixLen: 9,
+		},
+		{
+			// Regression for #1976: an invalid UTF-8 byte (0xFF) sits well before
+			// maxBytes. The old whole-prefix validation trimmed head to empty and
+			// kept only the suffix; the readable prefix — including the earlier
+			// invalid byte — must survive.
+			name:          "invalid byte before cut preserves prefix",
+			msg:           "ok\xffmore" + strings.Repeat("z", 5000),
+			maxBytes:      100,
+			wantContains:  "... [truncated",
+			wantPrefixLen: 100,
+		},
+		{
+			// A complete-but-invalid byte (0xFF) landing exactly at maxBytes-1 is
+			// NOT a cut-split partial rune — it is a full width-1 error rune that
+			// was in the original message, so it must be preserved, not trimmed.
+			// DecodeLastRuneInString alone cannot tell it apart from an incomplete
+			// sequence; the FullRuneInString guard is what keeps the full prefix.
+			name:          "invalid byte at boundary is preserved",
+			msg:           strings.Repeat("a", 99) + "\xff" + strings.Repeat("z", 50),
+			maxBytes:      100,
+			wantContains:  "... [truncated",
+			wantPrefixLen: 100,
 		},
 	}
 
@@ -844,11 +926,30 @@ func TestBoundTerminationMsg(t *testing.T) {
 				}
 				return
 			}
-			if !utf8.ValidString(got) {
+			// A valid-UTF-8 input must stay valid after trimming only a trailing
+			// partial rune; an input already carrying invalid bytes is preserved
+			// verbatim, so validity is not required there.
+			if utf8.ValidString(tt.msg) && !utf8.ValidString(got) {
 				t.Errorf("truncated output is not valid UTF-8: %q", got)
 			}
 			if tt.wantContains != "" && !strings.Contains(got, tt.wantContains) {
 				t.Errorf("output missing suffix %q, got %q", tt.wantContains, got)
+			}
+			// The readable prefix (everything before the truncation suffix) must
+			// survive. A regression that validates the whole prefix and trims it
+			// to empty would leave only the suffix — assert the prefix is
+			// non-empty and that at most an incomplete trailing rune (< UTFMax
+			// bytes) was trimmed back from maxBytes, not the entire message.
+			suffixIdx := strings.LastIndex(got, "... [truncated")
+			if suffixIdx <= 0 {
+				t.Fatalf("readable prefix was discarded, got only the suffix: %q", got)
+			}
+			if tt.wantPrefixLen != 0 && suffixIdx != tt.wantPrefixLen {
+				t.Errorf("retained prefix = %d bytes, want %d", suffixIdx, tt.wantPrefixLen)
+			}
+			if trimmed := tt.maxBytes - suffixIdx; trimmed < 0 || trimmed >= utf8.UTFMax {
+				t.Errorf("trimmed %d bytes back from maxBytes=%d; want an incomplete-rune trim (0..%d)",
+					trimmed, tt.maxBytes, utf8.UTFMax-1)
 			}
 		})
 	}

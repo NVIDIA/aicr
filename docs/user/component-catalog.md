@@ -104,6 +104,37 @@ aicr recipe --service eks --accelerator h100 --os ubuntu --intent training -o re
 
 The output lists every component with its pinned version and configuration values.
 
+## GKE Device-Plugin Ownership
+
+**Current supported setup: use the GKE default — do NOT set the opt-out label.** Create GPU node pools with GKE's managed driver install and leave `gke-no-default-nvidia-gpu-device-plugin` unset:
+
+```bash
+gcloud container node-pools create POOL_NAME \
+  --cluster CLUSTER_NAME \
+  --location=LOCATION \
+  --node-locations=ZONE \
+  --num-nodes=1 \
+  --machine-type=a3-highgpu-8g \
+  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default
+```
+
+Two flags deserve care:
+
+- `--machine-type` must match the accelerator (H100 GPUs are exclusive to the A3 series — `a3-highgpu-8g` for `nvidia-h100-80gb`, `a3-megagpu-8g` for `nvidia-h100-mega-80gb`); without the flag, `gcloud` defaults to `e2-medium` and pool creation fails.
+- `--num-nodes` is **per zone**, defaults to 3, and an unrestricted pool on a regional cluster inherits every cluster zone — the defaults on a three-zone cluster would attempt nine 8-GPU nodes (72 H100s). Set `--num-nodes` explicitly and narrow `--node-locations` to the zones you intend.
+
+On such a pool, GKE's managed device-plugin DaemonSet installs and loads the NVIDIA driver (an init container of that DaemonSet finalizes the `gpu-driver-version` install) and advertises `nvidia.com/gpu`.
+
+**Known limitation of the current recipes on this setup:** AICR's GKE-COS recipes ship the GPU Operator with `devicePlugin.enabled: true`, so the Operator's device plugin *also* registers `nvidia.com/gpu` alongside GKE's. Kubelet's device manager keys its endpoint and device inventory by resource name, so the two registrations replace each other: ownership is nondeterministic across plugin restarts, and one plugin's device IDs (GKE uses `nvidia0`-style names, NVIDIA uses GPU UUIDs) can reach the other plugin's `Allocate`, producing intermittent allocation failures ([#1755](https://github.com/NVIDIA/aicr/issues/1755)). This latent conflict is the long-standing behavior of every AICR GKE deployment to date; the resolution is the ADR-015 `gpuStack` profile ([#1761](https://github.com/NVIDIA/aicr/issues/1761)), whose default value disables the Operator's plugin and declares GKE's as the sole advertiser.
+
+**Do not set `gke-no-default-nvidia-gpu-device-plugin=true` with the current recipes.** The label's contract is device-plugin ownership only, but on GKE Standard its implementation excludes the *whole* managed DaemonSet — including the init container that finalizes the managed driver install. A freshly provisioned labeled pool therefore comes up with the driver staged but never installed: no `/dev/nvidia*`, zero allocatable GPUs, and the GPU Operator's stack blocked on `driver-validation` indefinitely. Never pair the label with `gpu-driver-version=default|latest`.
+
+**The label returns with the future `operator-managed` profile value** (the GPU Operator's plugin as sole advertiser), where it is paired with the configuration that actually supports it, matching [Google's GPU Operator procedure](https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-operator): pools created with `gpu-driver-version=disabled` and the label, plus Google's standalone `nvidia-driver-installer` DaemonSet providing the driver (the standalone DaemonSet is unaffected by the label). That mode — and an AICR-managed installer component — is tracked in [#1761](https://github.com/NVIDIA/aicr/issues/1761) and [#1716](https://github.com/NVIDIA/aicr/issues/1716); until it ships, it is not a supported AICR configuration, and this section deliberately omits its procedures.
+
+**Enforcement status: withdrawn until the profile lands.** `aicr validate` briefly enforced the label as a readiness constraint (`NodeTopology.gpu-nodes.label`, #1755); live qualification exposed the driver-install coupling above, so the constraint was withdrawn — on the supported label-free setup it would fail every validation closed. While it is withdrawn there is NO deterministic detection point for advertiser conflicts: `aicr bundle` is offline by design and cannot read node labels; the operator-health deployment check verifies only that GPU Operator controller pods are Running; allocation probes such as `check-nvidia-smi` skip cordoned or busy GPU nodes, and when they run they may fail nondeterministically without identifying the cause. The `gpuStack` profile re-lands enforcement symmetrically per selected value.
+
+See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation reference.
+
 ## Inference Gateway Network Exposure
 
 Inference recipes include the **agentgateway** component, which deploys an `inference-gateway` Gateway. The agentgateway controller materializes that Gateway into a `Service` of type `LoadBalancer`, so on every cloud the platform provisions a load balancer for the (plaintext HTTP, unauthenticated) inference endpoint. Left unrestricted that load balancer is internet-facing, so `aicr bundle` scopes it to private networks by default — the opt-in path for public exposure and the validation behavior are described below.

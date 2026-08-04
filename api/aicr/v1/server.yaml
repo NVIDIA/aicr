@@ -203,7 +203,6 @@ paths:
                     kind: RecipeResult
                     metadata:
                       version: v1.0.0
-                      created: "2025-01-15T10:30:00Z"
                       appliedOverlays:
                         - base
                         - eks
@@ -646,9 +645,10 @@ paths:
                     useOpenKernelModules: true
         "400":
           description: >
-            Invalid request: malformed criteria, allowlist violation, a resolved
-            profile (which requires `/v2/query`), or a stated criteria dimension
-            not honored by any applicable recipe overlay (uncovered dimension).
+            Invalid request: an omitted selector, malformed criteria, allowlist
+            violation, a resolved profile (which requires `/v2/query`), or a stated
+            criteria dimension not honored by any applicable recipe overlay
+            (uncovered dimension).
             Uncovered-dimension errors carry a machine-readable
             `details.uncovered` array (dimension, requestedValue,
             validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
@@ -663,6 +663,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
               examples:
+                missingSelector:
+                  summary: Required selector omitted
+                  value:
+                    code: INVALID_REQUEST
+                    message: "Invalid query criteria"
+                    details:
+                      error: "[INVALID_REQUEST] selector is required on /v1/query"
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
                 invalidParameter:
                   summary: Invalid query parameter
                   value:
@@ -1679,7 +1689,6 @@ paths:
                   kind: RecipeResult
                   metadata:
                     version: v1.0.0
-                    created: "2025-01-15T10:30:00Z"
                     appliedOverlays:
                       - base
                       - eks
@@ -2453,10 +2462,6 @@ components:
               type: string
               description: Recipe version
               example: v1.0.0
-            created:
-              type: string
-              format: date-time
-              description: Recipe creation timestamp
             appliedOverlays:
               type: array
               items:

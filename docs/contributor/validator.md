@@ -10,7 +10,7 @@ contributor view for all four.
 | [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
 | [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
 | [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
-| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `validators/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
+| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `pkg/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
 
 Rule of thumb: declarative constraint against a snapshot value → surface 1.
 Active probe of a live cluster → surface 2 or 4. Pre-deployment sanity
@@ -44,9 +44,13 @@ spec:
           value: ">= 450"            # GB/s
 ```
 
-Top-level `constraints` are evaluated as a **pre-flight gate** before
-phase checks run; phase-specific `constraints` are evaluated against
-each container check's reported metrics.
+Top-level `constraints` — and any declared under
+`validation.readiness.constraints` — are evaluated as a **pre-flight
+gate** before phase checks run; other phases' `constraints` are
+evaluated against each container check's reported metrics. Readiness
+placement matters for gates that must not participate in
+generation-time overlay filtering (e.g. the GKE device-plugin
+ownership check, issue #1755).
 
 **Supported operators** (`pkg/constraints/constraint.go`):
 
@@ -67,6 +71,16 @@ falls back to string comparison.
 an error (not `false`) when a value claimed to be a version fails to
 parse — callers in `pkg/validator/validator.go::checkReadiness` treat
 parse errors as `ErrCodeInvalidRequest`, fail-closed.
+
+**One name bypasses the scalar flow entirely:** the node-set form
+`NodeTopology.gpu-nodes.label` ([#1755](https://github.com/NVIDIA/aicr/issues/1755))
+is dispatched by exact name in `constraints.Evaluate` *before*
+`ParseConstraintPath`, uses its own value grammar
+(`<label-key>=<value>` / `!<label-key>`, validated with the Kubernetes
+label validators), and quantifies the predicate over the GPU-node set
+synthesized from `NodeTopology.label` readings instead of comparing a
+single reading. See `pkg/constraints/gpu_nodes.go` for its fail-closed
+rules (truncation, empty universe, malformed or ambiguous encodings).
 
 **Adding a new operator:**
 
@@ -467,10 +481,10 @@ return; this is one of the two CLAUDE.md-sanctioned uses of `Background()`.
 
 ### Pre-flight gates are fail-closed
 
-`pkg/validator/validator.go::checkReadiness` evaluates top-level
-`validation.constraints` *before* any phase runs. A parse error or a
-failing constraint returns `ErrCodeInvalidRequest` and aborts the
-entire run. **Do not** `slog.Warn; continue` on an evaluator
+`pkg/validator/validator.go::checkReadiness` evaluates the recipe's
+top-level `constraints` plus any `validation.readiness.constraints`
+*before* any phase runs. A parse error or a failing constraint returns
+`ErrCodeInvalidRequest` and aborts the entire run. **Do not** `slog.Warn; continue` on an evaluator
 error — that masquerades a broken validation YAML as a passing
 constraint, which is an explicit anti-pattern in CLAUDE.md.
 
@@ -919,13 +933,34 @@ The same assertion file now powers TWO surfaces:
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's
    chainsaw runner (PR #1220). Since #1236 the runner is **pure Go**:
-   `validators/chainsaw/inprocess.go` unmarshals the
+   `pkg/chainsaw/inprocess.go` unmarshals the
    `chainsaw.kyverno.io/v1alpha1` Test, walks `spec.steps[].try[]`, and
    dispatches `assert` / `error` to kyverno-json's `checks.Check` engine
    against live cluster state. No external binary is shipped in the
    deployment validator image. CLI output is source-tagged `[chainsaw]`
    vs `[expectedResources]` so operators can disambiguate when both
    paths report on the same component.
+
+Only surface 1 still needs the `chainsaw` binary, and only on the
+developer's machine — that is why `.settings.yaml` keeps the
+`testing_tools.chainsaw` pin and `tools/update-chainsaw-checksums`.
+
+The **readiness gate** (`cmd/gate`, image `ghcr.io/nvidia/aicr-gate`,
+emitted by `aicr bundle --readiness-hooks`) is a third consumer of the
+same executor. It shelled out to an embedded `chainsaw` binary until
+PR #2038 removed it; that binary was the gate image's only source of
+HIGH CVEs and upstream ships no release that fixes them. It calls `chainsaw.Run`
+against a dynamic client built from the Job's read-only ServiceAccount,
+so `pkg/chainsaw` is the single assertion engine for validator and gate
+alike. The gate's `--namespace` flag survives as the default namespace
+for resource blocks that omit one (`defaultNamespaceFetcher` in
+`pkg/chainsawgate/runner`), preserving what `chainsaw --namespace` did.
+
+A Test that declares no `assert`/`error` operation is rejected rather
+than passing vacuously (#2040); a check that is intentionally a no-op —
+today the three `*-ocp-olm` components, whose readiness is enforced by
+the bundler's `--readiness-hooks` gate instead — must say so with the
+`aicr/no-op-check: "true"` annotation on the Test.
 
 **Registration.** A component opts in by declaring
 `healthCheck.assertFile` in `recipes/registry.yaml`:
@@ -972,7 +1007,7 @@ for the full operator list.
 `assert` and `error` operations. The deployment validator Job runs
 under a ServiceAccount bound to cluster-admin, so registry content is
 restricted at runtime to read-only Chainsaw operations
-(`validators/chainsaw/allowlist.go`). Any other operation (`script`,
+(`pkg/chainsaw/allowlist.go`). Any other operation (`script`,
 `apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
 `sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
 `ErrCodeInvalidRequest`. PR #1223 will add the same enforcement at
@@ -1037,7 +1072,7 @@ make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 
 During `aicr validate --phase deployment`, registry health checks in
 `recipes/checks/<component>/health-check.yaml` run in-process inside
-the `expected-resources` check (`validators/chainsaw/inprocess.go`).
+the `expected-resources` check (`pkg/chainsaw/inprocess.go`).
 
 A Test's `spec.timeouts.assert` is the **whole-Test budget** — one
 deadline shared across every step and retry. Slurm's
@@ -1060,6 +1095,12 @@ assert budget (`TestExpectedResourcesCatalogEnvelope` guards this).
 `pkg/constraints` is shared by surface 1, surface 2's recipe
 constraints, and the readiness pre-flight gate. The evaluation flow:
 
+0. **Name dispatch.** `constraints.Evaluate` first matches the
+   constraint name against the node-set form
+   `NodeTopology.gpu-nodes.label`
+   ([#1755](https://github.com/NVIDIA/aicr/issues/1755)), which has its
+   own value grammar and evaluator and never reaches the steps below.
+   Every other name proceeds through the scalar flow.
 1. **Parse.** `ParseConstraintExpression(expr)` strips whitespace,
    finds the **longest** matching operator prefix (so `>=` wins over
    `>`), splits into `{Operator, Value}`. Empty value → `ErrCodeInvalidRequest`.
