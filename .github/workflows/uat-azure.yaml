@@ -371,7 +371,31 @@ jobs:
         run: |
           set -euo pipefail
           PREFIX="aicr-uat-day-${RESERVATION}-"
-          OUT=$(az aks list --query "[].name" -o tsv --only-show-errors)
+          # Bounded retry. Every teardown gate below keys off DAYTIME_FOUND, so a
+          # single throttled/transient list call ending this step early would skip
+          # teardown entirely and leak the cluster (and the reservation) until a
+          # human re-dispatches daytime-down. Retry, then fail LOUDLY saying so.
+          RC=1
+          OUT=
+          for attempt in 1 2 3; do
+            set +e
+            OUT=$(az aks list --query "[].name" -o tsv --only-show-errors 2>&1)
+            RC=$?
+            set -e
+            if [[ ${RC} -eq 0 ]]; then
+              break
+            fi
+            echo "cluster listing attempt ${attempt} failed (rc=${RC}): ${OUT}"
+            if [[ ${attempt} -lt 3 ]]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          if [[ ${RC} -ne 0 ]]; then
+            echo "::error::could not list clusters for reservation ${RESERVATION} after 3 attempts: ${OUT}"
+            echo "::error::TEARDOWN SKIPPED — any daytime cluster is still up and the reservation may still be held."
+            echo "::error::re-dispatch: gh workflow run uat-run.yaml -f reservation=${RESERVATION} -f lifecycle=daytime-down"
+            exit 1
+          fi
           mapfile -t held < <(printf '%s\n' "${OUT}" | grep "^${PREFIX}[0-9]" || true)
           if [[ "${#held[@]}" -eq 0 ]]; then
             echo "no ${PREFIX}* cluster found; nothing to tear down (already gone or never provisioned)."
