@@ -441,7 +441,10 @@ jobs:
             echo "::error::re-dispatch: gh workflow run uat-run.yaml -f reservation=${RESERVATION} -f lifecycle=daytime-down"
             exit 1
           fi
-          mapfile -t held < <(printf '%s\n' "${OUT}" | tr '\t' '\n' | grep "^${PREFIX}[0-9]" || true)
+          # End-anchored: only an exact <prefix><run-id> name is a teardown
+          # target. The guard's matcher is deliberately broader — anything
+          # prefix-ish should BLOCK a batch, but must not be destroyed here.
+          mapfile -t held < <(printf '%s\n' "${OUT}" | tr '\t' '\n' | grep -E "^\${PREFIX}[0-9]+$" || true)
           if [[ "${#held[@]}" -eq 0 ]]; then
             echo "no ${PREFIX}* cluster found; nothing to tear down (already gone or never provisioned)."
             echo "DAYTIME_FOUND=false" >> "$GITHUB_ENV"
@@ -968,7 +971,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
+          # Set BOTH deployment fields here rather than relying on the Update
+          # Config step (mirrors uat-azure.yaml): any failure between Resolve and
+          # Update Config would otherwise leave the destroy targeting the
+          # committed placeholder id (aicr-uat) while the real — now ephemerally
+          # named — cluster leaks.
+          yq -i '.deployment.id = strenv(DEPLOYMENT_ID) | .deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
           destroyed=false
           attempts=3
