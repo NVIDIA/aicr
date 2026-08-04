@@ -131,3 +131,8 @@ compute:
             labels:
               nodeGroup: gpu-worker
               dedicated: user-workload
+              # Disable GKE's managed device plugin so the GPU Operator's
+              # plugin is the sole advertiser of nvidia.com/gpu — the cluster
+              # prerequisite AICR's GKE recipes document and (as of #1755)
+              # enforce at validate readiness.
+              gke-no-default-nvidia-gpu-device-plugin: "true"

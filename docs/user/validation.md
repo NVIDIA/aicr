@@ -38,6 +38,7 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Cluster service account with RBAC to create Jobs, ConfigMaps, and read cluster state (AICR creates its own `aicr-validation` namespace on first run).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
+- **GKE recipes**: the readiness pre-flight requires every GPU node (nodes carrying `cloud.google.com/gke-accelerator`) to have the label `gke-no-default-nvidia-gpu-device-plugin=true` — without it, GKE's managed device plugin conflicts with the GPU Operator's plugin over `nvidia.com/gpu` ownership. The check fails closed (exit 2) on missing or mixed labels, on malformed or ambiguous label readings, on a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally).
 
 ## Training performance validation
 

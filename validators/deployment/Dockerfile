@@ -14,7 +14,7 @@
 
 # Deployment validator image. Pure-Go binary that executes Chainsaw
 # Test-format health checks in-process (see
-# validators/chainsaw/inprocess.go, issue #1236). The chainsaw-fetch
+# pkg/chainsaw/inprocess.go, issue #1236). The chainsaw-fetch
 # multi-stage that downloaded /usr/local/bin/chainsaw at build time
 # was removed in #1236 — the in-process executor walks the same
 # v1alpha1.Test AST and dispatches assert/error to kyverno-json's
