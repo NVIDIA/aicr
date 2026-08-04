@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -290,8 +291,33 @@ func TestParseAIPerfOutput(t *testing.T) {
 			wantTTFT:       84.1,
 		},
 		{
+			// Shape emitted by aiperf_entrypoint.py: benchmark chatter, then
+			// sentinel, then the exported JSON, then sentinel. Sentinel lookup
+			// is substring-based, so the parser also tolerates the closing
+			// sentinel sharing a line with the JSON's final brace — the
+			// wrapper's newline guard is for log readability, not parseability.
+			// TestAIPerfEntrypointFramingFeedsParser asserts the real bytes;
+			// this case keeps the parser covered without python3 on PATH.
+			name: "wrapper framing with no trailing newline in export",
+			logs: "stub-aiperf: progress chatter\nstub-aiperf: done\n" +
+				aiperfResultSentinel + "\n" + validJSON + "\n" + aiperfResultSentinel + "\n",
+			wantThroughput: 5667.5,
+			wantTTFT:       84.1,
+		},
+		{
+			// The guard-absent shape, proving the claim above rather than
+			// asserting it in a comment: the closing sentinel glued to the
+			// final brace still parses.
+			name:           "closing sentinel glued to the JSON's final brace",
+			logs:           aiperfResultSentinel + "\n" + validJSON + aiperfResultSentinel + "\n",
+			wantThroughput: 5667.5,
+			wantTTFT:       84.1,
+		},
+		{
+			// A failed benchmark exits non-zero before the wrapper emits any
+			// sentinel, so the logs carry only diagnostics.
 			name:          "missing start sentinel — benchmark failed",
-			logs:          "pip install failed: unable to reach PyPI\n",
+			logs:          "aiperf-entrypoint: aiperf exited 7\n",
 			wantErrSubstr: "sentinel",
 		},
 		{
@@ -896,19 +922,64 @@ func TestBuildAIPerfJob_PrebuiltImageAndSentinel(t *testing.T) {
 		t.Errorf("aiperfBaseImage %q should be the pre-built ghcr image", aiperfBaseImage)
 	}
 
-	script := container.Args[0]
-	if strings.Contains(script, "pip install") {
-		t.Errorf("script should not pip install at runtime — aiperf is baked into the image; got:\n%s", script)
+	// The runtime image is distroless (no /bin/sh), so the Job must invoke the
+	// baked Python framing wrapper in exec form. A regression back to a shell
+	// would fail at pod start with "exec: /bin/sh: no such file or directory".
+	wantCommand := []string{aiperfEntrypointPython, aiperfEntrypointScript}
+	if !reflect.DeepEqual(container.Command, wantCommand) {
+		t.Errorf("container.Command = %v, want %v", container.Command, wantCommand)
 	}
-	if !strings.Contains(script, aiperfResultSentinel) {
-		t.Errorf("script missing result sentinel %q", aiperfResultSentinel)
+	assertNoShellIndicators(t, container, "the distroless runtime has none")
+
+	argv := strings.Join(container.Args, " ")
+	if strings.Contains(argv, "pip install") {
+		t.Errorf("args should not pip install at runtime — aiperf is baked into the image; got:\n%s", argv)
 	}
-	if strings.Contains(script, "2>&1") || strings.Contains(script, "> /dev/null") {
-		t.Errorf("script should not silence stderr/stdout — benchmark errors must surface in pod logs")
+	if strings.Contains(argv, "2>&1") || strings.Contains(argv, "> /dev/null") {
+		t.Errorf("args should not silence stderr/stdout — benchmark errors must surface in pod logs")
 	}
-	// /bin/sh is sufficient (POSIX) and avoids a bash install in the image.
-	if len(container.Command) == 0 || container.Command[0] != "/bin/sh" {
-		t.Errorf("container.Command[0] = %v, want /bin/sh", container.Command)
+	// The wrapper prepends `aiperf profile`, so Args must carry only flags —
+	// a leading subcommand would be passed twice.
+	if len(container.Args) == 0 || !strings.HasPrefix(container.Args[0], "-") {
+		t.Errorf("container.Args should start with a flag, got %v", container.Args)
+	}
+	for _, want := range []string{
+		"--output-artifact-dir " + aiperfArtifactDir,
+		"--export-level summary",
+		"--endpoint-type chat",
+	} {
+		if !strings.Contains(argv, want) {
+			t.Errorf("args missing %q; got:\n%s", want, argv)
+		}
+	}
+
+	// Sentinel framing moved from the shell script into env consumed by
+	// aiperf_entrypoint.py; parseAIPerfOutput still keys off this exact value.
+	env := map[string]string{}
+	for _, e := range container.Env {
+		env[e.Name] = e.Value
+	}
+	if env[envAIPerfResultMarker] != aiperfResultSentinel {
+		t.Errorf("%s = %q, want %q", envAIPerfResultMarker, env[envAIPerfResultMarker], aiperfResultSentinel)
+	}
+	if env[envAIPerfArtifactDir] != aiperfArtifactDir {
+		t.Errorf("%s = %q, want %q", envAIPerfArtifactDir, env[envAIPerfArtifactDir], aiperfArtifactDir)
+	}
+	// The artifact dir is double-sourced: argv tells aiperf where to write, env
+	// tells the wrapper where to read. They agree today because both resolve
+	// from one constant, but a future per-run subdirectory applied to only the
+	// argv side would leave the wrapper reading a stale path and returning 1
+	// ("cannot read result file") on an otherwise-successful benchmark.
+	argvArtifactDir, ok := argvFlagValue(container.Args, "--output-artifact-dir")
+	if !ok {
+		t.Fatalf("--output-artifact-dir missing from argv: %v", container.Args)
+	}
+	if argvArtifactDir != env[envAIPerfArtifactDir] {
+		t.Errorf("--output-artifact-dir = %q but %s = %q; aiperf would write where the wrapper does not read",
+			argvArtifactDir, envAIPerfArtifactDir, env[envAIPerfArtifactDir])
+	}
+	if env[envAIPerfModel] == "" {
+		t.Errorf("%s must be set so the wrapper can pass --model", envAIPerfModel)
 	}
 
 	// Pull secrets from the outer pod must propagate to the inner aiperf pod
@@ -1011,11 +1082,44 @@ func clearTuningEnvs(t *testing.T) {
 	}
 }
 
-// TestBuildAIPerfJob_ModelViaEnvNotShell verifies the model is passed through a
-// container env var and referenced as "$AICR_MODEL" in the script, never
-// interpolated into the /bin/sh -c text — so a model containing shell
-// metacharacters cannot be command-substituted before the benchmark runs.
-func TestBuildAIPerfJob_ModelViaEnvNotShell(t *testing.T) {
+// assertNoShellIndicators fails if any element of the container's full argv
+// looks like a shell invocation. The aiperf-bench runtime is distroless and
+// ships no /bin/sh, so a regression here fails at pod start rather than in a
+// test — and it is what keeps a metacharacter-bearing model inert. Shared by
+// every test that asserts the shell-free contract so the recognized set of
+// shell binaries stays in one place.
+func assertNoShellIndicators(t *testing.T, ctr v1.Container, why string) {
+	t.Helper()
+	for _, a := range append(append([]string{}, ctr.Command...), ctr.Args...) {
+		if strings.HasSuffix(a, "/sh") || strings.HasSuffix(a, "/bash") || a == "-c" {
+			t.Errorf("argv element %q implies a shell; %s", a, why)
+		}
+	}
+}
+
+// aiperfArgv renders the container's benchmark flags for substring assertions.
+// Args is exec-form argv (no shell), so joining on a space reproduces the
+// "--flag value" shape the older script-based assertions matched against.
+func aiperfArgv(job *batchv1.Job) string {
+	return strings.Join(job.Spec.Template.Spec.Containers[0].Args, " ")
+}
+
+// argvFlagValue returns the element following the named flag in argv.
+func argvFlagValue(args []string, flag string) (string, bool) {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+// TestBuildAIPerfJob_ModelCarriedAsDiscreteArgv verifies the model is handed to
+// execvp as its own argv element rather than spliced into a command string. The
+// runtime image is distroless with no shell, so a model containing shell
+// metacharacters must survive verbatim and inert — not be quoted, escaped, or
+// indirected through an env expansion that no longer has a shell to expand it.
+func TestBuildAIPerfJob_ModelCarriedAsDiscreteArgv(t *testing.T) {
 	clearTuningEnvs(t)
 	malicious := "$(touch /tmp/pwned)"
 	job, _, err := buildAIPerfJob("ns", "aicr-aiperf-run-0", "http://ep:8000", malicious, 16, nil)
@@ -1023,22 +1127,30 @@ func TestBuildAIPerfJob_ModelViaEnvNotShell(t *testing.T) {
 		t.Fatalf("buildAIPerfJob: %v", err)
 	}
 	ctr := job.Spec.Template.Spec.Containers[0]
-	script := ctr.Args[0]
-	if strings.Contains(script, malicious) {
-		t.Errorf("script must not interpolate the model verbatim (injection risk); script:\n%s", script)
+
+	// The value must appear as exactly one argv element, so execvp passes it
+	// as a single token with no re-parsing.
+	got, ok := argvFlagValue(ctr.Args, "--model")
+	if !ok {
+		t.Fatalf("--model flag missing from argv: %v", ctr.Args)
 	}
-	if !strings.Contains(script, `"$AICR_MODEL"`) {
-		t.Errorf("script must reference the model via \"$AICR_MODEL\"; script:\n%s", script)
+	if got != malicious {
+		t.Errorf("--model value = %q, want the raw model %q carried verbatim", got, malicious)
 	}
-	var got string
+
+	// No shell anywhere in the invocation means nothing can substitute it.
+	assertNoShellIndicators(t, ctr, "the model would become command-substitutable")
+
+	// Retained for operator visibility via `kubectl describe pod`.
+	var envVal string
 	found := false
 	for _, e := range ctr.Env {
-		if e.Name == "AICR_MODEL" {
-			got, found = e.Value, true
+		if e.Name == envAIPerfModel {
+			envVal, found = e.Value, true
 		}
 	}
-	if !found || got != malicious {
-		t.Errorf("AICR_MODEL env = %q (found=%v), want the raw model %q carried as data", got, found, malicious)
+	if !found || envVal != malicious {
+		t.Errorf("%s env = %q (found=%v), want the raw model %q", envAIPerfModel, envVal, found, malicious)
 	}
 }
 
@@ -1048,16 +1160,20 @@ func TestBuildAIPerfJob_ModelViaEnvNotShell(t *testing.T) {
 // regression here fails every inference-perf run on every cloud.
 func TestBuildAIPerfJob_ModelPassedWithFlag(t *testing.T) {
 	clearTuningEnvs(t)
-	job, _, err := buildAIPerfJob("ns", "aicr-aiperf-run-0", "http://ep:8000", "Qwen/Qwen3-8B", 16, nil)
+	const model = "Qwen/Qwen3-8B"
+	job, _, err := buildAIPerfJob("ns", "aicr-aiperf-run-0", "http://ep:8000", model, 16, nil)
 	if err != nil {
 		t.Fatalf("buildAIPerfJob: %v", err)
 	}
-	script := job.Spec.Template.Spec.Containers[0].Args[0]
-	if !strings.Contains(script, `--model "$AICR_MODEL"`) {
-		t.Errorf("script must pass the model as `--model \"$AICR_MODEL\"`; script:\n%s", script)
+	args := job.Spec.Template.Spec.Containers[0].Args
+	got, ok := argvFlagValue(args, "--model")
+	if !ok || got != model {
+		t.Errorf("argv must pass the model as `--model %s`; got %v", model, args)
 	}
-	if strings.Contains(script, `aiperf profile "$AICR_MODEL"`) {
-		t.Errorf("model must not be passed positionally (rejected by aiperf >= 0.11.0); script:\n%s", script)
+	// A bare positional would be argv[0] since the wrapper supplies only
+	// `aiperf profile` ahead of these args.
+	if len(args) > 0 && args[0] == model {
+		t.Errorf("model must not be passed positionally (rejected by aiperf >= 0.11.0); got %v", args)
 	}
 }
 
@@ -1074,7 +1190,7 @@ func TestBuildAIPerfJob_RequestCountFloor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			job := mustBuildAIPerfJob(t, "ns", "aicr-aiperf-run-0", "http://ep:8000", tt.concurrency, nil)
-			script := job.Spec.Template.Spec.Containers[0].Args[0]
+			script := aiperfArgv(job)
 			needle := fmt.Sprintf("--request-count %d", tt.wantMinReqs)
 			if !strings.Contains(script, needle) {
 				t.Errorf("script missing %q; script:\n%s", needle, script)
@@ -1099,7 +1215,7 @@ func TestBuildAIPerfJob_Warmup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			job := mustBuildAIPerfJob(t, "ns", "aicr-aiperf-run-0", "http://ep:8000", tt.concurrency, nil)
-			script := job.Spec.Template.Spec.Containers[0].Args[0]
+			script := aiperfArgv(job)
 			needle := fmt.Sprintf("--warmup-request-count %d", tt.concurrency*aiperfWarmupPerConcurrency)
 			if !strings.Contains(script, needle) {
 				t.Errorf("concurrency=%d: script missing %q; script:\n%s", tt.concurrency, needle, script)
@@ -1665,7 +1781,7 @@ func TestBuildAIPerfJob_EnvOverrides(t *testing.T) {
 	t.Setenv(envOutputTokensMean, "256")
 
 	job := mustBuildAIPerfJob(t, "ns", "run-0", "http://ep:8000", 100, nil)
-	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	script := aiperfArgv(job)
 	for _, needle := range []string{
 		"--request-count 2000",
 		"--warmup-request-count 300",

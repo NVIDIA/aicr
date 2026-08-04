@@ -178,6 +178,7 @@ LICENSE_IGNORES = \
 	-ignore 'recipes/evidence/*.yaml' \
 	-ignore 'recipes/evidence/*/*/*.yaml' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
+	-ignore 'validators/performance/licenses/**' \
 	-ignore '.licenses-cache/**'
 
 # The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
@@ -609,6 +610,10 @@ validate-local: image-validators ## Builds validator images and runs validation 
 	AICR_VALIDATOR_IMAGE_REGISTRY=$(IMAGE_REGISTRY) $$AICR_BIN validate \
 		--recipe "$(RECIPE)" \
 		--phase deployment
+
+.PHONY: python-licenses
+python-licenses: ## Refreshes the committed Python license section for the aiperf-bench image (needs network)
+	@python3 tools/generate-python-licenses
 
 .PHONY: notices
 notices: ## Generates THIRD_PARTY_NOTICES.md aggregating every dependency's license
