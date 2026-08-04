@@ -3,9 +3,9 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-08-03T00:00:00Z",
-  "version": 10,
-  "tooling": "manual; aiperf-bench statements verified against aiperf v0.11.0 source (which pins pillow~=12.2.0); the aiperf-bench runtime base moved from python:3.13-slim to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, adding 21 libexpat1 2.7.1-2 statements (4 High, 16 Medium, 1 Low) whose unreachability was verified by reading ELF DT_NEEDED across the built image (no binary links libexpat) and by confirming CPython's pyexpat statically bundles expat 2.8.1; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); aicr-gate statements suppress CVEs in the embedded upstream kyverno/chainsaw binary (affected packages identified via vuln.go.dev), justified by chainsaw's ephemeral cluster-internal readiness-gate usage; v10 dropped 11 redundant aicr-gate statements (GO-2026-5005/5006/5013/5014/5015/5017/5018/5019/5020/5021/5023): the 2026-08-03 scan of ghcr.io/nvidia/aicr-gate reports each of those CVEs under its GHSA identifier instead of the go.dev one, and the GHSA-aliased statement for every one of them is retained here (e.g. GO-2026-5005 / CVE-2026-39833 is covered by GHSA-jppx-rxg9-jmrx), so no suppression coverage is lost — chainsaw is unchanged at v0.2.15 and the vulnerable golang.org/x/crypto/ssh code is still present in the embedded binary, so the retained GHSA statements must not be removed",
+  "timestamp": "2026-08-04T00:00:00Z",
+  "version": 11,
+  "tooling": "manual; aiperf-bench statements verified against aiperf v0.11.0 source (which pins pillow~=12.2.0); the aiperf-bench runtime base moved from python:3.13-slim to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, adding 21 libexpat1 2.7.1-2 statements (4 High, 16 Medium, 1 Low) whose unreachability was verified by reading ELF DT_NEEDED across the built image (no binary links libexpat) and by confirming CPython's pyexpat statically bundles expat 2.8.1; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); aicr-gate statements suppress CVEs in the embedded upstream kyverno/chainsaw binary (affected packages identified via vuln.go.dev), justified by chainsaw's ephemeral cluster-internal readiness-gate usage; v10 dropped 11 redundant aicr-gate statements (GO-2026-5005/5006/5013/5014/5015/5017/5018/5019/5020/5021/5023): the 2026-08-03 scan of ghcr.io/nvidia/aicr-gate reports each of those CVEs under its GHSA identifier instead of the go.dev one, and the GHSA-aliased statement for every one of them is retained here (e.g. GO-2026-5005 / CVE-2026-39833 is covered by GHSA-jppx-rxg9-jmrx), so no suppression coverage is lost \u2014 chainsaw is unchanged at v0.2.15 and the vulnerable golang.org/x/crypto/ssh code is still present in the embedded binary, so the retained GHSA statements must not be removed; v11 added four statements for the 2026-08-04 scan: aicr-gate GO-2026-5942 (golang.org/x/net) and GO-2026-5970 (golang.org/x/text), both scoped to the embedded kyverno/chainsaw v0.2.15 binary and both justified vulnerable_code_not_present after enumerating the binary's pclntab function names and finding the vulnerable packages present only under the Go toolchain's stdlib `vendor/` prefix (module-path golang.org/x/net/dns/dnsmessage absent entirely; module-path golang.org/x/text/unicode/norm reduced to five leaf property-lookup functions with no Iter/nextComposed/patchTail), plus aiperf-bench CVE-2026-11940 and CVE-2026-11972 (CPython 3.13.14 tarfile), justified vulnerable_code_not_in_execute_path after confirming aiperf 0.11.0 has zero tarfile references and that AICR's fixed `aiperf profile` argv lands in the synthetic-dataset branch of aiperf/dataset/dataset_manager.py, never downloading or extracting an archive; the v11 stale audit found zero dead statements (aicr-gate 45/45 and aiperf-bench 32/32 declared statements applied against locally built images scanned with the CI-pinned grype v0.110.0)",
   "statements": [
     {
       "vulnerability": {
@@ -1507,6 +1507,86 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-5942",
+        "description": "Parsing an invalid SVCB or HTTPS resource record can panic in golang.org/x/net/dns/dnsmessage (CVE-2026-46600, High). Present via golang.org/x/net v0.52.0 recorded in the Go build info of the embedded kyverno/chainsaw binary; fixed in golang.org/x/net v0.56.0. No bump remediates: chainsaw v0.2.15 (2026-05-06) is the latest upstream release and chainsaw's unreleased main branch is still on golang.org/x/net v0.53.0."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-gate",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-gate"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The flagged package is golang.org/x/net v0.52.0, recorded in the Go build info of /usr/local/bin/chainsaw -- the upstream, cosign-attested kyverno/chainsaw binary copied into the image by cmd/gate/Dockerfile. grype reports the match location as /usr/local/bin/chainsaw, so the AICR gate binary is not implicated: /gate is built -mod=vendor -trimpath from this repo's go.mod, which pins golang.org/x/net v0.57.0 (already past the v0.56.0 fix), and `go version -m /gate` records zero dependency module versions, so grype cannot attribute any module finding to it. No bump remediates -- chainsaw v0.2.15 (2026-05-06) is the latest release and chainsaw's unreleased main is still on golang.org/x/net v0.53.0, below the v0.56.0 fix. The vulnerable code from the flagged module is not in the image. GO-2026-5942 is scoped to package golang.org/x/net/dns/dnsmessage (advisory symbols Message.Unpack, Parser.SVCBResource, Parser.HTTPSResource, unpackSVCBResource, and the Parser.All* accessors). Every dnsmessage function name in the chainsaw binary's pclntab carries the `vendor/` prefix -- `vendor/golang.org/x/net/dns/dnsmessage.*` -- which is the Go toolchain's own copy vendored inside the standard library's net package for the pure-Go resolver, not the golang.org/x/net module grype matched; grepping the binary for the unprefixed module path `golang.org/x/net/dns/dnsmessage` returns zero hits, so no code from the flagged module version is linked. The Go vulnerability database carries no `stdlib` entry aliased to CVE-2026-46600 (the index at https://vuln.go.dev/index/vulns.json returns only GO-2026-5942, scoped to the module), so the toolchain's vendored copy is not covered by this advisory; consistent with that, unpackSVCBResource -- the function the advisory names as panicking -- is absent from the vendored copy's surviving unpackers, which after dead-code elimination are only unpackA/AAAA/CNAME/MX/NS/PTR/SRV/TXT plus the primitive unpackBytes/Class/Text/Type/Uint helpers. Independently, chainsaw runs inside AICR only as an ephemeral, cluster-internal readiness-gate Job that `chainsaw test`s recipe-authored assertions against the trusted in-cluster Kubernetes API server (cmd/gate/Dockerfile, pkg/chainsawgate/runner); it never parses DNS wire-format messages from an attacker-controlled resolver."
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-5970",
+        "description": "Infinite loop on invalid input in golang.org/x/text: a norm.Iter can spin forever on input containing invalid UTF-8 bytes (CVE-2026-56852, High). Present via golang.org/x/text v0.35.0 recorded in the Go build info of the embedded kyverno/chainsaw binary; fixed in golang.org/x/text v0.39.0. No bump remediates: chainsaw v0.2.15 (2026-05-06) is the latest upstream release and chainsaw's unreleased main branch is still on golang.org/x/text v0.36.0."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-gate",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-gate"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The flagged package is golang.org/x/text v0.35.0, recorded in the Go build info of /usr/local/bin/chainsaw -- the upstream, cosign-attested kyverno/chainsaw binary copied into the image by cmd/gate/Dockerfile. grype reports the match location as /usr/local/bin/chainsaw; the AICR gate binary is not implicated (this repo's go.mod pins golang.org/x/text v0.40.0, past the v0.39.0 fix, and `go version -m /gate` records no dependency module versions at all). No bump remediates -- chainsaw v0.2.15 (2026-05-06) is the latest release and chainsaw's unreleased main is still on golang.org/x/text v0.36.0, below v0.39.0. The defect itself is not in the image. Per the upstream report (go.dev/issue/80142, fix CL 794100, landed as golang/text commit 5ae8e578e495 'unicode/norm: avoid infinite loop on invalid input'), the hang lives in norm.Iter: nextComposed in unicode/norm/iter.go failed to advance when compInfo returned a zero-size Properties for an invalid UTF-8 byte; the fix makes compInfo return {flags: 0x80, size: 1} and adds Properties.isInvalid for normalize.go's patchTail. Enumerating every golang.org/x/text/unicode/norm function name in the chainsaw binary's pclntab that does NOT carry the standard library's `vendor/` prefix yields exactly five: compInfo, Form.Properties, Properties.Decomposition, Properties.combinesBackward, and init. Iter, nextComposed, patchTail, normReader.Read, and normWriter.Write are all absent -- the sole nextComposed anywhere in the binary is `vendor/golang.org/x/text/unicode/norm.nextComposed`, the Go 1.26.0 toolchain's own vendored copy reached through net/http's IDNA path, which is governed by the Go release cycle rather than the module version grype matched (the Go vulnerability database has no `stdlib` entry aliased to CVE-2026-56852). Disclosed for completeness: the advisory's symbol list does include Form.Properties, which IS linked here. That list is a conservative caller-closure over the patched compInfo -- it enumerates every exported entry point that can observe the corrected Properties -- but Form.Properties contains no loop; it returns the properties of a single rune. Reaching an unbounded loop requires an Iter (Iter.Init/Iter.InitString -> Iter.Next -> nextComposed) or patchTail to consume the zero-size Properties and fail to advance, and none of those are linked. Independently, chainsaw runs inside AICR only as an ephemeral, cluster-internal readiness-gate Job asserting recipe-authored conditions against the trusted in-cluster Kubernetes API server, so it never normalizes attacker-supplied text."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-11940",
+        "description": "cpython: tarfile.extractall() under the 'data' or 'tar' filter can be bypassed by a crafted archive in which a hardlink references a symlink stored at a deeper name than the hardlink itself, letting the recreated symlink escape the destination directory (GHSA-9mc4-rqmq-h467, High; incomplete fix of CVE-2025-4330). Present via CPython 3.13.14 in the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base. No bump remediates: 3.13.14 is the newest CPython 3.13 release, 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, grype's only known fixed version is 3.15.0b4 (an unreleased beta), and scanning the newest 3.14-line tag (3.14-v4.0.9, CPython 3.14.6) reports this same finding, so no minor-version move escapes it either."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Triggering this requires extracting an attacker-supplied tar archive with tarfile.extractall(). aiperf 0.11.0 never touches tarfile: grepping the installed package at /opt/venv/lib/python3.13/site-packages/aiperf for 'tarfile|extractall' returns zero hits. Across the entire venv (297 installed distributions) exactly one tar extraction exists -- datasets/utils/extract.py:130-131, TarExtractor.extract, which does `tarfile.open(input_path)` then `tar_file.extractall(output_path, members=TarExtractor.safemembers(tar_file, output_path))` -- inside the HuggingFace `datasets` package. aiperf declares that dependency (Requires-Dist: datasets>=3.0) but imports it from only two regions: the HuggingFace dataset loaders (aiperf/dataset/loader/base_hf_dataset.py, aiperf/dataset/loader/hf_asr.py) and the accuracy benchmark suites (aiperf/accuracy/benchmarks/{mmlu,gsm8k,aime,aime24,aime25,hellaswag,gpqa_diamond,math_500}.py). AICR reaches neither. buildAIPerfJob (validators/performance/inference_perf_constraint.go) launches the image with a fixed argv -- `aiperf profile --model <model> --url <endpoint> --endpoint-type chat --streaming --concurrency N --request-count N --warmup-request-count N --prompt-input-tokens-mean 128 --prompt-input-tokens-stddev 0 --prompt-output-tokens-mean 128 --prompt-output-tokens-stddev 0 --num-dataset-entries 100 --random-seed 100 --extra-inputs temperature:0 --output-artifact-dir /tmp/aiperf --export-level summary` -- with no --input-file, no public-dataset selector, and no accuracy flag. aiperf's dataset dispatch (aiperf/dataset/dataset_manager.py:444-456) therefore falls past the accuracy-enabled, PublicDataset, and FileDataset branches into _load_synthetic_dataset(), which generates prompts in-process from --random-seed and --num-dataset-entries. No archive is fetched and no tar is opened anywhere in the benchmark run. Note on the CVE's precondition: it describes a bypass of the 'data'/'tar' extraction filter, and that single call site passes no filter= argument at all (it screens members itself via safemembers), so the filter the CVE defeats is not the mechanism in use there -- but the operative reason this image is unaffected is that the call site is never executed by AICR's workload."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-11972",
+        "description": "cpython: when the tarfile module is used with a file opened in streaming mode (mode='r|'), tarfile does not properly handle EOF, so a crafted archive can be parsed in an infinite loop (GHSA-wqxf-pjxh-hh4h, High). Present via CPython 3.13.14 in the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base. No bump remediates: 3.13.14 is the newest CPython 3.13 release, 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, grype's only known fixed version is 3.15.0b4 (an unreleased beta), and the newest 3.14-line tag (3.14-v4.0.9, CPython 3.14.6) reports this same finding."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Triggering this requires feeding a crafted archive to tarfile with the file opened in streaming mode (mode='r|' / 'r|*'). aiperf 0.11.0 contains no tarfile usage at all: grepping the installed package at /opt/venv/lib/python3.13/site-packages/aiperf for 'tarfile|extractall' returns zero hits. Across the entire venv (297 installed distributions) exactly two streaming-mode opens exist, and neither is reachable from the benchmark. The first is datasets/utils/file_utils.py:1360, `tarfile.open(fileobj=f, mode='r|*')`, on the HuggingFace `datasets` streaming-download path; aiperf declares datasets as a dependency (Requires-Dist: datasets>=3.0) but imports it only from the HuggingFace dataset loaders (aiperf/dataset/loader/base_hf_dataset.py, aiperf/dataset/loader/hf_asr.py) and the accuracy benchmark suites (aiperf/accuracy/benchmarks/*.py). AICR invokes neither: buildAIPerfJob (validators/performance/inference_perf_constraint.go) runs a fixed argv -- `aiperf profile --model <model> --url <endpoint> --endpoint-type chat --streaming --num-dataset-entries 100 --random-seed 100 --prompt-input-tokens-mean 128 --output-artifact-dir /tmp/aiperf --export-level summary` and the remaining concurrency/token-count flags -- with no --input-file, no public-dataset selector, and no accuracy flag, so aiperf's dataset dispatch (aiperf/dataset/dataset_manager.py:444-456) falls through to _load_synthetic_dataset() and generates prompts in-process from --random-seed. Note that the --streaming flag here is an HTTP/SSE response-streaming option for the inference endpoint and has nothing to do with tarfile stream mode. The second call site is setuptools/_vendor/jaraco/context/__init__.py:79, a build-time helper in vendored setuptools; the runtime stage is distroless with no shell, no compiler, and no pip invocation -- the venv is copied in fully installed from the builder stage (validators/performance/aiperf-bench.Dockerfile), so setuptools is never executed. No tar stream from any source is parsed during a benchmark run."
     }
   ]
 }
