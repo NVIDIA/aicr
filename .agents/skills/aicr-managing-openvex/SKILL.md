@@ -2,11 +2,11 @@
 name: aicr-managing-openvex
 description: |
   Use when adding, updating, or removing CVE/GHSA suppressions in
-  `.openvex.json` — the OpenVEX document consumed by the daily image
+  `.openvex.json` — the OpenVEX document consumed by the weekly image
   vulnerability scan workflow. Triggers on "VEX", "OpenVEX",
   ".openvex.json", "suppress CVE", "ignore CVE", "vulnerability
   suppression", "aiperf-bench CVE", or any request to act on findings
-  reported by `Daily Image Vulnerability Scan` for the aiperf-bench
+  reported by `Weekly Image Vulnerability Scan` for the aiperf-bench
   image. Keeps the file current: adds reachability-evidenced statements
   for new HIGH+ findings, drops statements that no longer apply
   (dependency upgraded past the fix, advisory recalled, package
@@ -17,7 +17,7 @@ description: |
 
 `.openvex.json` carries per-CVE reachability evidence used to suppress
 vulnerability findings in the aiperf-bench container image. The file is
-consumed by the `Daily Image Vulnerability Scan` workflow
+consumed by the `Weekly Image Vulnerability Scan` workflow
 (`.github/workflows/vuln-scan-images.yaml`) via the `vex:` input on
 `anchore/scan-action@v7.4.0`, which passes it to grype as `--vex
 .openvex.json`.
@@ -28,7 +28,7 @@ no-ops every statement in the document.
 
 ## When to use
 
-- A `Daily Image Vulnerability Scan` run reports HIGH+ CVE(s) on the
+- A `Weekly Image Vulnerability Scan` run reports HIGH+ CVE(s) on the
   aiperf-bench image and a maintainer needs to add a suppression after
   verifying reachability.
 - A maintainer bumps the aiperf pin (`AIPERF_VERSION` in
@@ -192,7 +192,8 @@ findings, not discrepancies.
 
 ## Triage a new finding from the scan workflow
 
-The daily scan emits HIGH+ identifiers in the per-image artifact and
+The weekly scan (Thursdays, 06:00 UTC) emits HIGH+ identifiers in the
+per-image artifact and
 Slack notification:
 
 ```
@@ -225,7 +226,7 @@ For each ID:
 5. **Run the stale audit** (next section) — every edit to the file MUST
    include it, so dead statements never accumulate alongside new ones.
 6. **Commit and dispatch the workflow** to confirm CI matches local.
-   Run `gh workflow run "Daily Image Vulnerability Scan" --repo
+   Run `gh workflow run "Weekly Image Vulnerability Scan" --repo
    NVIDIA/aicr --ref main`, watch with `gh run watch <id> --exit-status`,
    inspect the aiperf-bench scan-result artifact.
 
@@ -262,7 +263,7 @@ For each candidate, classify before deleting — three distinct cases:
    `.ignoredMatches[]` with `appliedIgnoreRules[].namespace == ""`):
    `--only-fixed` already hides it, so the VEX statement never applies.
    **Delete** — do not keep it "just in case": if the distro ships a
-   fix, the daily image rebuild absorbs it automatically, and until it
+   fix, the weekly image rebuild absorbs it automatically, and until it
    does the finding must surface rather than be pre-suppressed (a fix
    that becomes reachable means bump, not VEX).
 3. **Present in `.matches[]` under a different primary ID** (a CVE
