@@ -236,7 +236,11 @@ func (r *VerifyResult) MaxAchievableTrustLevel() TrustLevel {
 // here and fails later at Evaluate.
 func ParseVersionConstraint(expr string) (*constraints.ParsedConstraint, error) {
 	expr = strings.TrimSpace(expr)
-	if !hasOperatorPrefix(expr) {
+	// A leading "!" is never a bare version. The shared parser rejects a bare
+	// "!" prefix outright (it means the user wanted "!=" or the node-set
+	// form), so prepending ">=" here would hide invalid syntax from that
+	// check and let it through as ">= !1.2.3".
+	if !hasOperatorPrefix(expr) && !strings.HasPrefix(expr, "!") {
 		expr = ">= " + expr
 	}
 	constraint, err := constraints.ParseConstraintExpression(expr)

@@ -265,6 +265,10 @@ func TestParseVersionConstraint(t *testing.T) {
 		{name: "surrounding whitespace tolerated", expr: "  0.8.0  ", satisfied: "0.9.0", rejected: "0.7.0"},
 		{name: "empty expression rejected", expr: "", wantErr: true},
 		{name: "operator with no version rejected", expr: ">=", wantErr: true},
+		// A bare "!" is invalid syntax that the shared parser rejects
+		// outright. Prepending ">=" would hide it from that check, so the
+		// bare-version default must not apply to "!"-prefixed input.
+		{name: "bare ! prefix rejected, not coerced to >=", expr: "!0.8.0", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
