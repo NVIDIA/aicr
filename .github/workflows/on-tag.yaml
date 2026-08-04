@@ -265,7 +265,7 @@ jobs:
           push: true
           # CHAINSAW_* args were dropped in #1236 — the deployment validator
           # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
-          # Test format in-process via validators/chainsaw/inprocess.go.
+          # Test format in-process via pkg/chainsaw/inprocess.go.
           # (The separate build-gate job below still passes CHAINSAW_VERSION
           # because the gate CLI image embeds chainsaw for its own use.)
           build-args: |

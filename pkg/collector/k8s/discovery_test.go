@@ -538,3 +538,39 @@ func expiredContext(t *testing.T) context.Context {
 	t.Cleanup(cancel)
 	return ctx
 }
+
+// TestCancellationErr pins the invariant that motivated cancellationErr: a
+// cancellation must be reported even when only an *outer* context in the chain
+// has observed it yet.
+//
+// The race this guards against is timing-dependent and therefore cannot be
+// reproduced reliably in a test — parent-to-child propagation loses the race
+// roughly 1 run in 10,000. So rather than stress the scheduler, the cases below
+// encode the resulting states directly. The "caller canceled, derived still
+// live" case is exactly the mid-propagation snapshot that made
+// TestKubernetesCollector_CustomResourceCancellationFailsCollection flaky in CI.
+func TestCancellationErr(t *testing.T) {
+	live := context.Background()
+
+	tests := []struct {
+		name    string
+		ctxs    []context.Context
+		wantErr bool
+	}{
+		{"all live", []context.Context{live, live, live}, false},
+		{"caller cancelled, derived still live", []context.Context{live, live, expiredContext(t)}, true},
+		{"middle cancelled only", []context.Context{live, expiredContext(t), live}, true},
+		{"errgroup context cancelled only (sibling failure)", []context.Context{expiredContext(t), live, live}, true},
+		{"whole chain cancelled", []context.Context{expiredContext(t), expiredContext(t), expiredContext(t)}, true},
+		{"no contexts", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := cancellationErr(tt.ctxs...)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("cancellationErr() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
