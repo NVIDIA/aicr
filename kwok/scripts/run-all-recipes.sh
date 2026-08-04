@@ -76,6 +76,12 @@ OVERLAYS_DIR="${REPO_ROOT}/recipes/overlays"
 # shellcheck source=lib/cleanup.sh
 source "${SCRIPT_DIR}/lib/cleanup.sh"
 
+# Shared profile-selection helpers (resolve_recipe_criteria,
+# select_profiles). Batch mode uses these to skip recipes with no
+# matching KWOK profile instead of hard-failing on them (#1997).
+# shellcheck source=lib/profile-select.sh
+source "${SCRIPT_DIR}/lib/profile-select.sh"
+
 CLUSTER_NAME="${KWOK_CLUSTER:-aicr-kwok-test}"
 CONTEXT="kind-${CLUSTER_NAME}"
 
@@ -242,6 +248,49 @@ run_recipe_test() {
     log_info "Testing recipe: ${recipe} (deployer=${DEPLOYER})"
     log_info "========================================"
 
+    # Skip recipes whose (service, accelerator) has no matching KWOK
+    # profile on disk. Direct `apply-nodes.sh <recipe>` still fails
+    # closed with the full diagnostic (#1997).
+    #
+    # Only PROFILE_SELECT_RC_NO_MATCH (rc=2 from select_profiles) is
+    # potentially skippable. Every other non-zero rc — ambiguous matches,
+    # invalid profiles root, malformed args — is a real fault the tree
+    # must surface; swallowing it would let a duplicate profile pass
+    # batch CI green, which is the false-pass class this PR exists to
+    # eliminate.
+    #
+    # For the no-match case the invocation mode decides. Implicit batch
+    # mode (get_recipes(), used by `make kwok-test-all` locally) keeps
+    # the historical SKIP-as-pass semantics so a partly-populated
+    # profile tree doesn't turn every dev-loop invocation red. Explicit
+    # invocation — the caller named this recipe on the command line, as
+    # every CI matrix cell does — fails: reporting green for a recipe
+    # the operator specifically asked about is the exact false-success
+    # the CI discovery filter also targets, and this is defense in
+    # depth if a caller ever bypasses that filter.
+    local overlay_file="${OVERLAYS_DIR}/${recipe}.yaml"
+    if [[ -f "${overlay_file}" ]]; then
+        local criteria svc accel
+        if criteria=$(resolve_recipe_criteria "${overlay_file}" 2>/dev/null); then
+            read -r svc accel <<< "${criteria}"
+            local sel_err select_rc=0
+            sel_err=$(select_profiles "${svc}" "${accel}" "${KWOK_DIR}/profiles" 2>&1 >/dev/null) || select_rc=$?
+            if (( select_rc == PROFILE_SELECT_RC_NO_MATCH )); then
+                if is_explicit_recipe "${recipe}"; then
+                    log_error "Recipe ${recipe} was explicitly requested but has no KWOK profile for service=${svc} accelerator=${accel}. Add a profile under kwok/profiles/${svc}/ or drop this recipe from the invocation (see #1997)."
+                    return 1
+                fi
+                log_warn "SKIP ${recipe}: no KWOK profile for service=${svc} accelerator=${accel} (add one under kwok/profiles/${svc}/ — see #1997)"
+                return 0
+            fi
+            if (( select_rc != 0 )); then
+                log_error "Profile selection failed for ${recipe} (service=${svc} accelerator=${accel}, rc=${select_rc}):"
+                [[ -n "${sel_err}" ]] && echo "${sel_err}" >&2
+                return "${select_rc}"
+            fi
+        fi
+    fi
+
     cleanup_between_tests
 
     # Create nodes (pass recipe name, script infers from overlay)
@@ -281,6 +330,21 @@ EOF
 # except the cleanup_between_tests system_ns allowlist gains two harmless
 # entries (argocd|aicr-registry) that never exist on the helm path.
 DEPLOYER="helm"
+
+# Space-separated list of recipes the caller explicitly named on the
+# command line. Populated in main() from positional args. Empty when the
+# recipe set came from get_recipes() (implicit batch mode). Used by
+# run_recipe_test to decide whether an unmapped-profile SKIP is a
+# recoverable batch outcome (rc=0) or a false-success that must be
+# surfaced as a failure (#1997): CI matrix cells always name a specific
+# recipe, so an unmapped recipe reaching them means every prior filter
+# was bypassed and the run has no coverage to report green about.
+EXPLICIT_RECIPES=""
+
+is_explicit_recipe() {
+    local recipe="$1"
+    [[ " ${EXPLICIT_RECIPES} " == *" ${recipe} "* ]]
+}
 
 main() {
     local recipes failed=() passed=()
@@ -332,6 +396,7 @@ main() {
 
     if [[ ${#positional[@]} -gt 0 ]]; then
         recipes="${positional[*]}"
+        EXPLICIT_RECIPES="${positional[*]}"
     else
         recipes=$(get_recipes)
     fi

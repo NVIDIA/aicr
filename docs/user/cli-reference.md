@@ -389,6 +389,11 @@ spec:
       accelerator: gb200
       intent: training
       nodes: 8
+      platform: slurm
+    configuration:
+      slurm:
+        accounting:
+          mode: disabled
     output:
       path: recipe.yaml
       format: yaml
@@ -440,6 +445,7 @@ Generate recipes using direct system parameters:
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on the AKS family); omit to use the declaration's default (`gpuStack=azure-managed` on AKS) |
+| `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -472,7 +478,23 @@ aicr recipe \
 
 # Save to file (--gpu is an alias for --accelerator)
 aicr recipe --os ubuntu --gpu h100 --service eks --intent training --output recipe.yaml
+
+# Slurm with an AICR-provided accounting database installation
+aicr recipe \
+  --service eks \
+  --accelerator h100 \
+  --intent training \
+  --os ubuntu \
+  --platform slurm \
+  --slurm-accounting-mode aicr-provided
 ```
+
+The AICR-provided example above is criteria-only: because it does not use
+`--snapshot`, the resulting recipe carries no target-cluster MariaDB Operator
+conflict evidence. Bundling warns that conflicts were not evaluated and
+proceeds for compatibility. Use a current snapshot before deployment when you
+need conflict detection. See
+[Conflict detection requires snapshot evidence](slinky-slurm-accounting.md#conflict-detection-requires-snapshot-evidence).
 
 #### Snapshot Mode
 
@@ -486,7 +508,9 @@ reconstruct the installed chart's Helm values. `K8s.mariadb-operator` records
 official MariaDB Operator API/CR conflict evidence but does not infer database
 availability, accounting intent, or database source. Pass `--platform slurm`
 to resolve a Slurm leaf. Older snapshots without either subtype remain
-compatible.
+compatible. For `aicr-provided`, missing MariaDB Operator conflict evidence
+causes bundling to warn that conflicts were not evaluated and proceed without
+target-cluster conflict detection.
 
 **Flags:**
 
@@ -496,6 +520,7 @@ compatible.
 | `--intent` | | string | Workload intent: training, inference |
 | `--platform` | | string | Explicit platform/framework type, including slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
+| `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
@@ -511,7 +536,8 @@ compatible.
 aicr recipe --snapshot system.yaml --intent training
 
 # Resolve the Slurm leaf from snapshot-derived infrastructure criteria
-aicr recipe --snapshot system.yaml --intent training --platform slurm
+aicr recipe --snapshot system.yaml --intent training --platform slurm \
+  --slurm-accounting-mode customer-managed
 
 # From ConfigMap (requires cluster access)
 aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --intent training
@@ -536,7 +562,7 @@ aicr recipe -s system.yaml --intent inference -o recipe.yaml --format yaml
 **Output structure:**
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1alpha3
 kind: RecipeResult
 metadata:
   version: v1.0.0
@@ -550,6 +576,11 @@ criteria:
   accelerator: gb200
   intent: training
   os: any
+  platform: slurm
+configuration:
+  slurm:
+    accounting:
+      mode: disabled
 componentRefs:
   - name: gpu-operator
     type: Helm
@@ -961,7 +992,14 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** Snapshots and legacy recipe results use `aicr.run/v1alpha2`. Recipe results with a selected configuration profile use `aicr.run/v1alpha3`. Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
+> **apiVersion gate:** Snapshots and catalog artifacts use `aicr.run/v1alpha2`;
+> recipe results with a selected configuration profile or configured Slurm
+> accounting use `aicr.run/v1alpha3`. Loading an
+> artifact stamped with an unsupported `apiVersion` fails fast; regenerate or
+> recapture it with a matching `aicr` version. Legacy recipes without
+> profile or accounting configuration retain v1alpha2 semantics. See
+> [ADR-011](../design/011-artifact-apiversion-policy.md) and
+> [ADR-016](../design/016-slurm-accounting-enablement.md).
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
 

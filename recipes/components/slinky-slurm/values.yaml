@@ -21,9 +21,10 @@
 # SlinkySlurm_NodeSchedulingPaths enforces this alignment with the
 # registry's nodeScheduling paths.
 #
-# Accounting (slurmdbd) and DCGM job-mapping are disabled by default:
-# accounting needs an external MariaDB AICR does not bundle; DCGM needs
-# dcgm-exporter on workers. Both opt in via valuesFile / --set.
+# Accounting (slurmdbd) and DCGM job-mapping are disabled by default.
+# Accounting is derived from configuration.slurm.accounting.mode during
+# recipe resolution; customers must not toggle it directly. DCGM needs
+# dcgm-exporter on workers and remains an explicit values opt-in.
 
 # Cgroup isolation + NVIDIA GPU autodetect (no-op without GPUs).
 # plugstack.conf loads pyxis from the *-pyxis images.

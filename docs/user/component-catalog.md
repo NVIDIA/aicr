@@ -36,9 +36,12 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
 | **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
+| **mariadb-operator-crds** | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
+| **mariadb-operator** | Official MariaDB Operator controller, webhook, and certificate controller. AICR installs it only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
+| **slurm-accounting-mariadb** | Installation-managed MariaDB instance whose initial database, all-privileges accounting user, and generated Secret reference are configured atomically on the MariaDB resource. Declared in every Slurm recipe and rendered only for `accounting.mode: aicr-provided`. | [MariaDB Cluster chart](https://artifacthub.io/packages/helm/mariadb-operator/mariadb-cluster) |
 | **slinky-slurm-operator-crds** | Custom Resource Definitions for the SchedMD Slinky Slurm operator. Installs the `slinky.slurm.net` CRDs (Controller, NodeSet, LoginSet, Accounting, RestApi, Token). Installed separately to support CRD lifecycle management. | [Slinky Slurm Operator](https://github.com/SlinkyProject/slurm-operator) |
 | **slinky-slurm-operator** | SchedMD Slinky Slurm operator and admission webhook. Manages the lifecycle of Slurm clusters declared via Slinky CRs (Controller, NodeSet, LoginSet, Accounting, RestApi, Token). AICR's system node-selector and toleration bundle flags apply to both deployments; affinity remains available through component values or typed overrides. | [Slinky Slurm Operator](https://github.com/SlinkyProject/slurm-operator) |
-| **slinky-slurm** | Slinky-managed Slurm cluster instance: Controller (slurmctld) + LoginSet (sackd/sshd) + NodeSet (slurmd) + RestApi (slurmrestd). Reconciled by `slinky-slurm-operator`. Declared inline per slurm leaf overlay alongside `slinky-slurm-operator-crds` and `slinky-slurm-operator` (matching the dynamo-platform pattern) so each leaf can carry its own GPU/GRES tuning. IMEX-capable leaves attach a fixed NVIDIA DRA `ComputeDomain` as a pre-manifest before the Slurm chart; the DRA driver reconciles it asynchronously into the `ResourceClaimTemplate` consumed by the NodeSet. Accounting (slurmdbd) requires an external MariaDB and is disabled in defaults — see [Slurm Accounting](slinky-slurm-accounting.md). | [Slinky Slurm Cluster Chart](https://github.com/SlinkyProject/slurm-operator/tree/main/helm/slurm) |
+| **slinky-slurm** | Slinky-managed Slurm cluster instance: Controller (slurmctld) + LoginSet (sackd/sshd) + NodeSet (slurmd) + RestApi (slurmrestd), with SlurmDBD derived from the recipe's typed accounting mode. Reconciled by `slinky-slurm-operator`. See [Slurm Accounting](slinky-slurm-accounting.md). | [Slinky Slurm Cluster Chart](https://github.com/SlinkyProject/slurm-operator/tree/main/helm/slurm) |
 | **slinky-topograph** | Slinky/Slurm-scoped instance of Topograph — queries cloud provider topology APIs (GCP, AWS, OCI …) to generate Slurm `topology.conf`, enabling topology-aware placement decisions in the Slinky-managed scheduler. **Not installed by default**; leaf overlays opt in by adding an explicit `componentRef` entry for `slinky-topograph` — the `componentRef` is what schedules the release; `dependencyRefs` alone does not install anything. That `componentRef` declares `slinky-slurm` as a `dependencyRef` to deploy **after** it: `slinky-slurm` renders and owns the `slinky-slurm-config-extra` ConfigMap (from its `configFiles`, mounted into slurmctld via the Controller CR's `configFileRefs`), and Topograph patches only that ConfigMap's `topology.conf` key on each sync, preserving the chart-owned `cgroup.conf`/`gres.conf` keys — Helm has to own the ConfigMap first. `TopologyPlugin: topology/tree` is set per-leaf via `slinky-slurm`'s `controller.extraConfMap`. Includes the `node-observer` sub-chart, which watches the topograph API pod and regenerates topology on restarts or selected node/pod changes. Requires cloud provider IAM access (e.g. GCP `roles/compute.viewer` for Workload Identity). | [Topograph](https://github.com/NVIDIA/topograph) |
 | **nfd-ocp-olm** | OLM installer for Node Feature Discovery on OpenShift. Creates the OperatorGroup and Subscription resources that install NFD via the Operator Lifecycle Manager. Paired with `nfd-ocp`. OCP-specific. | [Node Feature Discovery (Certified)](https://catalog.redhat.com/software/container-stacks/detail/5ec53e8c110f56bd24f5f8db) |
 | **nfd-ocp** | Node Feature Discovery CR for OpenShift. Configures NFD's operand (worker, topology updater) via a NodeFeatureDiscovery custom resource. Deployed after `nfd-ocp-olm`. OCP-specific. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
@@ -100,6 +103,76 @@ aicr recipe --service eks --accelerator h100 --os ubuntu --intent training -o re
 ```
 
 The output lists every component with its pinned version and configuration values.
+
+## GKE Device-Plugin Ownership
+
+**Cluster prerequisite:** GPU node pools used with AICR's GKE recipes must carry the node label `gke-no-default-nvidia-gpu-device-plugin=true`.
+
+AICR's GKE-COS recipes ship the GPU Operator with `devicePlugin.enabled: true`, so the Operator's device plugin is the intended sole advertiser of `nvidia.com/gpu`. (The GKE-COS values overlays — `values-gke-cos.yaml` and `values-gke-cos-training.yaml` — override `devicePlugin.env` but leave `devicePlugin.enabled` unset, so the base `enabled: true` carries through.) A default-provisioned GKE GPU node pool also runs GKE's own managed `nvidia-gpu-device-plugin` DaemonSet, which advertises the same resource name.
+
+Two plugins registering `nvidia.com/gpu` on one node is not a benign overlap. Kubelet's device manager keys its endpoint and device inventory by resource name, so competing registrations and `ListAndWatch` updates replace each other. Ownership becomes nondeterministic, and one plugin's device IDs (GKE uses `nvidia0`-style names, NVIDIA uses GPU UUIDs) can reach the other plugin's `Allocate`. Expect intermittent allocation and runtime failures.
+
+Set the label when you create the GPU node pool, alongside the GKE-managed driver install the recipes expect:
+
+```bash
+gcloud container node-pools create POOL_NAME \
+  --cluster CLUSTER_NAME \
+  --location=LOCATION \
+  --node-locations=ZONE \
+  --num-nodes=1 \
+  --machine-type=a3-highgpu-8g \
+  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default \
+  --node-labels="gke-no-default-nvidia-gpu-device-plugin=true"
+```
+
+Two flags deserve care beyond the label:
+
+- `--machine-type` must match the accelerator (H100 GPUs are exclusive to the A3 series — `a3-highgpu-8g` for `nvidia-h100-80gb`, `a3-megagpu-8g` for `nvidia-h100-mega-80gb`); without the flag, `gcloud` defaults to `e2-medium` and pool creation fails before the label is applied.
+- `--num-nodes` is **per zone**, defaults to 3, and an unrestricted pool on a regional cluster inherits every cluster zone — the defaults on a three-zone cluster would attempt nine 8-GPU nodes (72 H100s). Set `--num-nodes` explicitly and narrow `--node-locations` to the zones you intend.
+
+For a GPU node pool that already exists, add the label with a pool update instead — note that `--node-labels` on update **replaces** the pool's full user-label set. First list the labels the pool already carries, then pass the complete set with the new label appended:
+
+```bash
+gcloud container node-pools describe POOL_NAME \
+  --cluster CLUSTER_NAME \
+  --location=LOCATION \
+  --format='value[delimiter=","](config.labels)'
+
+gcloud container node-pools update POOL_NAME \
+  --cluster CLUSTER_NAME \
+  --location=LOCATION \
+  --node-labels="EXISTING_KEY_1=EXISTING_VALUE_1,gke-no-default-nvidia-gpu-device-plugin=true"
+```
+
+Replace `EXISTING_KEY_…=EXISTING_VALUE_…` with every label the `describe` command returned (drop it entirely if the pool has none). The `delimiter=","` attribute makes the output comma-separated, matching what `--node-labels` expects — without it, `value(config.labels)` joins entries with semicolons, which the update rejects. Omitting an existing label removes it from the pool's nodes, which can break scheduling that depends on it. This retrofit covers the label only — it assumes the pool already uses GKE-managed driver install (`gpu-driver-version` set at creation); a pool using the manual driver-installer mode is the separate case tracked in [#1716](https://github.com/NVIDIA/aicr/issues/1716).
+
+Then verify the handoff. The update applies the label to the pool's existing Node objects in place — it does not re-create or replace nodes — and nodes created later inherit it. Once the label lands, the DaemonSet controller reconciles asynchronously and evicts GKE's managed plugin pods from the labeled nodes, so allow a short delay (pods may show `Terminating` at first) before reading the checks below as failures.
+
+Verify all three parts of the result — every GPU node shows the label, GKE's managed plugin pods (kube-system, `k8s-app=nvidia-gpu-device-plugin`) are gone from those nodes, and the GPU Operator's plugin has actually taken ownership (its device-plugin pods are Running and every GPU node reports non-zero allocatable `nvidia.com/gpu`):
+
+```bash
+kubectl get nodes -l cloud.google.com/gke-accelerator \
+  -L gke-no-default-nvidia-gpu-device-plugin
+kubectl get pods -n kube-system -l k8s-app=nvidia-gpu-device-plugin -o wide
+kubectl get pods -n gpu-operator -l app=nvidia-device-plugin-daemonset -o wide
+kubectl get nodes -l cloud.google.com/gke-accelerator \
+  -o custom-columns='NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu'
+```
+
+The second list should be empty (or show pods only on GPU nodes you have not labeled). The third check matters because the label only removes GKE's advertiser — if the GPU Operator is not yet deployed (or its plugin is not Ready), labeling leaves the node with **no** `nvidia.com/gpu` advertiser at all, and GPU pods will not schedule until the Operator's plugin comes up.
+
+Both settings are required, and they cover different halves of the GPU stack:
+
+- `gpu-driver-version=default` (or `latest`) lets **GKE** install the driver. AICR's GKE-COS overlays set `driver.enabled: false` because the GPU Operator cannot install a driver on COS node images. (`gpu-driver-version=disabled` is the manual-installer mode covered at the end of this section — not what AICR's recipes expect.)
+- `gke-no-default-nvidia-gpu-device-plugin=true` disables **GKE's** device plugin so the Operator's plugin owns `nvidia.com/gpu`.
+
+The label controls device-plugin ownership only; it does not affect driver provisioning.
+
+**`aicr validate` enforces this prerequisite deterministically, before any phase runs.** The GKE recipes declare a readiness constraint (`NodeTopology.gpu-nodes.label`, [#1755](https://github.com/NVIDIA/aicr/issues/1755)) requiring every GPU node — identified by its `cloud.google.com/gke-accelerator` label — to carry `gke-no-default-nvidia-gpu-device-plugin=true`. The check fails closed: missing or mixed labels, an empty GPU-node set, and readings that `--max-nodes-per-entry` actually truncated (a cap larger than the node count truncates nothing and validates normally) all fail validation with exit 2 and remediation text pointing back at this section, before any check Jobs deploy. See [Validation](validation.md) for the readiness-gate mechanics.
+
+The readiness gate is the only deterministic detection point. `aicr bundle` is offline by design and cannot read node labels. The operator-health deployment check passes under the conflict because it verifies only that GPU Operator controller pods are Running — it never inspects the device plugin. Allocation probes such as `check-nvidia-smi` schedule a pod requesting `nvidia.com/gpu` on each schedulable GPU node, but skip cordoned nodes and skip entirely when any schedulable GPU node is busy; when they do run, they may fail nondeterministically without identifying the missing label as the cause.
+
+See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation procedure. The [NVIDIA GPU Operator GKE guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/google-gke.html) documents a **different mode** — `gpu-driver-version=disabled` plus a manually applied COS driver-installer DaemonSet. AICR's GKE recipes support only the GKE-managed driver install shown above; the manual-installer mode is not supported until profile-based recipes land, and is tracked separately in [#1716](https://github.com/NVIDIA/aicr/issues/1716).
 
 ## Inference Gateway Network Exposure
 

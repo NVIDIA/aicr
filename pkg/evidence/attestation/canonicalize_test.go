@@ -129,3 +129,33 @@ func TestSubjectDigest_DiffersOnMaterialChange(t *testing.T) {
 		t.Errorf("expected different digests for material change; both %q", da)
 	}
 }
+
+func TestSubjectDigest_BindsSlurmAccountingMode(t *testing.T) {
+	t.Parallel()
+
+	disabled := []byte(`apiVersion: aicr.run/v1alpha3
+kind: RecipeResult
+configuration:
+  slurm:
+    accounting:
+      mode: disabled
+`)
+	customerManaged := []byte(`apiVersion: aicr.run/v1alpha3
+kind: RecipeResult
+configuration:
+  slurm:
+    accounting:
+      mode: customer-managed
+`)
+	disabledDigest, err := SubjectDigest(disabled)
+	if err != nil {
+		t.Fatalf("SubjectDigest(disabled) error = %v", err)
+	}
+	customerDigest, err := SubjectDigest(customerManaged)
+	if err != nil {
+		t.Fatalf("SubjectDigest(customer-managed) error = %v", err)
+	}
+	if disabledDigest == customerDigest {
+		t.Fatalf("accounting mode change did not change recipe digest: %s", disabledDigest)
+	}
+}

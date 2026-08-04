@@ -672,6 +672,16 @@ func TestComponentRefIsEnabled(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "install false",
+			ref:      ComponentRef{Name: "mariadb-operator", Overrides: map[string]any{"install": false}},
+			expected: false,
+		},
+		{
+			name:     "install true",
+			ref:      ComponentRef{Name: "mariadb-operator", Overrides: map[string]any{"install": true}},
+			expected: true,
+		},
+		{
 			name:     "enabled string false is not recognized",
 			ref:      ComponentRef{Name: "test", Overrides: map[string]any{"enabled": "false"}},
 			expected: true,
@@ -689,6 +699,15 @@ func TestComponentRefIsEnabled(t *testing.T) {
 				t.Errorf("IsEnabled() = %v, want %v", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestRecipeResultValidateCoherenceRejectsUnknownAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	result := &RecipeResult{APIVersion: "aicr.run/v99"}
+	if err := result.ValidateCoherence(); err == nil {
+		t.Fatal("ValidateCoherence() error = nil, want unsupported apiVersion error")
 	}
 }
 

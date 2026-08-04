@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/urfave/cli/v3"
+
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -138,5 +140,51 @@ func TestQueryCmdFlagsIncludesSelector(t *testing.T) {
 		if !found[name] {
 			t.Errorf("queryCmdFlags must include --%s flag", name)
 		}
+	}
+}
+
+func TestQueryCmdRejectsRepeatedSlurmAccountingMode(t *testing.T) {
+	err := queryCmd().Run(t.Context(), []string{
+		"query",
+		"--service", "eks",
+		"--selector", "deploymentOrder",
+		"--slurm-accounting-mode", "disabled",
+		"--slurm-accounting-mode", "aicr-provided",
+	})
+	if err == nil || !strings.Contains(err.Error(),
+		"flag --slurm-accounting-mode can only be specified once") {
+
+		t.Fatalf("query command error = %v, want repeated accounting mode rejection", err)
+	}
+}
+
+func TestRecipeAndQueryCommandsRejectExplicitEmptySlurmAccountingMode(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  func() *cli.Command
+		args []string
+	}{
+		{
+			name: "recipe",
+			cmd:  recipeCmd,
+			args: []string{"recipe", "--service", "eks", "--slurm-accounting-mode="},
+		},
+		{
+			name: "query",
+			cmd:  queryCmd,
+			args: []string{
+				"query", "--service", "eks", "--selector", "deploymentOrder",
+				"--slurm-accounting-mode=",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd().Run(t.Context(), tt.args)
+			if err == nil || !strings.Contains(err.Error(), "invalid Slurm accounting mode") {
+				t.Fatalf("%s command error = %v, want explicit empty accounting mode rejection",
+					tt.name, err)
+			}
+		})
 	}
 }

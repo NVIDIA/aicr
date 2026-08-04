@@ -2948,6 +2948,53 @@ func TestH100AKSUbuntuTrainingSlurmFloorNotClobbered(t *testing.T) {
 			},
 			wantK8sFloor: ">= 1.34",
 		},
+		// AKS inference family (see #1969, the inference-family sibling of
+		// #1772/#1908 above): aks-inference.yaml sat at >= 1.30 and the H100
+		// leaves at >= 1.32.4, below the >= 1.34 floor aks.yaml itself
+		// claims. h100-aks-ubuntu-inference-dynamo was already correct
+		// (added directly at >= 1.34) and is included here for completeness.
+		{
+			name:     "aks inference (accelerator-generic) preserves >= 1.34 floor",
+			leafName: "aks-inference",
+			criteria: &Criteria{
+				Service: CriteriaServiceAKS,
+				Intent:  CriteriaIntentInference,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "h100 aks inference preserves >= 1.34 floor",
+			leafName: "h100-aks-inference",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentInference,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "h100 aks ubuntu inference preserves >= 1.34 floor",
+			leafName: "h100-aks-ubuntu-inference",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentInference,
+				OS:          CriteriaOSUbuntu,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name:     "h100 aks ubuntu dynamo inference preserves >= 1.34 floor",
+			leafName: "h100-aks-ubuntu-inference-dynamo",
+			criteria: &Criteria{
+				Service:     CriteriaServiceAKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentInference,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformDynamo,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
 	}
 
 	for _, tt := range tests {

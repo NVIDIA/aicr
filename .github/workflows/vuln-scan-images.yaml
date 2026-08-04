@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Daily Image Vulnerability Scan
+name: Weekly Image Vulnerability Scan
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Daily at 6:00 AM UTC
+    # Weekly on Thursday at 6:00 AM UTC. Every run reports the full HIGH+
+    # set, carried-over findings included -- an open vulnerability keeps
+    # being reported until it is fixed or VEX-suppressed.
+    - cron: '0 6 * * 4'
   workflow_dispatch:
     inputs:
       notify_slack:
@@ -155,7 +158,7 @@ jobs:
           push: true
           # CHAINSAW_* args were dropped in #1236 — the deployment validator
           # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
-          # Test format in-process via validators/chainsaw/inprocess.go.
+          # Test format in-process via pkg/chainsaw/inprocess.go.
           build-args: |
             GO_VERSION=${{ steps.go.outputs.version }}
           tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ env.SCAN_TAG }}-${{ matrix.arch }}

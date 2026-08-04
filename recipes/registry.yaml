@@ -687,6 +687,67 @@ components:
       defaultVersion: "1.2.0"
       defaultNamespace: slinky
 
+  - name: mariadb-operator-crds
+    displayName: MariaDB Operator CRDs
+    valueOverrideKeys:
+      - mariadboperatorcrds
+    healthCheck:
+      assertFile: checks/mariadb-operator-crds/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/mariadb-operator/charts
+      defaultChart: mariadb-operator-crds
+      defaultVersion: "26.6.0"
+      defaultNamespace: mariadb-system
+
+  - name: mariadb-operator
+    displayName: MariaDB Operator
+    valueOverrideKeys:
+      - mariadboperator
+    healthCheck:
+      assertFile: checks/mariadb-operator/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/mariadb-operator/charts
+      defaultChart: mariadb-operator
+      defaultVersion: "26.6.0"
+      defaultNamespace: mariadb-system
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+          - webhook.nodeSelector
+          - certController.nodeSelector
+        tolerationPaths:
+          - tolerations
+          - webhook.tolerations
+          - certController.tolerations
+    validations:
+      # Mixed-severity policy: the validation returns a non-blocking warning
+      # for missing evidence or api-detected, and a blocking error for
+      # crs-detected, unknown, or unrecognized metadata when accounting mode
+      # is aicr-provided.
+      - function: CheckMariaDBOperatorOwnershipCoherence
+        severity: warning
+
+  - name: slurm-accounting-mariadb
+    displayName: Slurm Accounting MariaDB
+    valueOverrideKeys:
+      - slurmaccountingmariadb
+    healthCheck:
+      assertFile: checks/slurm-accounting-mariadb/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/mariadb-operator/charts
+      defaultChart: mariadb-cluster
+      defaultVersion: "26.6.0"
+      defaultNamespace: slurm
+    storageClassPaths:
+      - mariadb.storage.storageClassName
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - mariadb.nodeSelector
+        tolerationPaths:
+          - mariadb.tolerations
+
   - name: slinky-slurm-operator
     displayName: slinky-slurm-operator
     # Short alias `slurm` routes to the operator; the cluster chart
@@ -742,10 +803,12 @@ components:
           - controller.podSpec.nodeSelector
           - restapi.podSpec.nodeSelector
           - loginsets.slinky.podSpec.nodeSelector
+          - accounting.podSpec.nodeSelector
         tolerationPaths:
           - controller.podSpec.tolerations
           - restapi.podSpec.tolerations
           - loginsets.slinky.podSpec.tolerations
+          - accounting.podSpec.tolerations
       accelerated:
         nodeSelectorPaths:
           - nodesets.slinky.podSpec.nodeSelector

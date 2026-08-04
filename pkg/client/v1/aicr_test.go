@@ -48,6 +48,104 @@ func TestNewClientRequiresRecipeSource(t *testing.T) {
 	}
 }
 
+func TestResolveRecipeAccountingMode(t *testing.T) {
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := client.Close(); closeErr != nil {
+			t.Errorf("Close() error = %v", closeErr)
+		}
+	})
+
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		Intent:      recipe.CriteriaIntentTraining,
+		OS:          recipe.CriteriaOSUbuntu,
+		Platform:    recipe.CriteriaPlatformSlurm,
+	}
+	result, err := client.ResolveRecipeFromCriteriaWithOptions(
+		t.Context(),
+		aicr.WrapCriteria(criteria),
+		aicr.WithAccountingMode("aicr-provided"),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteria() error = %v", err)
+	}
+	mode, present := result.Resolved().AccountingMode()
+	if !present || mode != recipe.AccountingModeAICRProvided {
+		t.Fatalf("AccountingMode() = %q, %v; want aicr-provided, true", mode, present)
+	}
+}
+
+func TestResolveRecipeFromSnapshotRecordsMariaDBOperatorState(t *testing.T) {
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+	)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		Intent:      recipe.CriteriaIntentTraining,
+		OS:          recipe.CriteriaOSUbuntu,
+		Platform:    recipe.CriteriaPlatformSlurm,
+	}
+	for _, state := range []string{
+		recipe.MariaDBOperatorStateAbsent,
+		recipe.MariaDBOperatorStateAPIDetected,
+		recipe.MariaDBOperatorStateCRsDetected,
+		recipe.MariaDBOperatorStateUnknown,
+	} {
+		t.Run(state, func(t *testing.T) {
+			snapshot := aicr.WrapSnapshot(&snapshotter.Snapshot{
+				Measurements: []*measurement.Measurement{
+					measurement.NewMeasurement(measurement.TypeK8s).
+						WithSubtypeBuilder(
+							measurement.NewSubtypeBuilder("server").
+								SetString(measurement.KeyVersion, "v1.34.0"),
+						).
+						WithSubtypeBuilder(
+							measurement.NewSubtypeBuilder("mariadb-operator").
+								SetString("collection-state", state),
+						).
+						Build(),
+					measurement.NewMeasurement(measurement.TypeOS).
+						WithSubtypeBuilder(
+							measurement.NewSubtypeBuilder("release").
+								SetString("ID", "ubuntu").
+								SetString("VERSION_ID", "24.04"),
+						).
+						WithSubtypeBuilder(
+							measurement.NewSubtypeBuilder("sysctl").
+								SetString("/proc/sys/kernel/osrelease", "6.8.0"),
+						).
+						Build(),
+				},
+			})
+			result, resolveErr := client.ResolveRecipeFromSnapshotWithOptions(
+				t.Context(),
+				aicr.WrapCriteria(criteria),
+				snapshot,
+				aicr.WithAccountingMode("aicr-provided"),
+			)
+			if resolveErr != nil {
+				t.Fatalf("ResolveRecipeFromSnapshot() error = %v, want observational success", resolveErr)
+			}
+			if got := result.Resolved().Metadata.MariaDBOperatorState; got != state {
+				t.Errorf("Metadata.MariaDBOperatorState = %q, want %q", got, state)
+			}
+		})
+	}
+}
+
 func TestNewClientRejectsMissingFilesystemDir(t *testing.T) {
 	t.Parallel()
 
@@ -2141,4 +2239,41 @@ func TestBundleComponents_DriverOwnershipPreflight(t *testing.T) {
 			t.Fatal("BundleComponents returned no bundles")
 		}
 	})
+}
+
+func TestBundleComponentsValidatesEffectiveAccountingValues(t *testing.T) {
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	result, err := client.ResolveRecipeFromCriteriaWithOptions(
+		t.Context(),
+		aicr.WrapCriteria(&recipe.Criteria{
+			Service:     recipe.CriteriaServiceEKS,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Intent:      recipe.CriteriaIntentTraining,
+			OS:          recipe.CriteriaOSUbuntu,
+			Platform:    recipe.CriteriaPlatformSlurm,
+		}),
+		aicr.WithAccountingMode("aicr-provided"),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteriaWithOptions() error = %v", err)
+	}
+	slurm := result.Resolved().GetComponentRef("slinky-slurm")
+	if slurm == nil {
+		t.Fatal("resolved recipe missing slinky-slurm")
+	}
+	accounting, ok := slurm.Overrides["accounting"].(map[string]any)
+	if !ok {
+		t.Fatalf("slinky-slurm accounting override = %T, want map", slurm.Overrides["accounting"])
+	}
+	accounting["storageConfig"] = map[string]any{"database": "unexpected"}
+
+	_, err = client.BundleComponents(t.Context(), result)
+	if err == nil || !strings.Contains(err.Error(), "accounting-owned value") {
+		t.Fatalf("BundleComponents() error = %v, want accounting contract rejection", err)
+	}
 }

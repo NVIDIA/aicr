@@ -483,6 +483,24 @@ Do not borrow paths from `validation.deployment.constraints`, such as
 evaluated against a live cluster, not snapshot readings, and `Deployment` is
 not a measurement type.
 
+**One name is a node-set form, not a reading path:**
+`NodeTopology.gpu-nodes.label`
+([#1755](https://github.com/NVIDIA/aicr/issues/1755)). No snapshot producer
+emits a `gpu-nodes` subtype; the evaluator synthesizes the GPU-node set from
+the snapshot's `NodeTopology.label` readings (nodes carrying
+`cloud.google.com/gke-accelerator`) and quantifies a label predicate over it.
+Its value grammar is also not the operator grammar:
+`<label-key>=<value>` asserts every GPU node carries the label with exactly
+that value, and `!<label-key>` asserts no GPU node carries the key. Both
+directions fail closed on a truncated node list (a snapshot captured with
+`--max-nodes-per-entry` whose cap actually truncated a participating
+reading), on an empty GPU-node universe, and on malformed or ambiguous
+label readings (an encoding collision between a disambiguated entry and a
+distinct dotted label name — see #2003). Declare it under
+`validation.readiness.constraints`, not `spec.constraints` — as a top-level
+constraint it would exclude the overlay during snapshot-based generation on
+the very cluster the diagnostic exists to fix.
+
 **Which signal qualifies a driver-ownership profile depends on the service.**
 The example above names none, which is why it is shape only. `GPU.hardware`
 readings do not settle it: `driver-loaded` proves a driver is *present*, not
@@ -602,6 +620,27 @@ reports `driver-loaded=true` and could flip a re-deployment toward driverless
 nodes. AICR warns when both `driver-loaded=true` and a gpu-operator
 ClusterPolicy are present in the snapshot. See
 [Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
+
+### Typed Slurm accounting configuration
+
+Slurm accounting ownership is resolved after catalog matching; it is not a
+criteria dimension and overlays must not author
+`configuration.slurm.accounting`. Every Slurm leaf declares stable refs for
+`mariadb-operator-crds`, `mariadb-operator`, and
+`slurm-accounting-mariadb`. The resolver derives their root `install` gates and
+`slinky-slurm.accounting.enabled` from one typed mode:
+
+| Mode | Slinky accounting | MariaDB components |
+| --- | --- | --- |
+| `disabled` | false | install false |
+| `customer-managed` | true | install false |
+| `aicr-provided` | true | install true |
+
+The AICR install gate is consumed by `ComponentRef.IsEnabled` before deployer,
+mirror, BOM, and health paths. It is not an upstream chart value. Mode-owned
+paths are immutable at bundle time. See
+[ADR-016](../design/016-slurm-accounting-enablement.md) and the
+[Slurm Accounting guide](../user/slinky-slurm-accounting.md).
 
 ## Disable a Component in an Overlay
 

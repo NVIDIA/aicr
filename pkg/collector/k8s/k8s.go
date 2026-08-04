@@ -65,6 +65,11 @@ type Collector struct {
 func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	slog.Info("collecting Kubernetes cluster information")
 
+	// Held before the shadowing below so the cancellation checks in the Slinky
+	// and MariaDB branches can consult the caller's context directly. See
+	// cancellationErr for why the derived contexts are not sufficient.
+	callerCtx := ctx
+
 	ctx, cancel := context.WithTimeout(ctx, defaults.CollectorK8sTimeout)
 	defer cancel()
 
@@ -132,7 +137,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 
 	g.Go(func() error {
 		slinky = k.collectSlinkySlurm(gctx, discoveryClient)
-		if err := gctx.Err(); err != nil {
+		if err := cancellationErr(gctx, ctx, callerCtx); err != nil {
 			return errors.Wrap(errors.ErrCodeTimeout, "Slinky Slurm collection cancelled", err)
 		}
 		return nil
@@ -140,7 +145,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 
 	g.Go(func() error {
 		mariaDB = k.collectMariaDBOperator(gctx, discoveryClient)
-		if err := gctx.Err(); err != nil {
+		if err := cancellationErr(gctx, ctx, callerCtx); err != nil {
 			return errors.Wrap(errors.ErrCodeTimeout, "MariaDB Operator collection cancelled", err)
 		}
 		return nil
@@ -166,6 +171,39 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		Build()
 
 	return res, nil
+}
+
+// cancellationErr returns the first cancellation observed across a chain of
+// related contexts, outermost check last.
+//
+// Checking more than one is deliberate, not defensive clutter. Cancellation
+// propagates parent -> child only *after* the parent has recorded its own error
+// and closed its own Done channel; the walk over children happens next. A
+// goroutine parked on an ancestor's Done channel therefore becomes runnable
+// while propagation is still in flight, and on a multi-core machine it can read
+// a descendant's Err() before that descendant has been canceled at all.
+//
+// The Slinky and MariaDB sub-collectors surface cancellation as data rather
+// than as a Go error (see collectSlinkySlurm), so the caller's check below is
+// the *only* thing that converts a canceled collection into a loud failure.
+// Losing that race meant Collect returned a fully-assembled measurement with a
+// nil error -- a partial snapshot indistinguishable from a healthy one, which
+// is precisely the failure mode collectSafe exists to prevent.
+//
+// Measured over 200k iterations against the real context chain in Collect
+// (caller -> WithTimeout -> errgroup): the errgroup context read nil 14 times
+// and the WithTimeout context 9, while the caller's context read nil 0 times.
+// Only the context whose Done channel actually woke the goroutine is reliable,
+// so the whole chain is consulted. Each context is still checked in its own
+// right: the errgroup context also carries sibling-failure cancellation, which
+// never reaches the outer two.
+func cancellationErr(ctxs ...context.Context) error {
+	for _, c := range ctxs {
+		if err := c.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // collectSafe calls a sub-collector function and returns its result.

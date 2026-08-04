@@ -648,6 +648,7 @@ func TestRecipeResult_DeepCopy_DropsOwner(t *testing.T) {
 		t.Fatalf("BuildFromCriteria: %v", err)
 	}
 	r.Metadata.GPUDriverState = GPUDriverStateAbsent
+	r.Metadata.MariaDBOperatorState = MariaDBOperatorStateCRsDetected
 	copy := r.DeepCopy()
 	if copy.Owner() != nil {
 		t.Errorf("DeepCopy.Owner() = %v, want nil", copy.Owner())
@@ -664,5 +665,13 @@ func TestRecipeResult_DeepCopy_DropsOwner(t *testing.T) {
 	copy.Metadata.GPUDriverState = GPUDriverStatePreinstalled
 	if r.Metadata.GPUDriverState != GPUDriverStateAbsent {
 		t.Error("mutating the copy's Metadata.GPUDriverState leaked into the original")
+	}
+	if copy.Metadata.MariaDBOperatorState != MariaDBOperatorStateCRsDetected {
+		t.Errorf("DeepCopy.Metadata.MariaDBOperatorState = %q, want %q",
+			copy.Metadata.MariaDBOperatorState, MariaDBOperatorStateCRsDetected)
+	}
+	copy.Metadata.MariaDBOperatorState = MariaDBOperatorStateAbsent
+	if r.Metadata.MariaDBOperatorState != MariaDBOperatorStateCRsDetected {
+		t.Error("mutating the copy's Metadata.MariaDBOperatorState leaked into the original")
 	}
 }

@@ -337,6 +337,12 @@ resolved := rec.Resolved()
 log.Printf("recipe constraints: %d", len(resolved.Constraints))
 ```
 
+For a per-resolution Slurm accounting mode, use
+`ResolveRecipeFromCriteriaWithOptions` or
+`ResolveRecipeFromSnapshotWithOptions` with
+`aicr.WithAccountingMode("customer-managed")`. The original criteria and
+snapshot method signatures remain unchanged for source compatibility.
+
 The returned `*RecipeResult` carries:
 
 - `Name`, `Version`, `TranslatedAt` — stable identity

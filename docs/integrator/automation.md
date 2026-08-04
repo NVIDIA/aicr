@@ -367,7 +367,7 @@ are not time-bounded and persist until `Client.Close()` is called.
 > optional `profile=gpuStack=azure-managed|operator-managed` on AKS. `/v1/recipe`
 > still works for non-profiled families but rejects `service=aks` now that
 > the AKS family carries the `gpuStack` profile. See
-> [API Reference › Profile-aware v2 endpoints](../user/api-reference.md#profile-aware-v2-endpoints).
+> [API Reference › Configured v2 endpoints](../user/api-reference.md#configured-v2-endpoints).
 
 ```python
 import requests

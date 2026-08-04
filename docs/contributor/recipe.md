@@ -97,7 +97,7 @@ components:
 | `podScheduling` | `PodSchedulingConfig` | no | Helm value paths for workload pod scheduling injection |
 | `storageClassPaths` | []string | no | Helm value paths where `--storage-class` is written |
 | `validations` | []`ComponentValidationConfig` | no | Bundle-time validation checks (function, severity, conditions, message) |
-| `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `validators/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
+| `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper, or the collapsed vendored folder under `--vendor-charts` (manifests create CRs of CRDs the chart installs) |
@@ -538,6 +538,7 @@ externally-visible product. Fields beyond `ComponentRefs` and
 | `Metadata.AppliedOverlays` | Ordered list of overlays merged into this result (base first, leaf last). |
 | `Metadata.ExcludedOverlays` | Overlays that matched criteria but were dropped (e.g., a mixin constraint failed against the snapshot). Each carries a typed `Reason` (`constraint-failed`, `mixin-constraint-failed`). |
 | `Metadata.ConstraintWarnings` | Per-constraint detail for excluded overlays (overlay, constraint name, expected vs actual, reason text). |
+| `Configuration` | Closed desired-state configuration that affects rendering without participating in overlay matching. Slurm accounting records exactly one ownership mode and derives its protected component gates. |
 | `Validation` | Multi-phase config (`readiness`, `deployment`, `performance`, `conformance`) inherited from overlay metadata. |
 | `owner` (unexported) | `*Builder` that produced this result. `AssertOwnedBy(b)` enforces — two builders bound to different `DataProvider`s must not cross-read each other's results. |
 | `provider` (unexported) | `DataProvider` that produced this result; accessed via `(*RecipeResult).DataProvider()`. Lets `GetValuesForComponent` route file reads through the originating provider, preserving per-Client isolation. |
@@ -564,9 +565,9 @@ externally-visible product. Fields beyond `ComponentRefs` and
    `recipes/checks/<name>/health-check.yaml`, and that file MUST use
    only the read-only `assert` / `error` operation allowlist (no
    `script`, `apply`, `wait`, `command`, etc. — see
-   `validators/chainsaw/allowlist.go`). The contract is enforced at
+   `pkg/chainsaw/allowlist.go`). The contract is enforced at
    PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck`
-   and `validators/chainsaw.TestValidateTestReadOnly_RegistryContent`
+   and `pkg/chainsaw.TestValidateTestReadOnly_RegistryContent`
    — both gate `make qualify`. See #1223 and the
    [chainsaw health check section in validator.md](validator.md#chainsaw-health-checks)
    for the assertion patterns currently in use (DaemonSet

@@ -526,6 +526,17 @@ the pre-push gate is local.
   fresh with nothing to remember — but if you edit `go.mod`/vendor by
   hand, run `make notices` yourself. The `notices-freshness` merge-gate
   job regenerates the file and fails CI if the committed copy is stale.
+- **Forgetting `make python-licenses`** after editing
+  `validators/performance/requirements.txt`. The notices file also covers
+  the Python closure installed into the `aiperf-bench` image, but that
+  closure is fetched from PyPI rather than vendored, so it cannot be
+  regenerated offline the way the Go half can. `make python-licenses`
+  (needs network) refreshes the committed fragment at
+  `validators/performance/licenses/python-notices.md`; `make notices`
+  then folds it in. The fragment records the sha256 of the requirements
+  file it came from, and `make notices` fails closed when that no longer
+  matches, so any edit without a refresh is caught by the same
+  `notices-freshness` job rather than shipping stale attributions.
   The generator sets a fixed platform matrix and `LC_ALL=C`, so
   `make notices` produces byte-identical output on macOS and Linux.
 - **Coverage decrease > 0.5%** is flagged for justification (the project-wide

@@ -28,15 +28,16 @@ const (
 
 // Flag names (urfave/cli flag.Name values).
 const (
-	flagOutput      = "output"
-	flagFormat      = "format"
-	flagService     = "service"
-	flagAccelerator = "accelerator"
-	flagIntent      = "intent"
-	flagOS          = "os"
-	flagPlatform    = "platform"
-	flagProfile     = "profile"
-	flagNoHealth    = "no-health"
+	flagOutput              = "output"
+	flagFormat              = "format"
+	flagService             = "service"
+	flagAccelerator         = "accelerator"
+	flagIntent              = "intent"
+	flagOS                  = "os"
+	flagPlatform            = "platform"
+	flagProfile             = "profile"
+	flagSlurmAccountingMode = "slurm-accounting-mode"
+	flagNoHealth            = "no-health"
 )
 
 // criteriaAny is the wildcard value for any criteria dimension.

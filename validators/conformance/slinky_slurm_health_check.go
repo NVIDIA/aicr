@@ -105,6 +105,10 @@ func CheckSlinkySlurmHealth(ctx *validators.Context) error {
 	if !recipeHasComponent(ctx, slinkySlurmComponent) {
 		return validators.Skip("slinky-slurm component not present in recipe")
 	}
+	accountingEnabled, accountingErr := slurmAccountingEnabled(ctx.ValidationInput)
+	if accountingErr != nil {
+		return accountingErr
+	}
 	namespace := resolveSlinkySlurmNamespace(ctx)
 
 	if err := discoverSlinkySetAPIs(ctx); err != nil {
@@ -129,6 +133,11 @@ func CheckSlinkySlurmHealth(ctx *validators.Context) error {
 	if len(failures) > 0 {
 		return errors.New(errors.ErrCodeInternal,
 			"Slinky Slurm health commands failed:\n"+strings.Join(failures, "\n"))
+	}
+	if accountingEnabled {
+		if accountingProbeErr := runSlinkySlurmAccountingProbe(ctx, namespace, loginPod.Name); accountingProbeErr != nil {
+			return accountingProbeErr
+		}
 	}
 
 	return nil

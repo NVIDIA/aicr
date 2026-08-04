@@ -437,6 +437,77 @@ value: [unclosed array`
 	})
 }
 
+func TestReader_WithStrictAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	type versionedConfig struct {
+		APIVersion string `json:"apiVersion" yaml:"apiVersion"`
+		Name       string `json:"name" yaml:"name"`
+	}
+	tests := []struct {
+		name    string
+		format  Format
+		input   string
+		wantErr bool
+	}{
+		{
+			name:   "legacy YAML remains permissive",
+			format: FormatYAML,
+			input:  "apiVersion: example/v1\nname: test\nextension: true\n",
+		},
+		{
+			name:    "target YAML is strict",
+			format:  FormatYAML,
+			input:   "apiVersion: example/v2\nname: test\nunknown: true\n",
+			wantErr: true,
+		},
+		{
+			name:    "target YAML rejects trailing document",
+			format:  FormatYAML,
+			input:   "apiVersion: example/v2\nname: test\n---\napiVersion: example/v2\nname: other\n",
+			wantErr: true,
+		},
+		{
+			name:   "legacy JSON remains permissive",
+			format: FormatJSON,
+			input:  `{"apiVersion":"example/v1","name":"test","extension":true}`,
+		},
+		{
+			name:   "legacy JSON accepts trailing document",
+			format: FormatJSON,
+			input:  `{"apiVersion":"example/v1","name":"test"} {"apiVersion":"example/v1","name":"other"}`,
+		},
+		{
+			name:    "target JSON is strict",
+			format:  FormatJSON,
+			input:   `{"apiVersion":"example/v2","name":"test","unknown":true}`,
+			wantErr: true,
+		},
+		{
+			name:    "target JSON rejects trailing document",
+			format:  FormatJSON,
+			input:   `{"apiVersion":"example/v2","name":"test"} {"apiVersion":"example/v2","name":"other"}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reader, err := NewReader(tt.format, strings.NewReader(tt.input))
+			if err != nil {
+				t.Fatalf("NewReader() error = %v", err)
+			}
+			WithStrictAPIVersion("example/v2")(reader)
+			var result versionedConfig
+			err = reader.Deserialize(&result)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Deserialize() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestReader_DeserializeNilChecks(t *testing.T) {
 	t.Run("nil reader", func(t *testing.T) {
 		var reader *Reader

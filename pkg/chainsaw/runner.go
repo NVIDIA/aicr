@@ -24,7 +24,7 @@
 //
 // The earlier `runChainsawBinary` path that exec'd
 // /usr/local/bin/chainsaw was removed in #1236; the read-only
-// allowlist (validators/chainsaw/allowlist.go) restricts registry-
+// allowlist (pkg/chainsaw/allowlist.go) restricts registry-
 // declared content to assert/error only, which is exactly the
 // subset the in-process executor implements. No external binary is
 // shipped or invoked.
