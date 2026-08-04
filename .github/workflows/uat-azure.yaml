@@ -396,7 +396,10 @@ jobs:
             echo "::error::re-dispatch: gh workflow run uat-run.yaml -f reservation=${RESERVATION} -f lifecycle=daytime-down"
             exit 1
           fi
-          mapfile -t held < <(printf '%s\n' "${OUT}" | grep "^${PREFIX}[0-9]" || true)
+          # End-anchored: only an exact <prefix><run-id> name is a teardown
+          # target. The guard's matcher is deliberately broader — anything
+          # prefix-ish should BLOCK a batch, but must not be destroyed here.
+          mapfile -t held < <(printf '%s\n' "${OUT}" | grep -E "^\${PREFIX}[0-9]+$" || true)
           if [[ "${#held[@]}" -eq 0 ]]; then
             echo "no ${PREFIX}* cluster found; nothing to tear down (already gone or never provisioned)."
             echo "DAYTIME_FOUND=false" >> "$GITHUB_ENV"
