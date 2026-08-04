@@ -78,28 +78,20 @@ spec:
               reapplyOnReboot: "true"
 
   validation:
-    # Readiness (not spec.constraints): this gate must fail `aicr validate`
-    # closed on an unlabeled cluster without excluding the GKE overlays at
-    # snapshot-based recipe generation — the user needs the recipe to exist
-    # in order to diagnose and fix the pool. Issue #1755. ADR-015's gpuStack
-    # profile relocates this constraint into profile values when it lands.
-    readiness:
-      constraints:
-        - name: NodeTopology.gpu-nodes.label
-          value: gke-no-default-nvidia-gpu-device-plugin=true
-          remediation: >-
-            GKE's managed device plugin must be disabled on AICR-managed GPU
-            node pools via the node label
-            gke-no-default-nvidia-gpu-device-plugin=true; otherwise it
-            conflicts with the GPU Operator's device plugin
-            (devicePlugin.enabled: true). Add the label to the GPU node pool
-            (gcloud container node-pools update ... --node-labels=...);
-            note --node-labels REPLACES the pool's full label set, so pass
-            every existing label plus the new one (see the Component
-            Catalog's GKE Device-Plugin Ownership section for the
-            discovery-then-update procedure). Because the recipe also sets
-            driver.enabled: false, compatible driver provisioning remains a
-            separate prerequisite.
+    # The #1755 device-plugin ownership readiness gate is temporarily
+    # WITHDRAWN. It required gke-no-default-nvidia-gpu-device-plugin=true on
+    # every GPU node, but on GKE the managed driver install
+    # (gpu-driver-version=default) is finalized by an init container of the
+    # same DaemonSet that label disables — a labeled fresh pool comes up
+    # driverless, so the gate enforced a prerequisite GKE cannot satisfy
+    # alone (discovered on UAT run 30930940652). Until the gpuStack profile
+    # lands (#1761 rollout PR 3) the recipe runs on GKE-default pools, where
+    # GKE's managed plugin and the operator's plugin BOTH advertise
+    # nvidia.com/gpu — the documented latent #1755 conflict. The profile
+    # re-lands enforcement symmetrically: gcp-managed (default) requires the
+    # label absent; operator-managed requires it present plus a
+    # label-surviving driver path (Google's standalone
+    # nvidia-driver-installer DaemonSet).
     conformance:
       checks:
         - platform-health

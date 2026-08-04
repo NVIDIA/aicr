@@ -1430,9 +1430,11 @@ work that resolves it.
    capability. **Resolved: confirmed.** The form
    (`NodeTopology.gpu-nodes.label`, `pkg/constraints`) landed under
    #1755 with both predicate directions and the fail-closed semantics
-   this ADR's acceptance requirements specify. Today the GKE overlays
-   declare it directly under readiness constraints; the GKE `gpuStack`
-   profile will consume it unchanged when that profile lands (#1761).
+   this ADR's acceptance requirements specify. The GKE overlays briefly declared it under readiness
+   constraints; that use is withdrawn until the GKE `gpuStack` profile
+   consumes the form per selected value (#1761 — the label also forfeits
+   GKE's managed driver install, so the gate's prerequisite needs the
+   profile's per-value pairing).
 3. **AKS node-pool-mode signal — resolved by the 2026-07-27 amendment.**
    The provider-facing AgentPool `gpuProfile.driver` property is the
    durable ownership marker. AKS adoption projects it into a snapshot
