@@ -17,6 +17,8 @@ package constraints
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/version"
@@ -69,6 +71,12 @@ func ParseConstraintExpression(expr string) (*ParsedConstraint, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "constraint expression cannot be empty")
+	}
+	if strings.HasPrefix(expr, "!") && !strings.HasPrefix(expr, string(OperatorNE)) {
+		next, size := utf8.DecodeRuneInString(expr[1:])
+		if size > 0 && !unicode.IsSpace(next) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, "bare '!' prefix is invalid; use '!=' or the separate node-set form")
+		}
 	}
 
 	pc := &ParsedConstraint{}
