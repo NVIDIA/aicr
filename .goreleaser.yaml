@@ -148,6 +148,30 @@ gomod:
 sboms:
   - artifacts: binary
 
+# Attest every binary SBOM with the same Rekor v2 cosign flow the binaries
+# themselves use, so an SBOM asset is no longer the one unsigned link in the
+# release (NVIDIA/aicr#1957). Produces
+# dist/aicr_<version>_<os>_<arch>.sbom.json.sigstore.json next to each SPDX
+# document; GoReleaser uploads it as a release asset.
+#
+# The shell lives in .github/scripts/sign-sbom.sh rather than inline `args`
+# because GoReleaser os.Expand's every sign argument and would erase `$n`,
+# `${VAR:-}` and `$((...))`; see the header comment in that script.
+#
+# `signs` only runs under `goreleaser release`; `goreleaser build` (make build,
+# tools/e2e) skips it, and the snapshot release workflows (build-attested.yaml,
+# packaging.yaml) pass --skip=sbom, which leaves this stanza with no matching
+# artifacts.
+signs:
+  - id: sbom
+    artifacts: sbom
+    cmd: .github/scripts/sign-sbom.sh
+    args:
+      - "${artifact}"
+      - "${signature}"
+    signature: "${artifact}.sigstore.json"
+    output: true
+
 checksum:
   name_template: "{{ .ProjectName }}_checksums.txt"
   algorithm: sha256

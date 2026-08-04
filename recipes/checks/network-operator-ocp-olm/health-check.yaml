@@ -20,6 +20,10 @@ apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
   name: network-operator-ocp-olm-health-check
+  annotations:
+    # Declares the empty step list intentional; without it the executor
+    # rejects a Test that asserts nothing (a check cannot pass vacuously).
+    aicr/no-op-check: "true"
 spec:
   timeouts:
     assert: 5m

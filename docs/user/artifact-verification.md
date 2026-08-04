@@ -24,6 +24,79 @@ verified, but it cannot reach the higher trust levels described below.
 
 AICR treats a deployment bundle as a closed-world inventory. `checksums.txt` contains one SHA256 entry for every regular payload file, including `recipe.yaml` when present. Verification derives the required directories from those paths and rejects every additional file or directory, symlink, and other non-regular filesystem object. Only `checksums.txt`, `attestation/bundle-attestation.sigstore.json`, and `attestation/aicr-attestation.sigstore.json` may exist outside the manifest; they remain part of the verified inventory. Inventory validation accepts valid manifest entries in any order, while AICR generates them sorted by canonical slash-relative path. AICR ZIP and CLI OCI publication revalidate a private snapshot and publish only that inventory. Legacy bundles with incomplete manifests report `unknown` trust and must be regenerated.
 
+## Released Container Image Metadata
+
+The artifacts above are the ones *you* produce with `aicr`. The container images
+NVIDIA publishes carry their own metadata, and all of it is retrievable from the
+registry as signed OCI referrers on the image: SLSA build provenance, an SPDX
+SBOM per platform, and an OpenVEX document recording the CVEs AICR has triaged
+as not affected. One command per kind:
+
+```shell
+# Extract under pipefail, and only write a predicate file once the whole
+# pipeline has succeeded. `jq` exits 0 on empty input, so without pipefail a
+# failed `cosign verify-attestation` would still end the pipeline with status 0,
+# and a plain `>` redirect would leave a zero-length file that reads as a
+# successful extraction.
+set -o pipefail
+
+export IMAGE="ghcr.io/nvidia/aicr"
+export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+export DIGEST=$(crane digest "${IMAGE}:${TAG}")
+# Resolve the platform digest from the pinned index, not from the tag: a tag
+# repointed between the two lookups would pair this SBOM with a different
+# release's index.
+export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
+export AICR_ISSUER="https://token.actions.githubusercontent.com"
+export AICR_SIGNER="https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}"
+
+# Build provenance (attached to the multi-platform index digest)
+gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml \
+  --source-ref "refs/tags/${TAG}" \
+  --bundle-from-oci
+
+# SPDX SBOM (attached to the per-platform manifest digest)
+sbom=$(cosign verify-attestation --type spdxjson \
+  --certificate-oidc-issuer "${AICR_ISSUER}" \
+  --certificate-identity "${AICR_SIGNER}" \
+  "${IMAGE}@${DIGEST_AMD64}" | jq -r '.payload' | base64 -d | jq '.predicate') \
+  && printf '%s\n' "${sbom}" > sbom.spdx.json
+
+# OpenVEX triage document (attached to the index digest)
+openvex=$(cosign verify-attestation --type openvex \
+  --certificate-oidc-issuer "${AICR_ISSUER}" \
+  --certificate-identity "${AICR_SIGNER}" \
+  "${IMAGE}@${DIGEST}" | jq -r '.payload' | base64 -d | jq '.predicate') \
+  && printf '%s\n' "${openvex}" > aicr-openvex.json
+```
+
+`--bundle-from-oci` makes `gh attestation verify` read the provenance from the
+registry referrer. Without it the command fetches from GitHub's attestations
+API, which is a different discovery path and would still succeed if the
+referrer push had silently failed. `--source-ref` and the exact
+`--certificate-identity` bind the result to release `${TAG}` rather than to any
+NVIDIA/aicr release.
+
+Pass the VEX document to your scanner so it suppresses the same findings AICR's
+own release scan suppresses, instead of re-reporting CVEs that have already been
+analyzed as unreachable:
+
+```shell
+grype "${IMAGE}@${DIGEST}" --vex aicr-openvex.json --only-fixed --fail-on high
+trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST}"
+```
+
+Each statement carries a `justification` and an `impact_statement` explaining
+why the vulnerable code is not reachable. Read those before adopting a
+suppression: the analysis is specific to how AICR invokes the affected
+component. The two `cosign verify-attestation` commands above need Cosign
+v3.0.1 or newer; `gh attestation verify` ships with the GitHub CLI and does not
+use Cosign, so it carries no such floor. For
+the full walkthrough, including the remaining release images and the signed
+binary SBOMs, see
+[Supply Chain Verification](../integrator/supply-chain-verification.md#unified-metadata-retrieval).
+
 ## Trust Levels
 
 `aicr verify` computes a trust level for a bundle. The levels are ordered;
@@ -352,6 +425,16 @@ case "$(jq '.exit' result.json)" in
   2) echo "bundle invalid" ;;
 esac
 ```
+
+## Monitoring Your Signing Identity
+
+Verification is only half the picture. It proves that an artifact you hold came
+from the identity you expect, but it cannot tell you that somebody else signed
+something *as you*: an entry in the transparency log under your signing identity
+that you did not produce may indicate the identity was used without you. Keyless signing
+leaves no local trace of a signing event, so the log is the only place that
+misuse shows up. For what each signing mode records and how to watch for it, see
+[Monitoring Your Signing Identity](../integrator/supply-chain-verification.md#monitoring-your-signing-identity).
 
 ## Troubleshooting Common Failures
 

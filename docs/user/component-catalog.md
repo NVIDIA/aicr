@@ -106,13 +106,7 @@ The output lists every component with its pinned version and configuration value
 
 ## GKE Device-Plugin Ownership
 
-**Cluster prerequisite:** GPU node pools used with AICR's GKE recipes must carry the node label `gke-no-default-nvidia-gpu-device-plugin=true`.
-
-AICR's GKE-COS recipes ship the GPU Operator with `devicePlugin.enabled: true`, so the Operator's device plugin is the intended sole advertiser of `nvidia.com/gpu`. (The GKE-COS values overlays — `values-gke-cos.yaml` and `values-gke-cos-training.yaml` — override `devicePlugin.env` but leave `devicePlugin.enabled` unset, so the base `enabled: true` carries through.) A default-provisioned GKE GPU node pool also runs GKE's own managed `nvidia-gpu-device-plugin` DaemonSet, which advertises the same resource name.
-
-Two plugins registering `nvidia.com/gpu` on one node is not a benign overlap. Kubelet's device manager keys its endpoint and device inventory by resource name, so competing registrations and `ListAndWatch` updates replace each other. Ownership becomes nondeterministic, and one plugin's device IDs (GKE uses `nvidia0`-style names, NVIDIA uses GPU UUIDs) can reach the other plugin's `Allocate`. Expect intermittent allocation and runtime failures.
-
-Set the label when you create the GPU node pool, alongside the GKE-managed driver install the recipes expect:
+**Current supported setup: use the GKE default — do NOT set the opt-out label.** Create GPU node pools with GKE's managed driver install and leave `gke-no-default-nvidia-gpu-device-plugin` unset:
 
 ```bash
 gcloud container node-pools create POOL_NAME \
@@ -121,58 +115,25 @@ gcloud container node-pools create POOL_NAME \
   --node-locations=ZONE \
   --num-nodes=1 \
   --machine-type=a3-highgpu-8g \
-  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default \
-  --node-labels="gke-no-default-nvidia-gpu-device-plugin=true"
+  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default
 ```
 
-Two flags deserve care beyond the label:
+Two flags deserve care:
 
-- `--machine-type` must match the accelerator (H100 GPUs are exclusive to the A3 series — `a3-highgpu-8g` for `nvidia-h100-80gb`, `a3-megagpu-8g` for `nvidia-h100-mega-80gb`); without the flag, `gcloud` defaults to `e2-medium` and pool creation fails before the label is applied.
+- `--machine-type` must match the accelerator (H100 GPUs are exclusive to the A3 series — `a3-highgpu-8g` for `nvidia-h100-80gb`, `a3-megagpu-8g` for `nvidia-h100-mega-80gb`); without the flag, `gcloud` defaults to `e2-medium` and pool creation fails.
 - `--num-nodes` is **per zone**, defaults to 3, and an unrestricted pool on a regional cluster inherits every cluster zone — the defaults on a three-zone cluster would attempt nine 8-GPU nodes (72 H100s). Set `--num-nodes` explicitly and narrow `--node-locations` to the zones you intend.
 
-For a GPU node pool that already exists, add the label with a pool update instead — note that `--node-labels` on update **replaces** the pool's full user-label set. First list the labels the pool already carries, then pass the complete set with the new label appended:
+On such a pool, GKE's managed device-plugin DaemonSet installs and loads the NVIDIA driver (an init container of that DaemonSet finalizes the `gpu-driver-version` install) and advertises `nvidia.com/gpu`.
 
-```bash
-gcloud container node-pools describe POOL_NAME \
-  --cluster CLUSTER_NAME \
-  --location=LOCATION \
-  --format='value[delimiter=","](config.labels)'
+**Known limitation of the current recipes on this setup:** AICR's GKE-COS recipes ship the GPU Operator with `devicePlugin.enabled: true`, so the Operator's device plugin *also* registers `nvidia.com/gpu` alongside GKE's. Kubelet's device manager keys its endpoint and device inventory by resource name, so the two registrations replace each other: ownership is nondeterministic across plugin restarts, and one plugin's device IDs (GKE uses `nvidia0`-style names, NVIDIA uses GPU UUIDs) can reach the other plugin's `Allocate`, producing intermittent allocation failures ([#1755](https://github.com/NVIDIA/aicr/issues/1755)). This latent conflict is the long-standing behavior of every AICR GKE deployment to date; the resolution is the ADR-015 `gpuStack` profile ([#1761](https://github.com/NVIDIA/aicr/issues/1761)), whose default value disables the Operator's plugin and declares GKE's as the sole advertiser.
 
-gcloud container node-pools update POOL_NAME \
-  --cluster CLUSTER_NAME \
-  --location=LOCATION \
-  --node-labels="EXISTING_KEY_1=EXISTING_VALUE_1,gke-no-default-nvidia-gpu-device-plugin=true"
-```
+**Do not set `gke-no-default-nvidia-gpu-device-plugin=true` with the current recipes.** The label's contract is device-plugin ownership only, but on GKE Standard its implementation excludes the *whole* managed DaemonSet — including the init container that finalizes the managed driver install. A freshly provisioned labeled pool therefore comes up with the driver staged but never installed: no `/dev/nvidia*`, zero allocatable GPUs, and the GPU Operator's stack blocked on `driver-validation` indefinitely. Never pair the label with `gpu-driver-version=default|latest`.
 
-Replace `EXISTING_KEY_…=EXISTING_VALUE_…` with every label the `describe` command returned (drop it entirely if the pool has none). The `delimiter=","` attribute makes the output comma-separated, matching what `--node-labels` expects — without it, `value(config.labels)` joins entries with semicolons, which the update rejects. Omitting an existing label removes it from the pool's nodes, which can break scheduling that depends on it. This retrofit covers the label only — it assumes the pool already uses GKE-managed driver install (`gpu-driver-version` set at creation); a pool using the manual driver-installer mode is the separate case tracked in [#1716](https://github.com/NVIDIA/aicr/issues/1716).
+**The label returns with the future `operator-managed` profile value** (the GPU Operator's plugin as sole advertiser), where it is paired with the configuration that actually supports it, matching [Google's GPU Operator procedure](https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-operator): pools created with `gpu-driver-version=disabled` and the label, plus Google's standalone `nvidia-driver-installer` DaemonSet providing the driver (the standalone DaemonSet is unaffected by the label). That mode — and an AICR-managed installer component — is tracked in [#1761](https://github.com/NVIDIA/aicr/issues/1761) and [#1716](https://github.com/NVIDIA/aicr/issues/1716); until it ships, it is not a supported AICR configuration, and this section deliberately omits its procedures.
 
-Then verify the handoff. The update applies the label to the pool's existing Node objects in place — it does not re-create or replace nodes — and nodes created later inherit it. Once the label lands, the DaemonSet controller reconciles asynchronously and evicts GKE's managed plugin pods from the labeled nodes, so allow a short delay (pods may show `Terminating` at first) before reading the checks below as failures.
+**Enforcement status: withdrawn until the profile lands.** `aicr validate` briefly enforced the label as a readiness constraint (`NodeTopology.gpu-nodes.label`, #1755); live qualification exposed the driver-install coupling above, so the constraint was withdrawn — on the supported label-free setup it would fail every validation closed. While it is withdrawn there is NO deterministic detection point for advertiser conflicts: `aicr bundle` is offline by design and cannot read node labels; the operator-health deployment check verifies only that GPU Operator controller pods are Running; allocation probes such as `check-nvidia-smi` skip cordoned or busy GPU nodes, and when they run they may fail nondeterministically without identifying the cause. The `gpuStack` profile re-lands enforcement symmetrically per selected value.
 
-Verify all three parts of the result — every GPU node shows the label, GKE's managed plugin pods (kube-system, `k8s-app=nvidia-gpu-device-plugin`) are gone from those nodes, and the GPU Operator's plugin has actually taken ownership (its device-plugin pods are Running and every GPU node reports non-zero allocatable `nvidia.com/gpu`):
-
-```bash
-kubectl get nodes -l cloud.google.com/gke-accelerator \
-  -L gke-no-default-nvidia-gpu-device-plugin
-kubectl get pods -n kube-system -l k8s-app=nvidia-gpu-device-plugin -o wide
-kubectl get pods -n gpu-operator -l app=nvidia-device-plugin-daemonset -o wide
-kubectl get nodes -l cloud.google.com/gke-accelerator \
-  -o custom-columns='NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu'
-```
-
-The second list should be empty (or show pods only on GPU nodes you have not labeled). The third check matters because the label only removes GKE's advertiser — if the GPU Operator is not yet deployed (or its plugin is not Ready), labeling leaves the node with **no** `nvidia.com/gpu` advertiser at all, and GPU pods will not schedule until the Operator's plugin comes up.
-
-Both settings are required, and they cover different halves of the GPU stack:
-
-- `gpu-driver-version=default` (or `latest`) lets **GKE** install the driver. AICR's GKE-COS overlays set `driver.enabled: false` because the GPU Operator cannot install a driver on COS node images. (`gpu-driver-version=disabled` is the manual-installer mode covered at the end of this section — not what AICR's recipes expect.)
-- `gke-no-default-nvidia-gpu-device-plugin=true` disables **GKE's** device plugin so the Operator's plugin owns `nvidia.com/gpu`.
-
-The label controls device-plugin ownership only; it does not affect driver provisioning.
-
-**`aicr validate` enforces this prerequisite deterministically, before any phase runs.** The GKE recipes declare a readiness constraint (`NodeTopology.gpu-nodes.label`, [#1755](https://github.com/NVIDIA/aicr/issues/1755)) requiring every GPU node — identified by its `cloud.google.com/gke-accelerator` label — to carry `gke-no-default-nvidia-gpu-device-plugin=true`. The check fails closed: missing or mixed labels, an empty GPU-node set, and readings that `--max-nodes-per-entry` actually truncated (a cap larger than the node count truncates nothing and validates normally) all fail validation with exit 2 and remediation text pointing back at this section, before any check Jobs deploy. See [Validation](validation.md) for the readiness-gate mechanics.
-
-The readiness gate is the only deterministic detection point. `aicr bundle` is offline by design and cannot read node labels. The operator-health deployment check passes under the conflict because it verifies only that GPU Operator controller pods are Running — it never inspects the device plugin. Allocation probes such as `check-nvidia-smi` schedule a pod requesting `nvidia.com/gpu` on each schedulable GPU node, but skip cordoned nodes and skip entirely when any schedulable GPU node is busy; when they do run, they may fail nondeterministically without identifying the missing label as the cause.
-
-See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation procedure. The [NVIDIA GPU Operator GKE guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/google-gke.html) documents a **different mode** — `gpu-driver-version=disabled` plus a manually applied COS driver-installer DaemonSet. AICR's GKE recipes support only the GKE-managed driver install shown above; the manual-installer mode is not supported until profile-based recipes land, and is tracked separately in [#1716](https://github.com/NVIDIA/aicr/issues/1716).
+See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation reference.
 
 ## Inference Gateway Network Exposure
 

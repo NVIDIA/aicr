@@ -22,6 +22,12 @@
 // into the pod, but any directory of *.yaml chainsaw tests works). Each file
 // becomes a component named after the filename (sans .yaml suffix).
 //
+// Assertions are evaluated in-process by pkg/chainsaw (assert / error only,
+// enforced by that package's read-only allowlist) against the cluster
+// reachable from the pod's ServiceAccount or the local KUBECONFIG. The gate
+// used to shell out to a `chainsaw` binary baked into the image; #2038 removed
+// it — it was the image's only source of HIGH CVEs, unfixable upstream.
+//
 // AICR runs this CLI from a readiness-gate Job emitted by the bundler; the Job
 // mounts the chainsaw Test as a ConfigMap and passes the polling parameters as
 // flags. No CRD or controller is involved.
@@ -39,7 +45,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/chainsawgate/runner"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/logging"
 )
 
@@ -56,12 +64,6 @@ const (
 	exitSignal = 130
 )
 
-// defaultChainsawConfig is the in-image path of the chainsaw Configuration
-// baked into the aicr-gate image (see cmd/gate/Dockerfile). It pins
-// chainsaw's cleanup behavior so the gate's read-only RBAC contract holds
-// regardless of base-image default drift. Local runs can override or unset it.
-const defaultChainsawConfig = "/etc/chainsaw/config.yaml"
-
 func main() {
 	logging.SetDefaultStructuredLogger("gate", version)
 	os.Exit(run(os.Args[1:]))
@@ -69,6 +71,23 @@ func main() {
 
 // evaluateFn is exposed for tests to stub runner.Evaluate.
 var evaluateFn = runner.Evaluate
+
+// newFetcherFn is exposed for tests to stub cluster-client construction.
+var newFetcherFn = newClusterFetcher
+
+// newClusterFetcher builds the read-only cluster reader the in-process
+// assertions run against. Client configuration is discovered the same way
+// every other AICR component discovers it (KUBECONFIG, then ~/.kube/config,
+// then the in-cluster ServiceAccount), so a local run and the Job-mounted pod
+// resolve identically. The client wiring itself lives in pkg/chainsaw so the
+// gate and the deployment validator cannot drift apart.
+func newClusterFetcher() (chainsaw.ResourceFetcher, error) {
+	_, restConfig, err := k8sclient.GetKubeClient()
+	if err != nil {
+		return nil, err
+	}
+	return chainsaw.NewClusterFetcherForConfig(restConfig)
+}
 
 func run(args []string) int {
 	fs := flag.NewFlagSet("gate", flag.ContinueOnError)
@@ -80,14 +99,12 @@ func run(args []string) int {
 
 	var (
 		bundleDir       = fs.String("bundle-dir", "", "directory of <component>.yaml chainsaw tests (required)")
-		namespace       = fs.String("namespace", "default", "namespace passed to chainsaw --namespace")
-		timeout         = fs.Duration("timeout", 5*time.Minute, "per-component chainsaw exec timeout")
+		namespace       = fs.String("namespace", "default", "default namespace for assertions that omit metadata.namespace")
+		timeout         = fs.Duration("timeout", 5*time.Minute, "per-component assertion budget")
 		pollInterval    = fs.Duration("poll-interval", 5*time.Minute, "sleep between evaluations")
 		stabilityWindow = fs.Duration("stability-window", 60*time.Second,
 			"continuous-pass duration required for success (0 to disable)")
-		maxWait        = fs.Duration("max-wait", 3*time.Hour, "upper bound on total wait time (0 to disable, wait forever)")
-		chainsawConfig = fs.String("chainsaw-config", defaultChainsawConfig,
-			"path to a chainsaw Configuration passed via --config (empty to omit)")
+		maxWait = fs.Duration("max-wait", 3*time.Hour, "upper bound on total wait time (0 to disable, wait forever)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return exitConfigErr
@@ -108,6 +125,12 @@ func run(args []string) int {
 		return exitConfigErr
 	}
 
+	fetcher, err := newFetcherFn()
+	if err != nil {
+		slog.Error("failed to build cluster client", "error", err)
+		return exitConfigErr
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -117,7 +140,7 @@ func run(args []string) int {
 		PollInterval:    *pollInterval,
 		StabilityWindow: *stabilityWindow,
 		MaxWait:         *maxWait,
-		ConfigPath:      *chainsawConfig,
+		Fetcher:         fetcher,
 	}
 
 	return loop(ctx, bundle, opts, time.Now())
