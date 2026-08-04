@@ -2833,6 +2833,63 @@ aicr verify <bundle-dir> [flags]
 | `--trust-root` | string | | Verify the bundle attestation against a private Sigstore trusted root (a `trusted_root.json` from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with `--key` and `--certificate-identity-regexp`. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`. |
 | `--insecure-ignore-tlog` | bool | `false` | Offline/air-gapped verification: skip the transparency-log (and observer-timestamp) requirement so a bundle signed with `bundle --signing-key ... --tlog-upload=false` verifies against `--key` with no transparency-log network calls. A local PEM `--key` is then fully offline; a KMS `--key` URI still makes a live `GetPublicKey` call to resolve the key (export a PEM with `cosign public-key` for a truly offline verify). Requires `--key`; the air-gapped path is key-based, not keyless. Named "insecure" because, with no transparency log, there is no trusted timestamp proving when the signature was made. Does not affect the binary attestation, which always requires a transparency log. |
 | `--format` | string | `text` | Output format: `text` or `json`. |
+| `--config` | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) supplying verification policy from `spec.verify`. CLI flags override values from this file. See [Verify Config File Mode](#verify-config-file-mode). |
+
+#### Verify Config File Mode
+
+`aicr verify --config <path>` reads verification policy from an AICRConfig
+YAML/JSON file under `spec.verify`. CLI flags always override values loaded from
+`--config`; override events are logged at INFO so users can see which input won.
+
+This is the one consumer-side section of the schema, so a single committed
+document can carry both the settings that build an artifact and the trust floor
+a downstream consumer enforces against it.
+
+**Supported schema:**
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: prod-verify
+spec:
+  verify:
+    policy:                              # assertions checked after verification runs
+      minTrustLevel: verified            # or unknown | unverified | attested | max
+      requireCreator: ci@myorg.example.com
+      cliVersionConstraint: ">= 0.16.0"  # bare version means ">="
+    trust:                               # material verification runs against
+      certificateIdentityRegexp: "https://github.com/NVIDIA/aicr/.+"
+      key: gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
+      trustRoot: ./trusted_root.json
+```
+
+Every field is a durable, non-secret reference or policy value, so the whole
+section is safe to commit. No private key material is part of the schema.
+
+Three `aicr verify` flags are deliberately **not** in the schema:
+
+- The bundle directory, which is a positional argument rather than a flag.
+- `--format`, which is presentation rather than policy.
+- `--insecure-ignore-tlog`, which weakens the trust floor by dropping the
+  transparency-log requirement. Keeping it command-line-only means a committed
+  file can never silently disable that check, and an air-gap override stays an
+  explicit operator act. It still composes with a config-supplied `key`.
+
+Values are validated when the document loads, so a typo fails with its spec path
+(for example `invalid spec.verify.policy.minTrustLevel`) rather than after a full
+verification run. One limit is worth knowing: `cliVersionConstraint` is checked
+at the operator level only, so `">="` with no version is rejected at load time
+while `">= not-a-version"` is accepted and fails later when the constraint is
+evaluated.
+
+```shell
+# Commit the verification policy, then gate a deploy on it.
+aicr verify ./my-bundle --config aicr-config.yaml
+
+# A CLI flag still wins over the committed policy.
+aicr verify ./my-bundle --config aicr-config.yaml --min-trust-level attested
+```
 
 #### Trust Levels
 
