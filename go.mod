@@ -23,7 +23,7 @@ require (
 	github.com/sigstore/sigstore/pkg/signature/kms/aws v1.10.9
 	github.com/sigstore/sigstore/pkg/signature/kms/azure v1.10.9
 	github.com/sigstore/sigstore/pkg/signature/kms/gcp v1.10.8
-	github.com/sigstore/sigstore/pkg/signature/kms/hashivault v1.10.8
+	github.com/sigstore/sigstore/pkg/signature/kms/hashivault v1.10.9
 	github.com/stretchr/testify v1.11.1
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
 	github.com/transparency-dev/formats v0.1.1
