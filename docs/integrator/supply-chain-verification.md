@@ -76,15 +76,25 @@ an SBOM returns nothing.
 
 Resolve the digests first. `crane digest` without `--platform` returns the index
 digest; with `--platform` it returns that platform's child manifest digest.
+Resolve the platform digests **from the pinned index**, not from the tag: a tag
+repointed between the two lookups would yield a platform digest belonging to a
+different index than the one the provenance and VEX are verified against, and
+a wildcard signer pattern would still accept that other release's validly
+signed SBOM. This is the same resolution the
+[`attest-image-from-tag`](https://github.com/NVIDIA/aicr/blob/main/.github/actions/attest-image-from-tag/action.yml)
+action performs at publication time.
 
 ```shell
 export IMAGE="ghcr.io/nvidia/aicr"
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")
-export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}:${TAG}")
-export DIGEST_ARM64=$(crane digest --platform linux/arm64 "${IMAGE}:${TAG}")
+export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
+export DIGEST_ARM64=$(crane digest --platform linux/arm64 "${IMAGE}@${DIGEST}")
 
 export AICR_ISSUER="https://token.actions.githubusercontent.com"
-export AICR_SIGNER='^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$'
+# Exact identity, qualified by the release tag. A `refs/tags/.+` regexp would
+# accept any AICR release's signature, which proves only that some NVIDIA/aicr
+# release workflow signed the artifact, not that ${TAG} did.
+export AICR_SIGNER="https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}"
 ```
 
 Then one command per kind:
@@ -94,19 +104,20 @@ Then one command per kind:
 gh attestation verify "oci://${IMAGE}@${DIGEST}" \
   --repo NVIDIA/aicr \
   --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml \
-  --source-ref "refs/tags/${TAG}"
+  --source-ref "refs/tags/${TAG}" \
+  --bundle-from-oci
 
 # 2. SPDX SBOM for one platform (per-platform manifest digest)
 cosign verify-attestation --type spdxjson \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
-  --certificate-identity-regexp "${AICR_SIGNER}" \
+  --certificate-identity "${AICR_SIGNER}" \
   "${IMAGE}@${DIGEST_AMD64}" \
   | jq -r '.payload' | base64 -d | jq '.predicate' > sbom-linux-amd64.spdx.json
 
 # 3. OpenVEX vulnerability triage (index digest)
 cosign verify-attestation --type openvex \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
-  --certificate-identity-regexp "${AICR_SIGNER}" \
+  --certificate-identity "${AICR_SIGNER}" \
   "${IMAGE}@${DIGEST}" \
   | jq -r '.payload' | base64 -d | jq '.predicate' > aicr-openvex.json
 ```
@@ -115,9 +126,19 @@ Each of the seven released images (`aicr`, `aicrd`, `aicr-gate`, and the four
 `aicr-validators/*` images) carries the same three kinds; substitute the image
 name in `IMAGE` and re-resolve the digests.
 
-**Cosign version.** These attestations are Sigstore bundles published through
-the OCI referrers path, which requires **Cosign v3.0.1+**; the same floor the
-Rekor v2 note above sets. GHCR does not implement the OCI 1.1
+**Why `--bundle-from-oci`.** `gh attestation verify` fetches bundles from
+GitHub's attestations API unless told otherwise, so the default form would
+succeed even if the registry referrer push had silently failed. `--bundle-from-oci`
+makes it read the same referrer Cosign reads in commands 2 and 3, which is what
+makes this a single registry-backed retrieval path. Verifying through the API
+instead is a legitimate fallback when the registry is unreachable or
+unauthenticated; the sections below that omit the flag are that API-based
+alternative, and they are labeled as such where they appear.
+
+**Cosign version.** Commands 2 and 3 are Sigstore bundles published through the
+OCI referrers path, which requires **Cosign v3.0.1+**; the same floor the
+Rekor v2 note above sets. Command 1 uses the GitHub CLI and does not involve
+Cosign, so the floor does not apply to it. GHCR does not implement the OCI 1.1
 `/v2/{name}/referrers/{digest}` endpoint, so clients fall back to the
 specification's referrers *tag* schema (a `sha256-{hex}` tag holding an index of
 referrers). Cosign and ORAS do this transparently, which is why the commands
@@ -175,6 +196,11 @@ rather than self-asserted, then logged to the public Rekor transparency log.
 > signed with `cosign attest-blob` from the release job and remain Build Level 2.
 
 **Method 1: GitHub CLI**
+
+These commands omit `--bundle-from-oci`, so they are the **API-based
+alternative**: `gh` fetches the bundle from GitHub's attestations API rather
+than from the registry referrer. Add `--bundle-from-oci` to verify the referrer
+itself, as [Unified Metadata Retrieval](#unified-metadata-retrieval) does.
 
 ```shell
 # Verify provenance exists and is valid (using digest)
@@ -316,7 +342,8 @@ multi-platform index digest. Resolve the platform digest with
 before verifying.
 
 ```shell
-export DIGEST_API_AMD64=$(crane digest --platform linux/amd64 "${IMAGE_API}:${TAG}")
+# Resolve from the pinned index (${DIGEST_API}), never from the mutable tag.
+export DIGEST_API_AMD64=$(crane digest --platform linux/amd64 "${IMAGE_API}@${DIGEST_API}")
 
 # Method 1: Using Cosign (extracts attestation) - uses the per-platform digest
 cosign verify-attestation \
@@ -326,7 +353,8 @@ cosign verify-attestation \
   ${IMAGE_API}@${DIGEST_API_AMD64} | \
   jq -r '.payload' | base64 -d | jq '.predicate' > sbom.json
 
-# Method 2: GitHub CLI (build provenance only; the SPDX SBOM needs Method 1's Cosign flow)
+# Method 2: GitHub CLI (build provenance only; the SPDX SBOM needs Method 1's Cosign flow).
+# Without --bundle-from-oci this reads GitHub's attestations API, not the registry referrer.
 gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}" --format json
 ```
 
@@ -381,6 +409,9 @@ jq '.creationInfo.created' sbom.json
 
 **Method 1: GitHub CLI (recommended)**
 
+Also the API-based path: append `--bundle-from-oci` to each command to verify
+the registry referrer instead of GitHub's attestations API.
+
 ```shell
 # Verify using digest (preferred - no warnings)
 gh attestation verify oci://${IMAGE_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
@@ -395,8 +426,9 @@ gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-work
 **Method 2: Cosign (SBOM and VEX attestations)**
 
 ```shell
-# Verify the SBOM attestation on a per-platform manifest digest
-export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}:${TAG}")
+# Verify the SBOM attestation on a per-platform manifest digest,
+# resolved from the pinned index rather than from the mutable tag.
+export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \

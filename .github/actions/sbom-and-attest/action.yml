@@ -80,6 +80,20 @@ runs:
             exit 1
           fi
         done
+        # A platform digest that equals the index digest means the caller
+        # passed the index through instead of resolving its child manifest,
+        # which would attach a per-platform SBOM to the multi-platform index.
+        # The caller in attest-image-from-tag already rejects this, but a
+        # direct caller could set only one platform to the index digest and
+        # slip past the distinctness check below, so re-check both here.
+        for platform_pair in \
+          "amd64_digest=${INPUT_AMD64_DIGEST}" \
+          "arm64_digest=${INPUT_ARM64_DIGEST}"; do
+          if [[ "${platform_pair#*=}" == "${INPUT_IMAGE_DIGEST}" ]]; then
+            echo "::error::${platform_pair%%=*} must not equal the multi-platform index digest"
+            exit 1
+          fi
+        done
         # A multi-platform release image must yield two distinct child
         # manifests. Equal digests mean the caller resolved the index instead
         # of a platform, or the image lost a platform. Fail closed either way.

@@ -223,23 +223,246 @@ func TestReleaseSBOMCoversBothPlatforms(t *testing.T) {
 	}
 }
 
+// TestReleaseCosignAttestationsAreBounded pins the subject cardinality as well
+// as the timeout. An SBOM describes one root filesystem, so each platform SBOM
+// must be attested against that platform's own manifest digest; the OpenVEX
+// document is platform independent and belongs on the index digest. Regressing
+// an SBOM subject back to the index digest is the exact defect #1957 fixed, and
+// nothing else in the suite would catch it.
 func TestReleaseCosignAttestationsAreBounded(t *testing.T) {
 	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
 	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
-	for _, name := range []string{
-		"Cosign amd64 SBOM attestation",
-		"Cosign arm64 SBOM attestation",
+	for _, tc := range []struct {
+		name    string
+		subject string
+	}{
+		{name: "Cosign amd64 SBOM attestation", subject: "${{ steps.validate.outputs.amd64_digest }}"},
+		{name: "Cosign arm64 SBOM attestation", subject: "${{ steps.validate.outputs.arm64_digest }}"},
+		{name: "Cosign OpenVEX attestation", subject: "${{ steps.validate.outputs.image_digest }}"},
 	} {
-		index := stepIndex(steps, name)
+		index := stepIndex(steps, tc.name)
 		if index < 0 {
-			t.Fatalf("missing step %q", name)
+			t.Fatalf("missing step %q", tc.name)
 		}
-		run := stringValue(t, steps[index].(map[string]any), "run")
+		step := steps[index].(map[string]any)
+		run := stringValue(t, step, "run")
 		if !strings.Contains(run, "timeout --foreground 120s cosign attest") {
-			t.Errorf("%s must bound cosign attest with the shared 120-second timeout", name)
+			t.Errorf("%s must bound cosign attest with the shared 120-second timeout", tc.name)
+		}
+		// The referrers publication path must be an explicit choice here, not
+		// whatever the installed cosign happens to default to.
+		if !strings.Contains(run, "--new-bundle-format=true") {
+			t.Errorf("%s must set --new-bundle-format=true explicitly", tc.name)
+		}
+		variable := ""
+		for key, value := range mapValue(t, step, "env") {
+			if fmt.Sprint(value) == tc.subject {
+				variable = key
+			}
+		}
+		if variable == "" {
+			t.Errorf("%s must bind %s into its environment", tc.name, tc.subject)
+			continue
+		}
+		if reference := "\"${IMAGE_NAME}@${" + variable + "}\""; !strings.Contains(run, reference) {
+			t.Errorf("%s must attest %s, want subject reference %s", tc.name, tc.subject, reference)
 		}
 	}
 }
+
+// TestReleasePlatformDigestResolution covers the attest-image-from-tag step
+// that turns the pinned index digest into per-platform child manifest digests,
+// plus its handoff to sbom-and-attest. Every failure mode has to be fail-closed:
+// a release that lost an architecture, or a resolution that yielded the index
+// digest, must stop the job rather than ship two SBOMs on one subject.
+func TestReleasePlatformDigestResolution(t *testing.T) {
+	doc := loadYAML(t, ".github/actions/attest-image-from-tag/action.yml")
+	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
+
+	resolveIndex := stepIndex(steps, "Resolve per-platform manifest digests")
+	if resolveIndex < 0 {
+		t.Fatal("attest-image-from-tag must resolve per-platform manifest digests")
+	}
+	resolve := steps[resolveIndex].(map[string]any)
+	if id := stringValue(t, resolve, "id"); id != "platforms" {
+		t.Fatalf("platform resolution step id = %q, want platforms", id)
+	}
+	script := stringValue(t, resolve, "run")
+	if !strings.Contains(script, "timeout --foreground 120s crane digest") {
+		t.Error("platform digest lookups must use the bounded crane invocation")
+	}
+
+	attestIndex := stepIndex(steps, "Generate SBOM and attestations")
+	if attestIndex < 0 {
+		t.Fatal("attest-image-from-tag must call sbom-and-attest")
+	}
+	with := mapValue(t, steps[attestIndex].(map[string]any), "with")
+	for input, want := range map[string]string{
+		"amd64_digest": "${{ steps.platforms.outputs.amd64_digest }}",
+		"arm64_digest": "${{ steps.platforms.outputs.arm64_digest }}",
+	} {
+		if got := fmt.Sprint(with[input]); got != want {
+			t.Errorf("sbom-and-attest %s = %q, want %q", input, got, want)
+		}
+	}
+
+	const indexDigest = "sha256:" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const amd64Digest = "sha256:" + "1111111111111111111111111111111111111111111111111111111111111111"
+	const arm64Digest = "sha256:" + "2222222222222222222222222222222222222222222222222222222222222222"
+
+	tests := []struct {
+		name    string
+		amd64   string
+		arm64   string
+		wantErr bool
+	}{
+		{name: "resolves both child manifests", amd64: amd64Digest, arm64: arm64Digest},
+		{name: "missing platform fails closed", amd64: amd64Digest, arm64: "MISSING", wantErr: true},
+		{name: "amd64 equal to the index fails closed", amd64: indexDigest, arm64: arm64Digest, wantErr: true},
+		{name: "arm64 equal to the index fails closed", amd64: amd64Digest, arm64: indexDigest, wantErr: true},
+		{name: "malformed digest fails closed", amd64: "sha256:not-a-digest", arm64: arm64Digest, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "bin")
+			if err := os.Mkdir(bin, 0o700); err != nil {
+				t.Fatalf("create fake bin: %v", err)
+			}
+			writeExecutable(t, filepath.Join(bin, "crane"), fakePlatformCrane)
+			writeExecutable(t, filepath.Join(bin, "timeout"), passthroughTimeout)
+			platforms := filepath.Join(dir, "platforms.tsv")
+			contents := fmt.Sprintf("linux/amd64\t%s\nlinux/arm64\t%s\n", tc.amd64, tc.arm64)
+			if err := os.WriteFile(platforms, []byte(contents), 0o600); err != nil {
+				t.Fatalf("write platform table: %v", err)
+			}
+			output := filepath.Join(dir, "outputs")
+
+			command := exec.Command("bash", "-c", script)
+			command.Env = append(os.Environ(),
+				"PATH="+bin+":"+os.Getenv("PATH"),
+				"FAKE_PLATFORM_DIGESTS="+platforms,
+				"IMAGE_NAME=ghcr.io/nvidia/aicr",
+				"INDEX_DIGEST="+indexDigest,
+				"GITHUB_OUTPUT="+output,
+			)
+			result, err := command.CombinedOutput()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("resolution error = %v, wantErr %t\n%s", err, tc.wantErr, result)
+			}
+			if tc.wantErr {
+				return
+			}
+			data := string(readFileAt(t, output))
+			for _, want := range []string{"amd64_digest=" + tc.amd64, "arm64_digest=" + tc.arm64} {
+				if !strings.Contains(data, want) {
+					t.Errorf("resolved outputs = %q, want %q", data, want)
+				}
+			}
+		})
+	}
+}
+
+// TestReleaseSbomAttestInputValidation locks the digest contract sbom-and-attest
+// enforces on its own inputs. attest-image-from-tag is the only in-repo caller,
+// but the action is reusable, so a direct caller that passes the index digest
+// through as a platform digest has to be rejected here rather than silently
+// attaching a per-platform SBOM to the multi-platform index.
+func TestReleaseSbomAttestInputValidation(t *testing.T) {
+	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
+	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
+	index := stepIndex(steps, "Validate inputs")
+	if index < 0 {
+		t.Fatal("sbom-and-attest must validate its inputs")
+	}
+	script := stringValue(t, steps[index].(map[string]any), "run")
+	actionPath := filepath.Join(repositoryRoot(t), ".github/actions/sbom-and-attest")
+
+	const indexDigest = "sha256:" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const amd64Digest = "sha256:" + "1111111111111111111111111111111111111111111111111111111111111111"
+	const arm64Digest = "sha256:" + "2222222222222222222222222222222222222222222222222222222222222222"
+
+	tests := []struct {
+		name    string
+		image   string
+		digest  string
+		amd64   string
+		arm64   string
+		wantErr bool
+	}{
+		{name: "distinct platform digests", image: "ghcr.io/nvidia/aicr", digest: indexDigest, amd64: amd64Digest, arm64: arm64Digest},
+		{name: "amd64 equals the index digest", image: "ghcr.io/nvidia/aicr", digest: indexDigest, amd64: indexDigest, arm64: arm64Digest, wantErr: true},
+		{name: "arm64 equals the index digest", image: "ghcr.io/nvidia/aicr", digest: indexDigest, amd64: amd64Digest, arm64: indexDigest, wantErr: true},
+		{name: "platform digests are identical", image: "ghcr.io/nvidia/aicr", digest: indexDigest, amd64: amd64Digest, arm64: amd64Digest, wantErr: true},
+		{name: "malformed platform digest", image: "ghcr.io/nvidia/aicr", digest: indexDigest, amd64: "sha256:short", arm64: arm64Digest, wantErr: true},
+		{name: "image outside the release set", image: "ghcr.io/attacker/aicr", digest: indexDigest, amd64: amd64Digest, arm64: arm64Digest, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "outputs")
+			command := exec.Command("bash", "-c", script)
+			command.Env = append(os.Environ(),
+				"GITHUB_ACTION_PATH="+actionPath,
+				"GITHUB_OUTPUT="+output,
+				"INPUT_IMAGE_NAME="+tc.image,
+				"INPUT_IMAGE_DIGEST="+tc.digest,
+				"INPUT_AMD64_DIGEST="+tc.amd64,
+				"INPUT_ARM64_DIGEST="+tc.arm64,
+			)
+			result, err := command.CombinedOutput()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validation error = %v, wantErr %t\n%s", err, tc.wantErr, result)
+			}
+			if tc.wantErr {
+				if data, readErr := os.ReadFile(output); readErr == nil && len(data) != 0 {
+					t.Errorf("rejected input emitted outputs: %s", data)
+				}
+				return
+			}
+			data := string(readFileAt(t, output))
+			for _, want := range []string{
+				"image_digest=" + tc.digest,
+				"amd64_digest=" + tc.amd64,
+				"arm64_digest=" + tc.arm64,
+			} {
+				if !strings.Contains(data, want) {
+					t.Errorf("validated outputs = %q, want %q", data, want)
+				}
+			}
+		})
+	}
+}
+
+// fakePlatformCrane answers `crane digest --platform <platform> <ref>` from a
+// table, mirroring crane's own non-zero exit and "no child with platform"
+// message when the index has no such child.
+const fakePlatformCrane = `#!/usr/bin/env bash
+set -euo pipefail
+platform=""
+previous=""
+for argument in "$@"; do
+  if [[ "${previous}" == "--platform" ]]; then platform="${argument}"; fi
+  previous="${argument}"
+done
+while IFS=$'\t' read -r candidate digest; do
+  if [[ "${candidate}" == "${platform}" && "${digest}" != "MISSING" ]]; then
+    printf '%s\n' "${digest}"
+    exit 0
+  fi
+done < "${FAKE_PLATFORM_DIGESTS}"
+echo "Error: no child with platform ${platform} in index" >&2
+exit 1
+`
+
+// passthroughTimeout runs the wrapped command directly. The bound itself is
+// asserted against the step's source text; a real timer here would keep the
+// command substitution's pipe open past the test deadline.
+const passthroughTimeout = `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--foreground" ]]; then shift; fi
+shift
+exec "$@"
+`
 
 func TestReleaseAttestationInputValidationEmitsCanonicalDigestMap(t *testing.T) {
 	doc := loadYAML(t, ".github/workflows/attest-images.yaml")
