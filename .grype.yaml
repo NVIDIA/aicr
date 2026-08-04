@@ -25,19 +25,21 @@ exclude:
   # scans a fresh checkout, so this path never exists there).
   - './.claude/worktrees/**'
 
-# CVE suppressions for the aiperf-bench base image (python:3.13-slim,
-# Debian trixie) are managed in `.openvex.json` and consumed by
-# scan-action via the `vex:` input in
+# CVE suppressions for the aiperf-bench image are managed in
+# `.openvex.json` and consumed by scan-action via the `vex:` input in
 # `.github/workflows/vuln-scan-images.yaml`. The OpenVEX document
 # carries the structured status + justification + per-CVE
 # reachability evidence and is self-sufficient for suppression.
+# The image builds on python:3.13-slim (Debian trixie) and ships on
+# nvcr.io/nvidia/distroless/python:3.13-v4.0.8, so suppressed findings
+# come from CPython, pillow, and Debian libraries in that runtime base.
 #
 # When scanning the aiperf-bench image locally, pass `--vex
 # .openvex.json` alongside `-c .grype.yaml`. Scans of the AICR Go
 # source tree (`make scan` → `grype dir:.`) don't need VEX since the
 # suppressed CVEs are all in Python / glibc / libcap2 / ncurses /
-# pillow and never surface against Go source.
-# Reviewed: 2026-06-01
+# pillow / libexpat1 and never surface against Go source.
+# Reviewed: 2026-08-03
 
 # Go-source suppressions (accepted risk, not "not affected").
 #

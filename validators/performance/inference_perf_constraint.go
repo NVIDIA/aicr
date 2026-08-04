@@ -137,6 +137,23 @@ const (
 	// aiperfArtifactDir is where AIPerf writes benchmark result files.
 	aiperfArtifactDir = "/tmp/aiperf"
 
+	// aiperfEntrypointPython and aiperfEntrypointScript locate the
+	// sentinel-framing wrapper baked into the aiperf-bench image. The runtime
+	// stage is distroless and ships no /bin/sh, so the Job cannot chain
+	// `aiperf`, `echo`, and `cat` in a shell; the wrapper does that framing in
+	// Python instead. Both paths are fixed by aiperf-bench.Dockerfile — keep
+	// them in sync with the COPY destination and venv layout there.
+	aiperfEntrypointPython = "/opt/venv/bin/python"
+	aiperfEntrypointScript = "/opt/aicr/aiperf_entrypoint.py"
+
+	// envAIPerfArtifactDir and envAIPerfResultMarker configure
+	// aiperf_entrypoint.py's framing. envAIPerfModel is informational only —
+	// the model reaches aiperf as an explicit --model argv element — and is
+	// kept so `kubectl describe pod` shows what a run benchmarked.
+	envAIPerfModel        = "AICR_MODEL"
+	envAIPerfArtifactDir  = "AICR_AIPERF_ARTIFACT_DIR"
+	envAIPerfResultMarker = "AICR_RESULT_SENTINEL"
+
 	// AICR_INFERENCE_PERF_* env vars let operators tune the benchmark without
 	// rebuilding the validator image. Each overrides the like-named constant
 	// above; set them on the inference-perf catalog entry's `env` (editable
@@ -2884,15 +2901,16 @@ type aiperfRunParams struct {
 
 // buildAIPerfJob constructs the Kubernetes Job spec for running AIPerf.
 // The image (aiperfBaseImage) has aiperf pre-installed at build time — no pip
-// install at runtime. The script wraps aiperf invocation in sentinel markers
-// so parseAIPerfOutput can locate the JSON unambiguously. Diagnostic output
+// install at runtime. The run is wrapped in sentinel markers so
+// parseAIPerfOutput can locate the JSON unambiguously. Diagnostic output
 // (aiperf progress, warnings) is kept in the pod logs — silencing it made
 // benchmark failures undiagnosable.
 //
-// Command overrides the image ENTRYPOINT (["aiperf"]) with a shell so we can
-// chain aiperf + echo + cat for sentinel framing. /bin/sh is POSIX-sufficient
-// for everything in the script (set -e, line continuation, echo, cat) and is
-// present in the python:3.12-slim base image, avoiding a bash dependency.
+// Command overrides the image ENTRYPOINT (["aiperf"]) with aiperf_entrypoint.py,
+// which performs that framing. It is a Python wrapper rather than a shell
+// pipeline because the runtime stage is NVIDIA's distroless Python image and
+// ships no /bin/sh — see the header of aiperf-bench.Dockerfile. Everything is
+// exec-form argv, so no element is shell-interpreted.
 func buildAIPerfJob(namespace, jobName, endpoint, model string, concurrency int, pullSecrets []v1.LocalObjectReference) (*batchv1.Job, aiperfRunParams, error) {
 	// AIPerf requires request_count >= concurrency. Scale the measured request
 	// count with concurrency so larger GPU counts still get a multi-wave
@@ -2930,44 +2948,35 @@ func buildAIPerfJob(namespace, jobName, endpoint, model string, concurrency int,
 	// were mutated between two calls (matters in tests; cheap in prod).
 	aiperfImage := resolveAiperfImage()
 
-	// The model is passed via the AICR_MODEL container env var and referenced as
-	// "$AICR_MODEL", not interpolated into the script text. A recipe /
-	// AICR_INFERENCE_PERF_MODEL value with shell metacharacters (e.g. $(...))
-	// would otherwise be command-substituted by /bin/sh -c even inside double
-	// quotes; "$AICR_MODEL" expands to the literal value without re-scanning it.
+	// Benchmark flags as exec-form argv. aiperf_entrypoint.py prepends
+	// `aiperf profile` and appends the sentinel-framed result JSON,
+	// reproducing what the previous `/bin/sh -c` script did. Every flag is
+	// built here so this file stays the single source of truth for the
+	// benchmark invocation.
 	//
-	// The model must be passed with the explicit --model flag: aiperf 0.11.0
-	// dropped support for a positional model argument, rejecting it with
-	// "Unused Tokens: ['<model>']" before the benchmark starts.
-	script := fmt.Sprintf(`set -e
-aiperf profile \
-  --model "$AICR_MODEL" \
-  --url %s \
-  --endpoint-type chat \
-  --streaming \
-  --concurrency %d \
-  --request-count %d \
-  --warmup-request-count %d \
-  --prompt-input-tokens-mean %d \
-  --prompt-input-tokens-stddev 0 \
-  --prompt-output-tokens-mean %d \
-  --prompt-output-tokens-stddev 0 \
-  --num-dataset-entries %d \
-  --random-seed %d \
-  --extra-inputs temperature:0 \
-  --output-artifact-dir %s \
-  --export-level summary
-echo '%s'
-cat %s/profile_export_aiperf.json
-echo '%s'`,
-		endpoint,
-		concurrency, requestCount, warmupCount,
-		inputTokensMean, outputTokensMean,
-		aiperfNumDatasetEntries, aiperfRandomSeed,
-		aiperfArtifactDir,
-		aiperfResultSentinel,
-		aiperfArtifactDir,
-		aiperfResultSentinel)
+	// The model is a discrete argv element handed to execvp, never spliced
+	// into a command string. The runtime image has no shell, so a model
+	// containing metacharacters cannot be command-substituted and needs no
+	// quoting. It must use the explicit --model flag: aiperf 0.11.0 dropped
+	// the positional form and aborts with "Unused Tokens: ['<model>']".
+	aiperfArgs := []string{
+		"--model", model,
+		"--url", endpoint,
+		"--endpoint-type", "chat",
+		"--streaming",
+		"--concurrency", strconv.Itoa(concurrency),
+		"--request-count", strconv.Itoa(requestCount),
+		"--warmup-request-count", strconv.Itoa(warmupCount),
+		"--prompt-input-tokens-mean", strconv.Itoa(inputTokensMean),
+		"--prompt-input-tokens-stddev", "0",
+		"--prompt-output-tokens-mean", strconv.Itoa(outputTokensMean),
+		"--prompt-output-tokens-stddev", "0",
+		"--num-dataset-entries", strconv.Itoa(aiperfNumDatasetEntries),
+		"--random-seed", strconv.Itoa(aiperfRandomSeed),
+		"--extra-inputs", "temperature:0",
+		"--output-artifact-dir", aiperfArtifactDir,
+		"--export-level", "summary",
+	}
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -3006,12 +3015,21 @@ echo '%s'`,
 							// `:edge`, `:main`, and similar rolling tags
 							// on-push.yaml recreates on every merge.
 							ImagePullPolicy: validatorv1.ImagePullPolicy(aiperfImage, os.Getenv("AICR_VALIDATOR_IMAGE_TAG")),
-							// Model passed as env and referenced as "$AICR_MODEL"
-							// in the script so a value with shell metacharacters
-							// can't be command-substituted (see script above).
-							Env:     []v1.EnvVar{{Name: "AICR_MODEL", Value: model}},
-							Command: []string{shellBin, "-c"},
-							Args:    []string{script},
+							// The artifact dir and sentinel configure the framing
+							// wrapper. AICR_MODEL is not read by the wrapper (the
+							// model is an explicit --model argv element); it is
+							// retained so `kubectl describe pod` still shows which
+							// model a run benchmarked.
+							Env: []v1.EnvVar{
+								{Name: envAIPerfModel, Value: model},
+								{Name: envAIPerfArtifactDir, Value: aiperfArtifactDir},
+								{Name: envAIPerfResultMarker, Value: aiperfResultSentinel},
+							},
+							// Exec form, no shell: the runtime image is distroless
+							// and has no /bin/sh. Overrides the image ENTRYPOINT
+							// (["aiperf"]) with the framing wrapper.
+							Command: []string{aiperfEntrypointPython, aiperfEntrypointScript},
+							Args:    aiperfArgs,
 						},
 					},
 				},
