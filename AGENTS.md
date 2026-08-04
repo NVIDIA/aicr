@@ -108,6 +108,7 @@ workspace paths. Use local file paths only when explicitly requested.
 | `pkg/component` | Bundler utilities and test helpers | Yes |
 | `pkg/collector` | System state collection | Yes |
 | `pkg/validator` | Constraint evaluation | Yes |
+| `pkg/chainsaw` | In-process Chainsaw Test executor (assert/error only) + read-only allowlist; no external chainsaw binary | Yes |
 | `pkg/errors` | Structured error handling with codes | Yes |
 | `pkg/manifest` | Shared Helm-compatible manifest rendering | Yes |
 | `pkg/evidence` | Conformance evidence capture and formatting | Yes |

@@ -158,7 +158,7 @@ jobs:
           push: true
           # CHAINSAW_* args were dropped in #1236 — the deployment validator
           # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
-          # Test format in-process via validators/chainsaw/inprocess.go.
+          # Test format in-process via pkg/chainsaw/inprocess.go.
           build-args: |
             GO_VERSION=${{ steps.go.outputs.version }}
           tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ env.SCAN_TAG }}-${{ matrix.arch }}

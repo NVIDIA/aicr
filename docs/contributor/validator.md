@@ -10,7 +10,7 @@ contributor view for all four.
 | [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
 | [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
 | [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
-| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `validators/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
+| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `pkg/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
 
 Rule of thumb: declarative constraint against a snapshot value → surface 1.
 Active probe of a live cluster → surface 2 or 4. Pre-deployment sanity
@@ -919,7 +919,7 @@ The same assertion file now powers TWO surfaces:
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's
    chainsaw runner (PR #1220). Since #1236 the runner is **pure Go**:
-   `validators/chainsaw/inprocess.go` unmarshals the
+   `pkg/chainsaw/inprocess.go` unmarshals the
    `chainsaw.kyverno.io/v1alpha1` Test, walks `spec.steps[].try[]`, and
    dispatches `assert` / `error` to kyverno-json's `checks.Check` engine
    against live cluster state. No external binary is shipped in the
@@ -972,7 +972,7 @@ for the full operator list.
 `assert` and `error` operations. The deployment validator Job runs
 under a ServiceAccount bound to cluster-admin, so registry content is
 restricted at runtime to read-only Chainsaw operations
-(`validators/chainsaw/allowlist.go`). Any other operation (`script`,
+(`pkg/chainsaw/allowlist.go`). Any other operation (`script`,
 `apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
 `sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
 `ErrCodeInvalidRequest`. PR #1223 will add the same enforcement at
@@ -1037,7 +1037,7 @@ make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 
 During `aicr validate --phase deployment`, registry health checks in
 `recipes/checks/<component>/health-check.yaml` run in-process inside
-the `expected-resources` check (`validators/chainsaw/inprocess.go`).
+the `expected-resources` check (`pkg/chainsaw/inprocess.go`).
 
 A Test's `spec.timeouts.assert` is the **whole-Test budget** — one
 deadline shared across every step and retry. Slurm's

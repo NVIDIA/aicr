@@ -25,12 +25,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/NVIDIA/aicr/pkg/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/chainsaw"
 	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
