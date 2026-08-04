@@ -153,6 +153,9 @@ func TestRecipeEndpointPOST(t *testing.T) {
 		body        string
 		contentType string
 		wantStatus  int
+		// wantBodyContains, when set, must appear in the response body so a
+		// rejection case pins its specific reason, not just any error status.
+		wantBodyContains string
 	}{
 		{
 			name:        "valid JSON body",
@@ -161,10 +164,19 @@ func TestRecipeEndpointPOST(t *testing.T) {
 			wantStatus:  http.StatusOK,
 		},
 		{
-			name:        "valid YAML body",
-			body:        "kind: RecipeCriteria\napiVersion: aicr.run/v1alpha2\nspec:\n  service: gke\n  accelerator: a100\n  os: cos",
+			name: "valid YAML body",
+			// eks, not gke: GKE compositions declare the gpuStack profile
+			// and are rejected on /v1 by design (profile cut-over).
+			body:        "kind: RecipeCriteria\napiVersion: aicr.run/v1alpha2\nspec:\n  service: eks\n  accelerator: h100\n  os: ubuntu\n  intent: training",
 			contentType: "application/x-yaml",
 			wantStatus:  http.StatusOK,
+		},
+		{
+			name:             "gke composition rejects on v1 (profile cut-over)",
+			body:             "kind: RecipeCriteria\napiVersion: aicr.run/v1alpha2\nspec:\n  service: gke\n  accelerator: a100\n  os: cos",
+			contentType:      "application/x-yaml",
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "Profiled recipes are available only on /v2/recipe",
 		},
 		{
 			name:        "valid JSON body with platform",
@@ -203,6 +215,10 @@ func TestRecipeEndpointPOST(t *testing.T) {
 			if w.Code != tt.wantStatus {
 				t.Errorf("expected status %d, got %d; body: %s",
 					tt.wantStatus, w.Code, w.Body.String())
+			}
+			if tt.wantBodyContains != "" && !strings.Contains(w.Body.String(), tt.wantBodyContains) {
+				t.Errorf("expected body to contain %q, got: %s",
+					tt.wantBodyContains, w.Body.String())
 			}
 		})
 	}

@@ -24,12 +24,13 @@
 #     --emit-attestation ./out --push ghcr.io/<owner>/aicr-evidence --no-sign
 #   cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
 #
-# Profiled families (AKS gpuStack): snapshot with --aks-gpu-pools and pass
-# -r a recipe hydrated via `aicr recipe -s snapshot.yaml --intent <intent>
-# [--platform <platform>] --profile gpuStack=<value>` — the raw overlay
-# resolves only the declaration default, and intent/platform are
-# author-selected (not in the fingerprint), so state the target leaf's
-# intent and optional platform explicitly.
+# Profiled families (AKS/GKE gpuStack): snapshot with --aks-gpu-pools on
+# AKS (a plain snapshot on GKE) and pass -r a recipe hydrated via
+# `aicr recipe -s snapshot.yaml --intent <intent> [--platform <platform>]
+# --profile gpuStack=<value>` — the raw overlay resolves only the
+# declaration default, and intent/platform are author-selected (not in
+# the fingerprint), so state the target leaf's intent and optional
+# platform explicitly.
 # See docs/contributor/evidence-publishing.md.
 #
 # They then run THIS workflow from their fork's Actions tab. It scans every

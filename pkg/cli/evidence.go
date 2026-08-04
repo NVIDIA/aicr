@@ -26,7 +26,8 @@ func evidenceCmd() *cli.Command {
 		Name:     "evidence",
 		Category: functionalCategoryName,
 		Usage:    "Manage recipe evidence bundles: digest, publish, sign, verify.",
-		Description: `Operations on recipe-evidence v1 bundles.
+		Description: `Operations on recipe-evidence bundles (v1 for unprofiled
+recipes, v2 when the recipe carries a configuration profile).
 
 Bundles are produced by ` + "`aicr validate --emit-attestation`" + ` and consumed
 by maintainers and CI to verify a recipe contribution without re-running

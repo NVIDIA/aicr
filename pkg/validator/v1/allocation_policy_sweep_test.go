@@ -135,11 +135,21 @@ func TestStockCatalogResolvesDevicePluginPolicy(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s lookup: %v", valuePathDevicePluginEnabled, err)
 				}
-				if !dpSet || !dpEnabled {
-					t.Errorf("%s %s: want explicitly true (present=%t value=%t)\n"+
+				// The explicit pin's wanted VALUE follows the advertiser:
+				// on an external-advertiser recipe (the GKE gcp-managed
+				// default) the platform's plugin advertises and the
+				// operator's plugin must be explicitly false; everywhere
+				// else the operator's plugin is the advertiser and must be
+				// explicitly true (issue #1327, ADR-015 GKE amendment).
+				wantDP := true
+				if sp := result.Metadata.SelectedProfile; sp != nil && sp.Advertiser != "" {
+					wantDP = false
+				}
+				if !dpSet || dpEnabled != wantDP {
+					t.Errorf("%s %s: want explicitly %t (present=%t value=%t)\n"+
 						"  The advertiser pin must be EXPLICIT in stock hydrated values, not the\n"+
 						"  chart-default fallback (issue #1327).",
-						opRef.Name, valuePathDevicePluginEnabled, dpSet, dpEnabled)
+						opRef.Name, valuePathDevicePluginEnabled, wantDP, dpSet, dpEnabled)
 				}
 				opPinChecked++
 			}

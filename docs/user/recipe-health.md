@@ -10,7 +10,7 @@ You may obtain a copy of the License at
 
 # Recipe Health
 
-This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](../design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (AKS `gpuStack`), the row grades the composition resolved at the **declaration default** (`azure-managed`); per-profile-value rows are a follow-up.
+This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](../design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS and GKE), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gcp-managed` on GKE); per-profile-value rows are a follow-up.
 
 The matrix is computed **hermetically and offline**: every signal is a pure read of the resolved recipe — no Helm render, no GPU, no cluster, no network. It is regenerated from the recipe catalog by `make recipe-health-docs` and is kept current by a weekly bot PR. `make recipe-health-check` is an advisory staleness check (it is **not** wired into `make qualify` or the merge gate). The full design is recorded in [ADR-009](../design/009-recipe-health-tracking.md).
 
@@ -77,8 +77,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | a100-gke-cos-training-kubeflow | gke | a100 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | b200-gke-cos-inference-dynamo | gke | b200 | cos | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
 | b200-gke-cos-training-kubeflow | gke | b200 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
-| h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | [gke/h100-cos/inference-dynamo](https://validation.aicr.run/#/gke/h100-cos/inference-dynamo) |
-| h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | [gke/h100-cos/training-kubeflow](https://validation.aicr.run/#/gke/h100-cos/training-kubeflow) |
+| h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
+| h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
 | h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-kind-inference-dynamo | kind | h100 | — | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-kind-training-kubeflow | kind | h100 | — | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |

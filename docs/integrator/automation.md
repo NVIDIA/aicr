@@ -364,9 +364,15 @@ are not time-bounded and persist until `Client.Close()` is called.
 
 > **Route note:** these helpers use `GET /v2/recipe` — it serves every
 > family (profiled and unprofiled) with the same criteria parameters, plus
-> optional `profile=gpuStack=azure-managed|operator-managed` on AKS. `/v1/recipe`
-> still works for non-profiled families but rejects `service=aks` now that
-> the AKS family carries the `gpuStack` profile. See
+> optional `profile=gpuStack=azure-managed` or
+> `profile=gpuStack=operator-managed` on AKS, and
+> `profile=gpuStack=gcp-managed` or `profile=gpuStack=operator-managed`
+> on GKE
+> (see [GKE GPU Setup](gke-gpu-setup.md#gpu-device-plugin-ownership)).
+> `/v1/recipe` still works for unprofiled compositions but rejects any
+> composition that resolves with a profile — the embedded AKS and GKE
+> families both carry `gpuStack`, so requests for them reject, while
+> unprofiled external AKS/GKE overlays keep `/v1` access. See
 > [API Reference › Configured v2 endpoints](../user/api-reference.md#configured-v2-endpoints).
 
 ```python

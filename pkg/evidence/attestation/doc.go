@@ -18,8 +18,12 @@
 // A recipe-test-attestation bundle is a signed, content-addressed
 // artifact that ties an AICR recipe to an `aicr validate` run on real
 // hardware. The signed payload is an in-toto Statement carrying a
-// custom predicate (predicateType
-// https://aicr.run/recipe-evidence/v1); the supporting files
+// custom predicate: predicateType
+// https://aicr.run/recipe-evidence/v1 for unprofiled recipes, or
+// https://aicr.run/recipe-evidence/v2 when the recipe carries a
+// metadata.selectedProfile — the v2 predicate adds a profile block
+// (selection, advertiser, recipe-scoped policy-descriptor identity;
+// ADR-015). The supporting files
 // (recipe, snapshot, BOM, CTRF, manifest) ship alongside in an OCI
 // artifact for reviewer convenience and offline verification.
 //

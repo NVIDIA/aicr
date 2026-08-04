@@ -41,7 +41,7 @@ func evidenceVerifyCmd() *cli.Command {
 		Name:     "verify",
 		Category: functionalCategoryName,
 		Usage:    "Verify a recipe evidence bundle (offline).",
-		Description: `Verifies a recipe-evidence v1 bundle's signature (when present)
+		Description: `Verifies a recipe-evidence bundle's (v1 or v2) signature (when present)
 and manifest hash chain, then surfaces the predicate's fingerprint,
 phase counts, and BOM info.
 

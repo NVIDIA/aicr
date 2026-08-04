@@ -66,7 +66,7 @@ type PublishOptions struct {
 	OIDCResolve bundleattest.ResolveOptions
 }
 
-// Publish signs and pushes an already-emitted recipe-evidence v1 bundle,
+// Publish signs and pushes an already-emitted recipe-evidence bundle,
 // then writes pointer.yaml beside it. It is the off-network second leg of
 // the workflow whose first leg is `aicr validate --emit-attestation`
 // (no --push): that step produces the unsigned on-disk bundle this one
@@ -159,50 +159,64 @@ func loadOnDiskBundle(dir string) (*Bundle, string, error) {
 		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
 			"bundle statement predicate is missing recipe.{name,digest}")
 	}
-	profile, err := readBundleRecipeProfile(summaryDir)
+	profile, advertiser, descriptorIdentity, err := readBundleRecipeProfile(summaryDir)
 	if err != nil {
 		return nil, "", err
 	}
-	return &Bundle{
-		SummaryDir:    summaryDir,
-		RecipeName:    pred.Recipe.Name,
-		Profile:       profile,
-		SubjectDigest: pred.Recipe.Digest,
-		Predicate:     pred,
-		StatementJSON: stmt,
-	}, outDir, nil
+	bundle := &Bundle{
+		SummaryDir:               summaryDir,
+		RecipeName:               pred.Recipe.Name,
+		Profile:                  profile,
+		Advertiser:               advertiser,
+		PolicyDescriptorIdentity: descriptorIdentity,
+		SubjectDigest:            pred.Recipe.Digest,
+		Predicate:                pred,
+		StatementJSON:            stmt,
+	}
+	// Fail closed at load time — before Publish's sign/push side effects —
+	// when the recipe's profile selection and the statement's predicate
+	// profile block disagree: signing and pushing such a bundle would spend
+	// a Fulcio cert and registry writes on an artifact whose pointer the
+	// verifier rejects.
+	if err := ValidateBundleProfileCoherence(bundle); err != nil {
+		return nil, "", err
+	}
+	return bundle, outDir, nil
 }
 
 // readBundleRecipeProfile decodes the summary bundle's recipe.yaml and
-// returns the canonical name=value selection it carries, or "" for an
-// unprofiled recipe. Publish reconstructs the pointer from the on-disk
-// bundle, so the recorded selection must come from the attested recipe
-// bytes — the predicate carries only the (suffixed) recipe name. The
-// read is size-bounded like readBundlePredicate: the publish target may
-// be an attacker-influenced bundle root where os.ReadFile would allocate
-// the whole file before any size check.
-func readBundleRecipeProfile(summaryDir string) (string, error) {
+// returns the canonical name=value selection it carries, its declared
+// advertiser, and the recipe-scoped policy-descriptor identity recomputed
+// from its closure-contributing descriptor entries — or "" for all three
+// on an unprofiled recipe. Publish
+// reconstructs the pointer from the on-disk bundle, so the recorded
+// selection must come from the attested recipe bytes — the predicate
+// carries only the (suffixed) recipe name. The read is size-bounded like
+// readBundlePredicate: the publish target may be an attacker-influenced
+// bundle root where os.ReadFile would allocate the whole file before any
+// size check.
+func readBundleRecipeProfile(summaryDir string) (profile, advertiser, descriptorIdentity string, err error) {
 	path := filepath.Join(summaryDir, RecipeFilename)
 	f, err := os.Open(path) //nolint:gosec // bundle-local path resolved by resolveSummaryDir
 	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeNotFound, "failed to read bundle recipe.yaml", err)
+		return "", "", "", errors.Wrap(errors.ErrCodeNotFound, "failed to read bundle recipe.yaml", err)
 	}
 	defer func() { _ = f.Close() }()
 	body, err := io.ReadAll(io.LimitReader(f, defaults.MaxRecipePOSTBytes+1))
 	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to read bundle recipe.yaml", err)
+		return "", "", "", errors.Wrap(errors.ErrCodeInternal, "failed to read bundle recipe.yaml", err)
 	}
 	if int64(len(body)) > defaults.MaxRecipePOSTBytes {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
+		return "", "", "", errors.New(errors.ErrCodeInvalidRequest,
 			"bundle recipe.yaml exceeds maximum size of "+
 				strconv.FormatInt(defaults.MaxRecipePOSTBytes, 10)+" bytes")
 	}
 	rec, err := recipe.DecodeRecipeResult(body, serializer.FormatYAML)
 	if err != nil {
-		return "", errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+		return "", "", "", errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"failed to parse bundle recipe.yaml")
 	}
-	return ProfileSelectionString(rec), nil
+	return ProfileSelectionString(rec), ProfileAdvertiserString(rec), profileDescriptorIdentityOf(rec), nil
 }
 
 // resolveSummaryDir accepts either the summary-bundle root or a parent
@@ -272,9 +286,8 @@ func readBundlePredicate(summaryDir string) (*Predicate, []byte, error) {
 	if uErr := json.Unmarshal(body, &envelope); uErr != nil {
 		return nil, nil, errors.Wrap(errors.ErrCodeInvalidRequest, "statement is not valid JSON", uErr)
 	}
-	if envelope.PredicateType != PredicateTypeV1 {
-		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
-			"unexpected predicateType "+envelope.PredicateType)
+	if cErr := ValidatePredicateTypeCoherence(envelope.PredicateType, &envelope.Predicate); cErr != nil {
+		return nil, nil, cErr
 	}
 	return &envelope.Predicate, body, nil
 }

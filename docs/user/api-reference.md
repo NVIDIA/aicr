@@ -147,8 +147,10 @@ curl "http://localhost:8080/v1/recipe?accelerator=h100"
 # Full specification
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8"
 
-# Using gpu alias (os is required here: gb200 on gke has no OS-agnostic recipe)
-curl "http://localhost:8080/v1/recipe?gpu=gb200&service=gke&os=cos"
+# Using gpu alias. Note: the profiled families (service=aks, service=gke)
+# are rejected on /v1 — use /v2/recipe for those (see the AKS/GKE
+# cut-over note below).
+curl "http://localhost:8080/v1/recipe?gpu=gb200&service=eks&os=ubuntu"
 
 # Pretty print with jq
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.'
@@ -409,11 +411,12 @@ a Slurm accounting mode—not the route number—determines whether the artifact
 uses `v1alpha3`.
 
 `/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the configured HTTP contract
-for profiles and Slurm accounting. The AKS family is the first embedded profile
-adopter (`gpuStack`), so
-**`/v1` workflows with `service=aks` now reject and must move to `/v2`**
-(see the AKS cut-over note below); `/v1` remains unchanged for families
-without a profile.
+for profiles and Slurm accounting. The AKS and GKE families are the embedded
+profile adopters (`gpuStack`), so **`/v1/recipe` and `/v1/query` requests with
+`service=aks` or `service=gke` now reject and must move to `/v2`**;
+`/v1/bundle` rejects only profile-bearing recipe bodies, so legacy unprofiled
+AKS/GKE recipes still bundle there (see the cut-over note below). `/v1`
+remains unchanged for families without a profile.
 
 **GET `/v2/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
 optional `profile=name=value` and `slurmAccountingMode`. Profile omission
@@ -476,7 +479,7 @@ application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
 
 ```shell
-# The AKS family is the first embedded adopter (gpuStack profile).
+# The AKS and GKE families are the embedded adopters (gpuStack profiles).
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip. POSIX sh suffices:
 # the commands are sequential (no pipeline), so pipefail is not needed.
@@ -501,12 +504,29 @@ disabled and use the `aicr.run/v1alpha2` response shape. `/v1/recipe` and
 omits selection, and `/v1/bundle` rejects a profile-bearing body. Migrate a
 converted workflow to v2 as one cut-over.
 
-**AKS cut-over:** the AKS family is the first embedded adopter, so
-`/v1/recipe` and `/v1/query` requests with `service=aks` now reject —
-move AKS clients to `GET /v2/recipe` / `GET /v2/query` (identical query
-parameters, plus optional `profile=gpuStack=azure-managed|operator-managed`), and
-POST AKS `aicr.run/v1alpha3` recipes to `/v2/bundle`. Other families are
+**AKS/GKE cut-over:** the AKS and GKE families are the embedded adopters, so
+`/v1/recipe` and `/v1/query` requests with `service=aks` or `service=gke` now
+reject. Move GET clients to `GET /v2/recipe` / `GET /v2/query` (identical
+query parameters, plus optional `profile=gpuStack=azure-managed` or
+`profile=gpuStack=operator-managed` on AKS, and `profile=gpuStack=gcp-managed`
+or `profile=gpuStack=operator-managed` on GKE); move POST
+clients to `POST /v2/recipe` / `POST /v2/query`, converting the body to the
+strict envelope described above (a plain `criteria` object with an explicit
+`Content-Type`, not the v1 `RecipeCriteria` resource). Then POST the
+resulting `aicr.run/v1alpha3` recipes to `/v2/bundle`. Other families are
 unaffected on `/v1` until they adopt a profile.
+
+```shell
+# GKE migration: /v2/recipe (omit profile= for the gcp-managed default,
+# or select gpuStack=operator-managed explicitly), then POST to /v2/bundle.
+# -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
+# an error response is never written to bundles.zip.
+set -euo pipefail
+curl -fsS -o recipe.json \
+  "http://localhost:8080/v2/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=operator-managed"
+curl -fsS -X POST "http://localhost:8080/v2/bundle" \
+  -H "Content-Type: application/json" -d @recipe.json -o bundles.zip
+```
 
 ---
 
@@ -1141,16 +1161,19 @@ main();
 #!/bin/bash
 # Generate recipes for multiple environments
 
+# /v2/recipe accepts every family (profiled and unprofiled); the aks and
+# gke entries below would be rejected on /v1 because those families carry
+# the gpuStack profile (see the AKS/GKE cut-over note).
 environments=(
   "os=ubuntu&accelerator=h100&service=eks"
-  "os=ubuntu&accelerator=gb200&service=gke"
-  "os=rhel&accelerator=a100&service=aks"
+  "os=cos&accelerator=h100&service=gke"
+  "os=ubuntu&accelerator=h100&service=aks"
 )
 
 for env in "${environments[@]}"; do
   echo "Fetching recipe for: $env"
 
-  curl -s "http://localhost:8080/v1/recipe?${env}" \
+  curl -s "http://localhost:8080/v2/recipe?${env}" \
     | jq -r '.componentRefs[] | "\(.name): \(.version)"'
 
   echo ""

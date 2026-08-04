@@ -858,6 +858,67 @@ func TestParseDynamoTemplate_RouterModeSubstituted(t *testing.T) {
 	t.Fatal("DYN_ROUTER_MODE env not found in Frontend envs")
 }
 
+// TestParseDynamoTemplate_WorkerDriverLibPathAppend pins the worker command's
+// guarded LD_LIBRARY_PATH append in both Dynamo deployment templates. GKE's
+// managed device plugin (gcp-managed gpuStack value) mounts the node driver
+// tree at /usr/local/nvidia without touching the container environment, so
+// without this append vLLM cannot dlopen libcuda.so.1 and crashes with
+// "Failed to infer device type" (observed live in gcp-managed qualification).
+// The shape matters: a shell APPEND with the ${VAR:+} guard — a pod-level env
+// would clobber the image's own LD_LIBRARY_PATH (nixl/ucx/cuda entries), and
+// an unguarded "${LD_LIBRARY_PATH}:" append would create a leading empty
+// ld.so entry (= CWD). If someone reverts the wrapper to a bare
+// ["python3", "-m", "dynamo.vllm"], this fails.
+func TestParseDynamoTemplate_WorkerDriverLibPathAppend(t *testing.T) {
+	wantCommand := []string{
+		"/bin/bash",
+		"-c",
+		`export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; exec python3 -m dynamo.vllm "$@"`,
+		"dynamo.vllm",
+	}
+	for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
+		t.Run(tmpl, func(t *testing.T) {
+			obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", tmpl), map[string]string{
+				"NAMESPACE":       "aicr-test",
+				"MODEL":           "Qwen/Qwen3-8B",
+				"ROUTER_MODE":     dynRouterModeDefault,
+				"GPU_COUNT":       "1",
+				"DEPLOYMENT_NAME": "aicr-inference",
+			})
+			if err != nil {
+				t.Fatalf("parseYAMLTemplate() error: %v", err)
+			}
+			podSpec := componentPodSpec(t, obj, "VllmDecodeWorker")
+			containers, _, err := unstructured.NestedSlice(podSpec, "containers")
+			if err != nil {
+				t.Fatalf("read VllmDecodeWorker containers: %v", err)
+			}
+			for _, raw := range containers {
+				container, ok := raw.(map[string]interface{})
+				if !ok || container[keyName] != mainContainerName {
+					continue
+				}
+				command, _, err := unstructured.NestedStringSlice(container, "command")
+				if err != nil {
+					t.Fatalf("read main container command: %v", err)
+				}
+				if !reflect.DeepEqual(command, wantCommand) {
+					t.Errorf("main container command = %#v, want %#v", command, wantCommand)
+				}
+				// The wrapper forwards args via "$@" with argv0 consumed by
+				// the trailing "dynamo.vllm" element — the model flag must
+				// still be the first arg the worker sees.
+				args, _, err := unstructured.NestedStringSlice(container, "args")
+				if err != nil || len(args) == 0 || args[0] != "--model" {
+					t.Errorf("main container args = %v (err=%v), want first element %q", args, err, "--model")
+				}
+				return
+			}
+			t.Fatal("main container not found in VllmDecodeWorker")
+		})
+	}
+}
+
 func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, componentName, containerName string) []interface{} {
 	t.Helper()
 	podSpec := componentPodSpec(t, obj, componentName)

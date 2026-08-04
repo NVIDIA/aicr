@@ -24,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/oci"
 )
 
@@ -48,6 +49,13 @@ type PushOptions struct {
 	// AICRVersion is recorded in the OCI manifest's
 	// org.opencontainers.image.version annotation.
 	AICRVersion string
+
+	// PredicateType is the in-toto predicate type of the bundle's
+	// statement (PredicateTypeV1 or PredicateTypeV2). It feeds the OCI
+	// manifest's org.opencontainers.image.description annotation so a v2
+	// (profiled) bundle is not mislabeled as recipe-evidence/v1 in
+	// registry UIs. Empty falls back to a version-neutral description.
+	PredicateType string
 
 	// PlainHTTP forces HTTP (used for local registry tests).
 	PlainHTTP bool
@@ -134,6 +142,8 @@ func pushWithDependencies(
 		}
 	}()
 
+	description := evidenceImageDescription(opts.PredicateType)
+
 	cfg := oci.OutputConfig{
 		SourceDir:   opts.SourceDir,
 		OutputDir:   workspace.Path(),
@@ -147,7 +157,7 @@ func pushWithDependencies(
 			"org.opencontainers.image.vendor":      "NVIDIA",
 			"org.opencontainers.image.title":       "AICR Recipe Evidence",
 			"org.opencontainers.image.source":      "https://github.com/NVIDIA/aicr",
-			"org.opencontainers.image.description": "Signed evidence bundle for an aicr recipe (recipe-evidence/v1).",
+			"org.opencontainers.image.description": description,
 		},
 	}
 
@@ -186,6 +196,19 @@ func effectiveEvidenceRef(userRef string, bundle *Bundle) (string, error) {
 		ref = ref.WithTag(deriveEvidenceTag(bundle))
 	}
 	return ref.String(), nil
+}
+
+// evidenceImageDescription derives the pushed OCI manifest's
+// org.opencontainers.image.description annotation from the statement's
+// actual predicate type, so a v2 (profiled) bundle is not mislabeled
+// recipe-evidence/v1. An empty predicate type (older callers) keeps the
+// unqualified description.
+func evidenceImageDescription(predicateType string) string {
+	if predicateType == "" {
+		return "Signed evidence bundle for an aicr recipe."
+	}
+	return "Signed evidence bundle for an aicr recipe (" +
+		strings.TrimPrefix(predicateType, "https://"+header.Domain+"/") + ")."
 }
 
 // deriveEvidenceTag builds a human-readable, per-attestation OCI tag for a

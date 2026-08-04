@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -49,22 +50,43 @@ import (
 // Returns per-file mismatch rows and an error summarizing the failure;
 // both nil on success.
 func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManifestDigest string) ([]KV, error) {
+	_, mismatches, err := checkInventoryCaptureRecipe(ctx, mat, expectedManifestDigest)
+	return mismatches, err
+}
+
+// checkInventoryCaptureRecipe is CheckInventory plus recipe-byte capture: it
+// returns the exact recipe.yaml bytes the inventory pass read and hashed, so
+// checkRecipeIdentity can bind identity to the manifest-verified content
+// instead of reopening the file by path. For InputFormDir the bundle
+// directory is caller-owned, so a path-based reread after the inventory
+// check is a TOCTOU window (CWE-367): a writer replacing recipe.yaml between
+// the two reads would have identity checks accept bytes the manifest never
+// covered. The recipe entry is therefore read ONCE — the retained bytes are
+// the hashed bytes by construction. recipeYAML is nil when the manifest
+// carries no recipe.yaml entry or its hash/size check failed (both surface
+// in mismatches).
+func checkInventoryCaptureRecipe(
+	ctx context.Context,
+	mat *MaterializedBundle,
+	expectedManifestDigest string,
+) ([]byte, []KV, error) {
+
 	if mat == nil || mat.BundleDir == "" {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "materialized bundle is required")
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest, "materialized bundle is required")
 	}
 	if expectedManifestDigest == "" {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
 			"expected manifest digest is required (from predicate.manifest.digest)")
 	}
 	body, err := readBoundedFile(
 		filepath.Join(mat.BundleDir, attestation.ManifestFilename),
 		"manifest.json", defaults.MaxManifestFileBytes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	gotManifestDigest := attestation.HashBytesSHA256(body)
 	if gotManifestDigest != expectedManifestDigest {
-		return []KV{{Key: attestation.ManifestFilename,
+		return nil, []KV{{Key: attestation.ManifestFilename,
 				Value: "sha256 mismatch (got " + gotManifestDigest +
 					", want " + expectedManifestDigest + ")"}},
 			errors.New(errors.ErrCodeInvalidRequest,
@@ -74,27 +96,37 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManife
 
 	var manifest attestation.Manifest
 	if uErr := json.Unmarshal(body, &manifest); uErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "manifest.json is not valid JSON", uErr)
+		return nil, nil, errors.Wrap(errors.ErrCodeInvalidRequest, "manifest.json is not valid JSON", uErr)
 	}
 	if !isSupportedManifestSchema(manifest.SchemaVersion) {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
 			"unsupported manifest schemaVersion "+manifest.SchemaVersion+" (verifier supports 1.0.x)")
 	}
 	if len(manifest.Files) == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "manifest.json has no files")
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest, "manifest.json has no files")
 	}
 
+	var recipeYAML []byte
 	var mismatches []KV
 	for _, e := range manifest.Files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return mismatches, errors.Wrap(errors.ErrCodeUnavailable,
+			return nil, mismatches, errors.Wrap(errors.ErrCodeUnavailable,
 				"inventory check canceled", ctxErr)
 		}
-		got, hashErr := hashFile(ctx, mat.BundleDir, e.Path, e.Size)
+		var got string
+		var captured []byte
+		var hashErr error
+		if e.Path == attestation.RecipeFilename {
+			// Read ONCE: the retained bytes are the hashed bytes by
+			// construction, closing the reread TOCTOU window.
+			captured, got, hashErr = hashAndCaptureFile(mat.BundleDir, e.Path, e.Size)
+		} else {
+			got, hashErr = hashFile(ctx, mat.BundleDir, e.Path, e.Size)
+		}
 		if hashErr != nil {
 			hashErr = normalizeInventoryHashError(ctx, hashErr)
 			if isInventoryAbortError(hashErr) {
-				return mismatches, hashErr
+				return nil, mismatches, hashErr
 			}
 			mismatches = append(mismatches, KV{Key: e.Path, Value: hashErr.Error()})
 			continue
@@ -105,13 +137,17 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManife
 				Key:   e.Path,
 				Value: "sha256 mismatch (got " + got + ", want " + want + ")",
 			})
+			continue
+		}
+		if captured != nil {
+			recipeYAML = captured
 		}
 	}
 
 	extras, walkErr := findExtras(ctx, mat.BundleDir, manifest.Files)
 	if walkErr != nil {
 		if isInventoryAbortError(walkErr) {
-			return mismatches, walkErr
+			return nil, mismatches, walkErr
 		}
 		mismatches = append(mismatches, KV{Key: "walk", Value: walkErr.Error()})
 	}
@@ -120,10 +156,54 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManife
 	}
 
 	if len(mismatches) > 0 {
-		return mismatches, errors.New(errors.ErrCodeInvalidRequest,
+		return nil, mismatches, errors.New(errors.ErrCodeInvalidRequest,
 			"manifest inventory check failed for "+strconv.Itoa(len(mismatches))+" file(s)")
 	}
-	return nil, nil
+	return recipeYAML, nil, nil
+}
+
+// hashAndCaptureFile is the capture variant of hashFile for the manifest's
+// recipe.yaml entry: it opens the file once, reads the bounded content, and
+// hashes the bytes it read — never restat-and-stream, which would hash a
+// different read than the one retained. The size check runs against the
+// bytes actually read (not a pre-read Stat) for the same reason. Returns
+// the captured bytes and the bare-hex sha256 (hashFile's format).
+func hashAndCaptureFile(bundleDir, rel string, expectedSize int64) ([]byte, string, error) {
+	localRel := filepath.FromSlash(rel)
+	if !filepath.IsLocal(localRel) {
+		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
+			"manifest entry "+rel+" is not a local path (rejecting potential traversal)")
+	}
+	full := filepath.Join(bundleDir, localRel)
+	f, err := os.Open(full) //nolint:gosec // path is locality-checked above
+	if err != nil {
+		return nil, "", errors.Wrap(errors.ErrCodeNotFound, "file missing from bundle: "+rel, err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close() // read-only handle
+		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to stat bundle file: "+rel, err)
+	}
+	if info.IsDir() {
+		_ = f.Close() // read-only handle
+		return nil, "", errors.New(errors.ErrCodeInvalidRequest, "manifest entry "+rel+" is a directory")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxRecipePOSTBytes+1))
+	_ = f.Close() // read-only handle
+	if err != nil {
+		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to read bundle file: "+rel, err)
+	}
+	if int64(len(data)) > defaults.MaxRecipePOSTBytes {
+		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
+			"bundle "+rel+" exceeds the identity-binding size cap")
+	}
+	if expectedSize > 0 && int64(len(data)) != expectedSize {
+		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
+			"size mismatch for "+rel+
+				" (got "+strconv.FormatInt(int64(len(data)), 10)+
+				", want "+strconv.FormatInt(expectedSize, 10)+")")
+	}
+	return data, strings.TrimPrefix(attestation.HashBytesSHA256(data), "sha256:"), nil
 }
 
 func normalizeInventoryHashError(ctx context.Context, err error) error {

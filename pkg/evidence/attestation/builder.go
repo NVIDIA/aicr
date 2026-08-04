@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -93,6 +94,25 @@ type Bundle struct {
 	// unprofiled recipe. Recorded in the evidence pointer so the repo
 	// gate can recompute the digest with the same selection.
 	Profile string
+
+	// Advertiser is the attested recipe's
+	// metadata.selectedProfile.advertiser ("" when the recipe is
+	// unprofiled or declares none). ValidateBundleProfileCoherence
+	// compares it against the predicate's profile block so an on-disk
+	// bundle whose advertiser diverged from its recipe fails closed
+	// BEFORE the sign/push side effects — the verifier rejects the
+	// mismatch anyway (pkg/evidence/verifier/identity.go).
+	Advertiser string
+
+	// PolicyDescriptorIdentity is the recipe-scoped #1327 policy-descriptor
+	// identity recomputed from the attested recipe's closure-contributing
+	// descriptor entries ("" when the recipe is unprofiled).
+	// ValidateBundleProfileCoherence compares it against the predicate's
+	// recorded identity so a bundle whose evidence predates a descriptor
+	// expansion fails closed BEFORE the sign/push side effects — the
+	// verifier rejects the mismatch as historical-only anyway
+	// (pkg/evidence/verifier/identity.go, ADR-015 descriptor-currentness).
+	PolicyDescriptorIdentity string
 
 	// SubjectDigest is sha256(canonicalize(recipe.yaml)) as hex.
 	SubjectDigest string
@@ -202,6 +222,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 	fp := fingerprint.FromMeasurements(snapMeasurements)
 	cm := fp.Match(criteriaOf(opts.Recipe))
 	pred := BuildPredicate(PredicateInputs{
+		Profile:                 profilePredicateOf(opts.Recipe),
 		AttestedAt:              attestedAt,
 		AICRVersion:             opts.AICRVersion,
 		ValidatorCatalogVersion: opts.ValidatorCatalogVersion,
@@ -242,12 +263,14 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		"fileCount", len(manifest.Files))
 
 	return &Bundle{
-		SummaryDir:    summaryDir,
-		RecipeName:    recipeName,
-		Profile:       ProfileSelectionString(opts.Recipe),
-		SubjectDigest: subjectDigest,
-		Predicate:     pred,
-		StatementJSON: stmt,
+		SummaryDir:               summaryDir,
+		RecipeName:               recipeName,
+		Profile:                  ProfileSelectionString(opts.Recipe),
+		Advertiser:               ProfileAdvertiserString(opts.Recipe),
+		PolicyDescriptorIdentity: profileDescriptorIdentityOf(opts.Recipe),
+		SubjectDigest:            subjectDigest,
+		Predicate:                pred,
+		StatementJSON:            stmt,
 	}, nil
 }
 
@@ -345,6 +368,40 @@ func ParsePointerProfile(selection string) (string, error) {
 	return ProfileSegment(&recipe.SelectedProfile{Name: sel.Name, Value: sel.Value})
 }
 
+// profilePredicateOf builds the v2 predicate profile block from a
+// profiled recipe (nil for unprofiled recipes, keeping the statement on
+// PredicateTypeV1). The recorded descriptor identity is recipe-scoped: the
+// deterministic identity of the descriptor entries contributing to THIS
+// recipe's effective closure (allocpolicy.IdentityFor over
+// ClosureDescriptorEntries) — not the identity of the entire global
+// descriptor, which would let an expansion that never touches this
+// recipe's closure spuriously invalidate its evidence (ADR-015
+// descriptor-currentness).
+func profilePredicateOf(rec *recipe.RecipeResult) *ProfilePredicate {
+	if rec == nil || rec.Metadata.SelectedProfile == nil {
+		return nil
+	}
+	selected := rec.Metadata.SelectedProfile
+	return &ProfilePredicate{
+		Selection:                selected.Name + "=" + selected.Value,
+		Advertiser:               selected.Advertiser,
+		PolicyDescriptorIdentity: profileDescriptorIdentityOf(rec),
+	}
+}
+
+// profileDescriptorIdentityOf returns the recipe-scoped policy-descriptor
+// identity for a profiled recipe — allocpolicy.IdentityFor over the
+// recipe's closure-contributing descriptor entries — or "" for an
+// unprofiled recipe. Shared by predicate production (profilePredicateOf)
+// and the publish-time coherence gate (Bundle.PolicyDescriptorIdentity) so
+// the two derivations cannot drift.
+func profileDescriptorIdentityOf(rec *recipe.RecipeResult) string {
+	if rec == nil || rec.Metadata.SelectedProfile == nil {
+		return ""
+	}
+	return allocpolicy.IdentityFor(rec.ClosureDescriptorEntries())
+}
+
 // ProfileSegment returns the lowercase path-forming segment
 // "<name>-<value>" derived from a selected profile, or "" when sp is nil
 // (unprofiled recipe). It is the single shared derivation joined into the
@@ -378,6 +435,17 @@ func ProfileSelectionString(r *recipe.RecipeResult) string {
 		return ""
 	}
 	return r.Metadata.SelectedProfile.Name + "=" + r.Metadata.SelectedProfile.Value
+}
+
+// ProfileAdvertiserString returns the recipe's declared
+// metadata.selectedProfile.advertiser, or "" when the recipe is
+// unprofiled or declares none. Paired with ProfileSelectionString so the
+// bundle-side coherence gate compares the same tuple the verifier checks.
+func ProfileAdvertiserString(r *recipe.RecipeResult) string {
+	if r == nil || r.Metadata.SelectedProfile == nil {
+		return ""
+	}
+	return r.Metadata.SelectedProfile.Advertiser
 }
 
 func criteriaOf(r *recipe.RecipeResult) *recipe.Criteria {

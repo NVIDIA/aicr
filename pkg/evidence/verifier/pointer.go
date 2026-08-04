@@ -97,9 +97,22 @@ func validatePointer(p *attestation.Pointer) error {
 			"pointer.attestations has multiple entries — schema 2.0 not yet supported")
 	}
 	att := p.Attestations[0]
-	if att.Bundle.PredicateType != attestation.PredicateTypeV1 {
+	switch att.Bundle.PredicateType {
+	case attestation.PredicateTypeV1, attestation.PredicateTypeV2:
+	default:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"unsupported predicateType "+att.Bundle.PredicateType)
+	}
+	// Bidirectional pointer-level coherence: a profiled pointer must
+	// reference v2 evidence, and an unprofiled one must not.
+	if p.Profile != "" && att.Bundle.PredicateType != attestation.PredicateTypeV2 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"pointer records a profile selection but references "+att.Bundle.PredicateType+
+				" evidence; profile-bearing recipes require "+attestation.PredicateTypeV2)
+	}
+	if p.Profile == "" && att.Bundle.PredicateType == attestation.PredicateTypeV2 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"pointer references "+attestation.PredicateTypeV2+" evidence without a profile selection")
 	}
 	if att.Bundle.OCI != "" && !strings.HasPrefix(att.Bundle.Digest, "sha256:") {
 		return errors.New(errors.ErrCodeInvalidRequest,

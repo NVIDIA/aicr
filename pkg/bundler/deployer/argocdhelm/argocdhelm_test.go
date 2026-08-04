@@ -32,6 +32,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
@@ -43,6 +44,11 @@ import (
 // update regenerates goldens under testdata/ when set via `go test -update`.
 // Same convention as helm and localformat deployer test suites.
 var update = flag.Bool("update", false, "update golden files")
+
+// helmTemplateTimeout bounds every `helm template` subprocess this file's
+// live-render tests spawn — generous for a local render, short enough that a
+// wedged helm cannot stall the suite.
+const helmTemplateTimeout = 30 * time.Second
 
 // requireHelm gates the live-render tests on a helm binary. In CI (the
 // standard CI=true environment variable set by GitHub Actions) a missing
@@ -357,7 +363,7 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				cmdCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+				cmdCtx, cancel := context.WithTimeout(t.Context(), helmTemplateTimeout)
 				defer cancel()
 				args := []string{
 					"template", "test-release", outputDir,
@@ -374,6 +380,101 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("advertiser-owning profile guard locks closure selector paths", func(t *testing.T) {
+		outputDir := t.TempDir()
+		result := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+			{
+				Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+				Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+				Source: "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name: "nvidia-dra-driver-gpu", Namespace: "nvidia-dra-driver-gpu",
+				Chart: "nvidia-dra-driver-gpu", Version: "v25.3.0",
+				Type:   recipe.ComponentTypeHelm,
+				Source: "https://helm.ngc.nvidia.com/nvidia",
+			},
+		})
+		result.APIVersion = recipe.RecipeProfileAPIVersion
+		// gcp-managed shape: an external advertiser plus a disabled
+		// gpu-operator device plugin. The external advertiser triggers the
+		// #1327 closure, so the guard must lock the recomputed closure
+		// paths of every enabled descriptor component — not only the
+		// declared ownedPaths.
+		result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+			Name:       "gpuStack",
+			Value:      "gcp-managed",
+			Advertiser: allocpolicy.AdvertiserExternal,
+			OwnedPaths: map[string][]string{
+				"gpu-operator": {allocpolicy.PathDevicePluginEnabled, "enabled"},
+			},
+		}
+		g := &Generator{
+			RecipeResult: result,
+			ComponentValues: map[string]map[string]any{
+				"gpu-operator":          {"devicePlugin": map[string]any{"enabled": false}},
+				"nvidia-dra-driver-gpu": {},
+			},
+			Version: "v0.0.0-test",
+		}
+		if _, err := g.Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		guard, err := os.ReadFile(filepath.Join(outputDir, "templates", "aicr-profile-lock.yaml"))
+		if err != nil {
+			t.Fatalf("read profile lock guard: %v", err)
+		}
+		for _, want := range []string{
+			allocpolicy.ComponentGPUOperator + "." + allocpolicy.PathDevicePluginEnabled,
+			allocpolicy.ComponentDRADriver + "." + allocpolicy.PathDRAGPUsEnabled,
+			allocpolicy.ComponentDRADriver + "." + allocpolicy.PathDRAGPUsEnabledOverride,
+		} {
+			if !strings.Contains(string(guard), want) {
+				t.Fatalf("profile lock guard missing closure path %q:\n%s", want, guard)
+			}
+		}
+
+		// Live-render the guard: closure-derived paths (never listed in the
+		// declared ownedPaths) must reject install-time overrides exactly
+		// like declared ones — the string assertions above prove the paths
+		// are named, this proves the rejection actually fires.
+		t.Run("closure path rejects install-time override", func(t *testing.T) {
+			requireHelm(t)
+
+			tests := []struct {
+				name      string
+				extraArgs []string
+				wantErr   bool
+			}{
+				{name: "no component override"},
+				{
+					name:      "closure-derived DRA path intersects",
+					extraArgs: []string{"--set", "dradriver.resources.gpus.enabled=false"},
+					wantErr:   true,
+				},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					cmdCtx, cancel := context.WithTimeout(t.Context(), helmTemplateTimeout)
+					defer cancel()
+					args := []string{
+						"template", "test-release", outputDir,
+						"--set", "repoURL=oci://example.test/aicr",
+					}
+					args = append(args, tt.extraArgs...)
+					cmd := exec.CommandContext(cmdCtx, "helm", args...) //nolint:gosec // controlled test arguments
+					out, err := cmd.CombinedOutput()
+					if (err != nil) != tt.wantErr {
+						t.Fatalf("helm template error = %v, wantErr %v\noutput:\n%s", err, tt.wantErr, out)
+					}
+					if tt.wantErr && !strings.Contains(string(out), "intersects profile-owned path") {
+						t.Fatalf("helm template error does not name profile intersection:\n%s", out)
+					}
+				})
+			}
+		})
 	})
 
 	t.Run("profiled to unprofiled regeneration removes guard", func(t *testing.T) {
@@ -1859,7 +1960,7 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 	const wantParentRepoURL = setRepoURL + "/" + DefaultChartName
 	const wantChildRepoURL = setRepoURL + "/" + DefaultChartName
 	const wantTagName = "v9.9.9-render-test"
-	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
 		"--set", "repoURL="+setRepoURL,
@@ -1974,7 +2075,7 @@ func TestHelmTemplate_RendersWithHelmRepoRepoURL(t *testing.T) {
 
 	const setRepoURL = "https://charts.example.com"
 	const wantTagName = "v9.9.9-helm-repo-test"
-	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
 		"--set", "repoURL="+setRepoURL,
@@ -2078,7 +2179,7 @@ func TestGenerate_CustomChartName(t *testing.T) {
 		t.Errorf("Chart.yaml missing quoted custom name %q; got:\n%s", customName, chartBytes)
 	}
 
-	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
 		"--set", "repoURL=oci://example.test/myorg",
@@ -2200,7 +2301,7 @@ func TestHelmTemplate_AppNameOverride(t *testing.T) {
 				helmArgs = append(helmArgs, "--set", "appName="+tt.installTimeSet)
 			}
 
-			cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 			defer cancel()
 			cmd := exec.CommandContext(cmdCtx, "helm", helmArgs...) //nolint:gosec // controlled args
 			out, err := cmd.CombinedOutput()
@@ -2398,7 +2499,7 @@ func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
 	const wantPathChildRepoURL = setRepoURL + "/" + DefaultChartName // post-#1035 fix
 	const wantTagName = "v9.9.9-issue-1018"
 
-	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
 		"--set", "repoURL="+setRepoURL,
@@ -2509,7 +2610,7 @@ func TestHelmTemplate_FailsWithoutRepoURL(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir) //nolint:gosec // controlled args
 	out, err := cmd.CombinedOutput()
@@ -2796,7 +2897,7 @@ func TestHelmTemplate_DeployerNamePrefixOverride(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
 		"--set", "repoURL=oci://example.test/myorg",
@@ -2871,7 +2972,7 @@ func TestHelmTemplate_IncludeRootAppToggle(t *testing.T) {
 
 	render := func(t *testing.T, extraArgs ...string) (string, error) {
 		t.Helper()
-		cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 		defer cancel()
 		args := append([]string{"template", "test-release", outputDir,
 			"--set", "repoURL=oci://example.test/myorg",
@@ -3051,7 +3152,7 @@ func TestHelmTemplate_ChildNameGuards(t *testing.T) {
 				"--set", "targetRevision=v1.0.0",
 			}
 			args = append(args, tt.extraSets...)
-			cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 			defer cancel()
 			cmd := exec.CommandContext(cmdCtx, "helm", args...) //nolint:gosec // controlled args
 			out, err := cmd.CombinedOutput()
@@ -3161,7 +3262,7 @@ func TestValidationContractParity(t *testing.T) {
 	// and success. Bounded by an exec timeout like the other live tests.
 	helmTemplate := func(t *testing.T, setFlag, key, value string) (string, bool) {
 		t.Helper()
-		cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cmdCtx, cancel := context.WithTimeout(context.Background(), helmTemplateTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
 			"--set", "repoURL=oci://example.test/myorg",
