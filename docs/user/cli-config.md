@@ -11,7 +11,7 @@ aicr snapshot --config aicr-config.yaml
 aicr recipe   --config aicr-config.yaml
 aicr bundle   --config aicr-config.yaml
 aicr validate --config aicr-config.yaml
-aicr verify   --config aicr-config.yaml
+aicr verify   ./my-bundle --config aicr-config.yaml   # bundle dir is positional
 ```
 
 The first four are the producer pipeline; `spec.verify` is the consumer side, so

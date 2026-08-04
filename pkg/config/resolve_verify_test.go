@@ -139,6 +139,17 @@ func TestVerifyResolve_InvalidValues(t *testing.T) {
 			wantSub: "spec.verify.policy.cliVersionConstraint",
 		},
 		{
+			// Contains the required anchor, so the substring check passes;
+			// only compiling the pattern catches it. Without this, an
+			// uncompilable regexp reaches the verifier and fails there
+			// instead of at load time with its spec path.
+			name: "identity regexp that is not a compilable regexp",
+			spec: &config.VerifySpec{
+				Trust: &config.VerifyTrustSpec{CertificateIdentityRegexp: "https://github.com/NVIDIA/aicr/["},
+			},
+			wantSub: "spec.verify.trust.certificateIdentityRegexp",
+		},
+		{
 			name: "identity regexp missing the required NVIDIA/aicr anchor",
 			spec: &config.VerifySpec{
 				Trust: &config.VerifyTrustSpec{CertificateIdentityRegexp: "https://example.com/.+"},
