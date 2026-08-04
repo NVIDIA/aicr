@@ -124,6 +124,14 @@ jobs:
               # derivation, and a languages.go bump changes the `go list std`
               # ignore set. This is a standalone job — the full `tests` suite
               # does NOT regenerate the file.
+              # The Python half of the notices file covers the aiperf-bench
+              # image, whose dependency closure is an installed venv rather
+              # than a vendored tree. It cannot be regenerated here (that needs
+              # docker + PyPI), so the committed fragment is watched directly,
+              # alongside the requirements.txt whose sha256 the generator
+              # asserts the fragment still records — editing requirements
+              # without a refresh must fail this gate rather than ship stale
+              # attributions.
               - 'Makefile'
               - '.settings.yaml'
               - '.goreleaser.yaml'
@@ -131,6 +139,9 @@ jobs:
               - 'go.sum'
               - 'vendor/**'
               - 'tools/generate-notices'
+              - 'tools/generate-python-licenses'
+              - 'validators/performance/requirements.txt'
+              - 'validators/performance/licenses/**'
               - 'THIRD_PARTY_NOTICES.md'
 
       # code = true iff at least one changed file is NOT docs/markdown/LICENSE.

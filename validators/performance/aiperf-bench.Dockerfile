@@ -69,8 +69,22 @@ RUN apt-get update \
 # with current CVE fixes (the base image ships an older pinned pip).
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
+
+# Installed from requirements.txt rather than a bare "aiperf==${AIPERF_VERSION}"
+# so that this image and the third-party license record in
+# THIRD_PARTY_NOTICES.md are driven by ONE input. tools/generate-python-licenses
+# installs the same file to enumerate what ships here; without a shared input it
+# would have to reconstruct this environment and could silently diverge from it.
+COPY validators/performance/requirements.txt /tmp/requirements.txt
+
+# AIPERF_VERSION now feeds only the io.aicr.aiperf.version label below, so it
+# can drift from what is actually installed. Fail the build closed instead of
+# publishing an image whose label misreports its own contents.
+RUN grep -qE "^aiperf==${AIPERF_VERSION}([[:space:]]|$)" /tmp/requirements.txt \
+ || { echo "ARG AIPERF_VERSION=${AIPERF_VERSION} does not match requirements.txt" >&2; exit 1; }
+
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir "aiperf==${AIPERF_VERSION}"
+ && pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Syntax-gate the framing wrapper here, where a shell and a compiler still
 # exist. The runtime stage has neither, and the repo runs no Python test
