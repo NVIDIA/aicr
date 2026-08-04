@@ -38,6 +38,13 @@ type EvalResult struct {
 // Used by the recipe package to filter overlays based on constraint
 // evaluation during snapshot-based recipe generation.
 func Evaluate(constraint recipe.Constraint, snap *snapshotter.Snapshot) EvalResult {
+	// The node-set form dispatches by exact name before the scalar path: its
+	// value grammar (key=value / !key) is not the operator grammar, and its
+	// name is a virtual path no snapshot producer emits directly.
+	if constraint.Name == GPUNodesLabelConstraintName {
+		return evaluateGPUNodesLabel(constraint.Value, snap)
+	}
+
 	result := EvalResult{}
 
 	path, err := ParseConstraintPath(constraint.Name)
