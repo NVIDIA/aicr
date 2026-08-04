@@ -29,6 +29,18 @@
 # crick) and, on Python versions without cp3XX wheels yet, no wheel for
 # pyzmq/uvloop either. Compiling those in the builder means the arm64 image
 # never regresses regardless of aiperf's dependency set.
+#
+# The runtime stage is NVIDIA's distroless Python image. It ships no shell,
+# no package manager, and no login tooling, so it cannot host `RUN` steps —
+# that is exactly why the builder stays on python:3.13-slim. Two consequences
+# follow and are handled below:
+#   1. `useradd` is unavailable; the base already defines a non-root `nvs`
+#      user (uid 1000), which we adopt instead of minting our own.
+#   2. `/bin/sh` is absent, so the benchmark Job cannot frame its result JSON
+#      with `sh -c 'aiperf ...; echo; cat; echo'`. aiperf_entrypoint.py
+#      reproduces that framing with the standard library; buildAIPerfJob in
+#      validators/performance/inference_perf_constraint.go invokes it with
+#      exec-form argv.
 
 # Single global default so the builder install and the final-stage
 # io.aicr.aiperf.version label always move together on a bump; each stage
@@ -60,30 +72,54 @@ ENV PATH="/opt/venv/bin:${PATH}"
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir "aiperf==${AIPERF_VERSION}"
 
-# ---- Final stage: runtime only, no toolchain ----
-FROM python:3.13-slim
+# Syntax-gate the framing wrapper here, where a shell and a compiler still
+# exist. The runtime stage has neither, and the repo runs no Python test
+# tooling, so without this a syntax regression would produce a perfectly valid
+# image and only surface when a benchmark Job execs the script — the most
+# expensive possible discovery point. py_compile is byte-compilation only; the
+# exit-code and framing contract is asserted by TestAIPerfEntrypointExitContract
+# and TestAIPerfEntrypointFramingFeedsParser in aiperf_entrypoint_test.go.
+COPY validators/performance/aiperf_entrypoint.py /opt/aicr/aiperf_entrypoint.py
+RUN python -m py_compile /opt/aicr/aiperf_entrypoint.py
+
+# ---- Final stage: runtime only, no toolchain, no shell ----
+# renovate: pinned by digest. The tag is retained for readability; the digest
+# is what actually resolves, so a retag upstream cannot silently change the
+# runtime. Bump both together.
+FROM nvcr.io/nvidia/distroless/python:3.13-v4.0.8@sha256:89574a7b9524b7166ff3e0c547ad87a203437b3afe71dfb9878e279196254b76
 
 ARG AIPERF_VERSION
 
 # Copy the fully-installed venv from the builder; nothing is compiled here.
-# The venv's interpreter symlinks resolve against this stage's identical base
-# image, and PATH makes `aiperf` (and python) resolve to the venv.
+# Both stages put CPython 3.13 at /usr/local/bin, so the venv's interpreter
+# symlinks still resolve and its compiled extensions (pyzmq, uvloop, crick)
+# load unchanged. PATH makes `aiperf` (and python) resolve to the venv.
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
+# Sentinel-framing entrypoint used by the benchmark Job. Baked in rather than
+# generated at runtime so the image is self-contained and air-gap friendly.
+# Taken from the builder so the copy that ships is the one py_compile accepted.
+# This destination and the venv path above are mirrored by the Go constants
+# aiperfEntrypointScript and aiperfEntrypointPython;
+# TestAIPerfEntrypointPathsMatchDockerfile reads this file and fails on drift.
+COPY --from=builder /opt/aicr/aiperf_entrypoint.py /opt/aicr/aiperf_entrypoint.py
+
 # Drop privileges: the runtime benchmark pod only needs to exec
 # `aiperf profile ...` against an HTTP endpoint, no filesystem writes outside
-# /tmp, and no privileged ops — running as a dedicated non-root user hardens
-# the image for air-gap / multi-tenant deployments.
-RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 aiperf
-USER aiperf
-WORKDIR /home/aiperf
+# /tmp, and no privileged ops. The distroless base has no `useradd`, but it
+# already defines a non-root `nvs` user (uid 1000) with /home/nvs, so we adopt
+# that instead of minting a dedicated one.
+USER nvs
+WORKDIR /home/nvs
 
 # Runtime metadata so `docker inspect` surfaces what's baked in.
 LABEL org.opencontainers.image.description="AIPerf benchmark runner for AICR inference-perf validator"
 LABEL io.aicr.aiperf.version="${AIPERF_VERSION}"
 
 # Default entrypoint for direct use (e.g., `docker run <image> profile <model> --url ...`).
-# Kubernetes callers override Command to wrap invocation in a shell for the
-# sentinel-delimited log framing used by parseAIPerfOutput.
+# The base image sets its own ENTRYPOINT (/usr/bin/shelless_ulimit); override it
+# so direct `docker run` keeps behaving as before. Kubernetes callers override
+# Command to run aiperf_entrypoint.py for the sentinel-delimited log framing
+# used by parseAIPerfOutput — see buildAIPerfJob.
 ENTRYPOINT ["aiperf"]
