@@ -19,8 +19,9 @@ name: UAT Daytime Human-Access
 # day, with an automatic evening teardown that releases the reservation before the
 # nightly batch. daytime-up is intentionally NOT on a cron — a human requests it
 # when they want a cluster (see docs/contributor/uat.md); only the safety-net
-# teardown is scheduled, so a manually-provisioned daytime cluster never leaks into
-# the nightly window even if nobody tears it down. The cloud→flavor split is data,
+# teardown is scheduled, so a manually-provisioned daytime cluster is reclaimed
+# even if nobody remembers to tear it down. If that teardown itself fails, the
+# pre-batch guard blocks the batch rather than racing the still-held cluster. The cloud→flavor split is data,
 # not code — it comes from the `daytime-intent` column of the reservation registry
 # (infra/uat/reservations.yaml), defaulting to AWS=training / GCP=inference.
 #
