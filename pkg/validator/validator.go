@@ -47,26 +47,52 @@ import (
 // namespace, RBAC, and Job objects share a single conflict domain.
 const validatorFieldManager = "aicr"
 
-// checkReadiness evaluates top-level validation constraints against the snapshot.
-// Returns an error if any constraint fails, nil if all pass or no constraints exist.
+// checkReadiness evaluates the recipe's readiness constraints against the
+// snapshot: the top-level constraint set plus the readiness phase's own
+// constraints (validation.readiness.constraints — declared for recipes whose
+// pre-flight gates must not participate in generation-time overlay
+// filtering, e.g. the GKE device-plugin ownership check, issue #1755).
+// Returns an error if any constraint fails, nil if all pass or none exist.
 func checkReadiness(validationInput *v1.ValidationInput, snap *snapshotter.Snapshot) error {
-	if validationInput == nil || snap == nil || len(validationInput.Constraints) == 0 {
+	if validationInput == nil {
 		return nil
 	}
+	cs := validationInput.Constraints
+	if r := validationInput.Config.Readiness; r != nil {
+		cs = append(cs[:len(cs):len(cs)], r.Constraints...)
+	}
+	if len(cs) == 0 {
+		return nil
+	}
+	// Declared readiness constraints with no snapshot to evaluate them
+	// against must fail closed — silently skipping the gate would let a
+	// direct SDK caller bypass it by passing a nil snapshot.
+	if snap == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"readiness constraints are declared but no snapshot is available to evaluate them — supply a snapshot")
+	}
 
-	slog.Info("readiness pre-flight", "constraints", len(validationInput.Constraints))
+	slog.Info("readiness pre-flight", "constraints", len(cs))
 
-	for _, c := range validationInput.Constraints {
+	for _, c := range cs {
 		result := constraints.Evaluate(c, snap)
 		if result.Error != nil {
+			// Deliberately flattens the evaluator's code (incl. the
+			// ErrCodeNotFound gpu_nodes.go returns for empty-universe /
+			// missing readings): the readiness contract is one uniform
+			// fail-closed exit, and "constraint cannot be evaluated" is an
+			// invalid request at this boundary.
 			return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("readiness check could not evaluate: %s", c.Name),
 				result.Error,
 				map[string]any{"constraint": c.Name, "expected": c.Value})
 		}
 		if !result.Passed {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("readiness check failed: %s expected %s, got %s", c.Name, c.Value, result.Actual))
+			msg := fmt.Sprintf("readiness check failed: %s expected %s, got %s", c.Name, c.Value, result.Actual)
+			if c.Remediation != "" {
+				msg += "\n" + strings.TrimSpace(c.Remediation)
+			}
+			return errors.New(errors.ErrCodeInvalidRequest, msg)
 		}
 		slog.Info("readiness constraint passed", "name", c.Name, "expected", c.Value, "actual", result.Actual)
 	}
@@ -204,8 +230,9 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 
-	// Pre-flight: evaluate top-level validation constraints against snapshot.
-	// Fails fast before deploying any Jobs if prerequisites aren't met.
+	// Pre-flight: evaluate the top-level and readiness-phase constraints
+	// against the snapshot. Fails fast before deploying any Jobs if
+	// prerequisites aren't met.
 	if err := checkReadiness(validationInput, snap); err != nil {
 		return nil, err
 	}
@@ -279,7 +306,11 @@ func (v *Validator) runPhases(
 	return results, nil
 }
 
-// ValidatePhase runs a single validation phase.
+// ValidatePhase runs a single validation phase. The readiness pre-flight
+// runs first, exactly as in ValidatePhases: per-phase SDK callers must not
+// be able to execute a phase against a cluster that fails the recipe's
+// readiness gates (e.g. the GKE device-plugin ownership constraint, issue
+// #1755).
 func (v *Validator) ValidatePhase(
 	ctx context.Context,
 	phase Phase,
@@ -290,6 +321,13 @@ func (v *Validator) ValidatePhase(
 	// Lower any nccl-benchmark-runtime-ref into its inline carrier before the
 	// phase runs (or is skipped), so a bad ref fails fast even offline.
 	if err := v.resolveBenchmarkRuntimeRef(ctx, validationInput); err != nil {
+		return nil, err
+	}
+
+	// Readiness pre-flight — before the no-cluster short-circuit, matching
+	// ValidatePhases: constraints are evaluated inline against the snapshot
+	// even in test mode.
+	if err := checkReadiness(validationInput, snap); err != nil {
 		return nil, err
 	}
 

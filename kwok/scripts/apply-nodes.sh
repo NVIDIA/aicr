@@ -17,8 +17,12 @@
 # Usage: ./apply-nodes.sh <recipe-name>
 #
 # Reads the recipe overlay to determine:
-#   - criteria.service → cloud provider (eks, gke)
-#   - criteria.accelerator → GPU type (h100 default, gb200)
+#   - criteria.service → cloud provider (matches kwok/profiles/<service>/)
+#   - criteria.accelerator → GPU type (matches metadata.labels.accelerator)
+#
+# Profile selection is fail-closed and driven by profile-declared labels;
+# see kwok/scripts/lib/profile-select.sh. Unknown or ambiguous
+# combinations abort with a diagnostic instead of falling back.
 #
 # Fixed defaults: 2 system nodes, 4 GPU nodes
 
@@ -29,6 +33,10 @@ KWOK_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${KWOK_DIR}/.." && pwd)"
 TEMPLATE="${KWOK_DIR}/templates/nodes/node.yaml.tmpl"
 OVERLAYS_DIR="${REPO_ROOT}/recipes/overlays"
+PROFILES_ROOT="${KWOK_DIR}/profiles"
+
+# shellcheck source=lib/profile-select.sh
+source "${SCRIPT_DIR}/lib/profile-select.sh"
 
 # Fixed defaults
 SYSTEM_NODE_COUNT=2
@@ -46,43 +54,6 @@ check_deps() {
     for cmd in yq kubectl; do
         command -v "$cmd" &>/dev/null || { log_error "Missing: $cmd"; exit 1; }
     done
-}
-
-# Map service + accelerator to profile paths
-get_profiles() {
-    local service="$1"
-    local accelerator="$2"
-
-    # System profile: {service}/system-*.yaml
-    local system_profile=""
-    case "$service" in
-        eks) system_profile="eks/system-m7i.yaml" ;;
-        gke) system_profile="eks/system-m7i.yaml" ;;  # Fallback to EKS for now
-        *)   system_profile="eks/system-m7i.yaml" ;;  # Default
-    esac
-
-    # GPU profile: based on accelerator
-    local gpu_profile=""
-    case "$service" in
-        eks)
-            case "$accelerator" in
-                gb200) gpu_profile="eks/p6-gb200.yaml" ;;
-                *)     gpu_profile="eks/p5-h100.yaml" ;;  # h100 or default
-            esac
-            ;;
-        gke)
-            # GKE uses same profiles for now
-            case "$accelerator" in
-                gb200) gpu_profile="eks/p6-gb200.yaml" ;;
-                *)     gpu_profile="eks/p5-h100.yaml" ;;
-            esac
-            ;;
-        *)
-            gpu_profile="eks/p5-h100.yaml"  # Default to H100
-            ;;
-    esac
-
-    echo "${system_profile}:${gpu_profile}"
 }
 
 # Generate node YAML from template
@@ -139,30 +110,25 @@ create_nodes() {
     local recipe="$1"
     local overlay_file="${OVERLAYS_DIR}/${recipe}.yaml"
 
-    [[ -f "$overlay_file" ]] || { log_error "Recipe overlay not found: $overlay_file"; exit 1; }
-
-    # Extract criteria from overlay
-    local service accelerator
-    service=$(yq eval '.spec.criteria.service // "eks"' "$overlay_file")
-    accelerator=$(yq eval '.spec.criteria.accelerator // "h100"' "$overlay_file")
-
-    # Handle 'any' or empty values
-    [[ "$service" == "any" || "$service" == "null" ]] && service="eks"
-    [[ "$accelerator" == "any" || "$accelerator" == "null" ]] && accelerator="h100"
+    local criteria service accelerator
+    if ! criteria=$(resolve_recipe_criteria "$overlay_file"); then
+        exit 1
+    fi
+    read -r service accelerator <<< "${criteria}"
 
     log_info "Recipe: $recipe (service=$service, accelerator=$accelerator)"
 
-    # Get profile paths
+    # Discover profiles by matching metadata.labels; unmapped or ambiguous
+    # combinations fail closed here rather than falling back to defaults.
     local profiles system_profile gpu_profile
-    profiles=$(get_profiles "$service" "$accelerator")
+    if ! profiles=$(select_profiles "$service" "$accelerator" "$PROFILES_ROOT"); then
+        exit 1
+    fi
     system_profile="${profiles%%:*}"
     gpu_profile="${profiles##*:}"
 
-    local sys_profile_path="${KWOK_DIR}/profiles/${system_profile}"
-    local gpu_profile_path="${KWOK_DIR}/profiles/${gpu_profile}"
-
-    [[ -f "$sys_profile_path" ]] || { log_error "System profile not found: $sys_profile_path"; exit 1; }
-    [[ -f "$gpu_profile_path" ]] || { log_error "GPU profile not found: $gpu_profile_path"; exit 1; }
+    local sys_profile_path="${PROFILES_ROOT}/${system_profile}"
+    local gpu_profile_path="${PROFILES_ROOT}/${gpu_profile}"
 
     log_info "Profiles: system=$system_profile, gpu=$gpu_profile"
 

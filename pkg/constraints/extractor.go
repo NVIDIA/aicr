@@ -28,6 +28,7 @@ import (
 const (
 	keyType     = "type"
 	keyPath     = "path"
+	keyKey      = "key"
 	keySubtype  = "subtype"
 	keySelector = "selector"
 )
@@ -259,7 +260,7 @@ func (cp *ConstraintPath) ExtractValue(snap *snapshotter.Snapshot) (string, erro
 	if !exists {
 		return "", errors.NewWithContext(errors.ErrCodeNotFound,
 			"key not found in subtype",
-			map[string]any{"key": cp.Key, keySubtype: cp.Subtype, keyType: cp.Type})
+			map[string]any{keyKey: cp.Key, keySubtype: cp.Subtype, keyType: cp.Type})
 	}
 
 	// Convert reading to string
@@ -334,5 +335,5 @@ func lookupInItem(item *measurement.ItemEntry, cp *ConstraintPath) (string, erro
 	}
 	return "", errors.NewWithContext(errors.ErrCodeNotFound,
 		"key not found in item",
-		map[string]any{"key": cp.Key, keySubtype: cp.Subtype, keyType: cp.Type, keySelector: cp.Selector.Raw})
+		map[string]any{keyKey: cp.Key, keySubtype: cp.Subtype, keyType: cp.Type, keySelector: cp.Selector.Raw})
 }

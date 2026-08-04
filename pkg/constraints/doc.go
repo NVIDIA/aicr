@@ -29,6 +29,14 @@
 //     reading, and reports a Result describing whether the constraint
 //     passed and why.
 //
+// One constraint name carries a non-scalar form: the node-set constraint
+// GPUNodesLabelConstraintName ("NodeTopology.gpu-nodes.label", issue #1755)
+// quantifies a label predicate over the snapshot's GPU-node set instead of
+// comparing a single reading. Its value grammar is "key=value" (every GPU
+// node carries the label) or "!key" (no GPU node carries the key); it is
+// dispatched by exact name before the scalar path and fails closed on
+// truncated node lists and on an empty GPU-node universe.
+//
 // Evaluation is deliberately side-effect free and never performs network
 // or cluster I/O; consumers (pkg/validator, pkg/recipe) supply the
 // snapshot context.

@@ -1424,10 +1424,15 @@ work that resolves it.
    diagnostic, or a distinguishable "reading unavailable — regenerate
    the snapshot"? Both fail closed; only the second is actionable.
    **Proposed: distinguish.**
-2. **#1755 scope confirmation.** This ADR reads #1755 as delivering the
-   node-set constraint *form* (every GPU node has label X, including
-   the negated form) — a new reading/evaluator capability. **Proposed:
-   confirm during GKE adoption; the GKE consumer is gated on it.**
+2. **#1755 scope confirmation — resolved by PR #2000.** This ADR reads
+   #1755 as delivering the node-set constraint *form* (every GPU node
+   has label X, including the negated form) — a new reading/evaluator
+   capability. **Resolved: confirmed.** The form
+   (`NodeTopology.gpu-nodes.label`, `pkg/constraints`) landed under
+   #1755 with both predicate directions and the fail-closed semantics
+   this ADR's acceptance requirements specify. Today the GKE overlays
+   declare it directly under readiness constraints; the GKE `gpuStack`
+   profile will consume it unchanged when that profile lands (#1761).
 3. **AKS node-pool-mode signal — resolved by the 2026-07-27 amendment.**
    The provider-facing AgentPool `gpuProfile.driver` property is the
    durable ownership marker. AKS adoption projects it into a snapshot

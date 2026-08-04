@@ -32,6 +32,7 @@ func TestReleaseScriptsStructure(t *testing.T) {
 	for _, relative := range []string{
 		".github/scripts/release-images.sh",
 		".github/scripts/publish-homebrew.sh",
+		".github/scripts/sign-sbom.sh",
 	} {
 		t.Run(filepath.Base(relative), func(t *testing.T) {
 			path := repositoryPath(t, relative)
@@ -52,6 +53,256 @@ func TestReleaseScriptsStructure(t *testing.T) {
 			}
 			if firstExecutable(lines) != "set -euo pipefail" {
 				t.Errorf("first executable statement = %q, want strict mode", firstExecutable(lines))
+			}
+		})
+	}
+}
+
+// TestReleaseSbomSignaturesAreAllowlisted ties the goreleaser `signs:` stanza
+// to the publish-time asset allowlist. GoReleaser types the bundles that stanza
+// writes as Signature artifacts, which are release-uploadable, and
+// .goreleaser.yaml sets no `release.ids` filter, so every one of them lands on
+// the release. `publish-release` validates the asset set in exact mode, so an
+// unlisted bundle fails the publish job after promote-images has already
+// mutated registry aliases. Deriving the expected names from the stanza's own
+// `signature:` template keeps the two from drifting apart.
+func TestReleaseSbomSignaturesAreAllowlisted(t *testing.T) {
+	config := loadYAML(t, ".goreleaser.yaml")
+
+	sboms, ok := config["sboms"].([]any)
+	if !ok || len(sboms) != 1 {
+		t.Fatalf("goreleaser must declare exactly one sboms stanza, got %T", config["sboms"])
+	}
+	sbom, ok := sboms[0].(map[string]any)
+	if !ok {
+		t.Fatalf("sboms entry must be a map, got %T", sboms[0])
+	}
+	if artifacts := fmt.Sprint(sbom["artifacts"]); artifacts != "binary" {
+		t.Fatalf("sboms artifacts = %q, want binary", artifacts)
+	}
+
+	signs, ok := config["signs"].([]any)
+	if !ok {
+		t.Fatal("goreleaser must sign the binary SBOMs")
+	}
+	const artifactPlaceholder = "${artifact}"
+	suffix := ""
+	for _, raw := range signs {
+		entry, ok := raw.(map[string]any)
+		if !ok || fmt.Sprint(entry["artifacts"]) != "sbom" {
+			continue
+		}
+		signature := fmt.Sprint(entry["signature"])
+		if !strings.HasPrefix(signature, artifactPlaceholder) {
+			t.Fatalf("sbom signature template %q must extend %s", signature, artifactPlaceholder)
+		}
+		suffix = strings.TrimPrefix(signature, artifactPlaceholder)
+		if suffix == "" || strings.ContainsAny(suffix, "${}") {
+			t.Fatalf("sbom signature suffix %q must be a literal so the asset name is predictable", suffix)
+		}
+		command := fmt.Sprint(entry["cmd"])
+		info, err := os.Stat(repositoryPath(t, command))
+		if err != nil {
+			t.Fatalf("sbom signing command %s: %v", command, err)
+		}
+		if info.Mode().Perm() != 0o755 {
+			t.Errorf("sbom signing command %s mode = %o, want 755", command, info.Mode().Perm())
+		}
+	}
+	if suffix == "" {
+		t.Fatal("goreleaser signs stanza must cover artifacts: sbom")
+	}
+
+	const tag = "v1.2.3-rc1"
+	names := shellReleaseAssetNames(t, tag)
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		allowed[name] = true
+	}
+
+	documents := 0
+	for _, name := range names {
+		if !strings.HasSuffix(name, ".sbom.json") {
+			continue
+		}
+		documents++
+		if !allowed[name+suffix] {
+			t.Errorf("allowlist has SBOM %s but not the %q bundle the signs stanza writes for it", name, suffix)
+		}
+	}
+	if documents == 0 {
+		t.Fatal("allowlist has no binary SBOM documents to sign")
+	}
+
+	signatures := 0
+	for _, name := range names {
+		document := strings.TrimSuffix(name, suffix)
+		if document == name || !strings.HasSuffix(document, ".sbom.json") {
+			continue
+		}
+		signatures++
+		if !allowed[document] {
+			t.Errorf("allowlist has bundle %s without its %s document", name, document)
+		}
+	}
+	if signatures != documents {
+		t.Errorf("allowlist has %d SBOM bundles for %d SBOM documents", signatures, documents)
+	}
+
+	fixture := make([]string, 0, len(names))
+	for _, asset := range expectedReleaseAssets(tag) {
+		fixture = append(fixture, fmt.Sprint(asset["name"]))
+	}
+	sort.Strings(fixture)
+	if strings.Join(fixture, "\n") != strings.Join(names, "\n") {
+		t.Errorf("test fixture assets\n%s\ndiverge from the shipped allowlist\n%s",
+			strings.Join(fixture, "\n"), strings.Join(names, "\n"))
+	}
+}
+
+// shellReleaseAssetNames evaluates the release script's own
+// expected_release_asset_names definition so the policy check reads the shipped
+// allowlist rather than a copy of it.
+func shellReleaseAssetNames(t *testing.T, tag string) []string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	text := string(readFile(t, ".github/scripts/release-images.sh"))
+	const marker = "expected_release_asset_names() {"
+	start := strings.Index(text, marker)
+	if start < 0 {
+		t.Fatal("release-images.sh no longer defines expected_release_asset_names")
+	}
+	const terminator = "\n}\n"
+	end := strings.Index(text[start:], terminator)
+	if end < 0 {
+		t.Fatal("expected_release_asset_names has no closing brace")
+	}
+	script := text[start:start+end+len(terminator)] + "\nexpected_release_asset_names\n"
+	command := exec.CommandContext(ctx, "bash", "-c", script)
+	command.Env = append(os.Environ(), "RELEASE_TAG="+tag)
+	output, err := command.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("evaluate expected_release_asset_names exceeded test deadline: %v\n%s", ctx.Err(), output)
+	}
+	if err != nil {
+		t.Fatalf("evaluate expected_release_asset_names: %v\n%s", err, output)
+	}
+	var names []string
+	if err := json.Unmarshal(output, &names); err != nil {
+		t.Fatalf("parse allowlist %q: %v", output, err)
+	}
+	return names
+}
+
+// TestReleaseSignSbomBehavior exercises the fail-closed guards and the retry
+// loop in sign-sbom.sh with a mocked cosign. GoReleaser registers the bundle
+// path as a release artifact whether or not the script writes it, so every
+// path that cannot produce a bundle has to exit non-zero.
+func TestReleaseSignSbomBehavior(t *testing.T) {
+	tests := []struct {
+		name         string
+		failures     int
+		omitSBOM     bool
+		emptySBOM    bool
+		noPredicate  bool
+		noSigningCfg bool
+		args         []string
+		wantErr      bool
+		wantAttempts int
+		wantBundle   bool
+	}{
+		{name: "signs on the first attempt", wantAttempts: 1, wantBundle: true},
+		{name: "retries and succeeds on the second attempt", failures: 1, wantAttempts: 2, wantBundle: true},
+		{name: "fails after the third attempt", failures: 3, wantErr: true, wantAttempts: 3},
+		{name: "no arguments", args: []string{}, wantErr: true},
+		{name: "missing bundle argument", args: []string{"sbom-only"}, wantErr: true},
+		{name: "missing SBOM document", omitSBOM: true, wantErr: true},
+		{name: "empty SBOM document", emptySBOM: true, wantErr: true},
+		{name: "SLSA_PREDICATE unset", noPredicate: true, wantErr: true},
+		{name: "AICR_SIGNING_CONFIG unset", noSigningCfg: true, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "bin")
+			if err := os.Mkdir(bin, 0o700); err != nil {
+				t.Fatalf("create fake bin: %v", err)
+			}
+			writeExecutable(t, filepath.Join(bin, "cosign"), fakeCosign)
+			// The retry loop backs off 5s then 10s, which would outrun the
+			// harness deadline; a PATH shim keeps the waits instantaneous.
+			writeExecutable(t, filepath.Join(bin, "sleep"), noopSleep)
+
+			sbomPath := filepath.Join(dir, "aicr_1.2.3_linux_amd64.sbom.json")
+			if !tc.omitSBOM {
+				contents := []byte("{\"spdxVersion\":\"SPDX-2.3\"}\n")
+				if tc.emptySBOM {
+					contents = nil
+				}
+				if err := os.WriteFile(sbomPath, contents, 0o600); err != nil {
+					t.Fatalf("write SBOM: %v", err)
+				}
+			}
+			bundlePath := sbomPath + ".sigstore.json"
+			predicate := filepath.Join(dir, "predicate.json")
+			signingConfig := filepath.Join(dir, "signing-config.json")
+			attempts := filepath.Join(dir, "attempts")
+			invocations := filepath.Join(dir, "invocations")
+
+			environment := []string{
+				"PATH=" + bin + ":" + os.Getenv("PATH"),
+				"FAKE_COSIGN_ATTEMPTS=" + attempts,
+				"FAKE_COSIGN_INVOCATIONS=" + invocations,
+				fmt.Sprintf("FAKE_COSIGN_FAILURES=%d", tc.failures),
+			}
+			if !tc.noPredicate {
+				environment = append(environment, "SLSA_PREDICATE="+predicate)
+			}
+			if !tc.noSigningCfg {
+				environment = append(environment, "AICR_SIGNING_CONFIG="+signingConfig)
+			}
+
+			args := []string{sbomPath, bundlePath}
+			if tc.args != nil {
+				args = tc.args
+			}
+			result := runScript(t, environment, ".github/scripts/sign-sbom.sh", args...)
+			if (result.err != nil) != tc.wantErr {
+				t.Fatalf("sign-sbom error = %v, wantErr %t\n%s", result.err, tc.wantErr, result.output)
+			}
+
+			got := 0
+			if recorded := strings.TrimSpace(readOptional(t, attempts)); recorded != "" {
+				if _, err := fmt.Sscanf(recorded, "%d", &got); err != nil {
+					t.Fatalf("parse attempt counter %q: %v", recorded, err)
+				}
+			}
+			if got != tc.wantAttempts {
+				t.Errorf("cosign attempts = %d, want %d\n%s", got, tc.wantAttempts, result.output)
+			}
+
+			_, err := os.Stat(bundlePath)
+			if tc.wantBundle && err != nil {
+				t.Errorf("successful signing wrote no bundle: %v", err)
+			}
+			if !tc.wantBundle && err == nil {
+				t.Error("failed signing left a bundle behind")
+			}
+			if !tc.wantBundle {
+				return
+			}
+			invoked := readOptional(t, invocations)
+			for _, required := range []string{
+				"--predicate " + predicate,
+				"--type https://slsa.dev/provenance/v1",
+				"--signing-config " + signingConfig,
+				"--bundle " + bundlePath,
+				"--yes " + sbomPath,
+			} {
+				if !strings.Contains(invoked, required) {
+					t.Errorf("cosign invocation missing %q\n%s", required, invoked)
+				}
 			}
 		})
 	}
@@ -1197,15 +1448,21 @@ func expectedReleaseAssets(tag string) []map[string]any {
 	version := strings.TrimPrefix(tag, "v")
 	names := []string{
 		"aicr_" + version + "_darwin_amd64.sbom.json",
+		"aicr_" + version + "_darwin_amd64.sbom.json.sigstore.json",
 		"aicr_" + version + "_darwin_amd64.tar.gz",
 		"aicr_" + version + "_darwin_arm64.sbom.json",
+		"aicr_" + version + "_darwin_arm64.sbom.json.sigstore.json",
 		"aicr_" + version + "_darwin_arm64.tar.gz",
 		"aicr_" + version + "_linux_amd64.sbom.json",
+		"aicr_" + version + "_linux_amd64.sbom.json.sigstore.json",
 		"aicr_" + version + "_linux_amd64.tar.gz",
 		"aicr_" + version + "_linux_arm64.sbom.json",
+		"aicr_" + version + "_linux_arm64.sbom.json.sigstore.json",
 		"aicr_" + version + "_linux_arm64.tar.gz",
 		"aicrd_" + version + "_linux_amd64.sbom.json",
+		"aicrd_" + version + "_linux_amd64.sbom.json.sigstore.json",
 		"aicrd_" + version + "_linux_arm64.sbom.json",
+		"aicrd_" + version + "_linux_arm64.sbom.json.sigstore.json",
 		"aicr_checksums.txt",
 		"recipe-catalog.sigstore.json",
 		"THIRD_PARTY_NOTICES.md",
@@ -1716,6 +1973,34 @@ cat "${FAKE_CHECKSUMS}"
 const blockingCommand = `#!/usr/bin/env bash
 set -euo pipefail
 exec /bin/sleep 60
+`
+
+// fakeCosign records every invocation, fails the first FAKE_COSIGN_FAILURES
+// attempts, and otherwise writes the bundle the caller asked for. It never
+// contacts Fulcio, Rekor, or a registry.
+const fakeCosign = `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${FAKE_COSIGN_INVOCATIONS}"
+attempt="$(( $(cat "${FAKE_COSIGN_ATTEMPTS}" 2>/dev/null || echo 0) + 1 ))"
+printf '%s\n' "${attempt}" > "${FAKE_COSIGN_ATTEMPTS}"
+if [[ "${attempt}" -le "${FAKE_COSIGN_FAILURES:-0}" ]]; then
+  echo "simulated cosign failure ${attempt}" >&2
+  exit 1
+fi
+bundle=""
+while [[ "$#" -gt 0 ]]; do
+  if [[ "$1" == "--bundle" ]]; then bundle="${2:-}"; fi
+  shift
+done
+if [[ -z "${bundle}" ]]; then
+  echo "cosign invoked without --bundle" >&2
+  exit 2
+fi
+printf '{}\n' > "${bundle}"
+`
+
+const noopSleep = `#!/usr/bin/env bash
+exit 0
 `
 
 const fakeTimeout = `#!/usr/bin/env bash

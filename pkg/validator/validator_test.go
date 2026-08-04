@@ -20,11 +20,13 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
@@ -302,6 +304,94 @@ func TestValidatePhaseNoCluster(t *testing.T) {
 	}
 }
 
+func TestValidatePhaseRunsReadinessPreflight(t *testing.T) {
+	// The per-phase SDK entry point must enforce the same readiness gate as
+	// ValidatePhases: a caller running a single phase must not be able to
+	// bypass the recipe's readiness constraints (e.g. the GKE device-plugin
+	// ownership check, issue #1755). Runs in no-cluster mode — readiness is
+	// evaluated inline before the no-cluster short-circuit.
+	v := New(
+		WithVersion("1.0.0"),
+		WithNoCluster(true),
+	)
+
+	rec := &recipe.RecipeResult{
+		Constraints: []recipe.Constraint{
+			{Name: "K8s.server.version", Value: ">= 99.0"},
+		},
+	}
+	snap := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeK8s,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "server",
+						Data: map[string]measurement.Reading{
+							"version": measurement.Str("v1.30.0"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.ValidatePhase(context.Background(), PhaseDeployment, v1.ToValidationInput(rec), snap)
+	if err == nil {
+		t.Fatal("ValidatePhase() = nil error, want readiness failure")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+}
+
+func TestValidatePhasesRunsReadinessPreflight(t *testing.T) {
+	// The plural entry point is the DEFAULT client validate path
+	// (pkg/client/v1/aicr.go routes full-phase validation through
+	// ValidatePhases), so its readiness gate needs its own pin: a regression
+	// that reorders checkReadiness below the NoCluster short-circuit would
+	// pass every singular-path test while silently fail-opening the primary
+	// path — the exact #1755 failure this gate exists to prevent. Uses a
+	// non-nil snapshot so the gate must actually evaluate the constraint
+	// rather than fail on snapshot absence.
+	v := New(
+		WithVersion("1.0.0"),
+		WithNoCluster(true),
+	)
+
+	rec := &recipe.RecipeResult{
+		Constraints: []recipe.Constraint{
+			{Name: "K8s.server.version", Value: ">= 99.0"},
+		},
+	}
+	snap := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeK8s,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "server",
+						Data: map[string]measurement.Reading{
+							"version": measurement.Str("v1.30.0"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := v.ValidatePhases(context.Background(), nil, v1.ToValidationInput(rec), snap)
+	if err == nil {
+		t.Fatal("ValidatePhases() = nil error, want readiness failure")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+	if results != nil {
+		t.Errorf("PhaseResults = %v, want nil: no phase may run after a readiness failure", results)
+	}
+}
+
 func TestCheckReadinessNilInputs(t *testing.T) {
 	tests := []struct {
 		name string
@@ -319,6 +409,24 @@ func TestCheckReadinessNilInputs(t *testing.T) {
 				t.Errorf("checkReadiness() = %v, want nil", err)
 			}
 		})
+	}
+}
+
+func TestCheckReadinessNilSnapshotWithConstraintsFailsClosed(t *testing.T) {
+	// Declared readiness constraints with no snapshot must error, not
+	// silently skip — a direct SDK caller passing a nil snapshot must not
+	// bypass the gate.
+	rec := &recipe.RecipeResult{
+		Constraints: []recipe.Constraint{
+			{Name: "K8s.server.version", Value: ">= 1.28"},
+		},
+	}
+	err := checkReadiness(v1.ToValidationInput(rec), nil)
+	if err == nil {
+		t.Fatal("checkReadiness() = nil, want error for declared constraints without a snapshot")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
 
@@ -347,6 +455,95 @@ func TestCheckReadinessUnparseableConstraintFailsClosed(t *testing.T) {
 	validationInput := v1.ToValidationInput(rec)
 	if err := checkReadiness(validationInput, snap); err == nil {
 		t.Errorf("checkReadiness() = nil, want error for unevaluable constraint")
+	}
+}
+
+func TestCheckReadinessEvaluatesReadinessPhaseConstraints(t *testing.T) {
+	// validation.readiness.constraints must be evaluated by the pre-flight
+	// gate alongside the top-level constraint set (issue #1755): they exist
+	// for gates that must fail `aicr validate` closed without participating
+	// in generation-time overlay filtering. The failure message must carry
+	// the constraint's remediation so the operator gets the diagnostic.
+	snap := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeK8s,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "server",
+						Data: map[string]measurement.Reading{
+							"version": measurement.Str("v1.30.0"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	passC := recipe.Constraint{Name: "K8s.server.version", Value: ">= 1.28"}
+	failC := recipe.Constraint{
+		Name:        "K8s.server.version",
+		Value:       ">= 99.0",
+		Remediation: "upgrade the control plane",
+	}
+
+	tests := []struct {
+		name      string
+		topLevel  []recipe.Constraint
+		readiness []recipe.Constraint
+		wantErr   bool
+		wantIn    string // substring the error must carry; "" skips
+	}{
+		{
+			name:      "failing readiness-phase constraint carries remediation",
+			readiness: []recipe.Constraint{failC},
+			wantErr:   true,
+			wantIn:    "upgrade the control plane",
+		},
+		{
+			name:      "passing readiness-phase constraint",
+			readiness: []recipe.Constraint{passC},
+		},
+		{
+			name:      "passing top-level with failing readiness-phase",
+			topLevel:  []recipe.Constraint{passC},
+			readiness: []recipe.Constraint{failC},
+			wantErr:   true,
+			wantIn:    "upgrade the control plane",
+		},
+		{
+			name:      "passing top-level with passing readiness-phase",
+			topLevel:  []recipe.Constraint{passC},
+			readiness: []recipe.Constraint{passC},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &recipe.RecipeResult{
+				Constraints: tt.topLevel,
+				Validation: &recipe.ValidationConfig{
+					Readiness: &recipe.ValidationPhase{Constraints: tt.readiness},
+				},
+			}
+			vi := v1.ToValidationInput(rec)
+			topBefore := len(vi.Constraints)
+
+			err := checkReadiness(vi, snap)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkReadiness() = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantIn != "" && !strings.Contains(err.Error(), tt.wantIn) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantIn)
+			}
+			// The combined evaluation must not grow the input's top-level
+			// slice: ToValidationInput aliases the recipe's Constraints, so
+			// an aliasing append would write readiness constraints into the
+			// caller's recipe (the capped append in checkReadiness prevents
+			// this).
+			if len(vi.Constraints) != topBefore {
+				t.Errorf("checkReadiness mutated Constraints: len %d -> %d", topBefore, len(vi.Constraints))
+			}
+		})
 	}
 }
 
