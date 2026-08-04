@@ -406,10 +406,17 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request, v2 b
 			if err != nil {
 				break
 			}
-		} else if _, supplied := r.URL.Query()[keyProfile]; supplied {
-			err = aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-				"profile selection is available only on /v2/query")
-			break
+		} else {
+			if _, supplied := r.URL.Query()[keyProfile]; supplied {
+				err = aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					"profile selection is available only on /v2/query")
+				break
+			}
+			if !r.URL.Query().Has("selector") {
+				err = aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					"selector is required on /v1/query")
+				break
+			}
 		}
 		criteria, err = recipe.ParseCriteriaFromRequest(r, h.client.CriteriaRegistry())
 		if !v2 {
