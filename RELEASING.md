@@ -182,7 +182,7 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
 | `deployment` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Deployment validator |
 | `performance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Performance validator |
 | `conformance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Conformance validator |
-| `aiperf-bench` | `python:3.12-slim` | AIPerf benchmark runner |
+| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.0.8` | AIPerf benchmark runner (built from `python:3.13-slim`) |
 
 Stable releases promote `vX.Y.Z` and `latest`; prereleases promote their
 `vX.Y.Z-rcN` version tags but never `latest`. The release workflow also retains
