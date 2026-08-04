@@ -106,14 +106,21 @@ jobs:
       AWS_REGION: "us-east-1"
       GITHUB_ACTIONS_ROLE_NAME: "github-actions-role-aicr"
       # Cluster name (EKS actuator derives it from .deployment.id). The nightly
-      # per-run lifecycle uses a run-scoped name for per-run OCI/state isolation;
-      # the daytime lifecycles use a STABLE, reservation-tagged name so the
-      # evening teardown (daytime-down) and the nightly pre-batch guard can find
-      # the held cluster. Reservation names are lowercase alnum+hyphen, so the
-      # derived name is a valid EKS cluster name.
+      # per-run lifecycle uses a run-scoped name for per-run OCI/state isolation.
+      # daytime-up uses an EPHEMERAL, reservation-scoped name — the stable prefix
+      # aicr-uat-day-<reservation>- with the up-run's id appended — so a re-provision
+      # never reuses a name the previous teardown just deleted (which collides with
+      # cloud deletion tombstones and stale terraform-state locks). Discovery is
+      # name-free: the pre-batch guard and daytime-down both scan the stable prefix
+      # (the actuator derives the name AND its TF-state key from .deployment.id, so
+      # recovering the name recovers everything teardown needs). daytime-down has no
+      # static name here — it resolves the concrete cluster at runtime (see the
+      # "Resolve daytime cluster to tear down" step) and overrides DEPLOYMENT_ID.
+      # Reservation names are lowercase alnum+hyphen, so the derived name is a valid
+      # EKS cluster name.
       DEPLOYMENT_ID: >-
-        ${{ (inputs.lifecycle == 'daytime-up' || inputs.lifecycle == 'daytime-down')
-        && format('aicr-uat-day-{0}', inputs.reservation)
+        ${{ inputs.lifecycle == 'daytime-up'
+        && format('aicr-uat-day-{0}-{1}', inputs.reservation, github.run_id)
         || format('aicr-uat-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
       # The AICRConfig is selected by accelerator + intent
@@ -343,39 +350,87 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-UAT-AICR
 
-      # Pre-batch guard (#1275, DC2). The nightly lifecycle refuses to provision
-      # into a reservation that still holds an un-torn-down daytime cluster:
-      # a missed evening teardown must surface as a BLOCKED batch, not as silent
-      # contention with the daytime deployment. Detect by the stable daytime
-      # cluster name (aicr-uat-day-<reservation>); we already hold the
-      # reservation lease (uat-run.yaml) and are authenticated to the cloud, so
-      # this runs before Bringup and fails fast rather than racing. Only the
-      # nightly lifecycle guards — daytime-up creates that cluster, daytime-down
-      # removes it.
+      # Pre-batch guard (#1275, DC2). A provisioning run refuses to provision into
+      # a reservation that still holds an un-torn-down daytime cluster: a missed
+      # evening teardown must surface as a BLOCKED run, not as silent contention
+      # with the daytime deployment (or a second, stacked daytime cluster).
+      #
+      # daytime clusters are now EPHEMERALLY named (aicr-uat-day-<reservation>-<id>),
+      # so this detects them by the stable, reservation-scoped PREFIX rather than a
+      # reconstructed exact name — nothing in the system can name a held cluster
+      # again, so a prefix scan is the only name-free way to find it. Both the
+      # nightly batch AND daytime-up guard: daytime-up must refuse if a prior day's
+      # cluster leaked (the reservation cannot host two, and unique names would
+      # otherwise let them stack). daytime-up's OWN cluster does not exist yet (it
+      # is provisioned after this step), so only a leaked prior cluster matches.
+      # We already hold the reservation lease (uat-run.yaml) and are authenticated,
+      # so this runs before Bringup and fails fast rather than racing.
       - name: Pre-batch guard — refuse if a daytime cluster still holds the reservation
         id: guard
-        if: inputs.lifecycle == 'nightly'
+        if: inputs.lifecycle == 'nightly' || inputs.lifecycle == 'daytime-up'
+        env:
+          RESERVATION: ${{ inputs.reservation }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+        run: |
+          set -euo pipefail
+          PREFIX="aicr-uat-day-${RESERVATION}-"
+          set +e
+          OUT=$(aws eks list-clusters --region "${AWS_REGION}" --query "clusters[]" --output text 2>&1)
+          RC=$?
+          set -e
+          # Fail closed on a list error: a throttle/auth failure must not be read
+          # as "no daytime cluster, clear to proceed".
+          if [[ ${RC} -ne 0 ]]; then
+            echo "::error::could not list clusters to determine daytime-cluster state for reservation ${RESERVATION}: ${OUT}"
+            exit 1
+          fi
+          HELD=$(printf '%s\n' "${OUT}" | tr '\t' '\n' | grep "^${PREFIX}[0-9]" || true)
+          if [[ -n "${HELD}" ]]; then
+            echo "::error::a daytime cluster still holds reservation ${RESERVATION}; refusing (lifecycle=${LIFECYCLE})."
+            echo "::error::tear it down first: gh workflow run uat-run.yaml -f reservation=${RESERVATION} -f lifecycle=daytime-down"
+            while IFS= read -r c; do
+              [[ -z "${c}" ]] && continue
+              echo "::error::  held: ${c}"
+            done <<<"${HELD}"
+            exit 1
+          fi
+          echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
+
+      # Resolve the ephemeral daytime cluster this daytime-down run must tear down.
+      # daytime-up names it aicr-uat-day-<reservation>-<up-run-id>, so this evening
+      # run (a different run id) cannot reconstruct the name — it discovers it by
+      # the stable, reservation-scoped prefix (name-free, exactly like the guard).
+      # The resolved name is exported to DEPLOYMENT_ID so the unconditional Update
+      # Config step writes it into the cluster-config and the always()-run teardown
+      # steps (creds refresh, LB cleanup, Destroy) target it — the actuator derives
+      # both the cluster name and its TF-state key from .deployment.id, so the
+      # discovered name is all teardown needs. Runs before Update Config.
+      #   0 matches → benign no-op (already gone / never provisioned); teardown skips.
+      #   1 match   → the normal case; export it.
+      #   >1        → a broken invariant (the guard refuses a second daytime-up while
+      #               one is held); fail loud rather than silently tear down one.
+      - name: Resolve daytime cluster to tear down
+        if: inputs.lifecycle == 'daytime-down'
         env:
           RESERVATION: ${{ inputs.reservation }}
         run: |
           set -euo pipefail
-          DAYTIME_NAME="aicr-uat-day-${RESERVATION}"
-          set +e
-          OUT=$(aws eks describe-cluster --name "${DAYTIME_NAME}" --region "${AWS_REGION}" 2>&1)
-          RC=$?
-          set -e
-          if [[ ${RC} -eq 0 ]]; then
-            echo "::error::daytime cluster ${DAYTIME_NAME} still holds reservation ${RESERVATION}; refusing to start the nightly batch. Tear it down first (uat-run lifecycle=daytime-down)."
+          PREFIX="aicr-uat-day-${RESERVATION}-"
+          OUT=$(aws eks list-clusters --region "${AWS_REGION}" --query "clusters[]" --output text)
+          mapfile -t held < <(printf '%s\n' "${OUT}" | tr '\t' '\n' | grep "^${PREFIX}[0-9]" || true)
+          if [[ "${#held[@]}" -eq 0 ]]; then
+            echo "no ${PREFIX}* cluster found; nothing to tear down (already gone or never provisioned)."
+            echo "DAYTIME_FOUND=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [[ "${#held[@]}" -gt 1 ]]; then
+            echo "::error::expected at most one daytime cluster for ${RESERVATION} but found ${#held[@]}: ${held[*]}"
+            echo "::error::the pre-batch guard should prevent this; tear each down manually and investigate the leak."
             exit 1
           fi
-          # Fail closed on anything that is NOT a definitive "does not exist":
-          # a throttle/auth error must not be read as "clear to proceed".
-          if grep -q 'ResourceNotFoundException' <<<"${OUT}"; then
-            echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
-          else
-            echo "::error::could not determine daytime-cluster state for ${DAYTIME_NAME}: ${OUT}"
-            exit 1
-          fi
+          echo "daytime cluster to tear down: ${held[0]}"
+          echo "DEPLOYMENT_ID=${held[0]}" >> "$GITHUB_ENV"
+          echo "DAYTIME_FOUND=true" >> "$GITHUB_ENV"
 
       # Post-lease capacity assertion (#1275, DC2). The reservation lease
       # (uat-run.yaml) is now the contention gate, so this is no longer a
@@ -821,7 +876,7 @@ jobs:
       - name: Refresh AWS credentials for teardown
         if: >-
           always() && (
-            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
             (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
           )
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
@@ -843,7 +898,7 @@ jobs:
       - name: Delete LoadBalancer Services (pre-teardown)
         if: >-
           always() && (
-            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
             (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
           )
         # Bounded so a hung API server (or many LB Services) can never starve the
@@ -883,7 +938,7 @@ jobs:
       - name: Destroy Cluster
         if: >-
           always() && (
-            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
             (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
           )
         shell: bash

@@ -7,11 +7,11 @@
 Each reserved GPU pool follows a daily cycle, with every phase acquiring the *same* per-reservation lease so CI and human use never overlap on one reservation:
 
 - **Night — the nightly batch.** On a cron, `uat-nightly-batch.yaml` runs the [version matrix](#the-version-matrix) per reservation — `main` plus the previous N stable releases — each cell a full provision → CUJ → evidence → publish → teardown (for `intent=inference` the CUJ serve step is wired but not executed pending #1644 — those cells run provision → install → validate/conformance → verify → teardown). This is the `lifecycle=nightly` mode: provision-and-destroy under a run-scoped cluster name.
-- **Morning — handoff.** Once the batch drains a reservation, the [daytime human-access deployment](#daytime-human-access-deployment) is stood up on it with `lifecycle=daytime-up`: provision, deploy the stack, and **hold** (no teardown) under a stable, reservation-tagged cluster name. The `uat-daytime.yaml` scheduler fires this on a morning cron for every reservation in the daytime rotation. DC2 owns the provision-and-hold mechanic; DC8 (`uat-daytime.yaml`) owns *which* flavor lands on *which* cloud and how access is shared.
+- **Morning — handoff.** Once the batch drains a reservation, the [daytime human-access deployment](#daytime-human-access-deployment) is stood up on it with `lifecycle=daytime-up`: provision, deploy the stack, and **hold** (no teardown) under an ephemeral, reservation-scoped cluster name (`aicr-uat-day-<reservation>-<run-id>`) — unique per provision, so a re-provision never reuses the name the previous evening's teardown just deleted (which collides with cloud deletion tombstones and stale terraform-state locks). The `uat-daytime.yaml` scheduler fires this on a morning cron for every reservation in the daytime rotation. DC2 owns the provision-and-hold mechanic; DC8 (`uat-daytime.yaml`) owns *which* flavor lands on *which* cloud and how access is shared.
 - **Day — human use.** The daytime cluster is used outside CI — humans reach it [out-of-band](#daytime-human-access-deployment), never through the CI path.
 - **Evening — teardown.** `uat-daytime.yaml` fires `lifecycle=daytime-down` on an evening cron to tear the daytime cluster down and release the reservation **before** the next night batch.
 
-The phases are independently scheduled (cron edges), not chained: the per-reservation lease — plus a [pre-batch guard](#pre-batch-guard) — keeps them from overlapping, so a crashed or overrunning phase never orphans the reservation. A hosted GitHub Actions job is capped at the runner's timeout (hours, not a whole working day), so a single lease-holding run cannot span the day; the lease only needs to cover the brief transition windows, and the steady-state daytime cluster's existence is tracked by its stable, reservation-tagged name rather than a continuously held run.
+The phases are independently scheduled (cron edges), not chained: the per-reservation lease — plus a [pre-batch guard](#pre-batch-guard) — keeps them from overlapping, so a crashed or overrunning phase never orphans the reservation. A hosted GitHub Actions job is capped at the runner's timeout (hours, not a whole working day), so a single lease-holding run cannot span the day; the lease only needs to cover the brief transition windows, and the steady-state daytime cluster's existence is tracked by its reservation-scoped name **prefix** (`aicr-uat-day-<reservation>-*`, discovered by a list-and-match scan) rather than a continuously held run.
 
 > What ships today is the **night side** (the nightly batch), the **lease + dispatch surface** every phase builds on, DC2's **per-intent selection**, **daytime provision-and-hold / teardown mechanics**, and **pre-batch guard**, DC8's **day side** — the `uat-daytime.yaml` scheduler that stands up one human-facing deployment per cloud each morning and tears it down each evening, and DC3's **served-inference CUJ** — the `phase_serve` step of an `intent=inference` run (deploy a `DynamoGraphDeployment`, hit its OpenAI-compatible endpoint, assert a completion); the `phase_serve` runner source ships and is intent-selected, but the workflow step is currently disabled in both cloud pipelines pending #1644, so automated runs validate the inference platform without executing the serving CUJ.
 
@@ -90,11 +90,11 @@ The `lifecycle` input selects one of three cluster lifecycles, all sharing the r
 
 | Lifecycle | Cluster name | Provisions | Deploys | CUJ | Teardown at job end |
 |-----------|--------------|-----------|---------|-----|---------------------|
-| `nightly` (default) | `aicr-uat-<run_id>` (AWS) / `aicr-<run_id>` (GCP) — run-scoped | yes | yes | yes (prep→install→validate→train\|serve→verify; the serve step is disabled pending #1644) | yes (unless `skip_delete`) |
-| `daytime-up` | `aicr-uat-day-<reservation>` (AWS) / `aicr-day-<reservation>` (GCP) — **stable** | yes | yes (prep→install) | no | **no — holds** |
-| `daytime-down` | same stable name | no | no | no | yes (tears down the held cluster) |
+| `nightly` (default) | `aicr-uat-<run_id>` — run-scoped | yes | yes | yes (prep→install→validate→train\|serve→verify; the serve step is disabled pending #1644) | yes (unless `skip_delete`) |
+| `daytime-up` | `aicr-uat-day-<reservation>-<run_id>` — **ephemeral** | yes | yes (prep→install) | no | **no — holds** |
+| `daytime-down` | *discovered* by the `aicr-uat-day-<reservation>-` prefix | no | no | no | yes (tears down the discovered cluster) |
 
-The nightly per-run name isolates concurrent history (OCI tags, Terraform state) per run. The daytime name is **stable and reservation-tagged** so the evening `daytime-down` teardown and the nightly pre-batch guard can find the held cluster without tracking a run id. `skip_delete` is a nightly-only debugging escape and is ignored by the daytime lifecycles.
+Names use the **same `aicr-uat-` scheme on all three platforms** (matching the committed `id: aicr-uat` in each `cluster-config.yaml`), so a name is platform-independent. The nightly per-run name isolates concurrent history (OCI tags, Terraform state) per run. The daytime name is **ephemeral** — a stable, reservation-scoped prefix with the up-run's id appended — so a re-provision never reuses the name the previous teardown just deleted (cloud deletion tombstones and stale terraform-state locks make same-name reuse flaky). Because the name is no longer reconstructable from the reservation alone, the evening `daytime-down` and the pre-batch guard find the held cluster by **scanning the prefix** (`list-clusters`/`az aks list`/`clusters list` + match), the same name-free discovery the guard already uses for run-scoped clusters. The actuator derives the cluster name, resource group, and terraform-state key all from `.deployment.id`, so recovering the name recovers everything teardown needs. `skip_delete` is a nightly-only debugging escape and is ignored by the daytime lifecycles.
 
 ## Daytime human-access deployment
 
@@ -137,14 +137,18 @@ The teardown is not the only safety net. If a `daytime-down` is skipped or fails
 
 ### Reaching the daytime cluster
 
-Access is **out-of-band by design**: nothing here routes a kubeconfig or endpoint URL through the CI path, the evidence bundle, or the dashboard. Instead, the cluster's stable name is public knowledge and access is gated by **cloud IAM** on the daytime cluster — so an authorized operator mints their own kubeconfig directly and no credential ever transits CI:
+Access is **out-of-band by design**: nothing here routes a kubeconfig or endpoint URL through the CI path, the evidence bundle, or the dashboard. Access is gated by **cloud IAM** on the daytime cluster — so an authorized operator mints their own kubeconfig directly and no credential ever transits CI. Because the daytime cluster is now ephemerally named, first **discover** it by its reservation-scoped prefix, then bind to the discovered name:
 
 ```bash
-# AWS — training cluster (aicr-uat-day-aws-h100)
-aws eks update-kubeconfig --region us-east-1 --name aicr-uat-day-aws-h100
+# AWS — training cluster (prefix aicr-uat-day-aws-h100-)
+name=$(aws eks list-clusters --region us-east-1 --query "clusters[]" --output text \
+  | tr '\t' '\n' | grep '^aicr-uat-day-aws-h100-')
+aws eks update-kubeconfig --region us-east-1 --name "$name"
 
-# GCP — inference cluster (aicr-day-gcp-h100)
-gcloud container clusters get-credentials aicr-day-gcp-h100 --region <region>
+# GCP — inference cluster (prefix aicr-uat-day-gcp-h100-)
+name=$(gcloud container clusters list --project eidosx --format='value(name)' \
+  | grep '^aicr-uat-day-gcp-h100-')
+gcloud container clusters get-credentials "$name" --region <region> --project eidosx
 ```
 
 **Training (AWS).** Submit Kubeflow `TrainJob`s against the held cluster — the same CUJ the nightly `intent=training` run exercises (see `demos/cuj1-training.md`).
@@ -163,7 +167,7 @@ On the held daytime cluster this served workload is a one-command manual apply (
 
 ## Pre-batch guard
 
-A missed evening teardown must surface as a **blocked batch, never as silent contention** with the still-running daytime deployment. Before it provisions, every `nightly` run asserts that no daytime cluster (by the stable `aicr-uat-day-<reservation>` / `aicr-day-<reservation>` name) is still up on the target reservation. The check runs *after* the run has acquired the reservation lease and authenticated to the cloud, and *before* Bringup — so it fails fast rather than racing. It fails **closed**: only a definitive "cluster does not exist" (AWS `ResourceNotFoundException`, GCP `code=404`) clears the run to proceed; a throttle or auth error blocks the batch rather than being read as "clear."
+A missed evening teardown must surface as a **blocked run, never as silent contention** with the still-running daytime deployment. Before it provisions, every `nightly` **and** `daytime-up` run asserts that no daytime cluster is still up on the target reservation — `daytime-up` guards too, because with ephemeral names a leaked prior cluster would otherwise let a second daytime cluster stack on a reservation that can host only one. Detection is a **prefix scan** (`aicr-uat-day-<reservation>-*`, the same scheme on every platform): the held cluster's exact name is no longer reconstructable, so the guard lists clusters and matches the reservation-scoped prefix. The check runs *after* the run has acquired the reservation lease and authenticated to the cloud, and *before* Bringup — so it fails fast rather than racing. It fails **closed**: a `list-clusters` throttle or auth error blocks the run rather than being read as "no daytime cluster, clear to proceed." If it trips, the error names the held cluster(s) and the exact `lifecycle=daytime-down` reclaim command.
 
 If the guard trips, tear the daytime cluster down with `lifecycle=daytime-down` (which releases the reservation), then re-run the batch.
 
