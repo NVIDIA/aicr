@@ -838,7 +838,7 @@ github.com/sigstore/sigstore-go/pkg/verify
 # github.com/sigstore/sigstore/pkg/signature/kms/aws v1.10.8
 ## explicit; go 1.25.0
 github.com/sigstore/sigstore/pkg/signature/kms/aws
-# github.com/sigstore/sigstore/pkg/signature/kms/azure v1.10.8
+# github.com/sigstore/sigstore/pkg/signature/kms/azure v1.10.9
 ## explicit; go 1.25.0
 github.com/sigstore/sigstore/pkg/signature/kms/azure
 # github.com/sigstore/sigstore/pkg/signature/kms/gcp v1.10.8
@@ -1077,7 +1077,7 @@ google.golang.org/api/transport/http
 ## explicit; go 1.25.8
 google.golang.org/genproto/googleapis/cloud/location
 google.golang.org/genproto/googleapis/type/expr
-# google.golang.org/genproto/googleapis/api v0.0.0-20260720211330-0afa2a65878a
+# google.golang.org/genproto/googleapis/api v0.0.0-20260727163830-6c54dddc4772
 ## explicit; go 1.25.0
 google.golang.org/genproto/googleapis/api
 google.golang.org/genproto/googleapis/api/annotations
