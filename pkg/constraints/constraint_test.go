@@ -15,7 +15,10 @@
 package constraints
 
 import (
+	stderrors "errors"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestParseConstraintExpression(t *testing.T) {
@@ -27,6 +30,7 @@ func TestParseConstraintExpression(t *testing.T) {
 		wantOp      Operator
 		wantValue   string
 		expectError bool
+		wantErrCode errors.ErrorCode
 	}{
 		// Comparison operators
 		{name: "greater or equal", expression: ">= 1.32.4", wantOp: OperatorGTE, wantValue: "1.32.4"},
@@ -53,6 +57,8 @@ func TestParseConstraintExpression(t *testing.T) {
 		{name: "no space with ne", expression: "!=rhel", wantOp: OperatorNE, wantValue: "rhel"},
 
 		// Error cases
+		{name: "bare bang label key", expression: "!some-label-key", expectError: true, wantErrCode: errors.ErrCodeInvalidRequest},
+		{name: "bare bang scalar", expression: "!ubuntu", expectError: true, wantErrCode: errors.ErrCodeInvalidRequest},
 		{name: "empty expression", expression: "", expectError: true},
 		{name: "only spaces", expression: "   ", expectError: true},
 		{name: "operator without value", expression: ">=", expectError: true},
@@ -66,6 +72,10 @@ func TestParseConstraintExpression(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error, got nil")
+					return
+				}
+				if tt.wantErrCode != "" && !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+					t.Errorf("error = %v, want code %s", err, tt.wantErrCode)
 				}
 				return
 			}
