@@ -151,15 +151,19 @@ The teardown is not the only safety net. If a `daytime-down` is skipped or fails
 Access is **out-of-band by design**: nothing here routes a kubeconfig or endpoint URL through the CI path, the evidence bundle, or the dashboard. Access is gated by **cloud IAM** on the daytime cluster — so an authorized operator mints their own kubeconfig directly and no credential ever transits CI. Because the daytime cluster is now ephemerally named, first **discover** it by its reservation-scoped prefix, then bind to the discovered name:
 
 ```bash
+# Expect exactly one match — zero means no cluster is held (nothing to reach),
+# and more than one means a leak the pre-batch guard should have caught.
+one() { [ "$(printf '%s' "$1" | grep -c .)" -eq 1 ] || { echo "expected exactly one daytime cluster, got: ${1:-<none>}" >&2; return 1; }; }
+
 # AWS — training cluster (prefix aicr-uat-day-aws-h100-)
 name=$(aws eks list-clusters --region us-east-1 --query "clusters[]" --output text \
   | tr '\t' '\n' | grep '^aicr-uat-day-aws-h100-')
-aws eks update-kubeconfig --region us-east-1 --name "$name"
+one "$name" && aws eks update-kubeconfig --region us-east-1 --name "$name"
 
 # GCP — inference cluster (prefix aicr-uat-day-gcp-h100-)
 name=$(gcloud container clusters list --project eidosx --format='value(name)' \
   | grep '^aicr-uat-day-gcp-h100-')
-gcloud container clusters get-credentials "$name" --region <region> --project eidosx
+one "$name" && gcloud container clusters get-credentials "$name" --region us-central1 --project eidosx
 ```
 
 **Training (AWS).** Submit Kubeflow `TrainJob`s against the held cluster — the same CUJ the nightly `intent=training` run exercises (see `demos/cuj1-training.md`).
