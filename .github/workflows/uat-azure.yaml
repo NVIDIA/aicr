@@ -387,7 +387,7 @@ jobs:
             fi
             echo "cluster listing attempt ${attempt} failed (rc=${RC}): ${OUT}"
             if [[ ${attempt} -lt 3 ]]; then
-              sleep $((attempt * 10))
+              sleep 15
             fi
           done
           if [[ ${RC} -ne 0 ]]; then
