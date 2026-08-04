@@ -100,6 +100,14 @@ export AICR_SIGNER="https://github.com/NVIDIA/aicr/.github/workflows/attest-imag
 Then one command per kind:
 
 ```shell
+# Extract under pipefail, and only write a predicate file once the whole
+# pipeline has succeeded. Both halves are needed: `jq` exits 0 on empty input,
+# so without pipefail a failed `cosign verify-attestation` still ends the
+# pipeline with status 0, and the shell truncates a `>` target before cosign
+# ever runs, so a plain redirect would leave a zero-length file that reads as a
+# successful extraction.
+set -o pipefail
+
 # 1. Build provenance (index digest)
 gh attestation verify "oci://${IMAGE}@${DIGEST}" \
   --repo NVIDIA/aicr \
@@ -108,18 +116,20 @@ gh attestation verify "oci://${IMAGE}@${DIGEST}" \
   --bundle-from-oci
 
 # 2. SPDX SBOM for one platform (per-platform manifest digest)
-cosign verify-attestation --type spdxjson \
+sbom_amd64=$(cosign verify-attestation --type spdxjson \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
   "${IMAGE}@${DIGEST_AMD64}" \
-  | jq -r '.payload' | base64 -d | jq '.predicate' > sbom-linux-amd64.spdx.json
+  | jq -r '.payload' | base64 -d | jq '.predicate') \
+  && printf '%s\n' "${sbom_amd64}" > sbom-linux-amd64.spdx.json
 
 # 3. OpenVEX vulnerability triage (index digest)
-cosign verify-attestation --type openvex \
+openvex=$(cosign verify-attestation --type openvex \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
   "${IMAGE}@${DIGEST}" \
-  | jq -r '.payload' | base64 -d | jq '.predicate' > aicr-openvex.json
+  | jq -r '.payload' | base64 -d | jq '.predicate') \
+  && printf '%s\n' "${openvex}" > aicr-openvex.json
 ```
 
 Each of the seven released images (`aicr`, `aicrd`, `aicr-gate`, and the four
@@ -342,16 +352,22 @@ multi-platform index digest. Resolve the platform digest with
 before verifying.
 
 ```shell
+# pipefail plus the deferred write, for the reason given under
+# Unified Metadata Retrieval: a failed verification must not leave an empty
+# sbom.json behind.
+set -o pipefail
+
 # Resolve from the pinned index (${DIGEST_API}), never from the mutable tag.
 export DIGEST_API_AMD64=$(crane digest --platform linux/amd64 "${IMAGE_API}@${DIGEST_API}")
 
 # Method 1: Using Cosign (extracts attestation) - uses the per-platform digest
-cosign verify-attestation \
+sbom=$(cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   ${IMAGE_API}@${DIGEST_API_AMD64} | \
-  jq -r '.payload' | base64 -d | jq '.predicate' > sbom.json
+  jq -r '.payload' | base64 -d | jq '.predicate') \
+  && printf '%s\n' "${sbom}" > sbom.json
 
 # Method 2: GitHub CLI (build provenance only; the SPDX SBOM needs Method 1's Cosign flow).
 # Without --bundle-from-oci this reads GitHub's attestations API, not the registry referrer.
@@ -426,6 +442,11 @@ gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-work
 **Method 2: Cosign (SBOM and VEX attestations)**
 
 ```shell
+# pipefail plus the deferred write, for the reason given under
+# Unified Metadata Retrieval: a failed verification must not leave an empty
+# predicate file behind.
+set -o pipefail
+
 # Verify the SBOM attestation on a per-platform manifest digest,
 # resolved from the pinned index rather than from the mutable tag.
 export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
@@ -443,11 +464,12 @@ cosign verify-attestation \
   ${IMAGE}@${DIGEST_AMD64} | jq -r '.payload' | base64 -d | jq '.predicate'
 
 # Verify the OpenVEX attestation on the index digest
-cosign verify-attestation \
+openvex=$(cosign verify-attestation \
   --type openvex \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
-  ${IMAGE_DIGEST} | jq -r '.payload' | base64 -d | jq '.predicate' > aicr-openvex.json
+  ${IMAGE_DIGEST} | jq -r '.payload' | base64 -d | jq '.predicate') \
+  && printf '%s\n' "${openvex}" > aicr-openvex.json
 ```
 
 ### CLI binary attestation

@@ -15,6 +15,7 @@
 package releasepolicy
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -431,6 +433,180 @@ func TestReleaseSbomAttestInputValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// openVEXContext is the OpenVEX namespace the sbom-and-attest guard pins. It is
+// asserted against the step's own env binding so a version bump has to move
+// both the guard and this test, and with them the enum tables below.
+const openVEXContext = "https://openvex.dev/ns/v0.2.0"
+
+// TestReleaseOpenVEXValidation exercises the sbom-and-attest guard that stands
+// between `.openvex.json` and a published VEX attestation. The step runs after
+// image promotion, so it validates in jq rather than fetching a schema; these
+// cases are what stands in for the schema. A document that reaches
+// `cosign attest` malformed produces an attestation no scanner can apply, and
+// the shapes that pass a naive presence check (an empty `statements` array, a
+// `{}` statement, a `not_affected` statement with no reason) are exactly the
+// ones that look healthy until a downstream consumer tries to use them.
+func TestReleaseOpenVEXValidation(t *testing.T) {
+	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
+	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
+	index := stepIndex(steps, "Verify OpenVEX document")
+	if index < 0 {
+		t.Fatal("sbom-and-attest must verify the OpenVEX document before attesting it")
+	}
+	step := steps[index].(map[string]any)
+	script := stringValue(t, step, "run")
+	if got := fmt.Sprint(mapValue(t, step, "env")["VEX_CONTEXT"]); got != openVEXContext {
+		t.Fatalf("VEX_CONTEXT = %q, want %q", got, openVEXContext)
+	}
+
+	const validStatement = `{"vulnerability": {"name": "CVE-2026-0001"},
+		"products": [{"@id": "pkg:oci/aicr", "identifiers": {"purl": "pkg:oci/aicr"}}],
+		"status": "not_affected", "justification": "component_not_present"}`
+	document := func(statements string) string {
+		return `{"@context": "` + openVEXContext + `", "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
+			"author": "NVIDIA AICR maintainers", "timestamp": "2026-08-04T00:00:00Z", "version": 1,
+			"statements": [` + statements + `]}`
+	}
+
+	tests := []struct {
+		name     string
+		document string
+		wantErr  string
+	}{
+		{name: "a complete document is accepted", document: document(validStatement)},
+		{
+			name:     "missing document metadata",
+			document: `{"statements": [` + validStatement + `]}`,
+			wantErr:  "@id must be a non-empty string",
+		},
+		{
+			name: "downgraded context",
+			document: `{"@context": "https://openvex.dev/ns/v0.0.1", "@id": "urn:x", "author": "a",
+				"timestamp": "2026-08-04T00:00:00Z", "version": 1, "statements": [` + validStatement + `]}`,
+			wantErr: "@context must be " + openVEXContext,
+		},
+		{
+			name:     "non-numeric version",
+			document: strings.Replace(document(validStatement), `"version": 1`, `"version": "1"`, 1),
+			wantErr:  "version must be a number",
+		},
+		{name: "empty statements", document: document(""), wantErr: "statements must not be empty"},
+		{
+			name:     "statement with no fields",
+			document: document(`{}`),
+			wantErr:  "statement 0 must set vulnerability.name to a non-empty string",
+		},
+		{
+			name:     "statement without products",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"}, "status": "fixed"}`),
+			wantErr:  "statement 0 must list at least one product",
+		},
+		{
+			name: "product without an identifier",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"}, "products": [{}],
+				"status": "fixed"}`),
+			wantErr: "statement 0 has a product with neither @id nor identifiers.purl",
+		},
+		{
+			name:     "status outside the enum",
+			document: strings.Replace(document(validStatement), `"not_affected"`, `"probably_fine"`, 1),
+			wantErr:  "statement 0 status \"probably_fine\" is not one of",
+		},
+		{
+			name: "not_affected without a justification or an impact statement",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"},
+				"products": [{"@id": "pkg:oci/aicr"}], "status": "not_affected"}`),
+			wantErr: "statement 0 is not_affected and must carry a justification or an impact_statement",
+		},
+		{
+			name: "not_affected with only an impact statement is accepted",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"},
+				"products": [{"@id": "pkg:oci/aicr"}], "status": "not_affected",
+				"impact_statement": "the vulnerable entry point is compiled out"}`),
+		},
+		{
+			name:     "justification outside the enum",
+			document: strings.Replace(document(validStatement), `"component_not_present"`, `"seems_unlikely"`, 1),
+			wantErr:  "statement 0 justification \"seems_unlikely\" is not one of",
+		},
+		{
+			name: "affected without an action statement",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"},
+				"products": [{"@id": "pkg:oci/aicr"}], "status": "affected"}`),
+			wantErr: "statement 0 is affected and must carry an action_statement",
+		},
+		{
+			name:     "statements holding a scalar",
+			document: document(`"CVE-2026-0001"`),
+			wantErr:  "statement 0 must be a JSON object",
+		},
+		{name: "document that is not an object", document: `[]`, wantErr: "statements must be an array"},
+		{name: "document that is not JSON", document: `{`, wantErr: "not valid JSON"},
+		{name: "empty document", document: "", wantErr: "not found or empty"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			vex := filepath.Join(workspace, ".openvex.json")
+			if err := os.WriteFile(vex, []byte(tc.document), 0o600); err != nil {
+				t.Fatalf("write OpenVEX fixture: %v", err)
+			}
+			output, result := runOpenVEXGuard(t, script, workspace)
+			if (result != nil) != (tc.wantErr != "") {
+				t.Fatalf("guard error = %v, wantErr %q\n%s", result, tc.wantErr, output)
+			}
+			if tc.wantErr != "" {
+				if !strings.Contains(output, tc.wantErr) {
+					t.Errorf("guard output = %q, want it to report %q", output, tc.wantErr)
+				}
+				return
+			}
+			if !strings.Contains(output, "file="+vex) {
+				t.Errorf("accepted document did not publish the file output: %q", output)
+			}
+		})
+	}
+
+	// The shipped document has to survive the guard it is published through.
+	// A release cannot be the first place this is discovered.
+	t.Run("the committed .openvex.json is valid", func(t *testing.T) {
+		workspace := t.TempDir()
+		committed := readFile(t, ".openvex.json")
+		if err := os.WriteFile(filepath.Join(workspace, ".openvex.json"), committed, 0o600); err != nil {
+			t.Fatalf("stage the committed OpenVEX document: %v", err)
+		}
+		output, err := runOpenVEXGuard(t, script, workspace)
+		if err != nil {
+			t.Fatalf(".openvex.json fails the release guard: %v\n%s", err, output)
+		}
+	})
+}
+
+// runOpenVEXGuard executes the extracted guard against a workspace holding a
+// candidate `.openvex.json`, returning the combined step output (its ::error::
+// annotations and the GITHUB_OUTPUT contents) alongside the exit status.
+func runOpenVEXGuard(t *testing.T, script, workspace string) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	outputs := filepath.Join(t.TempDir(), "outputs")
+	command := exec.CommandContext(ctx, "bash", "-c", script)
+	command.Env = append(os.Environ(),
+		"GITHUB_WORKSPACE="+workspace,
+		"GITHUB_OUTPUT="+outputs,
+		"VEX_CONTEXT="+openVEXContext,
+	)
+	combined, err := command.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("OpenVEX guard exceeded test deadline: %v\n%s", ctx.Err(), combined)
+	}
+	written, readErr := os.ReadFile(outputs)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("read step outputs: %v", readErr)
+	}
+	return string(combined) + string(written), err
 }
 
 // fakePlatformCrane answers `crane digest --platform <platform> <ref>` from a

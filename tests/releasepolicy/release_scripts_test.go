@@ -165,6 +165,8 @@ func TestReleaseSbomSignaturesAreAllowlisted(t *testing.T) {
 // allowlist rather than a copy of it.
 func shellReleaseAssetNames(t *testing.T, tag string) []string {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	text := string(readFile(t, ".github/scripts/release-images.sh"))
 	const marker = "expected_release_asset_names() {"
 	start := strings.Index(text, marker)
@@ -177,9 +179,12 @@ func shellReleaseAssetNames(t *testing.T, tag string) []string {
 		t.Fatal("expected_release_asset_names has no closing brace")
 	}
 	script := text[start:start+end+len(terminator)] + "\nexpected_release_asset_names\n"
-	command := exec.Command("bash", "-c", script)
+	command := exec.CommandContext(ctx, "bash", "-c", script)
 	command.Env = append(os.Environ(), "RELEASE_TAG="+tag)
 	output, err := command.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("evaluate expected_release_asset_names exceeded test deadline: %v\n%s", ctx.Err(), output)
+	}
 	if err != nil {
 		t.Fatalf("evaluate expected_release_asset_names: %v\n%s", err, output)
 	}

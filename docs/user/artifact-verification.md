@@ -33,6 +33,13 @@ SBOM per platform, and an OpenVEX document recording the CVEs AICR has triaged
 as not affected. One command per kind:
 
 ```shell
+# Extract under pipefail, and only write a predicate file once the whole
+# pipeline has succeeded. `jq` exits 0 on empty input, so without pipefail a
+# failed `cosign verify-attestation` would still end the pipeline with status 0,
+# and a plain `>` redirect would leave a zero-length file that reads as a
+# successful extraction.
+set -o pipefail
+
 export IMAGE="ghcr.io/nvidia/aicr"
 export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")
@@ -50,16 +57,18 @@ gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr \
   --bundle-from-oci
 
 # SPDX SBOM (attached to the per-platform manifest digest)
-cosign verify-attestation --type spdxjson \
+sbom=$(cosign verify-attestation --type spdxjson \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
-  "${IMAGE}@${DIGEST_AMD64}" | jq -r '.payload' | base64 -d | jq '.predicate' > sbom.spdx.json
+  "${IMAGE}@${DIGEST_AMD64}" | jq -r '.payload' | base64 -d | jq '.predicate') \
+  && printf '%s\n' "${sbom}" > sbom.spdx.json
 
 # OpenVEX triage document (attached to the index digest)
-cosign verify-attestation --type openvex \
+openvex=$(cosign verify-attestation --type openvex \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
-  "${IMAGE}@${DIGEST}" | jq -r '.payload' | base64 -d | jq '.predicate' > aicr-openvex.json
+  "${IMAGE}@${DIGEST}" | jq -r '.payload' | base64 -d | jq '.predicate') \
+  && printf '%s\n' "${openvex}" > aicr-openvex.json
 ```
 
 `--bundle-from-oci` makes `gh attestation verify` read the provenance from the
