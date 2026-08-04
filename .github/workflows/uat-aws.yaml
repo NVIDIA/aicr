@@ -891,6 +891,14 @@ jobs:
           set -euo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
+          # NOTE: unlike the GCP and Azure teardowns, there is deliberately no
+          # stale-lock break here. The EKS actuator's S3 backend runs WITHOUT
+          # state locking — its `terraform init -backend-config` passes only
+          # bucket/key/region/prefix/encrypt (no `dynamodb_table`, no
+          # `use_lockfile`), so a cancel mid-bringup cannot orphan a lock that
+          # would block this destroy. If the actuator ever adds S3-native
+          # locking (a `<key>.tflock` object) or a DynamoDB lock table, add the
+          # equivalent best-effort break here (see uat-gcp.yaml / uat-azure.yaml).
           destroyed=false
           attempts=3
           for attempt in 1 2 3; do

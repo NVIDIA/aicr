@@ -689,9 +689,41 @@ jobs:
           set -euo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
+          # Break any orphaned Terraform state lock before each destroy attempt.
+          # The GCS backend takes a lock (default.tflock) for the duration of the
+          # Bringup apply; a run cancelled mid-bringup SIGKILLs that apply before
+          # Terraform can release it, orphaning the lock. Every destroy attempt
+          # then fails identically with HTTP 412 (conditionNotMet), so the retry
+          # loop cannot recover — the GPU node leaks. This always()-gated step
+          # runs only after the Bringup container has already exited, so any lock
+          # present has no live holder and is safe to remove. The teardown SA
+          # owns the state bucket (it writes state via the actuator), so the
+          # delete is authorized.
+          #
+          # Only a genuinely-absent object is the happy path (the apply released
+          # its lock). Every other failure — auth, permission, network, wrong
+          # URI — is reported as a warning rather than collapsed into "no lock",
+          # and is retried by virtue of running inside the destroy loop. It is
+          # deliberately not fatal: aborting here would skip the destroy
+          # entirely and guarantee the leak this step exists to prevent, so the
+          # loop's terminal `exit 1` stays the gate on a real teardown failure.
+          LOCK_URI="gs://cluster-state-${GCP_PROJECT_ID}/deployments/${GCP_REGION}/${DEPLOYMENT_ID}/default.tflock"
+          break_stale_state_lock() {
+            local err rc
+            echo "Clearing any stale Terraform state lock at ${LOCK_URI}"
+            err="$(gcloud storage rm "${LOCK_URI}" 2>&1 >/dev/null)" && rc=0 || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "removed stale state lock"
+            elif printf '%s' "$err" | grep -qiE 'matched no object|not found|notfound|404|does not exist'; then
+              echo "no stale state lock to remove (expected on the happy path)"
+            else
+              echo "::warning::stale state-lock cleanup failed (rc=${rc}); a held lock will block this destroy: ${err}"
+            fi
+          }
           destroyed=false
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
+            break_stale_state_lock
             if /usr/bin/docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \

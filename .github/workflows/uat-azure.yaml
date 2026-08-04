@@ -885,12 +885,82 @@ jobs:
           set -euxo pipefail
           yq -i '.deployment.id = strenv(DEPLOYMENT_ID) | .deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
+          # Break any orphaned Terraform state-blob lease before each destroy
+          # attempt. The azurerm backend holds an INFINITE lease on the state
+          # blob for the duration of the Bringup apply; a run cancelled
+          # mid-bringup SIGKILLs that apply before Terraform can release it,
+          # leaving the lease held. Every destroy attempt then fails to acquire
+          # the state lock and the retry loop cannot recover — the GPU node
+          # leaks. This always()-gated step runs only after the Bringup
+          # container has exited, so the lease has no live holder and is safe to
+          # break. State layout (infra/uat-azure-account): RG cluster-state-rg,
+          # account clst<sub-hex> (discovered — the setup tool derives the hex),
+          # container tfstate, blob deployments/<location>/<id>/terraform.tfstate.
+          #
+          # Auth is the account key, handed to `az` through AZURE_STORAGE_KEY
+          # rather than --account-key so it never appears in argv (which is
+          # world-readable via /proc/<pid>/cmdline), with xtrace off across the
+          # whole helper so it cannot reach the build log either. `--auth-mode
+          # login` is not an option: the pipeline identity holds subscription
+          # Contributor, which grants listKeys but no data-plane blob role, and
+          # the ABAC condition on its RBAC Administrator grant permits exactly
+          # three role definitions — none of them a Storage Blob Data role — so
+          # it cannot self-assign one (infra/uat-azure-account/README.md). Key
+          # auth is also how the actuator's own azurerm backend reaches this
+          # same blob.
+          #
+          # Only "no lease held" (and a state blob that was never written) is
+          # the happy path. Account lookup, key retrieval, and lease-break
+          # failures are reported as warnings instead of being swallowed by
+          # `|| true`, and are retried by virtue of running inside the destroy
+          # loop. Deliberately not fatal: aborting here would skip the destroy
+          # entirely and guarantee the leak this step exists to prevent, so the
+          # loop's terminal `exit 1` stays the gate on a real teardown failure.
+          STATE_RG="cluster-state-rg"
+          STATE_LOCATION="$(yq -r '.deployment.location' "$CLUSTER_CONFIG")"
+          STATE_BLOB="deployments/${STATE_LOCATION}/${DEPLOYMENT_ID}/terraform.tfstate"
+          break_stale_state_lease() {
+            local errf sa key rc
+            errf="$(mktemp)"
+            sa="$(az storage account list -g "$STATE_RG" --subscription "$AZURE_SUBSCRIPTION_ID" --query "[?starts_with(name, 'clst')].name | [0]" -o tsv 2>"$errf")" && rc=0 || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::warning::state storage account lookup failed (rc=${rc}); cannot clear a stale state-blob lease: $(cat "$errf")"
+              rm -f "$errf"
+              return 0
+            fi
+            if [ -z "$sa" ]; then
+              echo "::warning::no clst* state storage account under ${STATE_RG}; cannot clear a stale state-blob lease"
+              rm -f "$errf"
+              return 0
+            fi
+            key="$(az storage account keys list -g "$STATE_RG" -n "$sa" --subscription "$AZURE_SUBSCRIPTION_ID" --query '[0].value' -o tsv 2>"$errf")" && rc=0 || rc=$?
+            if [ "$rc" -ne 0 ] || [ -z "$key" ]; then
+              echo "::warning::state storage account key retrieval failed (rc=${rc}); cannot clear a stale state-blob lease: $(cat "$errf")"
+              rm -f "$errf"
+              return 0
+            fi
+            echo "Clearing any stale Terraform state-blob lease: ${sa}/tfstate/${STATE_BLOB}"
+            AZURE_STORAGE_ACCOUNT="$sa" AZURE_STORAGE_KEY="$key" \
+              az storage blob lease break --account-name "$sa" \
+                --container-name tfstate --blob-name "$STATE_BLOB" >/dev/null 2>"$errf" && rc=0 || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "broke stale state-blob lease"
+            elif grep -qiE 'LeaseNotPresent|there is currently no lease|BlobNotFound|does not exist' "$errf"; then
+              echo "no stale state-blob lease to break (expected on the happy path)"
+            else
+              echo "::warning::state-blob lease break failed (rc=${rc}); a held lease will block this destroy: $(cat "$errf")"
+            fi
+            rm -f "$errf"
+          }
           # Same writable-copy mount as Bringup Infra (container uid cannot
           # write a directly-mounted ~/.azure). Fresh copy per attempt so a
           # partially-mutated context cannot poison the retries.
           destroyed=false
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
+            set +x  # keep the storage account key out of the xtrace log
+            break_stale_state_lease
+            set -x
             AZ_MOUNT=$(mktemp -d)
             cp -a "$HOME/.azure/." "$AZ_MOUNT/"
             chmod -R a+rwX "$AZ_MOUNT"
