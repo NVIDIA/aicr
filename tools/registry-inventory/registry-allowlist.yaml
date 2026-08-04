@@ -1,0 +1,50 @@
+# Approved egress hosts for AICR builds & CI.
+#
+# This is the drift gate for tools/registry-inventory:
+# TestRegistryHostsWithinAllowlist (and `make registry-check`) fail when a
+# structured build/CI source introduces a registry/package host not listed here.
+# Adding a host is a deliberate, reviewable act (and this file is CODEOWNER-gated
+# to a maintainer) — if a PR trips the gate, either pin the dependency to an
+# approved host or add the new host below with justification.
+#
+# Scope: the structured sources this tool parses — recipes/registry.yaml,
+# .settings.yaml, .goreleaser.yaml/.ko.yaml, Dockerfiles, .github Actions
+# `uses:`, AND tool-download hosts in tools/setup-tools whose URL is a literal
+# (the shell-installer section below). NOT gated: shell-download URLs built from
+# variables (reported as warnings), rendered Helm-chart images (owned by
+# tools/bom), and Go Sigstore endpoint constants — see the tool's
+# "uncoveredSources" output.
+#
+# "github-actions" is the single logical host for all marketplace `uses:` refs;
+# per-action pin quality is asserted separately by TestExternalActionsArePinned,
+# but a new action OWNER is not host-gated (an acknowledged gap; see
+# uncoveredSources).
+hosts:
+  # --- container images, Helm charts, GitHub Actions (structured sources) ---
+  - aws.github.io                    # eks-charts (aws-efa) Helm repo
+  - charts.jetstack.io               # cert-manager Helm repo
+  - cr.agentgateway.dev              # agentgateway OCI Helm charts
+  - docker.gitea.com                 # gitea image (KWOK flux/argocd git lanes)
+  - docker.io                        # kindest/node, busybox, golang, python, openbao, ministack, ...
+  - ghcr.io                          # AICR images (push) + OCI Helm charts + third-party CI images
+  - github-actions                   # GitHub Actions marketplace (uses: refs)
+  - helm.ngc.nvidia.com              # NVIDIA NGC Helm (gpu-operator, network-operator, nim, dynamo)
+  - jmcgrath207.github.io            # k8s-ephemeral-storage-metrics Helm repo
+  - kubernetes-sigs.github.io        # node-feature-discovery, aws-ebs-csi-driver Helm repos
+  - nvcr.io                          # distroless/static base image (compiled-in)
+  - nvidia.github.io                 # topograph Helm repo
+  - open-policy-agent.github.io      # gatekeeper Helm repo
+  - prometheus-community.github.io   # kube-prometheus-stack, adapter, operator-crds Helm repos
+  - public.ecr.aws                   # in-cluster registry image (KWOK)
+  - registry.k8s.io                  # dra-driver, kueue OCI Helm charts
+  # --- dev/CI tool installers (tools/setup-tools; best-effort shell pass) ---
+  - github.com                       # tool release-asset tarballs (ko, chainsaw, flux, yq, ...)
+  - raw.githubusercontent.com        # install scripts (grype @main, golangci-lint @version)
+  - get.helm.sh                      # helm binary
+  - dl.k8s.io                        # kubectl binary
+  - kind.sigs.k8s.io                 # kind binary
+  - proxy.golang.org                 # `go install` module proxy (ctlptl, goreleaser, addlicense, go-licenses)
+  - sum.golang.org                   # `go install` checksum db (contacted alongside the proxy)
+  - pypi.org                         # pip (awscli, yamllint)
+  - apt                              # symbolic: distro apt mirror set (python3-venv)
+  - homebrew                         # symbolic: Homebrew bottle infra (macOS dev path)
