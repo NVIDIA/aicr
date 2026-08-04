@@ -203,7 +203,6 @@ paths:
                     kind: RecipeResult
                     metadata:
                       version: v1.0.0
-                      created: "2025-01-15T10:30:00Z"
                       appliedOverlays:
                         - base
                         - eks
@@ -1690,7 +1689,6 @@ paths:
                   kind: RecipeResult
                   metadata:
                     version: v1.0.0
-                    created: "2025-01-15T10:30:00Z"
                     appliedOverlays:
                       - base
                       - eks
@@ -2464,10 +2462,6 @@ components:
               type: string
               description: Recipe version
               example: v1.0.0
-            created:
-              type: string
-              format: date-time
-              description: Recipe creation timestamp
             appliedOverlays:
               type: array
               items:

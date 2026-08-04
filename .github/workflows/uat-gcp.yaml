@@ -234,7 +234,7 @@ jobs:
           GO_VERSION="$(cat .go-version)"
           # CHAINSAW_* args dropped in #1236 — the deployment validator
           # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
-          # Test format in-process via validators/chainsaw/inprocess.go.
+          # Test format in-process via pkg/chainsaw/inprocess.go.
           #
           # aiperf-bench is an ancillary (non-Go) validator image the
           # performance phase's inference-perf check pulls at runtime, resolved
