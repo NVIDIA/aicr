@@ -941,6 +941,27 @@ The same assertion file now powers TWO surfaces:
    vs `[expectedResources]` so operators can disambiguate when both
    paths report on the same component.
 
+Only surface 1 still needs the `chainsaw` binary, and only on the
+developer's machine — that is why `.settings.yaml` keeps the
+`testing_tools.chainsaw` pin and `tools/update-chainsaw-checksums`.
+
+The **readiness gate** (`cmd/gate`, image `ghcr.io/nvidia/aicr-gate`,
+emitted by `aicr bundle --readiness-hooks`) is a third consumer of the
+same executor. It shelled out to an embedded `chainsaw` binary until
+PR #2038 removed it; that binary was the gate image's only source of
+HIGH CVEs and upstream ships no release that fixes them. It calls `chainsaw.Run`
+against a dynamic client built from the Job's read-only ServiceAccount,
+so `pkg/chainsaw` is the single assertion engine for validator and gate
+alike. The gate's `--namespace` flag survives as the default namespace
+for resource blocks that omit one (`defaultNamespaceFetcher` in
+`pkg/chainsawgate/runner`), preserving what `chainsaw --namespace` did.
+
+A Test that declares no `assert`/`error` operation is rejected rather
+than passing vacuously (#2040); a check that is intentionally a no-op —
+today the three `*-ocp-olm` components, whose readiness is enforced by
+the bundler's `--readiness-hooks` gate instead — must say so with the
+`aicr/no-op-check: "true"` annotation on the Test.
+
 **Registration.** A component opts in by declaring
 `healthCheck.assertFile` in `recipes/registry.yaml`:
 

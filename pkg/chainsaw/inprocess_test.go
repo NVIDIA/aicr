@@ -22,6 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kyverno/chainsaw/pkg/apis/v1alpha1"
+	"sigs.k8s.io/yaml"
+
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -303,12 +306,50 @@ spec:
 // fixture produces Passed=true) is the load-bearing live-cluster
 // validation step.
 func TestRunChainsawTestInProcess_RegistryCorpusParses(t *testing.T) {
+	for _, c := range registryTestFormatChecks(t) {
+		// Short ctx so retry loops short-circuit. The empty fake
+		// fetcher makes every assert fail (NotFound), which would
+		// otherwise wait out the YAML's 5m assert timeout.
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		r := runChainsawTestInProcess(ctx, c.component, c.content, 5*time.Minute, newFakeFetcher())
+		cancel()
+		// We don't assert r.Passed; we assert no parse / schema
+		// rejection. ErrCodeInvalidRequest indicates a YAML / Test
+		// schema bug (the parity claim); any other code is the
+		// expected assertion-against-empty-fetcher failure.
+		if r.Error != nil {
+			var se *errors.StructuredError
+			if !stderrors.As(r.Error, &se) {
+				t.Errorf("%s: unexpected non-structured error: %T %v", c.component, r.Error, r.Error)
+				continue
+			}
+			if se.Code == errors.ErrCodeInvalidRequest {
+				t.Errorf("%s: parse/schema rejection: %v", c.component, r.Error)
+			}
+		}
+	}
+}
+
+// registryCheck is one in-tree health check the registry walkers yield.
+type registryCheck struct {
+	component string
+	content   string
+}
+
+// registryTestFormatChecks reads every recipes/checks/*/health-check.yaml that
+// IsChainsawTest recognizes. It fails the test when the walk yields nothing:
+// a registry walker that silently matches zero files turns every test built on
+// it into a vacuous pass — the exact failure mode #2040 is about.
+func registryTestFormatChecks(t *testing.T) []registryCheck {
+	t.Helper()
+
 	root := filepath.Join("..", "..", "recipes", "checks")
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatalf("read recipes/checks: %v", err)
 	}
-	parsed := 0
+
+	var checks []registryCheck
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -324,30 +365,480 @@ func TestRunChainsawTestInProcess_RegistryCorpusParses(t *testing.T) {
 		if !IsChainsawTest(string(data)) {
 			continue
 		}
-		// Short ctx so retry loops short-circuit. The empty fake
-		// fetcher makes every assert fail (NotFound), which would
-		// otherwise wait out the YAML's 5m assert timeout.
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		r := runChainsawTestInProcess(ctx, e.Name(), string(data), 5*time.Minute, newFakeFetcher())
-		cancel()
-		// We don't assert r.Passed; we assert no parse / schema
-		// rejection. ErrCodeInvalidRequest indicates a YAML / Test
-		// schema bug (the parity claim); any other code is the
-		// expected assertion-against-empty-fetcher failure.
-		if r.Error != nil {
+		checks = append(checks, registryCheck{component: e.Name(), content: string(data)})
+	}
+
+	if len(checks) == 0 {
+		t.Fatal("no Test-format checks were exercised — registry walker is broken")
+	}
+	return checks
+}
+
+// TestEvaluateAssert_ListSkipsGhosts covers #2041: the positive list-match
+// path must skip Terminating / NodeLost resources the same way the negative
+// path does. A positive assertion satisfied by a resource on its way out
+// reports the component ready on state that is about to vanish — a false
+// PASS. When filtering leaves nothing live, the verdict must be
+// ErrCodeNotFound (so the absent-resource grace still bounds the retry), not
+// a pass and not ErrCodeInternal (which latches the grace off).
+func TestEvaluateAssert_ListSkipsGhosts(t *testing.T) {
+	t.Parallel()
+
+	assertRunningPod := func() *v1alpha1.Assert {
+		var a v1alpha1.Assert
+		const spec = `
+resource:
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    namespace: ns
+    labels:
+      app: foo
+  status:
+    phase: Running
+`
+		if err := yaml.Unmarshal([]byte(spec), &a); err != nil {
+			t.Fatalf("unmarshal assert: %v", err)
+		}
+		return &a
+	}
+	labels := map[string]any{"app": "foo"}
+
+	tests := []struct {
+		name     string
+		items    []map[string]any
+		wantErr  bool
+		wantCode errors.ErrorCode
+	}{
+		{
+			name:    "live match passes",
+			items:   []map[string]any{pod("live", "Running", labels)},
+			wantErr: false,
+		},
+		{
+			name: "live match passes even when a ghost is present",
+			items: []map[string]any{
+				terminating(pod("ghost", "Running", labels)),
+				pod("live", "Running", labels),
+			},
+			wantErr: false,
+		},
+		{
+			name:     "terminating-only match does not satisfy the assert",
+			items:    []map[string]any{terminating(pod("ghost", "Running", labels))},
+			wantErr:  true,
+			wantCode: errors.ErrCodeNotFound,
+		},
+		{
+			name:     "node-lost-only match does not satisfy the assert",
+			items:    []map[string]any{nodeLost(pod("ghost", "Running", labels))},
+			wantErr:  true,
+			wantCode: errors.ErrCodeNotFound,
+		},
+		{
+			name: "all ghosts reports not-found rather than a shape mismatch",
+			items: []map[string]any{
+				terminating(pod("ghost-1", "Running", labels)),
+				nodeLost(pod("ghost-2", "Running", labels)),
+			},
+			wantErr:  true,
+			wantCode: errors.ErrCodeNotFound,
+		},
+		{
+			name:     "live non-matching item still reports the shape mismatch",
+			items:    []map[string]any{pod("live", "Pending", labels)},
+			wantErr:  true,
+			wantCode: errors.ErrCodeInternal,
+		},
+		{
+			// The mixed case decides whether the absent-resource grace
+			// latches off: resourceObservedErr keys on ErrCodeInternal, so a
+			// live mismatch alongside a ghost must still report the mismatch
+			// rather than collapsing to not-found.
+			name: "ghost alongside a live mismatch reports the mismatch",
+			items: []map[string]any{
+				terminating(pod("ghost", "Running", labels)),
+				pod("live", "Pending", labels),
+			},
+			wantErr:  true,
+			wantCode: errors.ErrCodeInternal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFakeFetcher()
+			f.addList("v1", "Pod", "ns", tt.items)
+
+			err := evaluateAssert(context.Background(), assertRunningPod(), f)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("evaluateAssert = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error, got nil (assert satisfied by a ghost)")
+			}
+			var se *errors.StructuredError
+			if !stderrors.As(err, &se) {
+				t.Fatalf("expected StructuredError, got %T %v", err, err)
+			}
+			if se.Code != tt.wantCode {
+				t.Errorf("code = %q, want %q (err=%v)", se.Code, tt.wantCode, err)
+			}
+		})
+	}
+}
+
+// TestEvaluate_NamedGetSkipsGhosts closes the symmetry gap the list-path ghost
+// filter left open: a named assert reached the resource through Fetch and never
+// consulted isTerminatingOrLost, so a Terminating pod (or one on a lost node)
+// that still carried the ready shape reported the component ready on state
+// about to disappear. The negative path gets the same filter, where it is the
+// safe false-FAIL direction, so the two paths agree.
+func TestEvaluate_NamedGetSkipsGhosts(t *testing.T) {
+	t.Parallel()
+
+	namedAssert := func(t *testing.T) *v1alpha1.Assert {
+		t.Helper()
+		var a v1alpha1.Assert
+		const spec = `
+resource:
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: p1
+    namespace: ns
+  status:
+    phase: Running
+`
+		if err := yaml.Unmarshal([]byte(spec), &a); err != nil {
+			t.Fatalf("unmarshal assert: %v", err)
+		}
+		return &a
+	}
+	namedError := func(t *testing.T) *v1alpha1.Error {
+		t.Helper()
+		var e v1alpha1.Error
+		const spec = `
+resource:
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: p1
+    namespace: ns
+  status:
+    phase: Running
+`
+		if err := yaml.Unmarshal([]byte(spec), &e); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		return &e
+	}
+
+	tests := []struct {
+		name string
+		obj  map[string]any
+		// assert expectations
+		assertErr  bool
+		assertCode errors.ErrorCode
+		// error-block expectation: does the negative assertion fire?
+		errorFires bool
+	}{
+		{
+			name:       "live matching pod satisfies assert and fires error",
+			obj:        pod("p1", "Running", nil),
+			assertErr:  false,
+			errorFires: true,
+		},
+		{
+			name:       "terminating pod satisfies neither",
+			obj:        terminating(pod("p1", "Running", nil)),
+			assertErr:  true,
+			assertCode: errors.ErrCodeNotFound,
+			errorFires: false,
+		},
+		{
+			name:       "node-lost pod satisfies neither",
+			obj:        nodeLost(pod("p1", "Running", nil)),
+			assertErr:  true,
+			assertCode: errors.ErrCodeNotFound,
+			errorFires: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFakeFetcher()
+			f.addGet("v1", "Pod", "ns", "p1", tt.obj)
+
+			err := evaluateAssert(context.Background(), namedAssert(t), f)
+			switch {
+			case tt.assertErr && err == nil:
+				t.Error("assert passed on a ghost")
+			case tt.assertErr && err != nil:
+				var se *errors.StructuredError
+				if !stderrors.As(err, &se) {
+					t.Fatalf("expected StructuredError, got %T %v", err, err)
+				}
+				if se.Code != tt.assertCode {
+					t.Errorf("assert code = %q, want %q (err=%v)", se.Code, tt.assertCode, err)
+				}
+			case !tt.assertErr && err != nil:
+				t.Errorf("assert failed unexpectedly: %v", err)
+			}
+
+			errErr := evaluateError(context.Background(), namedError(t), f)
+			if fired := errErr != nil; fired != tt.errorFires {
+				t.Errorf("error block fired = %v, want %v (err=%v)", fired, tt.errorFires, errErr)
+			}
+		})
+	}
+}
+
+// TestRunChainsawTestInProcess_NoExecutableOps covers #2040: a Test that
+// evaluates nothing must fail closed rather than report a healthy component,
+// unless it declares the no-op intentional. Before the guard, an empty
+// Spec.Steps fell straight through the step loop to Passed=true — so content
+// that lost its steps (a truncated ConfigMap value, bad templating, or raw
+// YAML misdispatched by the old substring detection) reported Pass without
+// asserting anything.
+func TestRunChainsawTestInProcess_NoExecutableOps(t *testing.T) {
+	t.Parallel()
+
+	const header = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: c-health
+`
+	tests := []struct {
+		name       string
+		yaml       string
+		wantPassed bool
+		wantCode   errors.ErrorCode
+	}{
+		{
+			name:       "empty step list is rejected",
+			yaml:       header + "spec:\n  steps: []\n",
+			wantPassed: false,
+			wantCode:   errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:       "no spec at all is rejected",
+			yaml:       header,
+			wantPassed: false,
+			wantCode:   errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "steps with an empty try list are rejected",
+			yaml: header + `spec:
+  steps:
+    - name: does-nothing
+      try: []
+`,
+			wantPassed: false,
+			wantCode:   errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "declared no-op passes",
+			yaml: `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: c-health
+  annotations:
+    aicr/no-op-check: "true"
+spec:
+  steps: []
+`,
+			wantPassed: true,
+		},
+		{
+			name: "annotation set to a value other than true does not opt out",
+			yaml: `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: c-health
+  annotations:
+    aicr/no-op-check: "false"
+spec:
+  steps: []
+`,
+			wantPassed: false,
+			wantCode:   errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "annotation does not excuse a Test that does carry ops",
+			yaml: `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: c-health
+  annotations:
+    aicr/no-op-check: "true"
+spec:
+  steps:
+    - name: assert-missing
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: absent
+                namespace: ns
+`,
+			wantPassed: false,
+			wantCode:   errors.ErrCodeNotFound,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			r := runChainsawTestInProcess(ctx, "c", tt.yaml, time.Second, newFakeFetcher())
+
+			if r.Passed != tt.wantPassed {
+				t.Fatalf("Passed = %v, want %v (err=%v)", r.Passed, tt.wantPassed, r.Error)
+			}
+			if tt.wantPassed {
+				if r.Error != nil {
+					t.Errorf("Error = %v, want nil", r.Error)
+				}
+				return
+			}
 			var se *errors.StructuredError
 			if !stderrors.As(r.Error, &se) {
-				t.Errorf("%s: unexpected non-structured error: %T %v", e.Name(), r.Error, r.Error)
-				continue
+				t.Fatalf("expected StructuredError, got %T %v", r.Error, r.Error)
 			}
-			if se.Code == errors.ErrCodeInvalidRequest {
-				t.Errorf("%s: parse/schema rejection: %v", e.Name(), r.Error)
+			if se.Code != tt.wantCode {
+				t.Errorf("code = %q, want %q (err=%v)", se.Code, tt.wantCode, r.Error)
+			}
+		})
+	}
+}
+
+// TestRunChainsawTestInProcess_RunsEveryDocument pins that a `---` stream is
+// executed in full. sigs.k8s.io/yaml.Unmarshal decodes only the FIRST document
+// — silently, without an error — so the executor used to evaluate document 1
+// and report Pass while every later document went unrun. A failing assertion
+// in document 2 behind a passing document 1 was therefore a false PASS, even
+// though ValidateTestReadOnly had always validated the whole stream.
+func TestRunChainsawTestInProcess_RunsEveryDocument(t *testing.T) {
+	t.Parallel()
+
+	doc := func(name, podName string) string {
+		return `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: ` + name + `
+spec:
+  timeouts:
+    assert: 100ms
+  steps:
+    - name: assert-` + podName + `
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: ` + podName + `
+                namespace: ns
+              status:
+                phase: Running
+`
+	}
+
+	tests := []struct {
+		name       string
+		stream     string
+		present    []string
+		wantPassed bool
+	}{
+		{
+			name:       "every document satisfied passes",
+			stream:     doc("first", "p1") + "---\n" + doc("second", "p2"),
+			present:    []string{"p1", "p2"},
+			wantPassed: true,
+		},
+		{
+			name:       "failing second document fails the component",
+			stream:     doc("first", "p1") + "---\n" + doc("second", "p2"),
+			present:    []string{"p1"},
+			wantPassed: false,
+		},
+		{
+			name:       "failing first document still fails",
+			stream:     doc("first", "p1") + "---\n" + doc("second", "p2"),
+			present:    []string{"p2"},
+			wantPassed: false,
+		},
+		{
+			// p2 IS present, so the second document would pass on its own.
+			// The only reason to fail is the empty first document, which
+			// makes this case discriminating: an executor that skipped
+			// document 1 (or applied the no-op rule stream-wide) would pass.
+			name:       "empty first document is rejected even when later documents pass",
+			stream:     "apiVersion: chainsaw.kyverno.io/v1alpha1\nkind: Test\nmetadata:\n  name: empty\nspec:\n  steps: []\n---\n" + doc("second", "p2"),
+			present:    []string{"p2"},
+			wantPassed: false,
+		},
+		{
+			// The same shape with the no-op intent declared on the empty
+			// document: the annotation excuses that document only, and the
+			// real one still runs.
+			name: "declared no-op document does not excuse its siblings",
+			stream: "apiVersion: chainsaw.kyverno.io/v1alpha1\nkind: Test\nmetadata:\n  name: empty\n" +
+				"  annotations:\n    aicr/no-op-check: \"true\"\nspec:\n  steps: []\n---\n" + doc("second", "p2"),
+			present:    []string{"p2"},
+			wantPassed: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFakeFetcher()
+			for _, name := range tt.present {
+				f.addGet("v1", "Pod", "ns", name, pod(name, "Running", nil))
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			r := runChainsawTestInProcess(ctx, "c", tt.stream, time.Second, f)
+			if r.Passed != tt.wantPassed {
+				t.Fatalf("Passed = %v, want %v (err=%v)", r.Passed, tt.wantPassed, r.Error)
+			}
+		})
+	}
+}
+
+// TestRegistryNoOpChecksDeclareIntent pins the registry side of #2040: a
+// health check that carries no assertions is only legitimate when it says so,
+// so the vacuous-pass guard cannot be silently re-broken by a check that
+// loses its steps.
+func TestRegistryNoOpChecksDeclareIntent(t *testing.T) {
+	t.Parallel()
+	for _, c := range registryTestFormatChecks(t) {
+		// decodeTests, not yaml.Unmarshal: the latter reads only the first
+		// document, so a check that grew a second empty document would slip
+		// past this guard — the same blind spot the executor had.
+		tests, err := decodeTests(c.content)
+		if err != nil {
+			t.Errorf("%s: decode: %v", c.component, err)
+			continue
+		}
+		if len(tests) == 0 {
+			t.Errorf("%s: no Test document decoded", c.component)
+			continue
+		}
+		for i := range tests {
+			if countExecutableOps(&tests[i]) == 0 && !isDeclaredNoOp(&tests[i]) {
+				t.Errorf("%s %s: check declares no assert/error operations and is not annotated %s: \"true\" — "+
+					"it would report healthy without evaluating anything",
+					c.component, testLabel(tests[i], i), noOpCheckAnnotation)
 			}
 		}
-		parsed++
-	}
-	if parsed == 0 {
-		t.Fatal("no Test-format checks were exercised — registry walker is broken")
 	}
 }
 

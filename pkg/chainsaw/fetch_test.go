@@ -17,8 +17,12 @@ package chainsaw
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -26,8 +30,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 // testMapper returns a RESTMapper that knows about the two GVKs the
@@ -285,6 +292,439 @@ func TestClusterFetcher_List_ErrorCodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestClusterFetcher_List_APIErrorCodes verifies List mirrors Fetch's mapping
+// of apiserver failures: a true 404 is ErrCodeNotFound, anything else is
+// ErrCodeUnavailable. Neither may be ErrCodeInternal — resourceObservedErr
+// keys on that code to latch off the absent-resource grace, so a transient
+// List failure carrying it would disable the fast-fail path for every
+// list-based assert (#2039).
+func TestClusterFetcher_List_APIErrorCodes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		reactorErr  error
+		wantErrCode errors.ErrorCode
+	}{
+		{
+			name:        "transient apiserver failure maps to ErrCodeUnavailable",
+			reactorErr:  apierrors.NewServiceUnavailable("apiserver down"),
+			wantErrCode: errors.ErrCodeUnavailable,
+		},
+		{
+			name:        "forbidden maps to ErrCodeUnavailable",
+			reactorErr:  apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "p1", stderrors.New("denied")),
+			wantErrCode: errors.ErrCodeUnavailable,
+		},
+		{
+			name:        "not found maps to ErrCodeNotFound",
+			reactorErr:  apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "p1"),
+			wantErrCode: errors.ErrCodeNotFound,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			scheme := runtime.NewScheme()
+			scheme.AddKnownTypeWithName(
+				schema.GroupVersionKind{Group: "", Version: "v1", Kind: "PodList"}, &unstructured.UnstructuredList{})
+			client := dynamicfake.NewSimpleDynamicClient(scheme)
+			client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, tt.reactorErr
+			})
+			f := NewClusterFetcher(client, testMapper())
+
+			_, err := f.List(context.Background(), "v1", "Pod", "ns", nil)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var se *errors.StructuredError
+			if !stderrors.As(err, &se) {
+				t.Fatalf("expected StructuredError, got %T %v", err, err)
+			}
+			if se.Code != tt.wantErrCode {
+				t.Errorf("code = %q, want %q (err=%v)", se.Code, tt.wantErrCode, err)
+			}
+			if resourceObservedErr(err) {
+				t.Errorf("resourceObservedErr = true for %v; a List failure must not latch the absent-resource grace", err)
+			}
+		})
+	}
+}
+
+// flakyMapper fails RESTMapping a configurable number of times before
+// delegating to a working mapper, and records how often Reset was called.
+type flakyMapper struct {
+	meta.RESTMapper
+	failures  int
+	err       error
+	resets    int
+	resetHeal bool // when true, Reset makes the next lookup succeed
+}
+
+func (m *flakyMapper) RESTMapping(gk schema.GroupKind, versions ...string) (*meta.RESTMapping, error) {
+	if m.failures > 0 {
+		m.failures--
+		return nil, m.err
+	}
+	return m.RESTMapper.RESTMapping(gk, versions...)
+}
+
+func (m *flakyMapper) Reset() {
+	m.resets++
+	if m.resetHeal {
+		m.failures = 0
+	}
+}
+
+// TestClusterFetcher_MappingErrorCodes is a fail-closed guard. A REST-mapping
+// failure used to be reported as ErrCodeNotFound regardless of cause — and
+// NotFound is the HAPPY path for a negative `error:` assertion, so a discovery
+// outage silently satisfied every negative health check. Only a genuine
+// no-match may be NotFound; anything else must be ErrCodeUnavailable.
+func TestClusterFetcher_MappingErrorCodes(t *testing.T) {
+	t.Parallel()
+
+	noMatch := &meta.NoKindMatchError{
+		GroupKind:        schema.GroupKind{Group: "nvidia.com", Kind: "ClusterPolicy"},
+		SearchedVersions: []string{"v1"},
+	}
+
+	tests := []struct {
+		name     string
+		mapErr   error
+		wantCode errors.ErrorCode
+	}{
+		{
+			name:     "genuine no-match is NotFound",
+			mapErr:   noMatch,
+			wantCode: errors.ErrCodeNotFound,
+		},
+		{
+			name:     "discovery outage is Unavailable, not NotFound",
+			mapErr:   stderrors.New("Get \"https://10.0.0.1:443/api\": dial tcp: i/o timeout"),
+			wantCode: errors.ErrCodeUnavailable,
+		},
+		{
+			name:     "forbidden discovery is Unavailable",
+			mapErr:   apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", stderrors.New("denied")),
+			wantCode: errors.ErrCodeUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			scheme := runtime.NewScheme()
+			scheme.AddKnownTypeWithName(
+				schema.GroupVersionKind{Group: "", Version: "v1", Kind: "PodList"}, &unstructured.UnstructuredList{})
+			client := dynamicfake.NewSimpleDynamicClient(scheme)
+			mapper := &flakyMapper{RESTMapper: testMapper(), failures: 99, err: tt.mapErr}
+			f := NewClusterFetcher(client, mapper)
+
+			for _, call := range []struct {
+				name string
+				run  func() error
+			}{
+				{"Fetch", func() error {
+					_, err := f.Fetch(context.Background(), "v1", "Pod", "ns", "p1")
+					return err
+				}},
+				{"List", func() error {
+					_, err := f.List(context.Background(), "v1", "Pod", "ns", nil)
+					return err
+				}},
+			} {
+				err := call.run()
+				if err == nil {
+					t.Fatalf("%s: expected error, got nil", call.name)
+				}
+				var se *errors.StructuredError
+				if !stderrors.As(err, &se) {
+					t.Fatalf("%s: expected StructuredError, got %T %v", call.name, err, err)
+				}
+				if se.Code != tt.wantCode {
+					t.Errorf("%s: code = %q, want %q (err=%v)", call.name, se.Code, tt.wantCode, err)
+				}
+			}
+		})
+	}
+}
+
+// TestClusterFetcher_MappingRefreshesOnNoMatch covers the stale-discovery case
+// that matters for the long-lived readiness gate: a CRD installed by the very
+// component being gated appears after the mapper's cache was populated. Without
+// a reset the gate reports "no such kind" until the process restarts.
+func TestClusterFetcher_MappingRefreshesOnNoMatch(t *testing.T) {
+	t.Parallel()
+
+	noMatch := &meta.NoKindMatchError{
+		GroupKind:        schema.GroupKind{Group: "", Kind: "Pod"},
+		SearchedVersions: []string{"v1"},
+	}
+
+	t.Run("no-match retries once against refreshed discovery", func(t *testing.T) {
+		t.Parallel()
+		scheme := runtime.NewScheme()
+		client := dynamicfake.NewSimpleDynamicClient(scheme, newPod("ns", "p1", nil))
+		mapper := &flakyMapper{RESTMapper: testMapper(), failures: 1, err: noMatch, resetHeal: true}
+		f := NewClusterFetcher(client, mapper)
+
+		if _, err := f.Fetch(context.Background(), "v1", "Pod", "ns", "p1"); err != nil {
+			t.Fatalf("Fetch after discovery refresh: %v", err)
+		}
+		if mapper.resets != 1 {
+			t.Errorf("Reset called %d times, want 1", mapper.resets)
+		}
+	})
+
+	t.Run("still-missing kind reports NotFound after one refresh", func(t *testing.T) {
+		t.Parallel()
+		scheme := runtime.NewScheme()
+		client := dynamicfake.NewSimpleDynamicClient(scheme)
+		mapper := &flakyMapper{RESTMapper: testMapper(), failures: 99, err: noMatch}
+		f := NewClusterFetcher(client, mapper)
+
+		_, err := f.Fetch(context.Background(), "v1", "Pod", "ns", "p1")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		var se *errors.StructuredError
+		if !stderrors.As(err, &se) || se.Code != errors.ErrCodeNotFound {
+			t.Errorf("err = %v, want ErrCodeNotFound", err)
+		}
+		if mapper.resets != 1 {
+			t.Errorf("Reset called %d times, want exactly 1", mapper.resets)
+		}
+	})
+
+	// A kind that never appears is retried every AssertRetryInterval for the
+	// whole assert window. Refreshing discovery on each of those retries would
+	// turn one missing CRD into a discovery storm, so the refresh is
+	// rate-limited.
+	t.Run("repeated no-match refreshes at most once per cooldown", func(t *testing.T) {
+		t.Parallel()
+		scheme := runtime.NewScheme()
+		client := dynamicfake.NewSimpleDynamicClient(scheme)
+		mapper := &flakyMapper{RESTMapper: testMapper(), failures: 99, err: noMatch}
+
+		clock := time.Now()
+		f := &clusterFetcher{client: client, mapper: mapper, now: func() time.Time { return clock }}
+
+		// Retries that all land inside a single cooldown window: the loop
+		// advances AssertRetryInterval (5s) per iteration and stops short of
+		// DiscoveryRefreshCooldown (60s), so exactly one refresh is allowed.
+		retries := int(defaults.DiscoveryRefreshCooldown / defaults.AssertRetryInterval)
+		for range retries {
+			_, _ = f.Fetch(context.Background(), "v1", "Pod", "ns", "p1")
+			clock = clock.Add(defaults.AssertRetryInterval)
+		}
+		if mapper.resets != 1 {
+			t.Errorf("Reset called %d times across %d retries inside one %v cooldown, want 1",
+				mapper.resets, retries, defaults.DiscoveryRefreshCooldown)
+		}
+
+		// Past the cooldown, a refresh is allowed again.
+		clock = clock.Add(defaults.DiscoveryRefreshCooldown)
+		_, _ = f.Fetch(context.Background(), "v1", "Pod", "ns", "p1")
+		if mapper.resets != 2 {
+			t.Errorf("Reset called %d times after the cooldown elapsed, want 2", mapper.resets)
+		}
+	})
+
+	// A caller denied a refresh by the cooldown must still re-read the mapper:
+	// a concurrent assertion may have just refreshed it, and concluding
+	// "absent" from an already-invalidated cache is the fail-open direction
+	// for a negative assertion.
+	t.Run("cooldown-denied caller still retries the lookup", func(t *testing.T) {
+		t.Parallel()
+		scheme := runtime.NewScheme()
+		client := dynamicfake.NewSimpleDynamicClient(scheme, newPod("ns", "p1", nil))
+		mapper := &flakyMapper{RESTMapper: testMapper(), failures: 1, err: noMatch}
+
+		clock := time.Now()
+		f := &clusterFetcher{client: client, mapper: mapper, now: func() time.Time { return clock }}
+		// Burn the cooldown so the next call is denied a reset.
+		f.lastReset = clock
+
+		if _, err := f.Fetch(context.Background(), "v1", "Pod", "ns", "p1"); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if mapper.resets != 0 {
+			t.Errorf("Reset called %d times, want 0 (cooldown active)", mapper.resets)
+		}
+	})
+}
+
+// TestClusterFetcher_PartialDiscoveryFailureIsUnavailable covers the narrower
+// fail-open path inside the no-match classification: client-go reports an
+// unreachable aggregated APIService as a NoKindMatchError wrapped in
+// ErrGroupDiscoveryFailed. Treating that as NotFound would let a down API group
+// satisfy every negative `error:` assertion.
+func TestClusterFetcher_PartialDiscoveryFailureIsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	groupErr := &discovery.ErrGroupDiscoveryFailed{
+		Groups: map[schema.GroupVersion]error{
+			{Group: "metrics.k8s.io", Version: "v1beta1"}: stderrors.New("the server is currently unable to handle the request"),
+		},
+	}
+
+	tests := []struct {
+		name     string
+		mapErr   error
+		wantCode errors.ErrorCode
+	}{
+		{
+			name:     "plain no-match stays NotFound",
+			mapErr:   &meta.NoKindMatchError{GroupKind: schema.GroupKind{Kind: "Pod"}, SearchedVersions: []string{"v1"}},
+			wantCode: errors.ErrCodeNotFound,
+		},
+		{
+			name:     "no-match caused by failed group discovery is Unavailable",
+			mapErr:   fmt.Errorf("%w: %w", groupErr, &meta.NoKindMatchError{GroupKind: schema.GroupKind{Kind: "Pod"}, SearchedVersions: []string{"v1"}}),
+			wantCode: errors.ErrCodeUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			scheme := runtime.NewScheme()
+			client := dynamicfake.NewSimpleDynamicClient(scheme)
+			mapper := &flakyMapper{RESTMapper: testMapper(), failures: 99, err: tt.mapErr}
+			f := NewClusterFetcher(client, mapper)
+
+			_, err := f.Fetch(context.Background(), "v1", "Pod", "ns", "p1")
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var se *errors.StructuredError
+			if !stderrors.As(err, &se) {
+				t.Fatalf("expected StructuredError, got %T %v", err, err)
+			}
+			if se.Code != tt.wantCode {
+				t.Errorf("code = %q, want %q (err=%v)", se.Code, tt.wantCode, err)
+			}
+		})
+	}
+}
+
+// TestNewClusterFetcherForConfig covers the client wiring shared by the
+// readiness gate (cmd/gate) and the deployment validator. Neither constructor
+// contacts the apiserver and discovery is deferred, so an unreachable host
+// still yields a usable fetcher; only a configuration client-go rejects at
+// transport construction fails.
+func TestNewClusterFetcherForConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		config     *rest.Config
+		wantErr    bool
+		wantErrMsg string
+		wantCode   errors.ErrorCode
+	}{
+		{
+			name:   "well-formed config yields a fetcher",
+			config: &rest.Config{Host: "https://127.0.0.1:6443"},
+		},
+		{
+			name:   "unreachable host still builds (discovery is deferred)",
+			config: &rest.Config{Host: "https://127.0.0.1:1"},
+		},
+		{
+			name:     "nil config is an invalid request",
+			config:   nil,
+			wantErr:  true,
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "conflicting auth strategies are rejected at transport construction",
+			config: &rest.Config{
+				Host: "https://127.0.0.1:6443",
+				// client-go rejects exactly this pair — see
+				// rest/transport.go: "execProvider and authProvider cannot
+				// be used in combination". BearerToken alongside either is
+				// NOT an error (BearerTokenFile simply takes precedence), so
+				// this is the only credential conflict worth pinning.
+				ExecProvider: &clientcmdapi.ExecConfig{
+					Command:    "true",
+					APIVersion: "client.authentication.k8s.io/v1",
+				},
+				AuthProvider: &clientcmdapi.AuthProviderConfig{Name: "gcp"},
+			},
+			wantErr:    true,
+			wantErrMsg: "execProvider and authProvider cannot be used in combination",
+			wantCode:   errors.ErrCodeInternal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := NewClusterFetcherForConfig(tt.config)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("NewClusterFetcherForConfig: %v", err)
+				}
+				if got == nil {
+					t.Error("fetcher is nil")
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var se *errors.StructuredError
+			if !stderrors.As(err, &se) {
+				t.Fatalf("expected StructuredError, got %T %v", err, err)
+			}
+			if se.Code != tt.wantCode {
+				t.Errorf("code = %q, want %q (err=%v)", se.Code, tt.wantCode, err)
+			}
+			if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.wantErrMsg)
+			}
+		})
+	}
+}
+
+// TestBoundedConfig pins the request bound applied to the fetcher's clients:
+// the RESTMapper's DiscoveryInterface calls take no context, so without this
+// they are governed only by client-go's own 32s discovery default — and the
+// dynamic client gets no client-level bound at all.
+func TestBoundedConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unset timeout is bounded", func(t *testing.T) {
+		t.Parallel()
+		in := &rest.Config{Host: "https://127.0.0.1:6443"}
+		got := boundedConfig(in)
+		if got.Timeout != defaults.K8sClientRequestTimeout {
+			t.Errorf("Timeout = %v, want %v", got.Timeout, defaults.K8sClientRequestTimeout)
+		}
+		if in.Timeout != 0 {
+			t.Errorf("caller config mutated: Timeout = %v, want 0", in.Timeout)
+		}
+	})
+
+	t.Run("caller timeout is preserved", func(t *testing.T) {
+		t.Parallel()
+		in := &rest.Config{Host: "https://127.0.0.1:6443", Timeout: 5 * time.Second}
+		if got := boundedConfig(in); got.Timeout != 5*time.Second {
+			t.Errorf("Timeout = %v, want 5s", got.Timeout)
+		}
+	})
+
+	t.Run("bound never loosens client-go's discovery default", func(t *testing.T) {
+		t.Parallel()
+		const clientGoDiscoveryDefault = 32 * time.Second
+		if defaults.K8sClientRequestTimeout > clientGoDiscoveryDefault {
+			t.Errorf("K8sClientRequestTimeout = %v exceeds client-go's %v discovery default, "+
+				"so setting it explicitly would weaken the only bound on context-free discovery calls",
+				defaults.K8sClientRequestTimeout, clientGoDiscoveryDefault)
+		}
+	})
 }
 
 // Suppress unused-import warning for metav1 when none of the helpers

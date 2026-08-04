@@ -841,7 +841,22 @@ spec:
                 state: ready
 ```
 
-When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`, which embeds Chainsaw). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
+When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
+
+**Supported operations.** The gate evaluates the Test in-process against its own read-only ServiceAccount — it ships no Chainsaw binary and shells out to nothing. Only `assert` and `error` are honored; every other operation (`apply`, `create`, `delete`, `patch`, `update`, `script`, `command`, `wait`, `sleep`, `get`, `describe`, `events`, `podLogs`, `proxy`) is rejected before evaluation, as are `catch`, `finally`, and `cleanup` blocks. A readiness test that declares one fails the gate with an invalid-request error naming the offending step.
+
+A Test declaring no `assert`/`error` operation at all is rejected rather than passing vacuously — a check that evaluates nothing must never report healthy. If the no-op is deliberate, because readiness for that component is enforced some other way, declare it with an annotation on the Test:
+
+```yaml
+metadata:
+  name: my-component-readiness
+  annotations:
+    aicr/no-op-check: "true"
+```
+
+The rule applies per document, so in a multi-document (`---`) stream each Test that carries no operations needs its own annotation.
+
+Resource blocks that omit `metadata.namespace` are scoped to the release namespace (the Job passes it via `--namespace`); cluster-scoped kinds, like the `ClusterPolicy` above, ignore it.
 
 ## Best Practices
 

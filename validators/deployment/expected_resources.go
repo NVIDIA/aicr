@@ -38,10 +38,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/restmapper"
 )
 
 const (
@@ -1092,14 +1089,19 @@ func buildResourceFetcher(ctx *validators.Context) (chainsaw.ResourceFetcher, er
 		return nil, err
 	}
 
-	discoveryClient, err := kubernetes.NewForConfig(ctx.RESTConfig)
+	// Mapper wiring is shared with the readiness gate (cmd/gate) so the two
+	// consumers of the in-process executor cannot drift; the dynamic client
+	// stays local because ctx.DynamicClient is an injection seam for tests.
+	//
+	// Invariant: a namespaced check MUST set metadata.namespace on its
+	// resource block. Unlike the gate — which has one release namespace and
+	// wraps its fetcher to default to it — the validator evaluates components
+	// spread across namespaces and has no single sensible default, so an
+	// omitted namespace Lists across ALL namespaces.
+	mapper, err := chainsaw.NewRESTMapperForConfig(ctx.RESTConfig)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create discovery client", err)
+		return nil, err
 	}
-
-	mapper := restmapper.NewDeferredDiscoveryRESTMapper(
-		memory.NewMemCacheClient(discoveryClient.Discovery()),
-	)
 
 	return chainsaw.NewClusterFetcher(dynClient, mapper), nil
 }
@@ -1112,9 +1114,12 @@ func getDynamicClient(ctx *validators.Context) (dynamic.Interface, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RESTConfig is not available")
 	}
 
-	dynClient, err := dynamic.NewForConfig(ctx.RESTConfig)
+	// Built through pkg/chainsaw so this client carries the same request
+	// bound the shared RESTMapper does — the two halves of the fetcher should
+	// not be governed by different timeouts.
+	dynClient, err := chainsaw.NewDynamicClientForConfig(ctx.RESTConfig)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create dynamic client", err)
+		return nil, err
 	}
 	ctx.DynamicClient = dynClient
 	return dynClient, nil
