@@ -3,7 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Generate a third-party notices file aggregating the licenses of every
-# Go dependency that ships in the released aicr/aicrd/validator binaries.
+# third-party dependency AICR redistributes:
+#   - Go modules statically linked into the released aicr/aicrd/validator
+#     binaries (collected here, offline, from the committed vendor/ tree).
+#   - Python packages installed into the released aiperf-bench image
+#     (collected by tools/generate-aiperf-licenses into a committed tree; read
+#     back here offline — see the "Python packages" section below).
 #
 # Output: THIRD_PARTY_NOTICES.md (single self-contained file with an
 # index of every dependency and the verbatim text of each license).
@@ -42,6 +47,16 @@ OUTPUT="${OUTPUT:-THIRD_PARTY_NOTICES.md}"
 LICENSES_DIR="${LICENSES_DIR:-.licenses-cache}"
 PACKAGES=("./...")
 
+# Python packages: the aiperf-bench image ships an installed venv, not a
+# vendored source tree, so its license data cannot be derived from anything in
+# this repo. It is collected out-of-band by tools/generate-python-licenses
+# (which needs docker + network), rendered to Markdown there, and COMMITTED.
+# This script appends that fragment verbatim, keeping generation hermetic and
+# byte-deterministic: 'make notices-check' regenerates and git-diffs in the
+# merge gate, where neither docker nor PyPI is available.
+PYTHON_NOTICES="${PYTHON_NOTICES:-validators/performance/licenses/python-notices.md}"
+PYTHON_REQUIREMENTS="${PYTHON_REQUIREMENTS:-validators/performance/requirements.txt}"
+
 if ! command -v go-licenses >/dev/null 2>&1; then
     echo "ERROR: go-licenses is not installed." >&2
     echo "Install it with 'make tools-setup' or 'go install github.com/google/go-licenses/v2@\$(yq -r .linting.go_licenses .settings.yaml)'." >&2
@@ -58,6 +73,69 @@ if ! command -v yq >/dev/null 2>&1; then
     echo "Install it with 'make tools-setup'." >&2
     exit 1
 fi
+
+# Fail closed on a missing/empty Python fragment rather than silently emitting
+# a Go-only notices file: quietly dropping the attributions for everything
+# redistributed inside the aiperf-bench image is the failure mode this gate
+# exists to prevent.
+if [[ ! -s "${PYTHON_NOTICES}" ]]; then
+    echo "ERROR: ${PYTHON_NOTICES} is missing or empty." >&2
+    echo "The aiperf-bench image redistributes third-party Python packages whose" >&2
+    echo "licenses must appear in ${OUTPUT}. Regenerate the committed fragment" >&2
+    echo "with 'make python-licenses' (requires docker + network) and commit it." >&2
+    exit 1
+fi
+
+# Staleness gate for the Python fragment. 'make notices-check' can only prove
+# the notices file matches its committed inputs; it cannot tell whether those
+# inputs still describe the image, because regenerating them needs docker and
+# PyPI (unavailable in the merge gate). Editing requirements.txt without
+# re-running 'make python-licenses' would otherwise ship an image whose
+# attributions silently describe the PREVIOUS dependency set.
+#
+# The fragment records the sha256 of the requirements file it was generated
+# from; comparing hashes catches every kind of edit (version bump, added or
+# removed package), unlike matching a single version string. Pure file
+# comparison, no network, so the existing gate enforces it for free.
+if [[ ! -f "${PYTHON_REQUIREMENTS}" ]]; then
+    echo "ERROR: ${PYTHON_REQUIREMENTS} not found — run 'make notices' from the repo root." >&2
+    exit 1
+fi
+# sha256sum is coreutils (Linux/CI); shasum is the perl one macOS ships. Accept
+# either so the gate and a developer laptop compute the same digest.
+if command -v sha256sum >/dev/null 2>&1; then
+    req_sha=$(sha256sum "${PYTHON_REQUIREMENTS}" | cut -d' ' -f1)
+elif command -v shasum >/dev/null 2>&1; then
+    req_sha=$(shasum -a 256 "${PYTHON_REQUIREMENTS}" | cut -d' ' -f1)
+else
+    echo "ERROR: neither sha256sum nor shasum is available to verify" >&2
+    echo "${PYTHON_NOTICES} against ${PYTHON_REQUIREMENTS}." >&2
+    exit 1
+fi
+if ! grep -qF "${req_sha}" "${PYTHON_NOTICES}"; then
+    echo "ERROR: ${PYTHON_NOTICES} is stale." >&2
+    echo "It was generated from a different ${PYTHON_REQUIREMENTS} than the one" >&2
+    echo "committed now (expected sha256 ${req_sha}). Re-run 'make python-licenses'" >&2
+    echo "(requires docker + network) and commit the result alongside the change." >&2
+    exit 1
+fi
+
+# Emit a code fence long enough to contain a license file verbatim.
+#
+# Some licenses are Markdown and contain fenced blocks of their own —
+# hashicorp/errwrap's LICENSE-adjacent README ships ```go samples. A fixed
+# ``` fence is closed early by that content, so the remainder of the license
+# renders as Markdown and every following block is inverted for the rest of
+# the document. CommonMark allows a longer opening fence, so use one backtick
+# more than the longest run present in the file.
+fence_for() {
+    local file="$1" longest
+    longest=$(grep -oE '`+' "${file}" 2>/dev/null \
+        | awk '{ if (length($0) > m) m = length($0) } END { print m+0 }')
+    local width=$(( longest + 1 ))
+    (( width < 3 )) && width=3
+    printf '%*s' "${width}" '' | tr ' ' '`'
+}
 
 mkdir -p "$(dirname "${OUTPUT}")"
 
@@ -129,9 +207,12 @@ fi
 
 # Per-platform license trees are saved under a scratch root and merged into
 # ${LICENSES_DIR}; the combined CSV accumulates every platform's entries.
-SAVE_ROOT="$(mktemp -d)"
-COMBINED_CSV="$(mktemp)"
-INDEX_FILE="$(mktemp)"
+# Explicit templates: macOS 'mktemp' with no template ignores TMPDIR and
+# allocates under confstr(_CS_DARWIN_USER_TEMP_DIR), which makes the scratch
+# location unoverridable in sandboxed or otherwise restricted environments.
+SAVE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/aicr-notices.XXXXXX")"
+COMBINED_CSV="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-csv.XXXXXX")"
+INDEX_FILE="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-idx.XXXXXX")"
 trap 'rm -rf "${SAVE_ROOT}"; rm -f "${COMBINED_CSV}" "${INDEX_FILE}"' EXIT
 
 mkdir -p "${LICENSES_DIR}"
@@ -189,12 +270,18 @@ echo "Composing ${OUTPUT}..." >&2
 
 NVIDIA AI Cluster Runtime (AICR)
 
-This file lists every third-party Go module that is statically linked into
-the released \`aicr\`, \`aicrd\`, and validator binaries, along with the
-verbatim text of each module's license. Standard library packages are
-excluded (their license is covered by the Go distribution).
+This file lists every third-party dependency that AICR redistributes, along
+with the verbatim text of each dependency's license. Two distribution
+surfaces are covered:
 
-## Index
+* **Go modules** statically linked into the released \`aicr\`, \`aicrd\`, and
+  validator binaries. Standard library packages are excluded (their license
+  is covered by the Go distribution).
+* **Python packages** installed into the released \`aicr-validators/aiperf-bench\`
+  container image, which ships the AIPerf benchmark runner and its full
+  transitive dependency closure.
+
+## Go Module Index
 
 | Package | License | Source |
 |---------|---------|--------|
@@ -208,7 +295,7 @@ EOF
 
     cat <<'EOF'
 
-## License Texts
+## Go Module License Texts
 
 EOF
 
@@ -220,9 +307,23 @@ EOF
         # LICENSE-MIT + LICENSE-APACHE for dual-licensed modules). Emit
         # every file in deterministic (sorted) order so attribution is
         # not silently lost. Use NUL-delimited reads to tolerate spaces.
+        # Keep only license-bearing files. 'go-licenses save' copies the whole
+        # module source for restricted licenses (MPL-2.0 and friends) to help
+        # satisfy their source-availability clauses, so the hashicorp/* trees
+        # arrive with README.md, Makefile, .travis.yml, .gitignore and .go
+        # sources alongside LICENSE. Emitting those verbatim put 143 non-license
+        # files into this document, which is not what a notices file is for and
+        # is not how source availability is actually discharged (we redistribute
+        # these modules unmodified; the upstream repository is the source).
+        # The glob still admits NOTICE and the dual-license variants
+        # (LICENSE-MIT / LICENSE-APACHE) that the emit loop exists to catch.
         license_files=()
         if [[ -d "${LICENSES_DIR}/${pkg}" ]]; then
             while IFS= read -r -d '' f; do
+                if ! printf '%s' "$(basename "${f}")" \
+                    | grep -qiE '^(licen[cs]e|notice|copying|copyright|authors|patents)([-._].*)?$'; then
+                    continue
+                fi
                 license_files+=("${f}")
             done < <(find "${LICENSES_DIR}/${pkg}" -maxdepth 1 -type f -print0 2>/dev/null \
                 | LC_ALL=C sort -z)
@@ -234,11 +335,12 @@ EOF
 
         if (( ${#license_files[@]} > 0 )); then
             for lf in "${license_files[@]}"; do
+                fence="$(fence_for "${lf}")"
                 printf '#### %s\n\n' "$(basename "${lf}")"
-                echo '```text'
+                printf '%stext\n' "${fence}"
                 cat "${lf}"
                 echo
-                echo '```'
+                printf '%s\n' "${fence}"
                 echo
             done
         else
@@ -246,7 +348,20 @@ EOF
         fi
         echo
     done < "${INDEX_FILE}"
+
+    # Python packages redistributed inside the aiperf-bench image. Appended
+    # verbatim from the committed fragment (see PYTHON_NOTICES above) so this
+    # stays offline and byte-deterministic. Rendering lives in
+    # tools/generate-python-licenses because only that step can reach the
+    # installed venv; keeping it there means the committed bytes are exactly
+    # what lands here, which is what makes the fragment reviewable on its own.
+    echo
+    cat "${PYTHON_NOTICES}"
 } > "${OUTPUT}"
 
-ENTRIES=$(wc -l < "${INDEX_FILE}" | tr -d ' ')
-echo "Wrote ${OUTPUT} (${ENTRIES} dependencies)" >&2
+GO_ENTRIES=$(wc -l < "${INDEX_FILE}" | tr -d ' ')
+# Count the index table rows, not '### ' headings: license texts are embedded
+# verbatim and some contain Markdown headings of their own, which inflated the
+# count (Shakespeare/Getty/tiktoken data notices in this closure).
+PY_ENTRIES=$(grep -c '^| `' "${PYTHON_NOTICES}" || true)
+echo "Wrote ${OUTPUT} (${GO_ENTRIES} Go modules, ${PY_ENTRIES} Python packages)" >&2

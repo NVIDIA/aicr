@@ -1,0 +1,11 @@
+# Python dependencies installed into the aiperf-bench image.
+#
+# This file is the single input shared by two consumers, so they cannot drift:
+#   - aiperf-bench.Dockerfile installs from it (`pip install -r`).
+#   - tools/generate-python-licenses collects the license of every package the
+#     resulting environment contains, for THIRD_PARTY_NOTICES.md.
+#
+# Bumping anything here requires re-running 'make python-licenses' and
+# 'make notices'; the notices generator fails closed if this file changes
+# without a corresponding license refresh.
+aiperf==0.11.0
