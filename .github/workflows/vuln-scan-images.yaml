@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Daily Image Vulnerability Scan
+name: Weekly Image Vulnerability Scan
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Daily at 6:00 AM UTC
+    # Weekly on Thursday at 6:00 AM UTC. Every run reports the full HIGH+
+    # set, carried-over findings included -- an open vulnerability keeps
+    # being reported until it is fixed or VEX-suppressed.
+    - cron: '0 6 * * 4'
   workflow_dispatch:
     inputs:
       notify_slack:
