@@ -103,6 +103,15 @@ func resumeJobWatch(ctx context.Context, client kubernetes.Interface, namespace,
 			"context canceled before Job watch resume", ctx.Err(), resumeContext(namespace, name))
 	}
 
+	// The timer and ctx.Done() branches race when the backoff elapses at or near
+	// cancellation: select picks a ready case at random, so a canceled context can
+	// lose to an already-fired timer. Re-check so a caller that has given up
+	// deterministically wins before we List/Watch against its apiserver.
+	if err := ctx.Err(); err != nil {
+		return nil, nil, errors.WrapWithContext(errors.ErrCodeTimeout,
+			"context canceled before Job watch resume", err, resumeContext(namespace, name))
+	}
+
 	// Resync via List: its collection ResourceVersion is current, and its result
 	// lets us catch a terminal transition that landed while the watch was down.
 	list, listErr := client.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{
