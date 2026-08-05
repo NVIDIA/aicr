@@ -24,7 +24,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -589,7 +588,7 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 // annotations and the GITHUB_OUTPUT contents) alongside the exit status.
 func runOpenVEXGuard(t *testing.T, script, workspace string) (string, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scriptDeadline(t))
 	defer cancel()
 	outputs := filepath.Join(t.TempDir(), "outputs")
 	command := exec.CommandContext(ctx, "bash", "-c", script)

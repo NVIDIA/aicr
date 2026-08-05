@@ -165,7 +165,7 @@ func TestReleaseSbomSignaturesAreAllowlisted(t *testing.T) {
 // allowlist rather than a copy of it.
 func shellReleaseAssetNames(t *testing.T, tag string) []string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scriptDeadline(t))
 	defer cancel()
 	text := string(readFile(t, ".github/scripts/release-images.sh"))
 	const marker = "expected_release_asset_names() {"
@@ -1679,7 +1679,7 @@ type scriptResult struct {
 
 func runScript(t *testing.T, environment []string, relative string, args ...string) scriptResult {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scriptDeadline(t))
 	defer cancel()
 	command := exec.CommandContext(ctx, repositoryPath(t, relative), args...)
 	command.Env = environment
@@ -1689,6 +1689,31 @@ func runScript(t *testing.T, environment []string, relative string, args ...stri
 	}
 	return scriptResult{output: string(output), err: err}
 }
+
+// scriptDeadline returns the per-script wall-clock budget for shelled-out
+// helpers in this package. The value guards against genuine hangs (infinite
+// loops, stuck prompts) while tolerating CPU starvation when the full test
+// suite runs concurrently with -race + coverage.
+//
+// Hangs and slow-but-progressing runs differ by orders of magnitude, so a
+// tight constant catches no additional hangs while producing false positives
+// under contention (see issue #1974). We cap at scriptDeadlineCap and shrink
+// only if the outer test binary's own deadline is closer, leaving
+// scriptDeadlineMargin so t.Fatalf can report cleanly before Go reaps the run.
+func scriptDeadline(t *testing.T) time.Duration {
+	t.Helper()
+	if d, ok := t.Deadline(); ok {
+		if remaining := time.Until(d) - scriptDeadlineMargin; remaining > 0 && remaining < scriptDeadlineCap {
+			return remaining
+		}
+	}
+	return scriptDeadlineCap
+}
+
+const (
+	scriptDeadlineCap    = 90 * time.Second
+	scriptDeadlineMargin = 30 * time.Second
+)
 
 func sortedImages() []string {
 	images := make([]string, 0, len(releaseImages))
