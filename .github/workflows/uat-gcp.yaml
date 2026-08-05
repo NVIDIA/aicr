@@ -77,9 +77,27 @@ jobs:
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
     # timeout cancels pending always() steps, so an undersized cap would skip
     # teardown and leak the GPU node. 190 UAT + ~30 setup + ~8 failure-path debug
-    # collection (Collect cluster debug bundle) + ~40 teardown = ~268, so 280
-    # leaves the teardown headroom even on a worst-case phase run.
-    timeout-minutes: 280
+    # collection (Collect cluster debug bundle) + ~40 teardown = ~268.
+    #
+    # The Bringup Infra step retries once (#2066) and carries no step-level
+    # timeout, so a retried run costs a second provisioning attempt. The failure
+    # it retries is the actuator's own hardcoded 30m node-pool timeout, so the
+    # first attempt burns the full 30m before failing, plus the 60s backoff:
+    # ~31m on top of the ~268 above, i.e. ~299 worst case.
+    #
+    # 320 leaves ~21m over that worst case — deliberately more than the ~12m
+    # this cap carried before, because overrunning does not merely fail the run:
+    # it cancels the always() Destroy Cluster step and leaks the GPU node and its
+    # VPC network group, exactly what #2066 exists to protect. Sizing for a
+    # single attempt would let a *successful* late retry trip that.
+    #
+    # Do not reduce this cap without recomputing the whole budget. In particular
+    # #2065 does NOT justify returning to 280: raising the actuator's node-pool
+    # timeout 30m->60m makes a single provisioning attempt cost up to ~30m MORE,
+    # so the ~268 base above rises to ~298 even with the retry never firing. It
+    # trades a frequent retry for a longer first attempt; it does not free
+    # budget.
+    timeout-minutes: 320
     permissions:
       contents: read
       actions: read
