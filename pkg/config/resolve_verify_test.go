@@ -15,6 +15,9 @@
 package config_test
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -268,5 +271,28 @@ func TestVerificationAccessor(t *testing.T) {
 	cfg := &config.AICRConfig{Spec: config.Spec{Verify: spec}}
 	if got := cfg.Verification(); got != spec {
 		t.Errorf("Verification() = %+v, want the populated section", got)
+	}
+}
+
+// TestVerifyTrustRejectsIgnoreTlogField locks the flag-only design of
+// --insecure-ignore-tlog into a named test. The guarantee that a committed
+// config can never disable transparency-log verification rests on strict
+// decoding rejecting the unknown field; a future schema addition that
+// accidentally introduced it would otherwise silently weaken that promise.
+func TestVerifyTrustRejectsIgnoreTlogField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	doc := "kind: AICRConfig\napiVersion: aicr.run/v1alpha2\n" +
+		"spec:\n  verify:\n    trust:\n      ignoreTlog: true\n"
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	_, err := config.Load(context.Background(), path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want rejection of spec.verify.trust.ignoreTlog")
+	}
+	if !strings.Contains(err.Error(), "ignoreTlog") {
+		t.Errorf("Load() error = %q, want it to name the unknown field", err.Error())
 	}
 }

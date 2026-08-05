@@ -188,6 +188,15 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		RequireCreator:    stringFlagOrConfig(cmd, "require-creator", resolved.RequireCreator),
 		VersionConstraint: stringFlagOrConfig(cmd, "cli-version-constraint", resolved.VersionConstraint),
 	}
+	// A config-supplied floor can be *lower* than the "max" default, and
+	// stringFlagOrConfig only logs when a CLI flag overrides config, so that
+	// case would otherwise be silent. Surface it: the trust floor is the one
+	// setting here where a committed value quietly weakening the gate is worth
+	// an audit line.
+	if !cmd.IsSet("min-trust-level") && resolved.MinTrustLevel != "" && resolved.MinTrustLevel != "max" {
+		slog.Info("trust floor set by config", "minTrustLevel", resolved.MinTrustLevel,
+			"source", "spec.verify.policy.minTrustLevel")
+	}
 	policyFailure, policyErr := result.CheckPolicy(policy)
 	if policyErr != nil {
 		return policyErr

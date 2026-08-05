@@ -301,6 +301,15 @@ checked after verification runs, `trust` holds the material it verifies against.
 | `trust.key` | string | KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`) or local PEM public-key path; the verify counterpart to `spec.bundle.attestation.signingKey` |
 | `trust.trustRoot` | string | Path to a private Sigstore `trusted_root.json`, additive to the built-in public-good root |
 
+`policy.minTrustLevel` sets **operator policy, not an org-enforced guardrail**.
+A committed value lowers the effective floor as readily as it raises it
+(`unknown` makes the trust check a no-op, since every level meets it), so treat
+it as a reviewable choice rather than a control that cannot be relaxed. Its
+blast radius is bounded: verification still rejects checksum-failed and
+invalidly-signed bundles regardless of policy, so only checksum-valid *unsigned*
+bundles pass a lowered floor. `aicr verify` logs at INFO whenever config sets the
+floor to anything other than `max`.
+
 Every field is a durable, non-secret reference or policy value; no private key
 material is part of the schema. Three `aicr verify` flags are deliberately
 excluded: the bundle directory (a positional argument), `--format`

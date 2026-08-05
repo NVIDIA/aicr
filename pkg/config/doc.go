@@ -38,5 +38,6 @@
 // Sigstore endpoints (spec.bundle.attestation.fulcioURL / rekorURL), the
 // KMS signing-key reference (spec.bundle.attestation.signingKey), and their
 // verify-side counterparts (spec.verify.trust.key / trustRoot) all belong in
-// version-controlled config even though they configure signing.
+// version-controlled config even though they configure signing or its
+// verification.
 package config

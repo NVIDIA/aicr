@@ -262,6 +262,8 @@ func TestParseVersionConstraint(t *testing.T) {
 		{name: "explicit ==", expr: "== 0.8.0", satisfied: "0.8.0", rejected: "0.8.1"},
 		{name: "explicit !=", expr: "!= 0.8.0", satisfied: "0.8.1", rejected: "0.8.0"},
 		{name: "explicit <", expr: "< 0.8.0", satisfied: "0.7.0", rejected: "0.8.0"},
+		{name: "explicit >", expr: "> 0.8.0", satisfied: "0.8.1", rejected: "0.8.0"},
+		{name: "explicit <=", expr: "<= 0.8.0", satisfied: "0.8.0", rejected: "0.9.0"},
 		{name: "surrounding whitespace tolerated", expr: "  0.8.0  ", satisfied: "0.9.0", rejected: "0.7.0"},
 		{name: "empty expression rejected", expr: "", wantErr: true},
 		{name: "operator with no version rejected", expr: ">=", wantErr: true},

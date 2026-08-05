@@ -65,8 +65,42 @@ func TestBundleVerifyCmd_ConfigKeyReachesKeyVerification(t *testing.T) {
 
 	out := runVerify(t, "verify", dir, "--config", cfg)
 
-	if !strings.Contains(out, "public key") {
+	// Assert on the config-supplied path name rather than the generic
+	// "public key" phrase: if the keyless path ever emits that phrase, a
+	// substring check on it would pass vacuously.
+	if !strings.Contains(out, "from-config.pem") {
 		t.Errorf("config key did not route to the key-verification path; got:\n%s", out)
+	}
+}
+
+// TestBundleVerifyCmd_MinTrustLevelFlagOverridesConfig covers the override
+// branch of stringFlagOrConfig for the policy fields. Config demands
+// "verified", which this unsigned fixture cannot reach, while the flag asks for
+// "unknown", which it does. The run must therefore not fail the trust check.
+func TestBundleVerifyCmd_MinTrustLevelFlagOverridesConfig(t *testing.T) {
+	dir := writeVerifiableKeyFixture(t)
+	cfg := verifyConfig(t, "    policy:\n      minTrustLevel: verified\n")
+
+	out := runVerify(t, "verify", dir, "--config", cfg, "--min-trust-level", "unknown")
+
+	if strings.Contains(out, `does not meet minimum "verified"`) {
+		t.Errorf("config minTrustLevel won over an explicit --min-trust-level; got:\n%s", out)
+	}
+}
+
+// TestBundleVerifyCmd_PolicylessConfigKeepsMaxDefault guards against the
+// wiring regressing to pass an empty MinTrustLevel. CheckPolicy skips the trust
+// check entirely when the field is "", so a fail-open regression would be
+// silent. A config with no policy section must leave the flag's "max" default
+// intact, which this unsigned fixture fails.
+func TestBundleVerifyCmd_PolicylessConfigKeepsMaxDefault(t *testing.T) {
+	dir := writeVerifiableKeyFixture(t)
+	cfg := verifyConfig(t, "    trust:\n      trustRoot: \"\"\n")
+
+	out := runVerify(t, "verify", dir, "--config", cfg)
+
+	if !strings.Contains(out, "maximum achievable") {
+		t.Errorf("policy-less config did not preserve the \"max\" default floor; got:\n%s", out)
 	}
 }
 

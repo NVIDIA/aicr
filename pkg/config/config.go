@@ -379,6 +379,16 @@ type VerifyPolicySpec struct {
 	// unverified, attested, verified) or the meta-value "max", which
 	// auto-detects the highest level achievable for the bundle. Empty
 	// leaves the CLI flag's "max" default in place.
+	//
+	// This is operator policy, not an org-enforced guardrail: a committed
+	// value *lowers* the effective floor as readily as it raises it (for
+	// example "unknown" makes the trust check a no-op, since every level
+	// meets it). That is a deliberate, reviewable choice living in version
+	// control, and its blast radius is bounded — the separate result.Errors
+	// gate still rejects checksum-failed and invalidly-signed bundles
+	// regardless of policy, so only checksum-valid *unsigned* bundles pass
+	// a lowered floor. `aicr verify` logs at INFO whenever config sets the
+	// floor to anything other than "max".
 	MinTrustLevel string `yaml:"minTrustLevel,omitempty" json:"minTrustLevel,omitempty"`
 
 	// RequireCreator pins the OIDC identity in the bundle attestation's
