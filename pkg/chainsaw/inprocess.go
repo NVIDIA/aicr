@@ -18,13 +18,16 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kyverno/chainsaw/pkg/apis"
 	"github.com/kyverno/chainsaw/pkg/apis/v1alpha1"
 	"github.com/kyverno/chainsaw/pkg/engine/checks"
+	yamlv3 "gopkg.in/yaml.v3"
 	"sigs.k8s.io/yaml"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -46,9 +49,14 @@ import (
 // ErrCodeInvalidRequest if they somehow appear.
 //
 // Per-Test execution:
-//   - The Test's `spec.timeouts.assert` (if set) is the deadline for
-//     each step's retry loop. Otherwise the caller-supplied
-//     `stepTimeout` is used (typically defaults.ChainsawAssertTimeout).
+//   - Every Test document in the (possibly multi-document) stream runs,
+//     in order. sigs.k8s.io/yaml.Unmarshal silently decodes only the
+//     first document, so decoding is done per document here — otherwise
+//     a failing assertion in a later document could not fail the check.
+//   - The first document's `spec.timeouts.assert` (if set) is the
+//     deadline for each step's retry loop, and bounds the stream as a
+//     whole. Otherwise the caller-supplied `stepTimeout` is used
+//     (typically defaults.ChainsawAssertTimeout).
 //   - Each step iterates its Try operations sequentially. An assert
 //     that doesn't match yet OR an error that still matches is retried
 //     at defaults.AssertRetryInterval until the step deadline.
@@ -68,56 +76,212 @@ import (
 func runChainsawTestInProcess(ctx context.Context, component, yamlContent string, stepTimeout time.Duration, fetcher ResourceFetcher) Result {
 	result := Result{Component: component}
 
-	var test v1alpha1.Test
-	if err := yaml.Unmarshal([]byte(yamlContent), &test); err != nil {
-		result.Error = errors.Wrap(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("failed to parse chainsaw Test YAML for component %q", component), err)
+	tests, err := decodeTests(yamlContent)
+	if err != nil {
+		// decodeTests already returns ErrCodeInvalidRequest; re-wrapping would
+		// only restate the code. The component is carried on Result.
+		result.Error = err
+		result.Output = err.Error()
 		return result
 	}
 
-	effectiveTimeout := stepTimeout
-	if test.Spec.Timeouts != nil && test.Spec.Timeouts.Assert != nil && test.Spec.Timeouts.Assert.Duration > 0 {
-		effectiveTimeout = test.Spec.Timeouts.Assert.Duration
+	// Content that declares no assert/error operation evaluates nothing, and
+	// the step loop below would fall through to Passed=true — a health check
+	// reporting healthy without having checked anything. Fail closed unless
+	// the intent is declared (#2040). This also backstops content that reaches
+	// the executor with its steps lost (truncated ConfigMap value, bad
+	// templating): a real check cannot silently degrade into a vacuous pass.
+	// The rule is per document, not per stream: a document that evaluates
+	// nothing must carry the annotation itself. A stream-wide check would let
+	// one annotated no-op document excuse a sibling that lost its steps.
+	totalOps := 0
+	for i := range tests {
+		ops := countExecutableOps(&tests[i])
+		totalOps += ops
+		if ops > 0 || isDeclaredNoOp(&tests[i]) {
+			continue
+		}
+		result.Error = errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("chainsaw Test %s for component %q declares no assert/error operations; "+
+				"annotate it with %s: \"true\" if the no-op is intentional",
+				testLabel(tests[i], i), component, noOpCheckAnnotation))
+		result.Output = result.Error.Error()
+		return result
+	}
+	// Every document is a declared no-op (or the stream decoded to none at
+	// all, which decodeTests only produces for content carrying no Test).
+	if totalOps == 0 {
+		if len(tests) == 0 {
+			result.Error = errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("no chainsaw Test document found for component %q", component))
+			result.Output = result.Error.Error()
+			return result
+		}
+		result.Passed = true
+		slog.Info("health check is a declared no-op; readiness is enforced elsewhere",
+			"component", component, "annotation", noOpCheckAnnotation)
+		return result
 	}
 
-	// Cap the whole Test under one budget — the old runChainsawBinary
-	// path wrapped the exec in context.WithTimeout(ctx, ChainsawAssertTimeout),
-	// so without an outer cap an N-step Test could run N × effectiveTimeout
-	// in the unhealthy / retrying case. Use effectiveTimeout as the
-	// shared budget across all steps.
+	// One budget covers the whole component, not one per document — the old
+	// runChainsawBinary path wrapped the exec in a single
+	// context.WithTimeout(ctx, ChainsawAssertTimeout), so without an outer cap
+	// an N-step (or N-document) check could run N × effectiveTimeout while
+	// retrying. The first document that declares spec.timeouts.assert sets it.
+	effectiveTimeout := stepTimeout
+	for i := range tests {
+		t := tests[i]
+		if t.Spec.Timeouts != nil && t.Spec.Timeouts.Assert != nil && t.Spec.Timeouts.Assert.Duration > 0 {
+			effectiveTimeout = t.Spec.Timeouts.Assert.Duration
+			break
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, effectiveTimeout)
 	defer cancel()
 
 	slog.Debug("running chainsaw Test in-process",
 		"component", component,
-		"steps", len(test.Spec.Steps),
+		"documents", len(tests),
+		"operations", totalOps,
 		"effectiveTimeout", effectiveTimeout)
 
-	for stepIdx, step := range test.Spec.Steps {
-		if err := ctx.Err(); err != nil {
-			result.Error = errors.Wrap(errors.ErrCodeInternal, "context canceled between steps", err)
-			return result
-		}
-		stepLabel := step.Name
-		if stepLabel == "" {
-			stepLabel = fmt.Sprintf("step[%d]", stepIdx)
-		}
-		if err := executeStepInProcess(ctx, step.Try, fetcher, effectiveTimeout); err != nil {
-			// Propagate the structured error from the inner evaluator
-			// as-is so codes (ErrCodeNotFound, ErrCodeUnavailable,
-			// ErrCodeInvalidRequest) survive — wrapping here would
-			// clobber them with ErrCodeInternal. Step / component
-			// context is captured in the slog line below.
-			result.Output = err.Error()
-			result.Error = err
-			slog.Warn("health check failed", "component", component, "step", stepLabel, "error", err)
-			return result
+	// EVERY document runs. sigs.k8s.io/yaml.Unmarshal decodes only the first
+	// one — silently, without an error — so evaluating just that decode left
+	// later documents unexecuted while the component still reported Pass. The
+	// allowlist (ValidateTestReadOnly) has always validated every document;
+	// execution now matches it.
+	for docIdx := range tests {
+		test := tests[docIdx]
+		for stepIdx, step := range test.Spec.Steps {
+			if err := ctx.Err(); err != nil {
+				result.Error = errors.Wrap(errors.ErrCodeInternal, "context canceled between steps", err)
+				return result
+			}
+			stepLabel := stepLabel(test, docIdx, step, stepIdx, len(tests))
+			if err := executeStepInProcess(ctx, step.Try, fetcher, effectiveTimeout); err != nil {
+				// Propagate the structured error from the inner evaluator
+				// as-is so codes (ErrCodeNotFound, ErrCodeUnavailable,
+				// ErrCodeInvalidRequest) survive — wrapping here would
+				// clobber them with ErrCodeInternal. Step / component
+				// context is captured in the slog line below.
+				result.Output = err.Error()
+				result.Error = err
+				slog.Warn("health check failed", "component", component, "step", stepLabel, "error", err)
+				return result
+			}
 		}
 	}
 
 	result.Passed = true
 	slog.Info("health check passed", "component", component)
 	return result
+}
+
+// stepLabel names a step for diagnostics, qualifying it with the document
+// index only when the stream carries more than one.
+func stepLabel(test v1alpha1.Test, docIdx int, step v1alpha1.TestStep, stepIdx, docCount int) string {
+	label := step.Name
+	if label == "" {
+		label = fmt.Sprintf("step[%d]", stepIdx)
+	}
+	if docCount == 1 {
+		return label
+	}
+	name := test.Name
+	if name == "" {
+		name = fmt.Sprintf("doc[%d]", docIdx)
+	}
+	return name + "/" + label
+}
+
+// decodeTests unmarshals every Chainsaw Test document in a (possibly
+// multi-document) YAML stream. Non-Test documents are skipped, matching
+// ValidateTestReadOnly, which walks the same stream to enforce the read-only
+// allowlist.
+//
+// Failures carry ErrCodeInvalidRequest: malformed content never becomes valid
+// by retrying, and isTerminalAssertErr keys on that code to fail fast.
+func decodeTests(yamlContent string) ([]v1alpha1.Test, error) {
+	dec := yamlv3.NewDecoder(strings.NewReader(yamlContent))
+	var tests []v1alpha1.Test
+	for docIdx := 0; ; docIdx++ {
+		var node yamlv3.Node
+		err := dec.Decode(&node)
+		if stderrors.Is(err, io.EOF) {
+			return tests, nil
+		}
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("failed to parse document %d", docIdx), err)
+		}
+		// Re-marshal the single document so the chainsaw types get the
+		// JSON-tag-aware unmarshal path (they are tagged json, not yaml).
+		buf, err := yamlv3.Marshal(&node)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("failed to re-marshal document %d", docIdx), err)
+		}
+		var header struct {
+			APIVersion string `json:"apiVersion"`
+			Kind       string `json:"kind"`
+		}
+		if err := yaml.Unmarshal(buf, &header); err != nil {
+			continue // not a Kubernetes-shaped document
+		}
+		if header.Kind != chainsawTestKind {
+			continue
+		}
+		if group, _, ok := strings.Cut(header.APIVersion, "/"); !ok || group != chainsawTestAPIGroup {
+			continue
+		}
+		var test v1alpha1.Test
+		if err := yaml.Unmarshal(buf, &test); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("failed to decode Test document %d", docIdx), err)
+		}
+		tests = append(tests, test)
+	}
+}
+
+// noOpCheckAnnotation marks a health check that intentionally asserts
+// nothing, because readiness for that component is enforced by another
+// mechanism (today: the bundler's --readiness-hooks gate, for the OLM
+// components whose subscription readiness is verified at deploy time).
+// Without the marker an empty Test is rejected, so a check that loses its
+// steps cannot masquerade as a passing one. Follows the existing
+// aicr/skip-hook-validation opt-out convention.
+const noOpCheckAnnotation = "aicr/no-op-check"
+
+// isDeclaredNoOp reports whether the Test explicitly opts out of carrying
+// assertions via noOpCheckAnnotation.
+func isDeclaredNoOp(test *v1alpha1.Test) bool {
+	return test.Annotations[noOpCheckAnnotation] == "true"
+}
+
+// testLabel names a document for diagnostics: its metadata.name when set,
+// otherwise its position in the stream.
+func testLabel(test v1alpha1.Test, docIdx int) string {
+	if test.Name != "" {
+		return strconv.Quote(test.Name)
+	}
+	return fmt.Sprintf("doc[%d]", docIdx)
+}
+
+// countExecutableOps returns the number of assert/error operations the Test
+// would actually evaluate. Steps with an empty try list, and Tests with no
+// steps at all, contribute nothing — which is the vacuous-pass shape the
+// caller rejects.
+func countExecutableOps(test *v1alpha1.Test) int {
+	n := 0
+	for _, step := range test.Spec.Steps {
+		for _, op := range step.Try {
+			if op.Assert != nil || op.Error != nil {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // executeStepInProcess walks a step's Try operations sequentially. All
@@ -347,6 +511,15 @@ func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFet
 			// propagate as-is rather than double-wrapping.
 			return err
 		}
+		// A ghost satisfies nothing, on this path just as on the list path
+		// below (#2041). Reporting ready on the strength of a resource that
+		// is Terminating or on a lost node is the fail-open direction; the
+		// resource is on its way out, so NotFound is the honest verdict and
+		// keeps the absent-resource grace applicable.
+		if isTerminatingOrLost(actual) {
+			return errors.New(errors.ErrCodeNotFound,
+				fmt.Sprintf("%s %s/%s is terminating or lost", kind, namespace, name))
+		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -370,22 +543,44 @@ func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFet
 			fmt.Sprintf("%s in %q: no resources found (labels=%v)", kind, namespace, labels))
 	}
 	var lastMatchErr error
+	live := 0
 	for _, actual := range items {
 		if err := ctx.Err(); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("list-match canceled for %s in %q", kind, namespace), err)
 		}
+		// Skip ghosts (Terminating or NodeLost), mirroring evaluateError
+		// (#2041). A positive assertion satisfied by a resource that is on
+		// its way out reports the component ready on the strength of state
+		// that is about to disappear — a false PASS, which is the dangerous
+		// direction for a readiness gate. The negative path has skipped
+		// ghosts since the ebs-csi-node orphan-pod false failure; this is
+		// the same filter on the positive side.
+		if isTerminatingOrLost(actual) {
+			continue
+		}
+		live++
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("%s in %q: assertion engine error", kind, namespace), checkErr)
 		}
 		if len(errs) == 0 {
-			return nil // at least one item matches
+			return nil // at least one live item matches
 		}
 		lastMatchErr = errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("no %s in %q matched (last reason: %s)",
 				kind, namespace, formatFieldErrors(errs)))
+	}
+	// Every item was a ghost. That is "nothing live to assert against", not a
+	// match — and it must carry ErrCodeNotFound so the absent-resource grace
+	// still applies, rather than ErrCodeInternal (which would latch the grace
+	// off, per resourceObservedErr) or nil (which would be the very false
+	// PASS this filter exists to prevent).
+	if live == 0 {
+		return errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("%s in %q: no live resources found (labels=%v; %d terminating or lost)",
+				kind, namespace, labels, len(items)))
 	}
 	return lastMatchErr
 }
@@ -422,6 +617,14 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 			}
 			return err
 		}
+		// A ghost is on its way out, so it must not fire a negative
+		// assertion — the orphan-pod trap, handled the same way on the list
+		// path below. Unlike the positive path this is the false-FAIL
+		// direction, but the two paths agreeing is what keeps the behavior
+		// predictable.
+		if isTerminatingOrLost(actual) {
+			return nil
+		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -430,7 +633,8 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 		if len(errs) == 0 {
 			// Resource matches the forbidden shape → error fires.
 			return errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("%s %s/%s: forbidden shape matched", kind, namespace, name))
+				fmt.Sprintf("%s %s/%s: forbidden shape matched%s",
+					kind, namespace, name, describePodStatus(actual)))
 		}
 		return nil
 	}

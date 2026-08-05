@@ -265,9 +265,8 @@ jobs:
           push: true
           # CHAINSAW_* args were dropped in #1236 — the deployment validator
           # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
-          # Test format in-process via pkg/chainsaw/inprocess.go.
-          # (The separate build-gate job below still passes CHAINSAW_VERSION
-          # because the gate CLI image embeds chainsaw for its own use.)
+          # Test format in-process via pkg/chainsaw/inprocess.go. #2038 did
+          # the same for the gate image, so no image passes them now.
           build-args: |
             GO_VERSION=${{ steps.go.outputs.version }}
           tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ needs.detect.outputs.candidate_tag }}-${{ matrix.arch }}
@@ -282,7 +281,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
   # =============================================================================
-  # Gate Job: native per-arch readiness-gate image (gate CLI + embedded chainsaw)
+  # Gate Job: native per-arch readiness-gate image (gate CLI only)
   # =============================================================================
 
   build-gate:
@@ -318,9 +317,9 @@ jobs:
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
-      # Go version and the chainsaw tag both come from the repo's single source
-      # of truth (.go-version / .settings.yaml) so the in-cluster gate runs the
-      # same chainsaw AICR validates with.
+      # Go version comes from the repo's single source of truth
+      # (.go-version / .settings.yaml). The gate image embeds no chainsaw
+      # binary since #2038 — assertions run in-process via pkg/chainsaw.
       - name: Load versions
         id: versions
         uses: ./.github/actions/load-versions
@@ -334,7 +333,6 @@ jobs:
           push: true
           build-args: |
             GO_VERSION=${{ steps.versions.outputs.go }}
-            CHAINSAW_VERSION=${{ steps.versions.outputs.chainsaw }}
             VERSION=${{ github.ref_name }}
           tags: ${{ env.GATE_IMAGE }}:${{ needs.detect.outputs.candidate_tag }}-${{ matrix.arch }}
           provenance: false

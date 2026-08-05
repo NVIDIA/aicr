@@ -131,8 +131,12 @@ compute:
             labels:
               nodeGroup: gpu-worker
               dedicated: user-workload
-              # Disable GKE's managed device plugin so the GPU Operator's
-              # plugin is the sole advertiser of nvidia.com/gpu — the cluster
-              # prerequisite AICR's GKE recipes document and (as of #1755)
-              # enforce at validate readiness.
-              gke-no-default-nvidia-gpu-device-plugin: "true"
+              # NO gke-no-default-nvidia-gpu-device-plugin label: on GKE the
+              # managed driver install (gpu-driver-version=DEFAULT) is
+              # finalized by an init container of the SAME DaemonSet the
+              # opt-out label disables, so a labeled fresh pool comes up
+              # driverless (staged installer, no kernel module — run
+              # 30930940652). Until the gpuStack profile lands (#1761 PR 3,
+              # csp-managed default) the pool uses GKE-default provisioning;
+              # the label returns only for the operator profile value, paired
+              # with a label-surviving driver path.
