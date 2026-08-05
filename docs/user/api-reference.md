@@ -477,10 +477,14 @@ rejected.
 
 ```shell
 # The AKS family is the first embedded adopter (gpuStack profile).
-curl -s \
-  "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed" |
-  curl -X POST "http://localhost:8080/v2/bundle" \
-    -H "Content-Type: application/json" -d @- -o bundles.zip
+# -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
+# an error response is never written to bundles.zip. POSIX sh suffices:
+# the commands are sequential (no pipeline), so pipefail is not needed.
+set -eu
+curl -fsS -o recipe.json \
+  "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
+curl -fsS -X POST "http://localhost:8080/v2/bundle" \
+  -H "Content-Type: application/json" -d @recipe.json -o bundles.zip
 ```
 
 Profile-bearing responses record `metadata.selectedProfile`; accounting-aware
