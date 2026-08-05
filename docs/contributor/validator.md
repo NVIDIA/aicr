@@ -10,7 +10,7 @@ contributor view for all four.
 | [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
 | [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
 | [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
-| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `validators/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
+| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `pkg/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
 
 Rule of thumb: declarative constraint against a snapshot value → surface 1.
 Active probe of a live cluster → surface 2 or 4. Pre-deployment sanity
@@ -539,16 +539,52 @@ tagged with its cordon state, and:
    `RESULT:` prefix makes the coverage figure visible during a live
    `aicr validate` run regardless of redaction, but it is not
    guaranteed to survive into the artifact a downstream consumer
-   verifies by default. See #1951 for carrying this kind of outcome
-   data in a structured field that survives redaction instead.
+   verifies by default. That is why the same counts are ALSO emitted
+   through `validators.EmitExtra` (#1951) — see **Structured coverage
+   survives redaction** below.
 
-This pattern is not yet applied everywhere it could be. Cluster-aggregate
-checks that assert on an operator's aggregate status
-(`gpu-operator-health`) are unaffected — DaemonSet operands ignore
-cordons — but `expected-resources`' `rdmaFabricProbe` is itself
-node-scoped (it calls `helper.FindSchedulableGpuNodes` to build its
-RDMA-capable cohort) and has the same undisclosed narrowing; it has not
-been updated to this pattern. See #1952.
+`expected-resources`' `rdmaFabricProbeCoverage` is itself node-scoped and now
+follows this pattern too (#1952). It enumerates every GPU node via
+`helper.FindGpuNodes`, validates only the schedulable Mellanox
+RDMA-capable cohort for uniform allocatable fabric, but discloses each
+cordoned RDMA-capable node explicitly (`<node>: skipped (cordoned)`),
+counts it in `nodesTotal`, and never narrows the printed total. Because
+the probe is re-run on every poll iteration
+(`verifyRDMAFabricReady`/`pollUntilStable`), the stdout
+enumeration/`RESULT:` line is printed **exactly once at the settled
+terminal outcome** (ready or fail-closed), never per tick. The structured
+Extra is emitted twice: an **eager floor** on the first observation that
+enumerates any RDMA-candidate node (with `nodesValidated=0` — nothing is
+certified mid-poll) and again at the terminal outcome.
+`parseExtraSentinels` keeps the last valid sentinel, so the terminal emit
+wins on a clean exit; the floor exists only so a cordoned-node narrowing
+still reaches the signed bundle if the Job's `activeDeadlineSeconds`
+SIGKILLs the process at the no-margin poll budget before the terminal emit
+runs (#1952). The gate stays fail-closed: "could not observe the fabric"
+reports `0` validated and never reads as ready.
+
+Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
+certifies the cohort or fails closed — so it mints no `skipReason`
+enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
+allowlist keys unchanged (see below), so the redaction
+`PolicyVersion` stays `v2`.
+
+Cluster-aggregate checks that assert on an operator's aggregate status
+(`gpu-operator-health`) remain unaffected — DaemonSet operands ignore
+cordons.
+
+**Structured coverage survives redaction.** The `RESULT:` stdout line
+is echoed to the live CLI but is stripped from a signed bundle by the
+default (`minimal`) redaction policy (`pkg/evidence/redact`), so both
+`check-nvidia-smi` and the RDMA gate ALSO emit the coverage through
+`validators.EmitExtra` as low-cardinality counts
+(`nodesValidated`/`nodesTotal`) or a closed-set `skipReason` code. Those
+keys are the only ones that clear the fail-closed `ctrfExtraAllowlist`
+(a value that structurally looks like a node name or IP is dropped even
+under an allowed key), so a signed bundle records reduced coverage —
+e.g. a cordoned RDMA node narrowing the fabric cohort — without shipping
+any operator-identifying text. Node names appear only in the redacted
+stdout enumeration, never in the Extra channel. See #1951/#1952.
 
 For *deliberate*, durable exclusion of a node from GPU service (as
 opposed to transient cordon-for-maintenance), use the GPU Operator's
@@ -933,13 +969,34 @@ The same assertion file now powers TWO surfaces:
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's
    chainsaw runner (PR #1220). Since #1236 the runner is **pure Go**:
-   `validators/chainsaw/inprocess.go` unmarshals the
+   `pkg/chainsaw/inprocess.go` unmarshals the
    `chainsaw.kyverno.io/v1alpha1` Test, walks `spec.steps[].try[]`, and
    dispatches `assert` / `error` to kyverno-json's `checks.Check` engine
    against live cluster state. No external binary is shipped in the
    deployment validator image. CLI output is source-tagged `[chainsaw]`
    vs `[expectedResources]` so operators can disambiguate when both
    paths report on the same component.
+
+Only surface 1 still needs the `chainsaw` binary, and only on the
+developer's machine — that is why `.settings.yaml` keeps the
+`testing_tools.chainsaw` pin and `tools/update-chainsaw-checksums`.
+
+The **readiness gate** (`cmd/gate`, image `ghcr.io/nvidia/aicr-gate`,
+emitted by `aicr bundle --readiness-hooks`) is a third consumer of the
+same executor. It shelled out to an embedded `chainsaw` binary until
+PR #2038 removed it; that binary was the gate image's only source of
+HIGH CVEs and upstream ships no release that fixes them. It calls `chainsaw.Run`
+against a dynamic client built from the Job's read-only ServiceAccount,
+so `pkg/chainsaw` is the single assertion engine for validator and gate
+alike. The gate's `--namespace` flag survives as the default namespace
+for resource blocks that omit one (`defaultNamespaceFetcher` in
+`pkg/chainsawgate/runner`), preserving what `chainsaw --namespace` did.
+
+A Test that declares no `assert`/`error` operation is rejected rather
+than passing vacuously (#2040); a check that is intentionally a no-op —
+today the three `*-ocp-olm` components, whose readiness is enforced by
+the bundler's `--readiness-hooks` gate instead — must say so with the
+`aicr/no-op-check: "true"` annotation on the Test.
 
 **Registration.** A component opts in by declaring
 `healthCheck.assertFile` in `recipes/registry.yaml`:
@@ -986,7 +1043,7 @@ for the full operator list.
 `assert` and `error` operations. The deployment validator Job runs
 under a ServiceAccount bound to cluster-admin, so registry content is
 restricted at runtime to read-only Chainsaw operations
-(`validators/chainsaw/allowlist.go`). Any other operation (`script`,
+(`pkg/chainsaw/allowlist.go`). Any other operation (`script`,
 `apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
 `sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
 `ErrCodeInvalidRequest`. PR #1223 will add the same enforcement at
@@ -1051,7 +1108,7 @@ make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 
 During `aicr validate --phase deployment`, registry health checks in
 `recipes/checks/<component>/health-check.yaml` run in-process inside
-the `expected-resources` check (`validators/chainsaw/inprocess.go`).
+the `expected-resources` check (`pkg/chainsaw/inprocess.go`).
 
 A Test's `spec.timeouts.assert` is the **whole-Test budget** — one
 deadline shared across every step and retry. Slurm's

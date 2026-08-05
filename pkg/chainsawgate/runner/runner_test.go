@@ -16,28 +16,76 @@ package runner
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/NVIDIA/aicr/pkg/chainsaw"
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// stubFetcher satisfies chainsaw.ResourceFetcher for wiring tests that never
+// reach a cluster. It records the namespace each call was made with so the
+// default-namespace decorator can be observed.
+type stubFetcher struct {
+	mu         sync.Mutex
+	namespaces []string
+	obj        map[string]any
+}
+
+func (f *stubFetcher) record(ns string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.namespaces = append(f.namespaces, ns)
+}
+
+func (f *stubFetcher) seen() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.namespaces...)
+}
+
+func (f *stubFetcher) Fetch(_ context.Context, _, _, namespace, _ string) (map[string]interface{}, error) {
+	f.record(namespace)
+	if f.obj != nil {
+		return f.obj, nil
+	}
+	return nil, errors.New(errors.ErrCodeNotFound, "stub: not found")
+}
+
+func (f *stubFetcher) List(_ context.Context, _, _, namespace string, _ map[string]string) ([]map[string]interface{}, error) {
+	f.record(namespace)
+	if f.obj != nil {
+		return []map[string]interface{}{f.obj}, nil
+	}
+	return nil, nil
+}
+
 func TestEvaluate(t *testing.T) {
-	// Stub out chainsaw exec for the duration of the test.
-	orig := runComponentFn
-	defer func() { runComponentFn = orig }()
+	// Stub out the in-process assertion engine for the duration of the test.
+	orig := runBundleFn
+	defer func() { runBundleFn = orig }()
 
 	t.Run("all pass", func(t *testing.T) {
-		runComponentFn = func(_ context.Context, _ time.Duration, _, _, _ string) ComponentResult {
-			return ComponentResult{Result: ResultPass}
+		runBundleFn = func(_ context.Context, asserts []chainsaw.ComponentAssert, _ time.Duration, _ chainsaw.ResourceFetcher) []chainsaw.Result {
+			out := make([]chainsaw.Result, 0, len(asserts))
+			for _, a := range asserts {
+				out = append(out, chainsaw.Result{Component: a.Name, Passed: true})
+			}
+			return out
 		}
 		bundle := map[string]string{
 			"comp-a.yaml": "# stub a",
 			"comp-b.yaml": "# stub b",
 		}
-		res, err := Evaluate(context.Background(), bundle, Options{Namespace: "ns", Timeout: time.Second})
+		res, err := Evaluate(context.Background(), bundle,
+			Options{Namespace: "ns", Timeout: time.Second, Fetcher: &stubFetcher{}})
 		if err != nil {
 			t.Fatalf("Evaluate: %v", err)
 		}
@@ -55,17 +103,27 @@ func TestEvaluate(t *testing.T) {
 	})
 
 	t.Run("one fail flips AllPass", func(t *testing.T) {
-		runComponentFn = func(_ context.Context, _ time.Duration, _, _, compDir string) ComponentResult {
-			if strings.Contains(compDir, "bad") {
-				return ComponentResult{Result: ResultFail, Message: "boom"}
+		runBundleFn = func(_ context.Context, asserts []chainsaw.ComponentAssert, _ time.Duration, _ chainsaw.ResourceFetcher) []chainsaw.Result {
+			out := make([]chainsaw.Result, 0, len(asserts))
+			for _, a := range asserts {
+				if strings.Contains(a.Name, "bad") {
+					out = append(out, chainsaw.Result{
+						Component: a.Name,
+						Output:    "boom",
+						Error:     errors.New(errors.ErrCodeInternal, "boom"),
+					})
+					continue
+				}
+				out = append(out, chainsaw.Result{Component: a.Name, Passed: true})
 			}
-			return ComponentResult{Result: ResultPass}
+			return out
 		}
 		bundle := map[string]string{
 			"good.yaml": "# stub",
 			"bad.yaml":  "# stub",
 		}
-		res, err := Evaluate(context.Background(), bundle, Options{Namespace: "ns", Timeout: time.Second})
+		res, err := Evaluate(context.Background(), bundle,
+			Options{Namespace: "ns", Timeout: time.Second, Fetcher: &stubFetcher{}})
 		if err != nil {
 			t.Fatalf("Evaluate: %v", err)
 		}
@@ -75,52 +133,72 @@ func TestEvaluate(t *testing.T) {
 		if res.Components["bad"].Result != ResultFail {
 			t.Errorf("bad component: got %v, want Fail", res.Components["bad"])
 		}
+		if res.Components["bad"].Message != "boom" {
+			t.Errorf("bad component message: got %q, want %q", res.Components["bad"].Message, "boom")
+		}
 		if res.Components["good"].Result != ResultPass {
 			t.Errorf("good component: got %v, want Pass", res.Components["good"])
 		}
 	})
 
-	t.Run("component name strips .yaml suffix", func(t *testing.T) {
-		var seenDirs []string
-		runComponentFn = func(_ context.Context, _ time.Duration, _, _, compDir string) ComponentResult {
-			seenDirs = append(seenDirs, filepath.Base(compDir))
-			return ComponentResult{Result: ResultPass}
+	t.Run("component name strips .yaml suffix and carries the test body", func(t *testing.T) {
+		var seen []chainsaw.ComponentAssert
+		runBundleFn = func(_ context.Context, asserts []chainsaw.ComponentAssert, _ time.Duration, _ chainsaw.ResourceFetcher) []chainsaw.Result {
+			seen = asserts
+			return []chainsaw.Result{{Component: asserts[0].Name, Passed: true}}
 		}
-		bundle := map[string]string{"prometheus.yaml": "# stub"}
-		res, err := Evaluate(context.Background(), bundle, Options{})
+		bundle := map[string]string{"prometheus.yaml": "# body"}
+		res, err := Evaluate(context.Background(), bundle, Options{Fetcher: &stubFetcher{}})
 		if err != nil {
 			t.Fatalf("Evaluate: %v", err)
 		}
 		if _, ok := res.Components["prometheus"]; !ok {
 			t.Errorf("expected component %q in result, got %v", "prometheus", res.Components)
 		}
-		if len(seenDirs) != 1 || seenDirs[0] != "prometheus" {
-			t.Errorf("expected compDir basename 'prometheus', got %v", seenDirs)
+		if len(seen) != 1 || seen[0].Name != "prometheus" || seen[0].AssertYAML != "# body" {
+			t.Errorf("dispatched asserts = %+v, want one {prometheus, # body}", seen)
 		}
 	})
 
-	t.Run("ConfigPath is forwarded to component runner", func(t *testing.T) {
-		var seenConfig []string
-		runComponentFn = func(_ context.Context, _ time.Duration, _, configPath, _ string) ComponentResult {
-			seenConfig = append(seenConfig, configPath)
-			return ComponentResult{Result: ResultPass}
+	t.Run("nil fetcher is rejected rather than reporting unevaluated components", func(t *testing.T) {
+		runBundleFn = func(_ context.Context, _ []chainsaw.ComponentAssert, _ time.Duration, _ chainsaw.ResourceFetcher) []chainsaw.Result {
+			t.Fatal("runBundleFn should not be called without a fetcher")
+			return nil
 		}
-		bundle := map[string]string{"comp.yaml": "# stub"}
-		if _, err := Evaluate(context.Background(), bundle,
-			Options{Namespace: "ns", ConfigPath: "/etc/chainsaw/config.yaml"}); err != nil {
+		_, err := Evaluate(context.Background(), map[string]string{"c.yaml": "# stub"}, Options{})
+		if err == nil {
+			t.Fatal("expected error for nil fetcher, got nil")
+		}
+		var se *errors.StructuredError
+		if !stderrors.As(err, &se) || se.Code != errors.ErrCodeInvalidRequest {
+			t.Errorf("err = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+
+	t.Run("unset timeout falls back to the default assertion budget", func(t *testing.T) {
+		var seenTimeout time.Duration
+		runBundleFn = func(_ context.Context, asserts []chainsaw.ComponentAssert, timeout time.Duration, _ chainsaw.ResourceFetcher) []chainsaw.Result {
+			seenTimeout = timeout
+			return []chainsaw.Result{{Component: asserts[0].Name, Passed: true}}
+		}
+		if _, err := Evaluate(context.Background(),
+			map[string]string{"comp.yaml": "# stub"}, Options{Fetcher: &stubFetcher{}}); err != nil {
 			t.Fatalf("Evaluate: %v", err)
 		}
-		if len(seenConfig) != 1 || seenConfig[0] != "/etc/chainsaw/config.yaml" {
-			t.Errorf("ConfigPath forwarded: got %v, want [/etc/chainsaw/config.yaml]", seenConfig)
+		if seenTimeout != defaults.ChainsawAssertTimeout {
+			t.Errorf("timeout = %v, want %v — a zero budget expires every assertion immediately",
+				seenTimeout, defaults.ChainsawAssertTimeout)
 		}
 	})
 
 	t.Run("empty bundle returns AllPass=true", func(t *testing.T) {
-		runComponentFn = func(_ context.Context, _ time.Duration, _, _, _ string) ComponentResult {
-			t.Fatalf("runComponentFn should not be called for empty bundle")
-			return ComponentResult{}
+		runBundleFn = func(_ context.Context, asserts []chainsaw.ComponentAssert, _ time.Duration, _ chainsaw.ResourceFetcher) []chainsaw.Result {
+			if len(asserts) != 0 {
+				t.Fatalf("expected no asserts for an empty bundle, got %d", len(asserts))
+			}
+			return nil
 		}
-		res, err := Evaluate(context.Background(), map[string]string{}, Options{})
+		res, err := Evaluate(context.Background(), map[string]string{}, Options{Fetcher: &stubFetcher{}})
 		if err != nil {
 			t.Fatalf("Evaluate: %v", err)
 		}
@@ -133,26 +211,243 @@ func TestEvaluate(t *testing.T) {
 	})
 }
 
+// TestEvaluate_AppliesDefaultNamespace pins the replacement for the removed
+// `chainsaw --namespace` flag: an assertion whose resource block omits
+// metadata.namespace must be scoped to Options.Namespace, not silently widened
+// to every namespace.
+func TestEvaluate_AppliesDefaultNamespace(t *testing.T) {
+	const namespacelessTest = `
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: t
+spec:
+  timeouts:
+    assert: 50ms
+  steps:
+    - name: assert-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: foo
+`
+	// The namespace + label-selector shape (no metadata.name) is the dominant
+	// health-check form and takes the List path, so it needs its own case —
+	// the decorator defaults the namespace in both methods.
+	const namespacelessListTest = `
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: t
+spec:
+  timeouts:
+    assert: 50ms
+  steps:
+    - name: assert-pods
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                labels:
+                  app: foo
+              status:
+                phase: Running
+`
+	tests := []struct {
+		name    string
+		options Options
+		body    string
+		want    string
+	}{
+		{
+			name:    "namespace-less list assert inherits Options.Namespace",
+			options: Options{Namespace: "release-ns", Timeout: 50 * time.Millisecond},
+			body:    namespacelessListTest,
+			want:    "release-ns",
+		},
+		{
+			name:    "namespace-less assert inherits Options.Namespace",
+			options: Options{Namespace: "release-ns", Timeout: 50 * time.Millisecond},
+			want:    "release-ns",
+		},
+		{
+			name:    "no configured namespace leaves the assert as authored",
+			options: Options{Timeout: 50 * time.Millisecond},
+			want:    "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &stubFetcher{}
+			opts := tt.options
+			opts.Fetcher = f
+
+			body := tt.body
+			if body == "" {
+				body = namespacelessTest
+			}
+			if _, err := Evaluate(context.Background(),
+				map[string]string{"comp.yaml": body}, opts); err != nil {
+				t.Fatalf("Evaluate: %v", err)
+			}
+			seen := f.seen()
+			if len(seen) == 0 {
+				t.Fatal("fetcher was never called")
+			}
+			for _, ns := range seen {
+				if ns != tt.want {
+					t.Errorf("fetch namespace = %q, want %q", ns, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestEvaluate_InProcessEndToEnd exercises the real pkg/chainsaw executor
+// through Evaluate — no runBundleFn stub — so the wiring that replaced the
+// chainsaw exec is covered end to end.
+func TestEvaluate_InProcessEndToEnd(t *testing.T) {
+	const readinessTest = `
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: t
+spec:
+  timeouts:
+    assert: 100ms
+  steps:
+    - name: validate-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: foo
+                namespace: ns
+              status:
+                availableReplicas: 2
+`
+	healthy := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "namespace": "ns"},
+		"status":     map[string]any{"availableReplicas": float64(2)},
+	}
+
+	tests := []struct {
+		name    string
+		obj     map[string]any
+		want    string
+		allPass bool
+	}{
+		{name: "healthy fixture passes", obj: healthy, want: ResultPass, allPass: true},
+		{name: "absent resource fails", obj: nil, want: ResultFail, allPass: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := Evaluate(context.Background(),
+				map[string]string{"comp.yaml": readinessTest},
+				Options{Namespace: "ns", Timeout: time.Second, Fetcher: &stubFetcher{obj: tt.obj}})
+			if err != nil {
+				t.Fatalf("Evaluate: %v", err)
+			}
+			if res.AllPass != tt.allPass {
+				t.Errorf("AllPass = %v, want %v (components=%+v)", res.AllPass, tt.allPass, res.Components)
+			}
+			if got := res.Components["comp"].Result; got != tt.want {
+				t.Errorf("component result = %q, want %q (msg=%q)",
+					got, tt.want, res.Components["comp"].Message)
+			}
+		})
+	}
+}
+
+func TestToComponentResult(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          chainsaw.Result
+		wantResult  string
+		wantMessage string
+	}{
+		{
+			name:       "passed",
+			in:         chainsaw.Result{Component: "c", Passed: true},
+			wantResult: ResultPass,
+		},
+		{
+			name: "assertion failure is Fail",
+			in: chainsaw.Result{
+				Component: "c",
+				Output:    "Deployment ns/foo: not ready",
+				Error:     errors.New(errors.ErrCodeInternal, "Deployment ns/foo: not ready"),
+			},
+			wantResult:  ResultFail,
+			wantMessage: "Deployment ns/foo: not ready",
+		},
+		{
+			name: "expired budget is Unknown, not a verdict",
+			in: chainsaw.Result{
+				Component: "c",
+				Error:     errors.Wrap(errors.ErrCodeInternal, "context canceled", context.DeadlineExceeded),
+			},
+			wantResult:  ResultUnknown,
+			wantMessage: "assertion budget exhausted: [INTERNAL] context canceled: context deadline exceeded",
+		},
+		{
+			name: "cancellation is Unknown",
+			in: chainsaw.Result{
+				Component: "c",
+				Output:    "canceled",
+				Error:     errors.Wrap(errors.ErrCodeInternal, "canceled", context.Canceled),
+			},
+			wantResult:  ResultUnknown,
+			wantMessage: "assertion budget exhausted: canceled",
+		},
+		{
+			name:       "failure without an error still reports Fail",
+			in:         chainsaw.Result{Component: "c", Output: "no match"},
+			wantResult: ResultFail, wantMessage: "no match",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toComponentResult(tt.in)
+			if got.Result != tt.wantResult {
+				t.Errorf("Result = %q, want %q", got.Result, tt.wantResult)
+			}
+			if got.Message != tt.wantMessage {
+				t.Errorf("Message = %q, want %q", got.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
 func TestEvaluate_HonorsContextCancellation(t *testing.T) {
-	orig := runComponentFn
-	defer func() { runComponentFn = orig }()
+	orig := runBundleFn
+	defer func() { runBundleFn = orig }()
 
 	var calls int
-	runComponentFn = func(_ context.Context, _ time.Duration, _, _, _ string) ComponentResult {
+	runBundleFn = func(_ context.Context, _ []chainsaw.ComponentAssert, _ time.Duration, _ chainsaw.ResourceFetcher) []chainsaw.Result {
 		calls++
-		return ComponentResult{Result: ResultPass}
+		return nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before Evaluate runs
 
 	bundle := map[string]string{"a.yaml": "# stub", "b.yaml": "# stub"}
-	_, err := Evaluate(ctx, bundle, Options{Namespace: "ns", Timeout: time.Second})
+	_, err := Evaluate(ctx, bundle, Options{Namespace: "ns", Timeout: time.Second, Fetcher: &stubFetcher{}})
 	if err == nil {
 		t.Fatal("expected error when context is cancelled, got nil")
 	}
 	if calls != 0 {
-		t.Errorf("expected no component execs after cancellation, got %d", calls)
+		t.Errorf("expected no assertion runs after cancellation, got %d", calls)
 	}
 }
 

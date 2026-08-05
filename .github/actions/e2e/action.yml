@@ -69,16 +69,6 @@ runs:
           CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment &
           CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance &
           CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance &
-          # Download chainsaw binary for health check assertions.
-          (
-            CHAINSAW_VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml | sed 's/^v//')
-            CHAINSAW_SHA256=$(yq eval '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml)
-            curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o dist/validator/chainsaw.tar.gz \
-              "https://github.com/kyverno/chainsaw/releases/download/v${CHAINSAW_VERSION}/chainsaw_linux_amd64.tar.gz"
-            echo "${CHAINSAW_SHA256}  dist/validator/chainsaw.tar.gz" | sha256sum -c
-            tar -xzf dist/validator/chainsaw.tar.gz -C dist/validator chainsaw
-            rm dist/validator/chainsaw.tar.gz
-          ) &
           wait
           # Build per-phase COPY-only images and push to local registry.
           # Ensure testdata dirs exist (conformance has none).
@@ -90,7 +80,6 @@ runs:
         FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
         COPY dist/validator/${phase} /${phase}
         COPY validators/${phase}/testdata /app/testdata
-        COPY dist/validator/chainsaw /usr/local/bin/chainsaw
         WORKDIR /app
         USER nvs
         ENTRYPOINT ["/${phase}"]

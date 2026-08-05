@@ -142,8 +142,8 @@ paths are fully specified in `.goreleaser.yaml` under `kos.repositories`.
 ```
 
 #### `attest-image-from-tag/`
-**Purpose**: Bind a fixed AICR candidate image to an authoritative digest and
-generate SBOM + provenance
+**Purpose**: Bind a fixed AICR candidate image to an authoritative digest,
+resolve its per-platform manifest digests, and generate SBOM + VEX + provenance
 **When to use**: Attesting candidate images in the AICR release workflow
 **Inputs**:
 - `image_name` (required): One of the seven fixed AICR release image names
@@ -165,11 +165,20 @@ generate SBOM + provenance
 
 #### `sbom-and-attest/`
 
-**Purpose**: Generate SBOM and attestations for image with known digest  
-**When to use**: When you already have the digest (e.g., from build output)  
+**Purpose**: Generate the SPDX SBOM, OpenVEX and SLSA provenance attestations
+for an image whose digests are already known
+**When to use**: When you already have the digests (e.g., from build output)
 **Inputs**:
 - `image_name` (required): One of the seven fixed AICR release image names
-- `image_digest` (required): sha256 digest
+- `image_digest` (required): Multi-platform index digest; subject for the VEX and provenance attestations
+- `amd64_digest` (required): `linux/amd64` manifest digest; subject for the amd64 SBOM
+- `arm64_digest` (required): `linux/arm64` manifest digest; subject for the arm64 SBOM
+
+Cosign is pinned from `.settings.yaml` via `load-versions`, and every
+`cosign attest` call sets `--new-bundle-format=true` explicitly so the
+attestations land through the OCI referrers path by our decision rather than by
+an installer default. Per-platform SBOM subjects and index-level VEX subjects
+are explained in the action's header comment.
 
 **Example**:
 
@@ -178,6 +187,8 @@ generate SBOM + provenance
   with:
     image_name: ghcr.io/nvidia/aicrd
     image_digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    amd64_digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+    arm64_digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
 ```
 
 ### KWOK Testing Actions

@@ -176,12 +176,18 @@ aicr bundle --recipe recipe.yaml --readiness-hooks --output ./bundles
 
 ## Deploy the bundle
 
-For the default `helm` deployer:
+For the default `helm` deployer, verify the bundle before installing it:
 
 ```bash
-cd bundles && chmod +x deploy.sh && ./deploy.sh
+cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh
 ```
 
 For GitOps deployers, commit/publish the manifests per your Argo CD or Flux
-workflow. After deploying, confirm the cluster matches the recipe with
+workflow. Verify the bundle directory before it enters the repository or
+registry; a pull-based controller reconciles on its own schedule, so a pipeline
+step gates what gets published rather than what the cluster applies. For the
+per-deployer gates and which of them the cluster can enforce, see
+[Gating Deployment on Verification](../integrator/supply-chain-verification.md#gating-deployment-on-verification).
+
+After deploying, confirm the cluster matches the recipe with
 [`aicr validate`](validation.md).

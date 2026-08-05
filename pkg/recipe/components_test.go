@@ -62,7 +62,7 @@ func TestComponentRegistry_Validate(t *testing.T) {
 // every component in recipes/registry.yaml MUST declare
 // healthCheck.assertFile, and that path MUST resolve through the data
 // provider to a readable file. Together with
-// TestValidateTestReadOnly_RegistryContent in validators/chainsaw —
+// TestValidateTestReadOnly_RegistryContent in pkg/chainsaw —
 // which separately validates that every file the registry points at
 // passes the read-only allowlist — this closes the registry-side half
 // of the contract that #1220 introduced at runtime: deployment-phase
@@ -88,7 +88,7 @@ func TestComponentRegistry_RequiresHealthCheck(t *testing.T) {
 			if comp.HealthCheck.AssertFile == "" {
 				t.Errorf("component %q must declare healthCheck.assertFile in recipes/registry.yaml "+
 					"and ship the corresponding recipes/checks/%s/health-check.yaml — see #1223 "+
-					"and validators/chainsaw/allowlist.go for the read-only allowlist contract",
+					"and pkg/chainsaw/allowlist.go for the read-only allowlist contract",
 					comp.Name, comp.Name)
 				return
 			}
