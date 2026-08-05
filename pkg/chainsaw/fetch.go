@@ -224,7 +224,7 @@ type resettableMapper interface {
 // cache predating the CRD's installation, and client-go silently drops
 // ErrGroupDiscoveryFailed whenever partial results exist, so a kind in an
 // unreachable group surfaces as a bare NoKindMatchError.
-func (f *clusterFetcher) resolveMapping(gvk schema.GroupVersionKind) (*meta.RESTMapping, error) {
+func (f *clusterFetcher) resolveMapping(ctx context.Context, gvk schema.GroupVersionKind) (*meta.RESTMapping, error) {
 	genBefore := f.resetGeneration()
 
 	mapping, err := f.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
@@ -264,7 +264,7 @@ func (f *clusterFetcher) resolveMapping(gvk schema.GroupVersionKind) (*meta.REST
 				gvk, defaults.DiscoveryRefreshCooldown), err)
 	}
 
-	if groupErr := f.groupDiscoveryFailure(gvk.Group); groupErr != nil {
+	if groupErr := f.groupDiscoveryFailure(ctx, gvk.Group); groupErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable,
 			fmt.Sprintf("no REST mapping for %s, but discovery for API group %q is incomplete",
 				gvk, gvk.Group), groupErr)
@@ -281,9 +281,21 @@ func (f *clusterFetcher) resolveMapping(gvk schema.GroupVersionKind) (*meta.REST
 // treating any partial failure as "everything is unresolved" would strand every
 // negative assertion on a permanently degraded cluster. Only a kind whose OWN
 // group could not be enumerated is ambiguous.
-func (f *clusterFetcher) groupDiscoveryFailure(group string) error {
+//
+// The probe normally reads the cache the mapper's retry just repopulated, so it
+// costs no request. It takes ctx anyway because DiscoveryInterface is
+// context-free: on a cold cache ServerGroupsAndResources fans out one request
+// per group-version, each bounded only by boundedConfig's per-request timeout,
+// with nothing tying the set to the assertion deadline. A ctx already past its
+// deadline cannot prove the group healthy, so it reports the cause instead of
+// probing — the fail-closed direction.
+func (f *clusterFetcher) groupDiscoveryFailure(ctx context.Context, group string) error {
 	if f.discovery == nil {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Wrap(errors.ErrCodeUnavailable,
+			"context expired before API group discovery could be verified", err)
 	}
 	_, _, err := f.discovery.ServerGroupsAndResources()
 	if err == nil {
@@ -297,7 +309,7 @@ func (f *clusterFetcher) groupDiscoveryFailure(group string) error {
 	}
 	for gv, gvErr := range groupErr.Groups {
 		if gv.Group == group {
-			return fmt.Errorf("%s: %w", gv, gvErr)
+			return errors.Wrap(errors.ErrCodeUnavailable, gv.String(), gvErr)
 		}
 	}
 	return nil
@@ -376,7 +388,7 @@ func (f *clusterFetcher) Fetch(ctx context.Context, apiVersion, kind, namespace,
 	}
 
 	gvk := gv.WithKind(kind)
-	mapping, err := f.resolveMapping(gvk)
+	mapping, err := f.resolveMapping(ctx, gvk)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +434,7 @@ func (f *clusterFetcher) List(ctx context.Context, apiVersion, kind, namespace s
 	}
 
 	gvk := gv.WithKind(kind)
-	mapping, err := f.resolveMapping(gvk)
+	mapping, err := f.resolveMapping(ctx, gvk)
 	if err != nil {
 		return nil, err
 	}

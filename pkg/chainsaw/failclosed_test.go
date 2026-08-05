@@ -178,7 +178,16 @@ spec:
 			name:       "a raw Kubernetes document alongside a Test is rejected",
 			content:    validTest + "---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: d\n",
 			wantErr:    true,
-			wantSubstr: `document 1 has kind "Deployment"`,
+			wantSubstr: `document 1 has "Deployment"`,
+		},
+		{
+			// A mapping with no kind at all is still content-bearing, so it
+			// is rejected too — named as "no kind field" rather than the
+			// opaque `kind ""`.
+			name:       "a mapping document with no kind is rejected",
+			content:    validTest + "---\nfoo: bar\n",
+			wantErr:    true,
+			wantSubstr: "document 1 has no kind field",
 		},
 		{
 			name:       "a Test-kind document from another API group is rejected",

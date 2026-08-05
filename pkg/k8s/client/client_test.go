@@ -414,8 +414,24 @@ users:
 // replaced used clientcmd's merging loading rules, so this was a regression.
 func TestBuildKubeClient_MultiFileKUBECONFIG(t *testing.T) {
 	dir := t.TempDir()
-	first := writeKubeconfig(t, dir, "first", "first", "https://first.example:6443")
-	second := writeKubeconfig(t, dir, "second", "second", "https://second.example:6443")
+	// The fixture is deliberately split so NEITHER file can satisfy the load
+	// alone: the first names the current context but never defines it, and the
+	// second defines that context plus the cluster/user it points at. A result
+	// is only reachable if both files were read and merged. Two complete
+	// kubeconfigs would not prove that — the first alone would produce the
+	// same answer.
+	first := filepath.Join(dir, "first")
+	if err := os.WriteFile(first, []byte(`apiVersion: v1
+kind: Config
+current-context: merged-ctx
+clusters:
+  - name: decoy
+    cluster:
+      server: https://decoy.example:6443
+`), 0o600); err != nil {
+		t.Fatalf("write first kubeconfig: %v", err)
+	}
+	second := writeKubeconfig(t, dir, "second", "merged-ctx", "https://merged.example:6443")
 
 	t.Setenv("KUBECONFIG", first+string(os.PathListSeparator)+second)
 
@@ -430,13 +446,86 @@ func TestBuildKubeClient_MultiFileKUBECONFIG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildKubeClient() with a multi-file KUBECONFIG: %v", err)
 	}
-	// clientcmd merges in KUBECONFIG order, so the first file's current-context
-	// wins — proving the merge ran rather than one file being read in isolation.
-	if config.Host != "https://first.example:6443" {
-		t.Errorf("config.Host = %q, want the first file's server (merge order)", config.Host)
+	// current-context came from the first file; the context, cluster, and user
+	// it resolves to came from the second. Both had to load.
+	if config.Host != "https://merged.example:6443" {
+		t.Errorf("config.Host = %q, want the second file's server — the merge did not cover both files", config.Host)
 	}
-	if config.BearerToken != "first-token" {
-		t.Errorf("config.BearerToken = %q, want %q", config.BearerToken, "first-token")
+	if config.BearerToken != "merged-ctx-token" {
+		t.Errorf("config.BearerToken = %q, want %q", config.BearerToken, "merged-ctx-token")
+	}
+}
+
+// TestBuildKubeClient_MultiFileKUBECONFIGWhitespace guards the divergence
+// between this package's classification and clientcmd's own loading rules.
+// multiPathKubeconfigEnv trims the value (matching ResolveKubeconfigPath), but
+// NewDefaultClientConfigLoadingRules splits os.Getenv("KUBECONFIG") verbatim —
+// so with outer whitespace the raw split yields a filename that does not exist,
+// Load() skips missing files non-fatally, and the merge silently drops it.
+//
+// The leading-space case is the dangerous one: before the Precedence override
+// it resolved to the SECOND file's context, so a run targeted a different
+// cluster than the operator named, with no error.
+func TestBuildKubeClient_MultiFileKUBECONFIGWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	first := writeKubeconfig(t, dir, "first", "first", "https://first.example:6443")
+	second := writeKubeconfig(t, dir, "second", "second", "https://second.example:6443")
+	joined := first + string(os.PathListSeparator) + second
+
+	tests := []struct {
+		name string
+		env  string
+	}{
+		{"no whitespace", joined},
+		{"leading whitespace", " " + joined},
+		{"trailing whitespace", joined + " "},
+		{"whitespace on both ends", "  " + joined + "  "},
+		{"whitespace around each entry", " " + first + " " + string(os.PathListSeparator) + " " + second + " "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KUBECONFIG", tt.env)
+
+			_, config, err := BuildKubeClient("")
+			if err != nil {
+				t.Fatalf("BuildKubeClient() with KUBECONFIG=%q: %v", tt.env, err)
+			}
+			// The first file's current-context wins in every case; anything
+			// else means an entry was mangled and silently dropped.
+			if config.Host != "https://first.example:6443" {
+				t.Errorf("config.Host = %q, want the first file's server — an entry was dropped from the merge", config.Host)
+			}
+		})
+	}
+}
+
+// TestKubeconfigPrecedence pins the normalization the loading rules are
+// overridden with.
+func TestKubeconfigPrecedence(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	tests := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{"two paths", "/a" + sep + "/b", []string{"/a", "/b"}},
+		{"outer whitespace", " /a" + sep + "/b ", []string{"/a", "/b"}},
+		{"whitespace around entries", " /a " + sep + " /b ", []string{"/a", "/b"}},
+		{"trailing separator drops the empty", "/a" + sep, []string{"/a"}},
+		{"separators only", sep, []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := kubeconfigPrecedence(tt.value)
+			if len(got) != len(tt.want) {
+				t.Fatalf("kubeconfigPrecedence(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("kubeconfigPrecedence(%q)[%d] = %q, want %q", tt.value, i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -484,7 +573,8 @@ func TestIsMultiPathKubeconfig(t *testing.T) {
 		{"single path", "/home/u/.kube/config", false},
 		{"empty", "", false},
 		{"unix separated", "/a:/b", true},
-		{"windows separated", `C:\a;C:\b`, true},
+		// No ':' in the value, so this proves ';' alone is recognized.
+		{"windows separated", `\a;\b`, true},
 		{"trailing separator still names a list", "/a:", true},
 	}
 	for _, tt := range tests {

@@ -257,10 +257,14 @@ func decodeTests(yamlContent string) ([]v1alpha1.Test, error) {
 					"Test may hold only Test documents, because nothing else evaluates the rest", docIdx), err)
 		}
 		if header.Kind != chainsawTestKind {
+			describedKind := strconv.Quote(header.Kind)
+			if header.Kind == "" {
+				describedKind = "no kind field"
+			}
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("document %d has kind %q, not %q; a stream carrying a chainsaw Test may hold "+
+				fmt.Sprintf("document %d has %s, not kind %q; a stream carrying a chainsaw Test may hold "+
 					"only Test documents, because nothing else evaluates the rest",
-					docIdx, header.Kind, chainsawTestKind))
+					docIdx, describedKind, chainsawTestKind))
 		}
 		if group, _, ok := strings.Cut(header.APIVersion, "/"); !ok || group != chainsawTestAPIGroup {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,

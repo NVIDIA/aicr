@@ -436,3 +436,33 @@ func isUnavailable(err error) bool {
 	var se *errors.StructuredError
 	return stderrors.As(err, &se) && se.Code == errors.ErrCodeUnavailable
 }
+
+// TestClusterFetcher_ProbeHonorsContext covers the bound on the partial-discovery
+// probe. DiscoveryInterface is context-free, so on a cold cache
+// ServerGroupsAndResources fans out one request per group-version with nothing
+// tying the set to the assertion deadline. An already-expired context cannot
+// prove the group healthy, so the probe reports the cause instead of issuing
+// those requests — Unavailable, never NotFound.
+func TestClusterFetcher_ProbeHonorsContext(t *testing.T) {
+	t.Parallel()
+
+	disco := newStubDiscovery(nil)
+	mapper, cached := newRealMapper(disco)
+	client := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+	f := NewClusterFetcher(client, mapper, WithGroupDiscovery(cached))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // expired before the probe would run
+
+	// ConfigMap is absent from the stub's healthy core group, so a live probe
+	// would clear it to NotFound. With the context already done it must not.
+	_, err := f.Fetch(ctx, "v1", "ConfigMap", "ns", "x")
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected StructuredError, got %T %v", err, err)
+	}
+	if se.Code != errors.ErrCodeUnavailable {
+		t.Errorf("code = %q, want %q — an expired context cannot prove a group was enumerated (err=%v)",
+			se.Code, errors.ErrCodeUnavailable, err)
+	}
+}
