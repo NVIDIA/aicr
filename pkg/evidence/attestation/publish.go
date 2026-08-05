@@ -93,7 +93,7 @@ func Publish(ctx context.Context, opts PublishOptions) error {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid push reference", err)
 	}
 
-	bundle, outDir, err := loadOnDiskBundle(opts.BundleDir)
+	bundle, outDir, err := loadOnDiskBundle(ctx, opts.BundleDir)
 	if err != nil {
 		return err
 	}
@@ -143,15 +143,15 @@ func Publish(ctx context.Context, opts PublishOptions) error {
 // unsigned in-toto Statement. The predicate is trusted as-is — Publish
 // signs the pre-built bundle bytes verbatim; integrity auditing is the
 // job of `aicr evidence verify`.
-func loadOnDiskBundle(dir string) (*Bundle, string, error) {
+func loadOnDiskBundle(ctx context.Context, dir string) (*Bundle, string, error) {
 	if dir == "" {
 		return nil, "", errors.New(errors.ErrCodeInvalidRequest, "bundle directory is required")
 	}
-	summaryDir, outDir, err := resolveSummaryDir(dir)
+	summaryDir, outDir, err := resolveSummaryDir(ctx, dir)
 	if err != nil {
 		return nil, "", err
 	}
-	pred, stmt, err := readBundlePredicate(summaryDir)
+	pred, stmt, err := readBundlePredicate(ctx, summaryDir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -159,7 +159,7 @@ func loadOnDiskBundle(dir string) (*Bundle, string, error) {
 		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
 			"bundle statement predicate is missing recipe.{name,digest}")
 	}
-	profile, advertiser, descriptorIdentity, err := readBundleRecipeProfile(summaryDir)
+	profile, advertiser, descriptorIdentity, err := readBundleRecipeProfile(ctx, summaryDir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -184,6 +184,40 @@ func loadOnDiskBundle(dir string) (*Bundle, string, error) {
 	return bundle, outDir, nil
 }
 
+// withFileReadTimeout runs fn — a blocking local-filesystem syscall (os.Open /
+// io.ReadAll / os.Stat) — under a FileReadTimeout-bounded derivative of ctx,
+// returning fn's own error, or an ErrCodeTimeout error if the bound elapses
+// first. It exists because a bare os.Open/os.Stat against a hung NFS/FUSE mount
+// blocks in the syscall indefinitely: no downstream sign/push timeout can
+// unblock it, so the read itself must be time-bounded to surface a dead mount
+// as a timeout rather than an indefinite hang.
+//
+// fn runs in a goroutine so the caller unblocks the instant ctx expires. The
+// accepted tradeoff: on timeout the parked goroutine stays blocked in the
+// syscall until the kernel returns or the process exits — fine for a
+// short-lived CLI leaf command (evidence publish/sign), which is the only
+// caller of these bundle readers.
+func withFileReadTimeout(ctx context.Context, what string, fn func() error) error {
+	ctx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
+	defer cancel()
+	// Fail closed and deterministically if the caller's context is already
+	// canceled/expired, before launching the goroutine — otherwise a fast
+	// syscall could win the select race against an already-done context.
+	if err := ctx.Err(); err != nil {
+		return errors.WrapWithContext(errors.ErrCodeTimeout, "timed out reading "+what, err,
+			map[string]interface{}{"timeout": defaults.FileReadTimeout.String()})
+	}
+	done := make(chan error, 1) // buffered so the goroutine never leaks on timeout
+	go func() { done <- fn() }()
+	select {
+	case <-ctx.Done():
+		return errors.WrapWithContext(errors.ErrCodeTimeout, "timed out reading "+what, ctx.Err(),
+			map[string]interface{}{"timeout": defaults.FileReadTimeout.String()})
+	case err := <-done:
+		return err
+	}
+}
+
 // readBundleRecipeProfile decodes the summary bundle's recipe.yaml and
 // returns the canonical name=value selection it carries, its declared
 // advertiser, and the recipe-scoped policy-descriptor identity recomputed
@@ -194,17 +228,25 @@ func loadOnDiskBundle(dir string) (*Bundle, string, error) {
 // carries only the (suffixed) recipe name. The read is size-bounded like
 // readBundlePredicate: the publish target may be an attacker-influenced
 // bundle root where os.ReadFile would allocate the whole file before any
-// size check.
-func readBundleRecipeProfile(summaryDir string) (profile, advertiser, descriptorIdentity string, err error) {
+// size check. It is also time-bounded via withFileReadTimeout so the read
+// cannot hang indefinitely on a dead NFS/FUSE mount.
+func readBundleRecipeProfile(ctx context.Context, summaryDir string) (profile, advertiser, descriptorIdentity string, err error) {
 	path := filepath.Join(summaryDir, RecipeFilename)
-	f, err := os.Open(path) //nolint:gosec // bundle-local path resolved by resolveSummaryDir
-	if err != nil {
-		return "", "", "", errors.Wrap(errors.ErrCodeNotFound, "failed to read bundle recipe.yaml", err)
-	}
-	defer func() { _ = f.Close() }()
-	body, err := io.ReadAll(io.LimitReader(f, defaults.MaxRecipePOSTBytes+1))
-	if err != nil {
-		return "", "", "", errors.Wrap(errors.ErrCodeInternal, "failed to read bundle recipe.yaml", err)
+	var body []byte
+	if rerr := withFileReadTimeout(ctx, "bundle recipe.yaml", func() error {
+		f, oErr := os.Open(path) //nolint:gosec // bundle-local path resolved by resolveSummaryDir
+		if oErr != nil {
+			return errors.Wrap(errors.ErrCodeNotFound, "failed to read bundle recipe.yaml", oErr)
+		}
+		defer func() { _ = f.Close() }()
+		b, rErr := io.ReadAll(io.LimitReader(f, defaults.MaxRecipePOSTBytes+1))
+		if rErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to read bundle recipe.yaml", rErr)
+		}
+		body = b
+		return nil
+	}); rerr != nil {
+		return "", "", "", rerr
 	}
 	if int64(len(body)) > defaults.MaxRecipePOSTBytes {
 		return "", "", "", errors.New(errors.ErrCodeInvalidRequest,
@@ -226,13 +268,21 @@ func readBundleRecipeProfile(summaryDir string) (profile, advertiser, descriptor
 // pointer lands in its parent so the on-disk layout matches the one-shot
 // `validate --emit-attestation --push` output (pointer.yaml beside
 // summary-bundle/).
-func resolveSummaryDir(dir string) (summaryDir, outDir string, err error) {
+func resolveSummaryDir(ctx context.Context, dir string) (summaryDir, outDir string, err error) {
 	clean := filepath.Clean(dir)
-	if HasBundleMarkers(clean) {
+	ok, err := HasBundleMarkers(ctx, clean)
+	if err != nil {
+		return "", "", err
+	}
+	if ok {
 		return clean, filepath.Dir(clean), nil
 	}
 	candidate := filepath.Join(clean, SummaryBundleDirName)
-	if HasBundleMarkers(candidate) {
+	ok, err = HasBundleMarkers(ctx, candidate)
+	if err != nil {
+		return "", "", err
+	}
+	if ok {
 		return candidate, clean, nil
 	}
 	return "", "", errors.New(errors.ErrCodeInvalidRequest,
@@ -246,33 +296,65 @@ func resolveSummaryDir(dir string) (summaryDir, outDir string, err error) {
 // other artifacts, but this pair only co-occurs in a summary bundle. It is
 // the single source of truth for "is this directory a summary bundle?",
 // shared by the publish path here and the verifier's materialization.
-func HasBundleMarkers(dir string) bool {
+//
+// The two os.Stat calls are time-bounded via withFileReadTimeout so a dead
+// NFS/FUSE mount surfaces as a timeout error instead of an indefinite hang.
+// The (bool, error) shape keeps a genuine "not a bundle" answer distinct from
+// a ctx timeout: only the timeout wrapper yields (false, err), which stops a
+// hung mount from masquerading as "not a bundle" and failing open. Every stat
+// error itself — absent, is-a-dir, and equally permission/EIO/ESTALE — reads
+// as "not a marker" (false, nil); this preserves the pre-change fail-soft
+// behavior. Surfacing non-ENOENT stat faults distinctly (so a soft-mount I/O
+// error is not diagnosed as a bad bundle) is a deliberate follow-up, not done
+// here — see #2083 for the remaining unbounded/undiagnosed reads.
+func HasBundleMarkers(ctx context.Context, dir string) (bool, error) {
 	for _, f := range []string{RecipeFilename, ManifestFilename} {
-		info, statErr := os.Stat(filepath.Join(dir, f))
-		if statErr != nil || info.IsDir() {
-			return false
+		path := filepath.Join(dir, f)
+		var present bool
+		// Label with the full path (not just f) so a timeout names which
+		// candidate directory stalled — the probe sites try more than one.
+		if err := withFileReadTimeout(ctx, "bundle marker "+path, func() error {
+			info, statErr := os.Stat(path)
+			// Any stat error (absent, permission, is-a-dir) means "not a
+			// marker"; only the timeout wrapper injects a non-nil error.
+			present = statErr == nil && !info.IsDir()
+			return nil
+		}); err != nil {
+			return false, err
+		}
+		if !present {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 // readBundlePredicate reads the bundle's unsigned in-toto Statement and
 // returns the predicate body plus the raw statement bytes. Mirrors the
 // verifier's loadUnsignedPredicate: the predicate is trusted as-is.
-func readBundlePredicate(summaryDir string) (*Predicate, []byte, error) {
+func readBundlePredicate(ctx context.Context, summaryDir string) (*Predicate, []byte, error) {
 	path := filepath.Join(summaryDir, StatementFilename)
-	// Bound the read: a publish target may be an attacker-influenced bundle
-	// root (extracted archive, symlinked path) where os.ReadFile would
-	// allocate the whole file before any size check. Mirrors the verifier's
-	// readBoundedFile against the same defaults cap.
-	f, err := os.Open(path) //nolint:gosec // bundle-local path resolved by resolveSummaryDir
-	if err != nil {
-		return nil, nil, errors.Wrap(errors.ErrCodeNotFound, "failed to read in-toto Statement", err)
-	}
-	defer func() { _ = f.Close() }()
-	body, err := io.ReadAll(io.LimitReader(f, defaults.MaxAttestationFileBytes+1))
-	if err != nil {
-		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to read in-toto Statement", err)
+	// Bound the read two ways: by size — a publish target may be an
+	// attacker-influenced bundle root (extracted archive, symlinked path)
+	// where os.ReadFile would allocate the whole file before any size check
+	// (mirrors the verifier's readBoundedFile against the same defaults cap)
+	// — and by time, via withFileReadTimeout, so a dead NFS/FUSE mount
+	// surfaces as a timeout instead of hanging indefinitely.
+	var body []byte
+	if rerr := withFileReadTimeout(ctx, "in-toto Statement", func() error {
+		f, oErr := os.Open(path) //nolint:gosec // bundle-local path resolved by resolveSummaryDir
+		if oErr != nil {
+			return errors.Wrap(errors.ErrCodeNotFound, "failed to read in-toto Statement", oErr)
+		}
+		defer func() { _ = f.Close() }()
+		b, rErr := io.ReadAll(io.LimitReader(f, defaults.MaxAttestationFileBytes+1))
+		if rErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to read in-toto Statement", rErr)
+		}
+		body = b
+		return nil
+	}); rerr != nil {
+		return nil, nil, rerr
 	}
 	if int64(len(body)) > defaults.MaxAttestationFileBytes {
 		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,

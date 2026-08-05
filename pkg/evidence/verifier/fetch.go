@@ -98,7 +98,7 @@ func MaterializeBundle(
 	}
 	switch form {
 	case InputFormDir:
-		return materializeDir(opts.Input)
+		return materializeDir(ctx, opts.Input)
 	case InputFormPointer:
 		return materializeFromPointer(ctx, pointer, opts)
 	case InputFormOCI:
@@ -114,12 +114,22 @@ func MaterializeBundle(
 // materializeDir accepts either the summary-bundle root or a parent
 // containing it. Bundles are recognized by recipe.yaml + manifest.json
 // at the candidate root.
-func materializeDir(input string) (*MaterializedBundle, error) {
-	if attestation.HasBundleMarkers(input) {
+func materializeDir(ctx context.Context, input string) (*MaterializedBundle, error) {
+	ok, err := attestation.HasBundleMarkers(ctx, input)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to probe bundle markers at "+input)
+	}
+	if ok {
 		return &MaterializedBundle{BundleDir: filepath.Clean(input)}, nil
 	}
 	candidate := filepath.Join(input, attestation.SummaryBundleDirName)
-	if attestation.HasBundleMarkers(candidate) {
+	ok, err = attestation.HasBundleMarkers(ctx, candidate)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to probe bundle markers at "+candidate)
+	}
+	if ok {
 		return &MaterializedBundle{BundleDir: filepath.Clean(candidate)}, nil
 	}
 	return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -242,7 +252,7 @@ func materializeOCIRefRequireDigest(ctx context.Context, ref string, opts Verify
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, "OCI pull failed", copyErr)
 	}
 
-	resolved, dErr := resolveBundleDir(tmp)
+	resolved, dErr := resolveBundleDir(ctx, tmp)
 	if dErr != nil {
 		cleanup()
 		return nil, dErr
@@ -392,12 +402,22 @@ func fetchAndWriteReferrerLayer(ctx context.Context, repo referrerFetcher, refer
 
 // resolveBundleDir picks the bundle root from a temp dir holding the
 // pulled or extracted layer contents.
-func resolveBundleDir(dir string) (string, error) {
-	if attestation.HasBundleMarkers(dir) {
+func resolveBundleDir(ctx context.Context, dir string) (string, error) {
+	ok, err := attestation.HasBundleMarkers(ctx, dir)
+	if err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to probe bundle markers at "+dir)
+	}
+	if ok {
 		return dir, nil
 	}
 	candidate := filepath.Join(dir, attestation.SummaryBundleDirName)
-	if attestation.HasBundleMarkers(candidate) {
+	ok, err = attestation.HasBundleMarkers(ctx, candidate)
+	if err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to probe bundle markers at "+candidate)
+	}
+	if ok {
 		return candidate, nil
 	}
 	return "", errors.New(errors.ErrCodeInvalidRequest,
