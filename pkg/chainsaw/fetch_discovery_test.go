@@ -433,8 +433,7 @@ func TestClusterFetcher_CooldownDeniedNoMatchIsUnavailable(t *testing.T) {
 }
 
 func isUnavailable(err error) bool {
-	var se *errors.StructuredError
-	return stderrors.As(err, &se) && se.Code == errors.ErrCodeUnavailable
+	return stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
 }
 
 // TestClusterFetcher_ProbeHonorsContext covers the bound on the partial-discovery
@@ -457,12 +456,8 @@ func TestClusterFetcher_ProbeHonorsContext(t *testing.T) {
 	// ConfigMap is absent from the stub's healthy core group, so a live probe
 	// would clear it to NotFound. With the context already done it must not.
 	_, err := f.Fetch(ctx, "v1", "ConfigMap", "ns", "x")
-	var se *errors.StructuredError
-	if !stderrors.As(err, &se) {
-		t.Fatalf("expected StructuredError, got %T %v", err, err)
-	}
-	if se.Code != errors.ErrCodeUnavailable {
-		t.Errorf("code = %q, want %q — an expired context cannot prove a group was enumerated (err=%v)",
-			se.Code, errors.ErrCodeUnavailable, err)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+		t.Errorf("err = %v, want code %s — an expired context cannot prove a group was enumerated",
+			err, errors.ErrCodeUnavailable)
 	}
 }
