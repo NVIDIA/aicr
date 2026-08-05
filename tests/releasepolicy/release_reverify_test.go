@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -508,6 +509,121 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 	}
 }
 
+// TestReleaseReverifySBOMLoopIsolatesChildStdin is the regression test for the
+// SBOM loop's `< /dev/null` redirects.
+//
+// The loop reads its subject list from a here-string, so every child it spawns
+// inherits that same stdin. A child that consumed stdin would swallow the
+// remaining SBOM names and end the loop early — and because the skipped
+// subjects are never examined, the run would report `clean` with no finding and
+// no warning. That is precisely the "silently verifies nothing" outcome this
+// whole workflow exists to catch, so it is the one bug class the job must never
+// have. Neither `gh` nor `cosign` reads stdin today; the redirects make the loop
+// independent of that, and this test keeps them.
+//
+// Three subjects, not two: with two, an early-terminating loop and a loop that
+// merely dropped the last entry are indistinguishable. Three makes the skipped
+// set unambiguous, and the assertions name the exact subjects rather than
+// counting them.
+func TestReleaseReverifySBOMLoopIsolatesChildStdin(t *testing.T) {
+	script := reverifyClassifierScript(t)
+
+	// Pin the redirect count so a change in form (a different redirection, or a
+	// third stdin-reading child added to the loop) has to revisit this test
+	// rather than silently neutering it.
+	const redirect = " < /dev/null"
+	if got := strings.Count(script, redirect); got != 2 {
+		t.Fatalf("classifier has %d %q redirects, want 2 (gh release download and cosign inside the SBOM loop)", got, redirect)
+	}
+	mutated := strings.ReplaceAll(script, redirect, "")
+
+	// A release above the SBOM signing floor, so the loop actually runs.
+	const version = "0.19.0"
+	// aicr and aicrd are the two binaries GoReleaser builds today; the third is
+	// a stand-in for any future binary, since the loop is generic over whatever
+	// SBOM assets the release publishes.
+	subjects := []string{
+		"aicr_" + version + "_linux_amd64.sbom.json",
+		"aicrd_" + version + "_linux_amd64.sbom.json",
+		"aicr-gate_" + version + "_linux_amd64.sbom.json",
+	}
+	assets := make([]string, 0, 3+2*len(subjects))
+	assets = append(assets,
+		"aicr_"+version+"_linux_amd64.tar.gz",
+		"aicr_checksums.txt",
+		"recipe-catalog.sigstore.json",
+	)
+	for _, subject := range subjects {
+		assets = append(assets, subject, subject+".sigstore.json")
+	}
+
+	tests := []struct {
+		name             string
+		drainGHStdin     bool
+		drainCosignStdin bool
+	}{
+		{name: "a stdin-consuming gh release download", drainGHStdin: true},
+		{name: "a stdin-consuming cosign verify-blob-attestation", drainCosignStdin: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := reverifyOptions{
+				tag:               "v" + version,
+				assets:            assets,
+				installOutcome:    "success",
+				sigstoreReachable: true,
+				drainGHStdin:      tc.drainGHStdin,
+				drainCosignStdin:  tc.drainCosignStdin,
+			}
+
+			class, code, output := runReverifyClassifier(t, script, opts)
+			if class != "clean" || code != 0 {
+				t.Fatalf("intact classifier = %q (exit %d), want clean (exit 0)\n%s", class, code, output)
+			}
+			if got := verifiedSBOMs(output); !slices.Equal(got, subjects) {
+				t.Fatalf("intact classifier verified %v, want every subject %v\n%s", got, subjects, output)
+			}
+
+			// Strip the redirects and the stdin-consuming child eats the rest of
+			// the loop's input.
+			brokenClass, brokenCode, brokenOutput := runReverifyClassifier(t, mutated, opts)
+			broken := verifiedSBOMs(brokenOutput)
+			if slices.Equal(broken, subjects) {
+				t.Fatalf("without the stdin redirects the loop still verified every subject; the redirects are not load-bearing and this test proves nothing\n%s", brokenOutput)
+			}
+			if !slices.Equal(broken, subjects[:1]) {
+				t.Errorf("without the stdin redirects the loop verified %v, want only the first subject %v", broken, subjects[:1])
+			}
+			// The damning part: the skipped subjects produce no finding and no
+			// warning, so the run still reports a clean verification.
+			if brokenClass != "clean" || brokenCode != 0 {
+				t.Errorf("mutated classifier = %q (exit %d); the skip is expected to be SILENT (clean/0), which is why it needs a test",
+					brokenClass, brokenCode)
+			}
+			for _, skipped := range subjects[1:] {
+				if strings.Contains(brokenOutput, "SBOM attestation verified: "+skipped) {
+					t.Errorf("%s was expected to be silently skipped by the mutated loop", skipped)
+				}
+			}
+		})
+	}
+}
+
+// verifiedSBOMs extracts, in order, the SBOM subjects the classifier reported as
+// verified. The loop emits exactly one such line per subject it processes, so
+// the returned set is the set it actually examined.
+func verifiedSBOMs(output string) []string {
+	const marker = "SBOM attestation verified: "
+	var verified []string
+	for _, line := range strings.Split(output, "\n") {
+		if subject, found := strings.CutPrefix(strings.TrimSpace(line), marker); found {
+			verified = append(verified, subject)
+		}
+	}
+	return verified
+}
+
 // reverifyOptions describes one simulated release and the behavior of the
 // binaries the classifier shells out to.
 type reverifyOptions struct {
@@ -528,6 +644,14 @@ type reverifyOptions struct {
 	aicrMessage       string
 	ghRC              int
 	sigstoreReachable bool
+
+	// drainGHStdin / drainCosignStdin make the fake drain its standard input,
+	// modeling a child that reads stdin. Neither real binary does today, which
+	// is exactly why the SBOM loop's `< /dev/null` redirects need a regression
+	// test: a future version that did would silently eat the remaining SBOM
+	// names off the loop's here-string.
+	drainGHStdin     bool
+	drainCosignStdin bool
 }
 
 // reverifyClassifierScript extracts the classifying step's shell from the
@@ -615,6 +739,8 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 		fmt.Sprintf("FAKE_AICR_RC=%d", opts.aicrRC),
 		"FAKE_AICR_MESSAGE="+opts.aicrMessage,
 		fmt.Sprintf("FAKE_GH_RC=%d", opts.ghRC),
+		fmt.Sprintf("FAKE_GH_DRAIN_STDIN=%t", opts.drainGHStdin),
+		fmt.Sprintf("FAKE_COSIGN_DRAIN_STDIN=%t", opts.drainCosignStdin),
 	)
 	combined, err := command.CombinedOutput()
 	if ctx.Err() != nil {
@@ -686,6 +812,12 @@ exit 7
 // cosign-shaped output to read.
 const reverifyFakeCosign = `#!/usr/bin/env bash
 set -euo pipefail
+# Model a child that reads stdin. Real cosign does not, but the SBOM loop must
+# not depend on that: without its ` + "`< /dev/null`" + ` redirect this drain would consume
+# the loop's remaining here-string and silently skip every later SBOM.
+if [[ "${FAKE_COSIGN_DRAIN_STDIN:-false}" == "true" ]]; then
+  cat > /dev/null
+fi
 if [[ "${FAKE_COSIGN_RC:-0}" == "0" ]]; then
   echo "Verified OK"
   exit 0
@@ -709,6 +841,10 @@ exit "${FAKE_AICR_RC}"
 // whole download when FAKE_GH_RC is set (a GitHub API / transport failure).
 const reverifyFakeGH = `#!/usr/bin/env bash
 set -euo pipefail
+# Same stdin-consuming child model as the cosign fake above.
+if [[ "${FAKE_GH_DRAIN_STDIN:-false}" == "true" ]]; then
+  cat > /dev/null
+fi
 if [[ "${FAKE_GH_RC:-0}" != "0" ]]; then
   echo "gh: HTTP 503 (https://api.github.com)" >&2
   exit "${FAKE_GH_RC}"

@@ -389,15 +389,19 @@ jobs:
                 security "release ${TAG} ships ${sbom} with no attestation bundle (${bundle})"
               elif ! command -v cosign > /dev/null 2>&1; then
                 operational "cosign is unavailable; cannot verify ${sbom}"
+              # Both commands read stdin from the loop's here-string unless it is
+              # redirected. A child that consumes stdin would eat the remaining
+              # SBOM names, silently skipping them with no finding, which is the
+              # exact failure mode this job exists to catch.
               elif ! timeout --foreground 120s gh release download "${TAG}" --repo "${REPO}" \
-                  --pattern "${sbom}" --pattern "${bundle}" --dir "${WORK_DIR}" --clobber; then
+                  --pattern "${sbom}" --pattern "${bundle}" --dir "${WORK_DIR}" --clobber < /dev/null; then
                 operational "downloading ${sbom} and its bundle failed; treating as infrastructure"
               elif timeout --foreground 300s cosign verify-blob-attestation \
                   --bundle "${WORK_DIR}/${bundle}" \
                   --type https://slsa.dev/provenance/v1 \
                   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
                   --certificate-identity-regexp "${identity_re}" \
-                  "${WORK_DIR}/${sbom}" > "${WORK_DIR}/${sbom}.verify.log" 2>&1; then
+                  "${WORK_DIR}/${sbom}" < /dev/null > "${WORK_DIR}/${sbom}.verify.log" 2>&1; then
                 echo "SBOM attestation verified: ${sbom}"
               else
                 cat "${WORK_DIR}/${sbom}.verify.log" >&2
