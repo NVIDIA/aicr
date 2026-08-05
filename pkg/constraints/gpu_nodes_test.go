@@ -681,3 +681,120 @@ func TestGPUNodesLabelRoundTripsCollectorEncoding(t *testing.T) {
 		}
 	})
 }
+
+// TestGPUNodesLabelLosslessEncodingResolvesCollision pins the #2003 fix at the
+// evaluator boundary.
+//
+// The cluster carries two distinct labels whose folded map keys collide: the
+// opt-out label with two values across the nodes (which encodeLabels
+// disambiguates to "<key>.true" and "<key>.false"), and a separate label
+// literally named "<key>.true". In the folded encoding one reading silently
+// overwrites the other by map iteration order, so the same snapshot evaluated
+// twice can disagree. The item encoding keeps key and value apart, so the
+// target label's readings are recovered exactly and the verdict is stable.
+//
+// Repeated because the failure it guards against is a race on map ordering: a
+// single run can pass by luck.
+func TestGPUNodesLabelLosslessEncodingResolvesCollision(t *testing.T) {
+	t.Parallel()
+
+	node := func(name string, labels map[string]string) *corev1.Node {
+		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}
+	}
+	gpuLabels := func(optOut string) map[string]string {
+		return map[string]string{
+			"cloud.google.com/gke-accelerator": "nvidia-h100-80gb",
+			optOutLabel:                        optOut,
+			// A distinct label whose name equals the disambiguated form of
+			// optOutLabel + ".true" — the collision.
+			optOutLabel + ".true": "true",
+		}
+	}
+
+	const runs = 50
+	verdicts := make(map[string]int)
+	for i := 0; i < runs; i++ {
+		c := &topology.Collector{
+			ClientSet: fake.NewClientset(
+				node("gpu-a", gpuLabels("true")),
+				node("gpu-b", gpuLabels("false")),
+			),
+		}
+		m, err := c.Collect(context.Background())
+		if err != nil {
+			t.Fatalf("Collect() failed: %v", err)
+		}
+		snap := &snapshotter.Snapshot{Measurements: []*measurement.Measurement{m}}
+
+		// gpu-b carries "false", so "=true" must fail — deterministically,
+		// and for the right reason rather than by a lost reading.
+		result := Evaluate(recipe.Constraint{
+			Name:  GPUNodesLabelConstraintName,
+			Value: optOutLabel + "=true",
+		}, snap)
+
+		switch {
+		case result.Error != nil:
+			verdicts["error"]++
+		case result.Passed:
+			verdicts["passed"]++
+		default:
+			verdicts["failed"]++
+		}
+	}
+
+	if len(verdicts) != 1 {
+		t.Fatalf("verdict is not deterministic across %d runs: %v — the collision is still "+
+			"reaching the evaluator", runs, verdicts)
+	}
+	if verdicts["failed"] != runs {
+		t.Errorf("verdicts = %v, want all %d runs to report failed (gpu-b carries %q=false)",
+			verdicts, runs, optOutLabel)
+	}
+}
+
+// TestGPUNodesLabelLegacyDataSnapshotStillEvaluates pins backward
+// compatibility: a snapshot captured before the item encoding carries only the
+// folded Data map, and must keep evaluating exactly as it did. Without this
+// the Data fallback could rot unnoticed, since every other test now exercises
+// the item path via the real collector.
+func TestGPUNodesLabelLegacyDataSnapshotStillEvaluates(t *testing.T) {
+	t.Parallel()
+
+	node := func(name string, labels map[string]string) *corev1.Node {
+		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}
+	}
+	c := &topology.Collector{
+		ClientSet: fake.NewClientset(
+			node("gpu-a", map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb",
+				optOutLabel:                        "true",
+			}),
+			node("gpu-b", map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb",
+				optOutLabel:                        "true",
+			}),
+		),
+	}
+	m, err := c.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect() failed: %v", err)
+	}
+
+	// Strip Items, leaving the shape an older aicr wrote.
+	for i := range m.Subtypes {
+		m.Subtypes[i].Items = nil
+	}
+	snap := &snapshotter.Snapshot{Measurements: []*measurement.Measurement{m}}
+
+	result := Evaluate(recipe.Constraint{
+		Name:  GPUNodesLabelConstraintName,
+		Value: optOutLabel + "=true",
+	}, snap)
+	if result.Error != nil {
+		t.Fatalf("legacy Data-only snapshot: unexpected error: %v", result.Error)
+	}
+	if !result.Passed {
+		t.Errorf("legacy Data-only snapshot: Passed = false, want true (actual=%q)", result.Actual)
+	}
+}

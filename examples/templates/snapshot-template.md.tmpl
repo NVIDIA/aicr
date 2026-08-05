@@ -103,15 +103,21 @@
 {{- end }}
 
 ## Node Topology
+{{- /* Prefer the lossless Items encoding; fall back to the folded Data map
+       for snapshots captured before it existed. Data cannot represent a label
+       whose name collides with a synthesized "<key>.<value>", so the two
+       renderings can differ in row count on such a cluster. */}}
 {{- $topoSummary := dict }}
+{{- $topoTaintItems := list }}
+{{- $topoLabelItems := list }}
 {{- $topoTaints := dict }}
 {{- $topoLabels := dict }}
 {{- range .Measurements }}
   {{- if eq .Type.String "NodeTopology" }}
     {{- range .Subtypes }}
       {{- if eq .Name "summary" }}{{ $topoSummary = .Data }}{{ end }}
-      {{- if eq .Name "taint" }}{{ $topoTaints = .Data }}{{ end }}
-      {{- if eq .Name "label" }}{{ $topoLabels = .Data }}{{ end }}
+      {{- if eq .Name "taint" }}{{ $topoTaints = .Data }}{{ $topoTaintItems = .Items }}{{ end }}
+      {{- if eq .Name "label" }}{{ $topoLabels = .Data }}{{ $topoLabelItems = .Items }}{{ end }}
     {{- end }}
   {{- end }}
 {{- end }}
@@ -126,18 +132,34 @@
 
 | Taint Key | Effect | Value | Nodes |
 |-----------|--------|-------|-------|
+{{- if $topoTaintItems }}
+{{- range $topoTaintItems }}
+| {{ index .Context "key" }} | {{ index .Context "effect" }} | {{ index .Context "value" }} | {{ (index .Data "node-list").String }} |
+{{- end }}
+{{- else }}
 {{- range $key, $reading := $topoTaints }}
 {{- $parts := splitList "|" $reading.String }}
+{{- if eq (len $parts) 3 }}
 | {{ $key }} | {{ index $parts 0 }} | {{ index $parts 1 }} | {{ index $parts 2 }} |
+{{- else }}
+| {{ $key }} | | {{ index $parts 0 }} | {{ index $parts 1 }} |
+{{- end }}
+{{- end }}
 {{- end }}
 
 ### Labels
 
 | Label Key | Value | Nodes |
 |-----------|-------|-------|
+{{- if $topoLabelItems }}
+{{- range $topoLabelItems }}
+| {{ index .Context "key" }} | {{ index .Context "value" }} | {{ (index .Data "node-list").String }} |
+{{- end }}
+{{- else }}
 {{- range $key, $reading := $topoLabels }}
 {{- $parts := splitList "|" $reading.String }}
 | {{ $key }} | {{ index $parts 0 }} | {{ index $parts 1 }} |
+{{- end }}
 {{- end }}
 
 ---

@@ -128,9 +128,37 @@ From `OS.sysctl` (key tuning parameters):
 
 From `NodeTopology.summary`: `node-count`, `taint-count`, `label-count`
 
-From `NodeTopology.taint`: Format is `effect|value|node1,node2,...`
+From `NodeTopology.taint` and `NodeTopology.label`, read the `items` list — one
+entry per distinct reading, sorted by key/value (taints: key/effect/value):
 
-From `NodeTopology.label`: Format is `value|node1,node2,...`
+| Item Field | What It Holds |
+|------------|---------------|
+| `context.key` | Taint or label key, verbatim |
+| `context.value` | Taint or label value (may be empty) |
+| `context.effect` | Taints only: `NoSchedule`, `PreferNoSchedule`, `NoExecute` |
+| `data.node-count` | True node total, including nodes dropped by truncation |
+| `data.node-list` | Comma-separated node names; may be truncated |
+| `data.truncated` | `true` when `node-list` is incomplete |
+
+Current snapshots also carry the older `data` map on both subtypes; `items` is
+authoritative. Take counts from `data.node-count` rather than splitting
+`node-list`, and read `data.truncated` rather than probing for a `(+N more)`
+suffix.
+
+**Older snapshots (no `items`):** fall back to the folded `data` map —
+`effect|value|node1,node2,...` for taints, `value|node1,node2,...` for labels.
+That encoding is lossy, so qualify anything derived from it:
+
+- A map key is ambiguous: when a key carries more than one value the value is
+  folded into the key as `<key>.<value>`, indistinguishable from a label
+  literally named that, and one of the colliding readings is dropped. Report
+  such a key verbatim instead of asserting a key/value split.
+- A taint key disambiguated the same way ends in `.<effect>` and its value has
+  only two fields (`value|nodes`); two taints sharing key and effect collapse
+  into one entry.
+- `summary.taint-count` / `label-count` count map entries there, so they
+  under-report wherever a collapse occurred, and node counts reflect only what
+  survived truncation.
 
 **High-value labels to extract** (skip `feature.node.kubernetes.io/cpu-cpuid.*`):
 

@@ -300,6 +300,57 @@ The constraint path is `K8s.aks-gpu-pools.gpu-driver` in profile value
 constraints; `K8s.aks-gpu-pools.gpu-pool-count` and
 `K8s.aks-gpu-pools.gpu-pools` use the same non-item path form.
 
+## NodeTopology shape
+
+`TypeNodeTopology` is a cluster-wide aggregate: one reading per distinct taint
+and per distinct label across all nodes, plus a `summary` of the counts. The
+`taint` and `label` subtypes carry every reading twice — as `items` (lossless)
+and as the legacy folded `data` map.
+
+```yaml
+type: NodeTopology
+subtypes:
+  - subtype: summary
+    data: {node-count: 8, taint-count: 1, label-count: 1}
+  - subtype: label
+    items:
+      - context:
+          key: nvidia.com/gpu.product
+          value: NVIDIA-H100-80GB-HBM3
+        data:
+          node-count: 4
+          node-list: gpu-node-01,gpu-node-02 (+2 more)
+          truncated: true
+    data:
+      nvidia.com/gpu.product: NVIDIA-H100-80GB-HBM3|gpu-node-01,gpu-node-02 (+2 more)
+```
+
+| Field | Where | Meaning |
+|---|---|---|
+| `key` | context | taint or label key, verbatim |
+| `value` | context | taint or label value; may be empty |
+| `effect` | context | taints only: `NoSchedule`, `PreferNoSchedule`, `NoExecute` |
+| `node-count` | data | nodes carrying the reading, counted **before** truncation |
+| `node-list` | data | node names, sorted and comma-joined, capped by `--max-nodes-per-entry` |
+| `truncated` | data | whether the cap dropped names from `node-list` |
+
+`key`, `effect`, and `value` identify a reading, so they live in `context`;
+node membership is counted, so it lives in `data`. Items are sorted by
+(`key`, `value`) for labels and (`key`, `effect`, `value`) for taints, because
+`pkg/diff` compares items positionally. `summary.taint-count` and
+`summary.label-count` count items, not `data` keys.
+
+`data` is retained byte-identical to earlier releases and stays lossy: a label
+key carrying multiple values is folded to `<key>.<value>`, which collides with
+a label literally named that and drops one reading. Consumers read `items` and
+fall back to `data` only for older snapshots — `topology.LabelReadings` /
+`TaintReadings` do exactly that, and `HasLosslessReadings` reports which form a
+subtype carries. Adding `items` beside `data` is additive-only, so the snapshot
+`apiVersion` is unchanged ([ADR-011](../design/011-artifact-apiversion-policy.md) §2).
+
+Minimal evidence keeps `NodeTopology.summary` and drops `taint` and `label`;
+redaction never carries `items` across the publication boundary.
+
 ## NetworkTopology shape
 
 `TypeNetworkTopology` describes one hardware group's network layout (PFs,

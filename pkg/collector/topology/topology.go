@@ -119,22 +119,26 @@ func (c *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 
 	taintData := encodeTaints(taints, c.MaxNodesPerEntry)
 	labelData := encodeLabels(labels, c.MaxNodesPerEntry)
+	taintItems := encodeTaintItems(taints, c.MaxNodesPerEntry)
+	labelItems := encodeLabelItems(labels, c.MaxNodesPerEntry)
 
+	// Counts come from the items, not the maps: folded keys collapse colliding
+	// readings, so len(data) under-reports. Mirrors slinky-slurm.
 	res := measurement.NewMeasurement(measurement.TypeNodeTopology).
 		WithSubtypeBuilder(
 			measurement.NewSubtypeBuilder("summary").
 				Set("node-count", measurement.Int(nodeCount)).
-				Set("taint-count", measurement.Int(len(taintData))).
-				Set("label-count", measurement.Int(len(labelData))),
+				Set("taint-count", measurement.Int(len(taintItems))).
+				Set("label-count", measurement.Int(len(labelItems))),
 		).
-		WithSubtype(measurement.Subtype{Name: "taint", Data: taintData}).
-		WithSubtype(measurement.Subtype{Name: "label", Data: labelData}).
+		WithSubtype(measurement.Subtype{Name: "taint", Data: taintData, Items: taintItems}).
+		WithSubtype(measurement.Subtype{Name: "label", Data: labelData, Items: labelItems}).
 		Build()
 
 	slog.Info("node topology collection complete",
 		slog.Int("nodes", nodeCount),
-		slog.Int("taints", len(taintData)),
-		slog.Int("labels", len(labelData)))
+		slog.Int("taints", len(taintItems)),
+		slog.Int("labels", len(labelItems)))
 
 	return res, nil
 }
@@ -184,6 +188,103 @@ func encodeLabels(labels map[labelID][]string, maxNodes int) map[string]measurem
 		data[mapKey] = measurement.Str(fmt.Sprintf("%s|%s", id.Value, nodeStr))
 	}
 	return data
+}
+
+// Item field names, kebab-case to match the k8s slinky-slurm subtype and the
+// existing summary keys. Placement follows measurement-api.md: context
+// identifies a record, data is measured or counted.
+const (
+	itemCtxKey    = "key"
+	itemCtxValue  = "value"
+	itemCtxEffect = "effect"
+
+	itemDataNodeCount = "node-count"
+	itemDataNodeList  = "node-list"
+	itemDataTruncated = "truncated"
+)
+
+// encodeLabelItems renders one ItemEntry per aggregated label reading, keeping
+// key and value in separate fields so the collision encodeLabels cannot avoid
+// (#2003) is structurally impossible.
+//
+// Sorted by (key, value): pkg/diff compares Items positionally.
+func encodeLabelItems(labels map[labelID][]string, maxNodes int) []measurement.ItemEntry {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	ids := make([]labelID, 0, len(labels))
+	for id := range labels {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if ids[i].Key != ids[j].Key {
+			return ids[i].Key < ids[j].Key
+		}
+		return ids[i].Value < ids[j].Value
+	})
+
+	items := make([]measurement.ItemEntry, 0, len(ids))
+	for _, id := range ids {
+		nodes := labels[id]
+		items = append(items, measurement.ItemEntry{
+			Context: map[string]string{
+				itemCtxKey:   id.Key,
+				itemCtxValue: id.Value,
+			},
+			Data: nodeListData(nodes, maxNodes),
+		})
+	}
+	return items
+}
+
+// encodeTaintItems renders one ItemEntry per aggregated taint reading. It also
+// closes a second collision: encodeTaints counts entries per key but
+// disambiguates with effect, so two taints sharing both synthesize one map key.
+func encodeTaintItems(taints map[taintID][]string, maxNodes int) []measurement.ItemEntry {
+	if len(taints) == 0 {
+		return nil
+	}
+
+	ids := make([]taintID, 0, len(taints))
+	for id := range taints {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if ids[i].Key != ids[j].Key {
+			return ids[i].Key < ids[j].Key
+		}
+		if ids[i].Effect != ids[j].Effect {
+			return ids[i].Effect < ids[j].Effect
+		}
+		return ids[i].Value < ids[j].Value
+	})
+
+	items := make([]measurement.ItemEntry, 0, len(ids))
+	for _, id := range ids {
+		nodes := taints[id]
+		items = append(items, measurement.ItemEntry{
+			Context: map[string]string{
+				itemCtxKey:    id.Key,
+				itemCtxValue:  id.Value,
+				itemCtxEffect: id.Effect,
+			},
+			Data: nodeListData(nodes, maxNodes),
+		})
+	}
+	return items
+}
+
+// nodeListData renders one reading's node membership. node-count is the true
+// pre-truncation total and truncated states the fact outright, replacing the
+// regex probe Data requires (#2002).
+func nodeListData(nodes []string, maxNodes int) map[string]measurement.Reading {
+	truncated := maxNodes > 0 && len(nodes) > maxNodes
+	return map[string]measurement.Reading{
+		itemDataNodeCount: measurement.Int(len(nodes)),
+		itemDataNodeList:  measurement.Str(formatNodeList(nodes, maxNodes)),
+		itemDataTruncated: measurement.Bool(truncated),
+	}
 }
 
 // truncatedNodeListRE matches the suffix formatNodeList appends when a node

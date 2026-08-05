@@ -17,6 +17,7 @@ package aicr
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -630,5 +631,125 @@ func TestDriverAbsentRemedyBranches(t *testing.T) {
 	}
 	if strings.Contains(profiled, "bundle in GPU-Operator-managed mode:") {
 		t.Errorf("profiled AKS remedy still offers the bundle-time tuple: %q", profiled)
+	}
+}
+
+// topologySnapshotWithItems builds a snapshot carrying the collector's
+// lossless label encoding: one item per {key, value} reading rather than a
+// folded map key. readings maps a label key to the values it carries across
+// the cluster, one node per value.
+func topologySnapshotWithItems(readings map[string][]string) *snapshotter.Snapshot {
+	var items []measurement.ItemEntry
+	for key, values := range readings {
+		for i, v := range values {
+			items = append(items, measurement.ItemEntry{
+				Context: map[string]string{"key": key, "value": v},
+				Data: map[string]measurement.Reading{
+					"node-count": measurement.Int(1),
+					"node-list":  measurement.Str(fmt.Sprintf("node-%d", i)),
+					"truncated":  measurement.Bool(false),
+				},
+			})
+		}
+	}
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			measurement.NewMeasurement(measurement.TypeNodeTopology).
+				WithSubtype(measurement.Subtype{Name: "label", Items: items}).
+				Build(),
+		},
+	}
+}
+
+// TestHasHeterogeneousGPUPoolLosslessEncoding pins the item-encoding path,
+// which decides heterogeneity by counting distinct values per label key
+// rather than by inspecting the shape of a folded map key.
+//
+// The last two cases are the false positives the shape heuristic cannot
+// avoid: a uniform GFD label whose name simply contains a dot reads as
+// disambiguated on the legacy path, so the warning fires on every
+// post-GPU-Operator re-snapshot of a perfectly uniform cluster.
+func TestHasHeterogeneousGPUPoolLosslessEncoding(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		readings map[string][]string
+		want     bool
+	}{
+		{
+			name:     "uniform gpu.product",
+			readings: map[string][]string{"nvidia.com/gpu.product": {"NVIDIA-H100-80GB-HBM3"}},
+			want:     false,
+		},
+		{
+			name:     "mixed gpu.product",
+			readings: map[string][]string{"nvidia.com/gpu.product": {"NVIDIA-H100-80GB-HBM3", "NVIDIA-B200"}},
+			want:     true,
+		},
+		{
+			name:     "mixed instance-type",
+			readings: map[string][]string{"node.kubernetes.io/instance-type": {"p5.48xlarge", "p4d.24xlarge"}},
+			want:     true,
+		},
+		{
+			name:     "uniform instance-type with dots in the value",
+			readings: map[string][]string{"node.kubernetes.io/instance-type": {"p5.48xlarge"}},
+			want:     false,
+		},
+		{
+			name:     "unrelated label with multiple values does not trigger",
+			readings: map[string][]string{"topology.kubernetes.io/zone": {"us-east-1a", "us-east-1b"}},
+			want:     false,
+		},
+		{
+			// Legacy-path false positive: the dot belongs to the label name,
+			// not to an appended value.
+			name:     "uniform gpu.compute.major is not heterogeneous",
+			readings: map[string][]string{"nvidia.com/gpu.compute.major": {"9"}},
+			want:     false,
+		},
+		{
+			name:     "uniform gpu.deploy.driver is not heterogeneous",
+			readings: map[string][]string{"nvidia.com/gpu.deploy.driver": {"true"}},
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := hasHeterogeneousGPUPool(topologySnapshotWithItems(tt.readings)); got != tt.want {
+				t.Errorf("hasHeterogeneousGPUPool() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHasHeterogeneousGPUPoolLegacyFalsePositive documents what the item
+// encoding fixes: on a Data-only snapshot a uniform GFD label is reported as
+// heterogeneous, because the shape heuristic cannot tell the dot in
+// "compute.major" from a value the encoder appended.
+//
+// Asserting the wrong answer is deliberate — it pins the legacy behavior so
+// the fallback path cannot drift, and marks the divergence a reader of the
+// two tests together will notice.
+func TestHasHeterogeneousGPUPoolLegacyFalsePositive(t *testing.T) {
+	t.Parallel()
+
+	legacy := topologySnapshotWith(map[string]measurement.Reading{
+		"nvidia.com/gpu.compute.major": measurement.Str("9|node-a,node-b"),
+	})
+	if !hasHeterogeneousGPUPool(legacy) {
+		t.Error("legacy Data path: got false, want true — the shape heuristic's known " +
+			"false positive on uniform GFD labels is being asserted here on purpose")
+	}
+
+	lossless := topologySnapshotWithItems(map[string][]string{
+		"nvidia.com/gpu.compute.major": {"9"},
+	})
+	if hasHeterogeneousGPUPool(lossless) {
+		t.Error("item path: got true, want false — the same cluster must not be reported " +
+			"heterogeneous once the encoding is lossless")
 	}
 }
