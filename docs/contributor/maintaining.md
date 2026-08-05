@@ -268,6 +268,82 @@ monitoring-coverage gap, not a verification gap. A follow-up may add a one-time
 new-shard backfill; until then, treat a rotation log line as a prompt to
 spot-check releases made around the rotation boundary.
 
+### Daily release re-verification
+
+`Release Re-Verification` (`.github/workflows/release-reverify.yaml`) runs daily
+and answers the question the Rekor monitor cannot: did the release we published
+actually **ship** the artifacts a consumer needs to verify it? The monitor proves
+the log is sound; it says nothing about a signing-side upload that silently
+failed or was skipped, which leaves a published release whose provenance cannot
+be reconstructed while nothing in the log is wrong
+([#1461](https://github.com/NVIDIA/aicr/issues/1461)).
+
+Each run resolves the latest non-draft, non-prerelease release (never a hardcoded
+tag; the resolved tag is written to the job summary) and runs the **shipped**
+verification commands against it, exactly as
+[`supply-chain-verification.md`](../integrator/supply-chain-verification.md)
+documents them:
+
+- the `linux/amd64` archive against `aicr_checksums.txt`, then its
+  `aicr-attestation.sigstore.json` SLSA provenance bundle via
+  `cosign verify-blob-attestation` pinned to `on-tag.yaml@refs/tags/<exact tag>`.
+  This is delegated wholesale to the `install-aicr-release` composite that UAT
+  release cells already use, so there is one hardened implementation of the
+  binary check, not two;
+- `recipe-catalog.sigstore.json` (a loose asset, deliberately outside
+  `aicr_checksums.txt`) via `aicr recipe verify-catalog`, run with the released
+  binary just verified — the only check that proves the *shipped* binary's
+  embedded `registry.yaml` and `validators/catalog.yaml` still digest to what the
+  release signed;
+- every `linux/amd64` SPDX SBOM asset and its sibling `.sigstore.json` bundle.
+  Gated on `SBOM_SIGNING_FLOOR` (`v0.18.0`): releases at or before it predate
+  SBOM signing ([#1957](https://github.com/NVIDIA/aicr/issues/1957)) and
+  legitimately ship unsigned SBOMs, while every later release must ship a bundle
+  per SBOM.
+
+Classification reuses the monitor's vocabulary and exit codes so both workflows
+triage identically: `clean` (0), `tamper` (1, security), `operational` (3). It
+opens the same two issue kinds with the same de-duplication and the same
+three-consecutive-failures rule before a calm `area/ci` degraded issue, and a
+later clean run closes both.
+
+**`tamper` is asserted only on positive evidence**, never as a fallback, so an
+outage cannot masquerade as a missing entry. "Missing" means an asset name is
+absent from the release's own asset inventory, or an attestation is absent from
+an archive that already downloaded and checksummed — neither is reachable from a
+failed network call, because a failed read aborts the step before any comparison.
+A failed *cryptographic* check is promoted to `tamper` only when two independent
+guards agree: Sigstore's TUF CDN answered a live probe, **and** the captured
+failure output carries no transport/outage signature. Either guard alone demotes
+to `operational`. The guards are demote-only, so the worst case is a real finding
+reported as operational — still a red job, still a degraded issue after three
+days, and it re-fires the next day — never the reverse. Any failure *before* the
+classifier runs leaves the classification empty, which the gates treat as
+operational by construction.
+
+Two things are deliberately out of scope, both tracked as follow-ups:
+
+- **Container-image OCI referrer attestations** (SBOM / OpenVEX / SLSA
+  provenance, [#1982](https://github.com/NVIDIA/aicr/issues/1982)). Those live in
+  ghcr.io's referrer store — a different system with a different retention and GC
+  model from GitHub Releases — and re-verifying seven images times three
+  predicate kinds would add roughly twenty registry round-trips per run,
+  multiplying operational noise against the one signal this job exists to keep
+  crisp. The images are already pulled and scanned weekly by
+  `vuln-scan-images.yaml`. A registry-side sibling check must use
+  `gh attestation verify --bundle-from-oci`, otherwise it reads GitHub's
+  attestations API and proves nothing about the registry copy's retrievability.
+- **Rekor entry liveness by log index.** `cosign verify-blob-attestation`
+  verifies a self-contained bundle: the inclusion proof and RFC3161 timestamp
+  travel inside it and are checked against the live Sigstore trust root. A pass
+  proves the bundle is retrievable and cryptographically sound, not that Rekor
+  would still serve that entry by index.
+
+Triage is in the workflow file's header comment. In short: a security issue names
+the exact artifact — an absent asset means re-upload and re-sign (or re-cut the
+release), while an asset that is present but fails verification means the
+published bytes do not match what the release signed, and is an incident.
+
 ## Reviewing Recipe Contributions
 
 A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,
