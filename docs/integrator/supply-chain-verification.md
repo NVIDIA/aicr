@@ -13,8 +13,9 @@ top-level [`SECURITY.md`](../../SECURITY.md).
 
 Verification uses [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/),
 the [GitHub CLI](https://cli.github.com/) (`gh`), `crane` (recommended; `docker inspect` resolves a digest only after a local pull),
-`jq`, and — for in-cluster enforcement — `kubectl`. Binary and bundle
-verification (`aicr verify`) need only the `aicr` binary.
+`jq`, [ORAS](https://oras.land/docs/installation) (only for retrieving the
+third-party source archive), and — for in-cluster enforcement — `kubectl`.
+Binary and bundle verification (`aicr verify`) need only the `aicr` binary.
 
 **Cosign version.** AICR release signatures (the binary attestation and the
 signed recipe catalog) are recorded in **Rekor v2** as of the v2 cutover (see the
@@ -57,15 +58,19 @@ docker login ghcr.io
 
 ## Unified Metadata Retrieval
 
-Every piece of release metadata AICR publishes for a container image is a
-signed in-toto attestation attached to that image as an OCI referrer. There is
-one retrieval command per metadata kind, and each kind has a fixed subject:
+Release metadata AICR publishes for a container image is attached to that image
+as an OCI referrer. The first three kinds below are signed in-toto attestations.
+The source archive is a plain OCI artifact rather than an attestation, but it is
+Sigstore-signed like the rest, so it is verified with `cosign verify` instead of
+`cosign verify-attestation`. There is one retrieval command per kind, and each
+has a fixed subject:
 
 | Metadata | Predicate type | Subject | Retrieved with |
 |----------|----------------|---------|----------------|
 | SLSA build provenance | `https://slsa.dev/provenance/v1` | multi-platform index digest | `gh attestation verify` |
 | SPDX SBOM | `https://spdx.dev/Document` | per-platform manifest digest | `cosign verify-attestation --type spdxjson` |
 | OpenVEX | `https://openvex.dev/ns` | multi-platform index digest | `cosign verify-attestation --type openvex` |
+| Third-party source (`aiperf-bench` only) | `application/vnd.nvidia.aicr.source.v1+tar` | multi-platform index digest | `oras pull` — see [Third-Party Source Code](#third-party-source-code) |
 
 The subjects differ because the claims differ. Provenance describes the build
 that produced the whole release image, and the VEX document is a single,
@@ -153,6 +158,87 @@ Cosign, so the floor does not apply to it. GHCR does not implement the OCI 1.1
 specification's referrers *tag* schema (a `sha256-{hex}` tag holding an index of
 referrers). Cosign and ORAS do this transparently, which is why the commands
 above are the documented path rather than a raw referrers API call.
+
+## Third-Party Source Code
+
+Source for every third-party open-source component AICR adds on top of its base
+images is published, regardless of license. Where it lives depends on how the
+component reaches the image.
+
+| Image | Third-party components | Where the source is |
+|-------|------------------------|---------------------|
+| `aicr`, `aicrd`, `aicr-gate`, `aicr-validators/{conformance,deployment,performance}` | Go modules compiled into the binary | The GitHub release source archive for the matching tag. Builds run with `-mod=vendor`, so `vendor/` in that archive is exactly the source that ships. |
+| `aicr-validators/aiperf-bench` | Python packages installed from wheels | An OCI referrer on the image, retrieved with the commands below. |
+| all | base image contents | Provided by NVIDIA with `nvcr.io/nvidia/distroless/*` under that image's own approval. |
+
+License texts for all of the above are in `THIRD_PARTY_NOTICES.md`, published as
+an asset on each release. That file discharges attribution; this section covers
+source availability, which is a separate obligation.
+
+### Retrieving the aiperf-bench source
+
+The archive is attached as an OCI referrer, so it is **not** fetched by
+`docker pull` and will not appear in the image's layers. Retrieve it explicitly:
+
+```bash
+IMAGE="ghcr.io/nvidia/aicr-validators/aiperf-bench:v0.19.0"
+
+# 1. Resolve the image to its digest and list what is attached to it.
+DIGEST=$(crane digest "${IMAGE}")
+oras discover --format tree "${IMAGE%:*}@${DIGEST}"
+
+# 2. Select the source referrer. Fail loudly on anything but exactly one:
+#    artifactType is not a unique key, and anyone with push access to the
+#    repository can attach another referrer carrying the same type. Taking the
+#    first match would silently pick theirs.
+mapfile -t MATCHES < <(oras discover --format json "${IMAGE%:*}@${DIGEST}" \
+  | jq -r '.referrers[]
+           | select(.artifactType == "application/vnd.nvidia.aicr.source.v1+tar")
+           | .digest')
+if [ "${#MATCHES[@]}" -ne 1 ]; then
+  echo "expected exactly 1 source referrer, found ${#MATCHES[@]}" >&2
+  exit 1
+fi
+SOURCE="${MATCHES[0]}"
+
+# 3. Verify the signature before trusting the bytes. Pin the exact signing
+#    workflow and tag; a regexp over the repository would accept a signature
+#    from any workflow in it.
+cosign verify \
+  --certificate-oidc-issuer "${AICR_ISSUER}" \
+  --certificate-identity \
+    "https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/${TAG}" \
+  "${IMAGE%:*}@${SOURCE}"
+
+# 4. Pull the verified archive.
+oras pull -o ./aiperf-source "${IMAGE%:*}@${SOURCE}"
+
+# 5. The archive holds one sdist per installed package, plus a README.
+tar tzf ./aiperf-source/aiperf-bench-python-source.tar.gz | head
+```
+
+The archive contains the source distribution of every Python package installed
+into the image **that publishes one upstream**, at the exact version installed.
+One package is intentionally absent: `aiperf` itself publishes no source
+distribution to PyPI. It is an
+NVIDIA package and its source is at [ai-dynamo/aiperf](https://github.com/ai-dynamo/aiperf); the
+archive's `README.txt` records this too.
+
+Only `aiperf-bench` carries this referrer. The other six images need none: their
+dependencies are vendored, so the release source archive already contains them.
+
+**Scope of the correspondence.** The archive is resolved from the same
+`requirements.txt` the image installs, so both derive from one input. Two gaps
+remain and are tracked rather than claimed away:
+
+* `pip` and `wheel` are provided by `python -m venv` rather than declared in
+  `requirements.txt`, so they ship in the image without source in this archive.
+* The image build layer-caches its dependency resolution, so a cached build can
+  carry an older closure than a freshly resolved archive (tracked in
+  [#2086](https://github.com/NVIDIA/aicr/issues/2086)).
+
+A referrer binds to one image digest, so resolve the tag to a digest first as
+shown above rather than assuming a tag keeps the same attachment across builds.
 
 ### Using the published VEX document
 

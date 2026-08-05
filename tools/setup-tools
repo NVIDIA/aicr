@@ -279,6 +279,7 @@ GO_LICENSES_VERSION=$(yq '.linting.go_licenses' .settings.yaml)
 GRYPE_VERSION=$(yq '.security_tools.grype' .settings.yaml)
 COSIGN_VERSION=$(yq '.security_tools.cosign' .settings.yaml)
 SYFT_VERSION=$(yq '.security_tools.syft' .settings.yaml)
+ORAS_VERSION=$(yq '.security_tools.oras' .settings.yaml)
 KIND_VERSION=$(yq '.testing_tools.kind' .settings.yaml)
 KUBECTL_VERSION=$(yq '.testing_tools.kubectl' .settings.yaml)
 CTLPTL_VERSION=$(yq '.testing_tools.ctlptl' .settings.yaml)
@@ -693,6 +694,34 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 fi
             fi
             log_success "syft installed"
+        fi
+    fi
+
+    # oras (attaches the aiperf-bench third-party source archive as an OCI
+    # referrer; see tools/generate-aiperf-source. Cosign cannot attach arbitrary
+    # artifacts, so this is a separate dependency from the signing path.)
+    if command_exists oras && [[ "${UPGRADE}" != "true" ]]; then
+        log_success "oras already installed: $(oras version 2>/dev/null | grep -E '^Version:' | awk '{print $2}')"
+    else
+        log_info "Installing oras ${ORAS_VERSION}..."
+        if prompt_continue; then
+            if [[ "${OS}" == "darwin" ]]; then
+                brew install oras
+            elif [[ "${OS}" == "linux" ]]; then
+                ORAS_VER="${ORAS_VERSION#v}"
+                ORAS_TMP=$(mktemp -d)
+                ORAS_URL="https://github.com/oras-project/oras/releases/download/v${ORAS_VER}/oras_${ORAS_VER}_linux_${GO_ARCH}.tar.gz"
+                if verify_download_url "$ORAS_URL" "oras ${ORAS_VERSION} for Linux ${GO_ARCH}"; then
+                    curl -fsSL "$ORAS_URL" | tar -xzC "$ORAS_TMP"
+                    sudo mv "$ORAS_TMP/oras" /usr/local/bin/oras
+                    sudo chmod +x /usr/local/bin/oras
+                    rm -rf "$ORAS_TMP"
+                else
+                    log_error "Failed to install oras. Please install manually."
+                    rm -rf "$ORAS_TMP"
+                fi
+            fi
+            log_success "oras installed"
         fi
     fi
 
