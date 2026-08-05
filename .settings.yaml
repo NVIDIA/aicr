@@ -66,7 +66,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.2.3'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
-  helm_diff: 'v3.15.10'
+  helm_diff: 'v3.15.11'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
   helmfile: 'v1.7.2'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
