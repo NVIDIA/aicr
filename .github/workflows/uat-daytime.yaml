@@ -15,32 +15,38 @@
 name: UAT Daytime Human-Access
 
 # The day side of the day/night cycle (#1281, DC8): stand up ONE long-lived,
-# human-facing deployment per cloud for the working day, then tear it down
-# before the nightly batch. The cloud→flavor split is data, not code — it comes
-# from the `daytime-intent` column of the reservation registry
+# human-facing deployment per cloud ON DEMAND (manual daytime-up) for the working
+# day, with an automatic evening teardown that releases the reservation before the
+# nightly batch. daytime-up is intentionally NOT on a cron — a human requests it
+# when they want a cluster (see docs/contributor/uat.md); only the safety-net
+# teardown is scheduled, so a manually-provisioned daytime cluster is reclaimed
+# even if nobody remembers to tear it down. If that teardown itself fails, the
+# pre-batch guard blocks the batch rather than racing the still-held cluster. The cloud→flavor split is data,
+# not code — it comes from the `daytime-intent` column of the reservation registry
 # (infra/uat/reservations.yaml), defaulting to AWS=training / GCP=inference.
 #
 # This workflow is a THIN SCHEDULER. It owns no lifecycle mechanics: it enumerates
 # the daytime rotation from the broker and dispatches the shared uat-run.yaml
-# once per reservation with lifecycle=daytime-up (morning) or daytime-down
-# (evening). DC2 owns provision-and-hold, teardown, and the pre-batch guard;
-# uat-run.yaml owns the per-reservation lease. Because the daytime runs go through
-# that same dispatch surface, they contend on the SAME lease as the nightly batch
-# — CI and human use never overlap on one reservation.
+# once per reservation with lifecycle=daytime-up (manual) or daytime-down (manual
+# or the evening cron). DC2 owns provision-and-hold, teardown, and the pre-batch
+# guard; uat-run.yaml owns the per-reservation lease. Because the daytime runs go
+# through that same dispatch surface, they contend on the SAME lease as the nightly
+# batch — CI and human use never overlap on one reservation.
 #
 # The daytime cluster is NOT a UAT cell: daytime-up stops after deploy (no CUJ),
 # so it emits NO evidence bundle and produces NO TestGrid column. Access is
 # distributed OUT-OF-BAND (see docs/contributor/uat.md), never through this CI
 # path.
 on:
+  # daytime-UP is manual only (workflow_dispatch, action=up). The single scheduled
+  # edge is the evening DOWN — an unconditional safety-net teardown.
   schedule:
     # Times are UTC. The nightly batch opens at 04:00 UTC (uat-nightly-batch.yaml).
-    # KEEP IN LOCKSTEP with env.MORNING_UP_CRON / env.EVENING_DOWN_CRON below —
-    # the Resolve-action step maps `github.event.schedule` to up/down by an exact
-    # string match against those env values (the `on:` block cannot reference
-    # env, so this coupling is by convention). Editing one cron without the other
-    # breaks that edge with `::error::could not resolve daytime action` when it fires.
-    - cron: '0 15 * * *' # morning handoff — provision + deploy + HOLD (daytime-up)
+    # KEEP IN LOCKSTEP with env.EVENING_DOWN_CRON below — the Resolve-action step
+    # maps `github.event.schedule` to `down` by an exact string match against that
+    # env value (the `on:` block cannot reference env, so this coupling is by
+    # convention). A cron with no matching env value fails with
+    # `::error::could not resolve daytime action` when it fires.
     - cron: '0 2 * * *'  # evening teardown — release the reservation ~2h before the batch (daytime-down)
   workflow_dispatch:
     inputs:
@@ -60,13 +66,12 @@ concurrency:
   group: uat-daytime
   cancel-in-progress: false
 
-# Cron edges map to lifecycle actions; a manual dispatch names the action
-# directly. Consumed by the enumerate job's Resolve action step, which maps
-# `github.event.schedule` to up/down by an EXACT string match against these.
-# These two values MUST stay identical to the `on.schedule` crons above — an
-# unsynced edit breaks the drifted edge (fails loud, but only when it fires).
+# The evening cron edge maps to the daytime-down action; a manual dispatch names
+# the action (up or down) directly. Consumed by the enumerate job's Resolve action
+# step, which maps `github.event.schedule` to `down` by an EXACT string match
+# against this value — which MUST stay identical to the on.schedule cron above (an
+# unsynced edit fails loud, but only when it fires).
 env:
-  MORNING_UP_CRON: '0 15 * * *'   # must equal the daytime-up cron in on.schedule
   EVENING_DOWN_CRON: '0 2 * * *'  # must equal the daytime-down cron in on.schedule
 
 jobs:
@@ -98,8 +103,6 @@ jobs:
           set -euo pipefail
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
             action="${INPUT_ACTION}"
-          elif [[ "${SCHEDULE}" == "${MORNING_UP_CRON}" ]]; then
-            action="up"
           elif [[ "${SCHEDULE}" == "${EVENING_DOWN_CRON}" ]]; then
             action="down"
           else

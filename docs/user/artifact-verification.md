@@ -258,12 +258,17 @@ cache miss — it does not fetch on the verify path, so offline verification wor
 out of the box. `aicr trust update` refreshes the cached trust material (it
 contacts the TUF CDN once) but is **not** required for offline verification.
 
-Two scope limits to be aware of, both reflected in the current CLI reference:
+Two further shapes, both reflected in the current CLI reference:
 
-- **Fully transparency-log-free verification**: dropping the Rekor
-  transparency-log check entirely, for true air-gapped use, is **not yet
-  supported**. It is tracked in
-  [#1154](https://github.com/NVIDIA/aicr/issues/1154).
+- **Fully transparency-log-free verification**: a bundle signed with
+  `aicr bundle --attest --signing-key <kms-uri> --tlog-upload=false` carries no
+  Rekor entry at all. Verify it with
+  `aicr verify ./my-bundle --key ./bundle-signer.pub --insecure-ignore-tlog`,
+  which drops the transparency-log requirement entirely. The flag requires
+  `--key`, because the air-gapped path is key-based rather than keyless, and it
+  is named "insecure" because with no transparency log there is no trusted
+  timestamp proving when the signature was made. It does not affect the binary
+  attestation, which always requires a transparency log.
 - **Private Sigstore verification**: `aicr bundle --attest` can redirect
   *signing* to a private Fulcio/Rekor with `--fulcio-url` / `--rekor-url`, and
   `aicr verify --trust-root` verifies the resulting bundles against that
