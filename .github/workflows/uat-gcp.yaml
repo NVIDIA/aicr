@@ -94,25 +94,33 @@ jobs:
       GCP_REGION: "us-central1"
       GCP_WIF_PROVIDER: "projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider"
       GCP_WIF_SERVICE_ACCOUNT: "github-actions@eidosx.iam.gserviceaccount.com"
-      # Cluster name (GKE actuator derives it from .deployment.id). The `aicr-uat-`
-      # prefix is shared across AWS/GCP/Azure (and matches the committed
-      # cluster-config `id: aicr-uat`), so UAT cluster names are consistent per
-      # platform. The nightly per-run lifecycle uses a run-scoped name
-      # (aicr-uat-<run_id>) for per-run isolation. daytime-up uses an EPHEMERAL,
-      # reservation-scoped name — the stable prefix aicr-uat-day-<reservation>- with
-      # the up-run's id appended — so a re-provision never reuses a name the previous
-      # teardown just deleted (which collides with cloud deletion tombstones and
-      # stale terraform-state locks). Discovery is name-free: the pre-batch guard and
-      # daytime-down both scan the stable prefix (the actuator derives the name AND
-      # its TF-state key from .deployment.id). daytime-down has no static name here —
-      # it resolves the concrete cluster at runtime (see "Resolve daytime cluster to
-      # tear down") and overrides DEPLOYMENT_ID. Reservation names are lowercase
-      # alnum+hyphen; the longest daytime name (aicr-uat-day-<reservation>-<run_id>)
-      # stays within GKE's 40-char cap for the registry's reservation names.
+      # Cluster name. The GKE actuator derives it — AND the node-pool service
+      # accounts — from .deployment.id: account_id = "<deployment.id>-system-nodes"
+      # / "-worker-nodes" (iam.tf), which GCP caps at 30 chars. `-system-nodes` is
+      # 13, so .deployment.id must be <= 17 chars or `terraform plan` fails before
+      # provisioning anything (#2064).
+      #
+      # nightly: aicr-<run_id> (16 chars => account_id 29). This deliberately DROPS
+      # the shared `uat` infix that AWS/Azure keep (aicr-uat-<run_id>): their IAM
+      # name caps are 64 chars, but on GCP aicr-uat-<run_id> (20) overflows the SA
+      # cap (33 > 30) and broke every GCP cell after #2042. aicr-<run_id> fits until
+      # run ids reach 13 digits (11 today) — the same headroom the pre-#2042 name
+      # had — and the run-scoped id still gives per-run isolation.
+      #
+      # daytime-up: aicr-uat-day-<reservation>-<run_id> — the EPHEMERAL,
+      # reservation-scoped name whose prefix the pre-batch guard and daytime-down
+      # scan for name-free discovery (the actuator derives the name AND its TF-state
+      # key from it), so a re-provision never reuses a just-deleted name. This name
+      # (33 chars) STILL overflows the SA cap, so daytime-up provisioning is
+      # knowingly broken on GCP pending the durable fix — bounding the derived
+      # account_id in the actuator (#2064). daytime-up is on-demand
+      # (workflow_dispatch), NOT in the nightly batch, so this does not gate
+      # nightlies. daytime-down resolves the cluster at runtime and overrides
+      # DEPLOYMENT_ID.
       DEPLOYMENT_ID: >-
         ${{ inputs.lifecycle == 'daytime-up'
         && format('aicr-uat-day-{0}-{1}', inputs.reservation, github.run_id)
-        || format('aicr-uat-{0}', github.run_id) }}
+        || format('aicr-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
