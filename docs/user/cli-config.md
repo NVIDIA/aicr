@@ -304,11 +304,18 @@ checked after verification runs, `trust` holds the material it verifies against.
 `policy.minTrustLevel` sets **operator policy, not an org-enforced guardrail**.
 A committed value lowers the effective floor as readily as it raises it
 (`unknown` makes the trust check a no-op, since every level meets it), so treat
-it as a reviewable choice rather than a control that cannot be relaxed. Its
-blast radius is bounded: verification still rejects checksum-failed and
-invalidly-signed bundles regardless of policy, so only checksum-valid *unsigned*
-bundles pass a lowered floor. `aicr verify` logs at INFO whenever config sets the
-floor to anything other than `max`.
+it as a reviewable choice rather than a control that cannot be relaxed.
+
+A lowered floor admits any bundle whose actual trust level reaches it, which is
+broader than unsigned bundles. It also covers chains that legitimately degraded:
+an attested bundle whose binary attestation is absent, or one carrying external
+`--data`, both report `attested` against a `verified` maximum, so the default
+`max` rejects them while a lowered floor does not.
+
+What no policy value can wave through: checksum failures, and attestations that
+are present but fail verification. Those are rejected regardless of the floor.
+`aicr verify` logs at INFO whenever config sets the floor to anything other than
+`max`.
 
 Every field is a durable, non-secret reference or policy value; no private key
 material is part of the schema. Three `aicr verify` flags are deliberately
