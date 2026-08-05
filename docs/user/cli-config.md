@@ -314,8 +314,11 @@ an attested bundle whose binary attestation is absent, or one carrying external
 
 What no policy value can wave through: checksum failures, and attestations that
 are present but fail verification. Those are rejected regardless of the floor.
-`aicr verify` logs at INFO whenever config sets the floor to anything other than
-`max`.
+
+`aicr verify` logs the floor at INFO when config is what supplies it: that is,
+when `--min-trust-level` is absent and the configured value is anything other
+than `max`. An explicit flag takes precedence instead, and that override is
+logged separately by the flag-precedence path.
 
 Every field is a durable, non-secret reference or policy value; no private key
 material is part of the schema. Three `aicr verify` flags are deliberately

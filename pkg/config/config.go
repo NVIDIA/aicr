@@ -397,8 +397,11 @@ type VerifyPolicySpec struct {
 	// What no policy value can wave through: checksum failures and
 	// attestations that are present but fail verification. Those populate
 	// result.Errors, which is gated separately from the trust floor.
-	// `aicr verify` logs at INFO whenever config sets the floor to anything
-	// other than "max".
+	//
+	// `aicr verify` logs the floor at INFO when config is what supplies it:
+	// when --min-trust-level is absent and the configured value is anything
+	// other than "max". An explicit flag wins instead, and that override is
+	// logged by the flag-precedence path rather than this one.
 	MinTrustLevel string `yaml:"minTrustLevel,omitempty" json:"minTrustLevel,omitempty"`
 
 	// RequireCreator pins the OIDC identity in the bundle attestation's
