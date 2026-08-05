@@ -302,24 +302,55 @@ documents them:
   per SBOM.
 
 Classification reuses the monitor's vocabulary and exit codes so both workflows
-triage identically: `clean` (0), `tamper` (1, security), `operational` (3). It
-opens the same two issue kinds with the same de-duplication and the same
-three-consecutive-failures rule before a calm `area/ci` degraded issue, and a
-later clean run closes both.
+triage identically: `clean` (0), `tamper` (1, security), `operational` (3). A
+`tamper` finding opens a security issue **and** posts a Slack alert through the
+same `SLACK_SERVICE` webhook rekor-monitor uses, so an incident-grade finding
+does not depend on one channel. Operational failures page no one, and only three
+consecutive failed scheduled runs open a calm `area/ci` degraded issue. Only a
+`failure` conclusion counts toward that streak: a canceled or timed-out run says
+nothing about upstream health.
+
+**The alert is tag-scoped, and that is a deliberate divergence from
+rekor-monitor.** The issue title carries the resolved tag, and a clean run only
+closes the alert for the tag it actually verified. The job checks the latest
+release, so a clean run on `vX+1` proves nothing about `vX`; closing `vX`'s issue
+would silently resolve a live finding on a release that is never re-checked
+again. The degraded issue has no such scoping, because it tracks the checker's
+own health rather than a release, so any clean run clears it. rekor-monitor's
+alert is release-agnostic (it tracks the log), which is why a clean run genuinely
+clears it there.
 
 **`tamper` is asserted only on positive evidence**, never as a fallback, so an
 outage cannot masquerade as a missing entry. "Missing" means an asset name is
 absent from the release's own asset inventory, or an attestation is absent from
-an archive that already downloaded and checksummed — neither is reachable from a
-failed network call, because a failed read aborts the step before any comparison.
-A failed *cryptographic* check is promoted to `tamper` only when two independent
-guards agree: Sigstore's TUF CDN answered a live probe, **and** the captured
-failure output carries no transport/outage signature. Either guard alone demotes
-to `operational`. The guards are demote-only, so the worst case is a real finding
-reported as operational — still a red job, still a degraded issue after three
-days, and it re-fires the next day — never the reverse. Any failure *before* the
-classifier runs leaves the classification empty, which the gates treat as
-operational by construction.
+an archive that already downloaded and checksummed. Neither is reachable from a
+failed network call: a failed read aborts the step before any comparison, and an
+inventory file that cannot be read at all demotes and stops rather than reporting
+every asset as missing. A failed *cryptographic* check is promoted to `tamper`
+only when every demotion test declines it:
+
+- the command was not killed (`timeout` exit 124, or 137 from a SIGKILL or the
+  OOM killer);
+- it produced a non-empty, readable log: `grep` declines to match an empty file
+  and exits 2 on an unreadable one, either of which would otherwise sail straight
+  through the pattern guard;
+- every Sigstore liveness probe answered. Both the TUF CDN and Fulcio are
+  probed and **all** must respond, so a Fulcio-only outage demotes too. Rekor v2
+  shard hostnames rotate, so no fixed shard is probed;
+- the captured output carries no transport or outage signature.
+
+All of these are demote-only, so the worst case is a real finding reported as
+operational: still a red job, still a degraded issue after three days, and it
+re-fires the next day. Never the reverse. The cost of that bias is that a probe
+URL which broke permanently would silently disable paging, so each probe failure
+is logged by name. Any failure *before* the classifier runs leaves the
+classification empty, which the gates treat as operational by construction.
+
+One fault in the step fails in the **opposite** direction and is guarded
+separately: if `sort -V` cannot order the tag against the SBOM signing floor, an
+unguarded comparison would read as "at or before the floor" and skip every SBOM
+check while logging that it did so on purpose. That is silent under-verification
+rather than a false page, and it is demoted explicitly.
 
 Two things are deliberately out of scope, both tracked as follow-ups:
 

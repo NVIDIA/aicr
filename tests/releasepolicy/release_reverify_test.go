@@ -16,6 +16,7 @@ package releasepolicy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -68,8 +69,14 @@ func TestReleaseReverifyWorkflowShape(t *testing.T) {
 		"actions":  "read",
 		"issues":   "write",
 	})
-	if _, ok := job["timeout-minutes"]; !ok {
-		t.Error("the re-verification job must have an explicit timeout")
+	// The per-call `timeout --foreground` bounds stack, and a job that hits
+	// timeout-minutes is CANCELED by GitHub, which skips every `if: failure()`
+	// step: red
+	// with no degraded issue. The budget is sized in a comment on the field; this
+	// pins the floor so a casual reduction has to revisit that arithmetic.
+	budget, isInt := job["timeout-minutes"].(int)
+	if !isInt || budget < 45 {
+		t.Errorf("timeout-minutes = %v, want an explicit budget of at least 45 to cover the stacked per-call bounds", job["timeout-minutes"])
 	}
 
 	env := mapValue(t, doc, "env")
@@ -121,13 +128,20 @@ func TestReleaseReverifyWorkflowShape(t *testing.T) {
 	}
 	verifyScript := stringValue(t, steps[verify].(map[string]any), "run")
 	for _, required := range []string{
-		"CLASSIFICATION=${classification}", // same machine-readable line as tools/rekor-monitor
-		"classification=${classification}", // and the step output the gates branch on
-		"timeout --foreground",             // every network call is bounded
-		"recipe verify-catalog",            // the shipped catalog verification command
-		"cosign verify-blob-attestation",   // the shipped blob attestation command
-		"sigstore_reachable",               // guard #1
-		"infra_shaped",                     // guard #2
+		"CLASSIFICATION=${classification}",   // same machine-readable line as tools/rekor-monitor
+		"classification=${classification}",   // and the step output the gates branch on
+		"timeout --foreground",               // every network call is bounded
+		"recipe verify-catalog",              // the shipped catalog verification command
+		"cosign verify-blob-attestation",     // the shipped blob attestation command
+		"sigstore_reachable",                 // liveness guard
+		"infra_shaped",                       // pattern guard
+		`[ -r "$1" ] || return 0`,            // an unreadable log is not evidence
+		`if [ ! -s "${log}" ]; then`,         // nor is an empty one
+		`-eq 124 ]`,                          // a timeout kill is infrastructure
+		`-eq 137 ]`,                          // so is a SIGKILL or OOM
+		`if [ ! -r "${RELEASE_ASSETS}" ];`,   // grep exits 2 on an unreadable inventory
+		`^https://github\\.com/`,             // fully escaped identity regexp
+		`/\\.github/workflows/on-tag\\.yaml`, // including the /.github/ segment
 	} {
 		if !strings.Contains(verifyScript, required) {
 			t.Errorf("classifier missing %q", required)
@@ -157,16 +171,55 @@ func TestReleaseReverifyWorkflowShape(t *testing.T) {
 	if !strings.Contains(degradedGate, "steps.verify.outputs.classification != 'tamper'") {
 		t.Errorf("operational gate = %q, want the exact inverse of the security gate", degradedGate)
 	}
-	alertText := marshalYAML(t, steps[alert])
-	if !strings.Contains(alertText, "select(.title == $t)") {
+	alertScript := stringValue(t, steps[alert].(map[string]any), "run")
+	if !strings.Contains(alertScript, "select(.title == $t)") {
 		t.Error("the security issue must de-duplicate on an exact title match")
 	}
+	// Tag-scoped: the job only verifies the latest release, so an alert must name
+	// the tag it was raised for or a later clean run on a different tag would
+	// close it (see TestReleaseReverifyAlertCloseIsTagScoped).
+	if !strings.Contains(alertScript, `title="${ALERT_TITLE} [${TAG}]"`) {
+		t.Error("the alert title must carry the resolved tag")
+	}
+	// A transient 5xx or a renamed label must not cost the one notification this
+	// workflow exists to deliver.
+	if !strings.Contains(alertScript, "gh-api-retry.sh") {
+		t.Error("the alert de-duplication read must use the shared bounded-retry helper")
+	}
+	if !strings.Contains(alertScript, `--title "${title}" --body-file alert-body.md`) {
+		t.Error("the alert must fall back to an unlabelled issue rather than abort on a missing label")
+	}
+
+	slack := stepIndex(steps, "Post Slack alert on security finding")
+	if slack < 0 {
+		t.Fatal("a tamper finding must page Slack, as rekor-monitor does")
+	}
+	slackStep := steps[slack].(map[string]any)
+	if got := fmt.Sprint(slackStep["if"]); !strings.Contains(got, "classification == 'tamper'") {
+		t.Errorf("Slack gate = %q, want the security classification only, never degraded", got)
+	}
+	if got := fmt.Sprint(mapValue(t, slackStep, "env")["SLACK_SERVICE"]); got != "${{ secrets.SLACK_SERVICE }}" {
+		t.Errorf("Slack secret wiring = %q, want the same SLACK_SERVICE rekor-monitor uses", got)
+	}
+
 	degradedText := marshalYAML(t, steps[degraded])
-	if !strings.Contains(degradedText, `index("success") // length`) {
-		t.Error("the degraded issue must escalate on a consecutive-failure streak, not a failure count")
+	// Only a "failure" conclusion counts. A run that was canceled, skipped or
+	// timed out says nothing about upstream health and would inflate the streak.
+	if !strings.Contains(degradedText, `map(. == "failure") | (index(false) // length)`) {
+		t.Error("the streak must count only consecutive failure conclusions")
 	}
 	if !strings.Contains(degradedText, "workflows/release-reverify.yaml/runs") {
 		t.Error("the streak query must read this workflow's own run history")
+	}
+
+	closeScript := stringValue(t, steps[closer].(map[string]any), "run")
+	if !strings.Contains(closeScript, `"${ALERT_TITLE} [${TAG}]"`) {
+		t.Error("the close loop must scope the alert to the tag this run verified")
+	}
+	// A list blip must not flip a clean verification red, which would also
+	// inflate the next run's streak.
+	if !strings.Contains(closeScript, `|| echo '[]'`) {
+		t.Error("the close-on-success listing must tolerate a transient list failure")
 	}
 
 	// Repo convention: no ${{ }} interpolation inside run: blocks. Every value a
@@ -388,6 +441,127 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			code: 3,
 		},
 		{
+			// The fault mchmarny found: a full disk or a permissions fault on
+			// WORK_DIR breaks the extract. Before the guard, control fell
+			// through to cosign, which failed on a bundle that was never
+			// written -- and "no such file or directory" matches no
+			// infra_shaped pattern, so both guards passed it through to a
+			// security page. Every sibling branch in this chain demotes.
+			name: "a failed extract is operational, never a security finding",
+			opts: reverifyOptions{
+				tag:               reverifySBOMFloor,
+				assets:            assetsFor("0.18.0"),
+				installOutcome:    "failure",
+				tarExtractFails:   true,
+				sigstoreReachable: true,
+			},
+			want: "operational",
+			code: 3,
+		},
+		{
+			// A `timeout --foreground` kill exits 124. The message the fake still
+			// writes is deliberately NOT infra-shaped, so only the exit-status
+			// demotion can catch this.
+			name: "a cosign killed by its timeout is operational",
+			opts: reverifyOptions{
+				tag:               reverifySBOMFloor,
+				assets:            assetsFor("0.18.0"),
+				installOutcome:    "failure",
+				cosignRC:          124,
+				sigstoreReachable: true,
+			},
+			want: "operational",
+			code: 3,
+		},
+		{
+			// A SIGKILL (OOM killer) surfaces as 137.
+			name: "a cosign killed by the OOM killer is operational",
+			opts: reverifyOptions{
+				tag:               reverifySBOMFloor,
+				assets:            assetsFor("0.18.0"),
+				installOutcome:    "failure",
+				cosignRC:          137,
+				cosignSilent:      true,
+				sigstoreReachable: true,
+			},
+			want: "operational",
+			code: 3,
+		},
+		{
+			// An empty log is not evidence: grep declines to match it, so the
+			// pattern guard alone would pass this straight through to security.
+			name: "a failure that produced no output is operational",
+			opts: reverifyOptions{
+				tag:               reverifySBOMFloor,
+				assets:            assetsFor("0.18.0"),
+				installOutcome:    "failure",
+				cosignRC:          1,
+				cosignSilent:      true,
+				sigstoreReachable: true,
+			},
+			want: "operational",
+			code: 3,
+		},
+		{
+			// The `> <log>` redirect fails against a pre-existing unreadable
+			// file, so the classifier is handed a non-empty log it cannot read.
+			// grep exits 2 there, which is indistinguishable from "no match".
+			name: "a log the classifier cannot read is operational",
+			opts: reverifyOptions{
+				tag:               reverifySBOMFloor,
+				assets:            assetsFor("0.18.0"),
+				installOutcome:    "success",
+				seedUnreadableLog: "catalog-verify.log",
+				sigstoreReachable: true,
+			},
+			want: "operational",
+			code: 3,
+		},
+		{
+			// grep exits 2 on an unreadable inventory, which have_asset cannot
+			// tell from "not present", so every required asset would read as
+			// missing and page.
+			name: "an unreadable asset inventory is operational, not every asset missing",
+			opts: reverifyOptions{
+				tag:               reverifySBOMFloor,
+				missingAssetsFile: true,
+				installOutcome:    "success",
+				sigstoreReachable: true,
+			},
+			want: "operational",
+			code: 3,
+		},
+		{
+			// A Fulcio-only outage must demote too: probing the TUF CDN alone
+			// would stay green through it.
+			name: "a Fulcio-only outage demotes a failed verification",
+			opts: reverifyOptions{
+				tag:               reverifySBOMFloor,
+				assets:            assetsFor("0.18.0"),
+				installOutcome:    "failure",
+				cosignRC:          1,
+				cosignMessage:     "Error: no matching signatures found for the given identity",
+				sigstoreReachable: true,
+				sigstoreFailURL:   "fulcio",
+			},
+			want: "operational",
+			code: 3,
+		},
+		{
+			// Failing to order the tag against the floor must not silently skip
+			// every SBOM check.
+			name: "an undecidable SBOM floor ordering is operational",
+			opts: reverifyOptions{
+				tag:               "v0.19.0",
+				assets:            assetsFor("0.19.0"),
+				installOutcome:    "success",
+				sortFails:         true,
+				sigstoreReachable: true,
+			},
+			want: "operational",
+			code: 3,
+		},
+		{
 			name: "a corrupt archive download is operational, not a missing attestation",
 			opts: reverifyOptions{
 				tag:               reverifySBOMFloor,
@@ -436,6 +610,13 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			if !strings.Contains(output, "CLASSIFICATION="+tc.want) {
 				t.Errorf("classifier did not print the machine-readable CLASSIFICATION line\n%s", output)
 			}
+			// security() is the only emitter of ::error:: in the step, so a run
+			// that is not a finding must carry none. This pins "NOT tamper"
+			// directly rather than inferring it from the classification, and it
+			// holds for every non-finding row, not just the one being added.
+			if tc.want != "tamper" && strings.Contains(output, "::error::") {
+				t.Errorf("a %s run emitted a security annotation; an infrastructure fault must never page\n%s", tc.want, output)
+			}
 		})
 	}
 }
@@ -468,8 +649,79 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 			},
 		},
 		{
+			// Restores the pre-fix, unguarded extract. The step runs without
+			// `set -e`, so the failure falls through to cosign and reaches
+			// security -- the guards are demote-only and cannot save a path
+			// that never reaches them.
+			name: "restoring the unguarded tar extract",
+			from: `  if ! tar -xzf "${REL_DIR}/${archive}" -C "${WORK_DIR}" \
+      aicr aicr-attestation.sigstore.json 2>/dev/null; then
+    operational "the archive listed but could not be extracted; treating as infrastructure"
+  elif timeout --foreground 120s cosign verify-blob-attestation \`,
+			to: `  tar -xzf "${REL_DIR}/${archive}" -C "${WORK_DIR}" \
+      aicr aicr-attestation.sigstore.json 2>/dev/null
+  if timeout --foreground 120s cosign verify-blob-attestation \`,
+			opts: reverifyOptions{
+				installOutcome: "failure",
+				// The extract fails; Sigstore is up and the resulting cosign
+				// message is not infra-shaped, so the intact script must still
+				// say operational.
+				tarExtractFails:   true,
+				sigstoreReachable: true,
+			},
+		},
+		{
+			// Exit 124 is a `timeout --foreground` kill and 137 a SIGKILL/OOM.
+			// The fake still writes a non-infra-shaped message, so nothing else
+			// in the chain can demote this.
+			name: "removing the killed-command demotion",
+			from: `  if [ "${status}" -eq 124 ] || [ "${status}" -eq 137 ]; then`,
+			to:   "  if false; then",
+			opts: reverifyOptions{
+				installOutcome:    "failure",
+				cosignRC:          124,
+				sigstoreReachable: true,
+			},
+		},
+		{
+			// grep declines to match an empty file, so the pattern guard reads
+			// "no infrastructure signature" and reaches security.
+			name: "removing the empty-log demotion",
+			from: `  if [ ! -s "${log}" ]; then`,
+			to:   "  if false; then",
+			opts: reverifyOptions{
+				installOutcome:    "failure",
+				cosignRC:          1,
+				cosignSilent:      true,
+				sigstoreReachable: true,
+			},
+		},
+		{
+			// grep exits 2 on an unreadable file, indistinguishable from rc 1.
+			name: "removing the unreadable-log demotion",
+			from: `  [ -r "$1" ] || return 0`,
+			to:   `  [ -r "$1" ] || true`,
+			opts: reverifyOptions{
+				installOutcome:    "success",
+				seedUnreadableLog: "catalog-verify.log",
+				sigstoreReachable: true,
+			},
+		},
+		{
+			// Same rc-2 conflation one level up: an unreadable inventory makes
+			// have_asset report every required asset as missing.
+			name: "removing the asset-inventory readability guard",
+			from: `if [ ! -r "${RELEASE_ASSETS}" ]; then`,
+			to:   "if false; then",
+			opts: reverifyOptions{
+				missingAssetsFile: true,
+				installOutcome:    "success",
+				sigstoreReachable: true,
+			},
+		},
+		{
 			name: "removing the infrastructure-signature guard",
-			from: `if infra_shaped "$2"; then`,
+			from: `  if infra_shaped "${log}"; then`,
 			to:   "if false; then",
 			opts: reverifyOptions{
 				installOutcome: "failure",
@@ -485,10 +737,12 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := tc.opts
 			opts.tag = reverifySBOMFloor
-			opts.assets = []string{
-				"aicr_0.18.0_linux_amd64.tar.gz",
-				"aicr_checksums.txt",
-				"recipe-catalog.sigstore.json",
+			if !opts.missingAssetsFile {
+				opts.assets = []string{
+					"aicr_0.18.0_linux_amd64.tar.gz",
+					"aicr_checksums.txt",
+					"recipe-catalog.sigstore.json",
+				}
 			}
 
 			intact, _, output := runReverifyClassifier(t, script, opts)
@@ -624,6 +878,254 @@ func verifiedSBOMs(output string) []string {
 	return verified
 }
 
+// TestReleaseReverifySBOMFloorOrderingIsGuarded covers the one fault in this
+// step that fails OPEN rather than paging. If `sort -V` is unavailable or dies,
+// the floor comparison is undecidable; unguarded, the ordering test then reads
+// as "at or before the floor" and skips every SBOM check while logging that it
+// did so deliberately. A release that is genuinely missing an SBOM bundle would
+// come back clean.
+func TestReleaseReverifySBOMFloorOrderingIsGuarded(t *testing.T) {
+	script := reverifyClassifierScript(t)
+
+	const from = `newest=""
+if ! newest="$(printf '%s\n%s\n' "${SBOM_SIGNING_FLOOR}" "${TAG}" | sort -V | tail -n1)" \
+    || [ -z "${newest}" ]; then
+  operational "could not order ${TAG} against the SBOM signing floor ${SBOM_SIGNING_FLOOR}; treating as infrastructure"
+elif [ "${TAG}" = "${SBOM_SIGNING_FLOOR}" ] || [ "${newest}" != "${TAG}" ]; then`
+	const to = `newest="$(printf '%s\n%s\n' "${SBOM_SIGNING_FLOOR}" "${TAG}" | sort -V | tail -n1)"
+if [ "${TAG}" = "${SBOM_SIGNING_FLOOR}" ] || [ "${newest}" != "${TAG}" ]; then`
+	if !strings.Contains(script, from) {
+		t.Fatal("the SBOM floor ordering guard is no longer in the classifier")
+	}
+	mutated := strings.Replace(script, from, to, 1)
+
+	// A release above the floor that ships an SBOM with no attestation bundle:
+	// a finding the SBOM block is supposed to catch.
+	opts := reverifyOptions{
+		tag: "v0.19.0",
+		assets: []string{
+			"aicr_0.19.0_linux_amd64.tar.gz",
+			"aicr_checksums.txt",
+			"recipe-catalog.sigstore.json",
+			"aicr_0.19.0_linux_amd64.sbom.json",
+		},
+		installOutcome:    "success",
+		sigstoreReachable: true,
+	}
+
+	// Baseline: with a working sort the block runs and finds it.
+	if class, code, output := runReverifyClassifier(t, script, opts); class != "tamper" || code != 1 {
+		t.Fatalf("baseline classification = %q (exit %d), want tamper (exit 1)\n%s", class, code, output)
+	}
+
+	// Undecidable ordering: demote, do not silently skip.
+	opts.sortFails = true
+	class, code, output := runReverifyClassifier(t, script, opts)
+	if class != "operational" || code != 3 {
+		t.Fatalf("with an undecidable ordering, classification = %q (exit %d), want operational (exit 3)\n%s", class, code, output)
+	}
+
+	// Unguarded, the same fault reports a clean release and never mentions the
+	// missing bundle. That is the fail-open direction this guard exists for.
+	brokenClass, brokenCode, brokenOutput := runReverifyClassifier(t, mutated, opts)
+	if brokenClass == "operational" {
+		t.Fatalf("the unguarded ordering still demoted; the guard is not load-bearing and this test proves nothing\n%s", brokenOutput)
+	}
+	if brokenClass != "clean" || brokenCode != 0 {
+		t.Errorf("unguarded ordering = %q (exit %d), want clean (exit 0): the skip is expected to be SILENT", brokenClass, brokenCode)
+	}
+	if !strings.Contains(brokenOutput, "at or before the SBOM signing floor") {
+		t.Errorf("unguarded ordering did not take the misleading floor branch\n%s", brokenOutput)
+	}
+	if strings.Contains(brokenOutput, "with no attestation bundle") {
+		t.Errorf("unguarded ordering unexpectedly still reported the missing bundle\n%s", brokenOutput)
+	}
+}
+
+// TestReleaseReverifyAlertCloseIsTagScoped covers the close-on-success step. The
+// job only ever verifies /releases/latest, so a clean run on vX+1 proves nothing
+// about vX and must not close vX's alert: once vX stops being latest it is never
+// re-checked, and closing its issue would silently resolve a live finding. This
+// is the deliberate divergence from rekor-monitor, whose alert tracks the
+// release-agnostic log and so genuinely clears on any clean run.
+func TestReleaseReverifyAlertCloseIsTagScoped(t *testing.T) {
+	doc := loadYAML(t, reverifyWorkflow)
+	env := mapValue(t, doc, "env")
+	alertTitle := fmt.Sprint(env["ALERT_TITLE"])
+	degradedTitle := fmt.Sprint(env["DEGRADED_TITLE"])
+
+	steps := sliceValue(t, mapValue(t, mapValue(t, doc, "jobs"), "reverify"), "steps")
+	index := stepIndex(steps, "Close open issues on success")
+	if index < 0 {
+		t.Fatal("re-verification must auto-close its issues on a clean run")
+	}
+	script := stringValue(t, steps[index].(map[string]any), "run")
+
+	scoped := func(tag string) string { return alertTitle + " [" + tag + "]" }
+
+	tests := []struct {
+		name   string
+		tag    string
+		issues []closableIssue
+		want   []string
+	}{
+		{
+			name: "a clean run on a newer release leaves the older tag's alert open",
+			tag:  "v0.19.0",
+			issues: []closableIssue{
+				{Number: 11, Title: scoped("v0.18.0")},
+				{Number: 12, Title: degradedTitle},
+			},
+			// Only the degraded issue, which tracks the checker rather than a
+			// release, closes.
+			want: []string{"12"},
+		},
+		{
+			name: "a clean run closes the alert for the tag it verified",
+			tag:  "v0.19.0",
+			issues: []closableIssue{
+				{Number: 21, Title: scoped("v0.19.0")},
+				{Number: 22, Title: degradedTitle},
+			},
+			want: []string{"21", "22"},
+		},
+		{
+			name: "a title that merely contains the alert text is not closed",
+			tag:  "v0.19.0",
+			issues: []closableIssue{
+				{Number: 31, Title: scoped("v0.19.0") + " (follow-up)"},
+			},
+			want: nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			closed, output, err := runReverifyCloseStep(t, script, tc.tag, tc.issues)
+			if err != nil {
+				t.Fatalf("close step failed: %v\n%s", err, output)
+			}
+			if !slices.Equal(closed, tc.want) {
+				t.Errorf("closed %v, want %v\n%s", closed, tc.want, output)
+			}
+		})
+	}
+
+	t.Run("an unscoped close reopens the bug", func(t *testing.T) {
+		// The pre-fix shape: one global alert title, closed by any clean run.
+		// Staged with the unscoped title on both sides, which is what the
+		// workflow used to create.
+		const from = `for title in "${ALERT_TITLE} [${TAG}]" "${DEGRADED_TITLE}"; do`
+		if !strings.Contains(script, from) {
+			t.Fatal("the close loop no longer scopes the alert title by tag")
+		}
+		mutated := strings.Replace(script, from, `for title in "${ALERT_TITLE}" "${DEGRADED_TITLE}"; do`, 1)
+		issues := []closableIssue{{Number: 41, Title: alertTitle}}
+
+		closed, output, err := runReverifyCloseStep(t, script, "v0.19.0", issues)
+		if err != nil {
+			t.Fatalf("close step failed: %v\n%s", err, output)
+		}
+		if len(closed) != 0 {
+			t.Fatalf("the tag-scoped close matched an unscoped title: closed %v", closed)
+		}
+
+		brokenClosed, brokenOutput, err := runReverifyCloseStep(t, mutated, "v0.19.0", issues)
+		if err != nil {
+			t.Fatalf("mutated close step failed: %v\n%s", err, brokenOutput)
+		}
+		if !slices.Equal(brokenClosed, []string{"41"}) {
+			t.Fatalf("without tag scoping the close did not reach the unscoped alert (closed %v); the scoping is not load-bearing", brokenClosed)
+		}
+	})
+}
+
+// closableIssue is one open issue the fake `gh issue list` returns.
+type closableIssue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+}
+
+// runReverifyCloseStep executes the extracted close-on-success step against a
+// fake gh, returning the issue numbers it closed in order.
+func runReverifyCloseStep(t *testing.T, script, tag string, issues []closableIssue) ([]string, string, error) {
+	t.Helper()
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		t.Fatalf("create fake bin: %v", err)
+	}
+	writeExecutable(t, filepath.Join(bin, "gh"), reverifyFakeGHIssues)
+
+	// The fake answers every `issue list` with the whole fixture, mirroring
+	// GitHub's phrase-based title search over-matching. The step's own exact
+	// title filter is what has to do the work.
+	listing, err := json.Marshal(issues)
+	if err != nil {
+		t.Fatalf("marshal issue fixture: %v", err)
+	}
+	listFile := filepath.Join(root, "issues.json")
+	if err := os.WriteFile(listFile, listing, 0o600); err != nil {
+		t.Fatalf("write issue fixture: %v", err)
+	}
+	closedFile := filepath.Join(root, "closed.txt")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "bash", "-c", script)
+	command.Dir = root
+	command.Env = append(os.Environ(),
+		"PATH="+bin+":"+os.Getenv("PATH"),
+		"GH_TOKEN=fake",
+		"GITHUB_REPOSITORY=NVIDIA/aicr",
+		"GITHUB_RUN_ID=1234",
+		"TAG="+tag,
+		"ALERT_TITLE="+reverifyWorkflowEnv(t, "ALERT_TITLE"),
+		"DEGRADED_TITLE="+reverifyWorkflowEnv(t, "DEGRADED_TITLE"),
+		"FAKE_ISSUE_LIST="+listFile,
+		"FAKE_CLOSED_LOG="+closedFile,
+	)
+	combined, runErr := command.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("close step exceeded the test deadline: %v\n%s", ctx.Err(), combined)
+	}
+	var closed []string
+	if data, readErr := os.ReadFile(closedFile); readErr == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line != "" {
+				closed = append(closed, line)
+			}
+		}
+	} else if !os.IsNotExist(readErr) {
+		t.Fatalf("read closed log: %v", readErr)
+	}
+	return closed, string(combined), runErr
+}
+
+// reverifyWorkflowEnv reads one workflow-level env value, so the tests bind to
+// the shipped titles rather than a copy of them.
+func reverifyWorkflowEnv(t *testing.T, key string) string {
+	t.Helper()
+	return fmt.Sprint(mapValue(t, loadYAML(t, reverifyWorkflow), "env")[key])
+}
+
+// reverifyFakeGHIssues answers `gh issue list` from a fixture and records every
+// `gh issue close` so the test can assert on exactly which issues were touched.
+const reverifyFakeGHIssues = `#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}:${2:-}" in
+  issue:list)
+    cat "${FAKE_ISSUE_LIST}"
+    ;;
+  issue:close)
+    printf '%s\n' "${3}" >> "${FAKE_CLOSED_LOG}"
+    ;;
+  *)
+    echo "unexpected gh invocation: $*" >&2
+    exit 64
+    ;;
+esac
+`
+
 // reverifyOptions describes one simulated release and the behavior of the
 // binaries the classifier shells out to.
 type reverifyOptions struct {
@@ -637,6 +1139,19 @@ type reverifyOptions struct {
 	omitAttestation bool
 	// corruptArchive stages bytes that are not a tarball (a truncated download).
 	corruptArchive bool
+	// tarExtractFails makes the fake tar list the archive fine but fail the
+	// extract, modeling a full disk or a permissions fault on WORK_DIR.
+	tarExtractFails bool
+	// missingAssetsFile points RELEASE_ASSETS at a path that does not exist, so
+	// every `grep` against it exits 2 rather than 1.
+	missingAssetsFile bool
+	// seedUnreadableLog pre-creates the named log under WORK_DIR with content and
+	// mode 0000, so the step's `> <log>` redirect fails and the classifier is
+	// handed a non-empty log it cannot read.
+	seedUnreadableLog string
+	// sortFails makes the fake sort exit non-zero, breaking the SBOM floor
+	// ordering.
+	sortFails bool
 
 	cosignRC          int
 	cosignMessage     string
@@ -652,6 +1167,13 @@ type reverifyOptions struct {
 	// names off the loop's here-string.
 	drainGHStdin     bool
 	drainCosignStdin bool
+
+	// cosignSilent makes the fake fail without writing anything, so the captured
+	// log is empty (a killed or OOMed process).
+	cosignSilent bool
+	// sigstoreFailURL fails only the probe whose URL contains this substring,
+	// modeling a Fulcio-only or TUF-only outage.
+	sigstoreFailURL string
 }
 
 // reverifyClassifierScript extracts the classifying step's shell from the
@@ -687,18 +1209,38 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 	writeExecutable(t, filepath.Join(bin, "timeout"), passthroughTimeout)
 	writeExecutable(t, filepath.Join(bin, "sleep"), reverifyFakeSleep)
 	writeExecutable(t, filepath.Join(bin, "curl"), reverifyFakeCurl)
+	writeExecutable(t, filepath.Join(bin, "tar"), reverifyFakeTar)
+	writeExecutable(t, filepath.Join(bin, "sort"), reverifyFakeSort)
 	writeExecutable(t, filepath.Join(bin, "cosign"), reverifyFakeCosign)
 	writeExecutable(t, filepath.Join(bin, "gh"), reverifyFakeGH)
 	aicrBin := filepath.Join(bin, "aicr")
 	writeExecutable(t, aicrBin, reverifyFakeAicr)
 
 	assetsFile := filepath.Join(root, "release-assets.txt")
+	if opts.missingAssetsFile {
+		assetsFile = filepath.Join(root, "no-such-inventory.txt")
+	}
 	contents := ""
 	if len(opts.assets) > 0 {
 		contents = strings.Join(opts.assets, "\n") + "\n"
 	}
-	if err := os.WriteFile(assetsFile, []byte(contents), 0o600); err != nil {
-		t.Fatalf("write asset inventory: %v", err)
+	if !opts.missingAssetsFile {
+		if err := os.WriteFile(assetsFile, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write asset inventory: %v", err)
+		}
+	}
+	if opts.seedUnreadableLog != "" {
+		if os.Geteuid() == 0 {
+			t.Skip("root bypasses file permissions; the unreadable-log path cannot be staged")
+		}
+		seeded := filepath.Join(workDir, opts.seedUnreadableLog)
+		if err := os.WriteFile(seeded, []byte("stale output from a previous run\n"), 0o600); err != nil {
+			t.Fatalf("seed unreadable log: %v", err)
+		}
+		if err := os.Chmod(seeded, 0o000); err != nil {
+			t.Fatalf("chmod unreadable log: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(seeded, 0o600) })
 	}
 
 	archiveName := "aicr_" + strings.TrimPrefix(opts.tag, "v") + "_linux_amd64.tar.gz"
@@ -729,7 +1271,7 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 		"WORK_DIR="+workDir,
 		"AICR_BIN="+aicrBin,
 		"SBOM_SIGNING_FLOOR="+reverifySBOMFloor,
-		"SIGSTORE_PROBE_URL=https://tuf-repo-cdn.example.invalid/1.root.json",
+		"SIGSTORE_PROBE_URLS=https://tuf.example.invalid/1.root.json https://fulcio.example.invalid/api/v2/trustBundle",
 		"GITHUB_OUTPUT="+outputs,
 		"GITHUB_STEP_SUMMARY="+summary,
 		"GH_TOKEN=fake",
@@ -741,6 +1283,12 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 		fmt.Sprintf("FAKE_GH_RC=%d", opts.ghRC),
 		fmt.Sprintf("FAKE_GH_DRAIN_STDIN=%t", opts.drainGHStdin),
 		fmt.Sprintf("FAKE_COSIGN_DRAIN_STDIN=%t", opts.drainCosignStdin),
+		"FAKE_TAR_REAL="+systemBinary(t, "tar"),
+		"FAKE_SORT_REAL="+systemBinary(t, "sort"),
+		fmt.Sprintf("FAKE_TAR_EXTRACT_FAILS=%t", opts.tarExtractFails),
+		fmt.Sprintf("FAKE_COSIGN_SILENT=%t", opts.cosignSilent),
+		"FAKE_SIGSTORE_FAIL_URL="+opts.sigstoreFailURL,
+		fmt.Sprintf("FAKE_SORT_FAILS=%t", opts.sortFails),
 	)
 	combined, err := command.CombinedOutput()
 	if ctx.Err() != nil {
@@ -800,10 +1348,16 @@ exit 0
 // TUF CDN, reproducing curl's exit 7 when the host does not answer.
 const reverifyFakeCurl = `#!/usr/bin/env bash
 set -euo pipefail
+url="${*: -1}"
+# Fail one probe only, so a Fulcio-only (or TUF-only) outage can be modeled.
+if [[ -n "${FAKE_SIGSTORE_FAIL_URL:-}" && "${url}" == *"${FAKE_SIGSTORE_FAIL_URL}"* ]]; then
+  echo "curl: (7) Failed to connect to ${url}" >&2
+  exit 7
+fi
 if [[ "${FAKE_SIGSTORE_REACHABLE:-true}" == "true" ]]; then
   exit 0
 fi
-echo "curl: (7) Failed to connect to tuf-repo-cdn.sigstore.dev port 443" >&2
+echo "curl: (7) Failed to connect to ${url}" >&2
 exit 7
 `
 
@@ -818,11 +1372,27 @@ set -euo pipefail
 if [[ "${FAKE_COSIGN_DRAIN_STDIN:-false}" == "true" ]]; then
   cat > /dev/null
 fi
+# Real cosign opens the bundle before it verifies anything. Modeling that is
+# what makes a failed extract observable: the pre-fix, unguarded tar extract
+# fell through to here with no bundle on disk.
+bundle=""
+previous=""
+for argument in "$@"; do
+  if [[ "${previous}" == "--bundle" ]]; then bundle="${argument}"; fi
+  previous="${argument}"
+done
+if [[ -n "${bundle}" && ! -f "${bundle}" ]]; then
+  echo "Error: opening bundle: open ${bundle}: no such file or directory" >&2
+  exit 1
+fi
 if [[ "${FAKE_COSIGN_RC:-0}" == "0" ]]; then
   echo "Verified OK"
   exit 0
 fi
-printf '%s\n' "${FAKE_COSIGN_MESSAGE:-Error: verification failed}" >&2
+# A killed or OOMed process writes nothing; the captured log is then empty.
+if [[ "${FAKE_COSIGN_SILENT:-false}" != "true" ]]; then
+  printf '%s\n' "${FAKE_COSIGN_MESSAGE:-Error: verification failed}" >&2
+fi
 exit "${FAKE_COSIGN_RC}"
 `
 
@@ -835,6 +1405,43 @@ if [[ "${FAKE_AICR_RC:-0}" == "0" ]]; then
 fi
 printf '%s\n' "${FAKE_AICR_MESSAGE:-Error: catalog verification failed}" >&2
 exit "${FAKE_AICR_RC}"
+`
+
+// systemBinary resolves a real binary once, so a fake can delegate everything it
+// is not deliberately failing. The archive fixtures are built with the same tar
+// from the test process, which never sees the fake.
+func systemBinary(t *testing.T, name string) string {
+	t.Helper()
+	path, err := exec.LookPath(name)
+	if err != nil {
+		t.Fatalf("locate %s: %v", name, err)
+	}
+	return path
+}
+
+// reverifyFakeTar delegates to the real tar except that, when
+// FAKE_TAR_EXTRACT_FAILS is set, `-x` fails while `-t` still succeeds. That
+// asymmetry is the only way to reach the extract branch: the listing has to
+// succeed first, or the classifier stops one branch earlier.
+const reverifyFakeTar = `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == -x* && "${FAKE_TAR_EXTRACT_FAILS:-false}" == "true" ]]; then
+  echo "tar: aicr: Cannot open: No space left on device" >&2
+  exit 2
+fi
+exec "${FAKE_TAR_REAL}" "$@"
+`
+
+// reverifyFakeSort delegates to the real sort unless FAKE_SORT_FAILS is set, in
+// which case it models a coreutils without -V (or a sort that dies), which is
+// what leaves the SBOM floor ordering undecidable.
+const reverifyFakeSort = `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${FAKE_SORT_FAILS:-false}" == "true" ]]; then
+  echo "sort: unrecognized option '--version-sort'" >&2
+  exit 2
+fi
+exec "${FAKE_SORT_REAL}" "$@"
 `
 
 // reverifyFakeGH materializes every --pattern into --dir, or fails the
