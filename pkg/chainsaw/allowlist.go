@@ -105,6 +105,19 @@ func validateTest(component string, docIdx int, test *v1alpha1.Test) error {
 			stepLabel = fmt.Sprintf("step[%d]", stepIdx)
 		}
 		for opIdx, op := range step.Try {
+			// One action per operation. Chainsaw evaluates a single action
+			// per try entry, so an operation carrying both fields silently
+			// drops one of them — and the executor evaluates Assert first,
+			// which means the negative check is the one lost. A check that
+			// looks like it forbids a shape while never testing for it is
+			// the fail-open direction, so reject rather than pick a winner.
+			if op.Assert != nil && op.Error != nil {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q %s step %q try[%d]: operation sets both assert and error; "+
+						"chainsaw evaluates one action per operation, so the error check would never run — "+
+						"split them into separate try entries",
+						component, docLabel, stepLabel, opIdx))
+			}
 			if name, ok := disallowedOperation(op); ok {
 				return errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("component %q %s step %q try[%d]: operation %q is not in the read-only allowlist (assert, error)",

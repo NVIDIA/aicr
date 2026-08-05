@@ -207,9 +207,9 @@ func Evaluate(ctx context.Context, bundle map[string]string, opts Options) (Eval
 }
 
 // toComponentResult maps one in-process assertion outcome onto the gate's
-// per-component verdict. A cancellation or expired budget is ResultUnknown —
-// the component's true state was never established — while a substantive
-// assertion failure is ResultFail.
+// per-component verdict. A cancellation, an expired budget, or cluster state
+// the run never managed to read is ResultUnknown — the component's true state
+// was never established — while a substantive assertion failure is ResultFail.
 func toComponentResult(r chainsaw.Result) ComponentResult {
 	if r.Passed {
 		return ComponentResult{Result: ResultPass}
@@ -221,8 +221,11 @@ func toComponentResult(r chainsaw.Result) ComponentResult {
 	}
 	msg = TruncTail(strings.TrimSpace(msg), maxMsgLen)
 
-	if isBudgetExhausted(r.Error) {
+	switch {
+	case isBudgetExhausted(r.Error):
 		return ComponentResult{Result: ResultUnknown, Message: "assertion budget exhausted: " + msg}
+	case isIndeterminate(r.Error):
+		return ComponentResult{Result: ResultUnknown, Message: "cluster state indeterminate: " + msg}
 	}
 	return ComponentResult{Result: ResultFail, Message: msg}
 }
@@ -233,6 +236,24 @@ func toComponentResult(r chainsaw.Result) ComponentResult {
 func isBudgetExhausted(err error) bool {
 	return err != nil &&
 		(stderrors.Is(err, context.DeadlineExceeded) || stderrors.Is(err, context.Canceled))
+}
+
+// isIndeterminate reports whether err means the run never established the
+// component's state, as opposed to observing it and finding it unhealthy.
+//
+// ErrCodeUnavailable is exactly that class by construction: a discovery outage,
+// an apiserver 5xx, a forbidden read, a rate-limiter stall. It is never
+// terminal, so pkg/chainsaw retries it for the whole budget and can only
+// surface it once that budget runs out — which makes an Unavailable arriving
+// here the "budget expired while still blind" case, however it is spelled.
+// isBudgetExhausted alone misses it, because the retry loops deliberately
+// return the last substantive error rather than the context sentinel
+// (preferSubstantiveErr), so an API outage was labeling a never-observed
+// component Fail. Exit codes do not change — Fail and Unknown gate identically
+// — but an operator triaging "Fail" hunts a broken component instead of a
+// broken cluster.
+func isIndeterminate(err error) bool {
+	return err != nil && stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
 }
 
 // defaultNamespaceFetcher supplies Options.Namespace to assertions whose

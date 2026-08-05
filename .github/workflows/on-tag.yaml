@@ -32,7 +32,8 @@ env:
   # benchmark runner image (not a Go validator binary) used by the
   # inference-perf check.
   VALIDATOR_PHASES: "deployment performance conformance aiperf-bench"
-  # Readiness-gate image (gate CLI + embedded chainsaw). Built like a validator
+  # Readiness-gate image (gate CLI only; assertions run in-process via
+  # pkg/chainsaw since #2038 dropped the embedded chainsaw binary). Built like a validator
   # — native per-arch Dockerfile build, multi-arch manifest, scan, attest — but
   # under its own repo path, not aicr-validators/. See #904.
   GATE_IMAGE: ghcr.io/nvidia/aicr-gate

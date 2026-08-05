@@ -416,23 +416,30 @@ func TestClusterFetcher_MappingErrorCodes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			scheme := runtime.NewScheme()
-			scheme.AddKnownTypeWithName(
-				schema.GroupVersionKind{Group: "", Version: "v1", Kind: "PodList"}, &unstructured.UnstructuredList{})
-			client := dynamicfake.NewSimpleDynamicClient(scheme)
-			mapper := &flakyMapper{RESTMapper: testMapper(), failures: 99, err: tt.mapErr}
-			f := NewClusterFetcher(client, mapper)
+			// A fresh fetcher per call. Both entry points must classify the
+			// same cause identically, which is what this asserts — but the
+			// discovery-refresh cooldown is fetcher state, so reusing one
+			// instance would make the second call exercise the
+			// cooldown-denied path instead of the classification under test.
+			// That path has its own coverage below.
+			newFetcher := func() ResourceFetcher {
+				scheme := runtime.NewScheme()
+				scheme.AddKnownTypeWithName(
+					schema.GroupVersionKind{Group: "", Version: "v1", Kind: "PodList"}, &unstructured.UnstructuredList{})
+				client := dynamicfake.NewSimpleDynamicClient(scheme)
+				return NewClusterFetcher(client, &flakyMapper{RESTMapper: testMapper(), failures: 99, err: tt.mapErr})
+			}
 
 			for _, call := range []struct {
 				name string
 				run  func() error
 			}{
 				{"Fetch", func() error {
-					_, err := f.Fetch(context.Background(), "v1", "Pod", "ns", "p1")
+					_, err := newFetcher().Fetch(context.Background(), "v1", "Pod", "ns", "p1")
 					return err
 				}},
 				{"List", func() error {
-					_, err := f.List(context.Background(), "v1", "Pod", "ns", nil)
+					_, err := newFetcher().List(context.Background(), "v1", "Pod", "ns", nil)
 					return err
 				}},
 			} {

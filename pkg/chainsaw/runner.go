@@ -200,8 +200,18 @@ func assertRawResources(ctx context.Context, ca ComponentAssert, timeout time.Du
 		return result
 	}
 
+	// Zero documents means the entry carried nothing to assert — an empty or
+	// whitespace-only file, or one whose content was lost (a truncated
+	// ConfigMap value, a bad template render). Passing here reports a
+	// component healthy without having checked anything, and it bypasses the
+	// #2040 no-op guard, which only covers decoded Test documents. Fail
+	// closed; aicr/no-op-check on a Test document stays the sanctioned way to
+	// declare an intentional no-op.
 	if len(docs) == 0 {
-		result.Passed = true
+		result.Error = errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("health check content for component %q declares no resources to assert; "+
+				"an empty check cannot report healthy", ca.Name))
+		result.Output = result.Error.Error()
 		return result
 	}
 

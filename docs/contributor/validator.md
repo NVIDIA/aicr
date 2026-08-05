@@ -998,6 +998,44 @@ today the three `*-ocp-olm` components, whose readiness is enforced by
 the bundler's `--readiness-hooks` gate instead — must say so with the
 `aicr/no-op-check: "true"` annotation on the Test.
 
+Three sibling shapes are rejected for the same reason — each one would
+otherwise report a component healthy without having evaluated what it
+claims to (#2051):
+
+- **Empty content.** A blank, whitespace-only, or comments-and-`---`-only
+  entry has no Test to carry the no-op annotation, and used to reach
+  `assertRawResources` and pass on zero documents.
+- **A mixed stream.** Once any document is a chainsaw Test the whole
+  stream routes to the in-process executor, and nothing else reads it, so
+  a non-Test document alongside it was evaluated by no path at all. Only
+  Test documents may share a stream; a trailing `---`, a comment-only
+  document, and an explicit `null` are punctuation, not content.
+- **Both `assert` and `error` on one operation.** Chainsaw evaluates one
+  action per operation and the executor reaches `assert` first, so the
+  negative check silently never ran. Split them into separate `try`
+  entries.
+
+**Indeterminate is not a verdict.** The gate reports `Unknown`, not
+`Fail`, when a component's state was never established — a discovery
+outage, an apiserver 5xx, a forbidden read. Those surface as
+`ErrCodeUnavailable`, which `pkg/chainsaw` never treats as terminal, so
+it retries for the whole budget and can only surface it once the budget
+runs out. Exit codes are unchanged (`Fail` and `Unknown` gate
+identically), but the distinction points the operator at a broken
+cluster instead of a broken component.
+
+A no-match from the RESTMapper is held to the same standard: it resolves
+to `ErrCodeNotFound` — the immediate-pass path for a negative `error:`
+assertion — only when the retry ran against discovery performed after the
+lookup began *and* the kind's own API group was fully enumerated.
+client-go drops `ErrGroupDiscoveryFailed` whenever partial results exist,
+so a kind in an unreachable group arrives as a bare `NoKindMatchError`;
+`resolveMapping` consults the same cached discovery client the mapper
+resolves through to tell the two apart. The scope is deliberately one
+group: real clusters routinely carry a broken aggregated APIService, and
+treating any partial failure as global would strand every negative
+assertion.
+
 **Registration.** A component opts in by declaring
 `healthCheck.assertFile` in `recipes/registry.yaml`:
 
@@ -1046,9 +1084,9 @@ restricted at runtime to read-only Chainsaw operations
 (`pkg/chainsaw/allowlist.go`). Any other operation (`script`,
 `apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
 `sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
-`ErrCodeInvalidRequest`. PR #1223 will add the same enforcement at
-lint time so violations are caught before they ever reach the
-validator.
+`ErrCodeInvalidRequest`, as is an operation that sets both `assert` and
+`error`. PR #1223 will add the same enforcement at lint time so
+violations are caught before they ever reach the validator.
 
 **Value-gate awareness (#1844).** A registry assert file is static — it
 cannot see the component's effective Helm values. That is a problem for a
@@ -1115,6 +1153,20 @@ deadline shared across every step and retry. Slurm's
 [`health-check.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/checks/slinky-slurm/health-check.yaml)
 uses `assert: 7m` so workload-readiness steps can converge before the
 pod-phase guard runs.
+
+The authored value can only **shorten** the caller's budget, never
+extend it: the effective deadline is `min(spec.timeouts.assert,
+caller budget)`. The caller budget is `defaults.ChainsawAssertTimeout`
+for the deployment validator and the gate's `--timeout`
+(`defaults.ReadinessGateExecTimeout`, 2m) for a readiness Job. This
+restores what the removed chainsaw-exec path enforced by wrapping the
+subprocess in an independent outer `context.WithTimeout`; running
+in-process, the authored value had been substituting for the caller
+budget outright, letting registry- or integrator-authored content
+overrun `--timeout` by any factor it chose. No in-tree check changes
+behavior — every authored value is at or below its caller's budget —
+but a readiness test copied from a validator check (`assert: 5m`) is
+now capped at the gate's 2m per evaluation rather than overrunning it.
 
 The `expected-resources` catalog timeout (8m in
 `recipes/validators/catalog.yaml`) is the **outer** envelope. It must

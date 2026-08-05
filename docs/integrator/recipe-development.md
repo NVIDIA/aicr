@@ -841,9 +841,11 @@ spec:
                 state: ready
 ```
 
-When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
+When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. This is now enforced rather than advisory: the effective budget is the **smaller** of the authored `spec.timeouts.assert` and the caller's per-component budget (the gate's `--timeout`, the validator's catalog timeout), so an authored value larger than the caller allows is capped rather than honored. A shorter authored value still shortens the budget as before. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
 
 **Supported operations.** The gate evaluates the Test in-process against its own read-only ServiceAccount — it ships no Chainsaw binary and shells out to nothing. Only `assert` and `error` are honored; every other operation (`apply`, `create`, `delete`, `patch`, `update`, `script`, `command`, `wait`, `sleep`, `get`, `describe`, `events`, `podLogs`, `proxy`) is rejected before evaluation, as are `catch`, `finally`, and `cleanup` blocks. A readiness test that declares one fails the gate with an invalid-request error naming the offending step.
+
+One action per operation: a `try` entry that sets **both** `assert` and `error` is rejected. Chainsaw evaluates a single action per operation and the executor reaches `assert` first, so the `error` half — the one that forbids a shape — would never run. Split them into separate `try` entries.
 
 A Test declaring no `assert`/`error` operation at all is rejected rather than passing vacuously — a check that evaluates nothing must never report healthy. If the no-op is deliberate, because readiness for that component is enforced some other way, declare it with an annotation on the Test:
 
@@ -855,6 +857,10 @@ metadata:
 ```
 
 The rule applies per document, so in a multi-document (`---`) stream each Test that carries no operations needs its own annotation.
+
+An **empty** readiness file — blank, whitespace-only, or nothing but comments and `---` separators — is rejected outright. There is no Test to carry the annotation, so the only honest verdict is a failure; a check whose content was lost to a truncated ConfigMap value or a bad template render must not report healthy.
+
+A multi-document stream may hold **only** Test documents. Once any document in the file is a chainsaw Test, the whole stream is evaluated by the in-process executor, and nothing else reads it — so a raw Kubernetes manifest sitting alongside a Test would be silently ignored while the component still reported ready. Such a stream is rejected by naming the offending document's kind. Ordinary punctuation (a trailing `---`, a comment-only or `null` document) is not content and is skipped.
 
 Resource blocks that omit `metadata.namespace` are scoped to the release namespace (the Job passes it via `--namespace`); cluster-scoped kinds, like the `ClusterPolicy` above, ignore it.
 

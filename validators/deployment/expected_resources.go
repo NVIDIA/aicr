@@ -1247,21 +1247,21 @@ func buildResourceFetcher(ctx *validators.Context) (chainsaw.ResourceFetcher, er
 		return nil, err
 	}
 
-	// Mapper wiring is shared with the readiness gate (cmd/gate) so the two
-	// consumers of the in-process executor cannot drift; the dynamic client
-	// stays local because ctx.DynamicClient is an injection seam for tests.
+	// Mapper AND partial-discovery-probe wiring is shared with the readiness
+	// gate (cmd/gate) so the two consumers of the in-process executor cannot
+	// drift; only the dynamic client stays local, because ctx.DynamicClient is
+	// an injection seam for tests. Going through NewClusterFetcherWithClient
+	// (rather than assembling a mapper and calling NewClusterFetcher) is what
+	// gives the validator the same fail-closed no-match classification the gate
+	// gets: without the probe, a kind whose API group failed discovery reads as
+	// "absent" and satisfies every negative assertion.
 	//
 	// Invariant: a namespaced check MUST set metadata.namespace on its
 	// resource block. Unlike the gate — which has one release namespace and
 	// wraps its fetcher to default to it — the validator evaluates components
 	// spread across namespaces and has no single sensible default, so an
 	// omitted namespace Lists across ALL namespaces.
-	mapper, err := chainsaw.NewRESTMapperForConfig(ctx.RESTConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	return chainsaw.NewClusterFetcher(dynClient, mapper), nil
+	return chainsaw.NewClusterFetcherWithClient(dynClient, ctx.RESTConfig)
 }
 
 func getDynamicClient(ctx *validators.Context) (dynamic.Interface, error) {
@@ -1272,9 +1272,11 @@ func getDynamicClient(ctx *validators.Context) (dynamic.Interface, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RESTConfig is not available")
 	}
 
-	// Built through pkg/chainsaw so this client carries the same request
-	// bound the shared RESTMapper does — the two halves of the fetcher should
-	// not be governed by different timeouts.
+	// Reached only when a caller assembled the Context by hand: LoadContext
+	// always populates DynamicClient (validators/context.go), so in production
+	// the branch above returns first. Kept because the deployment validator's
+	// tests build a Context directly, and building through pkg/chainsaw gives
+	// that client the same request bound the shared RESTMapper carries.
 	dynClient, err := chainsaw.NewDynamicClientForConfig(ctx.RESTConfig)
 	if err != nil {
 		return nil, err

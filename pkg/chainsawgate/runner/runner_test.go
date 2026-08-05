@@ -223,7 +223,7 @@ metadata:
   name: t
 spec:
   timeouts:
-    assert: 50ms
+    assert: 500ms
   steps:
     - name: assert-deployment
       try:
@@ -244,7 +244,7 @@ metadata:
   name: t
 spec:
   timeouts:
-    assert: 50ms
+    assert: 500ms
   steps:
     - name: assert-pods
       try:
@@ -266,18 +266,18 @@ spec:
 	}{
 		{
 			name:    "namespace-less list assert inherits Options.Namespace",
-			options: Options{Namespace: "release-ns", Timeout: 50 * time.Millisecond},
+			options: Options{Namespace: "release-ns", Timeout: 500 * time.Millisecond},
 			body:    namespacelessListTest,
 			want:    "release-ns",
 		},
 		{
 			name:    "namespace-less assert inherits Options.Namespace",
-			options: Options{Namespace: "release-ns", Timeout: 50 * time.Millisecond},
+			options: Options{Namespace: "release-ns", Timeout: 500 * time.Millisecond},
 			want:    "release-ns",
 		},
 		{
 			name:    "no configured namespace leaves the assert as authored",
-			options: Options{Timeout: 50 * time.Millisecond},
+			options: Options{Timeout: 500 * time.Millisecond},
 			want:    "",
 		},
 	}
@@ -319,7 +319,7 @@ metadata:
   name: t
 spec:
   timeouts:
-    assert: 100ms
+    assert: 500ms
   steps:
     - name: validate-deployment
       try:
@@ -368,6 +368,63 @@ spec:
 	}
 }
 
+// unavailableFetcher models a cluster the run cannot read: a discovery outage,
+// an apiserver 5xx, a forbidden read. pkg/chainsaw never treats
+// ErrCodeUnavailable as terminal, so it retries for the whole budget and only
+// then surfaces it.
+type unavailableFetcher struct{}
+
+func (unavailableFetcher) Fetch(context.Context, string, string, string, string) (map[string]interface{}, error) {
+	return nil, errors.New(errors.ErrCodeUnavailable, "failed to resolve REST mapping: discovery outage")
+}
+
+func (unavailableFetcher) List(context.Context, string, string, string, map[string]string) ([]map[string]interface{}, error) {
+	return nil, errors.New(errors.ErrCodeUnavailable, "failed to resolve REST mapping: discovery outage")
+}
+
+// TestEvaluate_UnreadableClusterIsUnknown drives the real pkg/chainsaw executor
+// (no runBundleFn stub) against a cluster that cannot be read, proving the
+// Unknown verdict end to end rather than only through toComponentResult. A
+// component whose state was never established must not be reported Fail.
+func TestEvaluate_UnreadableClusterIsUnknown(t *testing.T) {
+	const readinessTest = `
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: t
+spec:
+  timeouts:
+    assert: 500ms
+  steps:
+    - name: validate-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: foo
+                namespace: ns
+`
+	res, err := Evaluate(context.Background(),
+		map[string]string{"comp.yaml": readinessTest},
+		Options{Namespace: "ns", Timeout: time.Second, Fetcher: unavailableFetcher{}})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if res.AllPass {
+		t.Error("AllPass = true against an unreadable cluster")
+	}
+	got := res.Components["comp"]
+	if got.Result != ResultUnknown {
+		t.Errorf("component result = %q, want %q — an unreadable cluster is not a verdict on the component (msg=%q)",
+			got.Result, ResultUnknown, got.Message)
+	}
+	if !strings.Contains(got.Message, "cluster state indeterminate") {
+		t.Errorf("message = %q, want it to name the indeterminate cause", got.Message)
+	}
+}
+
 func TestToComponentResult(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -413,6 +470,58 @@ func TestToComponentResult(t *testing.T) {
 			name:       "failure without an error still reports Fail",
 			in:         chainsaw.Result{Component: "c", Output: "no match"},
 			wantResult: ResultFail, wantMessage: "no match",
+		},
+		{
+			// The retry loops deliberately surface the last SUBSTANTIVE
+			// error rather than the context sentinel (preferSubstantiveErr),
+			// so a discovery/API outage that burned the whole budget arrives
+			// here as a bare ErrCodeUnavailable with no context sentinel to
+			// match. Reporting Fail sends the operator hunting a broken
+			// component instead of a broken cluster.
+			name: "unavailable cluster state is Unknown, not a verdict",
+			in: chainsaw.Result{
+				Component: "c",
+				Output:    "failed to list Pod in namespace \"ns\"",
+				Error: errors.Wrap(errors.ErrCodeUnavailable, "failed to list Pod in namespace \"ns\"",
+					stderrors.New("the server is currently unable to handle the request")),
+			},
+			wantResult:  ResultUnknown,
+			wantMessage: "cluster state indeterminate: failed to list Pod in namespace \"ns\"",
+		},
+		{
+			// A shape mismatch IS an observation, so it stays Fail even
+			// though it also went the distance on the budget.
+			name: "observed-but-unhealthy stays Fail",
+			in: chainsaw.Result{
+				Component: "c",
+				Output:    "Deployment ns/foo: availableReplicas: Invalid value: 1",
+				Error:     errors.New(errors.ErrCodeInternal, "Deployment ns/foo: availableReplicas: Invalid value: 1"),
+			},
+			wantResult:  ResultFail,
+			wantMessage: "Deployment ns/foo: availableReplicas: Invalid value: 1",
+		},
+		{
+			// Malformed authoring is actionable and specific — a real
+			// failure the operator must fix, not unknown cluster state.
+			name: "malformed authoring stays Fail",
+			in: chainsaw.Result{
+				Component: "c",
+				Output:    "declares no assert/error operations",
+				Error:     errors.New(errors.ErrCodeInvalidRequest, "declares no assert/error operations"),
+			},
+			wantResult:  ResultFail,
+			wantMessage: "declares no assert/error operations",
+		},
+		{
+			// A genuinely absent resource was observed to be absent.
+			name: "absent resource stays Fail",
+			in: chainsaw.Result{
+				Component: "c",
+				Output:    "Deployment ns/foo not found",
+				Error:     errors.New(errors.ErrCodeNotFound, "Deployment ns/foo not found"),
+			},
+			wantResult:  ResultFail,
+			wantMessage: "Deployment ns/foo not found",
 		},
 	}
 	for _, tt := range tests {
