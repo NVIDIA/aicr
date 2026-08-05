@@ -132,7 +132,10 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	// Step 4 — manifest hash check. Binds manifest.json to
 	// predicate.Manifest.Digest, then every file in the manifest to its
 	// recorded sha256.
-	mismatches, invErr := CheckInventory(ctx, mat, pred.Manifest.Digest)
+	// The capture variant retains the exact recipe.yaml bytes the inventory
+	// pass hashed, so the identity binding below cannot be raced by a
+	// swap of the caller-owned file between the two steps (CWE-367).
+	recipeYAML, mismatches, invErr := checkInventoryCaptureRecipe(ctx, mat, pred.Manifest.Digest)
 	if invErr != nil {
 		record(r, stepInventory, StepFailed, invErr.Error(), mismatches)
 		setFailureCause(r, stepInventory, invErr)
@@ -143,11 +146,13 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 		record(r, stepInventory, StepFailed, phaseErr.Error(), phaseRows)
 		setFailureCause(r, stepInventory, phaseErr)
 		r.Exit = ExitInvalid
-	} else if idErr := checkRecipeIdentity(mat.BundleDir, pointer, pred); idErr != nil {
+	} else if idErr := checkRecipeIdentity(recipeYAML, pointer, pred); idErr != nil {
 		// Content-bound identity: the pointer/predicate recipe name,
-		// profile claim, and digest must all derive from the
+		// profile claim (presence, selection, advertiser, descriptor
+		// currentness), and digest must all derive from the
 		// manifest-verified recipe bytes (suffix heuristics are
-		// name-spoofable).
+		// name-spoofable). Runs on both the unsigned-statement and the
+		// Sigstore-verified predicate paths.
 		record(r, stepInventory, StepFailed, idErr.Error(), nil)
 		setFailureCause(r, stepInventory, idErr)
 		r.Exit = ExitInvalid
@@ -267,9 +272,8 @@ func loadUnsignedPredicate(mat *MaterializedBundle) (*attestation.Predicate, err
 	if uErr := json.Unmarshal(body, &envelope); uErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "Statement is not valid JSON", uErr)
 	}
-	if envelope.PredicateType != attestation.PredicateTypeV1 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"unexpected predicateType "+envelope.PredicateType)
+	if cErr := attestation.ValidatePredicateTypeCoherence(envelope.PredicateType, &envelope.Predicate); cErr != nil {
+		return nil, cErr
 	}
 	return &envelope.Predicate, nil
 }

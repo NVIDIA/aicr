@@ -184,6 +184,23 @@ const (
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
 
+	// DiscoveryRefreshCooldown rate-limits how often the shared cluster
+	// fetcher (pkg/chainsaw) invalidates its cached discovery data after a
+	// no-match. The refresh exists so a CRD installed by the component being
+	// gated is picked up without a restart; the cooldown exists because an
+	// assertion for a kind that genuinely does not exist retries every
+	// AssertRetryInterval, and refreshing on each retry would turn one
+	// missing CRD into a discovery storm.
+	DiscoveryRefreshCooldown = 60 * time.Second
+
+	// K8sClientRequestTimeout bounds a single request issued by the shared
+	// read-only cluster fetcher (pkg/chainsaw). It exists because the
+	// RESTMapper reaches the apiserver through the context-free
+	// DiscoveryInterface: per-call contexts bound every other read, but not
+	// those. Kept at or below client-go's own 32s discovery default so
+	// setting it explicitly never loosens that backstop.
+	K8sClientRequestTimeout = 30 * time.Second
+
 	// K8sPodTerminationWaitTimeout is the maximum time to wait for a Job pod
 	// to fully terminate after the Job is deleted. Prevents race conditions
 	// where RBAC resources are cleaned up while the pod is still running

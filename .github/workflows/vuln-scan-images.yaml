@@ -175,7 +175,7 @@ jobs:
   # The in-cluster readiness gate image (cmd/gate/Dockerfile) is published only
   # on release tags by on-tag.yaml, so without this it is never vuln-scanned and
   # never refreshed on main. Mirror on-tag's build-args exactly (GO_VERSION +
-  # CHAINSAW_VERSION + VERSION) so the scanned image matches what ships.
+  # VERSION) so the scanned image matches what ships.
 
   build-gate:
     name: Docker Gate (${{ matrix.arch }})
@@ -223,7 +223,6 @@ jobs:
           push: true
           build-args: |
             GO_VERSION=${{ steps.versions.outputs.go }}
-            CHAINSAW_VERSION=${{ steps.versions.outputs.chainsaw }}
             VERSION=${{ env.SCAN_TAG }}
           tags: ${{ env.GATE_IMAGE }}:${{ env.SCAN_TAG }}-${{ matrix.arch }}
           provenance: false

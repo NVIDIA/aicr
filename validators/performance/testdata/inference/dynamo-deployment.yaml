@@ -86,7 +86,31 @@ spec:
             - name: main
               image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               workingDir: /workspace/examples/backends/vllm
-              command: ["python3", "-m", "dynamo.vllm"]
+              # GKE's managed device plugin (the gcp-managed gpuStack value)
+              # mounts the node's driver tree at /usr/local/nvidia via its
+              # device-plugin Allocate response WITHOUT touching the container
+              # environment, so libcuda.so.1 is invisible to the dynamic
+              # loader and vLLM dies with "RuntimeError: Failed to infer
+              # device type" (observed live: gcp-managed qualification, every
+              # worker in CrashLoopBackOff; A/B on the worker showed
+              # LD_LIBRARY_PATH=/usr/local/nvidia/lib64 alone flips torch CUDA
+              # to available — the mount is runtime-injected, only the env is
+              # missing). A pod-level LD_LIBRARY_PATH env cannot fix this: it
+              # would CLOBBER the image's own LD_LIBRARY_PATH (nixl/ucx/cuda
+              # entries), so the command wraps in a shell that APPENDS the
+              # path instead. The ${VAR:+} guard avoids a leading empty ld.so
+              # entry (= CWD) when the image ships no LD_LIBRARY_PATH, and
+              # appending keeps image entries in precedence. Under the GPU
+              # Operator's toolkit flow (EKS/AKS/operator-managed gpuStack)
+              # /usr/local/nvidia/lib64 does not exist and the append is a
+              # harmless no-op — no platform branching needed. Mirrors the
+              # secure-accelerator-access probe prologue and the NCCL GKE
+              # runtime template (testdata/h100/gke/runtime.yaml).
+              command:
+                - /bin/bash
+                - -c
+                - export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; exec python3 -m dynamo.vllm "$@"
+                - dynamo.vllm
               args:
                 - --model
                 - "${MODEL}"

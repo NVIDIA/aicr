@@ -177,7 +177,7 @@ spec:
         dir: ./evidence
         cncfSubmission: false        # requires dir
         features: []                 # empty = all features
-      attestation:                   # recipe-evidence v1 bundle (ADR-007)
+      attestation:                   # recipe-evidence bundle (ADR-007)
         out: evidence-result.json    # setting this enables the path
         bom: ""
         push: ""                     # OCI ref to push the signed bundle
@@ -266,7 +266,7 @@ Inputs to `aicr validate`.
 | `evidence.cncf.dir` | string | CNCF AI Conformance evidence directory (`--evidence-dir`) |
 | `evidence.cncf.cncfSubmission` | bool (tri-state) | Emit submission layout; requires `dir` |
 | `evidence.cncf.features` | []string | Empty = all features; honored only with `cncfSubmission` |
-| `evidence.attestation.out` | string | Recipe-evidence v1 result path — setting it **enables** the attestation path |
+| `evidence.attestation.out` | string | Recipe-evidence result path (v1 for unprofiled recipes, v2 for profiled ones) — setting it **enables** the attestation path |
 | `evidence.attestation.bom` / `.push` | string | BOM input; OCI ref for the signed bundle push |
 | `evidence.attestation.plainHTTP` / `.insecureTLS` | bool (tri-state) | Push transport options |
 

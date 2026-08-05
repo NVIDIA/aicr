@@ -29,9 +29,8 @@ import (
 )
 
 // GPUNodesLabelConstraintName is the node-set constraint form from issue
-// #1755 (declared in the GKE overlays' readiness constraints today; ADR-015's
-// GKE gpuStack profile will consume it when that profile lands — #1761).
-// Unlike scalar
+// #1755 (declared in the GKE overlays' readiness constraints; ADR-015's
+// GKE gpuStack profile consumes it — #1761). Unlike scalar
 // constraint paths, it does not name a reading the snapshot carries
 // directly; the evaluator synthesizes the GPU-node set from the snapshot's
 // NodeTopology.label readings and quantifies the value predicate over it.
@@ -117,6 +116,18 @@ func evaluateGPUNodesLabel(value string, snap *snapshotter.Snapshot) EvalResult 
 		return evaluateNoGPUNodeHasKey(key, universe, targetEntries)
 	}
 	return evaluateEveryGPUNodeHasValue(key, want, universe, targetEntries)
+}
+
+// ValidateGPUNodesLabelValue checks a node-set constraint value against the
+// grammar documented on GPUNodesLabelConstraintName ("key=value" or "!key"),
+// snapshot-free. It exists for hermetic structural checks (the recipe-health
+// constraints_wellformed dimension) that must mirror Evaluate's dispatch:
+// the node-set form is deliberately NOT valid under the scalar
+// ParseConstraintExpression grammar, so grading it with the scalar parser
+// would fail every recipe carrying a well-formed node-set constraint.
+func ValidateGPUNodesLabelValue(raw string) error {
+	_, _, _, err := parseGPUNodesLabelValue(raw) //nolint:dogsled // validation-only wrapper; the parsed fields are the evaluator's concern
+	return err
 }
 
 // parseGPUNodesLabelValue parses the node-set value grammar: "key=value"

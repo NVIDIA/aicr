@@ -75,12 +75,10 @@ type cachedPathClient struct {
 //     NewDefaultClientConfigLoadingRules path honors a multi-file
 //     KUBECONFIG natively) — e.g. l8k's kubeclient.New("") and any
 //     consumer that uses NewNonInteractiveDeferredLoadingClientConfig.
-//     This package's own BuildKubeClient (see below) skips clientcmd's
-//     loading rules entirely and falls through to InClusterConfig() on
-//     an empty path, so a multi-file KUBECONFIG run locally through
-//     BuildKubeClient is not a supported path; it was not supported
-//     before this change either (BuildConfigFromFlags rejected the
-//     joined value), so no regression.
+//     This package's own BuildKubeClient recognizes the same case and
+//     runs clientcmd's default loading rules for it, so a multi-file
+//     KUBECONFIG merges there too rather than falling through to
+//     in-cluster config.
 //  3. ~/.kube/config when the file exists.
 //  4. Empty string, signaling "fall through to in-cluster config" — the
 //     correct behavior when aicr is running inside a Kubernetes pod with a
@@ -106,7 +104,7 @@ func ResolveKubeconfigPath(kubeconfig string) string {
 		// caller who explicitly set KUBECONFIG=/a:/b doesn't want their
 		// home kubeconfig silently substituted for the merge they asked
 		// for.
-		if strings.ContainsAny(env, ":;") {
+		if isMultiPathKubeconfig(env) {
 			return ""
 		}
 		return env
@@ -116,6 +114,63 @@ func ResolveKubeconfigPath(kubeconfig string) string {
 		return defaultPath
 	}
 	return ""
+}
+
+// kubeconfigErrContextKey names the kubeconfig source in structured-error
+// context, so a caller debugging a client-construction failure sees which file
+// (or merged KUBECONFIG value) it came from.
+const kubeconfigErrContextKey = "kubeconfig"
+
+// kubeconfigPathSeparators are the characters clientcmd's loading rules use to
+// join several kubeconfig files into one KUBECONFIG value: ':' on Unix, ';' on
+// Windows. Both are recognized regardless of GOOS so the classification does
+// not change with the build target.
+const kubeconfigPathSeparators = ":;"
+
+// isMultiPathKubeconfig reports whether value names more than one kubeconfig
+// file, which makes it a clientcmd loading-rules value rather than a path.
+func isMultiPathKubeconfig(value string) bool {
+	return strings.ContainsAny(value, kubeconfigPathSeparators)
+}
+
+// multiPathKubeconfigEnv returns the KUBECONFIG value when it names several
+// files, or "" otherwise. ResolveKubeconfigPath deliberately reports no path
+// for that case; this is how BuildKubeClient tells "no kubeconfig at all, use
+// the in-cluster token" apart from "a merge clientcmd has to perform".
+//
+// The value is whitespace-trimmed, matching ResolveKubeconfigPath. Pair it with
+// kubeconfigPrecedence rather than letting clientcmd re-read the environment:
+// clientcmd splits the RAW value, so the two would disagree about which files
+// the merge covers. See kubeconfigPrecedence.
+func multiPathKubeconfigEnv() string {
+	env := strings.TrimSpace(os.Getenv("KUBECONFIG"))
+	if env == "" || !isMultiPathKubeconfig(env) {
+		return ""
+	}
+	return env
+}
+
+// kubeconfigPrecedence splits a multi-file KUBECONFIG value into the file list
+// clientcmd should merge, trimming each entry and dropping empties.
+//
+// This exists because clientcmd's NewDefaultClientConfigLoadingRules builds its
+// precedence from os.Getenv("KUBECONFIG") verbatim, while this package treats
+// surrounding whitespace as insignificant (ResolveKubeconfigPath trims a
+// single path the same way). Left to disagree, the mismatch is silent and
+// picks the wrong cluster: for KUBECONFIG=" /a:/b" the raw split yields " /a",
+// which does not exist, and Load() skips missing files non-fatally — so the
+// merge quietly drops the file that should have won and the run proceeds
+// against /b's context instead. Overriding Precedence with this list keeps the
+// files actually loaded identical to the value this package classified.
+func kubeconfigPrecedence(value string) []string {
+	parts := filepath.SplitList(strings.TrimSpace(value))
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // GetKubeClient returns a singleton Kubernetes client, creating it on first call.
@@ -168,29 +223,70 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 	var err error
 
 	kubeconfig = ResolveKubeconfigPath(kubeconfig)
+	// Read once: the value is used by the branch selector, the loading-rules
+	// override, and the error classification below, and re-reading the
+	// environment mid-function invites the three to disagree.
+	merged := multiPathKubeconfigEnv()
 
-	// Use InClusterConfig directly when no kubeconfig is available
-	// This avoids the warning: "Neither --kubeconfig nor --master was specified"
-	if kubeconfig == "" {
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to get in-cluster config", err)
-		}
-	} else {
+	switch {
+	case kubeconfig != "":
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "failed to build kube config", err, map[string]interface{}{
-				"kubeconfig": kubeconfig,
+				kubeconfigErrContextKey: kubeconfig,
 			})
+		}
+	case merged != "":
+		// KUBECONFIG names several files, so ResolveKubeconfigPath reports
+		// no single path. Merging them is clientcmd's job: hand it the
+		// default loading rules, which read and merge KUBECONFIG natively.
+		// Without this the empty path fell through to InClusterConfig()
+		// below, so any local run with KUBECONFIG=/a:/b failed with "unable
+		// to load in-cluster configuration" — the `gate` CLI documents
+		// exactly that local-KUBECONFIG invocation, and the chainsaw binary
+		// it replaced used these same loading rules.
+		//
+		// Precedence is overridden rather than left to the rules' own
+		// os.Getenv read, so the files clientcmd merges are exactly the ones
+		// this package classified — see kubeconfigPrecedence for the silent
+		// wrong-cluster failure that divergence causes.
+		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+		loadingRules.Precedence = kubeconfigPrecedence(merged)
+		config, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+			loadingRules,
+			&clientcmd.ConfigOverrides{},
+		).ClientConfig()
+		if err != nil {
+			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				"failed to build kube config from multi-file KUBECONFIG", err, map[string]interface{}{
+					kubeconfigErrContextKey: merged,
+				})
+		}
+	default:
+		// Use InClusterConfig directly when no kubeconfig is available.
+		// This avoids the warning: "Neither --kubeconfig nor --master was specified"
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to get in-cluster config", err)
 		}
 	}
 
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		if kubeconfig != "" {
+		// A file-derived config (explicit path, single- or multi-file
+		// KUBECONFIG, or ~/.kube/config) is caller input, so its failures are
+		// deterministic and non-retryable; only the in-cluster path is
+		// ErrCodeInternal. Checking `kubeconfig != ""` alone would misclassify
+		// a merged multi-file KUBECONFIG, for which ResolveKubeconfigPath
+		// reports no path.
+		source := kubeconfig
+		if source == "" {
+			source = merged
+		}
+		if source != "" {
 			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
 				"failed to create kubernetes client from kubeconfig", err,
-				map[string]interface{}{"kubeconfig": kubeconfig})
+				map[string]interface{}{kubeconfigErrContextKey: source})
 		}
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
 	}

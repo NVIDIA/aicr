@@ -375,3 +375,213 @@ func TestGetKubeClient_CallsOnce(t *testing.T) {
 		t.Errorf("GetKubeClient() returned inconsistent results: %d successes, %d failures", successCount, failCount)
 	}
 }
+
+// writeKubeconfig writes a syntactically valid single-context kubeconfig whose
+// cluster/user names are caller-chosen, so a merge across two files can be
+// observed by which context wins.
+func writeKubeconfig(t *testing.T, dir, file, name, server string) string {
+	t.Helper()
+	path := filepath.Join(dir, file)
+	content := `apiVersion: v1
+kind: Config
+clusters:
+  - name: ` + name + `
+    cluster:
+      server: ` + server + `
+contexts:
+  - name: ` + name + `
+    context:
+      cluster: ` + name + `
+      user: ` + name + `
+current-context: ` + name + `
+users:
+  - name: ` + name + `
+    user:
+      token: ` + name + `-token
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write kubeconfig %s: %v", path, err)
+	}
+	return path
+}
+
+// TestBuildKubeClient_MultiFileKUBECONFIG covers the local-execution regression
+// behind the `gate` CLI's documented KUBECONFIG invocation. ResolveKubeconfigPath
+// deliberately reports no path for a ':'-separated KUBECONFIG (it is a clientcmd
+// loading-rules value, not a path), and BuildKubeClient then fell through to
+// rest.InClusterConfig() — so any local run with KUBECONFIG=/a:/b failed with
+// "unable to load in-cluster configuration". The chainsaw binary the gate
+// replaced used clientcmd's merging loading rules, so this was a regression.
+func TestBuildKubeClient_MultiFileKUBECONFIG(t *testing.T) {
+	dir := t.TempDir()
+	// The fixture is deliberately split so NEITHER file can satisfy the load
+	// alone: the first names the current context but never defines it, and the
+	// second defines that context plus the cluster/user it points at. A result
+	// is only reachable if both files were read and merged. Two complete
+	// kubeconfigs would not prove that — the first alone would produce the
+	// same answer.
+	first := filepath.Join(dir, "first")
+	if err := os.WriteFile(first, []byte(`apiVersion: v1
+kind: Config
+current-context: merged-ctx
+clusters:
+  - name: decoy
+    cluster:
+      server: https://decoy.example:6443
+`), 0o600); err != nil {
+		t.Fatalf("write first kubeconfig: %v", err)
+	}
+	second := writeKubeconfig(t, dir, "second", "merged-ctx", "https://merged.example:6443")
+
+	t.Setenv("KUBECONFIG", first+string(os.PathListSeparator)+second)
+
+	// Precondition: the resolver still reports no single path for this value.
+	// If that ever changes, the branch under test becomes unreachable and this
+	// test should be revisited rather than silently passing for a new reason.
+	if got := ResolveKubeconfigPath(""); got != "" {
+		t.Fatalf("ResolveKubeconfigPath() = %q, want %q for a multi-file KUBECONFIG", got, "")
+	}
+
+	_, config, err := BuildKubeClient("")
+	if err != nil {
+		t.Fatalf("BuildKubeClient() with a multi-file KUBECONFIG: %v", err)
+	}
+	// current-context came from the first file; the context, cluster, and user
+	// it resolves to came from the second. Both had to load.
+	if config.Host != "https://merged.example:6443" {
+		t.Errorf("config.Host = %q, want the second file's server — the merge did not cover both files", config.Host)
+	}
+	if config.BearerToken != "merged-ctx-token" {
+		t.Errorf("config.BearerToken = %q, want %q", config.BearerToken, "merged-ctx-token")
+	}
+}
+
+// TestBuildKubeClient_MultiFileKUBECONFIGWhitespace guards the divergence
+// between this package's classification and clientcmd's own loading rules.
+// multiPathKubeconfigEnv trims the value (matching ResolveKubeconfigPath), but
+// NewDefaultClientConfigLoadingRules splits os.Getenv("KUBECONFIG") verbatim —
+// so with outer whitespace the raw split yields a filename that does not exist,
+// Load() skips missing files non-fatally, and the merge silently drops it.
+//
+// The leading-space case is the dangerous one: before the Precedence override
+// it resolved to the SECOND file's context, so a run targeted a different
+// cluster than the operator named, with no error.
+func TestBuildKubeClient_MultiFileKUBECONFIGWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	first := writeKubeconfig(t, dir, "first", "first", "https://first.example:6443")
+	second := writeKubeconfig(t, dir, "second", "second", "https://second.example:6443")
+	joined := first + string(os.PathListSeparator) + second
+
+	tests := []struct {
+		name string
+		env  string
+	}{
+		{"no whitespace", joined},
+		{"leading whitespace", " " + joined},
+		{"trailing whitespace", joined + " "},
+		{"whitespace on both ends", "  " + joined + "  "},
+		{"whitespace around each entry", " " + first + " " + string(os.PathListSeparator) + " " + second + " "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KUBECONFIG", tt.env)
+
+			_, config, err := BuildKubeClient("")
+			if err != nil {
+				t.Fatalf("BuildKubeClient() with KUBECONFIG=%q: %v", tt.env, err)
+			}
+			// The first file's current-context wins in every case; anything
+			// else means an entry was mangled and silently dropped.
+			if config.Host != "https://first.example:6443" {
+				t.Errorf("config.Host = %q, want the first file's server — an entry was dropped from the merge", config.Host)
+			}
+		})
+	}
+}
+
+// TestKubeconfigPrecedence pins the normalization the loading rules are
+// overridden with.
+func TestKubeconfigPrecedence(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	tests := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{"two paths", "/a" + sep + "/b", []string{"/a", "/b"}},
+		{"outer whitespace", " /a" + sep + "/b ", []string{"/a", "/b"}},
+		{"whitespace around entries", " /a " + sep + " /b ", []string{"/a", "/b"}},
+		{"trailing separator drops the empty", "/a" + sep, []string{"/a"}},
+		{"separators only", sep, []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := kubeconfigPrecedence(tt.value)
+			if len(got) != len(tt.want) {
+				t.Fatalf("kubeconfigPrecedence(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("kubeconfigPrecedence(%q)[%d] = %q, want %q", tt.value, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestBuildKubeClient_MultiFileKUBECONFIGErrorsAreCallerInput pins the error
+// classification for the merged path. A file-derived config is caller input, so
+// its failures are deterministic and non-retryable (ErrCodeInvalidRequest);
+// only the in-cluster path is ErrCodeInternal. Keying on the resolved path
+// alone would misclassify this branch, for which the resolver reports "".
+func TestBuildKubeClient_MultiFileKUBECONFIGErrorsAreCallerInput(t *testing.T) {
+	dir := t.TempDir()
+	// Both files parse but neither names a context, so the merged result has
+	// nothing to connect with and clientcmd reports an empty configuration.
+	// (An unparsable file would not do: clientcmd's loading rules skip those
+	// and merge on, which is its documented tolerance, not an error.)
+	empty := func(name string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("apiVersion: v1\nkind: Config\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return path
+	}
+
+	t.Setenv("KUBECONFIG", empty("first")+string(os.PathListSeparator)+empty("second"))
+
+	_, _, err := BuildKubeClient("")
+	if err == nil {
+		t.Fatal("BuildKubeClient() error = nil, want a rejection for an unparsable kubeconfig in the merge")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("BuildKubeClient() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "multi-file KUBECONFIG") {
+		t.Errorf("BuildKubeClient() error = %v, want it to name the multi-file source", err)
+	}
+}
+
+// TestIsMultiPathKubeconfig locks the classification that routes between the
+// three BuildKubeClient branches.
+func TestIsMultiPathKubeconfig(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"single path", "/home/u/.kube/config", false},
+		{"empty", "", false},
+		{"unix separated", "/a:/b", true},
+		// No ':' in the value, so this proves ';' alone is recognized.
+		{"windows separated", `\a;\b`, true},
+		{"trailing separator still names a list", "/a:", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isMultiPathKubeconfig(tt.value); got != tt.want {
+				t.Errorf("isMultiPathKubeconfig(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}

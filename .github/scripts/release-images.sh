@@ -93,19 +93,36 @@ release_prerelease_json() {
   fi
 }
 
+# Exact set of assets a published release must carry. Every GoReleaser stanza
+# that emits a release-uploadable artifact has to be represented here or
+# publish-release fails its exact-mode validation on the real release, long
+# after promote-images has already mutated registry aliases.
+#
+# The `.sbom.json.sigstore.json` entries come from the `signs:` stanza in
+# .goreleaser.yaml (`signature: "${artifact}.sigstore.json"` over
+# `artifacts: sbom`). GoReleaser types those bundles as Signature artifacts,
+# which are release-uploadable, and .goreleaser.yaml sets no `release.ids`
+# filter, so they land on the release. TestReleaseSbomSignaturesAreAllowlisted
+# in tests/releasepolicy cross-references this list against that stanza.
 expected_release_asset_names() {
   local version="${RELEASE_TAG#v}"
   jq -cn --arg version "${version}" '[
     "aicr_\($version)_darwin_amd64.sbom.json",
+    "aicr_\($version)_darwin_amd64.sbom.json.sigstore.json",
     "aicr_\($version)_darwin_amd64.tar.gz",
     "aicr_\($version)_darwin_arm64.sbom.json",
+    "aicr_\($version)_darwin_arm64.sbom.json.sigstore.json",
     "aicr_\($version)_darwin_arm64.tar.gz",
     "aicr_\($version)_linux_amd64.sbom.json",
+    "aicr_\($version)_linux_amd64.sbom.json.sigstore.json",
     "aicr_\($version)_linux_amd64.tar.gz",
     "aicr_\($version)_linux_arm64.sbom.json",
+    "aicr_\($version)_linux_arm64.sbom.json.sigstore.json",
     "aicr_\($version)_linux_arm64.tar.gz",
     "aicrd_\($version)_linux_amd64.sbom.json",
+    "aicrd_\($version)_linux_amd64.sbom.json.sigstore.json",
     "aicrd_\($version)_linux_arm64.sbom.json",
+    "aicrd_\($version)_linux_arm64.sbom.json.sigstore.json",
     "THIRD_PARTY_NOTICES.md",
     "aicr_checksums.txt",
     "recipe-catalog.sigstore.json"

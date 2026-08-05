@@ -399,17 +399,32 @@ func TestValidateProfileDeclaration(t *testing.T) {
 			wantErr: `repeats constraint "K8s.server.version"`,
 		},
 		{
-			name: "advertiser deferred",
+			name: "unknown advertiser rejected",
+			decl: &ProfileDeclaration{
+				Name: "mode", Default: "one",
+				Values: map[string]ProfileValue{"one": {Advertiser: "csp"}},
+			},
+			wantErr: "unknown advertiser",
+		},
+		{
+			// The GKE profile extension activated the reserved vocabulary:
+			// "external" is the one valid non-empty advertiser value.
+			name: "external advertiser accepted",
 			decl: &ProfileDeclaration{
 				Name: "mode", Default: "one",
 				Values: map[string]ProfileValue{"one": {Advertiser: "external"}},
 			},
-			wantErr: "deferred to the GKE",
+			wantOwned: map[string][]string{},
 		},
 		{
-			name:    "allocation policy deferred",
-			decl:    withOverride("gpu-operator", map[string]any{"devicePlugin": map[string]any{"enabled": false}}),
-			wantErr: "deferred allocation-policy",
+			// Owning a #1327 policy-selector path is legal since the GKE
+			// extension — it triggers the recomputed closure instead of
+			// rejecting at catalog load.
+			name: "allocation-policy selector path ownership accepted",
+			decl: withOverride("gpu-operator", map[string]any{"devicePlugin": map[string]any{"enabled": false}}),
+			wantOwned: map[string][]string{
+				"gpu-operator": {"devicePlugin.enabled", "enabled"},
+			},
 		},
 	}
 
@@ -969,15 +984,28 @@ func TestProfileArtifactContract(t *testing.T) {
 			wantErr: "name and value",
 		},
 		{
-			name: "advertiser deferred",
+			name: "unknown advertiser rejected",
 			result: &RecipeResult{
 				APIVersion: RecipeProfileAPIVersion,
 				Metadata: RecipeResultMetadata{SelectedProfile: &SelectedProfile{
-					Name: "gpuStack", Value: "driver-installed", Advertiser: "external",
+					Name: "gpuStack", Value: "driver-installed", Advertiser: "managed",
 					OwnedPaths: map[string][]string{},
 				}},
 			},
-			wantErr: "advertiser is deferred",
+			wantErr: "unknown advertiser",
+		},
+		{
+			// "external" is valid since the GKE extension; the empty
+			// ownedPaths map stays acceptable at this shape gate (path-level
+			// coherence is the hydrating gate's job).
+			name: "external advertiser accepted",
+			result: &RecipeResult{
+				APIVersion: RecipeProfileAPIVersion,
+				Metadata: RecipeResultMetadata{SelectedProfile: &SelectedProfile{
+					Name: "gpuStack", Value: "gcp-managed", Advertiser: "external",
+					OwnedPaths: map[string][]string{},
+				}},
+			},
 		},
 		{
 			name: "ownership map required",
@@ -1023,7 +1051,10 @@ func TestProfileArtifactContract(t *testing.T) {
 			wantErr: "repeats path",
 		},
 		{
-			name: "allocation policy ownership deferred",
+			// Owning a #1327 policy-selector path is legal since the GKE
+			// extension: the recorded ownership triggers the recomputed
+			// closure downstream instead of failing the shape gate.
+			name: "allocation policy ownership accepted",
 			result: &RecipeResult{
 				APIVersion: RecipeProfileAPIVersion,
 				Metadata: RecipeResultMetadata{SelectedProfile: &SelectedProfile{
@@ -1033,7 +1064,6 @@ func TestProfileArtifactContract(t *testing.T) {
 					},
 				}},
 			},
-			wantErr: "deferred allocation-policy",
 		},
 	}
 	for _, tt := range tests {
@@ -2087,7 +2117,7 @@ func TestValidateProfileValuesKustomizeOwnership(t *testing.T) {
 }
 
 // TestPathsIntersect covers the exported helper directly. It is otherwise
-// reached only through isDeferredAllocationPolicyPath, the dynamic-path guard,
+// reached only through ownsAllocationPolicySelectorPath, the dynamic-path guard,
 // and OwnsProfilePath, so a change to its prefix semantics would surface as a
 // failure in one of those rather than here — and the ancestor/descendant cases
 // below are precisely what the profile lock depends on.

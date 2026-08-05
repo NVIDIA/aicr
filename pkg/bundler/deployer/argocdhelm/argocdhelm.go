@@ -472,8 +472,13 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 		return "", 0, nil
 	}
 
-	components := make([]string, 0, len(g.RecipeResult.Metadata.SelectedProfile.OwnedPaths))
-	for component := range g.RecipeResult.Metadata.SelectedProfile.OwnedPaths {
+	// The guard is derived from the EFFECTIVE lock set — declared
+	// ownedPaths plus the recomputed #1327 closure — so an
+	// advertisement-owning profile also guards the closure's
+	// allocation-policy selector paths at install time (ADR-015).
+	lockSet := g.RecipeResult.EffectiveLockSet()
+	components := make([]string, 0, len(lockSet))
+	for component := range lockSet {
 		components = append(components, component)
 	}
 	sort.Strings(components)
@@ -485,7 +490,7 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 		if err != nil {
 			return "", 0, err
 		}
-		for pathIndex, lockedPath := range g.RecipeResult.Metadata.SelectedProfile.OwnedPaths[componentName] {
+		for pathIndex, lockedPath := range lockSet[componentName] {
 			segments := strings.Split(lockedPath, ".")
 			writeProfilePathGuard(
 				&buf,

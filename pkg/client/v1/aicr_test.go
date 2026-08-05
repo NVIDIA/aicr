@@ -1209,11 +1209,17 @@ func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 			wantErr: `reading "K8s.aks-gpu-pools.gpu-driver" is unavailable`,
 		},
 		{
-			name:         "gke-cos + k8s-only snapshot is Unknown → no override",
-			service:      "gke",
-			os:           "cos",
-			snap:         k8sVersionSnapshot(),
-			wantInjected: false,
+			// Pre-profile behavior treated a topology-less snapshot as
+			// Unknown and skipped the injector. The gpuStack profile
+			// supersedes that: the operator default's node-set constraint
+			// cannot be evaluated without NodeTopology label readings, and
+			// an unavailable reading fails closed (ADR-015 DD1) with the
+			// distinguishable diagnostic.
+			name:    "gke-cos + k8s-only snapshot fails closed (no topology reading)",
+			service: "gke",
+			os:      "cos",
+			snap:    k8sVersionSnapshot(),
+			wantErr: `reading "NodeTopology.gpu-nodes.label" is unavailable`,
 		},
 	}
 
@@ -1802,6 +1808,19 @@ func gpuHardwareSnapshotPools(poolMode string, driverLoaded bool) *aicr.Snapshot
 						SetBool("gpu-present", true).
 						SetInt("gpu-count", 8).
 						SetBool("driver-loaded", driverLoaded),
+				).
+				Build(),
+			// Node-topology label readings in the collector's
+			// "<value>|<nodes>" encoding: the GKE gpuStack gcp-managed
+			// default quantifies its negated opt-out-label constraint over
+			// the GPU-node set (nodes carrying
+			// cloud.google.com/gke-accelerator — label absent everywhere,
+			// the default GKE cluster shape), and a snapshot without the
+			// readings fails GKE resolution closed.
+			measurement.NewMeasurement(measurement.TypeNodeTopology).
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("label").
+						SetString("cloud.google.com/gke-accelerator", "nvidia-h100-80gb|gpu-a"),
 				).
 				Build(),
 		},

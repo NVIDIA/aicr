@@ -117,25 +117,55 @@ func TestValidatePointerProfileSuffixConsistency(t *testing.T) {
 			Recipe:        "h100-aks-ubuntu-training-gpustack-operator-managed",
 			Profile:       "gpuStack=operator-managed",
 			Attestations: []attestation.PointerAttestation{{
-				Bundle: attestation.PointerBundle{PredicateType: attestation.PredicateTypeV1},
+				// Profiled pointers require v2 evidence since the ADR-015
+				// descriptor-currentness cut-over.
+				Bundle: attestation.PointerBundle{PredicateType: attestation.PredicateTypeV2},
 			}},
 		}
 	}
 
-	if err := validatePointer(base()); err != nil {
-		t.Fatalf("suffixed profiled pointer rejected: %v", err)
+	// Bidirectional type coherence: a profiled pointer on v1 evidence is
+	// pre-cut-over output and must be re-signed; v2 evidence without a
+	// profile selection is malformed.
+	tests := []struct {
+		name    string
+		mutate  func(p *attestation.Pointer)
+		wantErr string // "" means the pointer must validate
+	}{
+		{"suffixed profiled pointer valid",
+			func(*attestation.Pointer) {}, ""},
+		{"profiled pointer on v1 evidence rejected",
+			func(p *attestation.Pointer) {
+				p.Attestations[0].Bundle.PredicateType = attestation.PredicateTypeV1
+			}, "profile-bearing recipes require"},
+		{"unprofiled pointer on v2 evidence rejected",
+			func(p *attestation.Pointer) {
+				p.Profile = ""
+				p.Recipe = "h100-aks-ubuntu-training"
+			}, "without a profile selection"},
+		{"unsuffixed profiled recipe name rejected",
+			func(p *attestation.Pointer) {
+				p.Recipe = "h100-aks-ubuntu-training"
+			}, "profile path segment"},
+		{"malformed profile selection rejected",
+			func(p *attestation.Pointer) {
+				p.Profile = "not-a-selection"
+			}, "name=value"},
 	}
-
-	unsuffixed := base()
-	unsuffixed.Recipe = "h100-aks-ubuntu-training"
-	err := validatePointer(unsuffixed)
-	if err == nil || !strings.Contains(err.Error(), "profile path segment") {
-		t.Fatalf("unsuffixed profiled pointer error = %v, want segment rejection", err)
-	}
-
-	malformed := base()
-	malformed.Profile = "not-a-selection"
-	if err := validatePointer(malformed); err == nil {
-		t.Fatal("malformed profile accepted")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := base()
+			tt.mutate(p)
+			err := validatePointer(p)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validatePointer() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("validatePointer() = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }

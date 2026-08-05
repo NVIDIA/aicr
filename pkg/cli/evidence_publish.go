@@ -34,9 +34,9 @@ func evidencePublishCmd() *cli.Command {
 		Category:  functionalCategoryName,
 		Usage:     "Sign and push an already-emitted evidence bundle.",
 		ArgsUsage: "<bundle-dir>",
-		Description: `Sign, push, and write the pointer for a recipe-evidence v1 bundle
-that was produced earlier by ` + "`aicr validate --emit-attestation`" + ` (without
---push), leaving an unsigned bundle on disk.
+		Description: `Sign, push, and write the pointer for a recipe-evidence bundle
+(v1 or v2) that was produced earlier by ` + "`aicr validate --emit-attestation`" + `
+(without --push), leaving an unsigned bundle on disk.
 
 This decouples the cluster-bound validate step from the
 Fulcio/Rekor-bound signing step so they can run on different networks:

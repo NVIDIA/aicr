@@ -362,10 +362,14 @@ type SelectedProfile struct {
 	// Value is the selected value within that declaration.
 	Value string
 
-	// Advertiser is reserved for the future GKE allocation-policy
-	// extension and is always empty in this version — a declaration
-	// carrying one is rejected at catalog load, so no result reaches a
-	// caller with it set. Do not branch on it.
+	// Advertiser declares that a platform-managed component outside the
+	// recipe advertises nvidia.com/gpu (ADR-015 GKE allocation-policy
+	// amendment). It is "external" on selections whose advertiser is
+	// platform-owned — e.g. GKE's managed device plugin on the gpuStack
+	// gcp-managed value (the GKE default) — and empty when no external
+	// advertiser is declared: the recipe's own components then determine
+	// advertisement (the GPU operator's device plugin, or DRA
+	// resources.gpus.enabled). "external" is the only non-empty value.
 	Advertiser string
 
 	// OwnedPaths maps each locked component to its sorted dotted value

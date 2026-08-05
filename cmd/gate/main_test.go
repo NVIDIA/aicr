@@ -24,7 +24,9 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/chainsawgate/runner"
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestProgressLine(t *testing.T) {
@@ -121,18 +123,34 @@ func TestLoop_StabilityWindowAfterEvalLatency(t *testing.T) {
 	})
 }
 
-func TestRun_ChainsawConfigFlag(t *testing.T) {
+// nopFetcher satisfies chainsaw.ResourceFetcher without touching a cluster;
+// run() builds a fetcher before evaluating, and these tests stub the
+// evaluation itself.
+type nopFetcher struct{}
+
+func (nopFetcher) Fetch(context.Context, string, string, string, string) (map[string]interface{}, error) {
+	return nil, errors.New(errors.ErrCodeNotFound, "nop fetcher")
+}
+
+func (nopFetcher) List(context.Context, string, string, string, map[string]string) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+
+func TestRun_NamespaceFlag(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "comp.yaml"), []byte("# stub"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	orig := evaluateFn
-	defer func() { evaluateFn = orig }()
+	origEval, origFetcher := evaluateFn, newFetcherFn
+	defer func() { evaluateFn, newFetcherFn = origEval, origFetcher }()
+	newFetcherFn = func() (chainsaw.ResourceFetcher, error) { return nopFetcher{}, nil }
 
-	var seenConfig string
+	var seenNamespace string
+	var seenFetcher chainsaw.ResourceFetcher
 	evaluateFn = func(_ context.Context, _ map[string]string, opts runner.Options) (runner.EvalResult, error) {
-		seenConfig = opts.ConfigPath
+		seenNamespace = opts.Namespace
+		seenFetcher = opts.Fetcher
 		return runner.EvalResult{
 			AllPass:    true,
 			Components: map[string]runner.ComponentResult{"comp": {Result: runner.ResultPass}},
@@ -144,20 +162,47 @@ func TestRun_ChainsawConfigFlag(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"default", []string{"--bundle-dir", dir, "--stability-window=0"}, defaultChainsawConfig},
-		{"override", []string{"--bundle-dir", dir, "--stability-window=0", "--chainsaw-config=/tmp/custom.yaml"}, "/tmp/custom.yaml"},
-		{"empty omits", []string{"--bundle-dir", dir, "--stability-window=0", "--chainsaw-config="}, ""},
+		{"default", []string{"--bundle-dir", dir, "--stability-window=0"}, "default"},
+		{"override", []string{"--bundle-dir", dir, "--stability-window=0", "--namespace=gpu-operator"}, "gpu-operator"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seenConfig = "sentinel"
+			seenNamespace, seenFetcher = "sentinel", nil
 			if got := run(tt.args); got != exitOK {
 				t.Fatalf("run = %d, want %d", got, exitOK)
 			}
-			if seenConfig != tt.want {
-				t.Errorf("ConfigPath = %q, want %q", seenConfig, tt.want)
+			if seenNamespace != tt.want {
+				t.Errorf("Namespace = %q, want %q", seenNamespace, tt.want)
+			}
+			if seenFetcher == nil {
+				t.Error("Options.Fetcher was nil; the gate must hand the evaluator a cluster reader")
 			}
 		})
+	}
+}
+
+// TestRun_FetcherFailureIsConfigError pins the failure mode when the gate
+// cannot reach a cluster: exit 2 (config error), not a readiness verdict
+// derived from components it never evaluated.
+func TestRun_FetcherFailureIsConfigError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "comp.yaml"), []byte("# stub"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	origEval, origFetcher := evaluateFn, newFetcherFn
+	defer func() { evaluateFn, newFetcherFn = origEval, origFetcher }()
+
+	newFetcherFn = func() (chainsaw.ResourceFetcher, error) {
+		return nil, errors.New(errors.ErrCodeInternal, "no kubeconfig")
+	}
+	evaluateFn = func(context.Context, map[string]string, runner.Options) (runner.EvalResult, error) {
+		t.Fatal("evaluate must not run without a cluster reader")
+		return runner.EvalResult{}, nil
+	}
+
+	if got := run([]string{"--bundle-dir", dir, "--stability-window=0"}); got != exitConfigErr {
+		t.Errorf("run = %d, want %d (exitConfigErr)", got, exitConfigErr)
 	}
 }
 

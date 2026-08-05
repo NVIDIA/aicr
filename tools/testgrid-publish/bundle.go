@@ -140,11 +140,6 @@ func loadPredicate(bundleDir string) (*attestation.Predicate, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"failed to parse statement.intoto.json", err)
 	}
-	if stmt.PredicateType != "" && stmt.PredicateType != attestation.PredicateTypeV1 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("unsupported predicateType %q, expected %q",
-				stmt.PredicateType, attestation.PredicateTypeV1))
-	}
 	if stmt.Predicate == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "statement has no predicate field")
 	}
@@ -153,6 +148,14 @@ func loadPredicate(bundleDir string) (*attestation.Predicate, error) {
 	if err := json.Unmarshal(stmt.Predicate, &pred); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"failed to decode predicate", err)
+	}
+	// The shared bidirectional contract, not just a type allowlist: v1 must
+	// not carry a profile block, v2 must carry a well-formed one, anything
+	// else (including an absent predicateType) is unknown. Without it a v1
+	// statement smuggling a profile block — evidence every other consumer
+	// rejects — would publish to TestGrid.
+	if err := attestation.ValidatePredicateTypeCoherence(stmt.PredicateType, &pred); err != nil {
+		return nil, err
 	}
 	return &pred, nil
 }
