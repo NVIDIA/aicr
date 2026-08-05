@@ -97,6 +97,9 @@ type BundleResolved struct {
 	// StorageClass is spec.bundle.scheduling.storageClass.
 	StorageClass string
 
+	// SharedStorageClass is spec.bundle.scheduling.sharedStorageClass.
+	SharedStorageClass string
+
 	// Attest is spec.bundle.attestation.enabled.
 	Attest bool
 
@@ -209,6 +212,7 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 		}
 		out.Nodes = b.Scheduling.Nodes
 		out.StorageClass = b.Scheduling.StorageClass
+		out.SharedStorageClass = b.Scheduling.SharedStorageClass
 
 		// maps.Clone preserves nil-vs-explicitly-empty: clone(nil) is nil,
 		// clone({}) is non-nil empty.

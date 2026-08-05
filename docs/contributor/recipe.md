@@ -96,6 +96,7 @@ components:
 | `nodeScheduling` | `NodeSchedulingConfig` | no | Helm value paths for injecting selectors/tolerations/taints (`system`, `accelerated`, plus `nodeCountPaths`) |
 | `podScheduling` | `PodSchedulingConfig` | no | Helm value paths for workload pod scheduling injection |
 | `storageClassPaths` | []string | no | Helm value paths where `--storage-class` is written |
+| `sharedStorageClassPaths` | []string | no | Helm value paths where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | []`ComponentValidationConfig` | no | Bundle-time validation checks (function, severity, conditions, message) |
 | `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |

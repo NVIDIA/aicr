@@ -100,6 +100,7 @@ spec:
       type: Helm
       valuesFile: components/slinky-slurm/values.yaml
       preManifestFiles:
+        - components/slinky-slurm/manifests/shared-storage-pvcs.yaml
         # Submit this immutable ComputeDomain after the NVIDIA DRA driver and
         # before the Slinky chart creates NodeSet pods that consume its RCT.
         # RCT reconciliation may complete asynchronously after this apply.

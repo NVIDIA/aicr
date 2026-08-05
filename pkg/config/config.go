@@ -216,6 +216,7 @@ type SchedulingSpec struct {
 	WorkloadSelector           map[string]string `yaml:"workloadSelector,omitempty" json:"workloadSelector,omitempty"`
 	Nodes                      int               `yaml:"nodes,omitempty" json:"nodes,omitempty"`
 	StorageClass               string            `yaml:"storageClass,omitempty" json:"storageClass,omitempty"`
+	SharedStorageClass         string            `yaml:"sharedStorageClass,omitempty" json:"sharedStorageClass,omitempty"`
 }
 
 // AttestationSpec captures bundle attestation inputs.

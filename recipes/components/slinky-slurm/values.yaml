@@ -126,6 +126,22 @@ accounting:
       name: mariadb-password
       key: password
 
+# Shared cluster filesystem. Bundle with
+# `--set slinkyslurm:storage.enabled=true` and provide an RWX-capable
+# StorageClass through `--shared-storage-class` or per-volume overrides.
+# AICR renders these claims before the Slinky chart and mounts them into
+# both the login and compute pods only when enabled.
+storage:
+  enabled: false
+  home:
+    name: shared-home
+    storageClassName: ""
+    size: 100Gi
+  data:
+    name: shared-data
+    storageClassName: ""
+    size: 100Gi
+
 # Secure default: the login pod is intentionally unreachable via SSH
 # (empty rootSshAuthorizedKeys + PasswordAuthentication off) until an
 # operator supplies real keys. Do not "fix" without wiring key delivery.

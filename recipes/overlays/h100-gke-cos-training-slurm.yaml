@@ -111,6 +111,8 @@ spec:
     - name: slinky-slurm
       type: Helm
       valuesFile: components/slinky-slurm/values.yaml
+      preManifestFiles:
+        - components/slinky-slurm/manifests/shared-storage-pvcs.yaml
       dependencyRefs:
         - slurm-accounting-mariadb
         - slinky-slurm-operator

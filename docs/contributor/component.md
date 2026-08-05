@@ -88,6 +88,7 @@ operator:
   componentRef declares none; shipped in the injected `-post` local chart
   after the main release. Ref-declared lists take precedence.
 - `storageClassPaths:` — where `--storage-class` is injected
+- `sharedStorageClassPaths:` — where `--shared-storage-class` is injected
 - `podScheduling.workload.workloadSelectorPaths` — for workload-pod placement
 - `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` — narrow service-specific quirks (see godoc on `ComponentConfig` for when these apply)
 
@@ -139,6 +140,7 @@ One-liner per field:
 | `nodeScheduling.nodeCountPaths` | Where `--nodes` is written |
 | `podScheduling.workload.workloadSelectorPaths` | Workload-pod placement |
 | `storageClassPaths` | Where `--storage-class` is written |
+| `sharedStorageClassPaths` | Where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
 | `manifestFiles` | Default manifest YAML paths bundled when the componentRef declares none (ref-declared lists take precedence). No opt-out: an empty ref-declared list is indistinguishable from absent (len == 0 → defaults filled) — to suppress the defaults, declare a replacement list. Helm components only; the loader rejects the combination with `kustomize:` |

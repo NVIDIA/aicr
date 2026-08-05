@@ -146,6 +146,7 @@ spec:
       workloadSelector: {}
       nodes: 2
       storageClass: ""
+      sharedStorageClass: ""          # RWX class for opt-in shared filesystems
     attestation:
       enabled: false
       certificateIdentityRegexp: ""
@@ -249,7 +250,7 @@ Inputs to `aicr bundle`.
 | `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value` |
 | `deployment.vendorCharts` | bool | Vendor charts into the bundle |
 | `deployment.appName` | string | Argo CD parent `Application` name override (multi-bundle installs sharing a namespace) |
-| `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings |
+| `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings |
 | `attestation.enabled` | bool | Enable bundle attestation (signing); keyless OIDC by default, KMS-backed when `signingKey` is set |
 | `attestation.certificateIdentityRegexp` | string | Expected signer identity |
 | `attestation.oidcDeviceFlow` | bool | Device-code flow for headless signing |

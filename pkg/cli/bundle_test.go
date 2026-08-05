@@ -101,6 +101,19 @@ func TestBundleCmd(t *testing.T) {
 	}
 }
 
+func TestBundleCmdRejectsRepeatedSharedStorageClass(t *testing.T) {
+	err := bundleCmd().Run(t.Context(), []string{
+		"bundle",
+		"--shared-storage-class", "rwx-one",
+		"--shared-storage-class", "rwx-two",
+	})
+	if err == nil || !strings.Contains(err.Error(),
+		"flag --shared-storage-class can only be specified once") {
+
+		t.Fatalf("bundle command error = %v, want repeated shared storage class rejection", err)
+	}
+}
+
 // TestSelectAttester_WiresEnvAndFlags is a thin smoke test for the CLI shim
 // over attestation.ResolveAttesterLazy. The OIDC source-precedence logic
 // itself is exhaustively covered in the attestation package's

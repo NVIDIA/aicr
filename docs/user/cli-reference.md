@@ -1402,6 +1402,7 @@ aicr bundle [flags]
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
+| `--shared-storage-class` | | string | RWX-capable Kubernetes StorageClass for opt-in shared filesystem PVCs. Written to registry-declared `sharedStorageClassPaths`; never falls back to `--storage-class`. |
 | `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
 | `--readiness-hooks` | | bool | Emit a per-component readiness gate (`NNN-<name>-readiness/`) for each component that ships a `recipes/components/<name>/readiness.yaml` Chainsaw test. The gate runs as a post-component Job so the deploy blocks on component-specific readiness signals (e.g. `ClusterPolicy` state). Supported with `--deployer helm`, `argocd`, and `argocd-helm`. Off by default. See [Readiness Gates](#readiness-gates). |
 | `--serial` | | bool | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `--deployer argocd`, `argocd-helm`, `flux`, and `helmfile` (helm is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply chain. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. Off by default. |
@@ -1564,6 +1565,15 @@ aicr bundle --recipe recipe.yaml \
 When `--storage-class` is not set, any `storageClassName` values already defined in the recipe overlays are preserved as defaults. When it is set, `--set <component>:<path>=<value>` on the same path still wins — `--storage-class` only fills in paths that were not explicitly overridden.
 
 If a rendered component creates a PVC at a registry-declared `storageClassPaths` entry and no usable `storageClassName` is set after overlay, `--storage-class`, and `--set` precedence is resolved, `aicr bundle` emits a non-blocking warning. The bundle still relies on the target cluster's default StorageClass in that case.
+
+`--shared-storage-class` is a separate input for registry-declared
+`sharedStorageClassPaths`. It is used by opt-in Slinky Slurm PVCs mounted at
+`/home` and `/scratch/fsw`, which request `ReadWriteMany`; it does not affect
+existing generic storage paths. Enable the feature with
+`--set slinkyslurm:storage.enabled=true`. If either shared PVC has no effective
+class after per-component overrides and `--shared-storage-class` are applied,
+bundle creation fails instead of falling back to a potentially RWO-only class.
+See [Slurm Shared Storage](slinky-slurm-storage.md).
 
 In contrast, when a bundle includes the `agentgateway` component with an empty or unset `allowedSourceRanges`, `aicr bundle` is **private by default**: it injects the RFC1918 private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) into the inference-gateway's `loadBalancerSourceRanges` and records a bundle note, so the deployed gateway is reachable from inside the cluster/VPC but denied to the public internet — it is never emitted open to `0.0.0.0/0`. (Kubernetes treats an empty `loadBalancerSourceRanges` as allow-all, so the safe default has to be a real list.) An invalid value — a bare-string `--set`, a non-list, an unparseable CIDR, or a non-canonical CIDR such as `1.2.3.4/24` — is rejected with an error. To admit specific clients (e.g. a corporate VPN, which egresses from a public IP not covered by the default), scope it via a recipe `componentRef` override or the list-aware [`--set-json`](#list-and-object-value-overrides) flag (`agentgateway:allowedSourceRanges='["<cidr>"]'`); to deliberately expose it publicly, opt in explicitly with `'["0.0.0.0/0"]'`, which generates with a loud warning. See [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
 
@@ -2634,22 +2644,30 @@ generated `README.md` lists under `## Uninstall`:
 helm uninstall <release> -n <namespace>
 ```
 
-Helm intentionally does not delete CRDs (charts that declare them under
-`crds/` are left in place) or PVCs (StatefulSet-managed volumes are
-preserved). Remove them only when you are sure no other release depends on
-them:
+Helm intentionally does not delete CRDs declared under `crds/`. PVC lifecycle
+depends on how the claim is created: StatefulSet-created claims normally
+outlive the StatefulSet, but standalone PVCs rendered as release resources are
+deleted unless the chart marks them with `helm.sh/resource-policy: keep`.
+Review the chart and the bound PersistentVolume reclaim policy before removing
+storage:
 
 ```bash
 # CRDs — review first; deletion cascades to every custom resource cluster-wide
 kubectl get crd -o name | grep -E '<component-prefix>'
 kubectl delete crd <name>
 
-# PVCs in a single namespace
-kubectl -n <namespace> delete pvc --all
+# PVCs — list and select explicitly; deletion can destroy backing data
+kubectl -n <namespace> get pvc
+kubectl -n <namespace> delete pvc <name>
 
 # Namespace
 kubectl delete namespace <namespace>
 ```
+
+Resources created by Helm hooks are not tracked as ordinary release resources
+and can remain after `helm uninstall`. Review the component-specific cleanup
+notes in the [Component Catalog](component-catalog.md) and the hook lifecycle
+guidance in [Bundling](bundling.md) before deleting them manually.
 
 If a release is stuck in `pending-install` or `pending-upgrade` (interrupted
 deploy), retry with `--no-hooks`:
@@ -2689,11 +2707,14 @@ kubectl -n argocd patch application <bundle-parent-app> --type=merge \
 kubectl -n argocd delete application <bundle-parent-app>
 ```
 
-The CRD and PVC notes from the **helm** walkthrough above still apply:
-Argo CD does not run `helm uninstall` for Helm-templated children — it
-renders manifests with `helm template` and prunes the rendered resources
-directly — so CRDs declared under `crds/` and PVCs from StatefulSets are
-not deleted by the cascade. Remove them by hand if needed.
+The CRD and PVC notes from the **helm** walkthrough above still apply, but
+Argo CD does not run `helm uninstall` for Helm-templated children. It renders
+manifests with `helm template` and prunes rendered resources directly.
+For standalone PVCs, `Delete=false` (or the equivalent
+`helm.sh/resource-policy: keep`) prevents cleanup during Application deletion,
+while `Prune=false` prevents pruning during manual or automated sync after a PVC
+disappears from the desired manifests. StatefulSet-created claims are not
+rendered as Application resources and normally remain.
 
 See [ArgoCD app deletion docs](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/)
 for finalizer behavior, cascade modes, and selective deletion.
@@ -2731,8 +2752,9 @@ kubectl -n <namespace> delete helmrelease <release>
 
 Delete the bundle's source objects (`HelmRepository` / `OCIRepository`)
 after the releases are gone. The CRD / PVC notes from the **helm**
-walkthrough above still apply — `helm-controller` follows the same
-non-destructive defaults.
+walkthrough above still apply: `helm-controller` honors Helm resource-policy
+annotations, while unannotated standalone PVCs are release resources and are
+deleted during uninstall.
 
 See the [Flux helm-controller uninstall reference](https://fluxcd.io/flux/components/helm/helmreleases/#uninstall-configuration)
 for `spec.uninstall` field semantics.

@@ -24,6 +24,7 @@ This section is for users who:
 | [Validation](validation.md) | Task-oriented walkthrough: validate a cluster against a recipe, both training and inference performance phases |
 | [Component Catalog](component-catalog.md) | Every component that can appear in a recipe |
 | [Slurm Accounting](slinky-slurm-accounting.md) | Configure Slinky Slurm accounting with a customer-operated MariaDB database |
+| [Slurm Shared Storage](slinky-slurm-storage.md) | Add opt-in persistent RWX home and data filesystems to Slinky Slurm |
 | [Container Images](container-images.md) | Container image inventory across all components (BOM) |
 | [Recipe Health](recipe-health.md) | Per-recipe health and validation status tracking |
 | [Air-Gap Mirror](air-gap-mirror.md) | Mirror images and charts for air-gapped deployment |
