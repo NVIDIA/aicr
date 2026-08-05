@@ -275,8 +275,20 @@ const (
 )
 
 // ConfigMap timeouts for Kubernetes ConfigMap operations.
+//
+// Read and write budgets are kept as separate named constants — even at the
+// same value today — so a future tuning of one path (e.g., raising the write
+// budget to absorb rate-limiter backoff after heavy API usage) does not
+// silently change the other.
 const (
-	// ConfigMapWriteTimeout is the timeout for writing to ConfigMaps.
+	// ConfigMapReadTimeout bounds a single ConfigMap GET. Applied when the
+	// serializer resolves a cm:// URI so a hung apiserver cannot stall the
+	// caller indefinitely.
+	ConfigMapReadTimeout = 30 * time.Second
+
+	// ConfigMapWriteTimeout bounds a single ConfigMap create/update. Sized
+	// with headroom for client-side rate-limiter waits after bursty API
+	// usage (e.g., during snapshot capture).
 	ConfigMapWriteTimeout = 30 * time.Second
 )
 
