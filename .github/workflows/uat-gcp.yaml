@@ -117,10 +117,10 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      # v0.5.16. Keep the release tag for update visibility and the digest for
+      # v0.5.17. Keep the release tag for update visibility and the digest for
       # execution identity. Review the upstream release and verify its signature
       # before rotating both values; never use a tag-only actuator reference.
-      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.16@sha256:f586ffa14dccb867c81fb8a12484f6e31d3adad93242292b7c9cc00c93af2367"
+      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.17@sha256:8bfffd412d98276ee1000a6c083514e6b28928416cc37602ec637ed3a2167c99"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
@@ -776,15 +776,25 @@ jobs:
       # Teardown gating (#1275, DC2): tear down for the nightly lifecycle
       # (unless skip_delete) and for daytime-down (the explicit evening
       # teardown of the held cluster — daytime-down provisions nothing, so it
-      # does not gate on steps.infra). NEVER for daytime-up, which holds the
-      # cluster for handoff. skip_delete is a nightly-only debugging escape and
-      # is ignored for daytime-down.
+      # does not gate on steps.infra). skip_delete is a nightly-only debugging
+      # escape and is ignored for daytime-down.
+      #
+      # daytime-up (provision + deploy + HOLD) holds the cluster for handoff ONLY
+      # on a clean run: if any stage failed or the run was cancelled
+      # (failure() || cancelled()), there is no usable cluster to hand off, so we
+      # tear it down rather than leak its GPU node + full VPC network group (the
+      # orphan class behind the NETWORKS-quota exhaustion). Gated on
+      # steps.infra.outcome != 'skipped' so a cancel before Bringup — which
+      # provisioned nothing — still no-ops. The Destroy step targets this run's
+      # own DEPLOYMENT_ID (aicr-uat-day-<reservation>-<run_id>), which it sets
+      # itself, so it tears down exactly the cluster this up-run created.
       - name: Re-authenticate to GCP for teardown
         id: auth_teardown
         if: >-
           always() && (
             (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
-            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped') ||
+            (inputs.lifecycle == 'daytime-up' && (failure() || cancelled()) && steps.infra.outcome != 'skipped')
           )
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
         with:
@@ -797,7 +807,8 @@ jobs:
         if: >-
           always() && (
             (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
-            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped') ||
+            (inputs.lifecycle == 'daytime-up' && (failure() || cancelled()) && steps.infra.outcome != 'skipped')
           )
         shell: bash
         run: |
