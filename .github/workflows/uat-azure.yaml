@@ -104,17 +104,26 @@ jobs:
       # AZURE_PRINCIPAL_ID). Inlined because the federated az session may
       # lack the Graph access needed to resolve the client id to a principal.
       AZURE_PRINCIPAL_ID: "3c061691-eded-40cb-869e-d5fdb2944a62"
-      # Cluster name (AKS actuator derives both the cluster name and its
-      # resource group `<id>-rg` from .deployment.id). The nightly
-      # per-run lifecycle uses a run-scoped name for per-run isolation; the
-      # daytime lifecycles use a STABLE, reservation-tagged name so the evening
-      # teardown (daytime-down) and the nightly pre-batch guard can find the
-      # held cluster. Reservation names are lowercase alnum+hyphen, so the
-      # derived name is a valid AKS cluster name.
+      # Cluster name (AKS actuator derives both the cluster name and its resource
+      # group `<id>-rg` from .deployment.id). The `aicr-uat-` prefix is shared across
+      # AWS/GCP/Azure (and matches the committed cluster-config `id: aicr-uat`), so
+      # UAT cluster names are consistent per platform. The nightly per-run lifecycle
+      # uses a run-scoped name (aicr-uat-<run_id>) for per-run isolation. daytime-up
+      # uses an EPHEMERAL, reservation-scoped name — the stable prefix
+      # aicr-uat-day-<reservation>- with the up-run's id appended — so a re-provision
+      # never reuses a name the previous teardown just deleted (which collides with
+      # cloud deletion tombstones and, on Azure especially, stale terraform-state
+      # blob-lease locks). Discovery is name-free: the pre-batch guard and
+      # daytime-down both scan the stable prefix (the actuator derives the cluster
+      # name, its <name>-rg resource group, AND its TF-state key from .deployment.id).
+      # daytime-down has no static name here — it resolves the concrete cluster at
+      # runtime (see "Resolve daytime cluster to tear down") and overrides
+      # DEPLOYMENT_ID. Reservation names are lowercase alnum+hyphen, so the derived
+      # name is a valid AKS cluster name.
       DEPLOYMENT_ID: >-
-        ${{ (inputs.lifecycle == 'daytime-up' || inputs.lifecycle == 'daytime-down')
-        && format('aicr-day-{0}', inputs.reservation)
-        || format('aicr-{0}', github.run_id) }}
+        ${{ inputs.lifecycle == 'daytime-up'
+        && format('aicr-uat-day-{0}-{1}', inputs.reservation, github.run_id)
+        || format('aicr-uat-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
@@ -298,41 +307,112 @@ jobs:
       # failure means genuinely exhausted quota, not a race. Recorded in
       # docs/contributor/uat.md; intentionally no capacity step below.
 
-      # Pre-batch guard (#1275, DC2). The nightly lifecycle refuses to provision
-      # into a reservation that still holds an un-torn-down daytime cluster: a
-      # missed evening teardown must surface as a BLOCKED batch, not as silent
-      # contention. Detect by the stable daytime cluster name
-      # (aicr-day-<reservation>); we already hold the reservation lease
-      # (uat-run.yaml) and are authenticated, so this runs before Bringup and
-      # fails fast rather than racing. Only the nightly lifecycle guards —
-      # daytime-up creates that cluster, daytime-down removes it.
+      # Pre-batch guard (#1275, DC2). A provisioning run refuses to provision into
+      # a reservation that still holds an un-torn-down daytime cluster: a missed
+      # evening teardown must surface as a BLOCKED run, not as silent contention
+      # (or a second, stacked daytime cluster).
+      #
+      # daytime clusters are now EPHEMERALLY named (aicr-uat-day-<reservation>-<id>), so
+      # this detects them by the stable, reservation-scoped PREFIX rather than a
+      # reconstructed exact name — a prefix scan is the only name-free way to find a
+      # held cluster this run cannot name. Both the nightly batch AND daytime-up
+      # guard: daytime-up must refuse if a prior day's cluster leaked (the
+      # reservation cannot host two, and unique names would otherwise let them
+      # stack). daytime-up's OWN cluster does not exist yet, so only a leaked prior
+      # cluster matches. We already hold the reservation lease (uat-run.yaml) and
+      # are authenticated, so this runs before Bringup and fails fast.
       - name: Pre-batch guard — refuse if a daytime cluster still holds the reservation
         id: guard
-        if: inputs.lifecycle == 'nightly'
+        if: inputs.lifecycle == 'nightly' || inputs.lifecycle == 'daytime-up'
+        env:
+          RESERVATION: ${{ inputs.reservation }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+        run: |
+          set -euo pipefail
+          PREFIX="aicr-uat-day-${RESERVATION}-"
+          set +e
+          OUT=$(az aks list --query "[].name" -o tsv --only-show-errors 2>&1)
+          RC=$?
+          set -e
+          # Fail closed on a list error: a throttle/auth failure must not be read
+          # as "no daytime cluster, clear to proceed".
+          if [[ ${RC} -ne 0 ]]; then
+            echo "::error::could not list clusters to determine daytime-cluster state for reservation ${RESERVATION}: ${OUT}"
+            exit 1
+          fi
+          HELD=$(printf '%s\n' "${OUT}" | grep "^${PREFIX}[0-9]" || true)
+          if [[ -n "${HELD}" ]]; then
+            echo "::error::a daytime cluster still holds reservation ${RESERVATION}; refusing (lifecycle=${LIFECYCLE})."
+            echo "::error::tear it down first: gh workflow run uat-run.yaml -f reservation=${RESERVATION} -f lifecycle=daytime-down"
+            while IFS= read -r c; do
+              [[ -z "${c}" ]] && continue
+              echo "::error::  held: ${c}"
+            done <<<"${HELD}"
+            exit 1
+          fi
+          echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
+
+      # Resolve the ephemeral daytime cluster this daytime-down run must tear down.
+      # daytime-up names it aicr-uat-day-<reservation>-<up-run-id>, so this evening run
+      # (a different run id) cannot reconstruct the name — it discovers it by the
+      # stable, reservation-scoped prefix (name-free, like the guard). The resolved
+      # name is exported to DEPLOYMENT_ID so the always()-run Destroy step (which
+      # writes .deployment.id itself) and the teardown creds refresh target it — the
+      # actuator derives the cluster name, its <name>-rg resource group, and its
+      # TF-state key from .deployment.id.
+      #   0 matches → benign no-op (already gone / never provisioned); teardown skips.
+      #   1 match   → the normal case; export it.
+      #   >1        → a broken invariant (the guard refuses a second daytime-up while
+      #               one is held); fail loud rather than silently tear down one.
+      - name: Resolve daytime cluster to tear down
+        if: inputs.lifecycle == 'daytime-down'
         env:
           RESERVATION: ${{ inputs.reservation }}
         run: |
           set -euo pipefail
-          DAYTIME_NAME="aicr-day-${RESERVATION}"
-          set +e
-          OUT=$(az aks show --name "${DAYTIME_NAME}" \
-            --resource-group "${DAYTIME_NAME}-rg" 2>&1)
-          RC=$?
-          set -e
-          if [[ ${RC} -eq 0 ]]; then
-            echo "::error::daytime cluster ${DAYTIME_NAME} still holds reservation ${RESERVATION}; refusing to start the nightly batch. Tear it down first (uat-run lifecycle=daytime-down)."
+          PREFIX="aicr-uat-day-${RESERVATION}-"
+          # Bounded retry. Every teardown gate below keys off DAYTIME_FOUND, so a
+          # single throttled/transient list call ending this step early would skip
+          # teardown entirely and leak the cluster (and the reservation) until a
+          # human re-dispatches daytime-down. Retry, then fail LOUDLY saying so.
+          RC=1
+          OUT=
+          for attempt in 1 2 3; do
+            set +e
+            OUT=$(az aks list --query "[].name" -o tsv --only-show-errors 2>&1)
+            RC=$?
+            set -e
+            if [[ ${RC} -eq 0 ]]; then
+              break
+            fi
+            echo "cluster listing attempt ${attempt} failed (rc=${RC}): ${OUT}"
+            if [[ ${attempt} -lt 3 ]]; then
+              sleep 15
+            fi
+          done
+          if [[ ${RC} -ne 0 ]]; then
+            echo "::error::could not list clusters for reservation ${RESERVATION} after 3 attempts: ${OUT}"
+            echo "::error::TEARDOWN SKIPPED — any daytime cluster is still up and the reservation may still be held."
+            echo "::error::re-dispatch: gh workflow run uat-run.yaml -f reservation=${RESERVATION} -f lifecycle=daytime-down"
             exit 1
           fi
-          # Fail closed on anything that is NOT a definitive "does not exist":
-          # a throttle/auth error must not be read as "clear to proceed". The
-          # actuator derives the RG as <cluster>-rg, so either the cluster or
-          # its whole RG being absent is a definitive negative.
-          if grep -qE 'ResourceNotFound|ResourceGroupNotFound|could not be found' <<<"${OUT}"; then
-            echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
-          else
-            echo "::error::could not determine daytime-cluster state for ${DAYTIME_NAME}: ${OUT}"
+          # End-anchored: only an exact <prefix><run-id> name is a teardown
+          # target. The guard's matcher is deliberately broader — anything
+          # prefix-ish should BLOCK a batch, but must not be destroyed here.
+          mapfile -t held < <(printf '%s\n' "${OUT}" | grep -E "^${PREFIX}[0-9]+$" || true)
+          if [[ "${#held[@]}" -eq 0 ]]; then
+            echo "no ${PREFIX}* cluster found; nothing to tear down (already gone or never provisioned)."
+            echo "DAYTIME_FOUND=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [[ "${#held[@]}" -gt 1 ]]; then
+            echo "::error::expected at most one daytime cluster for ${RESERVATION} but found ${#held[@]}: ${held[*]}"
+            echo "::error::the pre-batch guard should prevent this; tear each down manually and investigate the leak."
             exit 1
           fi
+          echo "daytime cluster to tear down: ${held[0]}"
+          echo "DEPLOYMENT_ID=${held[0]}" >> "$GITHUB_ENV"
+          echo "DAYTIME_FOUND=true" >> "$GITHUB_ENV"
 
       # Deps
       - name: Install tools
@@ -855,7 +935,7 @@ jobs:
       - name: Re-authenticate to Azure for teardown
         if: >-
           always() && (
-            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
             (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
           )
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
@@ -877,7 +957,7 @@ jobs:
       - name: Destroy Cluster
         if: >-
           always() && (
-            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
             (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
           )
         shell: bash

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -968,43 +969,183 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 // transient, self-healing partial rollout, mirroring the DRA kubelet-plugin and
 // Nodewright "stable ≥window" treatment above.
 //
-// Why *this* node set: the probe scopes to schedulable GPU nodes that carry the
+// Why *this* node set: the gate validates schedulable GPU nodes that carry the
 // NicClusterPolicy's own nodeAffinity label (helper.PCIMellanoxPresentLabel) —
-// exactly the cohort the fabric can land on and the NCCL check runs on. A
-// cordoned/draining node, or a GPU node in a non-RDMA (non-Mellanox) pool, never advertises the
-// resource; including it would wedge the gate on a node the workload excludes.
+// exactly the cohort the fabric can land on and the NCCL check runs on. A GPU
+// node in a non-RDMA (non-Mellanox) pool never advertises the resource; including
+// it would wedge the gate on a node the workload excludes.
+//
+// Cordoned RDMA-capable nodes: like check-nvidia-smi (#1668/#1936), a cordoned
+// Mellanox RDMA GPU node is excluded from the *validated* cohort (the NCCL
+// workload will not land on it) but is NOT silently dropped. It is enumerated via
+// helper.FindGpuNodes, disclosed explicitly as "skipped (cordoned)" in stdout,
+// counted in nodesTotal, and the coverage is emitted through validators.EmitExtra
+// so it survives the default redaction policy into the signed bundle (#1951/#1952) —
+// a cordoned node narrowing the fabric cohort can no longer hide behind a
+// stdout-only line the publisher strips.
 func verifyRDMAFabricReady(ctx *validators.Context) error {
-	var nodeCount int
-	return pollUntilStable(ctx,
-		fmt.Sprintf("RDMA shared-device fabric (%s) across RDMA GPU nodes", helper.AKSRdmaSharedResource),
-		func() error {
-			count, probeErr := rdmaFabricProbe(ctx)
-			nodeCount = count
-			return probeErr
-		},
-		func() {
-			fmt.Printf("  RDMA fabric (%s): allocatable (uniform) on all %d RDMA GPU node(s) (stable ≥%s)\n",
-				helper.AKSRdmaSharedResource, nodeCount, gpuReadinessStabilityWindow)
-		})
+	// Production emit seam: publish the structured coverage as an EmitExtra
+	// sentinel. verifyRDMAFabricReadyEmit injects it so tests can record the eager
+	// floor and terminal disclosures without capturing the EmitExtra stdout
+	// transport (which lives in the validators package).
+	return verifyRDMAFabricReadyEmit(ctx, func(validated, total int) {
+		emitExtraOrWarn(rdmaFabricCoverageExtra(validated, total))
+	})
 }
 
-// rdmaFabricProbe does one readiness pass over the Mellanox RDMA-capable GPU cohort:
-// schedulable GPU nodes (via helper.FindSchedulableGpuNodes — cordoned nodes and
-// nodes not yet advertising nvidia.com/gpu are excluded) that also carry the
-// NicClusterPolicy nodeAffinity label helper.PCIMellanoxPresentLabel. It returns
-// nil — plus the cohort size — only when every such node advertises
+// verifyRDMAFabricReadyEmit is verifyRDMAFabricReady with the structured
+// coverage emit injected. See verifyRDMAFabricReady for the gate contract.
+func verifyRDMAFabricReadyEmit(ctx *validators.Context, emitCoverage func(validated, total int)) error {
+	var coverage rdmaFabricCoverage
+	// emittedEarly gates the eager disclosure floor to exactly one emit.
+	var emittedEarly bool
+	// onStable is nil: the success line and the *terminal* coverage disclosure
+	// are printed once at the single seam below (rdmaFabricProbeCoverage runs every
+	// poll iteration, so emitting the human enumeration there would repeat it on
+	// each tick — the settled disclosure must land exactly once, at the final
+	// outcome).
+	err := pollUntilStable(ctx,
+		fmt.Sprintf("RDMA shared-device fabric (%s) across RDMA GPU nodes", helper.AKSRdmaSharedResource),
+		func() error {
+			cov, probeErr := rdmaFabricProbeCoverage(ctx)
+			coverage = cov
+			// Eager disclosure floor: emit the structured coverage once, on the
+			// first observation that actually enumerated an RDMA-candidate node,
+			// so a cordoned node narrowing the cohort survives even if the Job's
+			// activeDeadlineSeconds SIGKILLs the process mid-poll before the
+			// terminal emit runs. The catalog timeout feeds both the Job deadline
+			// and this poll budget with no margin (pkg/validator/v1/job_plan.go),
+			// so an exhausted never-ready poll (every RDMA node cordoned for
+			// maintenance, or a rollout slower than the budget) can be killed at
+			// the deadline with no terminal emit. parseExtraSentinels keeps the
+			// LAST valid sentinel, so a clean exit's terminal emit wins and a
+			// deadline kill leaves this floor as the disclosure of record.
+			// validated=0: nothing is certified mid-poll. Only the structured
+			// Extra is emitted eagerly (not the stdout enumeration) — the Extra is
+			// the piece that survives redaction into the signed bundle (#1951/
+			// #1952), and duplicating stdout would spam divergent counts. The
+			// broader no-margin kill race predates this gate and is tracked
+			// separately; this closes only the gate's own every-terminal-outcome
+			// coverage contract.
+			if !emittedEarly && cov.total() > 0 {
+				emittedEarly = true
+				emitCoverage(0, cov.total())
+			}
+			return probeErr
+		},
+		nil)
+
+	// Single terminal disclosure — printed/emitted exactly once after the poll
+	// settles, on BOTH the ready and the fail-closed path, reflecting the final
+	// observation. validated is the schedulable cohort size only when the gate
+	// certified it uniform+ready; a fail-closed exit (transient List error, no
+	// cohort observed, partial rollout, skew, or timeout) reports 0 validated so
+	// a narrowed-scope failure is never conflated with a full pass.
+	validated := 0
+	if err == nil {
+		validated = coverage.schedulable
+	}
+	printLines(coverage.enumerationLines()...)
+	printLines(coverage.coverageLine(validated))
+	// nodesValidated/nodesTotal are reused verbatim from the existing
+	// ctrfExtraAllowlist (see pkg/evidence/redact): their semantics fit exactly —
+	// validated = schedulable RDMA nodes with uniform allocatable fabric, total =
+	// all RDMA-candidate nodes incl cordoned. No new key or skipReason enum is
+	// minted (the RDMA gate never "skips" — it fails closed), so the redaction
+	// PolicyVersion stays v2.
+	emitCoverage(validated, coverage.total())
+
+	if err == nil {
+		fmt.Printf("  RDMA fabric (%s): allocatable (uniform) on all %d schedulable RDMA GPU node(s) (stable ≥%s)\n",
+			helper.AKSRdmaSharedResource, coverage.schedulable, gpuReadinessStabilityWindow)
+	}
+	return err
+}
+
+// rdmaFabricCoverage partitions the Mellanox RDMA-capable GPU nodes the fabric
+// gate discloses: the schedulable nodes it actually validates and the cordoned
+// RDMA-capable nodes it must reveal (never silently omit from the total). It
+// exists so the disclosure text and the coverage counts are a pure, independently
+// testable function of the partition rather than interleaved fmt.Printf calls —
+// the #1668/#1936 node-scope disclosure pattern applied to the RDMA gate (#1952).
+type rdmaFabricCoverage struct {
+	schedulable int      // schedulable Mellanox RDMA-capable GPU nodes in the gated cohort
+	cordoned    []string // cordoned Mellanox RDMA-capable GPU nodes: excluded from the cohort but disclosed
+}
+
+// total is every RDMA-candidate node the gate saw — the schedulable cohort plus
+// the cordoned nodes it excluded but must still count (nodesTotal).
+func (c rdmaFabricCoverage) total() int { return c.schedulable + len(c.cordoned) }
+
+// enumerationLines renders the RDMA-candidate listing: the total/schedulable/
+// cordoned counts, and each cordoned node explicitly marked "skipped (cordoned)"
+// rather than omitted from the total. Node names appear ONLY here (stdout),
+// never in the structured Extra.
+func (c rdmaFabricCoverage) enumerationLines() []string {
+	total := c.total()
+	if total == 0 {
+		return []string{"Found 0 Mellanox RDMA-capable GPU node(s)."}
+	}
+	lines := make([]string, 0, 1+len(c.cordoned))
+	lines = append(lines, fmt.Sprintf(
+		"Found %d Mellanox RDMA-capable GPU node(s), %d schedulable, %d cordoned:",
+		total, c.schedulable, len(c.cordoned)))
+	for _, name := range c.cordoned {
+		lines = append(lines, fmt.Sprintf("  %s: skipped (cordoned)", name))
+	}
+	return lines
+}
+
+// coverageLine renders the nodesValidated disclosure for the RDMA gate. The
+// "RESULT: " prefix is the validator runtime's convention (pkg/validator/
+// validator.go resultSummaryPrefix) for echoing a stdout line into live CLI
+// output; it is not guaranteed to survive redaction, which is why the same
+// counts are also emitted structurally via EmitExtra.
+func (c rdmaFabricCoverage) coverageLine(validated int) string {
+	if len(c.cordoned) == 0 {
+		return fmt.Sprintf("RESULT: nodesValidated: %d/%d", validated, c.total())
+	}
+	return fmt.Sprintf("RESULT: nodesValidated: %d/%d (%d cordoned, skipped)",
+		validated, c.total(), len(c.cordoned))
+}
+
+// rdmaFabricCoverageExtra builds the structured coverage disclosure carried
+// through the redaction boundary: how many schedulable RDMA nodes the gate
+// certified (validated) out of every RDMA-candidate node incl. cordoned (total).
+// Values are counts only — never node names or IPs (those live in the stdout
+// enumeration lines). The keys mirror check-nvidia-smi's coverage Extra and the
+// existing ctrfExtraAllowlist entries.
+func rdmaFabricCoverageExtra(validated, total int) map[string]string {
+	return map[string]string{
+		"nodesValidated": strconv.Itoa(validated),
+		"nodesTotal":     strconv.Itoa(total),
+	}
+}
+
+// rdmaFabricProbeCoverage does one readiness pass over the Mellanox RDMA-capable
+// GPU nodes. It enumerates every GPU node via helper.FindGpuNodes (NOT
+// FindSchedulableGpuNodes) so cordoned RDMA nodes stay VISIBLE in the coverage,
+// then validates only the schedulable cohort: nodes carrying the NicClusterPolicy
+// nodeAffinity label helper.PCIMellanoxPresentLabel. It returns nil — plus the
+// coverage partition — only when every schedulable such node advertises
 // helper.AKSRdmaSharedResource in a uniform, positive count. It fails closed on a
-// List error and when no RDMA GPU node is observed yet: "could not observe the
-// fabric" must never read as "fabric ready". The returned error rides the poll's
-// dwell reset like any other unhealthy sample.
-func rdmaFabricProbe(ctx *validators.Context) (int, error) {
+// List error and when no schedulable RDMA GPU node is observed yet: "could not
+// observe the fabric" must never read as "fabric ready". The returned error rides
+// the poll's dwell reset like any other unhealthy sample; the coverage is
+// returned alongside every error so the terminal disclosure can still name the
+// cordoned nodes it saw.
+func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error) {
 	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
 	defer cancel()
 
-	gpuNodes, err := helper.FindSchedulableGpuNodes(listCtx, ctx.Clientset)
+	gpuNodes, err := helper.FindGpuNodes(listCtx, ctx.Clientset)
 	if err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal,
-			"failed to list nodes for the RDMA fabric readiness gate", err)
+		// FindGpuNodes may return a coded *errors.StructuredError (ErrCodeTimeout if
+		// cancellation interrupts its own node scan, before this function's loop).
+		// PropagateOrWrap preserves that code, wrapping only a plain error with
+		// ErrCodeInternal + gate context.
+		return rdmaFabricCoverage{}, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to list nodes for the RDMA fabric readiness gate")
 	}
 
 	fabric := corev1.ResourceName(helper.AKSRdmaSharedResource)
@@ -1013,17 +1154,33 @@ func rdmaFabricProbe(ctx *validators.Context) (int, error) {
 		count int64
 	}
 	var cohort []rdmaNode
+	var coverage rdmaFabricCoverage
 	for i := range gpuNodes {
 		// Honor cancellation while walking a potentially large node list, per
 		// repo CLAUDE.md "Always check ctx.Done() in long-running operations".
 		select {
 		case <-listCtx.Done():
-			return 0, errors.Wrap(errors.ErrCodeTimeout,
+			// Return the coverage accumulated so far, not an empty partition:
+			// the function's contract (and every other error path below) hands
+			// back the cordoned nodes already seen so the terminal disclosure can
+			// still name them. Set schedulable from the cohort scanned before the
+			// cancellation so a partially-walked cohort count is not lost.
+			coverage.schedulable = len(cohort)
+			return coverage, errors.Wrap(errors.ErrCodeTimeout,
 				"canceled while scanning nodes for the RDMA fabric readiness gate", listCtx.Err())
 		default:
 		}
-		node := &gpuNodes[i]
+		node := &gpuNodes[i].Node
+		// Only Mellanox RDMA-capable GPU nodes are fabric candidates; a non-RDMA
+		// GPU node never advertises the shared resource.
 		if node.Labels[helper.PCIMellanoxPresentLabel] != "true" {
+			continue
+		}
+		// A cordoned RDMA-capable node is excluded from the validated cohort (the
+		// NCCL workload will not land on it) but is disclosed, not dropped — the
+		// spuriously-narrowed pass #1668/#1936 fixed, applied here (#1952).
+		if gpuNodes[i].Cordoned {
+			coverage.cordoned = append(coverage.cordoned, node.Name)
 			continue
 		}
 		var count int64
@@ -1032,9 +1189,10 @@ func rdmaFabricProbe(ctx *validators.Context) (int, error) {
 		}
 		cohort = append(cohort, rdmaNode{name: node.Name, count: count})
 	}
+	coverage.schedulable = len(cohort)
 
 	if len(cohort) == 0 {
-		return 0, errors.New(errors.ErrCodeNotFound,
+		return coverage, errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("RDMA fabric gate: no schedulable Mellanox RDMA-capable GPU nodes observed yet (label %s=true)",
 				helper.PCIMellanoxPresentLabel))
 	}
@@ -1048,7 +1206,7 @@ func rdmaFabricProbe(ctx *validators.Context) (int, error) {
 		}
 	}
 	if len(notReady) > 0 {
-		return len(cohort), errors.New(errors.ErrCodeInternal,
+		return coverage, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("%s not yet allocatable on %d of %d RDMA GPU node(s): %s "+
 				"(network operator MOFED / rdma-shared-device-plugin still rolling out)",
 				helper.AKSRdmaSharedResource, len(notReady), len(cohort), formatNames(notReady)))
@@ -1065,11 +1223,11 @@ func rdmaFabricProbe(ctx *validators.Context) (int, error) {
 		}
 	}
 	if len(skew) > 0 {
-		return len(cohort), errors.New(errors.ErrCodeInternal,
+		return coverage, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("%s allocatable count is non-uniform across %d RDMA GPU node(s) (want all == %d): %s",
 				helper.AKSRdmaSharedResource, len(cohort), want, formatNames(skew)))
 	}
-	return len(cohort), nil
+	return coverage, nil
 }
 
 func formatNames(names []string) string {

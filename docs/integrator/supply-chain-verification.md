@@ -623,6 +623,200 @@ admission webhook rejects it.
 > `SigstoreBundle` path was cluster-tested (v1.18.1) and **failed** to verify
 > AICR's bundle attestation (`no matching signatures found`) — see the Kyverno
 > note above; tracked in [#1537](https://github.com/NVIDIA/aicr/issues/1537).
+
+## Gating Deployment on Verification
+
+`aicr verify` is the deploy-time gate: run it against the bundle directory
+before anything installs that bundle or publishes it for a controller to pull.
+Because `checksums.txt` is a closed-world inventory of every payload file,
+verifying it transitively covers the whole bundle; see
+[Artifact Verification](../user/artifact-verification.md#what-can-be-verified).
+
+Where that gate belongs depends on whether the deployer pushes or pulls, so
+each one is covered separately below. Every gate is marked either *advisory* (a
+pipeline step that an operator holding cluster credentials can bypass) or
+*binding* (the cluster itself refuses to proceed).
+
+### Gating the helm and helmfile deployers
+
+The default `helm` deployer and `helmfile` are push-based: the same pipeline
+step that verifies is the one that installs, so verification and use cannot
+drift apart.
+
+```shell
+cd bundles
+aicr verify . --min-trust-level verified
+chmod +x deploy.sh
+./deploy.sh
+```
+
+`aicr verify` exits non-zero on any failure, so `&&` chaining or `set -e` is
+enough to stop the install. Prefer an explicit `--min-trust-level verified`
+over the default `max`, which resolves to the highest level *that particular
+bundle* can reach and therefore passes an unsigned bundle. Add
+`--require-creator` to pin who built it and `--cli-version-constraint` to floor
+the `aicr` version that produced it; `--format json` emits a machine-readable
+result for a pipeline that needs to branch. For `helmfile`, run the same
+`aicr verify .` before `helmfile apply`. See [Automation](automation.md) for
+the full four-stage pipeline and its GitLab, CircleCI, and Terraform
+equivalents.
+
+**These gates are advisory.** They run in your pipeline, on the machine that
+holds the kubeconfig. Anyone who can run `helm install` directly, or who can
+edit the pipeline definition, bypasses them. Protect them the way you protect
+any pipeline: branch protection on the workflow definition, and cluster
+credentials that only the pipeline holds.
+
+### Gating Argo CD
+
+Argo CD is pull-based. `aicr bundle --deployer argocd --repo <git-url>` writes
+`app-of-apps.yaml` plus per-component `NNN-<component>/application.yaml`, you
+commit them, and the cluster's Argo CD reconciles the repository on its own
+schedule. A CI step therefore gates **what enters the repository**, not what
+the cluster applies. Verify before you commit:
+
+```shell
+aicr bundle --recipe recipe.yaml --deployer argocd --attest \
+  --repo https://github.com/my-org/my-gitops-repo.git \
+  --output ./bundles
+aicr verify ./bundles --min-trust-level verified
+cp -r ./bundles/* gitops-repo/
+(cd gitops-repo && git add . && git commit -S -m "Update GPU stack" && git push)
+```
+
+Verify the bundle directory, never the GitOps repository. Verification is
+closed-world and rejects any filesystem entry not listed in `checksums.txt`, so
+running it against a repository that holds anything else fails.
+
+For a **binding** control, have the pipeline sign the commit and have Argo CD
+refuse unsigned revisions. `AppProject.spec.signatureKeys` lists the GnuPG key
+IDs allowed to sign; Argo CD then refuses to sync any revision that is unsigned
+or signed by a key outside that list:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: gpu-stack
+  namespace: argocd
+spec:
+  signatureKeys:
+    - keyID: 4AEE18F83AFDEB23
+  sourceRepos:
+    - https://github.com/my-org/my-gitops-repo.git
+```
+
+Read the trust chain carefully. The cluster enforces "this revision was signed
+by CI," and CI signs only after `aicr verify` passed. The cluster is not
+verifying the AICR attestation; it is trusting your pipeline's identity to have
+checked it. Argo CD's GnuPG verification applies to **Git** sources only, not
+to Helm repositories, and it disables `argocd app sync --local`. See Argo CD's
+[GnuPG signature verification](https://argo-cd.readthedocs.io/en/stable/user-guide/gpg-verification/).
+
+### Gating Flux
+
+Flux is likewise pull-based, in two source shapes.
+
+**Git source (default).** `aicr bundle --deployer flux --output ./flux-bundle`
+writes a root `kustomization.yaml`, a `sources/` directory, per-component
+`helmrelease.yaml` files, and a `README.md` carrying the entry-point
+`GitRepository` and `Kustomization` you apply to the cluster. Verify the bundle
+directory before copying it to the repository root, exactly as for Argo CD.
+Bind the reconcile by signing the commit in CI and adding `spec.verify` to that
+entry-point `GitRepository`:
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: aicr-stack
+  namespace: flux-system
+spec:
+  url: https://github.com/my-org/my-gitops-repo.git
+  ref:
+    branch: main
+  interval: 10m
+  verify:
+    mode: HEAD
+    secretRef:
+      name: pgp-public-keys
+```
+
+`mode: HEAD` verifies the commit at the checked-out HEAD; `Tag` and
+`TagAndHEAD` are the other accepted values. The referenced Secret holds the
+trusted public keys (`.asc` for PGP, `.sshpub` for SSH). See Flux's
+[GitRepository verification](https://fluxcd.io/flux/components/source/gitrepositories/).
+
+**OCI source.** With `--output oci://...`, AICR pushes the bundle as an OCI
+artifact and generates `ArtifactGenerator` CRs that reference an
+`OCIRepository` **you** deploy (named by `--flux-oci-source-name`, default
+`aicr-bundle`, in `--flux-namespace`, default `flux-system`). Because you own
+that `OCIRepository`, you can require a Cosign signature on the artifact before
+Flux will reconcile anything from it:
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: aicr-bundle
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: oci://ghcr.io/my-org/aicr-bundle
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: "^https://token\\.actions\\.githubusercontent\\.com$"
+        subject: "^https://github\\.com/my-org/my-gitops-repo/\\.github/workflows/deploy\\.yaml@refs/heads/main$"
+```
+
+That Cosign signature is **not** AICR's bundle attestation, and AICR does not
+produce it: your pipeline countersigns the pushed manifest after `aicr verify`
+passes. An OCI push also materializes the same inventory in `./bundle` relative
+to the working directory, which is the copy to verify, and `--image-refs`
+captures the published digest so the countersignature pins the exact manifest:
+
+```shell
+aicr bundle --recipe recipe.yaml --deployer flux --attest \
+  --output oci://ghcr.io/my-org/aicr-bundle:v1.0.0 \
+  --image-refs ./published-digest.txt
+aicr verify ./bundle --min-trust-level verified
+cosign sign "ghcr.io/my-org/aicr-bundle@$(cat ./published-digest.txt)"
+```
+
+This one is binding: source-controller will not produce an artifact from an
+`OCIRepository` whose signature fails to verify, so no `HelmRelease` downstream
+of it reconciles. As with Argo CD, what the cluster enforces is your pipeline's
+countersignature, not the AICR attestation. Flux OCI mode also has its own
+prerequisites (Flux v2.7+ with source-watcher and the `ExternalArtifact`
+feature gate); see
+[Flux OCI Mode](../user/cli-reference.md#flux-oci-mode) and Flux's
+[OCIRepository verification](https://fluxcd.io/flux/components/source/ocirepositories/).
+
+### Gates across trust environments
+
+Only the trust material handed to `aicr verify` changes between environments;
+the gate itself is the same command in the same place.
+
+| Environment | Signing | Deploy-time gate |
+|-------------|---------|------------------|
+| Public Sigstore | `--attest` | `aicr verify <dir> --min-trust-level verified` |
+| Private Sigstore | `--attest --fulcio-url <url> --rekor-url <url>` | `aicr verify <dir> --trust-root ./trusted_root.json --require-creator ci@myorg.example.com` |
+| KMS key | `--attest --signing-key <kms-uri>` | `aicr verify <dir> --key <kms-uri>` (or a PEM exported with `cosign public-key`) |
+| Air-gapped | `--attest --signing-key <kms-uri> --tlog-upload=false` | `aicr verify <dir> --key ./bundle-signer.pub --insecure-ignore-tlog` |
+
+`--trust-root` is additive to AICR's built-in public-good root, so one command
+verifies both org-signed and NVIDIA-signed bundles.
+`--insecure-ignore-tlog` requires `--key`, and a local PEM key keeps the verify
+fully offline where a KMS URI still resolves remotely. Full details for each
+shape are in
+[Artifact Verification](../user/artifact-verification.md#kms-key-verification).
+
+The binding half is unchanged across all four rows, because it enforces your
+pipeline's own signature rather than AICR's. Air-gapped sites should note that
+Flux's `spec.verify` keyless form depends on public Sigstore: use a key-based
+Cosign signature with `spec.verify.secretRef` instead of `matchOIDCIdentity`.
+
 ## Offline and Air-Gapped Verification
 
 Container image verification uses GitHub's attestation API

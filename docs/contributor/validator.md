@@ -539,16 +539,52 @@ tagged with its cordon state, and:
    `RESULT:` prefix makes the coverage figure visible during a live
    `aicr validate` run regardless of redaction, but it is not
    guaranteed to survive into the artifact a downstream consumer
-   verifies by default. See #1951 for carrying this kind of outcome
-   data in a structured field that survives redaction instead.
+   verifies by default. That is why the same counts are ALSO emitted
+   through `validators.EmitExtra` (#1951) — see **Structured coverage
+   survives redaction** below.
 
-This pattern is not yet applied everywhere it could be. Cluster-aggregate
-checks that assert on an operator's aggregate status
-(`gpu-operator-health`) are unaffected — DaemonSet operands ignore
-cordons — but `expected-resources`' `rdmaFabricProbe` is itself
-node-scoped (it calls `helper.FindSchedulableGpuNodes` to build its
-RDMA-capable cohort) and has the same undisclosed narrowing; it has not
-been updated to this pattern. See #1952.
+`expected-resources`' `rdmaFabricProbeCoverage` is itself node-scoped and now
+follows this pattern too (#1952). It enumerates every GPU node via
+`helper.FindGpuNodes`, validates only the schedulable Mellanox
+RDMA-capable cohort for uniform allocatable fabric, but discloses each
+cordoned RDMA-capable node explicitly (`<node>: skipped (cordoned)`),
+counts it in `nodesTotal`, and never narrows the printed total. Because
+the probe is re-run on every poll iteration
+(`verifyRDMAFabricReady`/`pollUntilStable`), the stdout
+enumeration/`RESULT:` line is printed **exactly once at the settled
+terminal outcome** (ready or fail-closed), never per tick. The structured
+Extra is emitted twice: an **eager floor** on the first observation that
+enumerates any RDMA-candidate node (with `nodesValidated=0` — nothing is
+certified mid-poll) and again at the terminal outcome.
+`parseExtraSentinels` keeps the last valid sentinel, so the terminal emit
+wins on a clean exit; the floor exists only so a cordoned-node narrowing
+still reaches the signed bundle if the Job's `activeDeadlineSeconds`
+SIGKILLs the process at the no-margin poll budget before the terminal emit
+runs (#1952). The gate stays fail-closed: "could not observe the fabric"
+reports `0` validated and never reads as ready.
+
+Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
+certifies the cohort or fails closed — so it mints no `skipReason`
+enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
+allowlist keys unchanged (see below), so the redaction
+`PolicyVersion` stays `v2`.
+
+Cluster-aggregate checks that assert on an operator's aggregate status
+(`gpu-operator-health`) remain unaffected — DaemonSet operands ignore
+cordons.
+
+**Structured coverage survives redaction.** The `RESULT:` stdout line
+is echoed to the live CLI but is stripped from a signed bundle by the
+default (`minimal`) redaction policy (`pkg/evidence/redact`), so both
+`check-nvidia-smi` and the RDMA gate ALSO emit the coverage through
+`validators.EmitExtra` as low-cardinality counts
+(`nodesValidated`/`nodesTotal`) or a closed-set `skipReason` code. Those
+keys are the only ones that clear the fail-closed `ctrfExtraAllowlist`
+(a value that structurally looks like a node name or IP is dropped even
+under an allowed key), so a signed bundle records reduced coverage —
+e.g. a cordoned RDMA node narrowing the fabric cohort — without shipping
+any operator-identifying text. Node names appear only in the redacted
+stdout enumeration, never in the Extra channel. See #1951/#1952.
 
 For *deliberate*, durable exclusion of a node from GPU service (as
 opposed to transient cordon-for-maintenance), use the GPU Operator's

@@ -1354,3 +1354,175 @@ func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 		},
 	}
 }
+
+// TestRDMAFabricCoverage_Disclosure exercises the headline behavior of #1952 as a
+// pure function of the partition: a cordoned Mellanox RDMA node must be listed
+// "skipped (cordoned)", counted in nodesTotal, and never omitted — the same
+// spuriously-narrowed-pass guard check-nvidia-smi got in #1668/#1936, applied to
+// the RDMA fabric gate. It also pins the two zero-cordoned/zero-total phrasings.
+func TestRDMAFabricCoverage_Disclosure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		cov              rdmaFabricCoverage
+		validated        int
+		wantTotal        int
+		wantEnumeration  []string
+		wantCoverageLine string
+	}{
+		{
+			name:      "cordoned RDMA node is disclosed and counted",
+			cov:       rdmaFabricCoverage{schedulable: 1, cordoned: []string{"rdma-drain-0"}},
+			validated: 1,
+			wantTotal: 2,
+			wantEnumeration: []string{
+				"Found 2 Mellanox RDMA-capable GPU node(s), 1 schedulable, 1 cordoned:",
+				"  rdma-drain-0: skipped (cordoned)",
+			},
+			wantCoverageLine: "RESULT: nodesValidated: 1/2 (1 cordoned, skipped)",
+		},
+		{
+			name:      "fail-closed exit reports zero validated but still counts cordoned",
+			cov:       rdmaFabricCoverage{schedulable: 2, cordoned: []string{"rdma-drain-0", "rdma-drain-1"}},
+			validated: 0,
+			wantTotal: 4,
+			wantEnumeration: []string{
+				"Found 4 Mellanox RDMA-capable GPU node(s), 2 schedulable, 2 cordoned:",
+				"  rdma-drain-0: skipped (cordoned)",
+				"  rdma-drain-1: skipped (cordoned)",
+			},
+			wantCoverageLine: "RESULT: nodesValidated: 0/4 (2 cordoned, skipped)",
+		},
+		{
+			name:             "no cordoned nodes omits the parenthetical",
+			cov:              rdmaFabricCoverage{schedulable: 3},
+			validated:        3,
+			wantTotal:        3,
+			wantEnumeration:  []string{"Found 3 Mellanox RDMA-capable GPU node(s), 3 schedulable, 0 cordoned:"},
+			wantCoverageLine: "RESULT: nodesValidated: 3/3",
+		},
+		{
+			name:             "zero total nodes gets a plain sentence",
+			cov:              rdmaFabricCoverage{},
+			validated:        0,
+			wantTotal:        0,
+			wantEnumeration:  []string{"Found 0 Mellanox RDMA-capable GPU node(s)."},
+			wantCoverageLine: "RESULT: nodesValidated: 0/0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.cov.total(); got != tt.wantTotal {
+				t.Errorf("total() = %d, want %d", got, tt.wantTotal)
+			}
+			gotEnum := tt.cov.enumerationLines()
+			if len(gotEnum) != len(tt.wantEnumeration) {
+				t.Fatalf("enumerationLines() = %v, want %v", gotEnum, tt.wantEnumeration)
+			}
+			for i, want := range tt.wantEnumeration {
+				if gotEnum[i] != want {
+					t.Errorf("enumerationLines()[%d] = %q, want %q", i, gotEnum[i], want)
+				}
+			}
+			if got := tt.cov.coverageLine(tt.validated); got != tt.wantCoverageLine {
+				t.Errorf("coverageLine(%d) = %q, want %q", tt.validated, got, tt.wantCoverageLine)
+			}
+		})
+	}
+}
+
+// TestRDMAFabricCoverageExtra proves the structured coverage disclosure carries
+// exactly the two allowlisted count keys (nodesValidated/nodesTotal) as decimal
+// strings and nothing else — no node names or IPs leak into the Extra channel.
+func TestRDMAFabricCoverageExtra(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		validated     int
+		total         int
+		wantValidated string
+		wantTotal     string
+	}{
+		{"full cohort, one cordoned excluded", 1, 2, "1", "2"},
+		{"uniform cohort no cordoned", 2, 2, "2", "2"},
+		{"fail-closed zero validated", 0, 3, "0", "3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			extra := rdmaFabricCoverageExtra(tt.validated, tt.total)
+			if extra["nodesValidated"] != tt.wantValidated {
+				t.Errorf("nodesValidated = %q, want %q", extra["nodesValidated"], tt.wantValidated)
+			}
+			if extra["nodesTotal"] != tt.wantTotal {
+				t.Errorf("nodesTotal = %q, want %q", extra["nodesTotal"], tt.wantTotal)
+			}
+			if len(extra) != 2 {
+				t.Errorf("coverage extra must carry exactly the two count keys, got %v", extra)
+			}
+		})
+	}
+}
+
+// TestRDMAFabricProbeCoverage_DisclosesCordoned is the end-to-end proof of #1952:
+// a cordoned Mellanox RDMA GPU node is enumerated (via helper.FindGpuNodes) and
+// surfaced in the coverage partition — visible and counted — while still being
+// excluded from the validated cohort. Under the pre-fix code path
+// (FindSchedulableGpuNodes) the cordoned node vanished entirely, so this test
+// fails without the production change.
+func TestRDMAFabricProbeCoverage_DisclosesCordoned(t *testing.T) {
+	t.Parallel()
+
+	clientset := k8sfake.NewClientset(
+		rdmaGPUNode("rdma-gpu-0", 8, 1000),         // schedulable, fabric ready → validated cohort
+		cordon(rdmaGPUNode("rdma-drain-0", 8, -1)), // cordoned RDMA node → disclosed, not dropped
+	)
+	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+
+	cov, err := rdmaFabricProbeCoverage(ctx)
+	if err != nil {
+		t.Fatalf("rdmaFabricProbeCoverage() error = %v, want nil (the one schedulable RDMA node carries the fabric)", err)
+	}
+	if cov.schedulable != 1 {
+		t.Errorf("schedulable cohort = %d, want 1 (cordoned node excluded from validation)", cov.schedulable)
+	}
+	if len(cov.cordoned) != 1 || cov.cordoned[0] != "rdma-drain-0" {
+		t.Errorf("cordoned = %v, want [rdma-drain-0] (must be disclosed, not silently dropped)", cov.cordoned)
+	}
+	if got := cov.total(); got != 2 {
+		t.Errorf("total() = %d, want 2 (schedulable + cordoned, never narrowed)", got)
+	}
+}
+
+// TestRDMAFabricProbeCoverage_CountsCordonedOnFailClosed proves the cordoned
+// disclosure survives the fail-closed paths too: when the sole schedulable RDMA
+// node has not finished rolling out the fabric, the probe returns an error AND
+// still reports the cordoned node in the coverage so the terminal disclosure can
+// name it.
+func TestRDMAFabricProbeCoverage_CountsCordonedOnFailClosed(t *testing.T) {
+	t.Parallel()
+
+	clientset := k8sfake.NewClientset(
+		rdmaGPUNode("rdma-gpu-0", 8, -1),           // schedulable but fabric absent → not ready
+		cordon(rdmaGPUNode("rdma-drain-0", 8, -1)), // cordoned RDMA node → still disclosed
+	)
+	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+
+	cov, err := rdmaFabricProbeCoverage(ctx)
+	if err == nil {
+		t.Fatal("expected a fail-closed error while the fabric is absent, got nil")
+	}
+	if !strings.Contains(err.Error(), "not yet allocatable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cov.cordoned) != 1 || cov.cordoned[0] != "rdma-drain-0" {
+		t.Errorf("cordoned = %v, want [rdma-drain-0] even on the fail-closed path", cov.cordoned)
+	}
+	if got := cov.total(); got != 2 {
+		t.Errorf("total() = %d, want 2 (cordoned counted even on failure)", got)
+	}
+}
