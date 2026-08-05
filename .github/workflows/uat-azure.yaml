@@ -929,14 +929,23 @@ jobs:
       # Teardown gating (#1275, DC2): tear down for the nightly lifecycle
       # (unless skip_delete) and for daytime-down (the explicit evening
       # teardown of the held cluster — daytime-down provisions nothing, so it
-      # does not gate on steps.infra). NEVER for daytime-up, which holds the
-      # cluster for handoff. skip_delete is a nightly-only debugging escape
-      # and is ignored for daytime-down.
+      # does not gate on steps.infra). skip_delete is a nightly-only debugging
+      # escape and is ignored for daytime-down.
+      #
+      # daytime-up (provision + deploy + HOLD) holds the cluster for handoff ONLY
+      # on a clean run: if any stage failed or the run was cancelled
+      # (failure() || cancelled()), there is no usable cluster to hand off, so we
+      # tear it down rather than leak its GPU node + resource group. Gated on
+      # steps.infra.outcome != 'skipped' so a cancel before Bringup — which
+      # provisioned nothing — still no-ops. The Destroy step targets this run's
+      # own DEPLOYMENT_ID (aicr-uat-day-<reservation>-<run_id>), which it sets
+      # itself, so it tears down exactly the cluster this up-run created.
       - name: Re-authenticate to Azure for teardown
         if: >-
           always() && (
             (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
-            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped') ||
+            (inputs.lifecycle == 'daytime-up' && (failure() || cancelled()) && steps.infra.outcome != 'skipped')
           )
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
         with:
@@ -958,7 +967,8 @@ jobs:
         if: >-
           always() && (
             (inputs.lifecycle == 'daytime-down' && env.DAYTIME_FOUND == 'true') ||
-            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped') ||
+            (inputs.lifecycle == 'daytime-up' && (failure() || cancelled()) && steps.infra.outcome != 'skipped')
           )
         shell: bash
         run: |
