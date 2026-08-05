@@ -454,11 +454,43 @@ jobs:
         if: inputs.lifecycle != 'daytime-down'
         run: |
           set -euo pipefail
-          /usr/bin/docker run \
-            -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
-            -e AUTO_APPROVE=true \
-            -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
-            ${{ env.GKE_ACTUATOR_IMAGE }} apply
+          # Retry the actuator apply once on a transient provisioning failure.
+          # The GKE actuator hardcodes a 30m node-pool create timeout
+          # (terraform/compute.tf), but a slow GPU pool can take ~35m; Terraform
+          # then fails the create even though GKE finishes and reports the pool
+          # RUNNING moments later (observed on run 30965268896, #2065). On a
+          # nightly run that false failure is recoverable (Destroy still runs),
+          # but on daytime-up / skip_delete runs it strands a healthy cluster and
+          # its whole VPC network group, leaking the GPU node and NETWORKS quota.
+          # `terraform apply` is idempotent: a second attempt refreshes state,
+          # waits out the still-completing (or already-healthy) pool, and
+          # converges. Bounded to 2 attempts so a genuinely-stuck provision still
+          # fails fast and surfaces. The durable fix is an upstream node-pool
+          # timeout bump 30m->60m (mirroring the AKS actuator's
+          # mchmarny/cluster#31) — tracked in #2065.
+          brought_up=false
+          for attempt in 1 2; do
+            echo "Bringup attempt ${attempt}..."
+            if /usr/bin/docker run \
+              -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
+              -e AUTO_APPROVE=true \
+              -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
+              ${{ env.GKE_ACTUATOR_IMAGE }} apply; then
+              brought_up=true
+              break
+            fi
+            if [ "${attempt}" -lt 2 ]; then
+              echo "Bringup attempt ${attempt} failed; retrying in 60s (a transient node-pool state often self-heals, and apply is idempotent)..."
+              sleep 60
+            fi
+          done
+          # Fail the step if every attempt failed: `docker run` in an `if` does
+          # not trip `set -e`, so without this guard a real bringup failure would
+          # exit 0 and the run would proceed against a cluster that never came up.
+          if [ "$brought_up" != true ]; then
+            echo "::error::Bringup failed after 2 attempts"
+            exit 1
+          fi
 
       # Connect
       - name: Install GKE auth plugin
