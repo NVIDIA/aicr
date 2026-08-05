@@ -101,14 +101,20 @@ jobs:
     # fails late, second converges quickly) lands ~285m; a worst-case second
     # apply near 60m reaches ~353m.
     #
-    # 380 covers that ~353m worst case with ~27m of teardown headroom.
-    # Overrunning does not merely fail the run: it cancels the always() Destroy
-    # Cluster step and leaks the GPU node and its VPC network group, exactly what
-    # #2066/#2067 exist to protect. Sizing for a single attempt would let a
-    # *successful* late retry trip that. Do not reduce this cap without
-    # recomputing the whole budget above; the stated ~353m worst case and this
-    # timeout-minutes value must stay in lockstep.
-    timeout-minutes: 380
+    # GitHub-hosted runners (ubuntu-latest) hard-cap a job at 360m of execution
+    # (6h); a larger timeout-minutes is silently clamped to 360, so 360 is the
+    # ceiling here and covers the ~353m worst case with only ~7m of margin. That
+    # margin is thin by design: the second ~60m provisioning attempt pushes the
+    # worst case close to the platform cap, so if the budget above grows the lever
+    # is trimming worst-case work (or moving off the capped runner), NOT raising
+    # this number past 360 — a higher value would not take effect anyway.
+    # Overrunning does not merely fail the run: a job-level timeout (or the 360m
+    # platform cap) cancels the always() Destroy Cluster step and leaks the GPU
+    # node and its VPC network group, exactly what #2066/#2067 exist to protect.
+    # Sizing for a single attempt would let a *successful* late retry trip that.
+    # Do not change this cap without recomputing the whole budget above; the
+    # stated ~353m worst case and this timeout-minutes value must stay in lockstep.
+    timeout-minutes: 360
     permissions:
       contents: read
       actions: read
