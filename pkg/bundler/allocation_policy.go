@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -34,10 +35,20 @@ import (
 // filterEnabledComponents) changes the allocation policy exactly like the
 // nested keys. gpu-operator-ocp is the OpenShift advertiser (policy
 // resolution reads its devicePlugin.enabled the same way).
-var gpuAllocationPolicyPaths = map[string][]string{
-	"nvidia-dra-driver-gpu": {"resources.gpus.enabled", "gpuResourcesEnabledOverride", config.ComponentEnabledKey},
-	"gpu-operator":          {"devicePlugin.enabled", config.ComponentEnabledKey},
-	"gpu-operator-ocp":      {"devicePlugin.enabled", config.ComponentEnabledKey},
+var gpuAllocationPolicyPaths = buildGPUAllocationPolicyPaths()
+
+// buildGPUAllocationPolicyPaths derives the enforcement map from the
+// canonical descriptor (pkg/allocpolicy) so this surface cannot drift from
+// the profile closure or the validation-time resolver. The component-level
+// enabled toggle is appended per entry: it is a bundle-time enforcement
+// concern (filterEnabledComponents honors it), not a descriptor selector
+// path.
+func buildGPUAllocationPolicyPaths() map[string][]string {
+	out := make(map[string][]string)
+	for _, entry := range allocpolicy.Descriptor() {
+		out[entry.Component] = append(append([]string(nil), entry.SelectorPaths...), config.ComponentEnabledKey)
+	}
+	return out
 }
 
 // enforceAllocationPolicyOverrides applies the #1327 bundle-time override

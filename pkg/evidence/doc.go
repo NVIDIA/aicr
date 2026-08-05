@@ -21,7 +21,7 @@
 //     conformance program).
 //   - attestation — recipe-test attestation pipeline (signed in-toto
 //     Statement plus supporting bundle).
-//   - verifier — offline verification for recipe-evidence v1 bundles
+//   - verifier — offline verification for recipe-evidence bundles
 //     produced by `aicr validate --emit-attestation`.
 //
 // This file exists only to give the umbrella package a package-level

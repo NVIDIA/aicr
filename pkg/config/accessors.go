@@ -49,6 +49,16 @@ func (c *AICRConfig) Validation() *ValidateSpec {
 	return c.Spec.Validate
 }
 
+// Verification returns the verify section, or nil if cfg or the section is
+// unset. Named Verification (not Verify) for symmetry with Validation, which
+// avoids colliding with (*AICRConfig).Validate.
+func (c *AICRConfig) Verification() *VerifySpec {
+	if c == nil {
+		return nil
+	}
+	return c.Spec.Verify
+}
+
 // Snapshot returns the snapshot section, or nil if cfg or the section is unset.
 func (c *AICRConfig) Snapshot() *SnapshotSpec {
 	if c == nil {

@@ -496,7 +496,12 @@ directions fail closed on a truncated node list (a snapshot captured with
 `--max-nodes-per-entry` whose cap actually truncated a participating
 reading), on an empty GPU-node universe, and on malformed or ambiguous
 label readings (an encoding collision between a disambiguated entry and a
-distinct dotted label name — see #2003). Declare it under
+distinct dotted label name — see #2003). It is consumed by the GKE
+`gpuStack` profile values (the positive form qualifies `operator-managed`, the
+negated form `gcp-managed`), where each selected value's constraint is
+verified at generation when generating from a snapshot (criteria-only
+generation has no snapshot evaluator and defers entirely to the
+pre-flight) and re-evaluated by the validate readiness pre-flight. Outside a profile declaration, declare it under
 `validation.readiness.constraints`, not `spec.constraints` — as a top-level
 constraint it would exclude the overlay during snapshot-based generation on
 the very cluster the diagnostic exists to fix.
@@ -515,7 +520,9 @@ is then checked against the reading — `azure-managed` requires `Install`,
 `--profile gpuStack=operator-managed` therefore fails closed on the azure-managed
 default rather than silently switching values. Unavailable, unknown, or
 mixed pool values fail closed against either selection. ADR-015 resolves
-this signal, and the AKS family above is the first embedded adopter.
+this signal. The AKS family above was the first embedded adopter; the GKE
+family's `gpuStack` (device-plugin ownership over the #1755 node-set form,
+with `advertiser: external` on `gcp-managed`) is the second.
 
 No equivalent reading exists for other services yet. Declare a
 driver-ownership profile only once the signal for that service exists, and
@@ -562,8 +569,11 @@ Profile declarations are intentionally narrow:
   for later validation. This qualification rule is enforced during catalog
   review; core admission does not infer whether arbitrary readings
   semantically distinguish two modes.
-- The GKE-only `advertiser` and allocation-policy selector paths are reserved
-  but rejected until the GKE extension lands.
+- A profile value may declare `advertiser: external` (the GKE `gcp-managed`
+  shape) to record a provider-managed plugin outside the recipe as THE
+  `nvidia.com/gpu` advertiser; the vocabulary is closed (empty or
+  `external`), and the declaration extends the #1327 dual-advertisement
+  gates and closure-locks the allocation-policy selector paths.
 
 Select with `aicr recipe --profile name=value`; omission uses the declared
 default. A profiled result uses `aicr.run/v1alpha3` and records

@@ -46,26 +46,39 @@ aicr validate \
 cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
 ```
 
-**Profiled families (the AKS `gpuStack` recipes)** need two adjustments,
-because validating the raw overlay resolves only the declaration default
-and `aicr validate` has no `--profile` flag:
+**Profiled families (the AKS and GKE `gpuStack` recipes)** need two
+adjustments, because validating the raw overlay resolves only the
+declaration default and `aicr validate` has no `--profile` flag:
 
 ```shell
+# AKS only: capture the pool projection first.
 az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json
 aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
+# GKE: a plain `aicr snapshot -o snapshot.yaml` suffices.
 aicr recipe -s snapshot.yaml \
   --intent <training|inference> \
-  --platform <kubeflow|dynamo|slurm> \
   --profile gpuStack=<value> \
   -o recipe.yaml
+# Add --platform <kubeflow|dynamo|slurm> ONLY when the target leaf's
+# criteria pin one (e.g. h100-gke-cos-training is platformless — no flag).
 aicr validate -r recipe.yaml -s snapshot.yaml ... # rest as above
 ```
 
-Capture the snapshot with the pool projection (resolution fails closed
-without the `K8s.aks-gpu-pools.gpu-driver` reading), then hydrate the
-recipe with the target leaf's criteria AND the selection recorded in the
-pointer you are refreshing (its `profile:` field), and validate that
-recipe — this is the only way to regenerate `operator-managed` evidence.
+On AKS, capture the snapshot with the pool projection (resolution fails
+closed without the `K8s.aks-gpu-pools.gpu-driver` reading); on GKE the
+plain snapshot already carries the node labels the profile constraints
+read. Then hydrate the recipe with the target leaf's criteria AND the
+profile selection, and validate that recipe. A v2 pointer records its
+selection in a `profile:` field — replay it verbatim. Legacy v1 pointers
+(`schemaVersion: 1.0.0`, e.g. the pre-profile `h100-gke-cos-training`
+pointers) predate profiles and carry no such field: converting one to
+profiled evidence selects the value from the **target cluster** — the
+profile the refreshed evidence is meant to attest — not from anything in
+the legacy pointer. This hydrated-recipe path is the only way to regenerate
+`operator-managed` evidence (on GKE, validating the raw overlay selects
+the `gcp-managed` default, whose
+`!gke-no-default-nvidia-gpu-device-plugin` constraint fails against an
+operator-managed cluster's labeled pools).
 State `--intent` (and `--platform` when the leaf pins one — omit it
 otherwise) explicitly: the snapshot fingerprint supplies service,
 accelerator, and OS, but intent and platform are author-selected and
@@ -206,9 +219,10 @@ hotspot), you can run the signing leg there instead of in Actions:
 ```shell
 # On VPN, where the cluster is: produce an unsigned bundle.
 aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml --emit-attestation ./out
-# Profiled families (AKS gpuStack): validate the hydrated recipe instead,
-# built from an --aks-gpu-pools snapshot with the target leaf's criteria
-# and the pointer's recorded --profile selection (see above):
+# Profiled families (AKS/GKE gpuStack): validate the hydrated recipe
+# instead, built from an --aks-gpu-pools snapshot (AKS; a plain snapshot
+# on GKE) with the target leaf's criteria and the pointer's recorded
+# --profile selection (see above):
 #   aicr recipe -s snapshot.yaml --intent <intent> [--platform <platform>] \
 #     --profile gpuStack=<value> -o recipe.yaml
 #   aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out

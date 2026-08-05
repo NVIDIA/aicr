@@ -179,13 +179,9 @@ func (r *VerifyResult) CheckPolicy(p Policy) (string, error) {
 		if r.ToolVersion == "" {
 			return "tool version not available in attestation (bundle may be unattested)", nil
 		}
-		expr := strings.TrimSpace(p.VersionConstraint)
-		if !hasOperatorPrefix(expr) {
-			expr = ">= " + expr
-		}
-		constraint, err := constraints.ParseConstraintExpression(expr)
+		constraint, err := ParseVersionConstraint(p.VersionConstraint)
 		if err != nil {
-			return "", errors.Wrap(errors.ErrCodeInvalidRequest, "invalid tool version constraint", err)
+			return "", err
 		}
 		passed, err := constraint.Evaluate(r.ToolVersion)
 		if err != nil {
@@ -223,6 +219,35 @@ func (r *VerifyResult) MaxAchievableTrustLevel() TrustLevel {
 		return TrustAttested
 	}
 	return TrustVerified
+}
+
+// ParseVersionConstraint parses a CLI-version constraint expression using the
+// same grammar CheckPolicy enforces at verify time, applying the bare-version
+// default (e.g. "0.8.0" means ">= 0.8.0").
+//
+// Exported so configuration layers can reject a malformed constraint when the
+// document is loaded rather than after a full verification run. Sharing the
+// parser is what keeps the two entry points from drifting: a value that parses
+// at load time is guaranteed to parse when Policy is evaluated.
+//
+// Note the check is operator-level only. The underlying parser splits off a
+// leading comparison operator and rejects an empty remainder, but does not
+// verify that the remainder is version-shaped, so ">= not-a-version" parses
+// here and fails later at Evaluate.
+func ParseVersionConstraint(expr string) (*constraints.ParsedConstraint, error) {
+	expr = strings.TrimSpace(expr)
+	// A leading "!" is never a bare version. The shared parser rejects a bare
+	// "!" prefix outright (it means the user wanted "!=" or the node-set
+	// form), so prepending ">=" here would hide invalid syntax from that
+	// check and let it through as ">= !1.2.3".
+	if !hasOperatorPrefix(expr) && !strings.HasPrefix(expr, "!") {
+		expr = ">= " + expr
+	}
+	constraint, err := constraints.ParseConstraintExpression(expr)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid tool version constraint", err)
+	}
+	return constraint, nil
 }
 
 // hasOperatorPrefix returns true if the expression starts with a comparison operator.

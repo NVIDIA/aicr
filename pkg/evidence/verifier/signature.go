@@ -245,9 +245,8 @@ func parseStatement(stmtBytes []byte) (subjectHex string, predicate *attestation
 	if subjectHex == "" {
 		return "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement subject has no sha256 digest")
 	}
-	if stmt.PredicateType != attestation.PredicateTypeV1 {
-		return "", nil, errors.New(errors.ErrCodeInvalidRequest,
-			"unexpected predicateType "+stmt.PredicateType)
+	if cErr := attestation.ValidatePredicateTypeCoherence(stmt.PredicateType, &stmt.Predicate); cErr != nil {
+		return "", nil, cErr
 	}
 	return subjectHex, &stmt.Predicate, nil
 }

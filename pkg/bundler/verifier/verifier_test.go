@@ -1607,3 +1607,15 @@ func TestVerifyBinaryStep_PropagatesTimeout(t *testing.T) {
 		t.Errorf("TrustLevel = %s, want unset for propagated timeout", result.TrustLevel)
 	}
 }
+
+// TestValidateIdentityPattern_RejectsUncompilablePattern covers a pattern that
+// carries the required repository anchor (so the substring check passes) but is
+// not a valid regexp. Callers validate up-front precisely so a bad pattern is
+// reported against its own input rather than surfacing later from the identity
+// matcher, so the compile has to happen here.
+func TestValidateIdentityPattern_RejectsUncompilablePattern(t *testing.T) {
+	err := ValidateIdentityPattern("https://github.com/NVIDIA/aicr/[")
+	if err == nil {
+		t.Fatal("ValidateIdentityPattern() error = nil, want rejection of an uncompilable pattern")
+	}
+}

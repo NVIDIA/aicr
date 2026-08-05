@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -491,6 +492,93 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 				InsecureTLS: boolPtrOrFalse(a.InsecureTLS),
 			}
 		}
+	}
+
+	return out, nil
+}
+
+// VerifyResolved is the typed-domain projection of VerifySpec produced by
+// (*VerifySpec).Resolve. Field names mirror the verifier structs the CLI
+// hands them to (verifier.Policy and verifier.VerifyOptions) rather than the
+// wire path, so the CLI can layer flag overrides and pass them straight
+// through.
+//
+// Zero values mean "config did not set this field," letting each CLI flag's
+// own default flow through — notably MinTrustLevel, whose flag defaults to
+// "max".
+type VerifyResolved struct {
+	// MinTrustLevel is spec.verify.policy.minTrustLevel.
+	MinTrustLevel string
+
+	// RequireCreator is spec.verify.policy.requireCreator.
+	RequireCreator string
+
+	// VersionConstraint is spec.verify.policy.cliVersionConstraint.
+	VersionConstraint string
+
+	// CertificateIdentityRegexp is
+	// spec.verify.trust.certificateIdentityRegexp.
+	CertificateIdentityRegexp string
+
+	// Key is spec.verify.trust.key.
+	Key string
+
+	// TrustRoot is spec.verify.trust.trustRoot.
+	TrustRoot string
+}
+
+// minTrustLevelMax is the meta-value accepted by --min-trust-level (and
+// spec.verify.policy.minTrustLevel) that auto-detects the highest trust level
+// achievable for the bundle. It is not a real level, so
+// verifier.ParseTrustLevel rejects it and it must be special-cased here.
+const minTrustLevelMax = "max"
+
+// Resolve converts a VerifySpec from the wire form to a typed
+// VerifyResolved. It is nil-receiver tolerant and never returns a nil
+// pointer — callers reach into fields, so nil would just relocate the
+// nil-pointer dereference.
+//
+// Every value that has a parser is validated here against the same parser
+// `aicr verify` uses at verification time, so a typo in a committed config
+// fails at load with spec-path attribution instead of after a full
+// verification run. Key and TrustRoot are passed through unvalidated: they
+// are references whose resolution (KMS reachability, file contents) belongs
+// to the verifier, which reports far better errors than a syntactic check
+// here could.
+func (v *VerifySpec) Resolve() (*VerifyResolved, error) {
+	out := &VerifyResolved{}
+	if v == nil {
+		return out, nil
+	}
+
+	if v.Policy != nil {
+		if v.Policy.MinTrustLevel != "" && v.Policy.MinTrustLevel != minTrustLevelMax {
+			if _, err := verifier.ParseTrustLevel(v.Policy.MinTrustLevel); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					"invalid spec.verify.policy.minTrustLevel", err)
+			}
+		}
+		if v.Policy.CLIVersionConstraint != "" {
+			if _, err := verifier.ParseVersionConstraint(v.Policy.CLIVersionConstraint); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					"invalid spec.verify.policy.cliVersionConstraint", err)
+			}
+		}
+		out.MinTrustLevel = v.Policy.MinTrustLevel
+		out.RequireCreator = v.Policy.RequireCreator
+		out.VersionConstraint = v.Policy.CLIVersionConstraint
+	}
+
+	if v.Trust != nil {
+		if v.Trust.CertificateIdentityRegexp != "" {
+			if err := verifier.ValidateIdentityPattern(v.Trust.CertificateIdentityRegexp); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					"invalid spec.verify.trust.certificateIdentityRegexp", err)
+			}
+		}
+		out.CertificateIdentityRegexp = v.Trust.CertificateIdentityRegexp
+		out.Key = v.Trust.Key
+		out.TrustRoot = v.Trust.TrustRoot
 	}
 
 	return out, nil

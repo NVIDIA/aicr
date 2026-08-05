@@ -18,7 +18,11 @@
 # --os cos --platform kubeflow` produces a valid recipe with correct criteria,
 # kubeflow-specific components, and standard GPU stack components.
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1alpha3
+metadata:
+  selectedProfile:
+    name: gpuStack
+    value: gcp-managed
 criteria:
   service: gke
   accelerator: h100
@@ -28,6 +32,8 @@ criteria:
 constraints:
   - name: K8s.server.version
     value: '>= 1.32'
+  - name: NodeTopology.gpu-nodes.label
+    value: '!gke-no-default-nvidia-gpu-device-plugin'
 componentRefs: ## alphabetically sorted
   - name: cert-manager
   - name: gke-nccl-tcpxo

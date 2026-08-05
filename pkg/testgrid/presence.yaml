@@ -39,12 +39,10 @@
 # the merge gate, so a presence-only edit would otherwise leave the doc stale
 # until the weekly refresh PR picks it up).
 coordinates:
-  # AKS entries removed with the gpuStack profile adoption: profiled runs
-  # land on "-gpustack-<value>"-suffixed dashboard routes, and the health
-  # generator is criteria-only today — its AKS cells stay an honest
-  # `pending` until profile-aware health links land (re-add the suffixed
-  # paths together with that change).
+  # AKS and GKE entries removed with the gpuStack profile adoption:
+  # profiled runs land on "-gpustack-<value>"-suffixed dashboard routes,
+  # and the health generator is criteria-only today — their cells stay an
+  # honest `pending` until profile-aware health links land (re-add the
+  # suffixed paths together with that change).
   - eks/h100-ubuntu/inference-dynamo
   - eks/h100-ubuntu/training-kubeflow
-  - gke/h100-cos/inference-dynamo
-  - gke/h100-cos/training-kubeflow

@@ -23,8 +23,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// Signer signs the in-toto Statement carrying the v1 recipe-evidence
-// predicate. statementJSON is the unsigned bytes from BuildStatement; the
+// Signer signs the in-toto Statement carrying the recipe-evidence
+// predicate (v1 for unprofiled recipes, v2 for profiled ones).
+// statementJSON is the unsigned bytes from BuildStatement; the
 // signer DSSE-wraps it and produces a Sigstore bundle.
 //
 // The keyless implementation lives in pkg/bundler/attestation as

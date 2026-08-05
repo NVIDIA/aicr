@@ -49,8 +49,12 @@ Top-level `constraints` — and any declared under
 gate** before phase checks run; other phases' `constraints` are
 evaluated against each container check's reported metrics. Readiness
 placement matters for gates that must not participate in
-generation-time overlay filtering (e.g. the GKE device-plugin
-ownership check, issue #1755).
+generation-time overlay filtering. (No shipped overlay currently
+declares one: the GKE device-plugin ownership check, issue #1755,
+briefly lived here before moving into the GKE `gpuStack` profile's
+per-value constraints, which are verified at snapshot-based generation
+(criteria-only generation has no snapshot evaluator and defers entirely
+to the pre-flight) AND re-evaluated by the same readiness pre-flight.)
 
 **Supported operators** (`pkg/constraints/constraint.go`):
 

@@ -573,14 +573,29 @@ func TestWritePointer_WritesValidYAML(t *testing.T) {
 
 func TestBuildPointer_RecordsProfile(t *testing.T) {
 	newBundle := func(profile string) *Bundle {
-		return &Bundle{
+		pred := &Predicate{
+			SchemaVersion: PredicateSchemaVersion,
+			AttestedAt:    time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+		}
+		// A profiled bundle must carry a coherent v2 predicate profile
+		// block — BuildPointer rejects the mismatch via
+		// ValidateBundleProfileCoherence (matrix in
+		// TestValidateBundleProfileCoherence, publish_test.go).
+		if profile != "" {
+			pred.Profile = &ProfilePredicate{
+				Selection:                profile,
+				PolicyDescriptorIdentity: "d0c",
+			}
+		}
+		bundle := &Bundle{
 			RecipeName: "h100-aks-ubuntu-training-gpustack-operator-managed",
 			Profile:    profile,
-			Predicate: &Predicate{
-				SchemaVersion: PredicateSchemaVersion,
-				AttestedAt:    time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
-			},
+			Predicate:  pred,
 		}
+		if pred.Profile != nil {
+			bundle.PolicyDescriptorIdentity = pred.Profile.PolicyDescriptorIdentity
+		}
+		return bundle
 	}
 
 	t.Run("profiled bundle records exact selection", func(t *testing.T) {

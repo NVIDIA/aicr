@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,17 +49,23 @@ type PointerInputs struct {
 
 // BuildPointer assembles the pointer YAML schema 1.0 from a built bundle
 // plus optional post-push/sign claims. Empty BundleOCI/BundleHash signal
-// "not yet published".
+// "not yet published". The bundle's recipe-derived profile selection and
+// its predicate profile block must cohere — the pointer derives its
+// predicateType from the predicate but copies its profile from the recipe,
+// so an incoherent bundle would emit a pointer the verifier itself rejects.
 func BuildPointer(in PointerInputs) (*Pointer, error) {
 	if in.Bundle == nil || in.Bundle.Predicate == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "bundle and predicate are required")
+	}
+	if err := ValidateBundleProfileCoherence(in.Bundle); err != nil {
+		return nil, err
 	}
 
 	att := PointerAttestation{
 		Bundle: PointerBundle{
 			OCI:           in.BundleOCI,
 			Digest:        in.BundleHash,
-			PredicateType: PredicateTypeV1,
+			PredicateType: StatementPredicateType(in.Bundle.Predicate),
 		},
 		Signer:     in.Signer,
 		AttestedAt: in.Bundle.Predicate.AttestedAt.UTC().Truncate(time.Second),
@@ -70,6 +77,70 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 		Profile:       in.Bundle.Profile,
 		Attestations:  []PointerAttestation{att},
 	}, nil
+}
+
+// ValidateBundleProfileCoherence rejects (ErrCodeInvalidRequest) a bundle
+// whose recipe-derived profile selection and predicate profile block
+// disagree: a profiled recipe requires a v2 predicate carrying the same
+// name=value selection, the same declared advertiser, AND the same
+// recipe-scoped policy-descriptor identity; an unprofiled recipe requires
+// no profile block.
+// BuildPointer runs it before assembling a pointer, and Publish runs it at
+// bundle load — BEFORE the Fulcio/Rekor sign and the OCI push — so an
+// incoherent on-disk bundle (e.g. a profiled recipe.yaml paired with a v1
+// statement) fails closed without registry side effects instead of emitting
+// a pointer its own verifier rejects.
+func ValidateBundleProfileCoherence(b *Bundle) error {
+	if b == nil || b.Predicate == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "bundle and predicate are required")
+	}
+	// The predicate itself must satisfy the shared type contract before the
+	// bundle-vs-predicate comparison: a profile block missing selection or
+	// policyDescriptorIdentity would otherwise slip through the equality
+	// cases below (both sides empty) and emit a v2 pointer every consumer
+	// rejects. In-repo constructors never build that shape — IdentityFor is
+	// a sha256 digest, so a profiled bundle's identity is never empty — but
+	// this is an exported entry point.
+	if err := ValidatePredicateTypeCoherence(StatementPredicateType(b.Predicate), b.Predicate); err != nil {
+		return err
+	}
+	switch {
+	case b.Profile == "" && b.Predicate.Profile != nil:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"bundle recipe is unprofiled but the predicate carries a profile block ("+
+				b.Predicate.Profile.Selection+") — the statement does not attest this recipe")
+	case b.Profile != "" && b.Predicate.Profile == nil:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"bundle recipe carries profile selection "+b.Profile+
+				" but the predicate has no profile block — profiled evidence requires "+
+				PredicateTypeV2+"; re-emit the bundle")
+	case b.Profile != "" && b.Predicate.Profile.Selection != b.Profile:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"bundle recipe profile selection "+b.Profile+
+				" does not match the predicate profile selection "+b.Predicate.Profile.Selection)
+	case b.Profile != "" && b.Predicate.Profile.Advertiser != b.Advertiser:
+		// The verifier compares the full profile tuple
+		// (pkg/evidence/verifier/identity.go), so an advertiser mismatch
+		// must fail here too — otherwise a matching selection would sign
+		// and push a bundle whose pointer the verifier rejects.
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"bundle recipe advertiser "+strconv.Quote(b.Advertiser)+
+				" does not match the predicate profile advertiser "+
+				strconv.Quote(b.Predicate.Profile.Advertiser))
+	case b.Profile != "" && b.Predicate.Profile.PolicyDescriptorIdentity != b.PolicyDescriptorIdentity:
+		// The verifier also recomputes the recipe-scoped policy-descriptor
+		// identity and rejects a mismatch as historical-only (ADR-015
+		// descriptor-currentness), so the split-leg publish must fail here
+		// too — otherwise a bundle emitted before a descriptor expansion
+		// would spend a Fulcio cert, a Rekor entry, and an OCI push on
+		// evidence its own verifier then rejects.
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"predicate policy-descriptor identity "+b.Predicate.Profile.PolicyDescriptorIdentity+
+				" does not match the recipe-scoped identity recomputed from the bundle recipe ("+
+				b.PolicyDescriptorIdentity+") — the evidence is historical-only; regenerate and re-sign it "+
+				"(ADR-015 descriptor-currentness)")
+	}
+	return nil
 }
 
 // MarshalPointer renders a pointer as deterministic YAML (recursively

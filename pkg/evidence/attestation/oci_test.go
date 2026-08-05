@@ -352,3 +352,23 @@ func assertEvidenceDirectoryEmpty(t *testing.T, path string) {
 		t.Fatalf("directory %q has residue: %v", path, entries)
 	}
 }
+
+func TestEvidenceImageDescription(t *testing.T) {
+	tests := []struct {
+		name          string
+		predicateType string
+		want          string
+	}{
+		{"empty falls back to unqualified", "", "Signed evidence bundle for an aicr recipe."},
+		{"v1 predicate", PredicateTypeV1, "Signed evidence bundle for an aicr recipe (recipe-evidence/v1)."},
+		{"v2 predicate", PredicateTypeV2, "Signed evidence bundle for an aicr recipe (recipe-evidence/v2)."},
+		{"foreign URI kept verbatim", "https://example.com/other/v9", "Signed evidence bundle for an aicr recipe (https://example.com/other/v9)."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := evidenceImageDescription(tt.predicateType); got != tt.want {
+				t.Errorf("evidenceImageDescription(%q) = %q, want %q", tt.predicateType, got, tt.want)
+			}
+		})
+	}
+}

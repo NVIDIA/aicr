@@ -55,6 +55,48 @@ func TestBuildPredicate_CarriesRedaction(t *testing.T) {
 	}
 }
 
+func TestBuildPredicate_CarriesProfile(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile *ProfilePredicate
+	}{
+		{
+			name: "profiled input propagates the profile block",
+			profile: &ProfilePredicate{
+				Selection:                "gpuStack=gcp-managed",
+				Advertiser:               "external",
+				PolicyDescriptorIdentity: "abc123",
+			},
+		},
+		{
+			// Unprofiled input stays unprofiled — the v1/v2
+			// predicate-type split keys off this nil.
+			name:    "unprofiled input stays nil",
+			profile: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := BuildPredicate(PredicateInputs{Profile: tt.profile})
+			if tt.profile == nil {
+				if p.Profile != nil {
+					t.Fatalf("expected nil Profile for unprofiled input, got %+v", p.Profile)
+				}
+				return
+			}
+			if p.Profile == nil {
+				t.Fatalf("expected Profile to be set")
+			}
+			if p.Profile.Selection != tt.profile.Selection ||
+				p.Profile.Advertiser != tt.profile.Advertiser ||
+				p.Profile.PolicyDescriptorIdentity != tt.profile.PolicyDescriptorIdentity {
+
+				t.Errorf("profile block not propagated: %+v", p.Profile)
+			}
+		})
+	}
+}
+
 func TestBuildPredicate_RedactionOmittedWhenNil(t *testing.T) {
 	p := BuildPredicate(PredicateInputs{})
 	if p.Redaction != nil {
@@ -230,6 +272,67 @@ func TestBuildArtifactStatement_RejectsBadInputs(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantContains) {
 				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantContains)
+			}
+		})
+	}
+}
+
+// TestStatementPredicateTypeSelection pins the v1/v2 statement split: a
+// profile-bearing predicate upgrades the statement to PredicateTypeV2;
+// unprofiled predicates stay on v1 byte-identically (ADR-015
+// descriptor-currentness cut-over).
+func TestStatementPredicateTypeSelection(t *testing.T) {
+	if got := StatementPredicateType(&Predicate{}); got != PredicateTypeV1 {
+		t.Errorf("unprofiled type = %q, want %q", got, PredicateTypeV1)
+	}
+	profiled := &Predicate{Profile: &ProfilePredicate{
+		Selection: "gpuStack=gcp-managed", PolicyDescriptorIdentity: "abc",
+	}}
+	if got := StatementPredicateType(profiled); got != PredicateTypeV2 {
+		t.Errorf("profiled type = %q, want %q", got, PredicateTypeV2)
+	}
+}
+
+// TestValidatePredicateTypeCoherence pins the bidirectional type contract
+// every evidence consumer shares.
+func TestValidatePredicateTypeCoherence(t *testing.T) {
+	profile := &ProfilePredicate{
+		Selection: "gpuStack=operator-managed", PolicyDescriptorIdentity: "abc",
+	}
+	tests := []struct {
+		name          string
+		predicateType string
+		pred          *Predicate
+		wantErr       string
+	}{
+		{"v1 unprofiled ok", PredicateTypeV1, &Predicate{}, ""},
+		{"v2 profiled ok", PredicateTypeV2, &Predicate{Profile: profile}, ""},
+		{"v1 with profile block rejected", PredicateTypeV1, &Predicate{Profile: profile}, "cannot carry a profile block"},
+		{"v2 without profile block rejected", PredicateTypeV2, &Predicate{}, "requires the predicate profile block"},
+		{"v2 with empty identity rejected", PredicateTypeV2,
+			&Predicate{Profile: &ProfilePredicate{Selection: "gpuStack=operator-managed"}},
+			"policyDescriptorIdentity"},
+		{"v2 with empty selection rejected", PredicateTypeV2,
+			&Predicate{Profile: &ProfilePredicate{PolicyDescriptorIdentity: "abc"}},
+			"selection"},
+		{"v2 with malformed selection rejected", PredicateTypeV2,
+			&Predicate{Profile: &ProfilePredicate{
+				Selection: "gpuStack", PolicyDescriptorIdentity: "abc",
+			}},
+			"malformed selection"},
+		{"unknown type rejected", "https://aicr.run/recipe-evidence/v9", &Predicate{}, "unexpected predicateType"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePredicateTypeCoherence(tt.predicateType, tt.pred)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
 	}

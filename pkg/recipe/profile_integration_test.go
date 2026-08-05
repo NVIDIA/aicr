@@ -112,7 +112,7 @@ func TestProfileResolutionEndToEnd(t *testing.T) {
 					selected.Name, selected.Value, tt.wantValue)
 			}
 			if selected.Advertiser != "" {
-				t.Fatalf("advertiser = %q, want empty (reserved)", selected.Advertiser)
+				t.Fatalf("advertiser = %q, want empty (this fixture declares none)", selected.Advertiser)
 			}
 
 			// ownedPaths is the union across every value of the declaration,

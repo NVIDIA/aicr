@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -322,6 +323,25 @@ func TestClassifyConstraintsWellformed(t *testing.T) {
 			"all well-formed constraints pass",
 			result(constraint("K8s.server.version", ">= 1.32.4"), constraint("OS.release.name", "ubuntu")),
 			StatusPass, "",
+		},
+		{
+			// The node-set form (#1755) has its own grammar; the negated
+			// "!key" value is valid there but rejected by the scalar
+			// parser — grading must mirror constraints.Evaluate's dispatch
+			// (the GKE gpuStack gcp-managed default declares this form).
+			"node-set negated form passes",
+			result(constraint(constraints.GPUNodesLabelConstraintName, "!gke-no-default-nvidia-gpu-device-plugin")),
+			StatusPass, "",
+		},
+		{
+			"node-set positive form passes",
+			result(constraint(constraints.GPUNodesLabelConstraintName, "gke-no-default-nvidia-gpu-device-plugin=true")),
+			StatusPass, "",
+		},
+		{
+			"node-set malformed value fails",
+			result(constraint(constraints.GPUNodesLabelConstraintName, ">= 1.0")),
+			StatusFail, "malformed value",
 		},
 		{
 			"malformed path (too few segments) fails",

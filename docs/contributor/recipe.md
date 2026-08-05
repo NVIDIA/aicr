@@ -206,12 +206,26 @@ configuration ownership modes. A declaration requires recipe apiVersion
 the legacy version, is rejected. Profile-version metadata and recipe
 artifacts are strictly decoded so an unknown field cannot silently disappear.
 
-The core `ProfileValue` contract is closed to `constraints` and
-`componentRefs{name,overrides}`. It rejects `valuesFile`, component
+The core `ProfileValue` contract is closed to `advertiser`, `constraints`,
+and `componentRefs{name,overrides}`. It rejects `valuesFile`, component
 identity/deployment fields, root `overrides.enabled`, literal dotted keys,
-nested empty maps, and allocation-policy selector paths. The `advertiser`
-wire field is reserved for the later GKE extension and is rejected by the
-core validator. Value-bearing ownership is limited to Helm components;
+and nested empty maps. The `advertiser` field accepts exactly one non-empty
+value, `external` (validated against `pkg/allocpolicy`, the canonical
+append-only #1327 descriptor). A profile that owns advertisement — a
+declared `advertiser: external`, or explicit ownership of a non-synthetic
+policy-selector path (`devicePlugin.enabled`, DRA `resources.gpus.enabled`
+/ `gpuResourcesEnabledOverride`)
+— triggers the recomputed policy closure: every enabled descriptor
+component's selector paths plus its synthetic `enabled` join the
+**effective lock set** (`RecipeResult.EffectiveLockSet()`), which the
+bundle/mirror lock, the argocd-helm guard, and the hydrating gate all
+consume. The closure is recomputed at every artifact boundary and never
+persisted in `ownedPaths`. The hydrating gate additionally runs the shared
+tuple-coherence rules (external + `devicePlugin.enabled=true` and external
++ DRA `gpus.enabled=true` both reject). Profiles that do not own
+advertisement (the AKS shape) trigger no closure and leave
+allocation-policy keys on the bundle-time WARN semantics.
+Value-bearing ownership is limited to Helm components;
 Kustomize components do not consume values overrides and support only a
 valueless reference for presence locking.
 

@@ -243,3 +243,63 @@ func TestGetTrustLevels(t *testing.T) {
 		}
 	}
 }
+
+// TestParseVersionConstraint covers the grammar shared by the CLI flag and
+// spec.verify.policy.cliVersionConstraint. The bare-version default is the
+// behavior worth pinning: "0.8.0" must mean ">= 0.8.0", not "== 0.8.0".
+func TestParseVersionConstraint(t *testing.T) {
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+		// satisfied is a version the parsed constraint must accept.
+		satisfied string
+		// rejected is a version the parsed constraint must refuse.
+		rejected string
+	}{
+		{name: "bare version defaults to >=", expr: "0.8.0", satisfied: "0.9.0", rejected: "0.7.0"},
+		{name: "explicit >=", expr: ">= 0.8.0", satisfied: "0.8.0", rejected: "0.7.9"},
+		{name: "explicit ==", expr: "== 0.8.0", satisfied: "0.8.0", rejected: "0.8.1"},
+		{name: "explicit !=", expr: "!= 0.8.0", satisfied: "0.8.1", rejected: "0.8.0"},
+		{name: "explicit <", expr: "< 0.8.0", satisfied: "0.7.0", rejected: "0.8.0"},
+		{name: "explicit >", expr: "> 0.8.0", satisfied: "0.8.1", rejected: "0.8.0"},
+		{name: "explicit <=", expr: "<= 0.8.0", satisfied: "0.8.0", rejected: "0.9.0"},
+		{name: "surrounding whitespace tolerated", expr: "  0.8.0  ", satisfied: "0.9.0", rejected: "0.7.0"},
+		{name: "empty expression rejected", expr: "", wantErr: true},
+		{name: "operator with no version rejected", expr: ">=", wantErr: true},
+		// A bare "!" is invalid syntax that the shared parser rejects
+		// outright. Prepending ">=" would hide it from that check, so the
+		// bare-version default must not apply to "!"-prefixed input.
+		{name: "bare ! prefix rejected, not coerced to >=", expr: "!0.8.0", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseVersionConstraint(tt.expr)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ParseVersionConstraint(%q) error = nil, want an error", tt.expr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseVersionConstraint(%q) error = %v, want nil", tt.expr, err)
+			}
+
+			ok, evalErr := got.Evaluate(tt.satisfied)
+			if evalErr != nil {
+				t.Fatalf("Evaluate(%q) error = %v", tt.satisfied, evalErr)
+			}
+			if !ok {
+				t.Errorf("constraint %q rejected %q, want it satisfied", tt.expr, tt.satisfied)
+			}
+
+			ok, evalErr = got.Evaluate(tt.rejected)
+			if evalErr != nil {
+				t.Fatalf("Evaluate(%q) error = %v", tt.rejected, evalErr)
+			}
+			if ok {
+				t.Errorf("constraint %q accepted %q, want it rejected", tt.expr, tt.rejected)
+			}
+		})
+	}
+}

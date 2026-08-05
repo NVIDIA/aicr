@@ -226,11 +226,16 @@ with only pre-manifests is rejected as having no deployable primary.
 When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 (`embedded` / `external` / `merged`) for every loaded file.
 
-## Converting a family to a configuration profile (AKS example)
+## Converting a family to a configuration profile
 
 `recipes/overlays/aks.yaml` declares the `gpuStack` configuration profile
 (`azure-managed` default, `operator-managed` alternative) over the GPU driver/toolkit
-ownership paths (see
+ownership paths, and `recipes/overlays/gke-cos.yaml` declares its own `gpuStack`
+(`gcp-managed` default, `operator-managed` alternative) over device-plugin ownership —
+the GKE default value (`gcp-managed`) additionally declares
+`advertiser: external`, and both GKE values trigger the #1327
+allocation-policy closure, so their effective lock set is larger than the
+declared paths (see
 [Configuration Profiles](recipe-development.md#configuration-profiles)).
 When an external data directory replaces a declaring overlay, or converts a
 family to a profile, the replacement rules above interact with the profile

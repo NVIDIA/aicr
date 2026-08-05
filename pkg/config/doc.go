@@ -13,16 +13,20 @@
 // limitations under the License.
 
 // Package config defines the AICRConfig file schema accepted by the
-// aicr CLI's --config flag on the snapshot, recipe, bundle, and validate
-// commands.
+// aicr CLI's --config flag on the snapshot, recipe, bundle, validate, and
+// verify commands.
 //
 // AICRConfig is a Kubernetes-style envelope (kind / apiVersion / metadata / spec)
 // that lets users capture flag values for these commands in a single YAML or
 // JSON document. Each per-command section under spec (snapshot, recipe,
-// bundle, validate) is optional, so a config file may populate just one
-// section or any combination for end-to-end workflows. CLI flags always
+// bundle, validate, verify) is optional, so a config file may populate just
+// one section or any combination for end-to-end workflows. CLI flags always
 // override values loaded from a config file; for slice/map flags, presence
 // on the command line replaces the file's value rather than appending.
+//
+// The first four sections are the producer pipeline; spec.verify is the
+// consumer side, so one committed document can describe both how an artifact
+// is built and the trust floor a downstream consumer enforces against it.
 //
 // Sources are restricted to local file paths and HTTP/HTTPS URLs.
 // ConfigMap (cm://) URIs are intentionally rejected: extract the data with
@@ -31,7 +35,9 @@
 // Secrets (notably the cosign identity token) are not part of the schema;
 // they must be supplied via environment variables or dedicated CLI flags.
 // Durable, non-secret references are in scope by contrast: the private
-// Sigstore endpoints (spec.bundle.attestation.fulcioURL / rekorURL) and the
-// KMS signing-key reference (spec.bundle.attestation.signingKey) all belong
-// in version-controlled config even though they configure signing.
+// Sigstore endpoints (spec.bundle.attestation.fulcioURL / rekorURL), the
+// KMS signing-key reference (spec.bundle.attestation.signingKey), and their
+// verify-side counterparts (spec.verify.trust.key / trustRoot) all belong in
+// version-controlled config even though they configure signing or its
+// verification.
 package config

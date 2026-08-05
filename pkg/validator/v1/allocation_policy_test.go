@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
@@ -438,6 +439,190 @@ func TestGetGPUAllocationPolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.input.GetGPUAllocationPolicy(); got != tt.want {
 				t.Errorf("GetGPUAllocationPolicy() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// advertiserProfileRecipe builds a profile-bearing recipe declaring the
+// given advertiser over the given component refs.
+func advertiserProfileRecipe(advertiser string, refs ...recipe.ComponentRef) *recipe.RecipeResult {
+	return &recipe.RecipeResult{
+		APIVersion:    recipe.RecipeProfileAPIVersion,
+		ComponentRefs: refs,
+		Metadata: recipe.RecipeResultMetadata{SelectedProfile: &recipe.SelectedProfile{
+			Name: "gpuStack", Value: "gcp-managed", Advertiser: advertiser,
+			OwnedPaths: map[string][]string{
+				"gpu-operator": {"devicePlugin.enabled", "enabled"},
+			},
+		}},
+	}
+}
+
+// externalProfileRecipe builds a profile-bearing recipe declaring
+// advertiser "external" (the GKE gcp-managed shape) over the given
+// component refs.
+func externalProfileRecipe(refs ...recipe.ComponentRef) *recipe.RecipeResult {
+	return advertiserProfileRecipe(allocpolicy.AdvertiserExternal, refs...)
+}
+
+// TestResolveGPUAllocationPolicyExternalAdvertiser pins the ADR-015 #1327
+// amendment: a declared external advertiser counts as THE advertiser in
+// the exactly-one invariant, the dual-advertisement gates extend to it
+// fail-closed, and the resolved policy value is unchanged
+// (device-plugin-extended-resource names the request mechanism, not
+// provider ownership).
+func TestResolveGPUAllocationPolicyExternalAdvertiser(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		recipe  *recipe.RecipeResult
+		want    string
+		wantErr bool
+		wantMsg string
+	}{
+		{
+			// The GKE gcp-managed happy path: operator plugin off, DRA off.
+			name:   "external advertiser with device plugin off and DRA off resolves to device-plugin policy",
+			recipe: externalProfileRecipe(draDriverRef(false, false), gpuOperatorRef(false)),
+			want:   GPUAllocationPolicyDevicePluginExtendedResource,
+		},
+		{
+			// External is also THE advertiser when no operator component
+			// exists at all — the pre-amendment "no whole-GPU advertiser"
+			// rejection must not fire for a declared external advertiser.
+			name:   "external advertiser without any operator component resolves",
+			recipe: externalProfileRecipe(draDriverRef(false, false)),
+			want:   GPUAllocationPolicyDevicePluginExtendedResource,
+		},
+		{
+			name:    "external advertiser with device plugin enabled is dual advertisement",
+			recipe:  externalProfileRecipe(draDriverRef(false, false), gpuOperatorRef(true)),
+			wantErr: true,
+			wantMsg: "devicePlugin.enabled=true",
+		},
+		{
+			// Under a declared external advertiser the reading aggregates
+			// across EVERY enabled operator component (OR semantics,
+			// mirroring the recipe-side checkAdvertiserCoherence): the
+			// warn-and-prefer selection used for diagnostics elsewhere must
+			// not let gpu-operator-ocp's live plugin slip past the gate
+			// behind a disabled gpu-operator.
+			name: "external advertiser with gpu-operator plugin off but gpu-operator-ocp plugin on is dual advertisement",
+			recipe: externalProfileRecipe(
+				draDriverRef(false, false),
+				gpuOperatorRef(false),
+				recipe.ComponentRef{
+					Name: "gpu-operator-ocp",
+					Overrides: map[string]any{
+						"devicePlugin": map[string]any{"enabled": true},
+					},
+				},
+			),
+			wantErr: true,
+			wantMsg: "devicePlugin.enabled=true",
+		},
+		{
+			// Both operator components enabled with the plugin off on each:
+			// the OR-aggregate stays false and external remains the sole
+			// advertiser.
+			name: "external advertiser with both operator components' plugins off resolves",
+			recipe: externalProfileRecipe(
+				draDriverRef(false, false),
+				gpuOperatorRef(false),
+				recipe.ComponentRef{
+					Name: "gpu-operator-ocp",
+					Overrides: map[string]any{
+						"devicePlugin": map[string]any{"enabled": false},
+					},
+				},
+			),
+			want: GPUAllocationPolicyDevicePluginExtendedResource,
+		},
+		{
+			// An enabled operator component with the key ABSENT follows the
+			// upstream chart default (true) in the aggregate too.
+			name: "external advertiser with gpu-operator-ocp missing the devicePlugin key is dual advertisement",
+			recipe: externalProfileRecipe(
+				draDriverRef(false, false),
+				gpuOperatorRef(false),
+				recipe.ComponentRef{Name: "gpu-operator-ocp"},
+			),
+			wantErr: true,
+			wantMsg: "devicePlugin.enabled=true",
+		},
+		{
+			name:    "external advertiser with DRA gpus enabled is dual advertisement",
+			recipe:  externalProfileRecipe(draDriverRef(true, true), gpuOperatorRef(false)),
+			wantErr: true,
+			wantMsg: "resources.gpus.enabled=true",
+		},
+		{
+			name:    "external advertiser with an inert waiver is rejected",
+			recipe:  externalProfileRecipe(draDriverRef(false, true), gpuOperatorRef(false)),
+			wantErr: true,
+			wantMsg: "inert waiver",
+		},
+		{
+			// The absent-pin gate (an enabled nvidia-dra-driver-gpu without
+			// an explicit resources.gpus.enabled) runs BEFORE the
+			// external-advertiser branch: a declared external advertiser
+			// must not bypass the deploy-time divergence guard.
+			name: "external advertiser with enabled DRA component missing the gpus.enabled pin is rejected",
+			recipe: externalProfileRecipe(
+				recipe.ComponentRef{Name: "nvidia-dra-driver-gpu"},
+				gpuOperatorRef(false),
+			),
+			wantErr: true,
+			wantMsg: "is not set",
+		},
+		{
+			// An empty advertiser on a profile-bearing recipe is the
+			// undeclared shape: it takes the ordinary (non-external)
+			// resolution path and resolves from the operator plugin state.
+			name:   "profile with empty advertiser resolves through the ordinary path",
+			recipe: advertiserProfileRecipe("", draDriverRef(false, false), gpuOperatorRef(true)),
+			want:   GPUAllocationPolicyDevicePluginExtendedResource,
+		},
+		{
+			// The vocabulary gate must run for typed Go callers too:
+			// only the exact "external" string reaches the declared-
+			// advertiser branch, so a wrong-case value must fail closed
+			// here rather than fall through and resolve as an ordinary
+			// undeclared recipe.
+			name:    "wrong-case advertiser is rejected, not resolved as undeclared",
+			recipe:  advertiserProfileRecipe("External", draDriverRef(false, false), gpuOperatorRef(false)),
+			wantErr: true,
+			wantMsg: "unknown advertiser",
+		},
+		{
+			name:    "unknown advertiser vocabulary is rejected",
+			recipe:  advertiserProfileRecipe("csp", draDriverRef(false, false), gpuOperatorRef(true)),
+			wantErr: true,
+			wantMsg: "unknown advertiser",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := ResolveGPUAllocationPolicy(context.Background(), tt.recipe)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ResolveGPUAllocationPolicy() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				// Every rejection in this table is a configuration defect
+				// the caller must surface as invalid input.
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+				}
+				if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
+					t.Fatalf("error %v does not contain %q", err, tt.wantMsg)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("policy = %q, want %q", got, tt.want)
 			}
 		})
 	}
