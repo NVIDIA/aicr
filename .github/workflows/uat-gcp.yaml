@@ -117,10 +117,10 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      # v0.5.16. Keep the release tag for update visibility and the digest for
+      # v0.5.17. Keep the release tag for update visibility and the digest for
       # execution identity. Review the upstream release and verify its signature
       # before rotating both values; never use a tag-only actuator reference.
-      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.16@sha256:f586ffa14dccb867c81fb8a12484f6e31d3adad93242292b7c9cc00c93af2367"
+      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.17@sha256:8bfffd412d98276ee1000a6c083514e6b28928416cc37602ec637ed3a2167c99"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
