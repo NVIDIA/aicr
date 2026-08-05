@@ -146,6 +146,12 @@ You never *have* to tear a cluster down by hand — the evening safety-net cron 
 
 The teardown is not the only safety net. If a `daytime-down` is skipped or fails and the daytime cluster is still up when the nightly batch opens, DC2's [pre-batch guard](#pre-batch-guard) **blocks** the batch (fail-closed) rather than racing the held deployment. Recover by tearing the daytime cluster down — `gh workflow run uat-daytime.yaml -f action=down`, or a single `uat-run.yaml … -f lifecycle=daytime-down` for one reservation — then re-run the batch.
 
+### The orphan janitor (backstop teardown)
+
+`uat-janitor.yaml` (hourly, all three clouds) is the last-resort backstop for whatever the in-run teardown misses — a runner hard-killed mid-cancel, a daytime hold whose evening `daytime-down` never fired, an abandoned `skip_delete` run, or a Bringup false-failure that stranded a healthy cluster. It reconciles every `aicr-uat-<run_id>` / `aicr-uat-day-<reservation>-<run_id>` deployment against its owning GitHub run and reaps only the ones whose run is finished and past an age floor, via the same actuator `destroy` the in-run teardown uses. It is **dry-run by default**: scheduled runs only report; an actual reap requires a deliberate `workflow_dispatch` with `enforce=true`. See `.github/scripts/uat-janitor.sh` for the full safety model.
+
+**Retention limit for `skip_delete`.** A cluster kept alive with `skip_delete=true` (manual debugging) **becomes eligible for enforced reclamation ~24h after its run finishes** — there is no API signal that distinguishes an intentional hold from a genuine orphan, so the age floor is the only lever. (While the janitor stays dry-run-first, eligibility only becomes a *reclaim* on an `enforce=true` dispatch — or automatically once scheduled enforcement is turned on.) Treat a `skip_delete` cluster as a one-working-day loan; if you need it longer, re-provision.
+
 ### Reaching the daytime cluster
 
 Access is **out-of-band by design**: nothing here routes a kubeconfig or endpoint URL through the CI path, the evidence bundle, or the dashboard. Access is gated by **cloud IAM** on the daytime cluster — so an authorized operator mints their own kubeconfig directly and no credential ever transits CI. Because the daytime cluster is now ephemerally named, first **discover** it by its `(slug, slot)`-scoped prefix (with the legacy `aicr-uat-day-<reservation>-` prefix as a fallback during the ADR-017 migration window, matching the dual-prefix scan the workflows carry), then bind to the discovered name:

@@ -77,7 +77,7 @@ on:
         type: string
         default: '0'
       skip_delete:
-        description: 'Skip cluster teardown (manual debugging only; ignored for daytime lifecycles).'
+        description: 'Skip cluster teardown (manual debugging only; ignored for daytime lifecycles). A retained cluster becomes eligible for janitor reclamation ~24h after the run finishes.'
         type: boolean
         default: false
       skip_tests:
