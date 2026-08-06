@@ -16,6 +16,8 @@ package releasepolicy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,6 +135,7 @@ func TestReleaseReverifyWorkflowShape(t *testing.T) {
 		"timeout --foreground",               // every network call is bounded
 		"recipe verify-catalog",              // the shipped catalog verification command
 		"cosign verify-blob-attestation",     // the shipped blob attestation command
+		"set -uo pipefail\nset +e",           // errexit is INHERITED from `bash -e {0}`
 		"sigstore_reachable",                 // liveness guard
 		"infra_shaped",                       // pattern guard
 		`[ -r "$1" ] || return 0`,            // an unreadable log is not evidence
@@ -247,7 +250,15 @@ func TestReleaseReverifyWorkflowShape(t *testing.T) {
 func TestReleaseReverifyClassification(t *testing.T) {
 	script := reverifyClassifierScript(t)
 
+	// Every fixture derives from the floor constant. Hardcoding a version here
+	// would desynchronize the moment the floor is raised, and unevenly: clean and
+	// operational cases would fail loudly on a now-missing archive, while
+	// security cases would keep PASSING on that spurious missing-archive finding
+	// (tamper is sticky) rather than on the condition they were written for.
+	atFloor := reverifySBOMFloor
+	atFloorVersion := strings.TrimPrefix(atFloor, "v")
 	aboveFloor := "v0.19.0"
+	aboveFloorVersion := strings.TrimPrefix(aboveFloor, "v")
 	assetsFor := func(version string, extra ...string) []string {
 		base := make([]string, 0, 3+len(extra))
 		base = append(base,
@@ -257,11 +268,25 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		)
 		return append(base, extra...)
 	}
+	// The linux/amd64 SBOM subjects every post-floor release must publish, read
+	// from the workflow so the fixtures cannot drift from what it mandates.
+	sbomSubjects := func(version string) []string {
+		binaries := strings.Fields(reverifyWorkflowEnv(t, "EXPECTED_SBOM_BINARIES"))
+		names := make([]string, 0, len(binaries))
+		for _, binary := range binaries {
+			names = append(names, binary+"_"+version+"_linux_amd64.sbom.json")
+		}
+		return names
+	}
+	unsignedSBOMAssets := func(version string) []string {
+		return assetsFor(version, sbomSubjects(version)...)
+	}
 	signedSBOMAssets := func(version string) []string {
-		return assetsFor(version,
-			"aicr_"+version+"_linux_amd64.sbom.json",
-			"aicr_"+version+"_linux_amd64.sbom.json.sigstore.json",
-		)
+		assets := assetsFor(version)
+		for _, subject := range sbomSubjects(version) {
+			assets = append(assets, subject, subject+".sigstore.json")
+		}
+		return assets
 	}
 
 	tests := []struct {
@@ -271,10 +296,15 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		code int
 	}{
 		{
-			name: "a complete release verifies clean",
+			// The real at-floor release ships unsigned aicr and aicrd linux/amd64
+			// SBOMs with no .sigstore.json siblings, which is precisely the shape
+			// the floor exempts. Without those assets this case would prove the
+			// version gate fires but not that the exemption works on a release
+			// that actually ships unsigned SBOMs.
+			name: "a release at the floor with unsigned SBOMs verifies clean",
 			opts: reverifyOptions{
-				tag:            reverifySBOMFloor,
-				assets:         assetsFor(strings.TrimPrefix(reverifySBOMFloor, "v")),
+				tag:            atFloor,
+				assets:         unsignedSBOMAssets(atFloorVersion),
 				installOutcome: "success",
 			},
 			want: "clean",
@@ -295,9 +325,9 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a missing catalog signature is a security finding",
 			opts: reverifyOptions{
-				tag: reverifySBOMFloor,
+				tag: atFloor,
 				assets: []string{
-					"aicr_0.18.0_linux_amd64.tar.gz",
+					"aicr_" + atFloorVersion + "_linux_amd64.tar.gz",
 					"aicr_checksums.txt",
 				},
 				installOutcome: "success",
@@ -308,7 +338,7 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a missing binary archive is a security finding",
 			opts: reverifyOptions{
-				tag:            reverifySBOMFloor,
+				tag:            atFloor,
 				assets:         []string{"aicr_checksums.txt", "recipe-catalog.sigstore.json"},
 				installOutcome: "failure",
 				noArchiveFile:  true,
@@ -319,10 +349,27 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "an archive shipped without its attestation bundle is a security finding",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				omitAttestation:   true,
+				sigstoreReachable: true,
+			},
+			want: "tamper",
+			code: 1,
+		},
+		{
+			// The expected set is derived from the tag, so deleting one of the
+			// two mandatory SBOMs is a finding. Derived from the RELEASE's own
+			// inventory it would not be: the loop would verify the survivor and
+			// report clean.
+			name: "a mandatory SBOM missing from the release is a security finding",
+			opts: reverifyOptions{
+				tag: aboveFloor,
+				assets: append(assetsFor(aboveFloorVersion),
+					"aicr_"+aboveFloorVersion+"_linux_amd64.sbom.json",
+					"aicr_"+aboveFloorVersion+"_linux_amd64.sbom.json.sigstore.json"),
+				installOutcome:    "success",
 				sigstoreReachable: true,
 			},
 			want: "tamper",
@@ -342,7 +389,7 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			name: "a release above the floor with no SBOM assets at all is a security finding",
 			opts: reverifyOptions{
 				tag:            aboveFloor,
-				assets:         assetsFor("0.19.0"),
+				assets:         assetsFor(aboveFloorVersion),
 				installOutcome: "success",
 			},
 			want: "tamper",
@@ -351,8 +398,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a signature that fails against a reachable Sigstore is a security finding",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				cosignRC:          1,
 				cosignMessage:     "Error: no matching signatures found for the given identity",
@@ -364,8 +411,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a catalog digest mismatch is a security finding",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "success",
 				aicrRC:            1,
 				aicrMessage:       "Error: recomputed catalog digest does not match the signed subject",
@@ -379,8 +426,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "an unreachable Sigstore demotes a failed verification to operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				cosignRC:          1,
 				cosignMessage:     "Error: no matching signatures found for the given identity",
@@ -392,8 +439,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a Rekor outage in the failure output demotes to operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				cosignRC:          1,
 				cosignMessage:     "Error: uploading to rekor: POST https://rekor.sigstore.dev: status 503 service unavailable",
@@ -405,8 +452,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a TUF trusted-root fetch failure demotes to operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				cosignRC:          1,
 				cosignMessage:     "Error: initializing trusted root: could not fetch metadata",
@@ -418,8 +465,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a network timeout during catalog verification is operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "success",
 				aicrRC:            1,
 				aicrMessage:       "Error: verifying catalog: dial tcp 34.1.2.3:443: i/o timeout",
@@ -431,8 +478,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a failed release-asset download is operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "success",
 				ghRC:              1,
 				sigstoreReachable: true,
@@ -449,8 +496,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			// security page. Every sibling branch in this chain demotes.
 			name: "a failed extract is operational, never a security finding",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				tarExtractFails:   true,
 				sigstoreReachable: true,
@@ -464,8 +511,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			// demotion can catch this.
 			name: "a cosign killed by its timeout is operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				cosignRC:          124,
 				sigstoreReachable: true,
@@ -477,8 +524,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			// A SIGKILL (OOM killer) surfaces as 137.
 			name: "a cosign killed by the OOM killer is operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				cosignRC:          137,
 				cosignSilent:      true,
@@ -492,8 +539,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			// pattern guard alone would pass this straight through to security.
 			name: "a failure that produced no output is operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				cosignRC:          1,
 				cosignSilent:      true,
@@ -508,8 +555,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			// grep exits 2 there, which is indistinguishable from "no match".
 			name: "a log the classifier cannot read is operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "success",
 				seedUnreadableLog: "catalog-verify.log",
 				sigstoreReachable: true,
@@ -523,7 +570,7 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			// missing and page.
 			name: "an unreadable asset inventory is operational, not every asset missing",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
+				tag:               atFloor,
 				missingAssetsFile: true,
 				installOutcome:    "success",
 				sigstoreReachable: true,
@@ -536,8 +583,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			// would stay green through it.
 			name: "a Fulcio-only outage demotes a failed verification",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				cosignRC:          1,
 				cosignMessage:     "Error: no matching signatures found for the given identity",
@@ -552,8 +599,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 			// every SBOM check.
 			name: "an undecidable SBOM floor ordering is operational",
 			opts: reverifyOptions{
-				tag:               "v0.19.0",
-				assets:            assetsFor("0.19.0"),
+				tag:               aboveFloor,
+				assets:            assetsFor(aboveFloorVersion),
 				installOutcome:    "success",
 				sortFails:         true,
 				sigstoreReachable: true,
@@ -564,8 +611,8 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a corrupt archive download is operational, not a missing attestation",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            assetsFor(atFloorVersion),
 				installOutcome:    "failure",
 				corruptArchive:    true,
 				sigstoreReachable: true,
@@ -576,20 +623,38 @@ func TestReleaseReverifyClassification(t *testing.T) {
 		{
 			name: "a transient install failure that re-verifies is operational",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
-				assets:            assetsFor("0.18.0"),
+				tag:               atFloor,
+				assets:            unsignedSBOMAssets(atFloorVersion),
 				installOutcome:    "failure",
+				checksumsManifest: "match",
 				sigstoreReachable: true,
 			},
 			want: "operational",
 			code: 3,
+		},
+		{
+			// The attestation binds the BINARY, so cosign passes while the
+			// published manifest no longer describes the published archive. The
+			// install action fails at its own sha256sum long before cosign, so
+			// without the checksum re-check this reports "transient" forever
+			// while every consumer following the documented checksum flow fails.
+			name: "a checksums manifest that stopped matching is a security finding",
+			opts: reverifyOptions{
+				tag:               atFloor,
+				assets:            unsignedSBOMAssets(atFloorVersion),
+				installOutcome:    "failure",
+				checksumsManifest: "mismatch",
+				sigstoreReachable: true,
+			},
+			want: "tamper",
+			code: 1,
 		},
 
 		// --- precedence: a real finding is never masked by a concurrent outage ---
 		{
 			name: "a missing asset still pages when the network is also down",
 			opts: reverifyOptions{
-				tag:               reverifySBOMFloor,
+				tag:               atFloor,
 				assets:            []string{"aicr_0.18.0_linux_amd64.tar.gz", "aicr_checksums.txt"},
 				installOutcome:    "failure",
 				noArchiveFile:     true,
@@ -635,6 +700,10 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 		from string
 		to   string
 		opts reverifyOptions
+		// wantIntactTamper inverts the assertion for a guard whose REMOVAL hides
+		// a finding rather than manufacturing one: intact must be tamper and the
+		// mutation must demote it to operational.
+		wantIntactTamper bool
 	}{
 		{
 			name: "removing the Sigstore reachability guard",
@@ -720,6 +789,29 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 			},
 		},
 		{
+			// The pre-fix shape: a passing cosign was taken as proof the install
+			// action's failure was transient. It is not: the attestation binds
+			// the binary, the manifest covers the archive.
+			name: "presuming a passing cosign clears the checksums manifest",
+			from: `    if [ ! -r "${REL_DIR}/aicr_checksums.txt" ]; then
+      operational "the checksums manifest is not on disk to re-check; treating as infrastructure"
+    elif (cd "${REL_DIR}" && grep " ${archive}\$" aicr_checksums.txt | sha256sum -c -) \
+        > "${WORK_DIR}/checksum-verify.log" 2>&1; then
+      operational "binary provenance and checksum verified on re-run after the install action failed; treating as a transient failure"
+    else
+      status=$?
+      cat "${WORK_DIR}/checksum-verify.log" >&2 || true
+      classify_failure "checksum verification of ${archive} for ${TAG}" "${WORK_DIR}/checksum-verify.log" "${status}"
+    fi`,
+			to: `    operational "binary provenance verified on re-run after the install action failed; treating as a transient failure"`,
+			opts: reverifyOptions{
+				installOutcome:    "failure",
+				checksumsManifest: "mismatch",
+				sigstoreReachable: true,
+			},
+			wantIntactTamper: true,
+		},
+		{
 			name: "removing the infrastructure-signature guard",
 			from: `  if infra_shaped "${log}"; then`,
 			to:   "if false; then",
@@ -738,16 +830,25 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 			opts := tc.opts
 			opts.tag = reverifySBOMFloor
 			if !opts.missingAssetsFile {
+				version := strings.TrimPrefix(reverifySBOMFloor, "v")
 				opts.assets = []string{
-					"aicr_0.18.0_linux_amd64.tar.gz",
+					"aicr_" + version + "_linux_amd64.tar.gz",
 					"aicr_checksums.txt",
 					"recipe-catalog.sigstore.json",
 				}
+				for _, binary := range strings.Fields(reverifyWorkflowEnv(t, "EXPECTED_SBOM_BINARIES")) {
+					opts.assets = append(opts.assets, binary+"_"+version+"_linux_amd64.sbom.json")
+				}
+			}
+
+			wantIntact, wantBroken := "operational", "tamper"
+			if tc.wantIntactTamper {
+				wantIntact, wantBroken = "tamper", "operational"
 			}
 
 			intact, _, output := runReverifyClassifier(t, script, opts)
-			if intact != "operational" {
-				t.Fatalf("intact classifier = %q, want operational for an infrastructure failure\n%s", intact, output)
+			if intact != wantIntact {
+				t.Fatalf("intact classifier = %q, want %s\n%s", intact, wantIntact, output)
 			}
 
 			if !strings.Contains(script, tc.from) {
@@ -755,9 +856,9 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 			}
 			mutated := strings.Replace(script, tc.from, tc.to, 1)
 			broken, _, brokenOutput := runReverifyClassifier(t, mutated, opts)
-			if broken != "tamper" {
-				t.Fatalf("classifier without %s = %q, want tamper — the guard is not load-bearing and this test proves nothing\n%s",
-					tc.name, broken, brokenOutput)
+			if broken != wantBroken {
+				t.Fatalf("classifier without %s = %q, want %s: the guard is not load-bearing and this test proves nothing\n%s",
+					tc.name, broken, wantBroken, brokenOutput)
 			}
 		})
 	}
@@ -793,13 +894,16 @@ func TestReleaseReverifySBOMLoopIsolatesChildStdin(t *testing.T) {
 
 	// A release above the SBOM signing floor, so the loop actually runs.
 	const version = "0.19.0"
-	// aicr and aicrd are the two binaries GoReleaser builds today; the third is
-	// a stand-in for any future binary, since the loop is generic over whatever
-	// SBOM assets the release publishes.
-	subjects := []string{
-		"aicr_" + version + "_linux_amd64.sbom.json",
-		"aicrd_" + version + "_linux_amd64.sbom.json",
-		"aicr-gate_" + version + "_linux_amd64.sbom.json",
+	// aicr and aicrd are the two binaries GoReleaser builds today; the third is a
+	// stand-in for any future binary, injected through the same env var the
+	// workflow derives its expected set from. Three subjects, not two: with two,
+	// an early-terminating loop and a loop that merely dropped the last entry are
+	// indistinguishable.
+	const binaries = "aicr aicrd aicr-gate"
+	names := strings.Fields(binaries)
+	subjects := make([]string, 0, len(names))
+	for _, binary := range names {
+		subjects = append(subjects, binary+"_"+version+"_linux_amd64.sbom.json")
 	}
 	assets := make([]string, 0, 3+2*len(subjects))
 	assets = append(assets,
@@ -823,12 +927,13 @@ func TestReleaseReverifySBOMLoopIsolatesChildStdin(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := reverifyOptions{
-				tag:               "v" + version,
-				assets:            assets,
-				installOutcome:    "success",
-				sigstoreReachable: true,
-				drainGHStdin:      tc.drainGHStdin,
-				drainCosignStdin:  tc.drainCosignStdin,
+				tag:                  "v" + version,
+				assets:               assets,
+				installOutcome:       "success",
+				sigstoreReachable:    true,
+				drainGHStdin:         tc.drainGHStdin,
+				drainCosignStdin:     tc.drainCosignStdin,
+				expectedSBOMBinaries: binaries,
 			}
 
 			class, code, output := runReverifyClassifier(t, script, opts)
@@ -939,6 +1044,85 @@ if [ "${TAG}" = "${SBOM_SIGNING_FLOOR}" ] || [ "${newest}" != "${TAG}" ]; then`
 	}
 	if strings.Contains(brokenOutput, "with no attestation bundle") {
 		t.Errorf("unguarded ordering unexpectedly still reported the missing bundle\n%s", brokenOutput)
+	}
+}
+
+// TestReleaseReverifyMandatorySBOMSetIsDerivedFromTheTag pins the one thing that
+// makes the SBOM check able to find a missing artifact at all.
+//
+// Derived from the RELEASE's own inventory, the loop only iterates what the
+// release already published, so the only detectable fault is a release with zero
+// SBOMs: delete one of the two mandatory subjects and the loop verifies the
+// survivor and reports clean. Deriving the expected set from the TAG, as
+// expected_release_asset_names() in .github/scripts/release-images.sh does, is
+// what turns a silently-missing mandatory artifact into a finding. This is the
+// same derive-from-the-artifact-under-test flaw that shipped the allowlist bug
+// in NVIDIA/aicr#1982.
+func TestReleaseReverifyMandatorySBOMSetIsDerivedFromTheTag(t *testing.T) {
+	script := reverifyClassifierScript(t)
+
+	derivation := "  read -r -a sbom_binaries <<< \"${EXPECTED_SBOM_BINARIES}\"\n" +
+		"  expected_sboms=\"\"\n" +
+		"  for binary in \"${sbom_binaries[@]}\"; do\n" +
+		"    expected_sboms+=\"${binary}_${version}_linux_amd64.sbom.json\"$'\\n'\n" +
+		"  done\n" +
+		"  expected_sboms=\"${expected_sboms%$'\\n'}\""
+	presence := "    if ! have_asset \"${sbom}\"; then\n" +
+		"      security \"release ${TAG} does not publish the mandatory SBOM ${sbom}\"\n" +
+		"    elif ! have_asset \"${bundle}\"; then"
+	for _, target := range []string{derivation, presence} {
+		if !strings.Contains(script, target) {
+			t.Fatalf("mutation target is no longer in the classifier:\n%s", target)
+		}
+	}
+	// Revert to the pre-fix shape: enumerate whatever the release shipped, and
+	// check only that each of those has a bundle.
+	inventoryDerived := "  expected_sboms=\"$(grep -E '_linux_amd64\\.sbom\\.json$' \"${RELEASE_ASSETS}\" || true)\""
+	mutated := strings.Replace(script, derivation, inventoryDerived, 1)
+	mutated = strings.Replace(mutated, presence, "    if ! have_asset \"${bundle}\"; then", 1)
+
+	const version = "0.19.0"
+	binaries := strings.Fields(reverifyWorkflowEnv(t, "EXPECTED_SBOM_BINARIES"))
+	if len(binaries) < 2 {
+		t.Fatalf("EXPECTED_SBOM_BINARIES = %v, want at least two mandatory subjects", binaries)
+	}
+	// A release that dropped the last mandatory subject and its bundle, but
+	// published every other one correctly.
+	dropped := binaries[len(binaries)-1] + "_" + version + "_linux_amd64.sbom.json"
+	assets := make([]string, 0, 3+2*(len(binaries)-1))
+	assets = append(assets,
+		"aicr_"+version+"_linux_amd64.tar.gz",
+		"aicr_checksums.txt",
+		"recipe-catalog.sigstore.json",
+	)
+	for _, binary := range binaries[:len(binaries)-1] {
+		subject := binary + "_" + version + "_linux_amd64.sbom.json"
+		assets = append(assets, subject, subject+".sigstore.json")
+	}
+	opts := reverifyOptions{
+		tag:               "v" + version,
+		assets:            assets,
+		installOutcome:    "success",
+		sigstoreReachable: true,
+	}
+
+	class, code, output := runReverifyClassifier(t, script, opts)
+	if class != "tamper" || code != 1 {
+		t.Fatalf("classification = %q (exit %d), want tamper (exit 1) for a missing mandatory SBOM\n%s", class, code, output)
+	}
+	if !strings.Contains(output, dropped) {
+		t.Errorf("the finding did not name the missing subject %q\n%s", dropped, output)
+	}
+
+	brokenClass, brokenCode, brokenOutput := runReverifyClassifier(t, mutated, opts)
+	if brokenClass == "tamper" {
+		t.Fatalf("the inventory-derived form still found it; the tag derivation is not load-bearing\n%s", brokenOutput)
+	}
+	if brokenClass != "clean" || brokenCode != 0 {
+		t.Errorf("inventory-derived form = %q (exit %d), want clean (exit 0): the miss is expected to be SILENT", brokenClass, brokenCode)
+	}
+	if strings.Contains(brokenOutput, dropped) {
+		t.Errorf("the inventory-derived form unexpectedly mentioned %q\n%s", dropped, brokenOutput)
 	}
 }
 
@@ -1071,7 +1255,7 @@ func runReverifyCloseStep(t *testing.T, script, tag string, issues []closableIss
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "bash", "-c", script)
+	command := exec.CommandContext(ctx, "bash", reverifyStepShell(t, root, script)...)
 	command.Dir = root
 	command.Env = append(os.Environ(),
 		"PATH="+bin+":"+os.Getenv("PATH"),
@@ -1152,6 +1336,10 @@ type reverifyOptions struct {
 	// sortFails makes the fake sort exit non-zero, breaking the SBOM floor
 	// ordering.
 	sortFails bool
+	// checksumsManifest stages aicr_checksums.txt next to the downloaded archive:
+	// "match" for the archive's real digest, "mismatch" for a manifest that no
+	// longer describes it. Empty stages none.
+	checksumsManifest string
 
 	cosignRC          int
 	cosignMessage     string
@@ -1174,6 +1362,39 @@ type reverifyOptions struct {
 	// sigstoreFailURL fails only the probe whose URL contains this substring,
 	// modeling a Fulcio-only or TUF-only outage.
 	sigstoreFailURL string
+	// expectedSBOMBinaries overrides EXPECTED_SBOM_BINARIES. Empty means the
+	// shipped workflow value, so cases bind to what production actually
+	// mandates unless they need a different subject count.
+	expectedSBOMBinaries string
+}
+
+// expectedSBOMBinaries resolves the SBOM subjects a case runs against, defaulting
+// to the shipped workflow value so a case exercises what production mandates.
+func expectedSBOMBinaries(t *testing.T, opts reverifyOptions) string {
+	t.Helper()
+	if opts.expectedSBOMBinaries != "" {
+		return opts.expectedSBOMBinaries
+	}
+	return reverifyWorkflowEnv(t, "EXPECTED_SBOM_BINARIES")
+}
+
+// reverifyStepShell stages an extracted `run:` block and returns the bash
+// arguments GitHub itself would use to invoke it.
+//
+// A step with no `shell:` key runs as `bash -e {0}` on the Actions runner: a
+// FILE, under errexit. Running it any other way (a plain `bash -c` with no -e,
+// which is what these tests used to do) tests semantics production does not
+// have, so an unguarded command added to the step would pass here and abort the
+// job in production. The classifier turns errexit off itself with an explicit
+// `set +e`; this harness is what proves the step does so rather than assuming
+// it. Keep in lockstep with GitHub's documented default shell.
+func reverifyStepShell(t *testing.T, dir, script string) []string {
+	t.Helper()
+	path := filepath.Join(dir, "step.sh")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		t.Fatalf("stage extracted step: %v", err)
+	}
+	return []string{"-e", path}
 }
 
 // reverifyClassifierScript extracts the classifying step's shell from the
@@ -1211,6 +1432,7 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 	writeExecutable(t, filepath.Join(bin, "curl"), reverifyFakeCurl)
 	writeExecutable(t, filepath.Join(bin, "tar"), reverifyFakeTar)
 	writeExecutable(t, filepath.Join(bin, "sort"), reverifyFakeSort)
+	writeExecutable(t, filepath.Join(bin, "sha256sum"), reverifyFakeSha256Sum)
 	writeExecutable(t, filepath.Join(bin, "cosign"), reverifyFakeCosign)
 	writeExecutable(t, filepath.Join(bin, "gh"), reverifyFakeGH)
 	aicrBin := filepath.Join(bin, "aicr")
@@ -1254,12 +1476,16 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 		stageReleaseArchive(t, relDir, archiveName, !opts.omitAttestation)
 	}
 
+	if opts.checksumsManifest != "" {
+		stageChecksumsManifest(t, relDir, archiveName, opts.checksumsManifest)
+	}
+
 	outputs := filepath.Join(root, "outputs")
 	summary := filepath.Join(root, "summary.md")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "bash", "-c", script)
+	command := exec.CommandContext(ctx, "bash", reverifyStepShell(t, root, script)...)
 	command.Dir = root
 	command.Env = append(os.Environ(),
 		"PATH="+bin+":"+os.Getenv("PATH"),
@@ -1271,6 +1497,7 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 		"WORK_DIR="+workDir,
 		"AICR_BIN="+aicrBin,
 		"SBOM_SIGNING_FLOOR="+reverifySBOMFloor,
+		"EXPECTED_SBOM_BINARIES="+expectedSBOMBinaries(t, opts),
 		"SIGSTORE_PROBE_URLS=https://tuf.example.invalid/1.root.json https://fulcio.example.invalid/api/v2/trustBundle",
 		"GITHUB_OUTPUT="+outputs,
 		"GITHUB_STEP_SUMMARY="+summary,
@@ -1314,6 +1541,25 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 		t.Fatalf("read step outputs: %v", readErr)
 	}
 	return published, code, string(combined)
+}
+
+// stageChecksumsManifest writes the aicr_checksums.txt the install action leaves
+// beside the archive, either describing it correctly or not.
+func stageChecksumsManifest(t *testing.T, dir, archive, mode string) {
+	t.Helper()
+	digest := strings.Repeat("0", 64)
+	if mode == "match" {
+		data, err := os.ReadFile(filepath.Join(dir, archive))
+		if err != nil {
+			t.Fatalf("read archive for its digest: %v", err)
+		}
+		sum := sha256.Sum256(data)
+		digest = hex.EncodeToString(sum[:])
+	}
+	line := fmt.Sprintf("%s  %s\n", digest, archive)
+	if err := os.WriteFile(filepath.Join(dir, "aicr_checksums.txt"), []byte(line), 0o600); err != nil {
+		t.Fatalf("stage checksums manifest: %v", err)
+	}
 }
 
 // stageReleaseArchive builds a real gzipped tarball shaped like a released aicr
@@ -1442,6 +1688,46 @@ if [[ "${FAKE_SORT_FAILS:-false}" == "true" ]]; then
   exit 2
 fi
 exec "${FAKE_SORT_REAL}" "$@"
+`
+
+// reverifyFakeSha256Sum implements the `-c -` subset the step uses. GNU
+// coreutils ships sha256sum on the runner, but macOS provides only
+// `shasum -a 256`, so the fake keeps the harness host-independent rather than
+// letting a missing binary read as a checksum failure.
+const reverifyFakeSha256Sum = `#!/usr/bin/env bash
+set -uo pipefail
+if [[ "${1:-}" != "-c" ]]; then
+  echo "fake sha256sum only implements -c" >&2
+  exit 64
+fi
+digest_of() {
+  if command -v shasum > /dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  fi
+}
+lines=0
+status=0
+while read -r expected name; do
+  [[ -n "${expected}" ]] || continue
+  lines=$((lines + 1))
+  actual="$(digest_of "${name}")"
+  if [[ "${actual}" == "${expected}" ]]; then
+    echo "${name}: OK"
+  else
+    echo "${name}: FAILED"
+    status=1
+  fi
+done
+if [[ "${lines}" -eq 0 ]]; then
+  echo "sha256sum: no properly formatted checksum lines found" >&2
+  exit 1
+fi
+if [[ "${status}" -ne 0 ]]; then
+  echo "sha256sum: WARNING: 1 computed checksum did NOT match" >&2
+fi
+exit "${status}"
 `
 
 // reverifyFakeGH materializes every --pattern into --dir, or fails the

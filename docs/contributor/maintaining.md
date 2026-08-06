@@ -278,6 +278,12 @@ failed or was skipped, which leaves a published release whose provenance cannot
 be reconstructed while nothing in the log is wrong
 ([#1461](https://github.com/NVIDIA/aicr/issues/1461)).
 
+It also declares `workflow_dispatch`, which matters operationally: GitHub
+disables scheduled workflows after 60 days of repository inactivity, so a manual
+dispatch is how a maintainer re-arms the schedule. It is also the way to get an
+on-demand run right after cutting a release, rather than waiting for the next
+day's cron to be the first thing that looks at the new artifacts.
+
 Each run resolves the latest non-draft, non-prerelease release (never a hardcoded
 tag; the resolved tag is written to the job summary) and runs the **shipped**
 verification commands against it, exactly as
@@ -289,17 +295,27 @@ documents them:
   `cosign verify-blob-attestation` pinned to `on-tag.yaml@refs/tags/<exact tag>`.
   This is delegated wholesale to the `install-aicr-release` composite that UAT
   release cells already use, so there is one hardened implementation of the
-  binary check, not two;
+  binary check, not two. When that composite fails, the classifier re-runs
+  **both** of its sub-checks (the checksum and the provenance) rather than
+  presuming which one broke: the attestation binds the *binary* while
+  `aicr_checksums.txt` covers the *archive*, so a manifest that stopped matching
+  an otherwise-valid archive would otherwise report "transient" every day while
+  every consumer following the documented checksum flow fails every time;
 - `recipe-catalog.sigstore.json` (a loose asset, deliberately outside
   `aicr_checksums.txt`) via `aicr recipe verify-catalog`, run with the released
   binary just verified — the only check that proves the *shipped* binary's
   embedded `registry.yaml` and `validators/catalog.yaml` still digest to what the
   release signed;
-- every `linux/amd64` SPDX SBOM asset and its sibling `.sigstore.json` bundle.
-  Gated on `SBOM_SIGNING_FLOOR` (`v0.18.0`): releases at or before it predate
-  SBOM signing ([#1957](https://github.com/NVIDIA/aicr/issues/1957)) and
-  legitimately ship unsigned SBOMs, while every later release must ship a bundle
-  per SBOM.
+- the `linux/amd64` SPDX SBOM every release must publish for each binary in
+  `EXPECTED_SBOM_BINARIES`, and each one's sibling `.sigstore.json` bundle. The
+  expected set is derived from the **tag**, mirroring
+  `expected_release_asset_names()` in `.github/scripts/release-images.sh`, never
+  from the release's own inventory: derived from the release, only a zero-SBOM
+  release would be a finding, and deleting one of the two would leave the check
+  verifying the survivor and reporting clean. Gated on `SBOM_SIGNING_FLOOR`
+  (`v0.18.0`): releases at or before it predate SBOM signing
+  ([#1957](https://github.com/NVIDIA/aicr/issues/1957)) and legitimately ship
+  unsigned SBOMs, while every later release must ship a bundle per SBOM.
 
 Classification reuses the monitor's vocabulary and exit codes so both workflows
 triage identically: `clean` (0), `tamper` (1, security), `operational` (3). A
@@ -370,10 +386,19 @@ Two things are deliberately out of scope, both tracked as follow-ups:
   proves the bundle is retrievable and cryptographically sound, not that Rekor
   would still serve that entry by index.
 
-Triage is in the workflow file's header comment. In short: a security issue names
-the exact artifact — an absent asset means re-upload and re-sign (or re-cut the
-release), while an asset that is present but fails verification means the
-published bytes do not match what the release signed, and is an incident.
+Triage is in the workflow file's header comment. In short, a security issue names
+the exact artifact:
+
+- **Absent asset**: a signing or upload step silently skipped. Re-upload and
+  re-sign the asset, or re-cut the release.
+- **Present asset that fails verification**: read the **verifier's reported
+  failure reason** before concluding anything. `cosign verify-blob-attestation`
+  fails on a certificate-identity or predicate-type mismatch just as it does on a
+  digest mismatch, so an asset re-signed under a different workflow identity, with
+  its bytes fully intact, produces the same red as tampering. A digest mismatch
+  means the published bytes are not what the release signed and is an incident;
+  an identity or predicate mismatch is a signing-path problem, and the remediation
+  is different.
 
 ## Reviewing Recipe Contributions
 

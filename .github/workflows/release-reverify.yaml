@@ -158,6 +158,14 @@ env:
   SIGSTORE_PROBE_URLS: >-
     https://tuf-repo-cdn.sigstore.dev/1.root.json
     https://fulcio.sigstore.dev/api/v2/trustBundle
+  # The binaries whose linux/amd64 SPDX SBOM every post-floor release must
+  # publish, each with a sibling .sigstore.json bundle. The expected set is
+  # derived from the TAG, never from the release's own inventory: deriving it
+  # from the artifact under test would make only a zero-SBOM release a finding,
+  # so deleting one of the two would leave the loop verifying the survivor and
+  # reporting clean. Authoritative list: expected_release_asset_names() in
+  # .github/scripts/release-images.sh -- keep this linux/amd64 subset in sync.
+  EXPECTED_SBOM_BINARIES: "aicr aicrd"
   # Workspace for downloads and captured verification logs, kept out of ./_rel
   # (which belongs to the install-aicr-release action).
   WORK_DIR: ./_reverify
@@ -258,10 +266,17 @@ jobs:
           RELEASE_ASSETS: ${{ steps.release.outputs.assets_file }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
         run: |
-          # Deliberately not `set -e`: this step must run every check, aggregate
-          # the findings, and exit with the classified status. Each check owns
-          # its own failure handling.
+          # This step must run EVERY check, aggregate the findings, and exit with
+          # the classified status, so errexit has to be off. It is not off by
+          # default: with no `shell:` key GitHub invokes this block as
+          # `bash -e {0}`, and `set -uo pipefail` does not clear an inherited
+          # -e. Turn it off explicitly, as rekor-monitor.yaml does. Without
+          # this, any unguarded top-level failure aborts the step before
+          # `finish` runs, and a `tamper` already recorded earlier in the same
+          # run never reaches GITHUB_OUTPUT: the gates then read the empty
+          # classification as operational and the finding never pages.
           set -uo pipefail
+          set +e
 
           mkdir -p "${WORK_DIR}"
           classification=clean
@@ -434,17 +449,18 @@ jobs:
           elif ! command -v cosign > /dev/null 2>&1; then
             operational "cosign was never installed; treating as infrastructure"
           else
-            # Re-run the verification the action already performed, this time
-            # capturing its output so guard #2 has something to read. The action
-            # retried three times; this is the classification pass, and a pass
-            # here means the action's failure was transient -- its own log stays
-            # authoritative for WHICH of its sub-checks (checksum, extract,
-            # cosign) failed.
-            # Guarded: the step runs without `set -e`, so an unguarded failure
-            # here would fall through to cosign, which then fails on a missing
-            # bundle with a message no infra_shaped pattern matches, producing a
-            # security page for what is only a full disk or a permissions fault
-            # on WORK_DIR. Every sibling branch demotes, and so must this one.
+            # Re-run BOTH of the action's sub-checks, capturing their output so
+            # the demotion tests have something to read. Nothing here parses the
+            # action's own log, so reproducing its checks is the only way to know
+            # WHICH one failed; presuming "cosign" would misread a checksum
+            # mismatch (see the checksum re-check below). The action retried
+            # three times, so a pass here means its failure was transient.
+            # Guarded: errexit is off in this step (see `set +e` above), so an
+            # unguarded failure here would fall through to cosign, which then
+            # fails on a missing bundle with a message no infra_shaped pattern
+            # matches, producing a security page for what is only a full disk or
+            # a permissions fault on WORK_DIR. Every sibling branch demotes, and
+            # so must this one.
             if ! tar -xzf "${REL_DIR}/${archive}" -C "${WORK_DIR}" \
                 aicr aicr-attestation.sigstore.json 2>/dev/null; then
               operational "the archive listed but could not be extracted; treating as infrastructure"
@@ -454,7 +470,30 @@ jobs:
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com \
                 --certificate-identity-regexp "${identity_re}" \
                 "${WORK_DIR}/aicr" > "${WORK_DIR}/binary-verify.log" 2>&1; then
-              operational "binary provenance verified on re-run after the install action failed; treating as a transient failure"
+              # Provenance passing does NOT clear the checksums manifest: the
+              # attestation binds the BINARY, while aicr_checksums.txt covers the
+              # ARCHIVE. The action fails at its own `sha256sum -c` before it
+              # ever reaches cosign, so without this re-check a manifest that
+              # stopped matching an otherwise-valid archive would report
+              # "transient" every single day, while every consumer following the
+              # documented checksum flow fails every single time.
+              #
+              # Ordered after cosign deliberately: a truncated or corrupt
+              # download also fails a checksum, but such an archive would have
+              # failed to list, or produced a binary the attestation rejects,
+              # further up this chain. Reaching here means the bytes are intact,
+              # so a mismatch is the published manifest disagreeing with the
+              # published archive.
+              if [ ! -r "${REL_DIR}/aicr_checksums.txt" ]; then
+                operational "the checksums manifest is not on disk to re-check; treating as infrastructure"
+              elif (cd "${REL_DIR}" && grep " ${archive}\$" aicr_checksums.txt | sha256sum -c -) \
+                  > "${WORK_DIR}/checksum-verify.log" 2>&1; then
+                operational "binary provenance and checksum verified on re-run after the install action failed; treating as a transient failure"
+              else
+                status=$?
+                cat "${WORK_DIR}/checksum-verify.log" >&2 || true
+                classify_failure "checksum verification of ${archive} for ${TAG}" "${WORK_DIR}/checksum-verify.log" "${status}"
+              fi
             else
               # $? is the elif condition's status and MUST be captured before any
               # other command runs, so timeout's 124 (or a 137 SIGKILL) survives
@@ -500,14 +539,23 @@ jobs:
           elif [ "${TAG}" = "${SBOM_SIGNING_FLOOR}" ] || [ "${newest}" != "${TAG}" ]; then
             echo "release ${TAG} is at or before the SBOM signing floor ${SBOM_SIGNING_FLOOR}; SBOM bundles not expected"
           else
-            sboms="$(grep -E '_linux_amd64\.sbom\.json$' "${RELEASE_ASSETS}" || true)"
-            if [ -z "${sboms}" ]; then
-              security "release ${TAG} publishes no linux/amd64 SBOM assets"
+            # Derived from the tag, so a mandatory SBOM that was never uploaded
+            # is a finding rather than an entry that simply is not iterated.
+            read -r -a sbom_binaries <<< "${EXPECTED_SBOM_BINARIES}"
+            expected_sboms=""
+            for binary in "${sbom_binaries[@]}"; do
+              expected_sboms+="${binary}_${version}_linux_amd64.sbom.json"$'\n'
+            done
+            expected_sboms="${expected_sboms%$'\n'}"
+            if [ -z "${expected_sboms}" ]; then
+              operational "EXPECTED_SBOM_BINARIES is empty; no SBOM subjects to check"
             fi
             while IFS= read -r sbom; do
               [ -n "${sbom}" ] || continue
               bundle="${sbom}.sigstore.json"
-              if ! have_asset "${bundle}"; then
+              if ! have_asset "${sbom}"; then
+                security "release ${TAG} does not publish the mandatory SBOM ${sbom}"
+              elif ! have_asset "${bundle}"; then
                 security "release ${TAG} ships ${sbom} with no attestation bundle (${bundle})"
               elif ! command -v cosign > /dev/null 2>&1; then
                 operational "cosign is unavailable; cannot verify ${sbom}"
@@ -530,7 +578,7 @@ jobs:
                 cat "${WORK_DIR}/${sbom}.verify.log" >&2 || true
                 classify_failure "SBOM attestation verification for ${sbom}" "${WORK_DIR}/${sbom}.verify.log" "${status}"
               fi
-            done <<< "${sboms}"
+            done <<< "${expected_sboms}"
           fi
 
           finish
