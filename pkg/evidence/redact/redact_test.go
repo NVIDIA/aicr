@@ -590,7 +590,11 @@ func TestSnapshotDropsItemsFromAllowlistedSubtype(t *testing.T) {
 					// Identifiers deliberately attached to an allowlisted subtype.
 					Items: []measurement.ItemEntry{{
 						Context: map[string]string{"key": "kubernetes.io/hostname", "value": "gpu-node-01"},
-						Data:    map[string]measurement.Reading{"node-list": measurement.Str("gpu-node-01,gpu-node-02")},
+						Data: map[string]measurement.Reading{
+							"node-count": measurement.Int(2),
+							"node-list":  measurement.Str("gpu-node-01,gpu-node-02"),
+							"truncated":  measurement.Bool(false),
+						},
 					}},
 				}).
 				Build(),

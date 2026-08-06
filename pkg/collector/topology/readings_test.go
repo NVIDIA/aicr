@@ -259,46 +259,101 @@ func TestReadingsTruncation(t *testing.T) {
 	}
 }
 
+// validItem is a well-formed item for both decoders. The tables below mutate
+// one field of it, so each case fails for the reason it names.
+func validItem() measurement.ItemEntry {
+	return measurement.ItemEntry{
+		Context: map[string]string{
+			itemCtxKey:    "k",
+			itemCtxValue:  "v",
+			itemCtxEffect: "NoSchedule",
+		},
+		Data: map[string]measurement.Reading{
+			itemDataNodeCount: measurement.Int(2),
+			itemDataNodeList:  measurement.Str("n1,n2"),
+			itemDataTruncated: measurement.Bool(false),
+		},
+	}
+}
+
 // TestReadingsMalformedItems pins that a structurally broken item is rejected
 // rather than decoded into a partial reading a caller might trust.
 func TestReadingsMalformedItems(t *testing.T) {
 	tests := []struct {
-		name string
-		item measurement.ItemEntry
+		name   string
+		mutate func(*measurement.ItemEntry)
 	}{
 		{
-			name: "missing key",
-			item: measurement.ItemEntry{
-				Context: map[string]string{itemCtxValue: "v"},
-				Data:    map[string]measurement.Reading{itemDataNodeList: measurement.Str("n1")},
+			name:   "missing key",
+			mutate: func(i *measurement.ItemEntry) { delete(i.Context, itemCtxKey) },
+		},
+		{
+			name:   "empty key",
+			mutate: func(i *measurement.ItemEntry) { i.Context[itemCtxKey] = "" },
+		},
+		{
+			name:   "missing node-list",
+			mutate: func(i *measurement.ItemEntry) { delete(i.Data, itemDataNodeList) },
+		},
+		{
+			name:   "node-list is not a string",
+			mutate: func(i *measurement.ItemEntry) { i.Data[itemDataNodeList] = measurement.Int(3) },
+		},
+		{
+			name:   "missing node-count",
+			mutate: func(i *measurement.ItemEntry) { delete(i.Data, itemDataNodeCount) },
+		},
+		{
+			name:   "node-count is not an integer",
+			mutate: func(i *measurement.ItemEntry) { i.Data[itemDataNodeCount] = measurement.Str("2") },
+		},
+		{
+			name:   "node-count is negative",
+			mutate: func(i *measurement.ItemEntry) { i.Data[itemDataNodeCount] = measurement.Int(-1) },
+		},
+		{
+			name:   "node-count is below the named nodes",
+			mutate: func(i *measurement.ItemEntry) { i.Data[itemDataNodeCount] = measurement.Int(1) },
+		},
+		{
+			name:   "node-count exceeds a complete list",
+			mutate: func(i *measurement.ItemEntry) { i.Data[itemDataNodeCount] = measurement.Int(40) },
+		},
+		{
+			name: "truncated list whose count does not exceed the names",
+			mutate: func(i *measurement.ItemEntry) {
+				i.Data[itemDataNodeList] = measurement.Str("n1,n2 (+3 more)")
+				i.Data[itemDataTruncated] = measurement.Bool(true)
 			},
 		},
 		{
-			name: "empty key",
-			item: measurement.ItemEntry{
-				Context: map[string]string{itemCtxKey: "", itemCtxValue: "v"},
-				Data:    map[string]measurement.Reading{itemDataNodeList: measurement.Str("n1")},
+			name:   "missing truncated",
+			mutate: func(i *measurement.ItemEntry) { delete(i.Data, itemDataTruncated) },
+		},
+		{
+			name:   "truncated is not a boolean",
+			mutate: func(i *measurement.ItemEntry) { i.Data[itemDataTruncated] = measurement.Str("false") },
+		},
+		{
+			name: "truncated is false against a truncated list",
+			mutate: func(i *measurement.ItemEntry) {
+				i.Data[itemDataNodeList] = measurement.Str("n1,n2 (+3 more)")
+				i.Data[itemDataNodeCount] = measurement.Int(5)
 			},
 		},
 		{
-			name: "missing node-list",
-			item: measurement.ItemEntry{
-				Context: map[string]string{itemCtxKey: "k", itemCtxValue: "v"},
-				Data:    map[string]measurement.Reading{},
-			},
-		},
-		{
-			name: "node-list is not a string",
-			item: measurement.ItemEntry{
-				Context: map[string]string{itemCtxKey: "k", itemCtxValue: "v"},
-				Data:    map[string]measurement.Reading{itemDataNodeList: measurement.Int(3)},
+			name: "truncated is true against a complete list",
+			mutate: func(i *measurement.ItemEntry) {
+				i.Data[itemDataTruncated] = measurement.Bool(true)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			st := &measurement.Subtype{Name: "label", Items: []measurement.ItemEntry{tt.item}}
+			item := validItem()
+			tt.mutate(&item)
+			st := &measurement.Subtype{Name: "label", Items: []measurement.ItemEntry{item}}
 			if _, err := LabelReadings(st); err == nil {
 				t.Error("LabelReadings() error = nil, want a decode error")
 			}
@@ -306,6 +361,48 @@ func TestReadingsMalformedItems(t *testing.T) {
 				t.Error("TaintReadings() error = nil, want a decode error")
 			}
 		})
+	}
+}
+
+// TestTaintReadingsRequireEffect pins that effect is mandatory for taints and
+// ignored for labels.
+func TestTaintReadingsRequireEffect(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(*measurement.ItemEntry)
+	}{
+		{"missing effect", func(i *measurement.ItemEntry) { delete(i.Context, itemCtxEffect) }},
+		{"empty effect", func(i *measurement.ItemEntry) { i.Context[itemCtxEffect] = "" }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			item := validItem()
+			tt.mutate(&item)
+			st := &measurement.Subtype{Name: "taint", Items: []measurement.ItemEntry{item}}
+			if _, err := TaintReadings(st); err == nil {
+				t.Error("TaintReadings() error = nil, want a decode error")
+			}
+			if _, err := LabelReadings(st); err != nil {
+				t.Errorf("LabelReadings() error = %v, want nil — labels have no effect", err)
+			}
+		})
+	}
+}
+
+// TestTaintReadingsAcceptUnknownEffect pins that the decoder does not gate on
+// the effects Kubernetes defines today, so a newer cluster stays readable.
+func TestTaintReadingsAcceptUnknownEffect(t *testing.T) {
+	item := validItem()
+	item.Context[itemCtxEffect] = "SomeFutureEffect"
+
+	readings, err := TaintReadings(&measurement.Subtype{
+		Name:  "taint",
+		Items: []measurement.ItemEntry{item},
+	})
+	if err != nil {
+		t.Fatalf("TaintReadings() error = %v, want nil", err)
+	}
+	if readings[0].Effect != "SomeFutureEffect" {
+		t.Errorf("Effect = %q, want it preserved verbatim", readings[0].Effect)
 	}
 }
 

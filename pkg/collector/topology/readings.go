@@ -146,9 +146,16 @@ func taintReadingsFromItems(items []measurement.ItemEntry) ([]TaintReading, erro
 		if err != nil {
 			return nil, err
 		}
+		// Required so an empty Effect cannot satisfy a caller matching on one.
+		// Not checked against the known effects — a newer Kubernetes must
+		// still decode.
+		effect, err := itemContext(items[i], itemCtxEffect, i)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, TaintReading{
 			Key:       key,
-			Effect:    items[i].Context[itemCtxEffect],
+			Effect:    effect,
 			Value:     items[i].Context[itemCtxValue],
 			Nodes:     nodes,
 			NodeCount: count,
@@ -196,23 +203,71 @@ func itemNodes(item measurement.ItemEntry, idx int) (nodes []string, count int, 
 			fmt.Sprintf("topology item %d: data field %q is not a string", idx, itemDataNodeList))
 	}
 	nodes = splitNodeList(list)
+	marker := IsTruncatedNodeList(list)
 
-	count = len(nodes)
-	if r, ok := item.Data[itemDataNodeCount]; ok {
-		if n, ok := readingInt(r); ok {
-			count = n
-		}
+	count, err = itemInt(item, itemDataNodeCount, idx)
+	if err != nil {
+		return nil, 0, false, err
 	}
-	// Default to the rendered suffix — the only signal Data ever carried — so an
-	// item that omits or mistypes the field still reads as truncated. A declared
-	// bool wins when it is one.
-	truncated = IsTruncatedNodeList(list)
-	if r, ok := item.Data[itemDataTruncated]; ok {
-		if b, ok := r.Any().(bool); ok {
-			truncated = b
-		}
+	truncated, err = itemBool(item, itemDataTruncated, idx)
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	// All three describe the same node set, so a disagreement makes the item
+	// unreadable rather than imprecise. Both count directions matter: too low
+	// understates the cluster, too high lets a consumer read a partial list as
+	// a complete one.
+	switch {
+	case marker != truncated:
+		return nil, 0, false, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("topology item %d: %q is %v but %q %s the truncation marker",
+				idx, itemDataTruncated, truncated, itemDataNodeList,
+				map[bool]string{true: "carries", false: "does not carry"}[marker]))
+	case truncated && count <= len(nodes):
+		return nil, 0, false, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("topology item %d: %q is truncated but %q (%d) does not exceed the %d nodes named",
+				idx, itemDataNodeList, itemDataNodeCount, count, len(nodes)))
+	case !truncated && count != len(nodes):
+		return nil, 0, false, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("topology item %d: %q is complete but %q is %d against %d nodes named",
+				idx, itemDataNodeList, itemDataNodeCount, count, len(nodes)))
 	}
 	return nodes, count, truncated, nil
+}
+
+// itemInt reads a required non-negative integer data field.
+func itemInt(item measurement.ItemEntry, field string, idx int) (int, error) {
+	r, ok := item.Data[field]
+	if !ok {
+		return 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("topology item %d: missing required data field %q", idx, field))
+	}
+	v, ok := readingInt(r)
+	if !ok {
+		return 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("topology item %d: data field %q is not an integer", idx, field))
+	}
+	if v < 0 {
+		return 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("topology item %d: data field %q is negative (%d)", idx, field, v))
+	}
+	return v, nil
+}
+
+// itemBool reads a required boolean data field.
+func itemBool(item measurement.ItemEntry, field string, idx int) (bool, error) {
+	r, ok := item.Data[field]
+	if !ok {
+		return false, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("topology item %d: missing required data field %q", idx, field))
+	}
+	v, ok := r.Any().(bool)
+	if !ok {
+		return false, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("topology item %d: data field %q is not a boolean", idx, field))
+	}
+	return v, nil
 }
 
 // readingInt accepts the integer shapes a Reading can hold; JSON decoders

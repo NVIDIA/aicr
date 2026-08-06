@@ -325,14 +325,27 @@ subtypes:
       nvidia.com/gpu.product: NVIDIA-H100-80GB-HBM3|gpu-node-01,gpu-node-02 (+2 more)
 ```
 
-| Field | Where | Meaning |
-|---|---|---|
-| `key` | context | taint or label key, verbatim |
-| `value` | context | taint or label value; may be empty |
-| `effect` | context | taints only: `NoSchedule`, `PreferNoSchedule`, `NoExecute` |
-| `node-count` | data | nodes carrying the reading, counted **before** truncation |
-| `node-list` | data | node names, sorted and comma-joined, capped by `--max-nodes-per-entry` |
-| `truncated` | data | whether the cap dropped names from `node-list` |
+| Field | Where | Required | Meaning |
+|---|---|---|---|
+| `key` | context | yes | taint or label key, verbatim |
+| `value` | context | no | taint or label value; may be empty |
+| `effect` | context | taints only | `NoSchedule`, `PreferNoSchedule`, `NoExecute` |
+| `node-count` | data | yes | nodes carrying the reading, counted **before** truncation |
+| `node-list` | data | yes | node names, sorted and comma-joined, capped by `--max-nodes-per-entry` |
+| `truncated` | data | yes | whether the cap dropped names from `node-list` |
+
+An item that omits a required field is rejected. The three `data` fields must
+also agree with each other:
+
+- `truncated` is `true` exactly when `node-list` ends with `(+N more)`
+- when `truncated` is `true`, `node-count` is greater than the names in `node-list`
+- when `truncated` is `false`, `node-count` equals the names in `node-list`
+
+A count that disagrees is rejected in both directions: too low understates the
+cluster, too high lets a consumer read a partial list as a complete one.
+
+`effect` is not checked against the three values listed above, so a snapshot
+from a newer Kubernetes stays readable.
 
 `key`, `effect`, and `value` identify a reading, so they live in `context`;
 node membership is counted, so it lives in `data`. Items are sorted by

@@ -491,11 +491,17 @@ func topologyItemsMeasurement(nodeCount int, readings map[string][]string, count
 			for i := 0; i < n && i < 3; i++ {
 				names = append(names, fmt.Sprintf("node-%d", i))
 			}
+			// Render the list the way formatNodeList does — marker included —
+			// so the fixture stays consistent with the truncated flag.
+			list := strings.Join(names, ",")
+			if n > len(names) {
+				list += fmt.Sprintf(" (+%d more)", n-len(names))
+			}
 			items = append(items, measurement.ItemEntry{
 				Context: map[string]string{"key": key, "value": v},
 				Data: map[string]measurement.Reading{
 					"node-count": measurement.Int(n),
-					"node-list":  measurement.Str(strings.Join(names, ",")),
+					"node-list":  measurement.Str(list),
 					"truncated":  measurement.Bool(n > len(names)),
 				},
 			})

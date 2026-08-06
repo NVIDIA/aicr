@@ -374,8 +374,9 @@ func hasHeterogeneousGPUPool(snap *snapshotter.Snapshot) bool {
 				slog.String("error", err.Error()))
 			continue
 		}
-		mixedGPU := hasMultipleValues(readings, gpuLabelBase)
-		mixedInstance := hasMultipleValues(readings, instanceTypeLabel)
+		// nvidia.com/gpu is a label family; instance-type is a complete key.
+		mixedGPU := hasMultipleValues(readings, gpuLabelBase, true)
+		mixedInstance := hasMultipleValues(readings, instanceTypeLabel, false)
 		if mixedGPU || mixedInstance {
 			return true
 		}
@@ -408,19 +409,21 @@ func isDisambiguatedLabelKey(k string) bool {
 	return false
 }
 
-// Label keys whose divergence indicates a non-uniform GPU pool. GFD publishes
-// a family of nvidia.com/gpu.* keys, so the base matches every child.
+// Label keys whose divergence indicates a non-uniform GPU pool.
 const (
 	gpuLabelBase      = "nvidia.com/gpu"
 	instanceTypeLabel = "node.kubernetes.io/instance-type"
 )
 
-// hasMultipleValues reports whether the named label, or any child of it,
-// carries more than one distinct value across the cluster.
-func hasMultipleValues(readings []topology.LabelReading, match string) bool {
+// hasMultipleValues reports whether match carries more than one distinct value
+// across the cluster. includeChildren also counts keys under match+".", each on
+// its own; use it only when match names a family rather than a label.
+func hasMultipleValues(readings []topology.LabelReading, match string, includeChildren bool) bool {
 	values := make(map[string]map[string]struct{})
 	for _, r := range readings {
-		if r.Key != match && !strings.HasPrefix(r.Key, match+".") {
+		matched := r.Key == match ||
+			(includeChildren && strings.HasPrefix(r.Key, match+"."))
+		if !matched {
 			continue
 		}
 		if values[r.Key] == nil {

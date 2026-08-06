@@ -703,6 +703,19 @@ func TestHasHeterogeneousGPUPoolLosslessEncoding(t *testing.T) {
 			want:     false,
 		},
 		{
+			name:     "child of instance-type is a separate label",
+			readings: map[string][]string{"node.kubernetes.io/instance-type.tier": {"gold", "silver"}},
+			want:     false,
+		},
+		{
+			name: "uniform instance-type alongside a diverging child",
+			readings: map[string][]string{
+				"node.kubernetes.io/instance-type":      {"p5.48xlarge"},
+				"node.kubernetes.io/instance-type.tier": {"gold", "silver"},
+			},
+			want: false,
+		},
+		{
 			// Legacy-path false positive: the dot belongs to the label name,
 			// not to an appended value.
 			name:     "uniform gpu.compute.major is not heterogeneous",
