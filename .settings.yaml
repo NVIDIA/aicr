@@ -46,6 +46,15 @@ security_tools:
   cosign: 'v3.1.2'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
   syft: 'v1.50.0'
+  # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
+  # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
+  # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
+  # this is a separate dependency from the signing/attestation path.
+  #
+  # Stored WITHOUT the leading 'v', unlike cosign/syft/grype above:
+  # oras-project/setup-oras looks the version up against bare release keys and
+  # throws on 'v1.3.0'. tools/setup-tools re-adds the prefix for the download URL.
+  oras: '1.3.0'
 
 # E2E Testing Tools
 testing_tools:

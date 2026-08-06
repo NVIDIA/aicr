@@ -1167,6 +1167,7 @@ func TestReleaseRunnableJobsHaveTimeouts(t *testing.T) {
 		".github/workflows/attest-images.yaml",
 		".github/workflows/build-attested.yaml",
 		".github/workflows/packaging.yaml",
+		".github/workflows/release-reverify.yaml",
 	} {
 		doc := loadYAML(t, path)
 		for name, raw := range mapValue(t, doc, "jobs") {

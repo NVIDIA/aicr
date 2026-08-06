@@ -100,6 +100,9 @@ get_tool_metadata() {
         syft)
             echo "syft:::syft version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}':::major_minor"
             ;;
+        oras)
+            echo "oras:::oras version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}':::major_minor"
+            ;;
         # Testing tools
         kubectl)
             echo "kubectl:::kubectl version --client -o json 2>/dev/null | grep gitVersion | grep -oE 'v[0-9]+\.[0-9]+' || echo installed:::major"

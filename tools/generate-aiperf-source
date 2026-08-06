@@ -1,0 +1,457 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""Publish the third-party Python source for the aiperf-bench image.
+
+Builds a tarball of the source distributions for every Python package installed
+into `aicr-validators/aiperf-bench`, and optionally attaches it to the published
+image as an OCI 1.1 referrer.
+
+Usage::
+
+    tools/generate-aiperf-source
+    tools/generate-aiperf-source --attach ghcr.io/nvidia/aicr-validators/aiperf-bench@sha256:...
+
+Why only this image
+-------------------
+NVIDIA's container policy requires the source of every third-party open-source
+component added on top of an approved base image to be retrievable by whoever
+pulls the image, regardless of license. Attribution (THIRD_PARTY_NOTICES.md) is
+a separate obligation and does not satisfy this one.
+
+The six Go images already satisfy it: their dependencies are vendored, so the
+GitHub release source archive for the matching tag contains the complete source
+of every module compiled in. Only aiperf-bench installs from wheels (built
+distributions), leaving nothing that holds its source.
+
+Why a referrer rather than baking it into the image
+---------------------------------------------------
+The sdists are ~250 MB. Embedding them would be paid on every benchmark pod
+pull, forever, for data nothing reads at runtime. A referrer leaves the runtime
+image untouched, binds the source to the exact image digest so correspondence
+cannot drift, and changes no other part of the release pipeline. OSRB confirmed
+the referrers API is acceptable provided retrieval is documented, which
+docs/integrator/supply-chain-verification.md covers.
+
+A referrer binds to one digest, so this runs per published build.
+
+Why the closure is read from the committed notices fragment
+-----------------------------------------------------------
+`validators/performance/licenses/python-notices.md` already records the exact
+name and version of every package in the image, and CI gates it against
+requirements.txt. Reading it here means the source archive and the attribution
+record cannot describe different closures, and avoids a second resolution that
+could drift from the first. It is also far faster than re-resolving: sdist URLs
+come from the PyPI JSON API, turning a 30-minute `pip download` into under a
+minute.
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import contextlib
+import gzip
+import hashlib
+import json
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+REQUIREMENTS = REPO_ROOT / "validators/performance/requirements.txt"
+
+# Must match the aiperf-bench builder stage so the resolution matches what the
+# image installs: `FROM python:3.13-slim` and the manylinux targets its wheels
+# are selected for.
+PYTHON_VERSION = "3.13"
+PLATFORM_TAGS = [
+    "manylinux2014_x86_64",
+    "manylinux_2_17_x86_64",
+    "manylinux_2_28_x86_64",
+]
+DEFAULT_OUTPUT = REPO_ROOT / "dist/aiperf-source"
+ARCHIVE_NAME = "aiperf-bench-python-source.tar.gz"
+
+# The OCI artifactType consumers filter on. Versioned so the layout can change
+# later without breaking a documented retrieval command.
+ARTIFACT_TYPE = "application/vnd.nvidia.aicr.source.v1+tar"
+
+# Packages that publish no sdist on PyPI, with where their source is instead.
+# Anything not listed here aborts the run rather than silently producing a
+# source archive with a hole in it.
+# The note is rendered into a README that ships in a public artifact, so it
+# names the source location and nothing else. aiperf's PyPI metadata also
+# carries a maintainer distribution list, deliberately not repeated here:
+# republishing another team's DL inside our compliance artifact would invite
+# external mail to it without adding anything the obligation requires.
+KNOWN_NO_SDIST = {
+    "aiperf": (
+        "NVIDIA package, wheel-only release; "
+        "source at https://github.com/ai-dynamo/aiperf"
+    ),
+}
+
+PYPI_JSON = "https://pypi.org/pypi/{name}/{version}/json"
+INDEX_ROW = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*([^|\s]+)\s*\|")
+
+# 130 metadata lookups plus 129 downloads against a third party is enough
+# requests that a transient failure is likely rather than exceptional. Without
+# retry a single blip fails the whole run.
+MAX_ATTEMPTS = 4
+BACKOFF_BASE_SECONDS = 1.0
+
+# Statuses worth retrying. 404 is deliberately absent: it is the honest answer
+# that no sdist exists for this version, and retrying it would only slow the
+# fail-closed path that reports a package as unavailable.
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def with_retry(operation, description: str):
+    """Run a network operation, retrying only genuinely transient failures."""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            return operation()
+        except urllib.error.HTTPError as err:
+            if err.code not in RETRYABLE_STATUS or attempt == MAX_ATTEMPTS:
+                raise
+            reason = f"HTTP {err.code}"
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as err:
+            if attempt == MAX_ATTEMPTS:
+                raise
+            reason = type(err).__name__
+
+        delay = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+        print(
+            f"  retry {attempt}/{MAX_ATTEMPTS - 1} for {description} after {reason}; "
+            f"waiting {delay:.0f}s",
+            file=sys.stderr,
+        )
+        time.sleep(delay)
+    raise RuntimeError("unreachable")
+
+
+def read_closure() -> list[tuple[str, str]]:
+    """Resolve requirements.txt to the exact closure the image installs.
+
+    Resolved here rather than read from the committed notices fragment so that
+    the archive and the image derive from ONE input: the same requirements.txt
+    the Dockerfile installs. A committed snapshot is a point-in-time record that
+    silently ages out of step with what a later build resolves, which would
+    break the per-digest correspondence the referrer exists to assert.
+
+    `--dry-run --report` resolves without downloading, so this costs a resolution
+    (~90s) rather than a full install, and deps stay free to float: a rebuild
+    picks up patched transitive versions exactly as it does today, and this
+    follows it instead of pinning it.
+
+    Two known gaps, tracked separately rather than claimed away: pip and wheel
+    come from `python -m venv` and are not declared here, and the image build
+    layer-caches its own resolution (#2086), so a cached build can ship an older
+    closure than this resolves.
+    """
+    if not REQUIREMENTS.is_file():
+        raise SystemExit(f"ERROR: {REQUIREMENTS} not found.")
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as handle:
+        report = pathlib.Path(handle.name)
+
+    cmd = [
+        sys.executable, "-m", "pip", "install",
+        "--dry-run", "--quiet",
+        "--report", str(report),
+        "--only-binary=:all:",
+        "--python-version", PYTHON_VERSION,
+        "--requirement", str(REQUIREMENTS),
+    ]
+    for tag in PLATFORM_TAGS:
+        cmd += ["--platform", tag]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            sys.stderr.write(result.stdout)
+            sys.stderr.write(result.stderr)
+            raise SystemExit(f"ERROR: could not resolve {REQUIREMENTS}")
+
+        data = json.loads(report.read_text(encoding="utf-8"))
+    finally:
+        report.unlink(missing_ok=True)
+
+    packages = [
+        (entry["metadata"]["name"], entry["metadata"]["version"])
+        for entry in data.get("install", [])
+    ]
+    if not packages:
+        raise SystemExit(f"ERROR: {REQUIREMENTS} resolved to no packages")
+    return packages
+
+
+def sdist_for(name: str, version: str) -> tuple[str, str, str] | None:
+    """Return (filename, url, sha256) of the sdist for one pinned package.
+
+    Returns None only when the index genuinely lists no usable sdist. Transport
+    failures raise, so "we could not ask" is never mistaken for "there is none".
+
+    The digest is carried through and checked after download. PyPI publishes a
+    sha256 for every file it serves, and this archive is a compliance artifact:
+    accepting whatever bytes arrive from a URL, without verifying them against
+    the index's own declaration, would make the published "source" unverifiable
+    against what the package author released.
+    """
+    def lookup() -> dict:
+        with urllib.request.urlopen(
+            PYPI_JSON.format(name=name, version=version), timeout=30
+        ) as response:
+            return json.load(response)
+
+    # Deliberately NOT catching network errors here. urllib.error.HTTPError
+    # subclasses URLError, so swallowing URLError would collapse a persistent
+    # 5xx or a 403 into the same `None` a genuine "no sdist" returns. The run
+    # would then abort saying the package publishes no source and advise adding
+    # it to KNOWN_NO_SDIST -- which would permanently suppress source
+    # publication for a package that has source. Letting the failure propagate
+    # aborts with the actual transport error instead.
+    data = with_retry(lookup, f"{name}=={version} metadata")
+
+    # Sort rather than take the first match. A release normally has one sdist,
+    # but the API does not guarantee that or a stable order, and picking by
+    # arrival order would let the same inputs produce a different archive on a
+    # different day. Ordering by filename is deterministic and, for the
+    # multiple-sdist case, prefers the canonical `.tar.gz` over a legacy `.zip`
+    # by simple lexical order.
+    sdists = sorted(
+        (e for e in data.get("urls", []) if e.get("packagetype") == "sdist"),
+        key=lambda e: e.get("filename", ""),
+    )
+    for entry in sdists:
+        digest = (entry.get("digests") or {}).get("sha256")
+        if not digest:
+            # Reported as unavailable rather than downloaded unverified: an
+            # entry we cannot check is not source we can vouch for. Named
+            # distinctly from "no sdist" so the diagnostic is not misleading.
+            print(
+                f"WARNING: {name}=={version} sdist has no sha256 on PyPI",
+                file=sys.stderr,
+            )
+            return None
+        return entry["filename"], entry["url"], digest
+    return None
+
+
+# Fixed permissions for archive members. Files land via write_bytes/write_text,
+# which apply the builder's umask, so a machine running umask 002 would produce
+# different modes -- and therefore a different archive digest -- than one
+# running 022 from byte-identical inputs.
+_FILE_MODE = 0o644
+_DIR_MODE = 0o755
+
+
+def _reset(info: tarfile.TarInfo) -> tarfile.TarInfo:
+    """Strip per-machine metadata so the archive is byte-reproducible."""
+    info.uid = info.gid = 0
+    info.uname = info.gname = "root"
+    info.mtime = 0
+    info.mode = _DIR_MODE if info.isdir() else _FILE_MODE
+    return info
+
+
+@contextlib.contextmanager
+def reproducible_tar(path: pathlib.Path):
+    """Open a .tar.gz whose bytes depend only on its contents.
+
+    `tarfile.open(mode="w:gz")` is not enough: gzip stamps the current time into
+    its own header, so two runs over identical input produce different archives
+    and therefore a different referrer digest. Driving gzip directly with
+    mtime=0 removes the last source of nondeterminism, since tarfile already
+    walks directories in sorted order and _reset zeroes per-file metadata.
+    """
+    with open(path, "wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz:
+            with tarfile.open(fileobj=gz, mode="w") as tar:
+                yield tar
+
+
+def build_archive(out_dir: pathlib.Path) -> tuple[pathlib.Path, int, list[str]]:
+    packages = read_closure()
+    print(f"Resolving sdists for {len(packages)} packages...", file=sys.stderr)
+
+    staging = out_dir / ".staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+
+    resolved: dict[str, tuple[str, str, str]] = {}
+    unavailable: list[str] = []
+
+    # PyPI lookups dominate wall clock and are independent, so fan out.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(sdist_for, n, v): n for n, v in packages}
+        for future in concurrent.futures.as_completed(futures):
+            name = futures[future]
+            found = future.result()
+            if found is None:
+                unavailable.append(name)
+            else:
+                resolved[name] = found
+
+    unexpected = sorted(set(unavailable) - set(KNOWN_NO_SDIST))
+    if unexpected:
+        raise SystemExit(
+            "ERROR: no source distribution published for: " + ", ".join(unexpected)
+            + "\nThe image would ship binaries whose source is not available.\n"
+            "Add the package to KNOWN_NO_SDIST with a documented source location,\n"
+            "or remove the dependency."
+        )
+
+    print(f"Downloading {len(resolved)} sdists...", file=sys.stderr)
+
+    def download(item: tuple[str, tuple[str, str, str]]) -> None:
+        name, (filename, url, want_sha256) = item
+
+        def get() -> bytes:
+            with urllib.request.urlopen(url, timeout=120) as response:
+                return response.read()
+
+        # No except here on purpose: an sdist that cannot be fetched after
+        # retries must fail the run. Skipping it would produce an archive that
+        # silently omits a package whose source we are obliged to publish.
+        payload = with_retry(get, f"{name} sdist")
+
+        got_sha256 = hashlib.sha256(payload).hexdigest()
+        if got_sha256 != want_sha256:
+            raise SystemExit(
+                f"ERROR: {name} sdist failed integrity check.\n"
+                f"  expected sha256 {want_sha256}\n"
+                f"  received sha256 {got_sha256}\n"
+                "Refusing to publish source that does not match what the index declares."
+            )
+
+        (staging / filename).write_bytes(payload)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(download, sorted(resolved.items())))
+
+    (staging / "README.txt").write_text(
+        "Third-party Python source for ghcr.io/nvidia/aicr-validators/aiperf-bench\n"
+        "========================================================================\n\n"
+        f"This archive contains the source distribution of {len(resolved)} Python\n"
+        "packages installed into the aiperf-bench image. Each is the source\n"
+        "published for the exact version installed, so it corresponds to the\n"
+        "binaries the image distributes.\n\n"
+        "Not included (no source distribution published upstream):\n"
+        + "".join(f"  {n}: {KNOWN_NO_SDIST[n]}\n" for n in sorted(unavailable))
+        + "\nThe base image (nvcr.io/nvidia/distroless/python) ships its own source\n"
+        "under its own approval; it is not duplicated here.\n\n"
+        "Source for the Go components of AICR is in the GitHub release archive for\n"
+        "the matching tag at https://github.com/NVIDIA/aicr, which contains the\n"
+        "complete vendor/ tree.\n\n"
+        "License texts for all of the above are in THIRD_PARTY_NOTICES.md,\n"
+        "published as an asset on each AICR release.\n",
+        encoding="utf-8",
+    )
+
+    archive = out_dir / ARCHIVE_NAME
+    with reproducible_tar(archive) as tar:
+        for entry in sorted(p.name for p in staging.iterdir()):
+            tar.add(staging / entry, arcname=entry, filter=_reset)
+
+    shutil.rmtree(staging)
+    return archive, len(resolved), sorted(unavailable)
+
+
+def attach(archive: pathlib.Path, image: str) -> str:
+    """Attach the archive as an OCI 1.1 referrer; return the referrer digest.
+
+    The digest is returned rather than discarded because `oras attach` produces
+    an UNSIGNED artifact. Anyone with push access to the repository can add a
+    second referrer carrying the same artifactType, and a consumer selecting by
+    type alone would have no way to tell them apart (CWE-345). The caller signs
+    this exact digest so retrieval can be authenticated.
+    """
+    if shutil.which("oras") is None:
+        raise SystemExit(
+            "ERROR: oras is not installed; it is required to attach the referrer.\n"
+            "See https://oras.land/docs/installation"
+        )
+
+    print(f"Attaching to {image}...", file=sys.stderr)
+    # Run from the archive's directory and pass the bare filename. `oras attach`
+    # rejects absolute paths outright, and for good reason: the file argument
+    # becomes the layer's org.opencontainers.image.title, so an absolute path
+    # would publish the builder's local directory layout into the artifact.
+    # Passing the basename keeps that annotation to just the archive name, which
+    # is also what a consumer wants to see. Preferred over
+    # --disable-path-validation, which would suppress the check and keep the leak.
+    result = subprocess.run(
+        [
+            "oras", "attach",
+            "--artifact-type", ARTIFACT_TYPE,
+            "--annotation", "org.opencontainers.image.title=Third-party Python source",
+            image,
+            f"{archive.name}:application/gzip",
+        ],
+        cwd=archive.parent,
+        capture_output=True, text=True, check=False,
+    )
+    sys.stderr.write(result.stdout)
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        raise SystemExit(f"ERROR: oras attach failed for {image}")
+
+    # oras reports the referrer manifest digest on the final "Digest:" line.
+    digest = ""
+    for line in result.stdout.splitlines():
+        if line.startswith("Digest:"):
+            digest = line.split(":", 1)[1].strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise SystemExit(
+            "ERROR: could not read the referrer digest from oras output.\n"
+            "Without it the artifact cannot be signed, and an unsigned referrer "
+            "is indistinguishable from one an attacker attached."
+        )
+    return digest
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--output-dir", type=pathlib.Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--attach",
+        metavar="IMAGE",
+        help="Attach the archive to this published image as an OCI referrer. "
+             "Prefer a digest reference; a referrer binds to one digest.",
+    )
+    args = parser.parse_args()
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    archive, count, missing = build_archive(args.output_dir)
+
+    size_mb = archive.stat().st_size // 1024 // 1024
+    print(f"Wrote {archive} ({count} packages, {size_mb} MB)", file=sys.stderr)
+    for name in missing:
+        print(f"  not included: {name} - {KNOWN_NO_SDIST[name]}", file=sys.stderr)
+
+    if args.attach:
+        referrer = attach(archive, args.attach)
+        print(f"Attached referrer {referrer}", file=sys.stderr)
+        print(f"Retrieve with: oras discover --format tree {args.attach}", file=sys.stderr)
+
+        # Emitted on stdout (everything else goes to stderr) so a caller can
+        # capture it without parsing progress output. The release workflow signs
+        # this digest; an unsigned referrer cannot be told apart from one an
+        # attacker with push access attached alongside it.
+        print(referrer)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
