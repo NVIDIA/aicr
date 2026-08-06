@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // PredicateInputs is the data BuildPredicate needs.
@@ -42,9 +43,15 @@ type PredicateInputs struct {
 
 	// Redaction is nil for full bundles and set for minimal bundles.
 	Redaction *RedactionInfo
+
+	// Profile is nil for unprofiled recipes and set for profile-bearing
+	// ones; it selects PredicateTypeV2 for the enclosing statement.
+	Profile *ProfilePredicate
 }
 
-// BuildPredicate constructs the v1 predicate body from inputs. The
+// BuildPredicate constructs the predicate body from inputs (the shared
+// shape behind predicateType v1 for unprofiled recipes and v2 when
+// Profile is set — see StatementPredicateType). The
 // returned Predicate has deterministic field ordering: ValidatorImages
 // is sorted by image, Phases iteration order is the canonical
 // AllPhases sequence (the map is fine because Go's JSON marshaller
@@ -75,6 +82,50 @@ func BuildPredicate(in PredicateInputs) *Predicate {
 		BOM:                     in.BOM,
 		Manifest:                in.Manifest,
 		Redaction:               in.Redaction,
+		Profile:                 in.Profile,
+	}
+}
+
+// StatementPredicateType returns the predicate type a predicate requires:
+// PredicateTypeV2 when it carries a profile block, PredicateTypeV1
+// otherwise.
+func StatementPredicateType(pred *Predicate) string {
+	if pred != nil && pred.Profile != nil {
+		return PredicateTypeV2
+	}
+	return PredicateTypeV1
+}
+
+// ValidatePredicateTypeCoherence enforces the bidirectional type contract
+// shared by every evidence consumer: v1 must not carry a profile block, v2
+// must carry a well-formed one, and any other type is unknown. A profiled
+// recipe attested under v1 would silently lose its descriptor identity —
+// exactly the pre-expansion evidence the v2 cut-over exists to invalidate.
+func ValidatePredicateTypeCoherence(predicateType string, pred *Predicate) error {
+	switch predicateType {
+	case PredicateTypeV1:
+		if pred != nil && pred.Profile != nil {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"predicateType "+PredicateTypeV1+" cannot carry a profile block; profile-bearing evidence requires "+PredicateTypeV2)
+		}
+		return nil
+	case PredicateTypeV2:
+		if pred == nil || pred.Profile == nil {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"predicateType "+PredicateTypeV2+" requires the predicate profile block")
+		}
+		if pred.Profile.Selection == "" || pred.Profile.PolicyDescriptorIdentity == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"predicate profile block requires selection and policyDescriptorIdentity")
+		}
+		if _, err := recipe.ParseProfileSelection(pred.Profile.Selection); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"predicate profile block carries a malformed selection", err)
+		}
+		return nil
+	default:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"unexpected predicateType "+predicateType)
 	}
 }
 
@@ -83,8 +134,10 @@ func SubjectName(recipeName string) string {
 	return SubjectNamePrefix + recipeName
 }
 
-// BuildStatement constructs the in-toto Statement carrying our v1
-// predicate. The returned bytes are protobuf-canonical JSON suitable
+// BuildStatement constructs the in-toto Statement carrying our
+// recipe-evidence predicate, typed via StatementPredicateType (v1 for
+// unprofiled recipes, v2 when the predicate carries a profile block).
+// The returned bytes are protobuf-canonical JSON suitable
 // for DSSE wrapping. The recipe canonicalization happens upstream;
 // callers pass in the already-computed subject digest.
 func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]byte, error) {
@@ -100,6 +153,13 @@ func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]
 	if pred == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "predicate is required")
 	}
+	// Producer-side coherence: StatementPredicateType keys off profile
+	// presence, so type-vs-profile agreement is structural — but a
+	// hand-built v2 profile block missing selection/policyDescriptorIdentity
+	// would sign fine and only fail at verify/ingest. Fail closed here.
+	if err := ValidatePredicateTypeCoherence(StatementPredicateType(pred), pred); err != nil {
+		return nil, err
+	}
 
 	predicate, err := predicateAsStruct(pred)
 	if err != nil {
@@ -114,7 +174,7 @@ func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]
 				Digest: map[string]string{"sha256": recipeSubjectDigest},
 			},
 		},
-		PredicateType: PredicateTypeV1,
+		PredicateType: StatementPredicateType(pred),
 		Predicate:     predicate,
 	}
 	if vErr := stmt.Validate(); vErr != nil {
@@ -149,6 +209,10 @@ func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]b
 	if pred.Recipe.Name == "" || pred.Recipe.Digest == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "predicate.recipe.{name,digest} must be populated for artifact-subject statement")
 	}
+	// Producer-side coherence — same rationale as BuildStatement.
+	if err := ValidatePredicateTypeCoherence(StatementPredicateType(pred), pred); err != nil {
+		return nil, err
+	}
 
 	predicate, err := predicateAsStruct(pred)
 	if err != nil {
@@ -163,7 +227,7 @@ func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]b
 				Digest: map[string]string{"sha256": artifactDigest},
 			},
 		},
-		PredicateType: PredicateTypeV1,
+		PredicateType: StatementPredicateType(pred),
 		Predicate:     predicate,
 	}
 	if vErr := stmt.Validate(); vErr != nil {

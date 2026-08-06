@@ -327,6 +327,29 @@ func TestComponentRegistry_SlinkySlurmChartVersions(t *testing.T) {
 	}
 }
 
+func TestComponentRegistry_SlinkySlurmSharedStorageClassPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+	slurm := registry.Get("slinky-slurm")
+	if slurm == nil {
+		t.Fatal("slinky-slurm not found in registry")
+	}
+	want := []string{
+		"storage.home.storageClassName",
+		"storage.data.storageClassName",
+	}
+	if got := slurm.GetSharedStorageClassPaths(); !slices.Equal(got, want) {
+		t.Errorf("shared storage class paths = %v, want %v", got, want)
+	}
+	if overlap := slices.ContainsFunc(slurm.GetStorageClassPaths(), func(path string) bool {
+		return slices.Contains(want, path)
+	}); overlap {
+		t.Errorf("shared storage paths must not overlap generic storageClassPaths: %v", slurm.GetStorageClassPaths())
+	}
+}
+
 // Pins the `slinky` map-key choice for slinky-slurm on both sides:
 // the registry's nodeScheduling paths AND components/slinky-slurm/
 // values.yaml must reference the same key, or injected tolerations

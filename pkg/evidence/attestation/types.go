@@ -25,8 +25,21 @@ import (
 // ADR-007 (docs/design/007-recipe-evidence.md) and are part of the V1
 // stability boundary.
 const (
-	// PredicateTypeV1 is the in-toto predicateType URI for recipe evidence.
+	// PredicateTypeV1 is the in-toto predicateType URI for recipe evidence
+	// of UNPROFILED recipes. Profile-bearing recipes require
+	// PredicateTypeV2 (ADR-015 descriptor-currentness): the #1327 closure
+	// is recomputed rather than persisted, so a descriptor expansion
+	// changes no recipe digest, and only the v2 predicate's recorded
+	// descriptor identity distinguishes pre-expansion evidence from
+	// current evidence.
 	PredicateTypeV1 = "https://" + header.Domain + "/recipe-evidence/v1"
+
+	// PredicateTypeV2 is the in-toto predicateType URI for profile-bearing
+	// recipe evidence. It extends v1 with the predicate.profile block
+	// (selection, advertiser, policy-descriptor identity). Enforcement is
+	// bidirectional: v2 requires the profile block, and a profile-bearing
+	// predicate on v1 is rejected.
+	PredicateTypeV2 = "https://" + header.Domain + "/recipe-evidence/v2"
 
 	// PredicateSchemaVersion is the recipe-evidence predicate schema version.
 	PredicateSchemaVersion = "1.0.0"
@@ -134,6 +147,31 @@ type Predicate struct {
 	// removed; the cryptographic binding is unaffected either way because
 	// the digests cover whatever bytes actually shipped.
 	Redaction *RedactionInfo `json:"redaction,omitempty" yaml:"redaction,omitempty"`
+
+	// Profile is present exactly when the attested recipe carries
+	// metadata.selectedProfile; it upgrades the statement to
+	// PredicateTypeV2. nil keeps the v1 predicate byte-identical for
+	// unprofiled recipes.
+	Profile *ProfilePredicate `json:"profile,omitempty" yaml:"profile,omitempty"`
+}
+
+// ProfilePredicate is the signed profile identity of a profiled recipe's
+// evidence (ADR-015). PolicyDescriptorIdentity is the deterministic,
+// recipe-scoped identity of the #1327 descriptor entries contributing to
+// the attested recipe's effective closure at production time
+// (pkg/allocpolicy.IdentityFor over the recipe's
+// ClosureDescriptorEntries): profiled evidence is CURRENT only when both
+// the recipe digest and this identity match the values recomputed at
+// verification time; a mismatch is historical-only and requires
+// re-qualification and re-signing.
+type ProfilePredicate struct {
+	// Selection is the exact name=value selection baked into the recipe.
+	Selection string `json:"selection" yaml:"selection"`
+	// Advertiser mirrors metadata.selectedProfile.advertiser ("" omitted).
+	Advertiser string `json:"advertiser,omitempty" yaml:"advertiser,omitempty"`
+	// PolicyDescriptorIdentity is the recipe-scoped
+	// pkg/allocpolicy.IdentityFor identity at production time.
+	PolicyDescriptorIdentity string `json:"policyDescriptorIdentity" yaml:"policyDescriptorIdentity"`
 }
 
 // RedactionInfo is the provenance of the minimal-bundle redaction recorded

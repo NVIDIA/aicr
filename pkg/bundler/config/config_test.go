@@ -81,6 +81,26 @@ func TestConfigStorageClass(t *testing.T) {
 	})
 }
 
+func TestConfigSharedStorageClass(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []Option
+		want    string
+	}{
+		{name: "default is empty"},
+		{name: "set via option", options: []Option{WithSharedStorageClass("efs-sc")}, want: "efs-sc"},
+		{name: "explicit empty remains empty", options: []Option{WithSharedStorageClass("")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig(tt.options...)
+			if got := cfg.SharedStorageClass(); got != tt.want {
+				t.Errorf("SharedStorageClass() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigVendorCharts(t *testing.T) {
 	tests := []struct {
 		name string

@@ -128,11 +128,26 @@ func runChainsawTestInProcess(ctx context.Context, component, yamlContent string
 	// context.WithTimeout(ctx, ChainsawAssertTimeout), so without an outer cap
 	// an N-step (or N-document) check could run N × effectiveTimeout while
 	// retrying. The first document that declares spec.timeouts.assert sets it.
+	//
+	// The authored value SHORTENS the caller's budget; it can never extend it.
+	// That exec path also wrapped the subprocess in an independent outer
+	// context.WithTimeout(stepTimeout), so a Test asking for more than the
+	// caller allows was cut off at the caller's bound. In-process the authored
+	// value replaced the caller budget outright, letting registry- or
+	// integrator-authored content overrun the gate's --timeout (and the
+	// validator's per-check budget) by any factor it liked. Restore the cap.
 	effectiveTimeout := stepTimeout
 	for i := range tests {
 		t := tests[i]
 		if t.Spec.Timeouts != nil && t.Spec.Timeouts.Assert != nil && t.Spec.Timeouts.Assert.Duration > 0 {
-			effectiveTimeout = t.Spec.Timeouts.Assert.Duration
+			if authored := t.Spec.Timeouts.Assert.Duration; authored < effectiveTimeout {
+				effectiveTimeout = authored
+			} else {
+				slog.Debug("authored assert timeout exceeds the caller budget; capping",
+					"component", component,
+					"authored", authored,
+					"budget", stepTimeout)
+			}
 			break
 		}
 	}
@@ -196,9 +211,16 @@ func stepLabel(test v1alpha1.Test, docIdx int, step v1alpha1.TestStep, stepIdx, 
 }
 
 // decodeTests unmarshals every Chainsaw Test document in a (possibly
-// multi-document) YAML stream. Non-Test documents are skipped, matching
-// ValidateTestReadOnly, which walks the same stream to enforce the read-only
-// allowlist.
+// multi-document) YAML stream.
+//
+// A stream reaching this executor was routed here because IsChainsawTest found
+// at least one Test in it, and nothing else evaluates it afterwards. So a
+// document that is NOT a Test would be evaluated by no path at all while the
+// component still reported Pass — the mixed-stream fail-open. Every
+// content-bearing document must therefore be a Test; anything else is rejected
+// by name. Genuinely empty documents (a trailing `---`, a comment-only or null
+// document) carry nothing to evaluate and are skipped, since they are ordinary
+// YAML punctuation rather than dropped content.
 //
 // Failures carry ErrCodeInvalidRequest: malformed content never becomes valid
 // by retrying, and isTerminalAssertErr keys on that code to fail fast.
@@ -215,6 +237,9 @@ func decodeTests(yamlContent string) ([]v1alpha1.Test, error) {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("failed to parse document %d", docIdx), err)
 		}
+		if isEmptyYAMLDocument(&node) {
+			continue
+		}
 		// Re-marshal the single document so the chainsaw types get the
 		// JSON-tag-aware unmarshal path (they are tagged json, not yaml).
 		buf, err := yamlv3.Marshal(&node)
@@ -227,13 +252,25 @@ func decodeTests(yamlContent string) ([]v1alpha1.Test, error) {
 			Kind       string `json:"kind"`
 		}
 		if err := yaml.Unmarshal(buf, &header); err != nil {
-			continue // not a Kubernetes-shaped document
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("document %d is not a Kubernetes-shaped mapping; a stream carrying a chainsaw "+
+					"Test may hold only Test documents, because nothing else evaluates the rest", docIdx), err)
 		}
 		if header.Kind != chainsawTestKind {
-			continue
+			describedKind := strconv.Quote(header.Kind)
+			if header.Kind == "" {
+				describedKind = "no kind field"
+			}
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("document %d has %s, not kind %q; a stream carrying a chainsaw Test may hold "+
+					"only Test documents, because nothing else evaluates the rest",
+					docIdx, describedKind, chainsawTestKind))
 		}
 		if group, _, ok := strings.Cut(header.APIVersion, "/"); !ok || group != chainsawTestAPIGroup {
-			continue
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("document %d has apiVersion %q, which is not in the %q group; a stream carrying "+
+					"a chainsaw Test may hold only Test documents, because nothing else evaluates the rest",
+					docIdx, header.APIVersion, chainsawTestAPIGroup))
 		}
 		var test v1alpha1.Test
 		if err := yaml.Unmarshal(buf, &test); err != nil {
@@ -242,6 +279,21 @@ func decodeTests(yamlContent string) ([]v1alpha1.Test, error) {
 		}
 		tests = append(tests, test)
 	}
+}
+
+// isEmptyYAMLDocument reports whether a decoded document carries no content:
+// the shape yaml.v3 produces for a trailing `---`, a comment-only document, or
+// an explicit `null`. Such a document is punctuation, not dropped content, so
+// decodeTests skips it rather than rejecting the stream.
+func isEmptyYAMLDocument(node *yamlv3.Node) bool {
+	if node.Kind == 0 || len(node.Content) == 0 {
+		return true
+	}
+	if len(node.Content) != 1 {
+		return false
+	}
+	inner := node.Content[0]
+	return inner.Kind == yamlv3.ScalarNode && inner.Tag == "!!null"
 }
 
 // noOpCheckAnnotation marks a health check that intentionally asserts
@@ -300,6 +352,16 @@ func executeStepInProcess(ctx context.Context, try []v1alpha1.Operation, fetcher
 				fmt.Sprintf("try[%d]: context canceled", opIdx), err)
 		}
 		switch {
+		case op.Assert != nil && op.Error != nil:
+			// Defense-in-depth for the allowlist's same rejection. The
+			// switch below evaluates Assert first, so an operation
+			// carrying both would silently skip the error check — a
+			// negative assertion that never runs reports Pass. Refuse to
+			// evaluate half an operation.
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("try[%d]: operation sets both assert and error; "+
+					"chainsaw evaluates one action per operation, so the error check would never run — "+
+					"split them into separate try entries", opIdx))
 		case op.Assert != nil:
 			// Propagate inner code (don't re-wrap with
 			// ErrCodeInternal); per-operation context is in the
@@ -640,10 +702,20 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 	}
 
 	// List-and-match: error fires if ANY item matches the forbidden
-	// shape. Empty list is the happy path. List already returns
-	// structured errors; propagate as-is.
+	// shape. Empty list is the happy path.
 	items, err := fetcher.List(ctx, apiVersion, kind, namespace, labels)
 	if err != nil {
+		// Same contract as the named branch above: a genuine NotFound —
+		// the collection cannot be listed because the cluster does not
+		// serve that kind — satisfies a negative assertion, since a kind
+		// the apiserver does not serve cannot hold a forbidden shape.
+		// Propagating it instead made the list form retry to max-wait
+		// where the named form passed immediately, for the same cluster
+		// state. ErrCodeUnavailable never satisfies it, and still
+		// propagates.
+		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			return nil
+		}
 		return err
 	}
 	for _, actual := range items {

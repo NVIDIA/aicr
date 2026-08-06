@@ -747,6 +747,39 @@ func TestSlurmLeavesClearInheritedPerformancePhase(t *testing.T) {
 	}
 }
 
+func TestSlurmLeavesIncludeSharedStoragePreManifest(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	const wantManifest = "components/slinky-slurm/manifests/shared-storage-pvcs.yaml"
+	for _, name := range []string{
+		"gb200-eks-ubuntu-training-slurm",
+		"h100-aks-ubuntu-training-slurm",
+		"h100-eks-ubuntu-training-slurm",
+		"h100-gke-cos-training-slurm",
+	} {
+		t.Run(name, func(t *testing.T) {
+			leaf, ok := store.GetRecipeByName(name)
+			if !ok {
+				t.Fatalf("overlay %q not found in store", name)
+			}
+			result, buildErr := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
+			if buildErr != nil {
+				t.Fatalf("BuildRecipeResult failed: %v", buildErr)
+			}
+			slurm := result.GetComponentRef("slinky-slurm")
+			if slurm == nil {
+				t.Fatal("resolved recipe missing slinky-slurm")
+			}
+			if !slices.Contains(slurm.PreManifestFiles, wantManifest) {
+				t.Errorf("preManifestFiles = %v, want %q", slurm.PreManifestFiles, wantManifest)
+			}
+		})
+	}
+}
+
 func TestGPUSlurmLeavesConfigureGRESAndTaskCgroup(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)

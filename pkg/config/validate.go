@@ -41,9 +41,11 @@ func (c *AICRConfig) Validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid apiVersion %q: expected %q", c.APIVersion, APIVersion))
 	}
-	if c.Spec.Snapshot == nil && c.Spec.Recipe == nil && c.Spec.Bundle == nil && c.Spec.Validate == nil {
+	if c.Spec.Snapshot == nil && c.Spec.Recipe == nil && c.Spec.Bundle == nil &&
+		c.Spec.Validate == nil && c.Spec.Verify == nil {
+
 		return errors.New(errors.ErrCodeInvalidRequest,
-			"config has none of spec.snapshot, spec.recipe, spec.bundle, spec.validate; at least one is required")
+			"config has none of spec.snapshot, spec.recipe, spec.bundle, spec.validate, spec.verify; at least one is required")
 	}
 	if err := c.Spec.Snapshot.validate(); err != nil {
 		return err
@@ -55,6 +57,9 @@ func (c *AICRConfig) Validate() error {
 		return err
 	}
 	if err := c.Spec.Validate.validate(); err != nil {
+		return err
+	}
+	if err := c.Spec.Verify.validate(); err != nil {
 		return err
 	}
 	if err := c.Spec.validateRecipeBundleHandoff(); err != nil {
@@ -132,6 +137,16 @@ func (b *BundleSpec) validate() error {
 }
 
 func (v *ValidateSpec) validate() error {
+	if v == nil {
+		return nil
+	}
+	if _, err := v.Resolve(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *VerifySpec) validate() error {
 	if v == nil {
 		return nil
 	}

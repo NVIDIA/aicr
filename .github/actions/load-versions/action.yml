@@ -67,6 +67,9 @@ outputs:
   cosign:
     description: 'Cosign version (must be >= v3.1.0 so DSSE attestations are logged to Rekor v2 as hashedrekord/PAE, not the legacy dsse entry type)'
     value: ${{ steps.versions.outputs.cosign }}
+  oras:
+    description: 'ORAS version (attaches the aiperf-bench source archive as an OCI 1.1 referrer; cosign cannot attach arbitrary artifacts)'
+    value: ${{ steps.versions.outputs.oras }}
   yamllint:
     description: 'yamllint version'
     value: ${{ steps.versions.outputs.yamllint }}
@@ -175,6 +178,7 @@ runs:
         # Security tools
         echo "grype=$(yq eval '.security_tools.grype' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "cosign=$(yq eval '.security_tools.cosign' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "oras=$(yq eval '.security_tools.oras' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Testing tools
         echo "kubectl=$(yq eval '.testing_tools.kubectl' .settings.yaml)" >> $GITHUB_OUTPUT

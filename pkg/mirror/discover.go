@@ -431,10 +431,10 @@ func prepareMirrorCandidate(
 		overrides:     make(map[string]map[string]string, len(rec.ComponentRefs)),
 		profileValues: make(map[string]map[string]any),
 	}
-	var owned map[string][]string
-	if rec.Metadata.SelectedProfile != nil {
-		owned = rec.Metadata.SelectedProfile.OwnedPaths
-	}
+	// The effective lock set includes the recomputed #1327 closure when
+	// the profile owns advertisement, so mirror preparation hydrates and
+	// guards closure-locked components exactly like declared ones.
+	owned := rec.EffectiveLockSet()
 	for _, ref := range rec.ComponentRefs {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, errors.Wrap(

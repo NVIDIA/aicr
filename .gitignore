@@ -32,6 +32,10 @@ bin/
 /bom
 /testgrid-publish
 /health
+/registry-inventory
+# ...and a compiled binary landing inside the tool package dir (its name equals
+# the dir, so `go build` there emits it right next to the source).
+tools/registry-inventory/registry-inventory
 
 # install
 /aicr_*.tar.gz

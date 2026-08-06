@@ -796,10 +796,11 @@ fi
     echo
     echo '```shell'
     echo "aicr snapshot -o snapshot.yaml"
-    echo "# Profiled families (AKS gpuStack): capture the pool projection and"
-    echo "# hydrate the recipe with the pointer's recorded 'profile:' selection"
-    echo "# first — validating the raw overlay resolves only the declaration"
-    echo "# default, and 'aicr validate' has no --profile flag:"
+    echo "# Profiled families (AKS/GKE gpuStack): hydrate the recipe with the"
+    echo "# pointer's recorded 'profile:' selection first — validating the raw"
+    echo "# overlay resolves only the declaration default, and 'aicr validate'"
+    echo "# has no --profile flag. AKS additionally needs the pool projection"
+    echo "# (GKE uses the plain snapshot above):"
     echo "#   az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json"
     echo "#   aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml"
     echo "#   aicr recipe -s snapshot.yaml --intent <intent> [--platform <platform>] \\"

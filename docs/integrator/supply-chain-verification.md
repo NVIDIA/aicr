@@ -13,8 +13,9 @@ top-level [`SECURITY.md`](../../SECURITY.md).
 
 Verification uses [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/),
 the [GitHub CLI](https://cli.github.com/) (`gh`), `crane` (recommended; `docker inspect` resolves a digest only after a local pull),
-`jq`, and — for in-cluster enforcement — `kubectl`. Binary and bundle
-verification (`aicr verify`) need only the `aicr` binary.
+`jq`, [ORAS](https://oras.land/docs/installation) (only for retrieving the
+third-party source archive), and — for in-cluster enforcement — `kubectl`.
+Binary and bundle verification (`aicr verify`) need only the `aicr` binary.
 
 **Cosign version.** AICR release signatures (the binary attestation and the
 signed recipe catalog) are recorded in **Rekor v2** as of the v2 cutover (see the
@@ -57,15 +58,19 @@ docker login ghcr.io
 
 ## Unified Metadata Retrieval
 
-Every piece of release metadata AICR publishes for a container image is a
-signed in-toto attestation attached to that image as an OCI referrer. There is
-one retrieval command per metadata kind, and each kind has a fixed subject:
+Release metadata AICR publishes for a container image is attached to that image
+as an OCI referrer. The first three kinds below are signed in-toto attestations.
+The source archive is a plain OCI artifact rather than an attestation, but it is
+Sigstore-signed like the rest, so it is verified with `cosign verify` instead of
+`cosign verify-attestation`. There is one retrieval command per kind, and each
+has a fixed subject:
 
 | Metadata | Predicate type | Subject | Retrieved with |
 |----------|----------------|---------|----------------|
 | SLSA build provenance | `https://slsa.dev/provenance/v1` | multi-platform index digest | `gh attestation verify` |
 | SPDX SBOM | `https://spdx.dev/Document` | per-platform manifest digest | `cosign verify-attestation --type spdxjson` |
 | OpenVEX | `https://openvex.dev/ns` | multi-platform index digest | `cosign verify-attestation --type openvex` |
+| Third-party source (`aiperf-bench` only) | `application/vnd.nvidia.aicr.source.v1+tar` | multi-platform index digest | `oras pull` — see [Third-Party Source Code](#third-party-source-code) |
 
 The subjects differ because the claims differ. Provenance describes the build
 that produced the whole release image, and the VEX document is a single,
@@ -153,6 +158,87 @@ Cosign, so the floor does not apply to it. GHCR does not implement the OCI 1.1
 specification's referrers *tag* schema (a `sha256-{hex}` tag holding an index of
 referrers). Cosign and ORAS do this transparently, which is why the commands
 above are the documented path rather than a raw referrers API call.
+
+## Third-Party Source Code
+
+Source for every third-party open-source component AICR adds on top of its base
+images is published, regardless of license. Where it lives depends on how the
+component reaches the image.
+
+| Image | Third-party components | Where the source is |
+|-------|------------------------|---------------------|
+| `aicr`, `aicrd`, `aicr-gate`, `aicr-validators/{conformance,deployment,performance}` | Go modules compiled into the binary | The GitHub release source archive for the matching tag. Builds run with `-mod=vendor`, so `vendor/` in that archive is exactly the source that ships. |
+| `aicr-validators/aiperf-bench` | Python packages installed from wheels | An OCI referrer on the image, retrieved with the commands below. |
+| all | base image contents | Provided by NVIDIA with `nvcr.io/nvidia/distroless/*` under that image's own approval. |
+
+License texts for all of the above are in `THIRD_PARTY_NOTICES.md`, published as
+an asset on each release. That file discharges attribution; this section covers
+source availability, which is a separate obligation.
+
+### Retrieving the aiperf-bench source
+
+The archive is attached as an OCI referrer, so it is **not** fetched by
+`docker pull` and will not appear in the image's layers. Retrieve it explicitly:
+
+```bash
+IMAGE="ghcr.io/nvidia/aicr-validators/aiperf-bench:v0.19.0"
+
+# 1. Resolve the image to its digest and list what is attached to it.
+DIGEST=$(crane digest "${IMAGE}")
+oras discover --format tree "${IMAGE%:*}@${DIGEST}"
+
+# 2. Select the source referrer. Fail loudly on anything but exactly one:
+#    artifactType is not a unique key, and anyone with push access to the
+#    repository can attach another referrer carrying the same type. Taking the
+#    first match would silently pick theirs.
+mapfile -t MATCHES < <(oras discover --format json "${IMAGE%:*}@${DIGEST}" \
+  | jq -r '.referrers[]
+           | select(.artifactType == "application/vnd.nvidia.aicr.source.v1+tar")
+           | .digest')
+if [ "${#MATCHES[@]}" -ne 1 ]; then
+  echo "expected exactly 1 source referrer, found ${#MATCHES[@]}" >&2
+  exit 1
+fi
+SOURCE="${MATCHES[0]}"
+
+# 3. Verify the signature before trusting the bytes. Pin the exact signing
+#    workflow and tag; a regexp over the repository would accept a signature
+#    from any workflow in it.
+cosign verify \
+  --certificate-oidc-issuer "${AICR_ISSUER}" \
+  --certificate-identity \
+    "https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/${TAG}" \
+  "${IMAGE%:*}@${SOURCE}"
+
+# 4. Pull the verified archive.
+oras pull -o ./aiperf-source "${IMAGE%:*}@${SOURCE}"
+
+# 5. The archive holds one sdist per installed package, plus a README.
+tar tzf ./aiperf-source/aiperf-bench-python-source.tar.gz | head
+```
+
+The archive contains the source distribution of every Python package installed
+into the image **that publishes one upstream**, at the exact version installed.
+One package is intentionally absent: `aiperf` itself publishes no source
+distribution to PyPI. It is an
+NVIDIA package and its source is at [ai-dynamo/aiperf](https://github.com/ai-dynamo/aiperf); the
+archive's `README.txt` records this too.
+
+Only `aiperf-bench` carries this referrer. The other six images need none: their
+dependencies are vendored, so the release source archive already contains them.
+
+**Scope of the correspondence.** The archive is resolved from the same
+`requirements.txt` the image installs, so both derive from one input. Two gaps
+remain and are tracked rather than claimed away:
+
+* `pip` and `wheel` are provided by `python -m venv` rather than declared in
+  `requirements.txt`, so they ship in the image without source in this archive.
+* The image build layer-caches its dependency resolution, so a cached build can
+  carry an older closure than a freshly resolved archive (tracked in
+  [#2086](https://github.com/NVIDIA/aicr/issues/2086)).
+
+A referrer binds to one image digest, so resolve the tag to a digest first as
+shown above rather than assuming a tag keeps the same attachment across builds.
 
 ### Using the published VEX document
 
@@ -623,6 +709,200 @@ admission webhook rejects it.
 > `SigstoreBundle` path was cluster-tested (v1.18.1) and **failed** to verify
 > AICR's bundle attestation (`no matching signatures found`) — see the Kyverno
 > note above; tracked in [#1537](https://github.com/NVIDIA/aicr/issues/1537).
+
+## Gating Deployment on Verification
+
+`aicr verify` is the deploy-time gate: run it against the bundle directory
+before anything installs that bundle or publishes it for a controller to pull.
+Because `checksums.txt` is a closed-world inventory of every payload file,
+verifying it transitively covers the whole bundle; see
+[Artifact Verification](../user/artifact-verification.md#what-can-be-verified).
+
+Where that gate belongs depends on whether the deployer pushes or pulls, so
+each one is covered separately below. Every gate is marked either *advisory* (a
+pipeline step that an operator holding cluster credentials can bypass) or
+*binding* (the cluster itself refuses to proceed).
+
+### Gating the helm and helmfile deployers
+
+The default `helm` deployer and `helmfile` are push-based: the same pipeline
+step that verifies is the one that installs, so verification and use cannot
+drift apart.
+
+```shell
+cd bundles
+aicr verify . --min-trust-level verified
+chmod +x deploy.sh
+./deploy.sh
+```
+
+`aicr verify` exits non-zero on any failure, so `&&` chaining or `set -e` is
+enough to stop the install. Prefer an explicit `--min-trust-level verified`
+over the default `max`, which resolves to the highest level *that particular
+bundle* can reach and therefore passes an unsigned bundle. Add
+`--require-creator` to pin who built it and `--cli-version-constraint` to floor
+the `aicr` version that produced it; `--format json` emits a machine-readable
+result for a pipeline that needs to branch. For `helmfile`, run the same
+`aicr verify .` before `helmfile apply`. See [Automation](automation.md) for
+the full four-stage pipeline and its GitLab, CircleCI, and Terraform
+equivalents.
+
+**These gates are advisory.** They run in your pipeline, on the machine that
+holds the kubeconfig. Anyone who can run `helm install` directly, or who can
+edit the pipeline definition, bypasses them. Protect them the way you protect
+any pipeline: branch protection on the workflow definition, and cluster
+credentials that only the pipeline holds.
+
+### Gating Argo CD
+
+Argo CD is pull-based. `aicr bundle --deployer argocd --repo <git-url>` writes
+`app-of-apps.yaml` plus per-component `NNN-<component>/application.yaml`, you
+commit them, and the cluster's Argo CD reconciles the repository on its own
+schedule. A CI step therefore gates **what enters the repository**, not what
+the cluster applies. Verify before you commit:
+
+```shell
+aicr bundle --recipe recipe.yaml --deployer argocd --attest \
+  --repo https://github.com/my-org/my-gitops-repo.git \
+  --output ./bundles
+aicr verify ./bundles --min-trust-level verified
+cp -r ./bundles/* gitops-repo/
+(cd gitops-repo && git add . && git commit -S -m "Update GPU stack" && git push)
+```
+
+Verify the bundle directory, never the GitOps repository. Verification is
+closed-world and rejects any filesystem entry not listed in `checksums.txt`, so
+running it against a repository that holds anything else fails.
+
+For a **binding** control, have the pipeline sign the commit and have Argo CD
+refuse unsigned revisions. `AppProject.spec.signatureKeys` lists the GnuPG key
+IDs allowed to sign; Argo CD then refuses to sync any revision that is unsigned
+or signed by a key outside that list:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: gpu-stack
+  namespace: argocd
+spec:
+  signatureKeys:
+    - keyID: 4AEE18F83AFDEB23
+  sourceRepos:
+    - https://github.com/my-org/my-gitops-repo.git
+```
+
+Read the trust chain carefully. The cluster enforces "this revision was signed
+by CI," and CI signs only after `aicr verify` passed. The cluster is not
+verifying the AICR attestation; it is trusting your pipeline's identity to have
+checked it. Argo CD's GnuPG verification applies to **Git** sources only, not
+to Helm repositories, and it disables `argocd app sync --local`. See Argo CD's
+[GnuPG signature verification](https://argo-cd.readthedocs.io/en/stable/user-guide/gpg-verification/).
+
+### Gating Flux
+
+Flux is likewise pull-based, in two source shapes.
+
+**Git source (default).** `aicr bundle --deployer flux --output ./flux-bundle`
+writes a root `kustomization.yaml`, a `sources/` directory, per-component
+`helmrelease.yaml` files, and a `README.md` carrying the entry-point
+`GitRepository` and `Kustomization` you apply to the cluster. Verify the bundle
+directory before copying it to the repository root, exactly as for Argo CD.
+Bind the reconcile by signing the commit in CI and adding `spec.verify` to that
+entry-point `GitRepository`:
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: aicr-stack
+  namespace: flux-system
+spec:
+  url: https://github.com/my-org/my-gitops-repo.git
+  ref:
+    branch: main
+  interval: 10m
+  verify:
+    mode: HEAD
+    secretRef:
+      name: pgp-public-keys
+```
+
+`mode: HEAD` verifies the commit at the checked-out HEAD; `Tag` and
+`TagAndHEAD` are the other accepted values. The referenced Secret holds the
+trusted public keys (`.asc` for PGP, `.sshpub` for SSH). See Flux's
+[GitRepository verification](https://fluxcd.io/flux/components/source/gitrepositories/).
+
+**OCI source.** With `--output oci://...`, AICR pushes the bundle as an OCI
+artifact and generates `ArtifactGenerator` CRs that reference an
+`OCIRepository` **you** deploy (named by `--flux-oci-source-name`, default
+`aicr-bundle`, in `--flux-namespace`, default `flux-system`). Because you own
+that `OCIRepository`, you can require a Cosign signature on the artifact before
+Flux will reconcile anything from it:
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: aicr-bundle
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: oci://ghcr.io/my-org/aicr-bundle
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: "^https://token\\.actions\\.githubusercontent\\.com$"
+        subject: "^https://github\\.com/my-org/my-gitops-repo/\\.github/workflows/deploy\\.yaml@refs/heads/main$"
+```
+
+That Cosign signature is **not** AICR's bundle attestation, and AICR does not
+produce it: your pipeline countersigns the pushed manifest after `aicr verify`
+passes. An OCI push also materializes the same inventory in `./bundle` relative
+to the working directory, which is the copy to verify, and `--image-refs`
+captures the published digest so the countersignature pins the exact manifest:
+
+```shell
+aicr bundle --recipe recipe.yaml --deployer flux --attest \
+  --output oci://ghcr.io/my-org/aicr-bundle:v1.0.0 \
+  --image-refs ./published-digest.txt
+aicr verify ./bundle --min-trust-level verified
+cosign sign "ghcr.io/my-org/aicr-bundle@$(cat ./published-digest.txt)"
+```
+
+This one is binding: source-controller will not produce an artifact from an
+`OCIRepository` whose signature fails to verify, so no `HelmRelease` downstream
+of it reconciles. As with Argo CD, what the cluster enforces is your pipeline's
+countersignature, not the AICR attestation. Flux OCI mode also has its own
+prerequisites (Flux v2.7+ with source-watcher and the `ExternalArtifact`
+feature gate); see
+[Flux OCI Mode](../user/cli-reference.md#flux-oci-mode) and Flux's
+[OCIRepository verification](https://fluxcd.io/flux/components/source/ocirepositories/).
+
+### Gates across trust environments
+
+Only the trust material handed to `aicr verify` changes between environments;
+the gate itself is the same command in the same place.
+
+| Environment | Signing | Deploy-time gate |
+|-------------|---------|------------------|
+| Public Sigstore | `--attest` | `aicr verify <dir> --min-trust-level verified` |
+| Private Sigstore | `--attest --fulcio-url <url> --rekor-url <url>` | `aicr verify <dir> --trust-root ./trusted_root.json --require-creator ci@myorg.example.com` |
+| KMS key | `--attest --signing-key <kms-uri>` | `aicr verify <dir> --key <kms-uri>` (or a PEM exported with `cosign public-key`) |
+| Air-gapped | `--attest --signing-key <kms-uri> --tlog-upload=false` | `aicr verify <dir> --key ./bundle-signer.pub --insecure-ignore-tlog` |
+
+`--trust-root` is additive to AICR's built-in public-good root, so one command
+verifies both org-signed and NVIDIA-signed bundles.
+`--insecure-ignore-tlog` requires `--key`, and a local PEM key keeps the verify
+fully offline where a KMS URI still resolves remotely. Full details for each
+shape are in
+[Artifact Verification](../user/artifact-verification.md#kms-key-verification).
+
+The binding half is unchanged across all four rows, because it enforces your
+pipeline's own signature rather than AICR's. Air-gapped sites should note that
+Flux's `spec.verify` keyless form depends on public Sigstore: use a key-based
+Cosign signature with `spec.verify.secretRef` instead of `matchOIDCIdentity`.
+
 ## Offline and Air-Gapped Verification
 
 Container image verification uses GitHub's attestation API

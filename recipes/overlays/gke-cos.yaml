@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1alpha3
 metadata:
   name: gke-cos
 
@@ -29,6 +29,97 @@ spec:
   constraints:
     - name: K8s.server.version
       value: ">= 1.28"
+
+  # Device-plugin ownership is a configuration profile (ADR-015, issue
+  # #1761): one qualified GKE cluster state per value, selected at recipe
+  # generation (--profile gpuStack=<value>), recorded in
+  # metadata.selectedProfile, and locked at every output boundary. This
+  # replaces nothing pre-existing — GKE had no qualified alternative before
+  # — but the gcp-managed value makes the previously unsupported
+  # "GKE's managed plugin owns nvidia.com/gpu" state declarable, verifiable
+  # (issue #1755's node-set constraint form), and coherent with the #1327
+  # allocation-policy contract (advertiser: external counts as THE
+  # advertiser; the recomputed policy closure locks devicePlugin/DRA
+  # selector paths against bundle- and install-time drift).
+  #
+  # gcp-managed is the DEFAULT because it is the only value a
+  # default-provisioned GKE cluster satisfies with zero setup: GKE's managed
+  # driver install (gpu-driver-version=default) is finalized by an init
+  # container of the SAME kube-system DaemonSet that the
+  # gke-no-default-nvidia-gpu-device-plugin=true label disables, so a fresh
+  # labeled pool comes up driverless — "GKE-installed driver + operator
+  # plugin" is not a reachable state. The operator-managed value therefore
+  # requires
+  # the label AND Google's standalone nvidia-driver-installer DaemonSet on
+  # pools created with gpu-driver-version=disabled.
+  #
+  # Every leaf GKE-COS overlay inherits this declaration unchanged. The
+  # third ADR value (operator-selfdriver, GKE driver-installer component,
+  # issue #1716) is deliberately NOT declared: it lands together with its
+  # durable distinguishing signal (ADR-015 Deferred Decision 5).
+  profile:
+    name: gpuStack
+    description: >-
+      GPU device-plugin ownership for GKE GPU node pools: "gcp-managed"
+      (the default) keeps GKE's managed device plugin as the nvidia.com/gpu
+      advertiser (opt-out label absent everywhere, the default GKE cluster
+      shape) and disables the operator's plugin; "operator-managed" runs the GPU
+      Operator's device plugin as the sole advertiser and requires every
+      GPU node pool to carry gke-no-default-nvidia-gpu-device-plugin=true
+      plus Google's standalone nvidia-driver-installer DaemonSet (pools
+      created with gpu-driver-version=disabled).
+    default: gcp-managed
+    values:
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              devicePlugin:
+                enabled: true
+        constraints:
+          - name: NodeTopology.gpu-nodes.label
+            value: gke-no-default-nvidia-gpu-device-plugin=true
+            remediation: >-
+              The operator-managed profile requires the GPU Operator's device
+              plugin to be the sole nvidia.com/gpu advertiser, so every GPU
+              node pool must carry gke-no-default-nvidia-gpu-device-plugin=true
+              at creation (gcloud container node-pools create ...
+              --node-labels=gke-no-default-nvidia-gpu-device-plugin=true)
+              PLUS Google's standalone nvidia-driver-installer DaemonSet,
+              with the pools created gpu-driver-version=disabled. The label
+              forfeits GKE's managed driver install — the installer rides
+              the same kube-system DaemonSet the label disables — so it
+              must NOT be paired with gpu-driver-version=default (labeled
+              pools come up driverless). See the GKE GPU Setup integrator
+              guide (docs/integrator/gke-gpu-setup.md) for the full
+              procedure. To use a default-provisioned GKE cluster instead,
+              regenerate with the default (--profile gpuStack=gcp-managed).
+      # GKE-installed driver AND GKE's managed device plugin — a
+      # default-provisioned GKE cluster (no node label required). The
+      # external advertiser is counted as THE nvidia.com/gpu advertiser in
+      # the #1327 exactly-one invariant; the resolved policy value stays
+      # device-plugin-extended-resource (the policy names the request
+      # mechanism, not provider ownership).
+      gcp-managed:
+        advertiser: external
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              devicePlugin:
+                enabled: false
+        constraints:
+          - name: NodeTopology.gpu-nodes.label
+            value: "!gke-no-default-nvidia-gpu-device-plugin"
+            remediation: >-
+              The gcp-managed profile (the default) requires GKE's managed
+              device plugin to be the sole nvidia.com/gpu advertiser, so NO
+              GPU node may carry the opt-out label
+              gke-no-default-nvidia-gpu-device-plugin — the default GKE
+              cluster shape, needing zero setup. Remove the label from the
+              labeled pools (gcloud container node-pools update ...
+              --node-labels=... passing the pool's full label set with the
+              label omitted; --node-labels REPLACES the full set), or
+              regenerate with --profile gpuStack=operator-managed.
 
   componentRefs:
     # GKE-COS-specific GPU Operator overrides
@@ -78,20 +169,15 @@ spec:
               reapplyOnReboot: "true"
 
   validation:
-    # The #1755 device-plugin ownership readiness gate is temporarily
-    # WITHDRAWN. It required gke-no-default-nvidia-gpu-device-plugin=true on
-    # every GPU node, but on GKE the managed driver install
-    # (gpu-driver-version=default) is finalized by an init container of the
-    # same DaemonSet that label disables — a labeled fresh pool comes up
-    # driverless, so the gate enforced a prerequisite GKE cannot satisfy
-    # alone (discovered on UAT run 30930940652). Until the gpuStack profile
-    # lands (#1761 rollout PR 3) the recipe runs on GKE-default pools, where
-    # GKE's managed plugin and the operator's plugin BOTH advertise
-    # nvidia.com/gpu — the documented latent #1755 conflict. The profile
-    # re-lands enforcement symmetrically: gcp-managed (default) requires the
-    # label absent; operator-managed requires it present plus a
-    # label-surviving driver path (Google's standalone
-    # nvidia-driver-installer DaemonSet).
+    # The #1755 device-plugin ownership gate lives in the gpuStack profile
+    # values above (as forecast when it landed here as a readiness
+    # constraint): profile constraints join the artifact's constraint set,
+    # are verified against the snapshot at generation (snapshot-based
+    # generation only; criteria-only generation defers entirely to the
+    # pre-flight), and are re-evaluated by the `aicr validate` readiness
+    # pre-flight — same fail-closed exit,
+    # now symmetric per selected value (positive form for operator-managed,
+    # negated for gcp-managed).
     conformance:
       checks:
         - platform-health

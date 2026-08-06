@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package verifier implements `aicr evidence verify`: offline
-// verification of a recipe-evidence v1 bundle produced by
+// verification of a recipe-evidence bundle (v1 or v2) produced by
 // `aicr validate --emit-attestation`. Five steps run:
 //
 //  1. Materialize — resolve the input (directory / pointer file / OCI

@@ -119,8 +119,9 @@ func parseCriteria(bundleDir string) (RecipeCriteria, error) {
 }
 
 // loadPredicate reads the in-toto Statement from the bundle and returns
-// the decoded Predicate. Returns an error when the file is absent or
-// malformed — callers should fall back to sensible defaults.
+// the decoded Predicate. Returns ErrCodeNotFound when the file is absent —
+// the only case callers may fall back on — and ErrCodeInvalidRequest for a
+// malformed predicate, which must fail closed.
 func loadPredicate(bundleDir string) (*attestation.Predicate, error) {
 	path := filepath.Join(bundleDir, attestation.StatementFilename)
 	data, err := readBoundedFile(path, defaults.MaxBundlePOSTBytes)
@@ -140,19 +141,35 @@ func loadPredicate(bundleDir string) (*attestation.Predicate, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"failed to parse statement.intoto.json", err)
 	}
-	if stmt.PredicateType != "" && stmt.PredicateType != attestation.PredicateTypeV1 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("unsupported predicateType %q, expected %q",
-				stmt.PredicateType, attestation.PredicateTypeV1))
-	}
 	if stmt.Predicate == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "statement has no predicate field")
 	}
 
-	var pred attestation.Predicate
+	// Decode into a pointer: a JSON-literal `null` predicate unmarshals to a
+	// nil pointer (a struct target would silently stay zero-valued and later
+	// fabricate a year-1 attestation timestamp), so reject it here.
+	var pred *attestation.Predicate
 	if err := json.Unmarshal(stmt.Predicate, &pred); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"failed to decode predicate", err)
 	}
-	return &pred, nil
+	if pred == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "statement predicate is null")
+	}
+	// Same fail-closed rule for an empty predicate object: every supported
+	// producer stamps attestedAt (attestation.Build defaults it to now), so
+	// a zero value means the bundle is broken and would otherwise publish a
+	// fabricated year-1 timestamp and build ID.
+	if pred.AttestedAt.IsZero() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "statement predicate has no attestedAt")
+	}
+	// The shared bidirectional contract, not just a type allowlist: v1 must
+	// not carry a profile block, v2 must carry a well-formed one, anything
+	// else (including an absent predicateType) is unknown. Without it a v1
+	// statement smuggling a profile block — evidence every other consumer
+	// rejects — would publish to TestGrid.
+	if err := attestation.ValidatePredicateTypeCoherence(stmt.PredicateType, pred); err != nil {
+		return nil, err
+	}
+	return pred, nil
 }

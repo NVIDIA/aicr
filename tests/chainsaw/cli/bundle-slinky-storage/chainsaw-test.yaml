@@ -1,0 +1,146 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-slinky-storage
+spec:
+  description: |
+    Validates default-off and enabled Slinky shared-storage bundle output.
+    No cluster is required.
+  timeouts:
+    exec: 60s
+  steps:
+    - name: generate-recipe
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-slinky-storage"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe \
+                --service eks \
+                --accelerator h100 \
+                --os ubuntu \
+                --intent training \
+                --platform slurm \
+                --output "${WORK}/recipe.yaml"
+
+    - name: disabled-storage-renders-no-pvcs
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-slinky-storage"
+              set -e
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --output "${WORK}/disabled"
+              ! ls -d "${WORK}"/disabled/[0-9][0-9][0-9]-slinky-slurm-pre >/dev/null 2>&1
+            check:
+              ($error == null): true
+
+    - name: enabled-storage-requires-class
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-slinky-storage"
+              set +e
+              output=$(${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --set slinkyslurm:storage.enabled=true \
+                --output "${WORK}/missing-class" 2>&1)
+              rc=$?
+              set -e
+              [ "${rc}" -ne 0 ]
+              printf '%s' "${output}" | grep -q "use --shared-storage-class <name>"
+            check:
+              ($error == null): true
+
+    - name: generate-enabled-storage-bundle
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-slinky-storage"
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --set slinkyslurm:storage.enabled=true \
+                --set-json 'slinkyslurm:loginsets.secondary={"enabled":false}' \
+                --set-json 'slinkyslurm:nodesets.secondary={"enabled":false}' \
+                --storage-class gp3 \
+                --shared-storage-class efs-sc \
+                --output "${WORK}/enabled"
+
+    - name: assert-shared-pvcs
+      try:
+        - script:
+            content: |
+              set -e
+              WORK="/tmp/chainsaw-bundle-slinky-storage"
+              PVC_MANIFEST=$(ls "${WORK}"/enabled/[0-9][0-9][0-9]-slinky-slurm-pre/templates/shared-storage-pvcs.yaml)
+              awk -v work="${WORK}" '
+                BEGIN { document = 0; has_content = 0 }
+                /^---$/ {
+                  if (has_content) {
+                    document++
+                    has_content = 0
+                  }
+                  next
+                }
+                {
+                  print > (work "/pvc-" document ".yaml")
+                  if ($0 !~ /^[[:space:]]*#/ && $0 !~ /^[[:space:]]*$/) {
+                    has_content = 1
+                  }
+                }
+              ' "${PVC_MANIFEST}"
+              test -s "${WORK}/pvc-0.yaml"
+              test -s "${WORK}/pvc-1.yaml"
+              for pvc in "${WORK}"/pvc-*.yaml; do
+                case "$(yq -r '.metadata.name' "${pvc}")" in
+                  shared-data) DATA_PVC="${pvc}" ;;
+                  shared-home) HOME_PVC="${pvc}" ;;
+                esac
+              done
+              test -n "${DATA_PVC:-}"
+              test -n "${HOME_PVC:-}"
+              chainsaw assert \
+                --resource "${DATA_PVC}" \
+                --file ./assert-data-pvc.yaml \
+                --no-color --timeout 5s
+              chainsaw assert \
+                --resource "${HOME_PVC}" \
+                --file ./assert-home-pvc.yaml \
+                --no-color --timeout 5s
+
+    - name: assert-slinky-mount-values
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-slinky-storage"
+              VALUES=$(ls "${WORK}"/enabled/[0-9][0-9][0-9]-slinky-slurm/values.yaml)
+              printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/slinky-values.yaml"
+              sed '/^---$/d' "${VALUES}" >> "${WORK}/slinky-values.yaml"
+              chainsaw assert \
+                --resource "${WORK}/slinky-values.yaml" \
+                --file ./assert-values.yaml \
+                --no-color --timeout 5s
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-slinky-storage

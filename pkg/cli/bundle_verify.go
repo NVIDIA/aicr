@@ -65,6 +65,9 @@ Require a minimum CLI version (bare version defaults to >= semantics):
 Verify a privately-signed bundle against an org trusted root:
   aicr verify ./my-bundle --trust-root ./trusted_root.json
 
+Read the verification policy from a committed AICRConfig (spec.verify):
+  aicr verify ./my-bundle --config aicr-config.yaml
+
 Verify an offline/air-gapped bundle (no transparency-log network calls; use a
 local PEM key for fully offline operation, since a KMS URI still resolves remotely):
   aicr verify ./bundle --key ./bundle-signer.pub --insecure-ignore-tlog
@@ -112,6 +115,7 @@ Output as JSON:
 				Value: verifyFormatText,
 				Usage: "Output format: text, json",
 			}, func() []string { return []string{verifyFormatJSON, verifyFormatText} }),
+			configFlag(),
 		},
 		Action: runBundleVerifyCmd,
 	}
@@ -134,19 +138,32 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}
 
+	// Load and resolve --config before any verification work so a malformed
+	// spec.verify fails immediately, with spec-path attribution, rather than
+	// after a full verification pass.
+	cfg, err := loadCmdConfig(ctx, cmd)
+	if err != nil {
+		return err
+	}
+	resolved, err := cfg.Verification().Resolve()
+	if err != nil {
+		return err
+	}
+
 	slog.Info("verifying bundle", "dir", absDir)
 
-	// Build verify options
+	// Build verify options. Every field is CLI-flag-over-config, matching the
+	// precedence the other --config-aware commands use.
 	verifyOpts := &verifier.VerifyOptions{}
-	identityRegexp := cmd.String("certificate-identity-regexp")
+	identityRegexp := stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertificateIdentityRegexp)
 	if identityRegexp != "" {
 		if validErr := verifier.ValidateIdentityPattern(identityRegexp); validErr != nil {
 			return validErr
 		}
 		verifyOpts.CertificateIdentityRegexp = identityRegexp
 	}
-	verifyOpts.Key = cmd.String("key")
-	verifyOpts.TrustRoot = cmd.String("trust-root")
+	verifyOpts.Key = stringFlagOrConfig(cmd, "key", resolved.Key)
+	verifyOpts.TrustRoot = stringFlagOrConfig(cmd, "trust-root", resolved.TrustRoot)
 	verifyOpts.IgnoreTLog = cmd.Bool("insecure-ignore-tlog")
 
 	// Offline/air-gapped verification is key-based only: reject the flag combo up
@@ -167,9 +184,18 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 
 	// Check policy requirements
 	policy := verifier.Policy{
-		MinTrustLevel:     cmd.String("min-trust-level"),
-		RequireCreator:    cmd.String("require-creator"),
-		VersionConstraint: cmd.String("cli-version-constraint"),
+		MinTrustLevel:     stringFlagOrConfig(cmd, "min-trust-level", resolved.MinTrustLevel),
+		RequireCreator:    stringFlagOrConfig(cmd, "require-creator", resolved.RequireCreator),
+		VersionConstraint: stringFlagOrConfig(cmd, "cli-version-constraint", resolved.VersionConstraint),
+	}
+	// A config-supplied floor can be *lower* than the "max" default, and
+	// stringFlagOrConfig only logs when a CLI flag overrides config, so that
+	// case would otherwise be silent. Surface it: the trust floor is the one
+	// setting here where a committed value quietly weakening the gate is worth
+	// an audit line.
+	if !cmd.IsSet("min-trust-level") && resolved.MinTrustLevel != "" && resolved.MinTrustLevel != "max" {
+		slog.Info("trust floor set by config", "minTrustLevel", resolved.MinTrustLevel,
+			"source", "spec.verify.policy.minTrustLevel")
 	}
 	policyFailure, policyErr := result.CheckPolicy(policy)
 	if policyErr != nil {

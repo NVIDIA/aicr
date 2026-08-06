@@ -49,8 +49,12 @@ Top-level `constraints` — and any declared under
 gate** before phase checks run; other phases' `constraints` are
 evaluated against each container check's reported metrics. Readiness
 placement matters for gates that must not participate in
-generation-time overlay filtering (e.g. the GKE device-plugin
-ownership check, issue #1755).
+generation-time overlay filtering. (No shipped overlay currently
+declares one: the GKE device-plugin ownership check, issue #1755,
+briefly lived here before moving into the GKE `gpuStack` profile's
+per-value constraints, which are verified at snapshot-based generation
+(criteria-only generation has no snapshot evaluator and defers entirely
+to the pre-flight) AND re-evaluated by the same readiness pre-flight.)
 
 **Supported operators** (`pkg/constraints/constraint.go`):
 
@@ -539,16 +543,52 @@ tagged with its cordon state, and:
    `RESULT:` prefix makes the coverage figure visible during a live
    `aicr validate` run regardless of redaction, but it is not
    guaranteed to survive into the artifact a downstream consumer
-   verifies by default. See #1951 for carrying this kind of outcome
-   data in a structured field that survives redaction instead.
+   verifies by default. That is why the same counts are ALSO emitted
+   through `validators.EmitExtra` (#1951) — see **Structured coverage
+   survives redaction** below.
 
-This pattern is not yet applied everywhere it could be. Cluster-aggregate
-checks that assert on an operator's aggregate status
-(`gpu-operator-health`) are unaffected — DaemonSet operands ignore
-cordons — but `expected-resources`' `rdmaFabricProbe` is itself
-node-scoped (it calls `helper.FindSchedulableGpuNodes` to build its
-RDMA-capable cohort) and has the same undisclosed narrowing; it has not
-been updated to this pattern. See #1952.
+`expected-resources`' `rdmaFabricProbeCoverage` is itself node-scoped and now
+follows this pattern too (#1952). It enumerates every GPU node via
+`helper.FindGpuNodes`, validates only the schedulable Mellanox
+RDMA-capable cohort for uniform allocatable fabric, but discloses each
+cordoned RDMA-capable node explicitly (`<node>: skipped (cordoned)`),
+counts it in `nodesTotal`, and never narrows the printed total. Because
+the probe is re-run on every poll iteration
+(`verifyRDMAFabricReady`/`pollUntilStable`), the stdout
+enumeration/`RESULT:` line is printed **exactly once at the settled
+terminal outcome** (ready or fail-closed), never per tick. The structured
+Extra is emitted twice: an **eager floor** on the first observation that
+enumerates any RDMA-candidate node (with `nodesValidated=0` — nothing is
+certified mid-poll) and again at the terminal outcome.
+`parseExtraSentinels` keeps the last valid sentinel, so the terminal emit
+wins on a clean exit; the floor exists only so a cordoned-node narrowing
+still reaches the signed bundle if the Job's `activeDeadlineSeconds`
+SIGKILLs the process at the no-margin poll budget before the terminal emit
+runs (#1952). The gate stays fail-closed: "could not observe the fabric"
+reports `0` validated and never reads as ready.
+
+Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
+certifies the cohort or fails closed — so it mints no `skipReason`
+enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
+allowlist keys unchanged (see below), so the redaction
+`PolicyVersion` stays `v2`.
+
+Cluster-aggregate checks that assert on an operator's aggregate status
+(`gpu-operator-health`) remain unaffected — DaemonSet operands ignore
+cordons.
+
+**Structured coverage survives redaction.** The `RESULT:` stdout line
+is echoed to the live CLI but is stripped from a signed bundle by the
+default (`minimal`) redaction policy (`pkg/evidence/redact`), so both
+`check-nvidia-smi` and the RDMA gate ALSO emit the coverage through
+`validators.EmitExtra` as low-cardinality counts
+(`nodesValidated`/`nodesTotal`) or a closed-set `skipReason` code. Those
+keys are the only ones that clear the fail-closed `ctrfExtraAllowlist`
+(a value that structurally looks like a node name or IP is dropped even
+under an allowed key), so a signed bundle records reduced coverage —
+e.g. a cordoned RDMA node narrowing the fabric cohort — without shipping
+any operator-identifying text. Node names appear only in the redacted
+stdout enumeration, never in the Extra channel. See #1951/#1952.
 
 For *deliberate*, durable exclusion of a node from GPU service (as
 opposed to transient cordon-for-maintenance), use the GPU Operator's
@@ -962,6 +1002,44 @@ today the three `*-ocp-olm` components, whose readiness is enforced by
 the bundler's `--readiness-hooks` gate instead — must say so with the
 `aicr/no-op-check: "true"` annotation on the Test.
 
+Three sibling shapes are rejected for the same reason — each one would
+otherwise report a component healthy without having evaluated what it
+claims to (#2051):
+
+- **Empty content.** A blank, whitespace-only, or comments-and-`---`-only
+  entry has no Test to carry the no-op annotation, and used to reach
+  `assertRawResources` and pass on zero documents.
+- **A mixed stream.** Once any document is a chainsaw Test the whole
+  stream routes to the in-process executor, and nothing else reads it, so
+  a non-Test document alongside it was evaluated by no path at all. Only
+  Test documents may share a stream; a trailing `---`, a comment-only
+  document, and an explicit `null` are punctuation, not content.
+- **Both `assert` and `error` on one operation.** Chainsaw evaluates one
+  action per operation and the executor reaches `assert` first, so the
+  negative check silently never ran. Split them into separate `try`
+  entries.
+
+**Indeterminate is not a verdict.** The gate reports `Unknown`, not
+`Fail`, when a component's state was never established — a discovery
+outage, an apiserver 5xx, a forbidden read. Those surface as
+`ErrCodeUnavailable`, which `pkg/chainsaw` never treats as terminal, so
+it retries for the whole budget and can only surface it once the budget
+runs out. Exit codes are unchanged (`Fail` and `Unknown` gate
+identically), but the distinction points the operator at a broken
+cluster instead of a broken component.
+
+A no-match from the RESTMapper is held to the same standard: it resolves
+to `ErrCodeNotFound` — the immediate-pass path for a negative `error:`
+assertion — only when the retry ran against discovery performed after the
+lookup began *and* the kind's own API group was fully enumerated.
+client-go drops `ErrGroupDiscoveryFailed` whenever partial results exist,
+so a kind in an unreachable group arrives as a bare `NoKindMatchError`;
+`resolveMapping` consults the same cached discovery client the mapper
+resolves through to tell the two apart. The scope is deliberately one
+group: real clusters routinely carry a broken aggregated APIService, and
+treating any partial failure as global would strand every negative
+assertion.
+
 **Registration.** A component opts in by declaring
 `healthCheck.assertFile` in `recipes/registry.yaml`:
 
@@ -1010,9 +1088,9 @@ restricted at runtime to read-only Chainsaw operations
 (`pkg/chainsaw/allowlist.go`). Any other operation (`script`,
 `apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
 `sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
-`ErrCodeInvalidRequest`. PR #1223 will add the same enforcement at
-lint time so violations are caught before they ever reach the
-validator.
+`ErrCodeInvalidRequest`, as is an operation that sets both `assert` and
+`error`. PR #1223 will add the same enforcement at lint time so
+violations are caught before they ever reach the validator.
 
 **Value-gate awareness (#1844).** A registry assert file is static — it
 cannot see the component's effective Helm values. That is a problem for a
@@ -1079,6 +1157,20 @@ deadline shared across every step and retry. Slurm's
 [`health-check.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/checks/slinky-slurm/health-check.yaml)
 uses `assert: 7m` so workload-readiness steps can converge before the
 pod-phase guard runs.
+
+The authored value can only **shorten** the caller's budget, never
+extend it: the effective deadline is `min(spec.timeouts.assert,
+caller budget)`. The caller budget is `defaults.ChainsawAssertTimeout`
+for the deployment validator and the gate's `--timeout`
+(`defaults.ReadinessGateExecTimeout`, 2m) for a readiness Job. This
+restores what the removed chainsaw-exec path enforced by wrapping the
+subprocess in an independent outer `context.WithTimeout`; running
+in-process, the authored value had been substituting for the caller
+budget outright, letting registry- or integrator-authored content
+overrun `--timeout` by any factor it chose. No in-tree check changes
+behavior — every authored value is at or below its caller's budget —
+but a readiness test copied from a validator check (`assert: 5m`) is
+now capped at the gate's 2m per evaluation rather than overrunning it.
 
 The `expected-resources` catalog timeout (8m in
 `recipes/validators/catalog.yaml`) is the **outer** envelope. It must

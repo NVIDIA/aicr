@@ -629,7 +629,7 @@ func fromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 }
 
 // fromConfigMapWithKubeconfigContext reads and deserializes data from a Kubernetes ConfigMap.
-// The provided context is wrapped with defaults.ConfigMapWriteTimeout so the read is bounded
+// The provided context is wrapped with defaults.ConfigMapReadTimeout so the read is bounded
 // even when the caller passes context.Background().
 func fromConfigMapWithKubeconfigContext[T any](
 	ctx context.Context,
@@ -675,7 +675,7 @@ func readConfigMapDataWithKubeconfigContext(
 			err, errors.ErrCodeInternal, "failed to get kubernetes client")
 	}
 
-	readCtx, cancel := context.WithTimeout(ctx, defaults.ConfigMapWriteTimeout)
+	readCtx, cancel := context.WithTimeout(ctx, defaults.ConfigMapReadTimeout)
 	defer cancel()
 	cm, err := k8sClient.CoreV1().ConfigMaps(namespace).Get(readCtx, name, metav1.GetOptions{})
 	if err != nil {

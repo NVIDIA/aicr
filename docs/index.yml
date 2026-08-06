@@ -48,6 +48,8 @@ navigation:
         path: user/coverage-matrix.md
       - page: Slurm Accounting
         path: user/slinky-slurm-accounting.md
+      - page: Slurm Shared Storage
+        path: user/slinky-slurm-storage.md
 
   - section: Integrator Guide
     contents:
@@ -59,6 +61,8 @@ navigation:
         path: integrator/kubernetes-deployment.md
       - page: AKS GPU Setup
         path: integrator/aks-gpu-setup.md
+      - page: GKE GPU Setup
+        path: integrator/gke-gpu-setup.md
       - page: EKS Dynamo Networking
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking
@@ -108,6 +112,8 @@ navigation:
         path: contributor/api-server.md
       - page: Testing
         path: contributor/tests.md
+      - page: Registry Egress
+        path: contributor/registry-egress.md
       - page: Claude Skills
         path: contributor/skills.md
       - page: Maintaining AICR

@@ -33,8 +33,10 @@ import (
 const readinessFileName = "readiness.yaml"
 
 // defaultGateImageRepo is the image (without tag) that runs the readiness
-// gate Job. It carries the gate CLI plus an embedded chainsaw binary and is
-// published through AICR's standard goreleaser pipeline alongside aicr/aicrd.
+// gate Job. It carries only the gate CLI — assertions run in-process through
+// pkg/chainsaw; the embedded `chainsaw` binary this image used to ship was
+// removed in #2038 as the sole source of its HIGH CVEs. Published through
+// AICR's standard goreleaser pipeline alongside aicr/aicrd.
 // Phase 1 builds this locally and `kind load`s it as :dev; Phase 2 publishes
 // release-tagged images. The registry mirrors .settings.yaml build.image_registry.
 const defaultGateImageRepo = "ghcr.io/nvidia/aicr-gate"

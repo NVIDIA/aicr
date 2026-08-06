@@ -384,7 +384,12 @@ func registryTestFormatChecks(t *testing.T) []registryCheck {
 func TestEvaluateAssert_ListSkipsGhosts(t *testing.T) {
 	t.Parallel()
 
-	assertRunningPod := func() *v1alpha1.Assert {
+	// Takes the subtest's own *testing.T rather than closing over the parent:
+	// the subtests below are t.Parallel(), and calling Fatalf on the parent
+	// from a parallel subtest's goroutine is a data race on a test that has
+	// already returned.
+	assertRunningPod := func(t *testing.T) *v1alpha1.Assert {
+		t.Helper()
 		var a v1alpha1.Assert
 		const spec = `
 resource:
@@ -470,7 +475,7 @@ resource:
 			f := newFakeFetcher()
 			f.addList("v1", "Pod", "ns", tt.items)
 
-			err := evaluateAssert(context.Background(), assertRunningPod(), f)
+			err := evaluateAssert(context.Background(), assertRunningPod(t), f)
 			if !tt.wantErr {
 				if err != nil {
 					t.Fatalf("evaluateAssert = %v, want nil", err)

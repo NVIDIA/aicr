@@ -420,6 +420,15 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			want: map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
 		},
 		{
+			// The RDMA fabric gate (#1952) reuses these same count keys to
+			// disclose a cordoned RDMA node narrowing its cohort (validated < total).
+			// No new key or skipReason is minted, so the allowlist is unchanged and
+			// the coverage survives redaction into the signed bundle verbatim.
+			name: "rdma cordoned-narrowed coverage survives",
+			in:   map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
+			want: map[string]string{"nodesValidated": "1", "nodesTotal": "2"},
+		},
+		{
 			name: "valid skip reason enum survives",
 			in:   map[string]string{"skipReason": "no-gpu-nodes"},
 			want: map[string]string{"skipReason": "no-gpu-nodes"},

@@ -57,6 +57,7 @@ type bundleCmdOptions struct {
 	workloadSelector           map[string]string
 	estimatedNodeCount         int
 	storageClass               string
+	sharedStorageClass         string
 	targetRevision             string
 
 	// dynamicValues declares value paths provided at install time.
@@ -410,6 +411,22 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		opts.storageClass = sc
 	} else if resolved.StorageClass != "" {
 		opts.storageClass = resolved.StorageClass
+	}
+
+	if cmd.IsSet("shared-storage-class") {
+		sc := strings.TrimSpace(cmd.String("shared-storage-class"))
+		if sc == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--shared-storage-class cannot be blank when specified")
+		}
+		opts.sharedStorageClass = sc
+	} else if resolved.SharedStorageClass != "" {
+		sc := strings.TrimSpace(resolved.SharedStorageClass)
+		if sc == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"spec.bundle.scheduling.sharedStorageClass cannot be blank")
+		}
+		opts.sharedStorageClass = sc
 	}
 
 	// Validate any private Sigstore endpoints up front so a malformed
@@ -784,6 +801,11 @@ Package with explicit tag (overrides CLI version):
 				Usage:    "Kubernetes StorageClass name to inject into components at bundle time (written to registry-declared storageClassPaths). Overrides any storageClassName set in recipe overlays.",
 				Category: catScheduling,
 			},
+			&cli.StringFlag{
+				Name:     "shared-storage-class",
+				Usage:    "RWX-capable Kubernetes StorageClass name for opt-in shared filesystem PVCs (written to registry-declared sharedStorageClassPaths).",
+				Category: catScheduling,
+			},
 			withCompletions(&cli.StringFlag{
 				Name:     "deployer",
 				Aliases:  []string{"d"},
@@ -1051,7 +1073,7 @@ func runBundleCmdWithDependencies(
 	deps = normalizeBundleCommandDependencies(deps)
 
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name", flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "shared-storage-class", "app-name", flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
 		return err
 	}
 
@@ -1142,6 +1164,7 @@ func runBundleCmdWithDependencies(
 		config.WithWorkloadSelector(opts.workloadSelector),
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 		config.WithStorageClass(opts.storageClass),
+		config.WithSharedStorageClass(opts.sharedStorageClass),
 		config.WithVendorCharts(opts.vendorCharts),
 		config.WithReadinessHooks(opts.readinessHooks),
 		config.WithSerial(opts.serial),

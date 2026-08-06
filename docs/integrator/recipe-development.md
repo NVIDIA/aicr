@@ -496,7 +496,12 @@ directions fail closed on a truncated node list (a snapshot captured with
 `--max-nodes-per-entry` whose cap actually truncated a participating
 reading), on an empty GPU-node universe, and on malformed or ambiguous
 label readings (an encoding collision between a disambiguated entry and a
-distinct dotted label name — see #2003). Declare it under
+distinct dotted label name — see #2003). It is consumed by the GKE
+`gpuStack` profile values (the positive form qualifies `operator-managed`, the
+negated form `gcp-managed`), where each selected value's constraint is
+verified at generation when generating from a snapshot (criteria-only
+generation has no snapshot evaluator and defers entirely to the
+pre-flight) and re-evaluated by the validate readiness pre-flight. Outside a profile declaration, declare it under
 `validation.readiness.constraints`, not `spec.constraints` — as a top-level
 constraint it would exclude the overlay during snapshot-based generation on
 the very cluster the diagnostic exists to fix.
@@ -515,7 +520,9 @@ is then checked against the reading — `azure-managed` requires `Install`,
 `--profile gpuStack=operator-managed` therefore fails closed on the azure-managed
 default rather than silently switching values. Unavailable, unknown, or
 mixed pool values fail closed against either selection. ADR-015 resolves
-this signal, and the AKS family above is the first embedded adopter.
+this signal. The AKS family above was the first embedded adopter; the GKE
+family's `gpuStack` (device-plugin ownership over the #1755 node-set form,
+with `advertiser: external` on `gcp-managed`) is the second.
 
 No equivalent reading exists for other services yet. Declare a
 driver-ownership profile only once the signal for that service exists, and
@@ -562,8 +569,11 @@ Profile declarations are intentionally narrow:
   for later validation. This qualification rule is enforced during catalog
   review; core admission does not infer whether arbitrary readings
   semantically distinguish two modes.
-- The GKE-only `advertiser` and allocation-policy selector paths are reserved
-  but rejected until the GKE extension lands.
+- A profile value may declare `advertiser: external` (the GKE `gcp-managed`
+  shape) to record a provider-managed plugin outside the recipe as THE
+  `nvidia.com/gpu` advertiser; the vocabulary is closed (empty or
+  `external`), and the declaration extends the #1327 dual-advertisement
+  gates and closure-locks the allocation-policy selector paths.
 
 Select with `aicr recipe --profile name=value`; omission uses the declared
 default. A profiled result uses `aicr.run/v1alpha3` and records
@@ -841,9 +851,11 @@ spec:
                 state: ready
 ```
 
-When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
+When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. This is now enforced rather than advisory: the effective budget is the **smaller** of the authored `spec.timeouts.assert` and the caller's per-component budget, so an authored value larger than the caller allows is capped rather than honored. A shorter authored value still shortens the budget as before. That caller budget is the gate's `--timeout` (`defaults.ReadinessGateExecTimeout`, 2m) for a readiness Job, and `defaults.ChainsawAssertTimeout` for `aicr validate --phase deployment` — not the `expected-resources` catalog timeout, which is the outer Job envelope rather than a per-component assertion budget. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
 
 **Supported operations.** The gate evaluates the Test in-process against its own read-only ServiceAccount — it ships no Chainsaw binary and shells out to nothing. Only `assert` and `error` are honored; every other operation (`apply`, `create`, `delete`, `patch`, `update`, `script`, `command`, `wait`, `sleep`, `get`, `describe`, `events`, `podLogs`, `proxy`) is rejected before evaluation, as are `catch`, `finally`, and `cleanup` blocks. A readiness test that declares one fails the gate with an invalid-request error naming the offending step.
+
+One action per operation: a `try` entry that sets **both** `assert` and `error` is rejected. Chainsaw evaluates a single action per operation and the executor reaches `assert` first, so the `error` half — the one that forbids a shape — would never run. Split them into separate `try` entries.
 
 A Test declaring no `assert`/`error` operation at all is rejected rather than passing vacuously — a check that evaluates nothing must never report healthy. If the no-op is deliberate, because readiness for that component is enforced some other way, declare it with an annotation on the Test:
 
@@ -855,6 +867,10 @@ metadata:
 ```
 
 The rule applies per document, so in a multi-document (`---`) stream each Test that carries no operations needs its own annotation.
+
+An **empty** readiness file — blank, whitespace-only, or nothing but comments and `---` separators — is rejected outright. There is no Test to carry the annotation, so the only honest verdict is a failure; a check whose content was lost to a truncated ConfigMap value or a bad template render must not report healthy.
+
+A multi-document stream may hold **only** Test documents. Once any document in the file is a chainsaw Test, the whole stream is evaluated by the in-process executor, and nothing else reads it — so a raw Kubernetes manifest sitting alongside a Test would be silently ignored while the component still reported ready. Such a stream is rejected by naming the offending document's kind. Ordinary punctuation (a trailing `---`, a comment-only or `null` document) is not content and is skipped.
 
 Resource blocks that omit `metadata.namespace` are scoped to the release namespace (the Job passes it via `--namespace`); cluster-scoped kinds, like the `ClusterPolicy` above, ignore it.
 

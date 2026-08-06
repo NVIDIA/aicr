@@ -100,7 +100,7 @@ func TestAccessors_PopulatedReturnsValues(t *testing.T) {
 				Input:   &config.RecipeInputSpec{Snapshot: "snap.yaml"},
 				Output:  &config.RecipeOutputSpec{Path: "out.yaml", Format: "json"},
 				Data:    "/data",
-				Profile: "gpuStack=operator",
+				Profile: "gpuStack=operator-managed",
 			},
 			Bundle: &config.BundleSpec{},
 		},
@@ -121,7 +121,7 @@ func TestAccessors_PopulatedReturnsValues(t *testing.T) {
 	if got := r.DataDir(); got != "/data" {
 		t.Errorf("DataDir = %q", got)
 	}
-	if got := r.ProfileSelection(); got != "gpuStack=operator" {
+	if got := r.ProfileSelection(); got != "gpuStack=operator-managed" {
 		t.Errorf("ProfileSelection = %q", got)
 	}
 	if cfg.Bundle() == nil {

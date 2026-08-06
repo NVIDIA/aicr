@@ -15,11 +15,9 @@
 package verifier
 
 import (
-	"io"
-	"os"
-	"path/filepath"
+	"strconv"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -27,8 +25,14 @@ import (
 )
 
 // checkRecipeIdentity binds the pointer's and predicate's identity claims to
-// the manifest-verified recipe.yaml CONTENT. Runs only after CheckInventory
-// has proven the bytes are the ones the predicate (and any signature) binds.
+// the manifest-verified recipe.yaml CONTENT: recipeYAML must be the exact
+// bytes the inventory pass read and hashed (checkInventoryCaptureRecipe),
+// never a path-based reread — for InputFormDir the bundle directory is
+// caller-owned, so reopening recipe.yaml after the inventory check is a
+// TOCTOU window (CWE-367) in which a writer can swap the file and have
+// identity accept bytes the manifest never covered. Runs only after the
+// inventory pass has proven the bytes are the ones the predicate (and any
+// signature) binds.
 // Suffix heuristics alone are spoofable — a recipe name that naturally ends
 // in "-<x>-<y>" (e.g. ...-ubuntu-training) satisfies a fabricated
 // "profile: x=y" — so identity is DERIVED from the decoded recipe and
@@ -38,22 +42,24 @@ import (
 //	pointer.recipe   == RecipeNameFor(recipe)
 //	predicate name   == RecipeNameFor(recipe)
 //	predicate digest == canonical digest of recipe.yaml
-func checkRecipeIdentity(bundleDir string, pointer *attestation.Pointer, pred *attestation.Predicate) error {
-	path := filepath.Join(bundleDir, attestation.RecipeFilename)
-	f, err := os.Open(filepath.Clean(path)) //nolint:gosec // manifest-verified bundle dir
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to open bundle recipe.yaml for identity binding", err)
-	}
-	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxRecipePOSTBytes+1))
-	_ = f.Close() // read-only handle
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read bundle recipe.yaml for identity binding", err)
-	}
-	if int64(len(data)) > defaults.MaxRecipePOSTBytes {
-		return errors.New(errors.ErrCodeInvalidRequest, "bundle recipe.yaml exceeds the identity-binding size cap")
+//	predicate profile block == recipe's metadata.selectedProfile
+//	  (presence both ways, exact name=value selection, advertiser) and its
+//	  policyDescriptorIdentity == the recipe-scoped descriptor identity
+//	  recomputed from the decoded recipe (ADR-015 descriptor-currentness).
+//	  Running the currentness check here — not on the predicate-parse path —
+//	  covers both the unsigned-statement and the Sigstore-verified predicate
+//	  sources, and compares like-for-like against the recipe that was
+//	  actually attested.
+func checkRecipeIdentity(recipeYAML []byte, pointer *attestation.Pointer, pred *attestation.Predicate) error {
+	if len(recipeYAML) == 0 {
+		// The inventory pass captured nothing: the manifest carries no
+		// recipe.yaml entry. Identity cannot bind without manifest-verified
+		// recipe bytes — fail closed rather than fall back to a path read.
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"bundle manifest carries no verified recipe.yaml — identity binding requires the manifest-covered recipe bytes")
 	}
 
-	rec, err := recipe.DecodeRecipeResult(data, serializer.FormatYAML)
+	rec, err := recipe.DecodeRecipeResult(recipeYAML, serializer.FormatYAML)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "failed to decode bundle recipe.yaml for identity binding")
 	}
@@ -73,13 +79,16 @@ func checkRecipeIdentity(bundleDir string, pointer *attestation.Pointer, pred *a
 	// SubjectDigest canonicalizes the raw recipe.yaml bytes — the same
 	// input the producer digested at emit time (never a decode/re-marshal
 	// round trip, which would not be byte-stable across writers).
-	wantDigest, err := attestation.SubjectDigest(data)
+	wantDigest, err := attestation.SubjectDigest(recipeYAML)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to digest bundle recipe", err)
 	}
 	if pred.Recipe.Digest != wantDigest {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"predicate recipe digest does not match the canonical digest of the bundle recipe")
+	}
+	if profErr := checkPredicateProfileBinding(rec, pred, wantSel); profErr != nil {
+		return profErr
 	}
 	if pointer != nil {
 		if wantName != "" && pointer.Recipe != wantName {
@@ -90,6 +99,50 @@ func checkRecipeIdentity(bundleDir string, pointer *attestation.Pointer, pred *a
 			return errors.New(errors.ErrCodeInvalidRequest,
 				"pointer.profile "+pointer.Profile+" does not match the bundle recipe's selection ("+wantSel+")")
 		}
+	}
+	return nil
+}
+
+// checkPredicateProfileBinding binds the predicate's profile claims to the
+// manifest-verified recipe's metadata.selectedProfile: presence must agree
+// in both directions, the selection and advertiser must match exactly, and
+// the recorded policy-descriptor identity must equal the recipe-scoped
+// identity recomputed from the decoded recipe's closure-contributing
+// descriptor entries (ADR-015 descriptor-currentness). Without this, a
+// pre-cut-over v1 statement over a profiled recipe — or a v2 payload
+// claiming another profile value or advertiser — would verify.
+func checkPredicateProfileBinding(rec *recipe.RecipeResult, pred *attestation.Predicate, wantSel string) error {
+	selected := rec.Metadata.SelectedProfile
+	switch {
+	case selected == nil && pred.Profile == nil:
+		return nil
+	case selected == nil:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"predicate carries a profile block ("+pred.Profile.Selection+
+				") but the bundle recipe is unprofiled")
+	case pred.Profile == nil:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"bundle recipe carries selectedProfile "+wantSel+
+				" but the predicate has no profile block — profiled evidence requires the "+
+				attestation.PredicateTypeV2+" predicate; regenerate and re-sign it (ADR-015)")
+	}
+	if pred.Profile.Selection != wantSel {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"predicate profile selection "+pred.Profile.Selection+
+				" does not match the bundle recipe's selection ("+wantSel+")")
+	}
+	if pred.Profile.Advertiser != selected.Advertiser {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"predicate profile advertiser "+strconv.Quote(pred.Profile.Advertiser)+
+				" does not match the bundle recipe's advertiser "+strconv.Quote(selected.Advertiser))
+	}
+	wantIdentity := allocpolicy.IdentityFor(rec.ClosureDescriptorEntries())
+	if pred.Profile.PolicyDescriptorIdentity != wantIdentity {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"profiled evidence records policy-descriptor identity "+pred.Profile.PolicyDescriptorIdentity+
+				", which differs from the recipe-scoped identity recomputed from the bundle recipe ("+
+				wantIdentity+") — the evidence is historical-only; regenerate and re-sign it "+
+				"(ADR-015 descriptor-currentness)")
 	}
 	return nil
 }
