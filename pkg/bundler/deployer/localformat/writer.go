@@ -21,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -77,9 +78,8 @@ type Options struct {
 	Components []Component // ordered per DeploymentOrder
 	// ComponentPreManifests maps component name → manifest path → rendered
 	// bytes for manifests that should apply BEFORE each component's primary
-	// chart. Populated from ComponentRef.PreManifestFiles. The writer does
-	// not yet emit pre-phase folders — Task 4 wires the pre-injection
-	// branch; for now the map is threaded through but unread.
+	// chart. Populated from ComponentRef.PreManifestFiles. Entries that all
+	// render empty are omitted instead of producing a no-op pre chart.
 	ComponentPreManifests map[string]map[string][]byte
 	// ComponentPostManifests maps component name → manifest path → rendered
 	// bytes for manifests that should apply AFTER each component's primary
@@ -132,6 +132,45 @@ func renderInputFor(c Component) manifest.RenderInput {
 		ChartVersion:  deployer.NormalizeVersionWithDefault(c.Version),
 		Values:        c.Values,
 	}
+}
+
+func filterEmptyPreManifests(
+	ctx context.Context,
+	components []Component,
+	preManifests map[string]map[string][]byte,
+) (map[string]map[string][]byte, error) {
+
+	filtered := make(map[string]map[string][]byte, len(preManifests))
+	for _, component := range components {
+		manifests := preManifests[component.Name]
+		if len(manifests) == 0 {
+			continue
+		}
+		paths := make([]string, 0, len(manifests))
+		for path := range manifests {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+
+		kept := make(map[string][]byte, len(manifests))
+		for _, path := range paths {
+			if err := ctx.Err(); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
+			}
+			rendered, err := manifest.Render(manifests[path], renderInputFor(component))
+			if err != nil {
+				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+					fmt.Sprintf("render pre-manifest %s for %s", path, component.Name))
+			}
+			if hasYAMLObjects(rendered) {
+				kept[path] = manifests[path]
+			}
+		}
+		if len(kept) > 0 {
+			filtered[component.Name] = kept
+		}
+	}
+	return filtered, nil
 }
 
 // injectionPhase selects whether injectAuxiliaryFolder reads pre- or
@@ -217,6 +256,12 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 	if err := ctx.Err(); err != nil {
 		return WriteResult{}, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
 	}
+	filteredPreManifests, err := filterEmptyPreManifests(ctx, opts.Components, opts.ComponentPreManifests)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	opts.ComponentPreManifests = filteredPreManifests
+
 	// Fail fast if the layout's three-digit prefix can't accommodate the
 	// number of NNN-* folders this bundle will actually emit. Compute
 	// the count using the same pre/primary/post emission rules the main

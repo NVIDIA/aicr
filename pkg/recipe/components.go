@@ -64,6 +64,11 @@ type ComponentConfig struct {
 	// When --storage-class is provided at bundle time, the value is written to each path.
 	StorageClassPaths []string `yaml:"storageClassPaths,omitempty"`
 
+	// SharedStorageClassPaths are Helm value paths for shared filesystem PVCs.
+	// When --shared-storage-class is provided at bundle time, the value is
+	// written to each path without affecting the generic storageClassPaths.
+	SharedStorageClassPaths []string `yaml:"sharedStorageClassPaths,omitempty"`
+
 	// Validations defines component-specific validation checks.
 	Validations []ComponentValidationConfig `yaml:"validations,omitempty"`
 
@@ -593,6 +598,15 @@ func (c *ComponentConfig) GetStorageClassPaths() []string {
 		return nil
 	}
 	return c.StorageClassPaths
+}
+
+// GetSharedStorageClassPaths returns Helm value paths where the shared
+// filesystem storage class name is injected.
+func (c *ComponentConfig) GetSharedStorageClassPaths() []string {
+	if c == nil {
+		return nil
+	}
+	return c.SharedStorageClassPaths
 }
 
 // GetValidations returns all validation configurations for a component.

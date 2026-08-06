@@ -65,6 +65,140 @@ func wantInvalidRequest(t *testing.T, err error) {
 	}
 }
 
+func wantTimeout(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("expected ErrCodeTimeout, got %v", err)
+	}
+}
+
+// TestBundleReaders_CanceledContextSurfacesTimeout proves each on-disk reader
+// path is bounded by the caller's context: against a real, valid bundle (so an
+// unbounded read would succeed instantly), an already-canceled context makes
+// every reader fail closed with ErrCodeTimeout rather than block on a
+// potentially hung mount. This is the load-bearing guarantee of issue #2054 —
+// a dead NFS/FUSE mount surfaces as a timeout, not an indefinite hang.
+func TestBundleReaders_CanceledContextSurfacesTimeout(t *testing.T) {
+	dir := emitUnsignedBundle(t)
+	summaryDir := filepath.Join(dir, SummaryBundleDirName)
+
+	tests := []struct {
+		name string
+		run  func(ctx context.Context) error
+	}{
+		{"readBundlePredicate", func(ctx context.Context) error {
+			_, _, err := readBundlePredicate(ctx, summaryDir)
+			return err
+		}},
+		{"readBundleRecipeProfile", func(ctx context.Context) error {
+			_, _, _, err := readBundleRecipeProfile(ctx, summaryDir)
+			return err
+		}},
+		{"HasBundleMarkers", func(ctx context.Context) error {
+			_, err := HasBundleMarkers(ctx, summaryDir)
+			return err
+		}},
+		{"resolveSummaryDir", func(ctx context.Context) error {
+			_, _, err := resolveSummaryDir(ctx, dir)
+			return err
+		}},
+		{"loadOnDiskBundle", func(ctx context.Context) error {
+			_, _, err := loadOnDiskBundle(ctx, dir)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			wantTimeout(t, tt.run(ctx))
+		})
+	}
+}
+
+// TestWithFileReadTimeout_InFlightTimeout exercises the goroutine+select arm of
+// withFileReadTimeout — the part that actually delivers hang-immunity. The
+// canceled-context tests above return at the ctx.Err() pre-check and never
+// reach the select, so this covers the case a wedged mount hits: fn is already
+// running (blocked in the syscall) when the caller context is canceled. It uses
+// a started/release/finished handshake so the cancellation is observed
+// in-flight, asserts ErrCodeTimeout, then unblocks fn and joins it — proving
+// the parked worker returns rather than leaking.
+func TestWithFileReadTimeout_InFlightTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- withFileReadTimeout(ctx, "blocked read", func() error {
+			close(started)
+			<-release // stand in for a syscall wedged on a hung mount
+			close(finished)
+			return nil
+		})
+	}()
+
+	<-started // fn is now running inside the goroutine+select path
+	cancel()  // cancel the caller context while fn is still blocked
+	wantTimeout(t, <-errCh)
+
+	close(release) // release the parked worker...
+	<-finished     // ...and confirm it returns (no leaked goroutine)
+}
+
+func TestHasBundleMarkers(t *testing.T) {
+	valid := filepath.Join(emitUnsignedBundle(t), SummaryBundleDirName)
+
+	tests := []struct {
+		name    string
+		dir     string
+		want    bool
+		wantErr bool
+	}{
+		{"valid summary bundle", valid, true, false},
+		{"empty dir is not a bundle", t.TempDir(), false, false},
+		{"missing dir is not a bundle", filepath.Join(t.TempDir(), "nope"), false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := HasBundleMarkers(context.Background(), tt.dir)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("HasBundleMarkers error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("HasBundleMarkers = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHasBundleMarkers_DirectoryMarkerIsNotABundle guards the IsDir() branch:
+// a directory named recipe.yaml must not be mistaken for the marker file, and
+// the non-timeout path must still report (false, nil), not an error.
+func TestHasBundleMarkers_DirectoryMarkerIsNotABundle(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, RecipeFilename), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ManifestFilename), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := HasBundleMarkers(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("HasBundleMarkers returned unexpected error: %v", err)
+	}
+	if got {
+		t.Errorf("HasBundleMarkers = true, want false (recipe.yaml is a directory)")
+	}
+}
+
 func TestPublish_RequiresPush(t *testing.T) {
 	err := Publish(context.Background(), PublishOptions{BundleDir: t.TempDir()})
 	wantInvalidRequest(t, err)
@@ -92,7 +226,7 @@ func TestPublish_MissingBundleDir(t *testing.T) {
 func TestLoadOnDiskBundle_ParentDir(t *testing.T) {
 	dir := emitUnsignedBundle(t)
 
-	bundle, outDir, err := loadOnDiskBundle(dir)
+	bundle, outDir, err := loadOnDiskBundle(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("loadOnDiskBundle: %v", err)
 	}
@@ -118,7 +252,7 @@ func TestLoadOnDiskBundle_SummaryDirItself(t *testing.T) {
 	dir := emitUnsignedBundle(t)
 	summaryDir := filepath.Join(dir, SummaryBundleDirName)
 
-	bundle, outDir, err := loadOnDiskBundle(summaryDir)
+	bundle, outDir, err := loadOnDiskBundle(context.Background(), summaryDir)
 	if err != nil {
 		t.Fatalf("loadOnDiskBundle: %v", err)
 	}
@@ -133,17 +267,17 @@ func TestLoadOnDiskBundle_SummaryDirItself(t *testing.T) {
 }
 
 func TestLoadOnDiskBundle_EmptyArg(t *testing.T) {
-	_, _, err := loadOnDiskBundle("")
+	_, _, err := loadOnDiskBundle(context.Background(), "")
 	wantInvalidRequest(t, err)
 }
 
 func TestResolveSummaryDir_NotABundle(t *testing.T) {
-	_, _, err := resolveSummaryDir(t.TempDir())
+	_, _, err := resolveSummaryDir(context.Background(), t.TempDir())
 	wantInvalidRequest(t, err)
 }
 
 func TestReadBundlePredicate_MissingStatement(t *testing.T) {
-	_, _, err := readBundlePredicate(t.TempDir())
+	_, _, err := readBundlePredicate(context.Background(), t.TempDir())
 	if err == nil {
 		t.Fatalf("expected error for missing statement")
 	}
@@ -157,7 +291,7 @@ func TestReadBundlePredicate_InvalidJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, StatementFilename), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := readBundlePredicate(dir)
+	_, _, err := readBundlePredicate(context.Background(), dir)
 	wantInvalidRequest(t, err)
 }
 
@@ -167,7 +301,7 @@ func TestReadBundlePredicate_WrongPredicateType(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, StatementFilename), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := readBundlePredicate(dir)
+	_, _, err := readBundlePredicate(context.Background(), dir)
 	wantInvalidRequest(t, err)
 }
 
@@ -188,7 +322,7 @@ func TestLoadOnDiskBundle_MissingRecipeIdentity(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(summaryDir, StatementFilename), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := loadOnDiskBundle(dir)
+	_, _, err := loadOnDiskBundle(context.Background(), dir)
 	wantInvalidRequest(t, err)
 }
 
@@ -227,7 +361,7 @@ componentRefs:
 	if err := os.WriteFile(filepath.Join(summaryDir, StatementFilename), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := loadOnDiskBundle(dir)
+	_, _, err := loadOnDiskBundle(context.Background(), dir)
 	wantInvalidRequest(t, err)
 	if !strings.Contains(err.Error(), "no profile block") {
 		t.Fatalf("error = %v, want profile/predicate incoherence rejection", err)
@@ -273,7 +407,7 @@ func TestLoadOnDiskBundle_ProfiledEmitRoundTrip(t *testing.T) {
 		t.Fatalf("Emit: %v", err)
 	}
 
-	bundle, _, err := loadOnDiskBundle(dir)
+	bundle, _, err := loadOnDiskBundle(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("loadOnDiskBundle rejected a coherent profiled bundle: %v", err)
 	}
@@ -343,7 +477,7 @@ componentRefs:
 	if err := os.WriteFile(filepath.Join(summaryDir, StatementFilename), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := loadOnDiskBundle(dir)
+	_, _, err := loadOnDiskBundle(context.Background(), dir)
 	wantInvalidRequest(t, err)
 	if !strings.Contains(err.Error(), "historical-only") {
 		t.Fatalf("error = %v, want stale descriptor-identity rejection", err)

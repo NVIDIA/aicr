@@ -165,7 +165,8 @@ func TestReleaseSbomSignaturesAreAllowlisted(t *testing.T) {
 // allowlist rather than a copy of it.
 func shellReleaseAssetNames(t *testing.T, tag string) []string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	budget := scriptBudget(t)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	text := string(readFile(t, ".github/scripts/release-images.sh"))
 	const marker = "expected_release_asset_names() {"
@@ -183,7 +184,7 @@ func shellReleaseAssetNames(t *testing.T, tag string) []string {
 	command.Env = append(os.Environ(), "RELEASE_TAG="+tag)
 	output, err := command.CombinedOutput()
 	if ctx.Err() != nil {
-		t.Fatalf("evaluate expected_release_asset_names exceeded test deadline: %v\n%s", ctx.Err(), output)
+		t.Fatalf("evaluate expected_release_asset_names exceeded %v budget (derived from -timeout): %v\n%s", budget, ctx.Err(), output)
 	}
 	if err != nil {
 		t.Fatalf("evaluate expected_release_asset_names: %v\n%s", err, output)
@@ -230,8 +231,9 @@ func TestReleaseSignSbomBehavior(t *testing.T) {
 				t.Fatalf("create fake bin: %v", err)
 			}
 			writeExecutable(t, filepath.Join(bin, "cosign"), fakeCosign)
-			// The retry loop backs off 5s then 10s, which would outrun the
-			// harness deadline; a PATH shim keeps the waits instantaneous.
+			// The retry loop backs off 5s then 10s; a PATH shim keeps the
+			// waits instantaneous so the test stays fast regardless of the
+			// per-script budget.
 			writeExecutable(t, filepath.Join(bin, "sleep"), noopSleep)
 
 			sbomPath := filepath.Join(dir, "aicr_1.2.3_linux_amd64.sbom.json")
@@ -1677,15 +1679,82 @@ type scriptResult struct {
 	err    error
 }
 
+// scriptHangCap bounds a single script invocation. Genuine hangs (stuck
+// prompt, infinite loop) exceed this by orders of magnitude, while
+// slow-but-correct runs under full-suite -race load stay well inside it
+// (see issue #1974).
+const scriptHangCap = 90 * time.Second
+
+// deadlineReportMargin is reserved from the test binary's -timeout so a
+// killed script still fails via t.Fatalf with its captured output instead
+// of being torn down by the test runner's deadline panic.
+const deadlineReportMargin = 30 * time.Second
+
+// scriptBudget derives the per-script deadline from the test binary's own
+// deadline so the budget inherits whatever -timeout the environment (gate,
+// CI, dev machine) was provisioned with, capped at hang-detection scale.
+func scriptBudget(t *testing.T) time.Duration {
+	t.Helper()
+	deadline, ok := t.Deadline()
+	if !ok {
+		return scriptHangCap
+	}
+	return scriptBudgetFor(time.Until(deadline))
+}
+
+// scriptBudgetFor computes the budget for the given time remaining before the
+// binary deadline. It reserves deadlineReportMargin for t.Fatalf to report
+// before the runner's deadline panic, but never takes more than half the
+// remaining time as margin — a short -timeout (e.g. 25s on a targeted run)
+// must still yield a usable budget rather than collapse it. Once the deadline
+// has passed the result goes non-positive and the context expires
+// immediately, failing fast with the script-timeout message instead of
+// starting doomed work.
+func scriptBudgetFor(remaining time.Duration) time.Duration {
+	budget := remaining - deadlineReportMargin
+	if half := remaining / 2; budget < half {
+		budget = half
+	}
+	if budget > scriptHangCap {
+		budget = scriptHangCap
+	}
+	return budget
+}
+
+func TestScriptBudgetFor(t *testing.T) {
+	tests := []struct {
+		name      string
+		remaining time.Duration
+		expected  time.Duration
+	}{
+		{"ample time hits hang cap", 10 * time.Minute, scriptHangCap},
+		{"cap boundary", scriptHangCap + deadlineReportMargin, scriptHangCap},
+		{"full margin reserved", 100 * time.Second, 70 * time.Second},
+		{"full-margin/half tie at 2x margin", 2 * deadlineReportMargin, deadlineReportMargin},
+		{"margin capped at half", 50 * time.Second, 25 * time.Second},
+		{"short targeted -timeout", 25 * time.Second, 12500 * time.Millisecond},
+		{"nearly exhausted", time.Second, 500 * time.Millisecond},
+		{"expired deadline fails fast", -10 * time.Second, -5 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := scriptBudgetFor(tt.remaining); got != tt.expected {
+				t.Errorf("scriptBudgetFor(%v) = %v, want %v", tt.remaining, got, tt.expected)
+			}
+		})
+	}
+}
+
 func runScript(t *testing.T, environment []string, relative string, args ...string) scriptResult {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	budget := scriptBudget(t)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	command := exec.CommandContext(ctx, repositoryPath(t, relative), args...)
 	command.Env = environment
 	output, err := command.CombinedOutput()
 	if ctx.Err() != nil {
-		t.Fatalf("script exceeded test deadline: %v\n%s", ctx.Err(), output)
+		t.Fatalf("script exceeded %v budget (derived from -timeout): %v\n%s", budget, ctx.Err(), output)
 	}
 	return scriptResult{output: string(output), err: err}
 }

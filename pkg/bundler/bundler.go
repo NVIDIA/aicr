@@ -1071,6 +1071,9 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 
 		// Apply node selectors, tolerations, workload selector, and taints based on component type
 		b.applyNodeSchedulingOverrides(ref.Name, values, provider, policy)
+		if sharedStorageErr := b.applySharedStorageClassOverride(ref.Name, values, provider); sharedStorageErr != nil {
+			return nil, sharedStorageErr
+		}
 
 		// Apply structured --set-json / --set-file overrides last so they take
 		// precedence over base values, scalar --set, and scheduling injection.
@@ -1096,6 +1099,13 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 					"failed to apply --set-json/--set-file value overrides",
 					applyErr,
 					map[string]any{errCtxKeyComponent: ref.Name})
+			}
+		}
+
+		if ref.Name == slinkySlurmComponentName {
+			supported := hasSlinkySharedStoragePreManifest(ref.PreManifestFiles)
+			if materializeErr := materializeSlinkySharedStorage(values, supported); materializeErr != nil {
+				return nil, materializeErr
 			}
 		}
 
@@ -1654,6 +1664,49 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 			}
 		}
 	}
+}
+
+// applySharedStorageClassOverride injects the dedicated RWX StorageClass
+// without allowing the generic, commonly RWO-only class to leak into shared
+// filesystem PVCs.
+func (b *DefaultBundler) applySharedStorageClassOverride(
+	componentName string,
+	values map[string]any,
+	provider recipe.DataProvider,
+) error {
+
+	if b.Config == nil || b.Config.SharedStorageClass() == "" {
+		return nil
+	}
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		return errors.WrapWithContext(errors.ErrCodeInternal,
+			"failed to load component registry for shared storage",
+			err,
+			map[string]any{errCtxKeyComponent: componentName})
+	}
+	comp := registry.Get(componentName)
+	if comp == nil || len(comp.GetSharedStorageClassPaths()) == 0 {
+		return nil
+	}
+
+	explicitOverrides := b.getValueOverridesForComponent(componentName, provider)
+	overrides := make(map[string]string, len(comp.GetSharedStorageClassPaths()))
+	for _, path := range comp.GetSharedStorageClassPaths() {
+		if _, isExplicit := explicitOverrides[path]; !isExplicit {
+			overrides[path] = b.Config.SharedStorageClass()
+		}
+	}
+	if len(overrides) == 0 {
+		return nil
+	}
+	if err := component.ApplyMapOverrides(values, overrides); err != nil {
+		return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"failed to apply shared storage class",
+			err,
+			map[string]any{errCtxKeyComponent: componentName})
+	}
+	return nil
 }
 
 // warnMissingStorageClassForPVCs emits a bundle note when a rendered component creates

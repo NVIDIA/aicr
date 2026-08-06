@@ -242,6 +242,7 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 			WorkloadSelector:           map[string]string{"workload": "true"},
 			Nodes:                      8,
 			StorageClass:               "fast-ssd",
+			SharedStorageClass:         "shared-rwx",
 		},
 		Attestation: &config.AttestationSpec{
 			Enabled:                   true,
@@ -301,6 +302,9 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 	}
 	if got.StorageClass != "fast-ssd" {
 		t.Errorf("StorageClass: got %q", got.StorageClass)
+	}
+	if got.SharedStorageClass != "shared-rwx" {
+		t.Errorf("SharedStorageClass: got %q", got.SharedStorageClass)
 	}
 	if !got.Attest || got.CertIDRegexp != ".+" || !got.OIDCDeviceFlow {
 		t.Errorf("Attestation fields: got attest=%v cert=%q oidc=%v",

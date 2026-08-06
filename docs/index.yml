@@ -48,6 +48,8 @@ navigation:
         path: user/coverage-matrix.md
       - page: Slurm Accounting
         path: user/slinky-slurm-accounting.md
+      - page: Slurm Shared Storage
+        path: user/slinky-slurm-storage.md
 
   - section: Integrator Guide
     contents:

@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
@@ -261,6 +263,42 @@ func TestLoadPredicate(t *testing.T) {
 			t.Fatal("expected error for invalid JSON")
 		}
 	})
+
+	invalidPredicates := []struct {
+		name            string
+		predicate       any
+		wantErrContains string
+	}{
+		{"null predicate returns error", nil, "statement predicate is null"},
+		{"empty predicate object returns error", map[string]any{}, "statement predicate has no attestedAt"},
+	}
+	for _, tt := range invalidPredicates {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			stmt := map[string]any{
+				"_type":         "https://in-toto.io/Statement/v0.1",
+				"predicateType": attestation.PredicateTypeV1,
+				"predicate":     tt.predicate,
+			}
+			stmtBytes, _ := json.Marshal(stmt)
+			if err := os.WriteFile(
+				filepath.Join(dir, attestation.StatementFilename),
+				stmtBytes, 0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadPredicate(dir)
+			if err == nil {
+				t.Fatal("expected error for invalid predicate")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Errorf("error = %v, want message containing %q", err, tt.wantErrContains)
+			}
+		})
+	}
 
 	t.Run("statement with no predicate field returns error", func(t *testing.T) {
 		dir := t.TempDir()

@@ -47,6 +47,12 @@ updates:
     labels: ["dependencies"]
     commit-message:
       prefix: "chore: deps"
+    # Group all codeql-action sub-actions so init/analyze bump together
+    # atomically (they must run at the same version within a job)
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   - package-ecosystem: "docker"
     directory: "/"

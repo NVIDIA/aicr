@@ -268,6 +268,138 @@ monitoring-coverage gap, not a verification gap. A follow-up may add a one-time
 new-shard backfill; until then, treat a rotation log line as a prompt to
 spot-check releases made around the rotation boundary.
 
+### Daily release re-verification
+
+`Release Re-Verification` (`.github/workflows/release-reverify.yaml`) runs daily
+and answers the question the Rekor monitor cannot: did the release we published
+actually **ship** the artifacts a consumer needs to verify it? The monitor proves
+the log is sound; it says nothing about a signing-side upload that silently
+failed or was skipped, which leaves a published release whose provenance cannot
+be reconstructed while nothing in the log is wrong
+([#1461](https://github.com/NVIDIA/aicr/issues/1461)).
+
+It also declares `workflow_dispatch`, which matters operationally: GitHub
+disables scheduled workflows after 60 days of repository inactivity, so a manual
+dispatch is how a maintainer re-arms the schedule. It is also the way to get an
+on-demand run right after cutting a release, rather than waiting for the next
+day's cron to be the first thing that looks at the new artifacts.
+
+Each run resolves the latest non-draft, non-prerelease release (never a hardcoded
+tag; the resolved tag is written to the job summary) and runs the **shipped**
+verification commands against it, exactly as
+[`supply-chain-verification.md`](../integrator/supply-chain-verification.md)
+documents them:
+
+- the `linux/amd64` archive against `aicr_checksums.txt`, then its
+  `aicr-attestation.sigstore.json` SLSA provenance bundle via
+  `cosign verify-blob-attestation` pinned to `on-tag.yaml@refs/tags/<exact tag>`.
+  This is delegated wholesale to the `install-aicr-release` composite that UAT
+  release cells already use, so there is one hardened implementation of the
+  binary check, not two. When that composite fails, the classifier re-runs
+  **both** of its sub-checks (the checksum and the provenance) rather than
+  presuming which one broke: the attestation binds the *binary* while
+  `aicr_checksums.txt` covers the *archive*, so a manifest that stopped matching
+  an otherwise-valid archive would otherwise report "transient" every day while
+  every consumer following the documented checksum flow fails every time;
+- `recipe-catalog.sigstore.json` (a loose asset, deliberately outside
+  `aicr_checksums.txt`) via `aicr recipe verify-catalog`, run with the released
+  binary just verified — the only check that proves the *shipped* binary's
+  embedded `registry.yaml` and `validators/catalog.yaml` still digest to what the
+  release signed;
+- the `linux/amd64` SPDX SBOM every release must publish for each binary in
+  `EXPECTED_SBOM_BINARIES`, and each one's sibling `.sigstore.json` bundle. The
+  expected set is derived from the **tag**, mirroring
+  `expected_release_asset_names()` in `.github/scripts/release-images.sh`, never
+  from the release's own inventory: derived from the release, only a zero-SBOM
+  release would be a finding, and deleting one of the two would leave the check
+  verifying the survivor and reporting clean. Gated on `SBOM_SIGNING_FLOOR`
+  (`v0.18.0`): releases at or before it predate SBOM signing
+  ([#1957](https://github.com/NVIDIA/aicr/issues/1957)) and legitimately ship
+  unsigned SBOMs, while every later release must ship a bundle per SBOM.
+
+Classification reuses the monitor's vocabulary and exit codes so both workflows
+triage identically: `clean` (0), `tamper` (1, security), `operational` (3). A
+`tamper` finding opens a security issue **and** posts a Slack alert through the
+same `SLACK_SERVICE` webhook rekor-monitor uses, so an incident-grade finding
+does not depend on one channel. Operational failures page no one, and only three
+consecutive failed scheduled runs open a calm `area/ci` degraded issue. Only a
+`failure` conclusion counts toward that streak: a canceled or timed-out run says
+nothing about upstream health.
+
+**The alert is tag-scoped, and that is a deliberate divergence from
+rekor-monitor.** The issue title carries the resolved tag, and a clean run only
+closes the alert for the tag it actually verified. The job checks the latest
+release, so a clean run on `vX+1` proves nothing about `vX`; closing `vX`'s issue
+would silently resolve a live finding on a release that is never re-checked
+again. The degraded issue has no such scoping, because it tracks the checker's
+own health rather than a release, so any clean run clears it. rekor-monitor's
+alert is release-agnostic (it tracks the log), which is why a clean run genuinely
+clears it there.
+
+**`tamper` is asserted only on positive evidence**, never as a fallback, so an
+outage cannot masquerade as a missing entry. "Missing" means an asset name is
+absent from the release's own asset inventory, or an attestation is absent from
+an archive that already downloaded and checksummed. Neither is reachable from a
+failed network call: a failed read aborts the step before any comparison, and an
+inventory file that cannot be read at all demotes and stops rather than reporting
+every asset as missing. A failed *cryptographic* check is promoted to `tamper`
+only when every demotion test declines it:
+
+- the command was not killed (`timeout` exit 124, or 137 from a SIGKILL or the
+  OOM killer);
+- it produced a non-empty, readable log: `grep` declines to match an empty file
+  and exits 2 on an unreadable one, either of which would otherwise sail straight
+  through the pattern guard;
+- every Sigstore liveness probe answered. Both the TUF CDN and Fulcio are
+  probed and **all** must respond, so a Fulcio-only outage demotes too. Rekor v2
+  shard hostnames rotate, so no fixed shard is probed;
+- the captured output carries no transport or outage signature.
+
+All of these are demote-only, so the worst case is a real finding reported as
+operational: still a red job, still a degraded issue after three days, and it
+re-fires the next day. Never the reverse. The cost of that bias is that a probe
+URL which broke permanently would silently disable paging, so each probe failure
+is logged by name. Any failure *before* the classifier runs leaves the
+classification empty, which the gates treat as operational by construction.
+
+One fault in the step fails in the **opposite** direction and is guarded
+separately: if `sort -V` cannot order the tag against the SBOM signing floor, an
+unguarded comparison would read as "at or before the floor" and skip every SBOM
+check while logging that it did so on purpose. That is silent under-verification
+rather than a false page, and it is demoted explicitly.
+
+Two things are deliberately out of scope, both tracked as follow-ups:
+
+- **Container-image OCI referrer attestations** (SBOM / OpenVEX / SLSA
+  provenance, [#1982](https://github.com/NVIDIA/aicr/issues/1982)). Those live in
+  ghcr.io's referrer store — a different system with a different retention and GC
+  model from GitHub Releases — and re-verifying seven images times three
+  predicate kinds would add roughly twenty registry round-trips per run,
+  multiplying operational noise against the one signal this job exists to keep
+  crisp. The images are already pulled and scanned weekly by
+  `vuln-scan-images.yaml`. A registry-side sibling check must use
+  `gh attestation verify --bundle-from-oci`, otherwise it reads GitHub's
+  attestations API and proves nothing about the registry copy's retrievability.
+- **Rekor entry liveness by log index.** `cosign verify-blob-attestation`
+  verifies a self-contained bundle: the inclusion proof and RFC3161 timestamp
+  travel inside it and are checked against the live Sigstore trust root. A pass
+  proves the bundle is retrievable and cryptographically sound, not that Rekor
+  would still serve that entry by index.
+
+Triage is in the workflow file's header comment. In short, a security issue names
+the exact artifact:
+
+- **Absent asset**: a signing or upload step silently skipped. Re-upload and
+  re-sign the asset, or re-cut the release.
+- **Present asset that fails verification**: read the **verifier's reported
+  failure reason** before concluding anything. `cosign verify-blob-attestation`
+  fails on a certificate-identity or predicate-type mismatch just as it does on a
+  digest mismatch, so an asset re-signed under a different workflow identity, with
+  its bytes fully intact, produces the same red as tampering. A digest mismatch
+  means the published bytes are not what the release signed and is an incident;
+  an identity or predicate mismatch is a signing-path problem, and the remediation
+  is different.
+
 ## Reviewing Recipe Contributions
 
 A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,

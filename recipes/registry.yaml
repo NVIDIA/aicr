@@ -797,6 +797,9 @@ components:
       # enforces their alignment with the scheduling paths below.
       defaultVersion: "1.2.0"
       defaultNamespace: slurm
+    sharedStorageClassPaths:
+      - storage.home.storageClassName
+      - storage.data.storageClassName
     nodeScheduling:
       system:
         nodeSelectorPaths:

@@ -77,6 +77,123 @@ func TestWrite_UpstreamHelmOnly(t *testing.T) {
 	assertGolden(t, outDir, "testdata/upstream_helm_only", "001-nfd/upstream.env")
 }
 
+func TestWrite_OmitsPreFolderWhenAllManifestsRenderEmpty(t *testing.T) {
+	conditional := []byte(`{{- $component := index .Values "foo" -}}
+{{- $storage := index $component "storage" -}}
+{{- if (index $storage "enabled") }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-home
+{{- end }}
+`)
+	always := []byte(`apiVersion: resource.nvidia.com/v1beta1
+kind: ComputeDomain
+metadata:
+  name: slinky-slurm-imex
+`)
+
+	tests := []struct {
+		name          string
+		enabled       bool
+		includeAlways bool
+		wantDirs      []string
+		wantSharedPVC bool
+	}{
+		{
+			name:     "disabled conditional pre-manifest emits only primary",
+			wantDirs: []string{"001-foo"},
+		},
+		{
+			name:          "enabled conditional pre-manifest emits pre and primary",
+			enabled:       true,
+			wantDirs:      []string{"001-foo-pre", "002-foo"},
+			wantSharedPVC: true,
+		},
+		{
+			name:          "always-rendered pre-manifest preserves pre folder",
+			includeAlways: true,
+			wantDirs:      []string{"001-foo-pre", "002-foo"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			preManifests := map[string][]byte{"shared-storage-pvcs.yaml": conditional}
+			if tt.includeAlways {
+				preManifests["compute-domain.yaml"] = always
+			}
+			result, err := localformat.Write(context.Background(), localformat.Options{
+				OutputDir: outDir,
+				Components: []localformat.Component{{
+					Name:       "foo",
+					Namespace:  "slurm",
+					Repository: "oci://example.invalid/charts/foo",
+					ChartName:  "foo",
+					Version:    "1.0.0",
+					Values: map[string]any{
+						"storage": map[string]any{"enabled": tt.enabled},
+					},
+				}},
+				ComponentPreManifests: map[string]map[string][]byte{"foo": preManifests},
+			})
+			if err != nil {
+				t.Fatalf("Write() error = %v", err)
+			}
+			gotDirs := make([]string, 0, len(result.Folders))
+			for _, folder := range result.Folders {
+				gotDirs = append(gotDirs, folder.Dir)
+			}
+			if !reflect.DeepEqual(gotDirs, tt.wantDirs) {
+				t.Fatalf("folder dirs = %v, want %v", gotDirs, tt.wantDirs)
+			}
+
+			preDir := filepath.Join(outDir, "001-foo-pre")
+			if len(tt.wantDirs) == 1 {
+				if _, statErr := os.Stat(preDir); !os.IsNotExist(statErr) {
+					t.Fatalf("empty pre folder must not exist, stat error = %v", statErr)
+				}
+				return
+			}
+			sharedPVCPath := filepath.Join(preDir, "templates", "shared-storage-pvcs.yaml")
+			_, statErr := os.Stat(sharedPVCPath)
+			if tt.wantSharedPVC && statErr != nil {
+				t.Fatalf("enabled shared PVC template missing: %v", statErr)
+			}
+			if !tt.wantSharedPVC && !os.IsNotExist(statErr) {
+				t.Fatalf("disabled shared PVC template must not exist, stat error = %v", statErr)
+			}
+			if tt.includeAlways {
+				computeDomainPath := filepath.Join(preDir, "templates", "compute-domain.yaml")
+				if _, statErr := os.Stat(computeDomainPath); statErr != nil {
+					t.Fatalf("always-rendered pre-manifest missing: %v", statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestWrite_PreManifestRenderErrorPreservesCode(t *testing.T) {
+	_, err := localformat.Write(t.Context(), localformat.Options{
+		OutputDir: t.TempDir(),
+		Components: []localformat.Component{{
+			Name:      "foo",
+			Namespace: "slurm",
+			Values:    map[string]any{},
+		}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"foo": {"invalid.yaml": []byte("{{")},
+		},
+	})
+	if err == nil {
+		t.Fatal("Write() error = nil, want invalid pre-manifest error")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("Write() error = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+}
+
 func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 	outDir := t.TempDir()
 

@@ -218,6 +218,10 @@ type Config struct {
 	// When non-empty, it overrides the storageClassName at all registry-declared storageClassPaths.
 	storageClass string
 
+	// sharedStorageClass is the Kubernetes StorageClass name to inject into
+	// shared filesystem PVCs at bundle time.
+	sharedStorageClass string
+
 	// vendorCharts pulls upstream Helm chart bytes into the bundle at bundle
 	// time so the resulting artifact is self-contained and air-gap
 	// deployable. Off by default — non-vendored bundles preserve the
@@ -472,6 +476,12 @@ func (c *Config) HasDynamicValues() bool {
 // StorageClass returns the Kubernetes StorageClass name to inject at bundle time, or empty string if unset.
 func (c *Config) StorageClass() string {
 	return c.storageClass
+}
+
+// SharedStorageClass returns the Kubernetes StorageClass name to inject into
+// shared filesystem PVCs at bundle time, or empty string if unset.
+func (c *Config) SharedStorageClass() string {
+	return c.sharedStorageClass
 }
 
 // VendorCharts reports whether upstream Helm chart bytes should be pulled
@@ -739,6 +749,14 @@ func WithDynamicValues(dynamicValues map[string][]string) Option {
 func WithStorageClass(storageClass string) Option {
 	return func(c *Config) {
 		c.storageClass = storageClass
+	}
+}
+
+// WithSharedStorageClass sets the Kubernetes StorageClass name to inject into
+// registry-declared sharedStorageClassPaths at bundle time.
+func WithSharedStorageClass(storageClass string) Option {
+	return func(c *Config) {
+		c.sharedStorageClass = storageClass
 	}
 }
 
