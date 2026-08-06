@@ -53,7 +53,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	if opts.Input == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "Input is required")
 	}
-	form, err := DetectInputForm(opts.Input)
+	form, err := DetectInputFormContext(ctx, opts.Input)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	// materialization knows the OCI ref to pull from.
 	var pointer *attestation.Pointer
 	if form == InputFormPointer {
-		p, perr := LoadAndValidatePointer(opts.Input)
+		p, perr := LoadAndValidatePointerContext(ctx, opts.Input)
 		if perr != nil {
 			return nil, perr
 		}
@@ -76,8 +76,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	mat, err := MaterializeBundle(ctx, opts, form, pointer)
 	if err != nil {
 		record(r, stepMaterialize, StepFailed, err.Error(), nil)
-		setFailureCause(r, stepMaterialize, err)
-		r.Exit = ExitInvalid
+		recordFailure(r, stepMaterialize, err)
 		return r, nil
 	}
 	defer mat.Cleanup()
@@ -96,11 +95,10 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	// step produced (cryptographically anchored); fall back to the
 	// bundle's unsigned statement.intoto.json when no signature was
 	// attached. Either way the manifest digest comes from this value.
-	pred, perr := resolvePredicate(verifiedPredicate, mat)
+	pred, perr := resolvePredicate(ctx, verifiedPredicate, mat)
 	if perr != nil {
 		record(r, stepPredicate, StepFailed, perr.Error(), nil)
-		setFailureCause(r, stepPredicate, perr)
-		r.Exit = ExitInvalid
+		recordFailure(r, stepPredicate, perr)
 		return r, nil
 	}
 	r.Predicate = pred
@@ -117,8 +115,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 				pred.Recipe.Name+" — the pointer's identity (including any profile claim) must "+
 				"be the signed bundle's identity")
 		record(r, stepPredicate, StepFailed, berr.Error(), nil)
-		setFailureCause(r, stepPredicate, berr)
-		r.Exit = ExitInvalid
+		recordFailure(r, stepPredicate, berr)
 		return r, nil
 	}
 	source := "unsigned statement.intoto.json"
@@ -138,14 +135,12 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	recipeYAML, mismatches, invErr := checkInventoryCaptureRecipe(ctx, mat, pred.Manifest.Digest)
 	if invErr != nil {
 		record(r, stepInventory, StepFailed, invErr.Error(), mismatches)
-		setFailureCause(r, stepInventory, invErr)
-		r.Exit = ExitInvalid
-	} else if phaseRows, phaseErr := CheckPhaseDigests(mat, pred); phaseErr != nil {
+		recordFailure(r, stepInventory, invErr)
+	} else if phaseRows, phaseErr := CheckPhaseDigestsContext(ctx, mat, pred); phaseErr != nil {
 		// Manifest chain is intact, but the predicate's per-phase CTRFDigest
 		// claim disagrees with the committed report — fail closed.
 		record(r, stepInventory, StepFailed, phaseErr.Error(), phaseRows)
-		setFailureCause(r, stepInventory, phaseErr)
-		r.Exit = ExitInvalid
+		recordFailure(r, stepInventory, phaseErr)
 	} else if idErr := checkRecipeIdentity(recipeYAML, pointer, pred); idErr != nil {
 		// Content-bound identity: the pointer/predicate recipe name,
 		// profile claim (presence, selection, advertiser, descriptor
@@ -154,8 +149,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 		// name-spoofable). Runs on both the unsigned-statement and the
 		// Sigstore-verified predicate paths.
 		record(r, stepInventory, StepFailed, idErr.Error(), nil)
-		setFailureCause(r, stepInventory, idErr)
-		r.Exit = ExitInvalid
+		recordFailure(r, stepInventory, idErr)
 	} else {
 		record(r, stepInventory, StepPassed,
 			"manifest digest matches predicate; bundle files, phase digests, and recipe identity (name/profile/digest) verified", nil)
@@ -204,8 +198,7 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 		if claimedSigner != nil {
 			if ccErr := CrossCheckPointerSigner(claimedSigner, nil); ccErr != nil {
 				record(r, stepSignature, StepFailed, ccErr.Error(), nil)
-				setFailureCause(r, stepSignature, ccErr)
-				r.Exit = ExitInvalid
+				recordFailure(r, stepSignature, ccErr)
 				return nil, false
 			}
 		}
@@ -217,15 +210,13 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 		return nil, true
 	case sigErr != nil:
 		record(r, stepSignature, StepFailed, sigErr.Error(), nil)
-		setFailureCause(r, stepSignature, sigErr)
-		r.Exit = ExitInvalid
+		recordFailure(r, stepSignature, sigErr)
 		return nil, false
 	default:
 		r.Signer = sig.Signer
 		if ccErr := CrossCheckPointerSigner(claimedSigner, sig.Signer); ccErr != nil {
 			record(r, stepSignature, StepFailed, ccErr.Error(), nil)
-			setFailureCause(r, stepSignature, ccErr)
-			r.Exit = ExitInvalid
+			recordFailure(r, stepSignature, ccErr)
 			return nil, false
 		}
 		detail := "signer " + sig.Signer.Identity + " (issuer " + sig.Signer.Issuer + ")"
@@ -243,11 +234,16 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 // Verified payload takes precedence; otherwise we fall back to the
 // unsigned statement.intoto.json. Both shapes go through the same
 // PredicateTypeV1 check.
-func resolvePredicate(verified *attestation.Predicate, mat *MaterializedBundle) (*attestation.Predicate, error) {
+func resolvePredicate(
+	ctx context.Context,
+	verified *attestation.Predicate,
+	mat *MaterializedBundle,
+) (*attestation.Predicate, error) {
+
 	if verified != nil {
 		return verified, nil
 	}
-	return loadUnsignedPredicate(mat)
+	return loadUnsignedPredicate(ctx, mat)
 }
 
 func record(r *VerifyResult, step int, status StepStatus, detail string, sub []KV) {
@@ -259,9 +255,9 @@ func record(r *VerifyResult, step int, status StepStatus, detail string, sub []K
 // loadUnsignedPredicate reads the bundle's unsigned in-toto Statement
 // and returns the predicate body. Used when no Sigstore Bundle was
 // emitted; the predicate is trusted as-is (self-consistency only).
-func loadUnsignedPredicate(mat *MaterializedBundle) (*attestation.Predicate, error) {
+func loadUnsignedPredicate(ctx context.Context, mat *MaterializedBundle) (*attestation.Predicate, error) {
 	path := filepath.Join(mat.BundleDir, attestation.StatementFilename)
-	body, err := readBoundedFile(path, "in-toto Statement", defaults.MaxAttestationFileBytes)
+	body, err := readBoundedFile(ctx, path, "in-toto Statement", defaults.MaxAttestationFileBytes)
 	if err != nil {
 		return nil, err
 	}

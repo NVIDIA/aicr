@@ -947,6 +947,7 @@ ls -la
 | `NOT_FOUND` | 404 | Selector path not found in the resolved configuration | No |
 | `METHOD_NOT_ALLOWED` | 405 | Wrong HTTP method | No |
 | `CONFLICT` | 409 | Resource state conflict (e.g., already exists or version mismatch) | No |
+| `CANCELED` | 408 | The operation was aborted before completion (CLI-originated; not expected from the HTTP API) | No |
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many requests | Yes |
 | `INTERNAL` | 500 | Server error | Yes |
 | `SERVICE_UNAVAILABLE` | 503 | Server temporarily unavailable | Yes |

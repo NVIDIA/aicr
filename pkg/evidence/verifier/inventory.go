@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
 )
 
 // CheckInventory verifies the bundle's integrity chain:
@@ -78,7 +78,7 @@ func checkInventoryCaptureRecipe(
 		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
 			"expected manifest digest is required (from predicate.manifest.digest)")
 	}
-	body, err := readBoundedFile(
+	body, err := readBoundedFile(ctx,
 		filepath.Join(mat.BundleDir, attestation.ManifestFilename),
 		"manifest.json", defaults.MaxManifestFileBytes)
 	if err != nil {
@@ -110,8 +110,7 @@ func checkInventoryCaptureRecipe(
 	var mismatches []KV
 	for _, e := range manifest.Files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, mismatches, errors.Wrap(errors.ErrCodeUnavailable,
-				"inventory check canceled", ctxErr)
+			return nil, mismatches, abortError(ctxErr, "inventory check")
 		}
 		var got string
 		var captured []byte
@@ -119,7 +118,7 @@ func checkInventoryCaptureRecipe(
 		if e.Path == attestation.RecipeFilename {
 			// Read ONCE: the retained bytes are the hashed bytes by
 			// construction, closing the reread TOCTOU window.
-			captured, got, hashErr = hashAndCaptureFile(mat.BundleDir, e.Path, e.Size)
+			captured, got, hashErr = hashAndCaptureFile(ctx, mat.BundleDir, e.Path, e.Size)
 		} else {
 			got, hashErr = hashFile(ctx, mat.BundleDir, e.Path, e.Size)
 		}
@@ -168,34 +167,19 @@ func checkInventoryCaptureRecipe(
 // different read than the one retained. The size check runs against the
 // bytes actually read (not a pre-read Stat) for the same reason. Returns
 // the captured bytes and the bare-hex sha256 (hashFile's format).
-func hashAndCaptureFile(bundleDir, rel string, expectedSize int64) ([]byte, string, error) {
+func hashAndCaptureFile(ctx context.Context, bundleDir, rel string, expectedSize int64) ([]byte, string, error) {
 	localRel := filepath.FromSlash(rel)
 	if !filepath.IsLocal(localRel) {
 		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
 			"manifest entry "+rel+" is not a local path (rejecting potential traversal)")
 	}
 	full := filepath.Join(bundleDir, localRel)
-	f, err := os.Open(full) //nolint:gosec // path is locality-checked above
+	// boundedio.ReadFile preserves the read-once property this function exists
+	// for (the retained bytes are the hashed bytes, closing the reread TOCTOU
+	// window) while adding the time bound and the descriptor-first shape checks.
+	data, err := boundedio.ReadFile(ctx, full, "bundle "+rel, defaults.MaxRecipePOSTBytes)
 	if err != nil {
-		return nil, "", errors.Wrap(errors.ErrCodeNotFound, "file missing from bundle: "+rel, err)
-	}
-	info, err := f.Stat()
-	if err != nil {
-		_ = f.Close() // read-only handle
-		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to stat bundle file: "+rel, err)
-	}
-	if info.IsDir() {
-		_ = f.Close() // read-only handle
-		return nil, "", errors.New(errors.ErrCodeInvalidRequest, "manifest entry "+rel+" is a directory")
-	}
-	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxRecipePOSTBytes+1))
-	_ = f.Close() // read-only handle
-	if err != nil {
-		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to read bundle file: "+rel, err)
-	}
-	if int64(len(data)) > defaults.MaxRecipePOSTBytes {
-		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
-			"bundle "+rel+" exceeds the identity-binding size cap")
+		return nil, "", err
 	}
 	if expectedSize > 0 && int64(len(data)) != expectedSize {
 		return nil, "", errors.New(errors.ErrCodeInvalidRequest,
@@ -211,14 +195,25 @@ func normalizeInventoryHashError(ctx context.Context, err error) error {
 		return nil
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable, "inventory check canceled", ctxErr)
+		return abortError(ctxErr, "inventory check")
 	}
 	return err
 }
 
+// abortError shapes a context abort so a deliberate operator cancellation stays
+// distinguishable from an environmental deadline: the former must never be
+// reported as a retryable condition.
+func abortError(cause error, what string) error {
+	if stderrors.Is(cause, context.Canceled) {
+		return errors.Wrap(errors.ErrCodeCanceled, what+" canceled", cause)
+	}
+	return errors.Wrap(errors.ErrCodeUnavailable, what+" timed out", cause)
+}
+
 func isInventoryAbortError(err error) bool {
 	return stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) ||
-		stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
+		stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) ||
+		boundedio.IsCanceled(err)
 }
 
 // CheckPhaseDigests verifies that each phase summary's CTRFDigest recorded in
@@ -232,7 +227,25 @@ func isInventoryAbortError(err error) bool {
 // and still pass verification. Fails closed on any mismatch or unreadable
 // phase file. Returns per-phase mismatch rows and a summarizing error; both
 // nil on success.
+//
+// Deprecated: prefer CheckPhaseDigestsContext. This form derives its own
+// defaults.FileReadTimeout-bounded context, so it cannot be aborted by the
+// caller; it is retained for source compatibility with out-of-tree callers.
 func CheckPhaseDigests(mat *MaterializedBundle, pred *attestation.Predicate) ([]KV, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return CheckPhaseDigestsContext(ctx, mat, pred)
+}
+
+// CheckPhaseDigestsContext is CheckPhaseDigests bounded by the caller's
+// context, so a wedged mount under ctrf/ surfaces as a timeout instead of
+// hanging the verifier.
+func CheckPhaseDigestsContext(
+	ctx context.Context,
+	mat *MaterializedBundle,
+	pred *attestation.Predicate,
+) ([]KV, error) {
+
 	if mat == nil || mat.BundleDir == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "materialized bundle is required")
 	}
@@ -261,10 +274,17 @@ func CheckPhaseDigests(mat *MaterializedBundle, pred *attestation.Predicate) ([]
 			continue
 		}
 		rel := attestation.CTRFRelPath(p)
-		body, err := readBoundedFile(
+		body, err := readBoundedFile(ctx,
 			filepath.Join(mat.BundleDir, filepath.FromSlash(rel)),
 			rel, defaults.MaxAttestationFileBytes)
 		if err != nil {
+			// An aborted read is a storage/operator condition, not a digest
+			// disagreement. Recording it as a mismatch would launder a dead
+			// mount into "this bundle's phase digests are wrong" — the exact
+			// mis-diagnosis this bounding work exists to prevent.
+			if isInventoryAbortError(err) {
+				return mismatches, err
+			}
 			mismatches = append(mismatches, KV{Key: rel, Value: err.Error()})
 			continue
 		}
@@ -292,9 +312,26 @@ func hashFile(ctx context.Context, bundleDir, rel string, expectedSize int64) (s
 			"manifest entry "+rel+" is not a local path (rejecting potential traversal)")
 	}
 	full := filepath.Join(bundleDir, localRel)
-	info, err := os.Stat(full)
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeNotFound, "file missing from bundle: "+rel, err)
+	// Bounded: an unbounded stat here wedges the whole inventory pass on a
+	// dead mount, before HashFileSHA256Context's own bound can apply.
+	var info os.FileInfo
+	var statErr error
+	if bErr := boundedio.Do(ctx, "bundle file "+rel, func() error {
+		info, statErr = os.Stat(full)
+		return nil
+	}); bErr != nil {
+		return "", bErr
+	}
+	if statErr != nil {
+		// Only a confirmed absence is "missing from bundle". A mount answering
+		// EIO/ESTALE/EACCES has not told us the file is absent, and reporting
+		// it as NotFound turns a storage fault into an inventory mismatch row
+		// and ultimately an "integrity" verdict.
+		if !os.IsNotExist(statErr) {
+			return "", errors.Wrap(errors.ErrCodeUnavailable,
+				"could not read bundle file (storage fault): "+rel, statErr)
+		}
+		return "", errors.Wrap(errors.ErrCodeNotFound, "file missing from bundle: "+rel, statErr)
 	}
 	if info.IsDir() {
 		return "", errors.New(errors.ErrCodeInvalidRequest, "manifest entry "+rel+" is a directory")
@@ -333,36 +370,48 @@ func findExtras(ctx context.Context, bundleDir string, manifestFiles []attestati
 		attestation.StatementFilename:   {},
 	}
 	var extras []string
-	walkErr := filepath.WalkDir(bundleDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		if d.IsDir() {
+	// The whole walk goes behind the boundary, not just the callback: the
+	// ctx.Err() check below only runs between entries, while WalkDir's own
+	// ReadDir/Lstat syscalls are what block on a wedged mount.
+	var walkErr error
+	if bErr := boundedio.Do(ctx, "bundle directory "+bundleDir, func() error {
+		walkErr = filepath.WalkDir(bundleDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			if d.IsDir() {
+				return nil
+			}
+			rel, relErr := filepath.Rel(bundleDir, path)
+			if relErr != nil {
+				return relErr
+			}
+			rel = filepath.ToSlash(rel)
+			if _, ok := want[rel]; ok {
+				return nil
+			}
+			if _, ok := exempt[rel]; ok {
+				return nil
+			}
+			extras = append(extras, rel)
 			return nil
-		}
-		rel, relErr := filepath.Rel(bundleDir, path)
-		if relErr != nil {
-			return relErr
-		}
-		rel = filepath.ToSlash(rel)
-		if _, ok := want[rel]; ok {
-			return nil
-		}
-		if _, ok := exempt[rel]; ok {
-			return nil
-		}
-		extras = append(extras, rel)
+		})
 		return nil
-	})
+	}); bErr != nil {
+		return nil, bErr
+	}
 	if walkErr != nil {
 		// A canceled ctx surfaces here as context.Canceled / DeadlineExceeded
-		// from the callback. Translate to ErrCodeUnavailable so cancellation
-		// reads the same way it does in the per-file loop above.
+		// from the callback. abortError splits the two the same way the
+		// per-file loop above does: a deliberate abort becomes ErrCodeCanceled
+		// (never retryable) and a deadline becomes ErrCodeUnavailable
+		// (transient). Both are aborts, so neither is folded into the
+		// mismatch rows as if it were a content failure.
 		if stderrors.Is(walkErr, context.Canceled) || stderrors.Is(walkErr, context.DeadlineExceeded) {
-			return nil, errors.Wrap(errors.ErrCodeUnavailable, "bundle walk canceled", walkErr)
+			return nil, abortError(walkErr, "bundle walk")
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to walk bundle dir", walkErr)
 	}

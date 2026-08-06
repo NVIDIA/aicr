@@ -340,17 +340,20 @@ func TestNormalizeInventoryHashError(t *testing.T) {
 			wantSame: true,
 		},
 		{
-			name: "caller cancellation becomes unavailable",
+			name: "caller cancellation becomes canceled",
 			ctx: func(*testing.T) context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
 				return ctx
 			},
-			wantCode:  apperrors.ErrCodeUnavailable,
+			// A deliberate abort must NOT read as SERVICE_UNAVAILABLE: that is
+			// the retryable bucket, and re-running a command the operator
+			// stopped on purpose is the wrong remediation.
+			wantCode:  apperrors.ErrCodeCanceled,
 			wantCause: context.Canceled,
 		},
 		{
-			name: "caller deadline becomes unavailable",
+			name: "caller deadline stays unavailable (retryable)",
 			ctx: func(t *testing.T) context.Context {
 				ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
 				t.Cleanup(cancel)

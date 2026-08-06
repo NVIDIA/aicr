@@ -39,6 +39,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -107,7 +108,7 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 			"-expected-issuer and -expected-identity-regexp are required (unpinned verification never counts)")
 	}
 
-	form, err := verifier.DetectInputForm(o.in)
+	form, err := verifier.DetectInputFormContext(ctx, o.in)
 	if err != nil {
 		return err
 	}
@@ -117,7 +118,7 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 	// file is parsed exactly once.
 	var pointer *attestation.Pointer
 	if form == verifier.InputFormPointer {
-		pointer, err = verifier.LoadAndValidatePointer(o.in)
+		pointer, err = verifier.LoadAndValidatePointerContext(ctx, o.in)
 		if err != nil {
 			return err
 		}
@@ -189,6 +190,42 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 	return synthesizeVerified(ctx, vr, mat.BundleDir, allowlist, evidenceRef, o.runID, o.out, stdout)
 }
 
+// ingestVerdictError decides whether a verify verdict may be ingested, and
+// with which process exit code when it may not.
+//
+// It is an allow-list, not a deny-list. An equality test against ExitInvalid
+// fails open on every other non-passing verdict: a transient failure during the
+// inventory step arrives with Signer and Predicate already populated (both are
+// set in earlier steps), so the nil checks in the caller would not catch it and
+// an unverified bundle would be ingested.
+//
+// The refusal codes preserve the distinction the verifier produced. Collapsing
+// an incomplete result to ErrCodeInvalidRequest would exit 2 — identical to a
+// bundle we read and rejected — leaving an operator unable to tell an ingest
+// failure caused by a dead mount from one caused by a bad artifact.
+func ingestVerdictError(vr *verifier.VerifyResult) error {
+	switch vr.Exit {
+	case verifier.ExitValidPassed, verifier.ExitValidPhaseFailures:
+		return nil
+	case verifier.ExitIncomplete:
+		code := errors.ErrCodeTimeout
+		if vr.FailureCause != nil && vr.FailureCause.Class == verifier.CauseCanceled {
+			code = errors.ErrCodeCanceled
+		}
+		return errors.New(code,
+			"bundle verification did not complete (exit "+strconv.Itoa(vr.Exit)+
+				") — refusing to ingest (see steps)")
+	case verifier.ExitInvalid:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"bundle verification did not pass (exit "+strconv.Itoa(vr.Exit)+") — refusing to ingest (see steps)")
+	default:
+		// An exit value this build does not know about must fail closed, not
+		// be waved through as if it were a pass.
+		return errors.New(errors.ErrCodeInternal,
+			"unknown bundle verification exit "+strconv.Itoa(vr.Exit)+" — refusing to ingest")
+	}
+}
+
 // synthesizeVerified records a verified bundle into the source-keyed
 // tree: it enforces the verify verdict (fail-closed on an invalid bundle
 // or a missing verified signer), classifies the signer from the
@@ -206,8 +243,8 @@ func synthesizeVerified(
 	if vr == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "nil verify result")
 	}
-	if vr.Exit == verifier.ExitInvalid {
-		return errors.New(errors.ErrCodeInvalidRequest, "bundle verification failed — refusing to ingest (see steps)")
+	if err := ingestVerdictError(vr); err != nil {
+		return err
 	}
 	if vr.Signer == nil || vr.Signer.Identity == "" {
 		return errors.New(errors.ErrCodeInvalidRequest,

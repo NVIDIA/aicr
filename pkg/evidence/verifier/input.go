@@ -15,10 +15,13 @@
 package verifier
 
 import (
+	"context"
 	"os"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
 )
 
 // DetectInputForm classifies a user-supplied input string into one of
@@ -27,7 +30,21 @@ import (
 //  1. URL prefix: oci:// → OCI; http(s):// is rejected.
 //  2. Filesystem: directory → dir; .yaml/.yml file → pointer.
 //  3. Bare OCI ref shape ("registry/repo[:tag][@digest]") → OCI.
+//
+// Deprecated: prefer DetectInputFormContext. This form derives its own
+// defaults.FileReadTimeout-bounded context, so it cannot be aborted by the
+// caller; it is retained for source compatibility.
 func DetectInputForm(input string) (InputForm, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return DetectInputFormContext(ctx, input)
+}
+
+// DetectInputFormContext is DetectInputForm bounded by the caller's context.
+// The filesystem probe below runs before any other verify step, so leaving it
+// unbounded meant `verify --input /mnt/hung/bundle` blocked here — ahead of
+// every bounded read downstream.
+func DetectInputFormContext(ctx context.Context, input string) (InputForm, error) {
 	if input == "" {
 		return "", errors.New(errors.ErrCodeInvalidRequest, "input is empty")
 	}
@@ -38,7 +55,15 @@ func DetectInputForm(input string) (InputForm, error) {
 		return "", errors.New(errors.ErrCodeInvalidRequest,
 			"http(s):// inputs are not supported — use oci://, a pointer file, or a local directory")
 	}
-	if info, err := os.Stat(input); err == nil {
+	var info os.FileInfo
+	var statErr error
+	if bErr := boundedio.Do(ctx, "input path "+input, func() error {
+		info, statErr = os.Stat(input)
+		return nil
+	}); bErr != nil {
+		return "", bErr
+	}
+	if err := statErr; err == nil {
 		if info.IsDir() {
 			return InputFormDir, nil
 		}

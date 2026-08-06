@@ -221,22 +221,29 @@ The verifier pulls the OCI artifact and runs five checks:
 
 Exit codes:
 
-| Surface | `0` | `2` |
-|---|---|---|
-| OS exit code | Bundle valid; every check passed. | Anything else — bundle invalid OR recorded validator results show failures. |
+| Surface | `0` | `2` | `5` | `9` |
+|---|---|---|---|---|
+| OS exit code | Bundle valid; every check passed. | Bundle invalid OR recorded validator results show failures. | Verification could not complete — a transient storage or registry failure (unreadable bundle, unreachable or erroring registry). `failureCause.class: transient`. | Verification was aborted by the operator (`failureCause.class: canceled`). |
 
 The structured output's `exit` field (`VerifyResult.Exit` in the
-library, `.exit` in JSON output) carries a three-valued code so JSON
-consumers can distinguish the two non-zero cases:
+library, `.exit` in JSON output) carries a four-valued code so JSON
+consumers can distinguish the non-zero cases:
 
 * `0` — bundle valid; every check passed.
 * `1` — bundle valid; recorded validator results show failures
   (cryptographic integrity intact, informational).
 * `2` — bundle invalid (signature, integrity, or predicate failure).
+* `3` — no verdict reached: a storage or registry fault stopped the
+  check (`failureCause.class: transient`, OS exit 5) or the operator
+  aborted it (`canceled`, OS exit 9). Retry the transient case; do not
+  treat either as a rejection.
 
 Today the CLI collapses `1` and `2` to OS exit `2` because
 `pkg/errors/exitcode.go` maps both `ErrCodeConflict` and
-`ErrCodeInvalidRequest` to the same OS code. Shell scripts that want
+`ErrCodeInvalidRequest` to the same OS code. `3` is separated out to OS
+exit `5` when `failureCause.class` is `transient` and OS exit `9` when it
+is `canceled`, so a gate can tell an incomplete verification from a bad
+bundle without parsing JSON. Shell scripts that want
 to branch on the informational case should consume `--format json`
 and read `.exit` via `jq`:
 
@@ -332,7 +339,7 @@ Paste the rendered Markdown into the PR comment for maintainer review.
 aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-9f8e7d6c5b4a3210fedcba9876543210abcdef0123456789fedcba9876543210.yaml \
   -o evidence-result.json -t json
 
-jq '.exit' evidence-result.json          # 0 / 1 / 2 (library code)
+jq '.exit' evidence-result.json          # 0 / 1 / 2 / 3 (library code)
 jq '.signer' evidence-result.json        # signer claims
 jq '.predicate.phases' evidence-result.json
 ```

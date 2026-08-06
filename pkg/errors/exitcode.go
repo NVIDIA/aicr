@@ -57,6 +57,14 @@ const (
 	// ExitInternal indicates an internal error (reserved for unexpected failures).
 	// Maps to: ErrCodeInternal
 	ExitInternal = 8
+
+	// ExitCanceled indicates the operator aborted the operation (SIGINT/SIGTERM).
+	// Maps to: ErrCodeCanceled
+	//
+	// Deliberately inside the documented 2-63 application range rather than the
+	// shell's 128+signal convention (130), so the whole scheme stays consistent
+	// and scriptable; callers that need signal fidelity should trap the signal.
+	ExitCanceled = 9
 )
 
 // ExitCodeFromError extracts an appropriate exit code from an error.
@@ -87,6 +95,8 @@ func exitCodeFromErrorCode(code ErrorCode) int {
 		return ExitUnauthorized
 	case ErrCodeTimeout:
 		return ExitTimeout
+	case ErrCodeCanceled:
+		return ExitCanceled
 	case ErrCodeUnavailable:
 		return ExitUnavailable
 	case ErrCodeRateLimitExceeded:

@@ -470,7 +470,12 @@ committed pointer file and the PR description.
    [#1535](https://github.com/NVIDIA/aicr/issues/1535)). A structured `exit: 1` (in `--format json`) requires explicit disposition
    (see [Exit-1 Review Process](#exit-1-review-process)); `exit: 2` is a hard
    fail. Both collapse to OS exit code 2, so distinguish them by reading
-   `.exit` from `aicr evidence verify --format json`.
+   `.exit` from `aicr evidence verify --format json`. A structured `exit: 3` is **not** a verdict on
+   the bundle — verification never reached one. `failureCause.class:
+   transient` (OS exit code 5) means the bundle was not readable (dead mount,
+   unreachable registry); re-run the check. `failureCause.class: canceled`
+   (OS exit code 9) means the run was deliberately aborted. In neither case
+   should the contributor be asked to change anything.
 3. **Signer identity is acceptable.** Open the committed pointer file under
    `recipes/evidence/<recipe>/<src>/` and review its `signer` block. See
    [Signer Identity Trust Patterns](#signer-identity-trust-patterns).

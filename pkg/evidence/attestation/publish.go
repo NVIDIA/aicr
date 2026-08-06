@@ -17,15 +17,19 @@ package attestation
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -198,24 +202,7 @@ func loadOnDiskBundle(ctx context.Context, dir string) (*Bundle, string, error) 
 // short-lived CLI leaf command (evidence publish/sign), which is the only
 // caller of these bundle readers.
 func withFileReadTimeout(ctx context.Context, what string, fn func() error) error {
-	ctx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
-	defer cancel()
-	// Fail closed and deterministically if the caller's context is already
-	// canceled/expired, before launching the goroutine — otherwise a fast
-	// syscall could win the select race against an already-done context.
-	if err := ctx.Err(); err != nil {
-		return errors.WrapWithContext(errors.ErrCodeTimeout, "timed out reading "+what, err,
-			map[string]interface{}{"timeout": defaults.FileReadTimeout.String()})
-	}
-	done := make(chan error, 1) // buffered so the goroutine never leaks on timeout
-	go func() { done <- fn() }()
-	select {
-	case <-ctx.Done():
-		return errors.WrapWithContext(errors.ErrCodeTimeout, "timed out reading "+what, ctx.Err(),
-			map[string]interface{}{"timeout": defaults.FileReadTimeout.String()})
-	case err := <-done:
-		return err
-	}
+	return boundedio.Do(ctx, what, fn)
 }
 
 // readBundleRecipeProfile decodes the summary bundle's recipe.yaml and
@@ -297,30 +284,51 @@ func resolveSummaryDir(ctx context.Context, dir string) (summaryDir, outDir stri
 // the single source of truth for "is this directory a summary bundle?",
 // shared by the publish path here and the verifier's materialization.
 //
-// The two os.Stat calls are time-bounded via withFileReadTimeout so a dead
-// NFS/FUSE mount surfaces as a timeout error instead of an indefinite hang.
-// The (bool, error) shape keeps a genuine "not a bundle" answer distinct from
-// a ctx timeout: only the timeout wrapper yields (false, err), which stops a
-// hung mount from masquerading as "not a bundle" and failing open. Every stat
-// error itself — absent, is-a-dir, and equally permission/EIO/ESTALE — reads
-// as "not a marker" (false, nil); this preserves the pre-change fail-soft
-// behavior. Surfacing non-ENOENT stat faults distinctly (so a soft-mount I/O
-// error is not diagnosed as a bad bundle) is a deliberate follow-up, not done
-// here — see #2083 for the remaining unbounded/undiagnosed reads.
+// The two os.Stat calls are time-bounded so a dead NFS/FUSE mount surfaces as
+// a timeout instead of an indefinite hang. The (bool, error) shape keeps a
+// genuine "not a bundle" answer distinct from a fault:
+//
+//   - absent (ENOENT) or is-a-dir → (false, nil). A missing marker is a real
+//     answer, and the probe sites try more than one candidate directory, so
+//     this must stay cheap and non-fatal.
+//   - any other stat error (EACCES/EIO/ESTALE) → (false, err). These say
+//     nothing about whether dir is a bundle. Collapsing them to "not a bundle"
+//     reported a storage fault to the operator as INVALID_REQUEST "does not
+//     look like a summary bundle", sending them to debug their input instead
+//     of their mount.
 func HasBundleMarkers(ctx context.Context, dir string) (bool, error) {
+	return hasBundleMarkersWithStat(ctx, dir, os.Stat)
+}
+
+func hasBundleMarkersWithStat(
+	ctx context.Context,
+	dir string,
+	statFn func(string) (os.FileInfo, error),
+) (bool, error) {
+
 	for _, f := range []string{RecipeFilename, ManifestFilename} {
 		path := filepath.Join(dir, f)
 		var present bool
+		var statErr error
 		// Label with the full path (not just f) so a timeout names which
 		// candidate directory stalled — the probe sites try more than one.
 		if err := withFileReadTimeout(ctx, "bundle marker "+path, func() error {
-			info, statErr := os.Stat(path)
-			// Any stat error (absent, permission, is-a-dir) means "not a
-			// marker"; only the timeout wrapper injects a non-nil error.
+			var info os.FileInfo
+			info, statErr = statFn(path)
 			present = statErr == nil && !info.IsDir()
 			return nil
 		}); err != nil {
 			return false, err
+		}
+		// ENOTDIR/ENAMETOOLONG mean the path cannot name a marker at all
+		// (e.g. the operator passed a file where a bundle dir was expected).
+		// syscall.Errno.Is maps only ENOENT to fs.ErrNotExist, so these must
+		// be listed explicitly or a typo becomes an INTERNAL error.
+		if statErr != nil && !stderrors.Is(statErr, fs.ErrNotExist) &&
+			!stderrors.Is(statErr, syscall.ENOTDIR) && !stderrors.Is(statErr, syscall.ENAMETOOLONG) {
+
+			return false, errors.Wrap(errors.ErrCodeUnavailable,
+				"failed to probe bundle marker "+path, statErr)
 		}
 		if !present {
 			return false, nil

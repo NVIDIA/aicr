@@ -49,8 +49,8 @@ func TestMaterializeBundle_DirRejectsNonBundle(t *testing.T) {
 	}
 }
 
-// TestBundleMarkerProbe_CanceledCtxPropagatesTimeout verifies that a
-// canceled caller context surfaces as an ErrCodeTimeout error through the
+// TestBundleMarkerProbe_CanceledCtxPropagatesAbort verifies that a
+// canceled caller context surfaces as an ErrCodeCanceled error through the
 // bundle-marker probe rather than being flattened into a benign "not a
 // bundle" (ErrCodeInvalidRequest) answer: at these probe sites a hung NFS/FUSE
 // mount fails closed, not open. Both marker-probing sites are exercised:
@@ -62,7 +62,7 @@ func TestMaterializeBundle_DirRejectsNonBundle(t *testing.T) {
 // probe, and several post-materialize reads are still unbounded; both are
 // tracked in #2083. The test calls the probes directly, so it must not be
 // read as proving the whole verify path is hang-immune.
-func TestBundleMarkerProbe_CanceledCtxPropagatesTimeout(t *testing.T) {
+func TestBundleMarkerProbe_CanceledCtxPropagatesAbort(t *testing.T) {
 	// A real bundle so a live context would succeed — proving the failure
 	// comes from cancellation, not a missing bundle.
 	bundleDir := buildTestBundle(t)
@@ -95,8 +95,8 @@ func TestBundleMarkerProbe_CanceledCtxPropagatesTimeout(t *testing.T) {
 			if err == nil {
 				t.Fatalf("%s: expected error on canceled ctx, got nil", tt.name)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
-				t.Errorf("%s: got %v, want ErrCodeTimeout (must not flatten to \"not a bundle\")", tt.name, err)
+			if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+				t.Errorf("%s: got %v, want ErrCodeCanceled (must not flatten to \"not a bundle\")", tt.name, err)
 			}
 			if stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("%s: canceled ctx was misreported as ErrCodeInvalidRequest (fail-open): %v", tt.name, err)

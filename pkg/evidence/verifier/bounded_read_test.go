@@ -15,6 +15,7 @@
 package verifier
 
 import (
+	"context"
 	stderrors "errors"
 	"os"
 	"path/filepath"
@@ -29,7 +30,7 @@ func TestReadBoundedFile_HappyPath(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"ok":true}`), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	body, err := readBoundedFile(path, "test file", 1024)
+	body, err := readBoundedFile(context.Background(), path, "test file", 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,7 +49,7 @@ func TestReadBoundedFile_RejectsOversize(t *testing.T) {
 	if err := os.WriteFile(path, make([]byte, 17), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	_, err := readBoundedFile(path, "test file", 16)
+	_, err := readBoundedFile(context.Background(), path, "test file", 16)
 	if err == nil {
 		t.Fatal("expected error for oversized file, got nil")
 	}
@@ -63,7 +64,7 @@ func TestReadBoundedFile_ExactlyAtCap(t *testing.T) {
 	if err := os.WriteFile(path, make([]byte, 16), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	body, err := readBoundedFile(path, "test file", 16)
+	body, err := readBoundedFile(context.Background(), path, "test file", 16)
 	if err != nil {
 		t.Fatalf("at-cap read should succeed, got %v", err)
 	}
@@ -73,7 +74,7 @@ func TestReadBoundedFile_ExactlyAtCap(t *testing.T) {
 }
 
 func TestReadBoundedFile_MissingFile(t *testing.T) {
-	_, err := readBoundedFile(filepath.Join(t.TempDir(), "nope"), "missing", 1024)
+	_, err := readBoundedFile(context.Background(), filepath.Join(t.TempDir(), "nope"), "missing", 1024)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
