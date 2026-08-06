@@ -119,8 +119,15 @@ jobs:
             ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:sha-${{ github.sha }}-${{ matrix.arch }}
             ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:edge-${{ matrix.arch }}
           provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # aiperf-bench builds without the layer cache on purpose (#2086).
+          # Its requirements.txt is deliberately unpinned so each rebuild
+          # resolves patched transitive versions, but `pip install` is opaque
+          # to BuildKit: neither the base image nor the COPY'd requirements.txt
+          # changes between releases, so a cache hit replays the old closure
+          # verbatim and the image silently stops picking up CVE fixes. The Go
+          # validators have no resolution step, so they keep the cache.
+          cache-from: ${{ matrix.phase != 'aiperf-bench' && 'type=gha' || '' }}
+          cache-to: ${{ matrix.phase != 'aiperf-bench' && 'type=gha,mode=max' || '' }}
           labels: |
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
             org.opencontainers.image.title=${{ matrix.image_title || format('aicr-validator-{0}', matrix.phase) }}

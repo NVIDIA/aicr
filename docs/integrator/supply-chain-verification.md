@@ -233,9 +233,19 @@ remain and are tracked rather than claimed away:
 
 * `pip` and `wheel` are provided by `python -m venv` rather than declared in
   `requirements.txt`, so they ship in the image without source in this archive.
-* The image build layer-caches its dependency resolution, so a cached build can
-  carry an older closure than a freshly resolved archive (tracked in
-  [#2086](https://github.com/NVIDIA/aicr/issues/2086)).
+* The image and the archive resolve the ranged dependencies independently: the
+  image when `build-docker` runs `pip install`, the archive later in
+  `attach-source`. A transitive release landing between the two resolves the
+  archive newer than the image, so the closures can differ by that window.
+
+Correspondence is therefore by shared input, not by identical resolved closure.
+An exact guarantee would require resolving the archive from the built image's
+own `pip freeze`, or pinning both to a shared lockfile.
+
+The second gap used to be unbounded. The image build layer-cached its
+resolution, so a cached build could replay a months-old closure
+([#2086](https://github.com/NVIDIA/aicr/issues/2086)); it now resolves fresh on
+every build, narrowing the divergence to the build-to-attach window.
 
 A referrer binds to one image digest, so resolve the tag to a digest first as
 shown above rather than assuming a tag keeps the same attachment across builds.

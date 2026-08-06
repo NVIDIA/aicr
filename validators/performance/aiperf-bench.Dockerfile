@@ -83,6 +83,14 @@ COPY validators/performance/requirements.txt /tmp/requirements.txt
 RUN grep -qE "^aiperf==${AIPERF_VERSION}([[:space:]]|$)" /tmp/requirements.txt \
  || { echo "ARG AIPERF_VERSION=${AIPERF_VERSION} does not match requirements.txt" >&2; exit 1; }
 
+# requirements.txt pins only aiperf itself, leaving the transitive closure
+# ranged so a rebuild picks up patched versions. That only holds if this layer
+# actually re-executes: BuildKit cannot see that pip reached the network, and
+# neither the base image nor the COPY above changes between releases, so an
+# imported cache replays the previous closure verbatim and the image quietly
+# stops absorbing CVE fixes (#2086). Every workflow that builds this file
+# therefore passes no cache-from/cache-to on the aiperf-bench matrix leg;
+# TestAIPerfBenchBuildsWithoutLayerCache in tests/releasepolicy enforces it.
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir -r /tmp/requirements.txt
 
