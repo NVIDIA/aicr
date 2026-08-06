@@ -19,6 +19,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1553,6 +1554,157 @@ func TestSelectFromRecipe(t *testing.T) {
 	}
 }
 
+// TestSelectFromRecipeWithContextCancellation proves the context-aware
+// selector honors caller cancellation: hydration reads each component's
+// values through the DataProvider, so an already-canceled context must abort
+// the hydration rather than run it to completion under a self-created
+// context.Background (the defect #2020 tracked).
+//
+// The failure is classified as a hydration failure, not a selector-path
+// failure: the outermost code is never ErrCodeNotFound, which is what lets
+// the REST handler map hydrate → 5xx and selector → 404 without a parallel
+// hydrate+select implementation.
+func TestSelectFromRecipeWithContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+	rec, err := c.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(crit))
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteria: %v", err)
+	}
+
+	// Sanity: the selector resolves under a live context, so a failure below
+	// is attributable to cancellation rather than a bad selector.
+	if _, liveErr := aicr.SelectFromRecipeWithContext(t.Context(), rec,
+		"components.gpu-operator.values.driver.version"); liveErr != nil {
+		t.Fatalf("SelectFromRecipeWithContext(live ctx): %v", liveErr)
+	}
+
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err = aicr.SelectFromRecipeWithContext(canceled, rec,
+		"components.gpu-operator.values.driver.version")
+	if err == nil {
+		t.Fatal("SelectFromRecipeWithContext(canceled ctx) = nil error, want hydration abort")
+	}
+
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("SelectFromRecipeWithContext(canceled ctx) error = %v, want *StructuredError", err)
+	}
+	if se.Code == aicrerrors.ErrCodeNotFound {
+		t.Fatalf("hydration failure surfaced outermost code %s; the facade contract reserves "+
+			"ErrCodeNotFound for selector-path failures so callers can map it to 404", se.Code)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("SelectFromRecipeWithContext(canceled ctx) error = %v, want context.Canceled in chain", err)
+	}
+}
+
+// TestSelectFromRecipeNotFoundIsOutermostCode pins the error contract the
+// REST query handler maps on: a missing selector path surfaces
+// ErrCodeNotFound as the OUTERMOST structured code.
+func TestSelectFromRecipeNotFoundIsOutermostCode(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+	rec, err := c.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(crit))
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteria: %v", err)
+	}
+
+	_, err = aicr.SelectFromRecipeWithContext(t.Context(), rec, "components.no-such-component")
+	if err == nil {
+		t.Fatal("SelectFromRecipeWithContext(missing path) = nil error, want ErrCodeNotFound")
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("error = %v, want *StructuredError", err)
+	}
+	if se.Code != aicrerrors.ErrCodeNotFound {
+		t.Errorf("outermost code = %s, want %s", se.Code, aicrerrors.ErrCodeNotFound)
+	}
+}
+
+// TestWrapResolvedIsQueryable proves the projection path the REST query
+// handler depends on: a pkg/recipe.RecipeResult obtained from Resolved()
+// (and possibly re-projected by the caller) round-trips back into a
+// queryable facade RecipeResult without an owning Client.
+func TestWrapResolvedIsQueryable(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+	rec, err := c.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(crit))
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteria: %v", err)
+	}
+
+	if aicr.WrapResolved(nil) != nil {
+		t.Error("WrapResolved(nil) = non-nil, want nil")
+	}
+
+	selector := "components.gpu-operator.values.driver.version"
+	want, err := aicr.SelectFromRecipeWithContext(t.Context(), rec, selector)
+	if err != nil {
+		t.Fatalf("SelectFromRecipeWithContext(resolved): %v", err)
+	}
+
+	wrapped := aicr.WrapResolved(rec.Resolved())
+	got, err := aicr.SelectFromRecipeWithContext(t.Context(), wrapped, selector)
+	if err != nil {
+		t.Fatalf("SelectFromRecipeWithContext(WrapResolved): %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("WrapResolved selector = %v, want %v", got, want)
+	}
+
+	// Queryable only: the wrapped result carries no owning Client, so the
+	// bundle path rejects it rather than silently bundling an unowned recipe.
+	if _, err := c.BundleComponents(t.Context(), wrapped); err == nil {
+		t.Error("BundleComponents(WrapResolved) = nil error, want ownership rejection")
+	}
+}
+
 // componentNames extracts a slice of component names from a
 // RecipeResult, suitable for error-message diagnostics. Keeps the
 // assertion logic above readable.
@@ -2294,5 +2446,45 @@ func TestBundleComponentsValidatesEffectiveAccountingValues(t *testing.T) {
 	_, err = client.BundleComponents(t.Context(), result)
 	if err == nil || !strings.Contains(err.Error(), "accounting-owned value") {
 		t.Fatalf("BundleComponents() error = %v, want accounting contract rejection", err)
+	}
+}
+
+// TestSnapshotUnwrapRoundTrips covers the accessor the CLI's validate path
+// relies on to reach measurement-level detail the facade does not project.
+// WrapSnapshot must hand the SAME pointer back — a reconstruction would drop
+// the measurements validate reads.
+func TestSnapshotUnwrapRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	internal := &snapshotter.Snapshot{}
+	internal.APIVersion = "aicr.run/v1alpha2"
+	internal.Kind = "Snapshot"
+	internal.Metadata = map[string]string{"version": "v9.9.9"}
+
+	wrapped := aicr.WrapSnapshot(internal)
+	if wrapped.Unwrap() != internal {
+		t.Error("WrapSnapshot(x).Unwrap() returned a different pointer; the measurement payload must round-trip by reference")
+	}
+
+	// A Snapshot built outside the facade has no internal payload; Unwrap
+	// rebuilds a minimal one so callers never nil-check a non-nil receiver.
+	bare := &aicr.Snapshot{APIVersion: "aicr.run/v1alpha2", Kind: "Snapshot"}
+	rebuilt := bare.Unwrap()
+	if rebuilt == nil {
+		t.Fatal("Unwrap() on a facade-constructed Snapshot = nil, want a minimal reconstruction")
+	}
+	if rebuilt.APIVersion != "aicr.run/v1alpha2" || string(rebuilt.Kind) != "Snapshot" {
+		t.Errorf("Unwrap() lost public fields: %+v", rebuilt)
+	}
+
+	var nilSnap *aicr.Snapshot
+	if nilSnap.Unwrap() != nil {
+		t.Error("Unwrap() on a nil receiver = non-nil, want nil")
+	}
+
+	// Raw is only populated by CollectSnapshot; every other construction path
+	// leaves it empty so callers can tell "no agent bytes" from "empty document".
+	if len(wrapped.Raw) != 0 {
+		t.Errorf("WrapSnapshot() populated Raw (%d bytes); only CollectSnapshot sets it", len(wrapped.Raw))
 	}
 }

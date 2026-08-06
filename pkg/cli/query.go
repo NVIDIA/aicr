@@ -132,13 +132,10 @@ Use in shell scripts:
 				return err
 			}
 
-			hydrated, err := recipe.HydrateResultWithContext(ctx, result.Resolved())
-			if err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to hydrate recipe", err)
-			}
-
-			selector := cmd.String("selector")
-			selected, err := recipe.Select(hydrated, selector)
+			// Hydrate + select through the facade so the CLI, the REST
+			// query handler, and out-of-tree SDK callers all run the same
+			// implementation; ctx bounds the values reads hydration performs.
+			selected, err := aicr.SelectFromRecipeWithContext(ctx, result, cmd.String("selector"))
 			if err != nil {
 				return err
 			}

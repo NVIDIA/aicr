@@ -24,6 +24,7 @@ import (
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -120,10 +121,15 @@ type snapshotCmdOptions struct {
 	tmplOpts        *snapshotTemplateOptions
 }
 
-// toAgentConfig converts the resolved options into the snapshotter.AgentConfig
-// the snapshotter deploy path expects.
-func (o *snapshotCmdOptions) toAgentConfig() *snapshotter.AgentConfig {
-	return &snapshotter.AgentConfig{
+// toAgentConfig converts the resolved options into the facade AgentConfig that
+// Client.CollectSnapshot consumes. The facade type — not
+// snapshotter.AgentConfig — is the single spelling the CLI builds, so the
+// facade/internal mirror is exercised on every snapshot run instead of only
+// by SDK consumers. Job mode is its only consumer: local (in-pod) collection
+// deploys no Job and builds a collector.Factory and serializer.Serializer from
+// opts directly, so it never needs an AgentConfig.
+func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
+	return &aicr.AgentConfig{
 		Kubeconfig:         o.kubeconfig,
 		Namespace:          o.namespace,
 		Image:              o.image,
@@ -507,59 +513,88 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				return err
 			}
 
-			// Create factory. Network-collector options come from the
-			// flags we just parsed; their env-var Sources mean a Job
-			// running our binary inside the cluster picks up
-			// AICR_CLUSTER_CONFIG_PATH / AICR_DISCOVER_NETWORK
-			// straight into opts before we get here, so this single
-			// builder serves both the local-mode bypass and the
-			// inside-the-Job rerun without a separate rebuild path.
-			factory := collector.NewDefaultFactory(
-				collector.WithMaxNodesPerEntry(opts.maxNodesPerEntry),
-				collector.WithOS(opts.os),
-				collector.WithClusterConfigPath(opts.clusterConfigPath),
-				collector.WithDiscoverNetwork(opts.discoverNetwork),
-				collector.WithKubeconfigPath(opts.kubeconfig),
-			)
-
-			// Create output serializer
-			ser, err := createSnapshotSerializer(opts.tmplOpts, opts.kubeconfig)
-			if err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to create output serializer", err)
-			}
-			if c, ok := ser.(serializer.Closer); ok {
-				defer func() {
-					if closeErr := c.Close(); closeErr != nil {
-						slog.Warn("failed to close snapshot serializer", "error", closeErr)
-					}
-				}()
-			}
-
-			// Build snapshotter configuration
-			ns := snapshotter.NodeSnapshotter{
-				Version:         version,
-				Factory:         factory,
-				Serializer:      ser,
-				RequireGPU:      opts.requireGPU,
-				AKSGPUPoolsPath: opts.aksGPUPoolsPath,
-			}
+			agentCfg := opts.toAgentConfig()
 
 			// When running inside an agent Job, collect locally instead of
-			// deploying another agent (prevents infinite nesting). The
-			// already-built `factory` above carries every CLI-resolved
-			// option — opts.clusterConfigPath, opts.discoverNetwork,
-			// opts.kubeconfig, opts.os, opts.maxNodesPerEntry — so we
-			// reuse it directly. The flags' cli.EnvVars Sources have
-			// already populated opts from the Job-set env vars before
-			// we reach this point, which keeps the dev-bypass case
-			// (`AICR_AGENT_MODE=true aicr snapshot --cluster-config
-			// <path>`) consistent with the in-pod path.
+			// deploying another agent (prevents infinite nesting). This path
+			// deploys nothing, so it stays on pkg/snapshotter directly — it
+			// needs a collector.Factory and a serializer.Serializer, which the
+			// semver-stable facade deliberately does not expose (see the
+			// Client.CollectSnapshot godoc).
+			//
+			// The factory carries every CLI-resolved option —
+			// opts.clusterConfigPath, opts.discoverNetwork, opts.kubeconfig,
+			// opts.os, opts.maxNodesPerEntry. The flags' cli.EnvVars Sources
+			// have already populated opts from the Job-set env vars before we
+			// reach this point, which keeps the dev-bypass case
+			// (`AICR_AGENT_MODE=true aicr snapshot --cluster-config <path>`)
+			// consistent with the in-pod path.
+			//
+			// Both the factory and the serializer are built HERE rather than
+			// above the branch: createSnapshotSerializer opens the destination
+			// with os.Create, which truncates it. Building it on the Job path —
+			// which never uses it, delivering raw agent bytes instead — would
+			// erase an existing snapshot file before the Job had produced a
+			// replacement, so a failed collection would destroy the previous
+			// capture. Job-mode destinations are instead validated without
+			// side effects: parseSnapshotCmdOptions checks the template, and
+			// DeployAndCollect parses a cm:// URI before touching the cluster.
 			if os.Getenv("AICR_AGENT_MODE") == "true" {
+				factory := collector.NewDefaultFactory(
+					collector.WithMaxNodesPerEntry(opts.maxNodesPerEntry),
+					collector.WithOS(opts.os),
+					collector.WithClusterConfigPath(opts.clusterConfigPath),
+					collector.WithDiscoverNetwork(opts.discoverNetwork),
+					collector.WithKubeconfigPath(opts.kubeconfig),
+				)
+
+				ser, serErr := createSnapshotSerializer(opts.tmplOpts, opts.kubeconfig)
+				if serErr != nil {
+					return errors.Wrap(errors.ErrCodeInternal, "failed to create output serializer", serErr)
+				}
+				if c, ok := ser.(serializer.Closer); ok {
+					defer func() {
+						if closeErr := c.Close(); closeErr != nil {
+							slog.Warn("failed to close snapshot serializer", "error", closeErr)
+						}
+					}()
+				}
+
+				ns := snapshotter.NodeSnapshotter{
+					Version:         version,
+					Factory:         factory,
+					Serializer:      ser,
+					RequireGPU:      opts.requireGPU,
+					AKSGPUPoolsPath: opts.aksGPUPoolsPath,
+				}
 				return ns.Measure(ctx)
 			}
 
-			ns.AgentConfig = opts.toAgentConfig()
-			return ns.Measure(ctx)
+			// Job mode goes through the facade so `aicr snapshot`, `aicr
+			// validate`, and SDK consumers all deploy the agent the same way.
+			// The recipe source is irrelevant here — CollectSnapshot does not
+			// consult the Client's DataProvider — so the embedded source keeps
+			// construction free of cluster- or flag-dependent setup.
+			client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+
+			snap, err := client.CollectSnapshot(ctx, agentCfg)
+			if err != nil {
+				return err
+			}
+
+			// Deliver the RAW agent bytes, never a re-serialization of the
+			// parsed snapshot: a newer agent image can emit fields this
+			// binary's Snapshot type does not model, and a typed round trip
+			// would silently drop them.
+			return snapshotter.DeliverSnapshot(ctx, snap.Raw, snapshotter.SnapshotDelivery{
+				Output:       agentCfg.Output,
+				TemplatePath: agentCfg.TemplatePath,
+				Kubeconfig:   agentCfg.Kubeconfig,
+			})
 		},
 	}
 }

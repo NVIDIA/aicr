@@ -210,6 +210,7 @@ func TestStability_TypesAndAliases(t *testing.T) {
 	_ = aicr.AllowLists{}
 	_ = aicr.AgentConfig{}
 	_ = aicr.Snapshot{}
+	_ = aicr.Snapshot{}.Raw
 	_ = aicr.ReportSummary{}
 	_ = aicr.PhaseResult{}
 	_ = aicr.ComponentBundle{}
@@ -242,6 +243,7 @@ func TestStability_Translations(t *testing.T) {
 	t.Parallel()
 
 	requireSignature[func(*snapshotter.Snapshot) *aicr.Snapshot](aicr.WrapSnapshot)
+	requireSignature[func(*aicr.Snapshot) *snapshotter.Snapshot]((*aicr.Snapshot).Unwrap)
 	requireSignature[func(*recipe.Criteria) *aicr.Criteria](aicr.WrapCriteria)
 	requireSignature[func(*recipe.AllowLists) *aicr.AllowLists](aicr.WrapAllowLists)
 	requireSignature[func(*aicr.AllowLists) *recipe.AllowLists](aicr.ToInternalAllowLists)
@@ -256,9 +258,14 @@ func TestStability_HealthAndEvidence(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, []*aicr.PhaseResult, aicr.EvidenceOptions) error]((*aicr.Client).EmitRecipeEvidence)
 }
 
-// TestStability_Query pins the package-level query selector.
+// TestStability_Query pins the package-level query selector, in both its
+// context-aware and legacy context-less spellings, plus the WrapResolved
+// constructor that makes an externally-projected pkg/recipe.RecipeResult
+// queryable through the facade.
 func TestStability_Query(t *testing.T) {
 	t.Parallel()
 
 	requireSignature[func(*aicr.RecipeResult, string) (any, error)](aicr.SelectFromRecipe)
+	requireSignature[func(context.Context, *aicr.RecipeResult, string) (any, error)](aicr.SelectFromRecipeWithContext)
+	requireSignature[func(*recipe.RecipeResult) *aicr.RecipeResult](aicr.WrapResolved)
 }

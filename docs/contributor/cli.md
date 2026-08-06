@@ -140,7 +140,7 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | `ResolveRecipeFromSnapshot(ctx, *Criteria, *Snapshot)` | `validate`, `recipe --snapshot` |
 | `LoadRecipe(ctx, path, kubeconfig)` | `bundle`, `validate`, `diff` (read a previously emitted recipe file) |
 | `BundleComponents(ctx, *RecipeResult)` | `bundle` |
-| `CollectSnapshot(ctx, *AgentConfig)` | `snapshot` |
+| `CollectSnapshot(ctx, *AgentConfig)` | `snapshot`, `validate` (Job-mode capture only; local `AICR_AGENT_MODE` collection deploys no Job and stays on `snapshotter.NodeSnapshotter`) |
 | `ValidateState(ctx, ...)` | `validate` |
 
 Construction in CLI happens via `recipeClientFromCmd(cmd, cfg)` in

@@ -25,6 +25,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
@@ -451,7 +452,13 @@ func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
 		jobName:    "aicr-validate-test",
 	}
 
-	_, err := deployAgentForValidation(t.Context(), cfg)
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	_, err = deployAgentForValidation(t.Context(), client, cfg)
 	if err == nil {
 		t.Fatal("expected error for nonexistent explicit kubeconfig, got nil")
 	}

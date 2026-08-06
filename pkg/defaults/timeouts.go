@@ -110,6 +110,19 @@ const (
 	// deadline already on the parent context.
 	SnapshotOperationTimeout = 5 * time.Minute
 
+	// SnapshotOperationGrace is the headroom Client.CollectSnapshot adds on
+	// top of AgentConfig.Timeout when bounding the whole operation.
+	//
+	// AgentConfig.Timeout budgets ONE step — waiting for the agent Job to
+	// complete. Deploying RBAC and the Job, projecting an --aks-gpu-pools
+	// file, and retrieving the result ConfigMap all sit outside it. Capping
+	// the operation at exactly AgentConfig.Timeout would silently shrink the
+	// Job-completion budget by however long deployment took, so a Job that
+	// legitimately needs its full timeout on a slow cluster would fail. The
+	// grace keeps the operation bounded for callers that pass an unbounded
+	// context without eating into the budget the caller asked for.
+	SnapshotOperationGrace = 1 * time.Minute
+
 	// ValidationOperationTimeout is the facade-level upper bound for
 	// Client.ValidateState when the caller's context has no deadline
 	// (controller/library callers; the CLI runs uncapped). It must exceed the

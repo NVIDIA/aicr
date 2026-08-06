@@ -37,6 +37,25 @@
 //
 //	func (n *NodeSnapshotter) Measure(ctx context.Context) error
 //
+// # Job-mode collection
+//
+// Deploying the agent as a Kubernetes Job is split into two exported steps so
+// callers that need the captured bytes and callers that need them written out
+// share one implementation:
+//
+//	func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []byte, error)
+//	func DeliverSnapshot(ctx context.Context, data []byte, dest SnapshotDelivery) error
+//
+// NodeSnapshotter.Measure composes them when AgentConfig is set. Most callers
+// should instead go through the aicr.Client facade's CollectSnapshot, which
+// wraps DeployAndCollect (`aicr snapshot` and `aicr validate` both do); reach
+// for NodeSnapshotter directly only for LOCAL collection, which deploys no Job
+// and needs a collector.Factory and serializer.Serializer.
+//
+// Deliver the RAW bytes DeployAndCollect returns, not a re-serialization of
+// the parsed Snapshot: a newer agent image can emit fields the local Snapshot
+// type does not model, and a typed round trip drops them silently.
+//
 // Snapshot: Captured configuration data
 //
 //	type Snapshot struct {

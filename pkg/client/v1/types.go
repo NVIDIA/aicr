@@ -77,6 +77,16 @@ type Snapshot struct {
 	Kind       string
 	CapturedAt time.Time
 
+	// Raw is the exact YAML document the collection agent emitted, set by
+	// Client.CollectSnapshot and empty on snapshots obtained any other way
+	// (WrapSnapshot, a hand-constructed Snapshot).
+	//
+	// Persist THESE bytes rather than re-serializing the parsed snapshot: a
+	// newer agent image can emit fields this binary's Snapshot type does not
+	// model, and a typed round trip silently drops them. `aicr snapshot`
+	// writes Raw for exactly that reason.
+	Raw []byte
+
 	// internal holds the upstream pkg/snapshotter.Snapshot so the
 	// facade can re-pass the snapshot to ValidateState without
 	// reserializing. Tests that construct &Snapshot{} have internal == nil;
@@ -85,11 +95,31 @@ type Snapshot struct {
 	internal *snapshotter.Snapshot
 }
 
+// Unwrap returns the underlying pkg/snapshotter.Snapshot — the inverse of
+// WrapSnapshot, and the analog of RecipeResult.Resolved(). In-tree callers
+// (the CLI's validate path) use it to reach measurement-level detail the
+// facade's public fields intentionally do not project.
+//
+// A Snapshot constructed outside the facade (no internal payload) yields a
+// minimal pkg/snapshotter.Snapshot rebuilt from the public fields, so callers
+// never have to nil-check the result of a non-nil receiver. Returns nil for a
+// nil receiver. The returned pointer is the facade's own — treat it as
+// read-only.
+func (s *Snapshot) Unwrap() *snapshotter.Snapshot {
+	return toInternalSnapshot(s)
+}
+
 // AgentConfig is the deployment-time configuration for the snapshot-
 // collection Job passed to Client.CollectSnapshot. Facade-owned;
 // field-for-field mirror of pkg/snapshotter.AgentConfig. Tolerations
 // keep k8s.io/api/core/v1.Toleration since kubernetes/api is itself
 // stable.
+//
+// The mirror is enforced, not conventional: TestAgentConfigMirrorsInternal
+// fails when either struct gains, drops, or retypes a field, and every
+// in-tree snapshot Job (`aicr snapshot`, `aicr validate`) is deployed through
+// this type — so an unplumbed field is a test failure rather than a silent
+// zero value.
 type AgentConfig struct {
 	Kubeconfig         string
 	Namespace          string
@@ -101,7 +131,6 @@ type AgentConfig struct {
 	Tolerations        []corev1.Toleration
 	Timeout            time.Duration
 	Cleanup            bool
-	Output             string
 	Debug              bool
 	Privileged         bool
 	RequireGPU         bool
@@ -111,6 +140,31 @@ type AgentConfig struct {
 	OS                 string
 	Requests           corev1.ResourceList
 	Limits             corev1.ResourceList
+
+	// Output selects where the agent Job stages its result. A cm://namespace/name
+	// URI makes that ConfigMap the delivery vehicle — the Job writes there and
+	// CollectSnapshot leaves it in place. A malformed cm:// URI is rejected
+	// with ErrCodeInvalidRequest before any cluster access, so a typo never
+	// costs a deployed Job. Any other value (including empty) stages to an
+	// internal ConfigMap in Namespace; delivering the snapshot to a file,
+	// stdout, or a template is then the caller's job — pass Snapshot.Raw to
+	// snapshotter.DeliverSnapshot.
+	Output string
+
+	// ClusterConfigPath asks the in-pod network collector to ingest a
+	// pre-existing k8s-launch-kit (l8k) cluster-config.yaml at this path.
+	// The path must resolve INSIDE the agent pod, which the Job does not yet
+	// mount — so CollectSnapshot rejects a non-empty value with
+	// ErrCodeInvalidRequest. Use DiscoverNetwork for live discovery from a
+	// Job. Local (in-pod) collection honors the file, but that path is
+	// outside the facade; see Client.CollectSnapshot.
+	ClusterConfigPath string
+
+	// DiscoverNetwork enables the in-pod network collector's live l8k
+	// discovery. Discovery is NOT read-only — it writes
+	// nvidia.kubernetes-launch-kit.* node labels and patches NicClusterPolicy
+	// via server-side-apply, so the agent's RBAC must allow those writes.
+	DiscoverNetwork bool
 
 	// AKSGPUPoolsPath points at an operator-supplied
 	// `az aks nodepool list -o json` dump on the machine running this

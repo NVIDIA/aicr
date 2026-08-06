@@ -528,9 +528,10 @@ spec:
 // === toAgentConfig conversion sanity check ===
 
 // TestSnapshotCmdOptions_ToAgentConfig pins the field-by-field
-// translation from snapshotCmdOptions to snapshotter.AgentConfig.
+// translation from snapshotCmdOptions to the facade aicr.AgentConfig.
 // Regression guard: silent drops would manifest as default empty values
-// reaching the deployer.
+// reaching the deployer. The facade→snapshotter half of the projection is
+// pinned separately by TestAgentConfigMirrorsInternal in pkg/client/v1.
 func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 	opts := &snapshotCmdOptions{
 		kubeconfig:         "/kube/config",
@@ -549,6 +550,9 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		runtimeClass:       "nvidia",
 		os:                 "ubuntu",
 		maxNodesPerEntry:   5,
+		clusterConfigPath:  "/l8k/cluster-config.yaml",
+		aksGPUPoolsPath:    "/aks/pools.json",
+		discoverNetwork:    true,
 		requests:           corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
 		limits:             corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")},
 		tmplOpts: &snapshotTemplateOptions{
@@ -581,6 +585,9 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		{"Output", ac.Output, "snapshot.yaml"},
 		{"TemplatePath", ac.TemplatePath, "tpl.tmpl"},
 		{"NodeSelector[k]", ac.NodeSelector["k"], "v"},
+		{"ClusterConfigPath", ac.ClusterConfigPath, "/l8k/cluster-config.yaml"},
+		{"AKSGPUPoolsPath", ac.AKSGPUPoolsPath, "/aks/pools.json"},
+		{"DiscoverNetwork", ac.DiscoverNetwork, true},
 	}
 	for _, w := range wants {
 		if !reflect.DeepEqual(w.got, w.want) {

@@ -26,8 +26,19 @@ import (
 )
 
 // toInternalAgentConfig copies every public field of the facade AgentConfig
-// onto a fresh snapshotter.AgentConfig. Field-for-field mirror; a future
-// field added to either side stays at its zero value until plumbed through.
+// onto a fresh snapshotter.AgentConfig.
+//
+// The two structs are a field-for-field mirror, enforced by
+// TestAgentConfigMirrorsInternal rather than by convention: adding a field to
+// either side without plumbing it here fails that test instead of silently
+// leaving the new field at its zero value on every snapshot run.
+//
+// Deliberately unexported. CollectSnapshot is the only projection point, and
+// every in-tree snapshot Job goes through it; an exported spelling with no
+// caller outside this package is the drift #2021 exists to remove, not add.
+// The CLI's local (in-pod) collection path does not need it — it deploys no
+// Job and builds a collector.Factory and serializer.Serializer from its own
+// options instead.
 func toInternalAgentConfig(cfg *AgentConfig) *snapshotter.AgentConfig {
 	if cfg == nil {
 		return nil
@@ -51,6 +62,8 @@ func toInternalAgentConfig(cfg *AgentConfig) *snapshotter.AgentConfig {
 		TemplatePath:       cfg.TemplatePath,
 		MaxNodesPerEntry:   cfg.MaxNodesPerEntry,
 		OS:                 cfg.OS,
+		ClusterConfigPath:  cfg.ClusterConfigPath,
+		DiscoverNetwork:    cfg.DiscoverNetwork,
 		Requests:           cfg.Requests,
 		Limits:             cfg.Limits,
 		AKSGPUPoolsPath:    cfg.AKSGPUPoolsPath,
@@ -62,6 +75,33 @@ func toInternalAgentConfig(cfg *AgentConfig) *snapshotter.AgentConfig {
 // a YAML file) can pass them to facade methods. Returns nil for nil input.
 func WrapSnapshot(s *snapshotter.Snapshot) *Snapshot {
 	return fromInternalSnapshot(s)
+}
+
+// WrapResolved wraps an already-resolved pkg/recipe.RecipeResult — typically
+// one obtained from RecipeResult.Resolved() and then projected by the caller —
+// back into the facade shape so it can be handed to SelectFromRecipeWithContext.
+// Returns nil for nil input.
+//
+// The wrapped result is QUERYABLE ONLY. It carries no owning Client, so
+// Client.MakeBundle, Client.BundleComponents, and Client.ValidateState reject
+// it with ErrCodeInvalidRequest; use Client.AdoptRecipe for those. The
+// caller-supplied result keeps whatever DataProvider it was already bound to,
+// so hydration resolves against the same source that produced it — no deep
+// copy, no re-validation, no provider rebinding.
+//
+// The REST query handler is the motivating in-tree caller: it projects a
+// legacy (/v1) view of a resolved recipe before selecting, and WrapResolved
+// lets it run the facade's selector rather than an inlined hydrate+select
+// pair that can drift.
+func WrapResolved(r *recipe.RecipeResult) *RecipeResult {
+	if r == nil {
+		return nil
+	}
+	var name string
+	if r.Criteria != nil {
+		name = r.Criteria.String()
+	}
+	return facadeResultFromInternal(r, name)
 }
 
 // fromInternalSnapshot wraps a pkg/snapshotter.Snapshot in the facade

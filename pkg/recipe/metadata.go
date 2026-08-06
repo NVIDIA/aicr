@@ -956,6 +956,14 @@ type RecipeResult struct {
 	// via BindDataProvider and consume read-only without going through
 	// ownership-checked entry points.
 	owner *Builder
+
+	// resolvedValues pins per-component effective Helm values for the
+	// duration of one operation, keyed by component name. Set only by
+	// WithResolvedValues (which returns a shallow copy — a builder-produced
+	// result is never pinned in place); nil on every other result, in which
+	// case GetValuesForComponent* resolves through the DataProvider as
+	// before. See WithResolvedValues for why read-once matters.
+	resolvedValues map[string]map[string]any
 }
 
 // DataProvider returns the DataProvider that produced this result. A
@@ -1075,6 +1083,8 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// AssertOwnedBy rejects it. The facade's AdoptRecipe path rebinds
 		// the provider but does not rebind owner — adopted recipes can be
 		// read but not consumed via ownership-checked entry points.
+		// resolvedValues intentionally left nil: a pinned snapshot scopes one
+		// operation's read-once view, so an independent copy resolves fresh.
 	}
 
 	// Metadata: scalar fields, the SelectedProfile

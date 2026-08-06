@@ -151,38 +151,49 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 	return resolved.Tolerations, nil
 }
 
+// toAgentConfig projects the validate command's resolved flags onto the
+// facade AgentConfig that Client.CollectSnapshot consumes. Privileged is
+// unconditional here: the validation snapshot needs the GPU and SystemD
+// collectors, which do not work in restricted mode.
+func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
+	return &aicr.AgentConfig{
+		Kubeconfig:         c.kubeconfig,
+		Namespace:          c.namespace,
+		Image:              c.image,
+		ImagePullSecrets:   c.imagePullSecrets,
+		JobName:            c.jobName,
+		ServiceAccountName: c.serviceAccountName,
+		NodeSelector:       c.nodeSelector,
+		Tolerations:        c.tolerations,
+		Timeout:            c.timeout,
+		Cleanup:            c.cleanup,
+		Debug:              c.debug,
+		Privileged:         true,
+		RequireGPU:         c.requireGPU,
+		AKSGPUPoolsPath:    c.aksGPUPoolsPath,
+	}
+}
+
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
 // The agent deployer creates the namespace itself (ensureNamespace, with the
 // managed-by label) using the same explicit kubeconfig (#1787), so no
 // pre-create happens here — deployAndWaitForResult's up-front pool-file
 // projection must run before ANY cluster mutation so a malformed
 // --aks-gpu-pools file fails without side effects.
-func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, error) {
-	agentConfig := &snapshotter.AgentConfig{
-		Kubeconfig:         cfg.kubeconfig,
-		Namespace:          cfg.namespace,
-		Image:              cfg.image,
-		ImagePullSecrets:   cfg.imagePullSecrets,
-		JobName:            cfg.jobName,
-		ServiceAccountName: cfg.serviceAccountName,
-		NodeSelector:       cfg.nodeSelector,
-		Tolerations:        cfg.tolerations,
-		Timeout:            cfg.timeout,
-		Cleanup:            cfg.cleanup,
-		Debug:              cfg.debug,
-		Privileged:         true,
-		RequireGPU:         cfg.requireGPU,
-		AKSGPUPoolsPath:    cfg.aksGPUPoolsPath,
-	}
-
-	snap, err := snapshotter.DeployAndGetSnapshot(ctx, agentConfig)
+//
+// Collection runs through the same Client.CollectSnapshot that `aicr snapshot`
+// uses, rather than a second hand-rolled snapshotter.AgentConfig, so the facade
+// mirror is exercised here too. Output is left empty: validate consumes the
+// snapshot in memory and never writes it out.
+func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *validateAgentConfig) (*snapshotter.Snapshot, error) {
+	snap, err := client.CollectSnapshot(ctx, cfg.toAgentConfig())
 	if err != nil {
 		// PropagateOrWrap: a structured error (e.g. ErrCodeInvalidRequest
 		// from a malformed --aks-gpu-pools file) keeps its code.
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to capture snapshot")
 	}
 
-	return snap, nil
+	return snap.Unwrap(), nil
 }
 
 // validationConfig holds all parameters for a validation run.
@@ -812,7 +823,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				agentCfg := parseValidateAgentConfig(cmd, resolved, shared)
 
 				var deployErr error
-				snap, deployErr = deployAgentForValidation(ctx, agentCfg)
+				snap, deployErr = deployAgentForValidation(ctx, client, agentCfg)
 				if deployErr != nil {
 					return deployErr
 				}

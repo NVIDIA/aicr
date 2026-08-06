@@ -97,9 +97,20 @@ telemetry hooks.
 ```go
 // CollectSnapshot deploys a snapshotter Job to the target cluster and
 // returns the resulting Snapshot. cfg is a facade-owned struct that
-// mirrors most fields of the underlying pkg/snapshotter.AgentConfig
-// (the in-pod network-discovery fields ClusterConfigPath and
-// DiscoverNetwork are not surfaced on the facade).
+// mirrors pkg/snapshotter.AgentConfig field for field; the mirror is
+// enforced by a test, so a field added upstream cannot silently stay at
+// its zero value here.
+//
+// The returned Snapshot carries the parsed form plus Snapshot.Raw — the
+// exact bytes the agent emitted. Persist Raw rather than re-serializing
+// the parsed snapshot: a newer agent image can emit fields this module
+// version does not model, and a typed round trip drops them silently.
+//
+// CollectSnapshot itself writes the snapshot nowhere unless AgentConfig.Output
+// names a ConfigMap (cm://namespace/name), in which case the agent Job stages
+// it there directly. To persist it anywhere else, hand Raw to
+// snapshotter.DeliverSnapshot — a file, stdout, a ConfigMap, or a Go template
+// render — which is what `aicr snapshot` does.
 //
 // On AKS, set AKSGPUPoolsPath to an `az aks nodepool list -o json` dump
 // on the machine running this client: the pool projection is merged
@@ -370,19 +381,59 @@ required default, and sorted value names; it is nil when the composition is
 unprofiled.
 
 To extract a single value from a resolved recipe, use
-`SelectFromRecipe` with a dot-path selector. It hydrates the recipe's
-component values and returns the value at the path; an empty selector
-returns the entire hydrated structure, and a `nil` `*RecipeResult`
-returns `ErrCodeInvalidRequest`. This mirrors the `aicr query` CLI
-command:
+`SelectFromRecipeWithContext` with a dot-path selector. It hydrates the
+recipe's component values and returns the value at the path; an empty
+selector returns the entire hydrated structure, and a `nil` `*RecipeResult`
+returns `ErrCodeInvalidRequest`. Hydration reads values files through the
+recipe's `DataProvider`, so the context bounds real I/O — cancel it and the
+hydration aborts. This is the same call the `aicr query` CLI command and the
+REST query handler run:
 
 ```go
-v, err := aicr.SelectFromRecipe(rec, "components.gpu-operator.values.driver.version")
+v, err := aicr.SelectFromRecipeWithContext(ctx, rec, "components.gpu-operator.values.driver.version")
 if err != nil {
 	log.Fatalf("select: %v", err)
 }
 log.Printf("driver version: %v", v)
 ```
+
+`SelectFromRecipe` is the context-less form, kept for source compatibility.
+It derives a `defaults.FileReadTimeout`-bounded context internally, so the
+reads stay bounded but the caller cannot cancel them. Prefer the
+context-aware form wherever a `context.Context` is available.
+
+The **outermost** structured code distinguishes the two failure stages, so a
+caller can shape a response without reimplementing hydrate-then-select:
+`ErrCodeNotFound` means the selector path does not exist, and any other code
+(`ErrCodeInternal`, `ErrCodeTimeout`, ...) means hydration failed. Match with
+`errors.As` on the outermost error rather than `errors.Is` — `Is` walks the
+wrap chain and would match an `ErrCodeNotFound` cause nested inside a
+hydration failure.
+
+### Delivering a collected snapshot
+
+`snapshotter.DeliverSnapshot(ctx, raw, snapshotter.SnapshotDelivery{...})`
+writes captured bytes to a destination independent of where the agent staged
+them:
+
+```go
+err = snapshotter.DeliverSnapshot(snapCtx, snap.Raw, snapshotter.SnapshotDelivery{
+	Output:     "snapshot.yaml",                 // file; "" or "-" for stdout; cm://ns/name for a ConfigMap
+	Kubeconfig: "/path/to/target-kubeconfig",    // only used for a cm:// Output
+})
+```
+
+A `cm://` destination is written, not assumed — including when it differs from
+the `AgentConfig.Output` used at collection time. Set `TemplatePath` to render
+through a Go template instead of copying bytes; `Output` then names the
+rendered report.
+
+`WrapResolved` turns a `*pkg/recipe.RecipeResult` — typically one taken from
+`RecipeResult.Resolved()` and then projected by the caller — back into a
+facade `*RecipeResult` that `SelectFromRecipeWithContext` accepts. The result
+is queryable only: it carries no owning `Client`, so `MakeBundle`,
+`BundleComponents`, and `ValidateState` reject it. Use `Client.AdoptRecipe`
+when you need a bundle-able result.
 
 ## Errors
 
@@ -416,8 +467,12 @@ passing a tighter deadline keeps it; a caller passing
 Per-operation caps:
 
 - `ResolveRecipe` / `BundleComponents`: `defaults.RecipeOperationTimeout`
-- `CollectSnapshot`: caller-controlled via `AgentConfig.Timeout`,
-  falling back to `defaults.SnapshotOperationTimeout` when unset
+- `CollectSnapshot`: caller-controlled via `AgentConfig.Timeout` (falling
+  back to `defaults.SnapshotOperationTimeout` when unset), plus
+  `defaults.SnapshotOperationGrace`. The grace exists because
+  `AgentConfig.Timeout` budgets Job *completion* only — deployment and
+  result retrieval sit outside it, so a bare cap would silently shrink the
+  completion budget you asked for.
 - `ValidateState`: `defaults.ValidationOperationTimeout`
 - `MakeBundle`: opt-in via `BundleOptions.Timeout`. When unset (`0`) the
   caller's context governs unchanged — large bundles, `--vendor-charts`,

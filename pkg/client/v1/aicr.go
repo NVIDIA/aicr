@@ -1119,6 +1119,18 @@ func (c *Client) LoadRecipe(ctx context.Context, path, kubeconfig string) (*Reci
 // and component registry were already per-Client at the time and
 // stayed correct throughout, so ResolveRecipe results never drifted.
 //
+// # Read-once value coherence
+//
+// Each component's effective Helm values are resolved exactly once per
+// call, and that same snapshot feeds the accounting check, the
+// registry-declared component validations (including the gpu-operator
+// driver-ownership coherence gate), and the returned ComponentBundle. A
+// DataProvider need not be stable — LayeredDataProvider re-reads external
+// --data files on every call — so a gate that resolved values
+// independently could validate one set of values while a different set was
+// returned. Pinning the snapshot removes that window: what the gates
+// examined is what you get back (issue #1873 item A).
+//
 // # Synchronization
 //
 // Read-locks Client.mu so a concurrent Close can't race the values
@@ -1177,23 +1189,6 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled before bundling", err)
 	}
 
-	// Component preflight: run the registry-declared component validations
-	// before handing back component values. DefaultBundler.Make runs the
-	// same gate (runComponentValidations) before writing a bundle; without
-	// it here the SDK path would return values the bundle path refuses to
-	// render — e.g. the gpu-operator driver-ownership coherence check
-	// (severity: error) on a recipe resolved from a snapshot that observed
-	// no NVIDIA kernel driver. This path has no bundle-time --set
-	// overrides, so the bundler config is nil; validations that act solely
-	// on bundle-time flags no-op on a nil config.
-	preflightWarnings, preflightErr := validations.RunComponentValidations(ctx, r.internal, nil)
-	for _, warning := range preflightWarnings {
-		slog.Warn(warning, "source", "component-validation")
-	}
-	if preflightErr != nil {
-		return nil, preflightErr
-	}
-
 	// Agree with DefaultBundler.Make (bundler.go), which fails closed with
 	// ErrCodeInvalidRequest whenever there is nothing to deploy — whether
 	// that's every component disabled or a zero-componentRef recipe. An
@@ -1204,15 +1199,42 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 			"recipe has no enabled components")
 	}
 
-	// Resolve the complete Helm-value inventory before emitting any component.
-	// Accounting ownership spans multiple charts, so validating one chart at a
-	// time could return a partial SDK bundle that DefaultBundler.Make rejects.
+	// Resolve the complete Helm-value inventory ONCE, before any gate runs and
+	// before emitting any component. Two properties depend on this ordering:
+	//
+	//  1. Accounting ownership spans multiple charts, so validating one chart
+	//     at a time could return a partial SDK bundle that
+	//     DefaultBundler.Make rejects.
+	//  2. Read-once coherence (#1873 item A). A LayeredDataProvider re-reads
+	//     external --data files on every call, so a gate that resolves values
+	//     independently can validate one set and let a different set be
+	//     emitted. Pinning the resolved maps onto the recipe result the gates
+	//     see makes the values they examine, by construction, the values
+	//     returned below.
 	helmValues, err := resolveHelmComponentValues(ctx, r)
 	if err != nil {
 		return nil, err
 	}
-	if err := bundler.ValidateAccountingValues(r.internal, helmValues); err != nil {
+	pinned := r.internal.WithResolvedValues(helmValues)
+	if err := bundler.ValidateAccountingValues(pinned, helmValues); err != nil {
 		return nil, err
+	}
+
+	// Component preflight: run the registry-declared component validations
+	// before handing back component values. DefaultBundler.Make runs the
+	// same gate (runComponentValidations) before writing a bundle; without
+	// it here the SDK path would return values the bundle path refuses to
+	// render — e.g. the gpu-operator driver-ownership coherence check
+	// (severity: error) on a recipe resolved from a snapshot that observed
+	// no NVIDIA kernel driver. This path has no bundle-time --set
+	// overrides, so the bundler config is nil; validations that act solely
+	// on bundle-time flags no-op on a nil config.
+	preflightWarnings, preflightErr := validations.RunComponentValidations(ctx, pinned, nil)
+	for _, warning := range preflightWarnings {
+		slog.Warn(warning, "source", "component-validation")
+	}
+	if preflightErr != nil {
+		return nil, preflightErr
 	}
 
 	bundles := make([]ComponentBundle, 0, len(r.Components))
@@ -1345,6 +1367,10 @@ func resolveHelmComponentValues(
 // CollectSnapshot deploys the snapshotter Job to the cluster identified
 // by cfg.Kubeconfig and returns the captured Snapshot.
 //
+// This is the single Job-mode collection path in the tree: `aicr snapshot`
+// and `aicr validate` both run it, so the facade AgentConfig mirror is
+// exercised on every snapshot AICR takes.
+//
 // CollectSnapshot does NOT consult the Client's recipe data provider —
 // the Client is required only to keep the facade surface uniform
 // (every public operation goes through a Client) and to leave room
@@ -1355,6 +1381,54 @@ func resolveHelmComponentValues(
 // cfg.Kubeconfig is the path (or empty for in-cluster). cfg.Namespace,
 // cfg.Image, cfg.ServiceAccountName must be set; other fields fall
 // back to package defaults documented on snapshotter.AgentConfig.
+//
+// # Output and delivery
+//
+// The returned Snapshot carries both the parsed form and, in Snapshot.Raw,
+// the exact bytes the agent emitted. CollectSnapshot does not write them
+// anywhere except when cfg.Output names a ConfigMap (cm://namespace/name),
+// which the Job writes directly. Persisting to a file, stdout, or a Go
+// template is the caller's step — pass Snapshot.Raw to
+// snapshotter.DeliverSnapshot, as `aicr snapshot` does. Delivering Raw rather
+// than re-serializing the parsed snapshot is what keeps the output
+// byte-identical to the agent's when a newer agent image emits fields this
+// binary does not model.
+//
+// # Fail-before-mutate
+//
+// Inputs that can be rejected without contacting the cluster are checked
+// before the Kubernetes client is built, so a rejection never leaves RBAC or
+// a Job behind (with cfg.Cleanup false — the zero value — they would
+// persist). That covers a malformed cfg.Output ConfigMap URI and a non-empty
+// cfg.ClusterConfigPath, both ErrCodeInvalidRequest.
+//
+// # Deliberately outside this method
+//
+// Two snapshot capabilities are NOT reachable through CollectSnapshot, by
+// design, because neither deploys a Job:
+//
+//   - Local (in-pod) collection — the mode the agent container itself runs
+//     under AICR_AGENT_MODE=true, and the dev bypass of the same name. It
+//     runs collectors in-process against the local node instead of deploying
+//     an agent, so it needs a collector.Factory and a serializer.Serializer,
+//     types the semver-stable facade deliberately does not expose. Use
+//     snapshotter.NodeSnapshotter directly, as pkg/cli/snapshot.go does. It
+//     takes no AgentConfig, so leaving it out costs no coverage of the field
+//     mirror: every deployed Job still projects through this method.
+//   - cfg.ClusterConfigPath — an l8k cluster-config.yaml ingested by the
+//     in-pod network collector. The path must resolve inside the pod and the
+//     Job does not mount it, so Job mode rejects a non-empty value with
+//     ErrCodeInvalidRequest. Use cfg.DiscoverNetwork for live discovery from
+//     a Job, or the local mode above to read a host file.
+//
+// # Timeout
+//
+// The operation is bounded by cfg.Timeout + defaults.SnapshotOperationGrace
+// (or defaults.SnapshotOperationTimeout + grace when cfg.Timeout is unset),
+// so a caller passing context.Background() still gets a bounded run. The
+// grace exists because cfg.Timeout budgets Job completion only — deployment
+// and result retrieval sit outside it, and a bare cap would silently shrink
+// the completion budget. A tighter caller deadline always wins.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client is nil, cfg is nil, or
@@ -1392,20 +1466,26 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 	// still gets a bounded operation. Preference order:
 	//   1. cfg.Timeout — caller-controlled, wins when set.
 	//   2. SnapshotOperationTimeout — package default (matches CLISnapshotTimeout).
+	// SnapshotOperationGrace is added on top because the chosen value budgets
+	// Job COMPLETION only: deploy, pool projection, and ConfigMap retrieval
+	// happen outside it, so a bare cap would quietly shrink the caller's
+	// completion budget by however long deployment took.
 	// context.WithTimeout honors the smaller of the parent deadline and
 	// the value supplied here, so callers with a tighter context keep it.
-	cap := cfg.Timeout
-	if cap <= 0 {
-		cap = defaults.SnapshotOperationTimeout
+	budget := cfg.Timeout
+	if budget <= 0 {
+		budget = defaults.SnapshotOperationTimeout
 	}
-	ctx, cancel := context.WithTimeout(ctx, cap)
+	ctx, cancel := context.WithTimeout(ctx, budget+defaults.SnapshotOperationGrace)
 	defer cancel()
 
-	snap, err := snapshotter.DeployAndGetSnapshot(ctx, toInternalAgentConfig(cfg))
+	snap, raw, err := snapshotter.DeployAndCollect(ctx, toInternalAgentConfig(cfg))
 	if err != nil {
 		return nil, err
 	}
-	return fromInternalSnapshot(snap), nil
+	out := fromInternalSnapshot(snap)
+	out.Raw = raw
+	return out, nil
 }
 
 // ValidateState evaluates a resolved recipe against an observed cluster

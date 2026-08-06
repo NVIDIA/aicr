@@ -184,16 +184,66 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 // File lookups route through the DataProvider bound to this result (set when
 // the result was built by a Builder via WithDataProvider). When no provider
 // is bound, lookups fall back to the package-level embedded-data singleton.
+//
+// On a result returned by WithResolvedValues, a component present in the
+// pinned snapshot is served from that snapshot instead — no provider read.
 func (r *RecipeResult) GetValuesForComponentWithContext(ctx context.Context, name string) (map[string]any, error) {
 	ref := r.GetComponentRef(name)
 	if ref == nil {
 		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("component %q not found in recipe", name))
 	}
 
+	// A pinned snapshot short-circuits the provider read so every consumer
+	// within one operation observes the same values. Hand back a deep copy:
+	// callers own (and some mutate) the returned map — the bundler's
+	// coherence gate layers --set overrides onto it — and a shared map would
+	// leak those mutations into the snapshot and into every later reader.
+	if values, pinned := r.resolvedValues[name]; pinned {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				fmt.Sprintf("context canceled before reading values for %q", name), err)
+		}
+		return serializer.DeepCopyAnyMap(values), nil
+	}
+
 	// Prefer the result-bound provider (per-tenant isolation); resolveComponentValues
 	// falls back to the embedded-data singleton when it is nil (e.g. the result was
 	// decoded from a recipe file before BindDataProvider was called).
 	return resolveComponentValues(ctx, r.provider, ref)
+}
+
+// WithResolvedValues returns a shallow copy of r whose
+// GetValuesForComponent / GetValuesForComponentWithContext serve the supplied
+// pre-resolved maps instead of re-reading them through the DataProvider.
+// Components absent from values keep the normal provider-backed path.
+//
+// # Why
+//
+// A DataProvider is not required to be stable: LayeredDataProvider re-reads
+// external `--data` files on every call. An operation that resolves a
+// component's values twice — once to validate, once to emit — can therefore
+// validate one set of values and emit a different set, so a mutation landing
+// between the two reads slips past the gate (issue #1873 item A). Pinning the
+// snapshot makes the whole operation read-once: the values a gate examines
+// are, by construction, the values the operation emits.
+//
+// # Semantics
+//
+// The copy shares r's slices, maps, and bound DataProvider — it is a
+// read-only view for the duration of one operation, not an independent
+// recipe. Do not mutate either side while the view is in use; use DeepCopy
+// when independent state is needed. Returns nil for a nil receiver, and r
+// unchanged when values is empty.
+func (r *RecipeResult) WithResolvedValues(values map[string]map[string]any) *RecipeResult {
+	if r == nil {
+		return nil
+	}
+	if len(values) == 0 {
+		return r
+	}
+	pinned := *r
+	pinned.resolvedValues = values
+	return &pinned
 }
 
 // GetComponentValues resolves the effective Helm values for a single

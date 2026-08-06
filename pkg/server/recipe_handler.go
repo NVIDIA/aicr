@@ -491,24 +491,29 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request, v2 b
 	}
 	resolved := normalizeLegacyRecipeResult(rec.Resolved(), v2)
 
-	// Hydrate and select as two steps (rather than the combined
-	// aicr.SelectFromRecipe) to preserve the legacy handler's distinct error
-	// mapping: a hydrate failure surfaces via its own error code (5xx), while a
-	// missing selector path is a 404. The legacy projection preserves the
-	// resolved result's bound DataProvider so hydration uses the same source.
-	hydrated, err := recipe.HydrateResultWithContext(ctx, resolved)
+	// Hydrate + select through the facade, then shape the response here.
+	// The legacy projection keeps the resolved result's bound DataProvider,
+	// so WrapResolved hydrates against the same source. The handler's
+	// distinct error mapping — a missing selector path is 404, a hydrate
+	// failure is its own (5xx) code — is a handler-level mapping over the
+	// facade's documented outermost-code contract, not a second
+	// hydrate+select implementation.
+	selected, err := aicr.SelectFromRecipeWithContext(ctx, aicr.WrapResolved(resolved), selector)
 	if err != nil {
+		// Match on the OUTERMOST structured code: stderrors.Is walks the
+		// wrap chain and would misread a hydration failure whose cause
+		// happens to carry ErrCodeNotFound (e.g. a missing values file) as
+		// a missing selector path.
+		var se *aicrerrors.StructuredError
+		if stderrors.As(err, &se) && se.Code == aicrerrors.ErrCodeNotFound {
+			WriteError(w, r, http.StatusNotFound, aicrerrors.ErrCodeNotFound,
+				"Selector path not found", false, map[string]any{
+					"selector": selector,
+					keyError:   err.Error(),
+				})
+			return
+		}
 		WriteErrorFromErr(w, r, err, "Failed to hydrate recipe", nil)
-		return
-	}
-
-	selected, err := recipe.Select(hydrated, selector)
-	if err != nil {
-		WriteError(w, r, http.StatusNotFound, aicrerrors.ErrCodeNotFound,
-			"Selector path not found", false, map[string]any{
-				"selector": selector,
-				keyError:   err.Error(),
-			})
 		return
 	}
 

@@ -15,10 +15,14 @@
 package aicr
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 // TestWrapCriteria_Nil verifies that wrapping a nil upstream criteria
@@ -265,4 +269,134 @@ func TestToInternalAgentConfig_ProjectsAKSGPUPoolsPath(t *testing.T) {
 	if toInternalAgentConfig(nil) != nil {
 		t.Fatal("toInternalAgentConfig(nil) should stay nil")
 	}
+}
+
+// TestAgentConfigMirrorsInternal turns the facade AgentConfig ↔
+// snapshotter.AgentConfig mirror from a convention into an invariant.
+//
+// The mirror used to be maintained by hand, and its own doc comment conceded
+// that "a future field added to either side stays at its zero value until
+// plumbed through" — which is exactly what happened: ClusterConfigPath and
+// DiscoverNetwork existed upstream while the facade silently dropped them.
+// Two assertions close that gap:
+//
+//  1. Shape — every field of one struct has a same-named, same-typed field on
+//     the other. Adding, removing, or retyping a field on either side fails
+//     here.
+//  2. Value — every facade field set to a distinct non-zero value must arrive
+//     on the internal struct. This catches a field that exists on both sides
+//     but is missing from (or misassigned in) toInternalAgentConfig, which a
+//     shape check alone cannot see.
+//
+// A new field of a type the value generator does not model fails loudly
+// rather than being skipped, so extending the mirror always forces a
+// deliberate update here.
+func TestAgentConfigMirrorsInternal(t *testing.T) {
+	facadeType := reflect.TypeOf(AgentConfig{})
+	internalType := reflect.TypeOf(snapshotter.AgentConfig{})
+
+	fieldTypes := func(t reflect.Type) map[string]reflect.Type {
+		out := make(map[string]reflect.Type, t.NumField())
+		for i := range t.NumField() {
+			f := t.Field(i)
+			out[f.Name] = f.Type
+		}
+		return out
+	}
+
+	facadeFields := fieldTypes(facadeType)
+	internalFields := fieldTypes(internalType)
+
+	for name, ft := range facadeFields {
+		it, ok := internalFields[name]
+		if !ok {
+			t.Errorf("facade AgentConfig.%s has no counterpart on snapshotter.AgentConfig — "+
+				"remove it or add the upstream field", name)
+			continue
+		}
+		if ft != it {
+			t.Errorf("AgentConfig.%s type mismatch: facade %s, internal %s", name, ft, it)
+		}
+	}
+	for name := range internalFields {
+		if _, ok := facadeFields[name]; !ok {
+			t.Errorf("snapshotter.AgentConfig.%s is not mirrored on the facade AgentConfig — "+
+				"SDK and CLI callers cannot set it, so it stays at its zero value on every run", name)
+		}
+	}
+
+	// Value round-trip: fill every facade field with a distinct non-zero
+	// value, project, and require it to land.
+	cfg := &AgentConfig{}
+	filled := reflect.ValueOf(cfg).Elem()
+	for i := range facadeType.NumField() {
+		field := facadeType.Field(i)
+		filled.Field(i).Set(nonZeroFieldValue(t, field.Name, field.Type, i))
+	}
+
+	projected := reflect.ValueOf(toInternalAgentConfig(cfg)).Elem()
+	for name, want := range facadeFields {
+		_ = want
+		src := filled.FieldByName(name)
+		dst := projected.FieldByName(name)
+		if !dst.IsValid() {
+			continue // already reported by the shape check above
+		}
+		if !reflect.DeepEqual(src.Interface(), dst.Interface()) {
+			t.Errorf("toInternalAgentConfig dropped or misassigned %s: got %v, want %v",
+				name, dst.Interface(), src.Interface())
+		}
+	}
+}
+
+// nonZeroFieldValue builds a distinct non-zero value for a mirror field.
+// seed makes every string unique so a copy-paste misassignment (JobName set
+// from Namespace, say) is caught rather than compared equal. Unmodeled kinds
+// fail the test: a new field type must be handled deliberately, never skipped.
+func nonZeroFieldValue(t *testing.T, name string, typ reflect.Type, seed int) reflect.Value {
+	t.Helper()
+
+	// resource.Quantity has unexported state, so it cannot be built by
+	// generic reflection — parse a real quantity instead.
+	if typ == reflect.TypeOf(resource.Quantity{}) {
+		return reflect.ValueOf(resource.MustParse(fmt.Sprintf("%d", seed+1)))
+	}
+
+	//nolint:exhaustive // The default branch fails the test for any unmodeled
+	// kind on purpose: a new AgentConfig field type must be handled here
+	// deliberately rather than silently skipped by the round-trip.
+	switch typ.Kind() {
+	case reflect.String:
+		return reflect.ValueOf(fmt.Sprintf("mirror-%s-%d", name, seed)).Convert(typ)
+	case reflect.Bool:
+		return reflect.ValueOf(true).Convert(typ)
+	case reflect.Int, reflect.Int64:
+		return reflect.ValueOf(int64(seed + 1)).Convert(typ)
+	case reflect.Slice:
+		slice := reflect.MakeSlice(typ, 1, 1)
+		slice.Index(0).Set(nonZeroFieldValue(t, name, typ.Elem(), seed))
+		return slice
+	case reflect.Map:
+		m := reflect.MakeMap(typ)
+		m.SetMapIndex(
+			nonZeroFieldValue(t, name+"-key", typ.Key(), seed),
+			nonZeroFieldValue(t, name+"-value", typ.Elem(), seed+1),
+		)
+		return m
+	case reflect.Struct:
+		v := reflect.New(typ).Elem()
+		for i := range typ.NumField() {
+			f := typ.Field(i)
+			if f.Type.Kind() == reflect.String && v.Field(i).CanSet() {
+				v.Field(i).Set(nonZeroFieldValue(t, name+"."+f.Name, f.Type, seed))
+				return v
+			}
+		}
+		t.Fatalf("AgentConfig.%s: struct type %s has no settable string field; "+
+			"extend nonZeroFieldValue so the mirror round-trip stays meaningful", name, typ)
+	default:
+		t.Fatalf("AgentConfig.%s: unhandled field kind %s; extend nonZeroFieldValue "+
+			"so the new field is actually round-tripped", name, typ.Kind())
+	}
+	return reflect.Value{}
 }

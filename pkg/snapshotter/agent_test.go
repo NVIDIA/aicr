@@ -18,6 +18,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -457,13 +458,13 @@ func TestParseTolerationsOperator(t *testing.T) {
 	}
 }
 
+// TestAgentOutputURILogic exercises agentConfigMapTarget — the rule that
+// decides where the agent Job stages its result:
+//  1. A file path leaves the Job on the default ConfigMap in its namespace.
+//  2. A cm:// URI makes that ConfigMap the Job's target AND the delivery
+//     vehicle, so a rewrite failure must be fatal rather than a warning.
+//  3. Stdout (empty or "-") behaves like a file path.
 func TestAgentOutputURILogic(t *testing.T) {
-	// Test the logic for determining agentOutput based on user's finalOutput
-	// This tests the rules:
-	// 1. If user specifies a file path, agent uses default ConfigMap in agent's namespace
-	// 2. If user specifies a ConfigMap URI, agent uses that URI
-	// 3. If user specifies stdout, agent uses default ConfigMap in agent's namespace
-
 	tests := []struct {
 		name               string
 		agentNamespace     string
@@ -508,18 +509,14 @@ func TestAgentOutputURILogic(t *testing.T) {
 		},
 	}
 
-	const configMapURIScheme = "cm://"
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the logic from measureWithAgent
-			finalOutput := tt.userOutput
-			agentOutput := configMapURIScheme + tt.agentNamespace + "/aicr-snapshot"
-
-			hasConfigMapPrefix := len(finalOutput) >= len(configMapURIScheme) &&
-				finalOutput[:len(configMapURIScheme)] == configMapURIScheme
-			if hasConfigMapPrefix {
-				agentOutput = finalOutput
+			agentOutput, deliverViaConfigMap, err := agentConfigMapTarget(&AgentConfig{
+				Namespace: tt.agentNamespace,
+				Output:    tt.userOutput,
+			})
+			if err != nil {
+				t.Fatalf("agentConfigMapTarget: %v", err)
 			}
 
 			if tt.wantUsesUserOutput {
@@ -530,6 +527,11 @@ func TestAgentOutputURILogic(t *testing.T) {
 				if agentOutput != tt.wantAgentOutputHas {
 					t.Errorf("agentOutput = %q, want %q", agentOutput, tt.wantAgentOutputHas)
 				}
+			}
+			if deliverViaConfigMap != tt.wantUsesUserOutput {
+				t.Errorf("deliverViaConfigMap = %v, want %v — the flag must track whether the "+
+					"ConfigMap is the user's delivery vehicle, since it decides whether an "+
+					"AKS-pool-merge rewrite failure is fatal", deliverViaConfigMap, tt.wantUsesUserOutput)
 			}
 		})
 	}
@@ -545,5 +547,254 @@ func TestAgentConfigWithTemplatePath(t *testing.T) {
 
 	if cfg.TemplatePath != "/path/to/template.tmpl" {
 		t.Errorf("AgentConfig.TemplatePath = %q, want %q", cfg.TemplatePath, "/path/to/template.tmpl")
+	}
+}
+
+// snapshotFixture is a minimal but realistic agent document. The
+// "unmodeledField" key stands in for a field a NEWER agent image emits that
+// this binary's Snapshot type does not know about — the reason delivery must
+// write raw bytes instead of re-serializing the parsed struct.
+const snapshotFixture = `apiVersion: aicr.run/v1alpha2
+kind: Snapshot
+metadata:
+  version: v9.9.9
+  source: node-1
+unmodeledField:
+  fromANewerAgent: true
+measurements: []
+`
+
+// TestDeliverSnapshot_FileIsByteIdentical is the byte-identity guarantee that
+// routing `aicr snapshot` through the facade had to preserve: what lands on
+// disk is exactly what the agent emitted, including fields this binary's
+// Snapshot type does not model. A re-serialization of the parsed struct would
+// drop unmodeledField and reorder keys.
+func TestDeliverSnapshot_FileIsByteIdentical(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "snapshot.yaml")
+
+	if err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{Output: out}); err != nil {
+		t.Fatalf("DeliverSnapshot: %v", err)
+	}
+
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read delivered snapshot: %v", err)
+	}
+	if string(got) != snapshotFixture {
+		t.Errorf("delivered bytes differ from the agent's output\n got:\n%s\nwant:\n%s", got, snapshotFixture)
+	}
+}
+
+// TestDeliverSnapshot_ConfigMapRejectsMalformedURI proves a cm:// destination
+// is parsed rather than prefix-matched, and — critically — that delivery to a
+// ConfigMap is not a silent no-op. It used to log success and return nil, so
+// an SDK caller that collected to the default internal ConfigMap and then
+// delivered to cm://ns/name got no artifact AND no error.
+//
+// A malformed URI is the assertion that needs no cluster: it must fail with
+// ErrCodeInvalidRequest, which is only reachable if delivery actually tries to
+// resolve and write the destination.
+func TestDeliverSnapshot_ConfigMapRejectsMalformedURI(t *testing.T) {
+	tests := []struct {
+		name string
+		uri  string
+	}{
+		{"scheme only", "cm://"},
+		{"namespace without name", "cm://aicr-snapshot"},
+		{"empty namespace", "cm:///aicr-snapshot"},
+		{"empty name", "cm://default/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{Output: tt.uri})
+			if err == nil {
+				t.Fatalf("DeliverSnapshot(%q) = nil error, want a rejection; a ConfigMap "+
+					"destination must never report success without writing one", tt.uri)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestDeliverSnapshot_ConfigMapWritesNoLocalFile guards the destination
+// dispatch: a cm:// Output must not fall through to the file branch and drop a
+// literal "cm:..." file in the working directory. The delivery below cannot
+// reach a cluster, so it is expected to fail — what matters is that it failed
+// on the ConfigMap path and left the filesystem alone.
+func TestDeliverSnapshot_ConfigMapWritesNoLocalFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	// Point at an unreachable apiserver so the write fails fast and
+	// deterministically instead of picking up an ambient kubeconfig.
+	unreachable := filepath.Join(dir, "does-not-exist.kubeconfig")
+	err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+		Output:     "cm://default/aicr-snapshot",
+		Kubeconfig: unreachable,
+	})
+	if err == nil {
+		t.Fatal("DeliverSnapshot(cm://) with an unusable kubeconfig = nil error, want a write failure")
+	}
+
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatalf("read working dir: %v", readErr)
+	}
+	for _, e := range entries {
+		if e.Name() != filepath.Base(unreachable) {
+			t.Errorf("cm:// delivery created local file %q; the ConfigMap branch must not "+
+				"fall through to file output", e.Name())
+		}
+	}
+}
+
+// TestDeliverSnapshot_Template renders through a Go template rather than
+// copying bytes — the one delivery mode that must parse the document, since
+// the template addresses Snapshot fields.
+func TestDeliverSnapshot_Template(t *testing.T) {
+	dir := t.TempDir()
+	tmpl := filepath.Join(dir, "snapshot.tmpl")
+	if err := os.WriteFile(tmpl, []byte("version={{ .Metadata.version }}\n"), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	out := filepath.Join(dir, "report.md")
+
+	if err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+		Output:       out,
+		TemplatePath: tmpl,
+	}); err != nil {
+		t.Fatalf("DeliverSnapshot(template): %v", err)
+	}
+
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read rendered report: %v", err)
+	}
+	if string(got) != "version=v9.9.9\n" {
+		t.Errorf("rendered report = %q, want %q", got, "version=v9.9.9\n")
+	}
+}
+
+// TestDeliverSnapshot_TemplateRejectsUnparseableDocument confirms the template
+// mode fails loudly rather than emitting a half-rendered report: it is the
+// only mode that depends on the document parsing.
+func TestDeliverSnapshot_TemplateRejectsUnparseableDocument(t *testing.T) {
+	dir := t.TempDir()
+	tmpl := filepath.Join(dir, "snapshot.tmpl")
+	if err := os.WriteFile(tmpl, []byte("{{ .Metadata.version }}\n"), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	err := DeliverSnapshot(t.Context(), []byte("\tnot: [valid yaml"), SnapshotDelivery{
+		Output:       filepath.Join(dir, "report.md"),
+		TemplatePath: tmpl,
+	})
+	if err == nil {
+		t.Fatal("DeliverSnapshot(unparseable) = nil error, want a parse failure")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Errorf("error = %v, want code ErrCodeInternal", err)
+	}
+}
+
+// TestAgentConfigMapTargetRejectsMalformedURI is the fail-before-mutate guard.
+// The Job's ConfigMap target used to be accepted on the "cm://" prefix alone,
+// so a typo like "cm://aicr-snapshot" (name, no namespace) was only caught by
+// the in-pod writer — after RBAC and the Job had been created. With Cleanup
+// false (the zero value, and what SDK callers get unless they opt in) those
+// resources, including a cluster-admin binding, stay behind.
+func TestAgentConfigMapTargetRejectsMalformedURI(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{"scheme only", "cm://"},
+		{"namespace without name", "cm://aicr-snapshot"},
+		{"empty namespace", "cm:///aicr-snapshot"},
+		{"empty name", "cm://default/"},
+		{"whitespace name", "cm://default/   "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := agentConfigMapTarget(&AgentConfig{Namespace: "default", Output: tt.output})
+			if err == nil {
+				t.Fatalf("agentConfigMapTarget(%q) = nil error, want rejection before any cluster access", tt.output)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestDeployAndCollectRejectsBeforeClusterAccess proves the rejections above
+// happen before the Kubernetes client is built: with a kubeconfig that cannot
+// be loaded, a valid-but-rejected config must still surface its own
+// ErrCodeInvalidRequest rather than a kubeconfig failure. If the order were
+// reversed, the documented contract would be masked whenever cluster access
+// was also unavailable — and, worse, a reachable cluster would get RBAC and a
+// Job before the input was ever checked.
+func TestDeployAndCollectRejectsBeforeClusterAccess(t *testing.T) {
+	badKubeconfig := filepath.Join(t.TempDir(), "does-not-exist.kubeconfig")
+
+	tests := []struct {
+		name    string
+		config  *AgentConfig
+		wantMsg string
+	}{
+		{
+			name: "malformed ConfigMap output",
+			config: &AgentConfig{
+				Namespace:  "default",
+				Kubeconfig: badKubeconfig,
+				Output:     "cm://aicr-snapshot",
+			},
+			wantMsg: "invalid ConfigMap output URI",
+		},
+		{
+			name: "cluster-config path in Job mode",
+			config: &AgentConfig{
+				Namespace:         "default",
+				Kubeconfig:        badKubeconfig,
+				ClusterConfigPath: "/host/cluster-config.yaml",
+			},
+			wantMsg: "--cluster-config is not supported in agent Job mode",
+		},
+		{
+			// Empty Namespace would build the invalid internal URI
+			// "cm:///aicr-snapshot", which only fails when it is finally
+			// parsed — after RBAC and the Job exist. The CLI always supplies
+			// a default, so this is the SDK-caller path.
+			name: "empty namespace",
+			config: &AgentConfig{
+				Kubeconfig: badKubeconfig,
+			},
+			wantMsg: "Namespace is required",
+		},
+		{
+			name: "whitespace-only namespace",
+			config: &AgentConfig{
+				Namespace:  "   ",
+				Kubeconfig: badKubeconfig,
+			},
+			wantMsg: "Namespace is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := DeployAndCollect(t.Context(), tt.config)
+			if err == nil {
+				t.Fatal("DeployAndCollect() = nil error, want rejection")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want it to mention %q (a kubeconfig failure here means the "+
+					"input check ran too late)", err, tt.wantMsg)
+			}
+		})
 	}
 }
