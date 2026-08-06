@@ -73,6 +73,14 @@ func TestTimeoutConstants(t *testing.T) {
 		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 10 * time.Second, 60 * time.Second},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
+
+		// ConfigMap read/write budgets — held as distinct constants so the
+		// read path (serializer resolving cm:// URIs) and the write path
+		// (snapshot upload, which needs headroom for rate-limiter backoff)
+		// can move independently. Same value today; range guards a bad
+		// dependency bump from silently making either wildly short or long.
+		{"ConfigMapReadTimeout", ConfigMapReadTimeout, 10 * time.Second, 60 * time.Second},
+		{"ConfigMapWriteTimeout", ConfigMapWriteTimeout, 10 * time.Second, 60 * time.Second},
 	}
 
 	for _, tt := range tests {

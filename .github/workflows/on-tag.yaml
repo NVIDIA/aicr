@@ -811,6 +811,173 @@ jobs:
   # =============================================================================
   # Notify: Post release announcement to Slack
   # =============================================================================
+  # Source: attach the aiperf-bench third-party source as an OCI 1.1 referrer
+  # =============================================================================
+  #
+  # NVIDIA's container policy requires the source of every third-party
+  # open-source component added on top of an approved base image to be
+  # retrievable by whoever pulls that image, regardless of license. This is a
+  # separate obligation from attribution (THIRD_PARTY_NOTICES.md) and is not
+  # satisfied by it.
+  #
+  # Only aiperf-bench needs this. The six Go images vendor their dependencies,
+  # so the GitHub release source archive for this tag already carries the
+  # complete source of every module compiled into them.
+  #
+  # A referrer rather than a layer in the image: the sdists are ~250 MB, which
+  # would otherwise be paid on every benchmark pod pull forever for data nothing
+  # reads at runtime. OSRB confirmed the referrers API is acceptable provided
+  # retrieval is documented (docs/integrator/supply-chain-verification.md).
+  #
+  # Runs against the resolved candidate digest, not a tag: a referrer binds to
+  # one digest, so attaching to a moving tag would leave later builds
+  # unreferenced.
+  #
+  # Deliberately NOT part of release-check, and deliberately after publish.
+  # Attaching depends on PyPI serving 129 sdists, which is an uncontrolled
+  # third party on the critical path of a release. Gating on it converts a PyPI
+  # blip, or a yanked package version, into a failed release and a release-day
+  # fire drill. Nothing is lost by attaching afterwards: a referrer binds to the
+  # image digest, and promotion does not change the digest, so the artifact
+  # lands on exactly the same subject either way. A failure here is re-runnable
+  # as a single job rather than requiring the tag to be recut.
+  #
+  # Gated on resolve-candidates and publish succeeding: there is no image to
+  # attach to otherwise. The job itself fails loudly if the attach, the
+  # signature, or the discoverability check does not succeed.
+  attach-source:
+    name: Attach Third-Party Source
+    runs-on: ubuntu-latest
+    needs: [detect, resolve-candidates, publish]
+    if: needs.resolve-candidates.result == 'success' && needs.publish.result == 'success'
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # packages: write to push the referrer to ghcr.io alongside the image.
+      packages: write
+      # id-token: write for keyless cosign signing of the referrer. oras attach
+      # produces an unsigned artifact, and anyone with push access could attach a
+      # second one carrying the same artifactType; signing lets a consumer tell
+      # ours apart rather than trusting whatever the type filter returns.
+      id-token: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d  # v2.0.1
+        with:
+          version: ${{ steps.versions.outputs.oras }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          cosign-release: ${{ steps.versions.outputs.cosign }}
+
+      - name: Build and attach source archive
+        id: attach
+        env:
+          DIGEST_MAP: ${{ needs.resolve-candidates.outputs.digest_map }}
+        run: |
+          set -euo pipefail
+          digest="$(jq -er '."aiperf-bench"' <<<"${DIGEST_MAP}")"
+          image="ghcr.io/nvidia/aicr-validators/aiperf-bench@${digest}"
+          # Skip if a source referrer is already attached to this digest.
+          # `oras attach` stamps org.opencontainers.image.created into the
+          # manifest, so re-running would push a NEW manifest digest and leave
+          # two referrers of the same artifactType on one image. A consumer
+          # selecting by type could then not tell which is ours -- reintroducing,
+          # on the deliberately re-runnable path, exactly the ambiguity the
+          # signature exists to remove.
+          # Reuse an existing referrer rather than attaching a second one:
+          # `oras attach` stamps org.opencontainers.image.created, so a re-run
+          # would push a new manifest digest and leave two referrers of the same
+          # artifactType on one image, which a consumer could not disambiguate.
+          #
+          # Crucially this does NOT skip signing. If a previous run attached and
+          # then failed before signing, the digest carries an unsigned referrer;
+          # skipping here would make every re-run skip the signature too and
+          # fail verification forever, contradicting this job's re-runnable
+          # recovery. Reusing the digest lets a re-run finish the interrupted
+          # attach-then-sign sequence instead of wedging on it.
+          existing="$(oras discover --format json "${image}" \
+            | jq -r '[.referrers[]? | select(.artifactType
+                     == "application/vnd.nvidia.aicr.source.v1+tar")
+                     | .digest] | first // ""')"
+          if [[ -n "${existing}" ]]; then
+            echo "Source referrer already attached (${existing}); reusing it and re-signing."
+            echo "referrer=${existing}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Attaching third-party source to ${image}"
+          # The tool prints the referrer manifest digest on stdout; everything
+          # else goes to stderr.
+          referrer="$(python3 tools/generate-aiperf-source --attach "${image}")"
+          if [[ ! "${referrer}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::did not receive a referrer digest from the attach step"
+            exit 1
+          fi
+          echo "referrer=${referrer}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign the source referrer
+        env:
+          REFERRER: ${{ steps.attach.outputs.referrer }}
+        # Signed for the same reason every other referrer AICR publishes is:
+        # the artifact is otherwise unauthenticated, and a consumer selecting by
+        # artifactType alone cannot distinguish ours from one an attacker with
+        # push access attached beside it (CWE-345). Signing the referrer's own
+        # digest is what makes the documented retrieval verifiable.
+        run: |
+          set -euo pipefail
+          cosign sign --yes \
+            "ghcr.io/nvidia/aicr-validators/aiperf-bench@${REFERRER}"
+
+      - name: Verify the referrer is retrievable
+        env:
+          DIGEST_MAP: ${{ needs.resolve-candidates.outputs.digest_map }}
+        # Attaching is not the same as being findable. ghcr.io has no referrers
+        # API and serves these through the spec's tag fallback, so confirm a
+        # client can actually discover the artifact before the release proceeds.
+        run: |
+          set -euo pipefail
+          digest="$(jq -er '."aiperf-bench"' <<<"${DIGEST_MAP}")"
+          image="ghcr.io/nvidia/aicr-validators/aiperf-bench@${digest}"
+          found="$(oras discover --format json "${image}" \
+            | jq -r '[.referrers[]? | select(.artifactType
+                     == "application/vnd.nvidia.aicr.source.v1+tar")] | length')"
+          # Exactly one, not at least one. Two referrers of the same type leave
+          # a consumer unable to tell which is authoritative, and `>= 1` would
+          # hide that rather than catch it.
+          if [[ "${found}" -ne 1 ]]; then
+            echo "::error::expected exactly 1 source referrer on ${image}, found ${found}"
+            exit 1
+          fi
+
+          # Discoverable is not the same as verifiable. Confirm the signature we
+          # just created actually resolves, so a silently-failed sign cannot ship
+          # an artifact the documented retrieval will then reject.
+          referrer="$(oras discover --format json "${image}" \
+            | jq -r '.referrers[] | select(.artifactType
+                     == "application/vnd.nvidia.aicr.source.v1+tar") | .digest')"
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity \
+              "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/on-tag.yaml@${GITHUB_REF}" \
+            "ghcr.io/nvidia/aicr-validators/aiperf-bench@${referrer}" >/dev/null
+
+          echo "Source referrer discoverable and signature verified on ${image}"
+
+  # =============================================================================
 
   notify:
     name: Slack Notification
@@ -846,7 +1013,23 @@ jobs:
   summary:
     name: Release Summary
     runs-on: ubuntu-latest
-    needs: [detect, tests, build-ko, build-docker, build-gate, docker-manifest, resolve-candidates, image-vuln-scan, attest, release-check, promote-images, publish, publish-homebrew, deploy, notify]
+    needs:
+      - detect
+      - tests
+      - build-ko
+      - build-docker
+      - build-gate
+      - docker-manifest
+      - resolve-candidates
+      - image-vuln-scan
+      - attest
+      - attach-source
+      - release-check
+      - promote-images
+      - publish
+      - publish-homebrew
+      - deploy
+      - notify
     if: always()
     timeout-minutes: 5
     permissions:
@@ -868,6 +1051,11 @@ jobs:
           HOMEBREW: ${{ needs.publish-homebrew.result }}
           DEPLOY: ${{ needs.deploy.result }}
           NOTIFY: ${{ needs.notify.result }}
+          # Non-gating by design (see the attach-source job), so a failure here
+          # does not red the release. It still reds its own job, but the summary
+          # is where the release outcome is read as a whole, and a missing row
+          # would leave "did the source publish?" unanswered there.
+          ATTACH_SOURCE: ${{ needs.attach-source.result }}
           TAG: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
           IS_PRERELEASE: ${{ needs.detect.outputs.is_prerelease }}
@@ -892,6 +1080,7 @@ jobs:
             echo "| Release Check | ${RELEASE_CHECK} |"
             echo "| Image Promotion | ${PROMOTE} |"
             echo "| Publish | ${PUBLISH} |"
+            echo "| Third-Party Source | ${ATTACH_SOURCE} |"
             echo "| Homebrew | ${HOMEBREW} |"
             echo "| Deploy | ${DEPLOY} |"
             echo "| Slack Notification | ${NOTIFY} |"

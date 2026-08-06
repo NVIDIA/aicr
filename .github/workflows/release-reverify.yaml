@@ -1,0 +1,780 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Daily re-verification of the latest published release's Sigstore artifacts
+# (NVIDIA/aicr#1461, part of the supply-chain epic #1149).
+#
+# WHAT THIS COVERS THAT rekor-monitor.yaml DOES NOT. The Rekor monitor proves the
+# transparency LOG is sound (append-only, no unexplained entries under the release
+# identity). It says nothing about whether a given release actually SHIPPED the
+# artifacts that chain to that log. A signing-side upload that silently failed or
+# was skipped -- goreleaser's post-hook exiting 0 without writing a bundle, an
+# asset that never made it onto the GitHub Release -- leaves a published release
+# whose provenance cannot be reconstructed by a consumer, and nothing in the log
+# is wrong. This workflow is the consumer's-eye check: every day it resolves the
+# latest release and runs the SHIPPED verification commands against it, exactly as
+# documented in docs/integrator/supply-chain-verification.md.
+#
+# WHAT IT VERIFIES (all release assets of the latest non-draft, non-prerelease
+# GitHub Release):
+#   - aicr_<version>_linux_amd64.tar.gz against aicr_checksums.txt, then the
+#     binary's SLSA provenance bundle (aicr-attestation.sigstore.json, shipped
+#     inside the archive) with `cosign verify-blob-attestation` pinned to
+#     on-tag.yaml@refs/tags/<exact tag>. This is delegated wholesale to the
+#     .github/actions/install-aicr-release composite, which already does the
+#     download, checksum, extract, exact-tag identity pinning, 3-attempt retry
+#     and fail-closed-on-missing-attestation.
+#   - recipe-catalog.sigstore.json (a loose release asset, deliberately NOT
+#     covered by aicr_checksums.txt) via `aicr recipe verify-catalog`, run with
+#     the released binary the step above just verified. This is the only check
+#     that proves the SHIPPED binary's embedded registry.yaml +
+#     validators/catalog.yaml still digest to what the release signed.
+#   - every aicr*/aicrd* linux/amd64 SPDX SBOM asset and its sibling
+#     <asset>.sigstore.json attestation bundle, again with
+#     `cosign verify-blob-attestation`. Gated behind SBOM_SIGNING_FLOOR: releases
+#     at or before that tag predate SBOM signing (NVIDIA/aicr#1957) and
+#     legitimately ship unsigned SBOMs; every release after it MUST ship a bundle
+#     per SBOM, and a missing one is a finding.
+#
+# WHAT IT DELIBERATELY DOES NOT VERIFY:
+#   - `aicr verify` (bundle attestation). A deployment bundle is produced on
+#     demand by a user (`aicr bundle --attest`); no bundle is a release asset, so
+#     there is nothing released to re-verify. Generating one here would test the
+#     signing path, not the retrievability of a published artifact.
+#   - The container images' OCI referrer attestations (SBOM / OpenVEX / SLSA
+#     provenance, NVIDIA/aicr#1982). Those live in ghcr.io's referrer store, a
+#     different system with a different retention and GC model from GitHub
+#     Releases, and re-verifying all seven images x three predicate kinds would
+#     add ~21 registry round-trips per run -- multiplying this job's operational
+#     noise against the one signal it exists to keep crisp. The images are
+#     already pulled and scanned weekly by vuln-scan-images.yaml. A sibling
+#     registry-side re-verification (which would need `gh attestation verify
+#     --bundle-from-oci` so it reads the REGISTRY copy rather than GitHub's
+#     attestations API) is tracked separately; see docs/contributor/maintaining.md.
+#   - Rekor entry liveness by log index. `cosign verify-blob-attestation` verifies
+#     a self-contained bundle: the inclusion proof and RFC3161 timestamp travel
+#     inside it and are checked against the live Sigstore TUF trust root, so a
+#     pass proves the bundle is retrievable and cryptographically sound, not that
+#     Rekor would still serve that entry by index. Re-fetching by index is a
+#     documented residual, also in maintaining.md.
+#
+# CLASSIFICATION (same vocabulary and exit codes as rekor-monitor.yaml, so the
+# two workflows triage identically):
+#   - clean      -> exit 0
+#   - tamper     -> exit 1, security: a released artifact is MISSING, or it fails
+#                   verification against a Sigstore that answered. Opens a
+#                   TAG-SCOPED security tracking issue mentioning the maintainers
+#                   AND posts a Slack alert, exactly as rekor-monitor does.
+#   - operational-> exit 3, infrastructure: Sigstore/GitHub-API/network trouble.
+#                   Pages no one. The job goes red; only three consecutive failed
+#                   scheduled runs open a calm `area/ci` degraded issue.
+#
+# WHY AN INFRA FAILURE CANNOT MASQUERADE AS A MISSING ENTRY. `tamper` is asserted
+# on POSITIVE evidence only, never as a fallback:
+#   1. "Missing" means the asset name is absent from the release's own asset
+#      inventory (a GitHub API read that either succeeded or aborted the step), or
+#      the attestation is absent from an archive we successfully downloaded and
+#      checksummed. Neither can be produced by a network failure -- a failed read
+#      aborts before any comparison, and an inventory file that is unreadable at
+#      all demotes and stops rather than reporting every asset as missing.
+#   2. A failed cryptographic verification is promoted to `tamper` only when
+#      EVERY demotion test declines it:
+#        - the command was not killed (exit 124 from `timeout`, or 137 from a
+#          SIGKILL/OOM);
+#        - it produced a non-empty, readable log (`grep` declines to match an
+#          empty file and exits 2 on an unreadable one, either of which would
+#          otherwise sail through the pattern guard);
+#        - every Sigstore liveness probe answered;
+#        - the captured output carries no transport/outage signature.
+#      Any one of them demotes to `operational`. All are demote-only, so the
+#      failure mode is a real finding reported as operational (still a red job,
+#      still a degraded issue after three days, and it re-fires tomorrow) --
+#      never the reverse.
+#   3. Any failure BEFORE the classifying step runs (checkout, release
+#      resolution, load-versions) leaves the classification output empty, which
+#      the issue gates treat as operational by construction.
+#   4. Every unguarded command whose failure could fall THROUGH into a branch
+#      that reaches `security` has been guarded, because the demotion tests
+#      above cannot save a path that never reaches them.
+#
+# TRIAGE:
+#   - Security issue (tamper): confirm by hand with the commands in
+#     docs/integrator/supply-chain-verification.md against the named tag. A
+#     genuinely missing asset means the release must be re-cut or the asset
+#     re-uploaded and re-signed; a verification failure on a present asset means
+#     the artifact does not match what the release signed -- treat as tampering
+#     and begin incident response. The issue title carries the tag, and a clean
+#     run only closes the alert for the tag it actually verified: once a newer
+#     release ships, the older tag is never re-checked, so its issue must be
+#     closed by hand after remediation.
+#   - Degraded issue (operational, 3+ consecutive days): Sigstore or the GitHub
+#     API has been unreachable. No action unless it persists past an upstream
+#     incident window.
+
+name: Release Re-Verification
+
+on:
+  schedule:
+    - cron: "41 13 * * *"  # daily, offset away from the release and UAT crons
+  # Also manual: GitHub disables scheduled workflows after 60 days of repository
+  # inactivity, and a dispatch re-arms the schedule as well as allowing an
+  # on-demand run after a release.
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: release-reverify
+  cancel-in-progress: false
+
+env:
+  ALERT_TITLE: "Release re-verification: a released artifact is missing or does not verify"
+  DEGRADED_TITLE: "Release re-verification: degraded"
+  # Maintainers group notified on an alert (GitHub team; issues cannot be
+  # assigned to a team, so it is @-mentioned in the issue body instead).
+  MAINTAINERS_TEAM: "@nvidia/aicr-maintainer"
+  # Releases at or before this tag predate signed SBOM assets (NVIDIA/aicr#1957)
+  # and ship SPDX documents with no sibling .sigstore.json. From the next release
+  # onward a missing bundle is a finding. Raise this ONLY to correct history.
+  SBOM_SIGNING_FLOOR: v0.18.0
+  # Liveness probes for the Sigstore services every verification depends on,
+  # space separated. This is the outer guard that keeps an outage from reading as
+  # a finding, and ALL of them must answer: probing only the TUF CDN would stay
+  # green through a Fulcio outage. Fulcio has a stable hostname; Rekor v2 shard
+  # hostnames rotate (log2025-1 -> log2026-1 -> ...), so a fixed shard URL is
+  # deliberately NOT probed. A probe that broke permanently would silently
+  # disable paging, so each failure is logged by name (see sigstore_reachable).
+  SIGSTORE_PROBE_URLS: >-
+    https://tuf-repo-cdn.sigstore.dev/1.root.json
+    https://fulcio.sigstore.dev/api/v2/trustBundle
+  # The binaries whose linux/amd64 SPDX SBOM every post-floor release must
+  # publish, each with a sibling .sigstore.json bundle. The expected set is
+  # derived from the TAG, never from the release's own inventory: deriving it
+  # from the artifact under test would make only a zero-SBOM release a finding,
+  # so deleting one of the two would leave the loop verifying the survivor and
+  # reporting clean. Authoritative list: expected_release_asset_names() in
+  # .github/scripts/release-images.sh -- keep this linux/amd64 subset in sync.
+  EXPECTED_SBOM_BINARIES: "aicr aicrd"
+  # Workspace for downloads and captured verification logs, kept out of ./_rel
+  # (which belongs to the install-aicr-release action).
+  WORK_DIR: ./_reverify
+  # Where install-aicr-release leaves its download and its installed binary.
+  REL_DIR: ./_rel
+  AICR_BIN: ./aicr
+
+jobs:
+  reverify:
+    name: Re-verify the latest release's Sigstore artifacts
+    runs-on: ubuntu-latest
+    # Sized from the stacked per-call bounds, because a job that hits
+    # timeout-minutes is CANCELLED, and a cancelled job skips every
+    # `if: failure()` step: it would go red with no degraded issue and still
+    # count against the streak. Worst case, all sequential:
+    #   binary cosign re-run          120s
+    #   catalog download              120s
+    #   catalog verify                120s
+    #   4 SBOMs x (120s dl + 120s)    960s   (aicr + aicrd today, sized for 4)
+    #   6 x classify_failure probes   840s   (2 URLs x 2 attempts x 20s + 5s backoff)
+    #   subtotal                     2160s = 36m
+    #   install-aicr-release          ~10m   (its gh/cosign calls are unbounded;
+    #                                         3 cosign attempts + 15s backoff)
+    #   checkout + load-versions       ~2m
+    #   issue/Slack bookkeeping        ~3m
+    #   total                         ~51m
+    # 60 leaves headroom without letting a wedged run occupy a runner for hours.
+    timeout-minutes: 60
+    permissions:
+      contents: read  # checkout, plus `gh release download` for the assets
+      actions: read   # read this workflow's run history for the failure streak
+      issues: write   # open/close the alert and degraded issues
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the latest release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # /releases/latest excludes drafts and prereleases, so this is the
+          # release a `curl .../releases/latest` consumer would actually install
+          # -- the same resolution documented in supply-chain-verification.md.
+          # gh-api-retry.sh publishes release.json only on success and removes it
+          # on total failure, so a GitHub API outage aborts this step (and, with
+          # no classification emitted, is treated as operational downstream)
+          # rather than falling through to an empty asset inventory that would
+          # read as "every asset is missing".
+          .github/scripts/gh-api-retry.sh release.json "repos/${GITHUB_REPOSITORY}/releases/latest"
+          tag="$(jq -r '.tag_name // empty' release.json)"
+          # Validate before the tag reaches a regexp or a filename. Same shape
+          # install-aicr-release enforces on its input.
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.]*)?$ ]]; then
+            echo "::error::/releases/latest returned '${tag}', which is not a release tag like v1.2.3." >&2
+            exit 1
+          fi
+          jq -r '.assets[].name' release.json > release-assets.txt
+          {
+            echo "tag=${tag}"
+            echo "assets_file=${PWD}/release-assets.txt"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved latest release ${tag} with $(wc -l < release-assets.txt) assets."
+          {
+            echo "### Release re-verification"
+            echo
+            echo "Target: [\`${tag}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${tag})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      # The authoritative binary check. Reused rather than reimplemented: this
+      # action already downloads the archive and checksums, verifies the tarball
+      # against the published checksum, extracts the SLSA provenance bundle,
+      # fails closed when the bundle is absent, and runs
+      # `cosign verify-blob-attestation` pinned to on-tag.yaml at the EXACT tag
+      # with a 3-attempt retry. continue-on-error hands its outcome to the
+      # classifying step below instead of ending the job with an unclassified
+      # red, which would page nobody but also file nothing.
+      - name: Verify the released aicr binary provenance
+        id: install
+        continue-on-error: true
+        uses: ./.github/actions/install-aicr-release
+        with:
+          aicr-version: ${{ steps.release.outputs.tag }}
+          cosign_version: ${{ steps.versions.outputs.cosign }}
+
+      - name: Re-verify release artifacts and classify
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_ASSETS: ${{ steps.release.outputs.assets_file }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+        run: |
+          # This step must run EVERY check, aggregate the findings, and exit with
+          # the classified status, so errexit has to be off. It is not off by
+          # default: with no `shell:` key GitHub invokes this block as
+          # `bash -e {0}`, and `set -uo pipefail` does not clear an inherited
+          # -e. Turn it off explicitly, as rekor-monitor.yaml does. Without
+          # this, any unguarded top-level failure aborts the step before
+          # `finish` runs, and a `tamper` already recorded earlier in the same
+          # run never reaches GITHUB_OUTPUT: the gates then read the empty
+          # classification as operational and the finding never pages.
+          set -uo pipefail
+          set +e
+
+          mkdir -p "${WORK_DIR}"
+          classification=clean
+
+          # security() records POSITIVE evidence that a released artifact is
+          # missing or does not verify. It is the only path to a page, and it is
+          # never reachable from a failed network call.
+          security() {
+            echo "::error::$1" >&2
+            classification=tamper
+          }
+
+          # operational() records infrastructure trouble. It never overwrites a
+          # security finding: a real finding that coincides with an outage still
+          # pages.
+          operational() {
+            echo "::warning::$1" >&2
+            [ "${classification}" = "tamper" ] || classification=operational
+          }
+
+          # finish() publishes the verdict and exits with the classified status.
+          # Defined up front so an early abort (an unreadable asset inventory)
+          # still emits an explicit classification instead of relying on the
+          # gates' treat-empty-as-operational fallback.
+          finish() {
+            {
+              echo ""
+              echo "Classification: \`${classification}\`"
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            # Machine-readable line for the log, mirroring tools/rekor-monitor.
+            echo "CLASSIFICATION=${classification}"
+            echo "classification=${classification}" >> "${GITHUB_OUTPUT}"
+            case "${classification}" in
+              clean) exit 0 ;;
+              tamper) exit 1 ;;
+              *) exit 3 ;;
+            esac
+          }
+
+          # sigstore_reachable is guard #1. Every verification here depends on
+          # Sigstore, so if any probed endpoint does not answer, a failed
+          # verification says nothing about the artifact. ALL probes must answer:
+          # a Fulcio-only outage has to demote too, which a TUF-only probe would
+          # miss. Demote-only, so the cost of a probe that breaks permanently is
+          # silently disabled paging; each failure is therefore named in the log,
+          # and a persistently red job still opens the degraded issue.
+          sigstore_reachable() {
+            local url attempt reached
+            local -a urls
+            read -r -a urls <<< "${SIGSTORE_PROBE_URLS}"
+            for url in "${urls[@]}"; do
+              reached=0
+              for attempt in 1 2; do
+                if timeout --foreground 20s curl -fsS -o /dev/null "${url}"; then
+                  reached=1
+                  break
+                fi
+                [ "${attempt}" -eq 2 ] || sleep 5
+              done
+              if [ "${reached}" -ne 1 ]; then
+                echo "Sigstore liveness probe failed for ${url}" >&2
+                return 1
+              fi
+            done
+            return 0
+          }
+
+          # infra_shaped is guard #2: does the captured failure output carry a
+          # transport or upstream-outage signature? Demote-only by construction
+          # -- a match can turn a would-be finding into operational, never the
+          # reverse -- so a broad pattern set is the safe direction.
+          #
+          # A log we cannot READ is not evidence of anything. grep exits 2 on a
+          # missing or unreadable file, which is indistinguishable from "no
+          # pattern matched" and would otherwise pass this guard straight through
+          # to security. That is reachable: if the `> <log>` redirect itself fails
+          # (a full disk, an unwritable WORK_DIR) the command never runs and no
+          # readable log is produced.
+          infra_shaped() {
+            [ -r "$1" ] || return 0
+            local patterns
+            patterns='timed? ?out|deadline exceeded|connection (refused|reset)|no such host'
+            patterns="${patterns}|i/o timeout|dial tcp|network is unreachable|tls handshake"
+            patterns="${patterns}|unexpected eof|temporary failure|too many requests|rate limit"
+            patterns="${patterns}|status (429|5[0-9][0-9])|service unavailable|bad gateway"
+            patterns="${patterns}|gateway time-?out|trusted root|tuf|error fetching"
+            patterns="${patterns}|could not (fetch|download|reach)|failed to (fetch|download)"
+            grep -qiE "${patterns}" "$1"
+          }
+
+          # classify_failure turns a failed cryptographic verification into a
+          # classification. Every demotion test below must decline before tamper
+          # is asserted; anything else is operational. Arguments: description,
+          # captured log, exit status of the failed command.
+          classify_failure() {
+            local what="$1" log="$2" status="${3:-0}"
+            # A `timeout --foreground` kill (124) or a SIGKILL (137, typically
+            # the OOM killer) is infrastructure by definition, and both usually
+            # leave nothing useful behind to pattern match.
+            if [ "${status}" -eq 124 ] || [ "${status}" -eq 137 ]; then
+              operational "${what} was killed (exit ${status}: timeout or OOM); treating as infrastructure, not a finding"
+              return
+            fi
+            # An EMPTY log is not evidence either. grep declines to match an
+            # empty file, so without this the run would pass guard #2 and reach
+            # security on, for example, a killed or OOMed cosign that wrote
+            # nothing to stderr.
+            if [ ! -s "${log}" ]; then
+              operational "${what} failed without producing any output; treating as infrastructure, not a finding"
+              return
+            fi
+            if ! sigstore_reachable; then
+              operational "${what} failed while Sigstore was unreachable; treating as infrastructure, not a finding"
+              return
+            fi
+            if infra_shaped "${log}"; then
+              operational "${what} failed with a transport/outage signature in its output; treating as infrastructure, not a finding"
+              return
+            fi
+            security "${what} failed against a reachable Sigstore: the released artifact does not verify"
+          }
+
+          have_asset() { grep -Fxq "$1" "${RELEASE_ASSETS}"; }
+
+          # (0) The asset inventory is the evidence base for every "missing"
+          # finding below. grep exits 2 on an unreadable file, which neither
+          # have_asset nor the SBOM enumeration can tell from "not present", so
+          # an unreadable inventory would report every required asset as missing
+          # and page. Demote and stop instead.
+          if [ ! -r "${RELEASE_ASSETS}" ]; then
+            operational "the release asset inventory (${RELEASE_ASSETS}) is missing or unreadable; treating as infrastructure"
+            finish
+          fi
+
+          version="${TAG#v}"
+          archive="aicr_${version}_linux_amd64.tar.gz"
+
+          # Pin provenance to the release workflow AND the exact tag, matching
+          # install-aicr-release: a bundle attested for one release must not
+          # satisfy another. Escape the tag's dots so they match literally.
+          identity_tag="${TAG//./\\.}"
+          identity_re="^https://github\\.com/${REPO}/\\.github/workflows/on-tag\\.yaml@refs/tags/${identity_tag}$"
+
+          # (1) Inventory. Absence from the release's own asset list is the
+          # cleanest possible "the upload silently failed" signal, and it is
+          # decided from an API read that already succeeded.
+          for required in "${archive}" "aicr_checksums.txt" "recipe-catalog.sigstore.json"; do
+            if have_asset "${required}"; then
+              echo "asset present: ${required}"
+            else
+              security "release ${TAG} does not publish ${required}; a consumer cannot verify this release"
+            fi
+          done
+
+          # (2) Binary provenance. install-aicr-release is authoritative; this
+          # only classifies its outcome.
+          if [ "${INSTALL_OUTCOME}" = "success" ]; then
+            echo "binary provenance verified for ${TAG}"
+          elif [ ! -f "${REL_DIR}/${archive}" ]; then
+            operational "the released archive never downloaded; treating as infrastructure"
+          elif ! tar -tzf "${REL_DIR}/${archive}" > "${WORK_DIR}/archive-members.txt" 2>/dev/null; then
+            # Listed into a file rather than piped into `grep -q`: under
+            # `pipefail`, grep's early exit can SIGPIPE tar and turn a PRESENT
+            # attestation into a non-zero pipeline, i.e. a false finding.
+            # A tarball that will not list at all is a truncated or corrupt
+            # download, not a publishing failure.
+            operational "the downloaded archive could not be listed; treating as infrastructure"
+          elif ! grep -qx 'aicr-attestation.sigstore.json' "${WORK_DIR}/archive-members.txt"; then
+            security "release ${TAG} ships no binary attestation (aicr-attestation.sigstore.json) inside ${archive}"
+          elif ! command -v cosign > /dev/null 2>&1; then
+            operational "cosign was never installed; treating as infrastructure"
+          else
+            # Re-run BOTH of the action's sub-checks, capturing their output so
+            # the demotion tests have something to read. Nothing here parses the
+            # action's own log, so reproducing its checks is the only way to know
+            # WHICH one failed; presuming "cosign" would misread a checksum
+            # mismatch (see the checksum re-check below). The action retried
+            # three times, so a pass here means its failure was transient.
+            # Guarded: errexit is off in this step (see `set +e` above), so an
+            # unguarded failure here would fall through to cosign, which then
+            # fails on a missing bundle with a message no infra_shaped pattern
+            # matches, producing a security page for what is only a full disk or
+            # a permissions fault on WORK_DIR. Every sibling branch demotes, and
+            # so must this one.
+            if ! tar -xzf "${REL_DIR}/${archive}" -C "${WORK_DIR}" \
+                aicr aicr-attestation.sigstore.json 2>/dev/null; then
+              operational "the archive listed but could not be extracted; treating as infrastructure"
+            elif timeout --foreground 120s cosign verify-blob-attestation \
+                --bundle "${WORK_DIR}/aicr-attestation.sigstore.json" \
+                --type https://slsa.dev/provenance/v1 \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+                --certificate-identity-regexp "${identity_re}" \
+                "${WORK_DIR}/aicr" > "${WORK_DIR}/binary-verify.log" 2>&1; then
+              # Provenance passing does NOT clear the checksums manifest: the
+              # attestation binds the BINARY, while aicr_checksums.txt covers the
+              # ARCHIVE. The action fails at its own `sha256sum -c` before it
+              # ever reaches cosign, so without this re-check a manifest that
+              # stopped matching an otherwise-valid archive would report
+              # "transient" every single day, while every consumer following the
+              # documented checksum flow fails every single time.
+              #
+              # Ordered after cosign deliberately: a truncated or corrupt
+              # download also fails a checksum, but such an archive would have
+              # failed to list, or produced a binary the attestation rejects,
+              # further up this chain. Reaching here means the bytes are intact,
+              # so a mismatch is the published manifest disagreeing with the
+              # published archive.
+              if [ ! -r "${REL_DIR}/aicr_checksums.txt" ]; then
+                operational "the checksums manifest is not on disk to re-check; treating as infrastructure"
+              elif (cd "${REL_DIR}" && grep " ${archive}\$" aicr_checksums.txt | sha256sum -c -) \
+                  > "${WORK_DIR}/checksum-verify.log" 2>&1; then
+                operational "binary provenance and checksum verified on re-run after the install action failed; treating as a transient failure"
+              else
+                status=$?
+                cat "${WORK_DIR}/checksum-verify.log" >&2 || true
+                classify_failure "checksum verification of ${archive} for ${TAG}" "${WORK_DIR}/checksum-verify.log" "${status}"
+              fi
+            else
+              # $? is the elif condition's status and MUST be captured before any
+              # other command runs, so timeout's 124 (or a 137 SIGKILL) survives
+              # to classify_failure.
+              status=$?
+              cat "${WORK_DIR}/binary-verify.log" >&2 || true
+              classify_failure "binary provenance verification for ${TAG}" "${WORK_DIR}/binary-verify.log" "${status}"
+            fi
+          fi
+
+          # (3) Signed recipe catalog. The loose asset is the path
+          # cli-reference.md tells users to curl, so that is the copy verified
+          # here; the archive ships an identical bundle.
+          if have_asset "recipe-catalog.sigstore.json"; then
+            if ! timeout --foreground 120s gh release download "${TAG}" --repo "${REPO}" \
+                --pattern 'recipe-catalog.sigstore.json' --dir "${WORK_DIR}" --clobber; then
+              operational "downloading recipe-catalog.sigstore.json failed; treating as infrastructure"
+            elif [ ! -x "${AICR_BIN}" ]; then
+              operational "no verified aicr binary is available to verify the recipe catalog"
+            elif timeout --foreground 120s "${AICR_BIN}" recipe verify-catalog \
+                "${WORK_DIR}/recipe-catalog.sigstore.json" > "${WORK_DIR}/catalog-verify.log" 2>&1; then
+              cat "${WORK_DIR}/catalog-verify.log"
+            else
+              status=$?
+              cat "${WORK_DIR}/catalog-verify.log" >&2 || true
+              classify_failure "recipe catalog verification for ${TAG}" "${WORK_DIR}/catalog-verify.log" "${status}"
+            fi
+          fi
+
+          # (4) Signed SBOM assets, for releases after the signing floor only.
+          # sort -V puts the floor first when TAG is newer; equal tags are
+          # excluded explicitly so the floor release itself stays exempt.
+          #
+          # Guarded: an unavailable or failing `sort -V` leaves newest empty, and
+          # the ordering test below would then read as "at or before the floor"
+          # and skip every SBOM check while logging that it did so on purpose.
+          # That direction is fail-OPEN (silent under-verification), the opposite
+          # of a false page but still wrong, so it is demoted explicitly.
+          newest=""
+          if ! newest="$(printf '%s\n%s\n' "${SBOM_SIGNING_FLOOR}" "${TAG}" | sort -V | tail -n1)" \
+              || [ -z "${newest}" ]; then
+            operational "could not order ${TAG} against the SBOM signing floor ${SBOM_SIGNING_FLOOR}; treating as infrastructure"
+          elif [ "${TAG}" = "${SBOM_SIGNING_FLOOR}" ] || [ "${newest}" != "${TAG}" ]; then
+            echo "release ${TAG} is at or before the SBOM signing floor ${SBOM_SIGNING_FLOOR}; SBOM bundles not expected"
+          else
+            # Derived from the tag, so a mandatory SBOM that was never uploaded
+            # is a finding rather than an entry that simply is not iterated.
+            read -r -a sbom_binaries <<< "${EXPECTED_SBOM_BINARIES}"
+            expected_sboms=""
+            for binary in "${sbom_binaries[@]}"; do
+              expected_sboms+="${binary}_${version}_linux_amd64.sbom.json"$'\n'
+            done
+            expected_sboms="${expected_sboms%$'\n'}"
+            if [ -z "${expected_sboms}" ]; then
+              operational "EXPECTED_SBOM_BINARIES is empty; no SBOM subjects to check"
+            fi
+            while IFS= read -r sbom; do
+              [ -n "${sbom}" ] || continue
+              bundle="${sbom}.sigstore.json"
+              if ! have_asset "${sbom}"; then
+                security "release ${TAG} does not publish the mandatory SBOM ${sbom}"
+              elif ! have_asset "${bundle}"; then
+                security "release ${TAG} ships ${sbom} with no attestation bundle (${bundle})"
+              elif ! command -v cosign > /dev/null 2>&1; then
+                operational "cosign is unavailable; cannot verify ${sbom}"
+              # Both commands read stdin from the loop's here-string unless it is
+              # redirected. A child that consumes stdin would eat the remaining
+              # SBOM names, silently skipping them with no finding, which is the
+              # exact failure mode this job exists to catch.
+              elif ! timeout --foreground 120s gh release download "${TAG}" --repo "${REPO}" \
+                  --pattern "${sbom}" --pattern "${bundle}" --dir "${WORK_DIR}" --clobber < /dev/null; then
+                operational "downloading ${sbom} and its bundle failed; treating as infrastructure"
+              elif timeout --foreground 120s cosign verify-blob-attestation \
+                  --bundle "${WORK_DIR}/${bundle}" \
+                  --type https://slsa.dev/provenance/v1 \
+                  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+                  --certificate-identity-regexp "${identity_re}" \
+                  "${WORK_DIR}/${sbom}" < /dev/null > "${WORK_DIR}/${sbom}.verify.log" 2>&1; then
+                echo "SBOM attestation verified: ${sbom}"
+              else
+                status=$?
+                cat "${WORK_DIR}/${sbom}.verify.log" >&2 || true
+                classify_failure "SBOM attestation verification for ${sbom}" "${WORK_DIR}/${sbom}.verify.log" "${status}"
+              fi
+            done <<< "${expected_sboms}"
+          fi
+
+          finish
+
+      - name: Open security alert issue
+        id: alert_issue
+        if: ${{ failure() && steps.verify.outputs.classification == 'tamper' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # TAG-SCOPED title. The job only ever verifies /releases/latest, so an
+          # unresolved finding for vX must NOT be closed by a later clean run on
+          # vX+1: once vX stops being latest it is never re-checked, and closing
+          # it would silently resolve a live supply-chain finding. This is the
+          # deliberate difference from rekor-monitor, whose alert tracks the
+          # release-agnostic log and so genuinely clears on any clean run.
+          title="${ALERT_TITLE} [${TAG}]"
+          # De-duplicate off a LISTING read, not the search API: search indexing
+          # lags, so a title search can miss an issue this workflow opened
+          # minutes ago and open a duplicate. Bounded retry via the shared helper
+          # because a transient 5xx here would otherwise drop the one
+          # notification this workflow exists to deliver.
+          .github/scripts/gh-api-retry.sh issues.json --paginate \
+            "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100"
+          existing="$(jq -rs --arg t "${title}" \
+            '[.[][] | select(.pull_request == null) | select(.title == $t)] | .[0].html_url // empty' issues.json)"
+          if [ -n "${existing}" ]; then
+            echo "Alert issue already open: ${existing}"
+            echo "url=${existing}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "${MAINTAINERS_TEAM}: daily re-verification of release \`${TAG}\` found a released artifact that is **missing or does not verify** ([run ${GITHUB_RUN_ID}](${run_url}))."
+            echo
+            echo "This is **not** a transparency-log problem (that is \`rekor-monitor.yaml\`). It means a consumer following"
+            echo "\`docs/integrator/supply-chain-verification.md\` against \`${TAG}\` today would be unable to verify what we published."
+            echo
+            echo "The run log names the exact artifact. Confirm by hand against \`${TAG}\`, then:"
+            echo "- **asset absent**: a signing or upload step silently skipped. Re-upload and re-sign the asset, or re-cut the release."
+            echo "- **asset present but fails verification**: the published bytes do not match what the release signed. Treat as tampering and begin incident response."
+            echo
+            echo "Sigstore reachability and the failure output were both checked before this was raised, so an outage alone cannot have produced it."
+            echo
+            echo "**Closing:** this issue auto-closes only while \`${TAG}\` is still the latest release and a later run re-verifies it cleanly."
+            echo "The workflow checks only the latest release, so once a newer release ships, \`${TAG}\` is no longer re-checked and this must be closed by hand after remediation."
+          } > alert-body.md
+          # A renamed or deleted label must not cost us the notification: retry
+          # the labelled create, then fall back to an unlabelled one rather than
+          # aborting the step.
+          url=""
+          for attempt in 1 2 3; do
+            if url="$(gh issue create --repo "${GITHUB_REPOSITORY}" \
+                --title "${title}" \
+                --label "area/security,theme/supply-chain" \
+                --body-file alert-body.md < /dev/null)"; then
+              break
+            fi
+            url=""
+            echo "::warning::gh issue create failed (attempt ${attempt}/3)"
+            [ "${attempt}" -eq 3 ] || sleep $((attempt * 5))
+          done
+          if [ -z "${url}" ]; then
+            if url="$(gh issue create --repo "${GITHUB_REPOSITORY}" \
+                --title "${title}" --body-file alert-body.md < /dev/null)"; then
+              echo "::warning::opened the alert issue without labels; check that area/security and theme/supply-chain still exist"
+            else
+              echo "::error::could not open an alert issue for ${TAG}; Slack is the only remaining channel for this finding" >&2
+              exit 0
+            fi
+          fi
+          echo "Opened alert issue: ${url}"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      # Mirrors rekor-monitor.yaml's "Post Slack alert on security finding": same
+      # SLACK_SERVICE secret, same gate shape (security classification only,
+      # never degraded), same message structure. Bounded with `timeout
+      # --foreground` per repo convention. Compounds with the retry above: the
+      # GitHub issue is no longer the only channel for an incident-grade finding.
+      - name: Post Slack alert on security finding
+        if: ${{ failure() && steps.verify.outputs.classification == 'tamper' }}
+        env:
+          # Slack incoming-webhook path suffix; same secret the release and
+          # rekor-monitor workflows use. Unset in forks, so this no-ops there.
+          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+          ISSUE_URL: ${{ steps.alert_issue.outputs.url }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_SERVICE:-}" ]; then
+            echo "::warning::SLACK_SERVICE not set; skipping Slack notification"
+            exit 0
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # To ping a Slack usergroup, prepend "<!subteam^GROUP_ID> " below.
+          text=":rotating_light: *Release re-verification: tamper signal on ${TAG}*: a released artifact is missing or does not verify."
+          text="${text} <${run_url}|View run>"
+          if [ -n "${ISSUE_URL:-}" ]; then
+            text="${text} · <${ISSUE_URL}|tracking issue>"
+          fi
+          jq -n --arg t "${text}" '{text: $t}' > slack-payload.json
+          timeout --foreground 30s curl -sSf -X POST -H 'Content-type: application/json' \
+            --data @slack-payload.json \
+            "https://hooks.slack.com/services/${SLACK_SERVICE}"
+          echo "Posted Slack alert."
+
+      - name: Open degraded issue if a non-security failure is persistent
+        # Inverse of the security allowlist: every failure that is NOT a
+        # confirmed finding is operational. This deliberately also covers an
+        # EMPTY classification, i.e. a step BEFORE the classifier failed
+        # (checkout, release resolution, load-versions) so nothing was ever
+        # classified. Those are exactly the GitHub-API/network outages the
+        # degraded path exists for. The two gates are mutually exclusive and
+        # together partition every failure() case.
+        if: ${{ failure() && steps.verify.outputs.classification != 'tamper' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Persistence via run history rather than a state file: escalate only
+          # when this run plus the two prior SCHEDULED runs all failed. The API
+          # returns completed runs most-recent-first and excludes this in-progress
+          # run, so the leading run of "failure" conclusions is the streak;
+          # `// length` handles an all-failures window. This is a true streak,
+          # not a failure count: [fail,success,fail] yields 1.
+          #
+          # Only "failure" counts. A `cancelled`, `skipped`, `timed_out` or
+          # `startup_failure` run says nothing about upstream health, and
+          # counting it would open the calm degraded issue before three genuine
+          # operational failures.
+          #
+          # A failed API read leaves the streak at 0 and stays quiet: the read
+          # failing is itself part of the outage being reported, and aborting the
+          # step here would only add a second red without a tracking issue.
+          runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/release-reverify.yaml/runs?event=schedule&status=completed&per_page=3" 2>/dev/null || true)"
+          streak=0
+          if [ -n "${runs_json}" ]; then
+            streak="$(printf '%s' "${runs_json}" \
+              | jq -r '[.workflow_runs[].conclusion] | map(. == "failure") | (index(false) // length)' 2>/dev/null || echo 0)"
+          fi
+          if [ "${streak}" -lt 2 ]; then
+            echo "Operational failure but not yet persistent (prior consecutive failures: ${streak}); staying quiet."
+            exit 0
+          fi
+          existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open \
+            --search "in:title \"${DEGRADED_TITLE}\"" --json title,url \
+            | jq -r --arg t "${DEGRADED_TITLE}" '[.[] | select(.title == $t)] | .[0].url // empty')"
+          if [ -n "${existing}" ]; then
+            echo "Degraded issue already open: ${existing}"
+            exit 0
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "Daily release re-verification has been **unable to complete** for 3+ consecutive scheduled runs (latest: [run ${GITHUB_RUN_ID}](${run_url}))."
+            echo
+            echo "This is an **operational** problem (Sigstore/TUF reachability, the GitHub API, or the release download), **not** a finding:"
+            echo "no released artifact was shown to be missing or unverifiable. No maintainer action is required unless it persists;"
+            echo "the check resumes automatically when upstream recovers."
+            echo
+            echo "This issue auto-closes on the next clean run."
+          } > degraded-body.md
+          gh issue create --repo "${GITHUB_REPOSITORY}" \
+            --title "${DEGRADED_TITLE}" \
+            --label "area/ci" \
+            --body-file degraded-body.md
+
+      - name: Close open issues on success
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # The alert is TAG-SCOPED: a clean run may only close the alert for the
+          # tag it actually verified, never an older tag it did not look at. The
+          # degraded issue tracks the checker's own health rather than a release,
+          # so any clean run legitimately clears it.
+          for title in "${ALERT_TITLE} [${TAG}]" "${DEGRADED_TITLE}"; do
+            # A transient list failure must not flip a clean verification red
+            # (which would also inflate the next run's failure streak); fall back
+            # to an empty list and try again tomorrow.
+            listed="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open \
+              --search "in:title \"${title}\"" --json number,title < /dev/null 2>/dev/null || echo '[]')"
+            # Exact-title filter: GitHub title search is phrase-based, so never
+            # close an issue whose title merely contains the search text.
+            numbers="$(printf '%s' "${listed}" \
+              | jq -r --arg t "${title}" '.[] | select(.title == $t) | .number' 2>/dev/null || true)"
+            while read -r n; do
+              [ -n "$n" ] || continue
+              # Tolerate a per-issue close failure (transient API error, rate
+              # limit, already-closed race): it must not abort the loop or flip a
+              # clean run to failed.
+              gh issue close "$n" --repo "${GITHUB_REPOSITORY}" \
+                --comment "Release re-verification of ${TAG} completed cleanly on run ${GITHUB_RUN_ID}; auto-closing." \
+                < /dev/null || echo "::warning::failed to close issue #${n}"
+            done <<< "${numbers}"
+          done
