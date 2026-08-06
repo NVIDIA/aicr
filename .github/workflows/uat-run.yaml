@@ -44,8 +44,9 @@ run-name: "UAT ${{ inputs.reservation }} ${{ inputs.intent }} @ ${{ inputs.aicr_
 #     recipe criteria.
 #   - lifecycle (nightly|daytime-up|daytime-down) selects the cluster
 #     lifecycle: the nightly provision→CUJ→teardown, the daytime
-#     provision-and-hold (stable lease-tagged name, no teardown), or the
-#     evening teardown of that held daytime cluster.
+#     provision-and-hold (stable lease-tagged name; holds on success, tears
+#     down on failure or cancellation), or the evening teardown of that held
+#     daytime cluster.
 on:
   workflow_dispatch:
     inputs:
@@ -67,7 +68,7 @@ on:
         options: [training, inference]
         default: training
       lifecycle:
-        description: 'Cluster lifecycle. nightly: provision→CUJ→teardown. daytime-up: provision+deploy+HOLD (stable name, no teardown). daytime-down: tear down the held daytime cluster.'
+        description: 'Cluster lifecycle. nightly: provision→CUJ→teardown. daytime-up: stable-named cluster, holds on success, tears down on failure or cancellation. daytime-down: tear down cluster.'
         type: choice
         options: [nightly, daytime-up, daytime-down]
         default: nightly
@@ -179,7 +180,7 @@ jobs:
   # (nested) evidence-ingest GCS WIF.
   run-aws:
     needs: resolve
-    if: needs.resolve.outputs.cloud == 'aws'
+    if: always() && needs.resolve.outputs.cloud == 'aws'
     # Superset ceiling for the nested pipeline (a reusable workflow's jobs
     # cannot exceed the caller's permissions).
     permissions:
@@ -201,7 +202,7 @@ jobs:
 
   run-gcp:
     needs: resolve
-    if: needs.resolve.outputs.cloud == 'gcp'
+    if: always() && needs.resolve.outputs.cloud == 'gcp'
     # Superset ceiling for the nested pipeline (a reusable workflow's jobs
     # cannot exceed the caller's permissions).
     permissions:
@@ -222,7 +223,7 @@ jobs:
 
   run-azure:
     needs: resolve
-    if: needs.resolve.outputs.cloud == 'azure'
+    if: always() && needs.resolve.outputs.cloud == 'azure'
     # Superset ceiling for the nested pipeline (a reusable workflow's jobs
     # cannot exceed the caller's permissions).
     permissions:

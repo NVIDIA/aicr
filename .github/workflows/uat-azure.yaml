@@ -68,19 +68,27 @@ permissions:
 
 jobs:
   uat-azure:
-    if: github.repository == 'nvidia/aicr'
+    # always() so a cancelled run still reaches the step-level always()-run
+    # Destroy Cluster teardown. Without it GitHub applies an implicit success()
+    # to the job-level if:, force-killing the job ~5m after cancellation — before
+    # the ~26m-per-attempt teardown can release the AKS cluster, leaking it and
+    # its resource group. The repository guard is preserved as the second
+    # conjunct so forks still skip the job.
+    if: always() && github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     # Budget = uncapped non-UAT steps (build, validator image push, AKS
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 90
     # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
-    # = up to 190) + the always()-run Destroy Cluster teardown (3 retries, ~10m
-    # each = up to ~40m). Only one of train/serve runs per intent, so the budget
-    # counts the larger (serve). The teardown MUST fit in this budget: a job-level
-    # timeout cancels pending always() steps, so an undersized cap would skip
-    # teardown and leak the GPU node. 190 UAT + ~30 setup + ~8 failure-path debug
-    # collection (Collect cluster debug bundle) + ~40 teardown = ~268, so 280
-    # leaves the teardown headroom even on a worst-case phase run.
-    timeout-minutes: 280
+    # = up to 190) + ~8 failure-path debug collection (Collect cluster debug
+    # bundle) + the always()-run Destroy Cluster teardown. Only one of
+    # train/serve runs per intent, so the budget counts the larger (serve).
+    # Teardown = up to 3 retries × ~26m real destroy = up to ~78m. The teardown
+    # MUST fit in this budget: a job-level timeout cancels pending always()
+    # steps, so an undersized cap would skip teardown and leak the GPU node /
+    # resource group even after a LATE failure. ~30 setup + 190 UAT + ~8 debug =
+    # 228, + ~78 teardown = 306, so 330 leaves the teardown clear headroom on a
+    # worst-case run.
+    timeout-minutes: 330
     permissions:
       contents: read
       actions: read

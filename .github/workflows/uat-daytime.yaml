@@ -51,7 +51,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'up: provision + deploy + hold the daytime cluster. down: tear it down and release the reservation.'
+        description: 'up: provision + deploy the daytime cluster; holds on success, tears down on failure or cancellation. down: tear it down and release the reservation.'
         type: choice
         options: [up, down]
         required: true

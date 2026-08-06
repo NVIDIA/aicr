@@ -67,7 +67,13 @@ permissions:
 
 jobs:
   uat-gcp:
-    if: github.repository == 'nvidia/aicr'
+    # always() so the job is NOT force-killed on cancellation: without a status
+    # function GitHub implies success(), which is false on cancel, and the
+    # runner is reclaimed ~5min after the cancel — before the step-level always()
+    # Destroy Cluster teardown (GCP destroy ~11m) can finish, leaking the cluster
+    # and its VPC network group. always() lets the teardown steps run to
+    # completion; the repository guard still confines this to the org repo.
+    if: always() && github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     # Budget = uncapped non-UAT steps (build, validator image push, GKE
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 90
@@ -77,27 +83,38 @@ jobs:
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
     # timeout cancels pending always() steps, so an undersized cap would skip
     # teardown and leak the GPU node. 190 UAT + ~30 setup + ~8 failure-path debug
-    # collection (Collect cluster debug bundle) + ~40 teardown = ~268.
+    # collection (Collect cluster debug bundle) + ~40 teardown = ~268 base.
     #
     # The Bringup Infra step retries once (#2066) and carries no step-level
-    # timeout, so a retried run costs a second provisioning attempt. The failure
-    # it retries is the actuator's own hardcoded 30m node-pool timeout, so the
-    # first attempt burns the full 30m before failing, plus the 60s backoff:
-    # ~31m on top of the ~268 above, i.e. ~299 worst case.
+    # timeout, so a retried run costs a second provisioning attempt. The pinned
+    # v0.5.17 GKE actuator widens the Terraform node-pool create/update timeout
+    # to 60m (up from the old 30m), so each of the two attempts can now burn up
+    # to ~60m before Terraform gives up. The retry exists because a slow GPU pool
+    # occasionally still trips even the wider window (or hits a transient state)
+    # and `terraform apply` is idempotent: a second attempt refreshes state,
+    # waits out the still-completing pool, and converges.
     #
-    # 320 leaves ~21m over that worst case — deliberately more than the ~12m
-    # this cap carried before, because overrunning does not merely fail the run:
-    # it cancels the always() Destroy Cluster step and leaks the GPU node and its
-    # VPC network group, exactly what #2066 exists to protect. Sizing for a
-    # single attempt would let a *successful* late retry trip that.
+    # Worst case is a second apply running near the full 60m: ~268 base already
+    # counts one ~60m provisioning attempt inside its ~30m "setup + provisioning"
+    # slice PLUS the remaining phases, so a second ~60m attempt (plus the 60s
+    # backoff) adds ~61m on top. The observed fast-recovery path (first attempt
+    # fails late, second converges quickly) lands ~285m; a worst-case second
+    # apply near 60m reaches ~353m.
     #
-    # Do not reduce this cap without recomputing the whole budget. In particular
-    # #2065 does NOT justify returning to 280: raising the actuator's node-pool
-    # timeout 30m->60m makes a single provisioning attempt cost up to ~30m MORE,
-    # so the ~268 base above rises to ~298 even with the retry never firing. It
-    # trades a frequent retry for a longer first attempt; it does not free
-    # budget.
-    timeout-minutes: 320
+    # GitHub-hosted runners (ubuntu-latest) hard-cap a job at 360m of execution
+    # (6h); a larger timeout-minutes is silently clamped to 360, so 360 is the
+    # ceiling here and covers the ~353m worst case with only ~7m of margin. That
+    # margin is thin by design: the second ~60m provisioning attempt pushes the
+    # worst case close to the platform cap, so if the budget above grows the lever
+    # is trimming worst-case work (or moving off the capped runner), NOT raising
+    # this number past 360 — a higher value would not take effect anyway.
+    # Overrunning does not merely fail the run: a job-level timeout (or the 360m
+    # platform cap) cancels the always() Destroy Cluster step and leaks the GPU
+    # node and its VPC network group, exactly what #2066/#2067 exist to protect.
+    # Sizing for a single attempt would let a *successful* late retry trip that.
+    # Do not change this cap without recomputing the whole budget above; the
+    # stated ~353m worst case and this timeout-minutes value must stay in lockstep.
+    timeout-minutes: 360
     permissions:
       contents: read
       actions: read
@@ -473,19 +490,19 @@ jobs:
         run: |
           set -euo pipefail
           # Retry the actuator apply once on a transient provisioning failure.
-          # The GKE actuator hardcodes a 30m node-pool create timeout
-          # (terraform/compute.tf), but a slow GPU pool can take ~35m; Terraform
-          # then fails the create even though GKE finishes and reports the pool
-          # RUNNING moments later (observed on run 30965268896, #2065). On a
-          # nightly run that false failure is recoverable (Destroy still runs),
-          # but on daytime-up / skip_delete runs it strands a healthy cluster and
-          # its whole VPC network group, leaking the GPU node and NETWORKS quota.
-          # `terraform apply` is idempotent: a second attempt refreshes state,
-          # waits out the still-completing (or already-healthy) pool, and
-          # converges. Bounded to 2 attempts so a genuinely-stuck provision still
-          # fails fast and surfaces. The durable fix is an upstream node-pool
-          # timeout bump 30m->60m (mirroring the AKS actuator's
-          # mchmarny/cluster#31) — tracked in #2065.
+          # The pinned v0.5.17 GKE actuator sets a 60m Terraform node-pool
+          # create/update timeout (terraform/compute.tf), wide enough for a slow
+          # GPU pool that used to exceed the prior 30m and get failed even though
+          # GKE finished and reported the pool RUNNING moments later (observed on
+          # run 30965268896). A pool can still occasionally trip that window or
+          # hit a transient state; on a nightly run that false failure is
+          # recoverable (Destroy still runs), but on daytime-up / skip_delete
+          # runs it strands a healthy cluster and its whole VPC network group,
+          # leaking the GPU node and NETWORKS quota. `terraform apply` is
+          # idempotent: a second attempt refreshes state, waits out the
+          # still-completing (or already-healthy) pool, and converges. Bounded to
+          # 2 attempts so a genuinely-stuck provision still fails fast and
+          # surfaces.
           brought_up=false
           for attempt in 1 2; do
             echo "Bringup attempt ${attempt}..."
@@ -494,8 +511,36 @@ jobs:
               -e AUTO_APPROVE=true \
               -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
               ${{ env.GKE_ACTUATOR_IMAGE }} apply; then
-              brought_up=true
-              break
+              # Actuator exit 0 is necessary but NOT sufficient. With google
+              # provider v7.35 a node pool left in ERROR state produces a
+              # no-change plan (exit 0) on a subsequent apply, and the Connect
+              # step's `kubectl get nodes` proves only API reachability, not pool
+              # health — together those would mark a broken cluster "brought up",
+              # holding it on daytime-up/skip_delete and suppressing #2067's
+              # failure() teardown (which never fires on an exit-0 run). Gate
+              # brought_up on every configured node pool reporting RUNNING.
+              # gcloud is already authenticated (google auth ran before bringup).
+              # set +e around the query so a transient list error or a non-zero
+              # grep does not abort the loop under `set -e`.
+              set +e
+              pool_status=$(gcloud container node-pools list \
+                --cluster "$DEPLOYMENT_ID" \
+                --region "$GCP_REGION" \
+                --project "$GCP_PROJECT_ID" \
+                --format='value(status)' 2>&1)
+              rc=$?
+              set -e
+              if [ "${rc}" -ne 0 ]; then
+                echo "Bringup attempt ${attempt}: could not list node pools (rc=${rc}): ${pool_status}"
+              elif [ -z "${pool_status}" ]; then
+                echo "Bringup attempt ${attempt}: cluster reports no node pools yet"
+              elif printf '%s\n' "${pool_status}" | grep -qvx 'RUNNING'; then
+                echo "Bringup attempt ${attempt}: node pool(s) not all RUNNING:"
+                printf '%s\n' "${pool_status}"
+              else
+                brought_up=true
+                break
+              fi
             fi
             if [ "${attempt}" -lt 2 ]; then
               echo "Bringup attempt ${attempt} failed; retrying in 60s (a transient node-pool state often self-heals, and apply is idempotent)..."
