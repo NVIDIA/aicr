@@ -218,10 +218,10 @@ the consensus mechanics):
 - **Review** — Claude Code (reviews the pinned diff directly; it deliberately does
   *not* delegate to the `code-review` command, whose step 8 instructs its agent to
   `gh pr comment` the result back to the PR), Codex (background dispatch, a 9-min
-  bounded wait plus one continuation wait when the job is still running — about 18 min
+  bounded wait plus up to two continuation waits when the job is still running — about 27 min
   for a live job), CodeRabbit (CLI against a detached worktree at `HEAD_SHA`, explicit
   600000 ms timeout — the Bash tool caps any single call at 10 minutes, which is why
-  Codex exceeds it by waiting twice rather than waiting longer), and integration
+  Codex exceeds it by waiting across several calls rather than waiting longer), and integration
   analysis (bounded to `changeList`). Every lane is a
   `general-purpose` agent. All
   parallel, schema-validated, and none may execute the reviewed commit's code.
@@ -377,22 +377,22 @@ the consensus mechanics):
   - **Wait elapsed, job still alive** (`.waitTimedOut` true with `.job.status` still
     `queued`/`running`) — not the end of the lane. The job is dispatched in the background
     and outlives the Bash call waiting on it, so it needs more **time**, not another
-    attempt — and the protocol now gives it exactly that: **one continuation wait** on the
-    *same* job id in a fresh call. That is not a retry; nothing is re-dispatched and no
-    work is duplicated. A second `.waitTimedOut` is then genuinely exhausted budget, and
+    attempt — and the protocol now gives it exactly that: **up to two continuation waits** on the
+    *same* job id in fresh calls. Those are not retries; nothing is re-dispatched and no
+    work is duplicated. A third `.waitTimedOut` is then genuinely exhausted budget, and
     the lane returns `unavailable` with the job id so the result can be fetched later.
     Measured on a real run: the lane timed out at the full 540000 ms while the job was
     demonstrably mid-work, the job was **still** `running` long after the review was
     abandoned, and its result stayed retrievable — so reporting exhausted budget there
     discarded a required lane, and the whole review with it, over a job that had merely
     not finished.
-  - **Exhausted budget** — a second `.waitTimedOut`, or no parseable JSON at all because
+  - **Exhausted budget** — a third `.waitTimedOut`, or no parseable JSON at all because
     the outer timeout killed the call (a dead broker). No retry, no further wait.
 
   The ceiling is not tunable — the wait runs inside a Bash call, and that tool silently
   kills any foreground command at 600000 ms. Exceeding 10 minutes requires polling across
   several calls, which is exactly what the continuation wait above does: a live job gets
-  two waits, roughly eighteen minutes, without a longer single call. The inner wait is
+  three waits, roughly twenty-seven minutes, without a longer single call. The inner wait is
   therefore 540000 ms,
   deliberately **below** the outer cap: were the two equal, Bash could kill the command
   before it printed its JSON, leaving no `.waitTimedOut` to classify on. That is why an
