@@ -23,7 +23,7 @@ apiVersion: aicr.run/v1alpha3
 metadata:
   selectedProfile:
     name: gpuStack
-    value: gcp-managed
+    value: gke-default
 criteria:
   service: gke
   accelerator: h100

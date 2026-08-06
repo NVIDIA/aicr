@@ -2540,7 +2540,7 @@ components:
                     Declares that a platform-managed component outside the
                     recipe advertises nvidia.com/gpu (ADR-015 GKE
                     allocation-policy amendment; e.g. GKE's managed device
-                    plugin on the gcp-managed gpuStack value). Absent when
+                    plugin on the gke-default gpuStack value). Absent when
                     no external advertiser is declared — the recipe's own
                     components then determine advertisement (the GPU
                     operator's device plugin, or DRA resources.gpus.enabled);

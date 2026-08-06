@@ -90,7 +90,7 @@ criteria:
 			name: "profile block over unprofiled recipe",
 			mutate: func(p *attestation.Predicate) {
 				p.Profile = &attestation.ProfilePredicate{
-					Selection:                "gpuStack=gcp-managed",
+					Selection:                "gpuStack=gke-default",
 					PolicyDescriptorIdentity: allocpolicy.IdentityFor(nil),
 				}
 			},
@@ -129,7 +129,7 @@ apiVersion: aicr.run/v1alpha3
 metadata:
   selectedProfile:
     name: gpuStack
-    value: gcp-managed
+    value: gke-default
     advertiser: external
     ownedPaths:
       gpu-operator:
@@ -152,19 +152,19 @@ componentRefs:
 		Component:     allocpolicy.ComponentGPUOperator,
 		SelectorPaths: allocpolicy.SelectorPaths(allocpolicy.ComponentGPUOperator),
 	}})
-	const name = "h100-gke-cos-training-gpustack-gcp-managed"
+	const name = "h100-gke-cos-training-gpustack-gke-default"
 	pred := func() *attestation.Predicate {
 		p := &attestation.Predicate{}
 		p.Recipe.Name = name
 		p.Recipe.Digest = digest
 		p.Profile = &attestation.ProfilePredicate{
-			Selection:                "gpuStack=gcp-managed",
+			Selection:                "gpuStack=gke-default",
 			Advertiser:               allocpolicy.AdvertiserExternal,
 			PolicyDescriptorIdentity: wantIdentity,
 		}
 		return p
 	}
-	ptr := &attestation.Pointer{Recipe: name, Profile: "gpuStack=gcp-managed"}
+	ptr := &attestation.Pointer{Recipe: name, Profile: "gpuStack=gke-default"}
 
 	tests := []struct {
 		name    string
@@ -180,7 +180,7 @@ componentRefs:
 			"no profile block"},
 		{"selection mismatch rejected",
 			func(p *attestation.Predicate) {
-				p.Profile.Selection = "gpuStack=operator-managed"
+				p.Profile.Selection = "gpuStack=driver-installer"
 			}, "selection"},
 		{"advertiser mismatch rejected",
 			func(p *attestation.Predicate) { p.Profile.Advertiser = "" },

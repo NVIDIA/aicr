@@ -11,8 +11,8 @@ verify against the cluster's GPU-node labels.
 
 | Value | `nvidia.com/gpu` advertiser | Driver provisioning | Node-label requirement | Pool creation | Recipe effect |
 |------|------|------|------|------|------|
-| `gcp-managed` (default) | GKE's managed device plugin (recorded as `advertiser: external`) | GKE's managed driver install | **No** GPU node carries `gke-no-default-nvidia-gpu-device-plugin` | Normal pools with `gpu-driver-version=default` or `latest` — zero extra setup | `devicePlugin.enabled=false` (profile-owned) |
-| `operator-managed` | GPU Operator's device plugin (sole advertiser) | Google's standalone `nvidia-driver-installer` DaemonSet | **Every** GPU node carries `gke-no-default-nvidia-gpu-device-plugin=true` | Pools created with the label and `gpu-driver-version=disabled` | `devicePlugin.enabled=true` (profile-owned) |
+| `gke-default` (default) | GKE's managed device plugin (recorded as `advertiser: external`) | GKE's managed driver install | **No** GPU node carries `gke-no-default-nvidia-gpu-device-plugin` | Normal pools with `gpu-driver-version=default` or `latest` — zero extra setup | `devicePlugin.enabled=false` (profile-owned) |
+| `driver-installer` | GPU Operator's device plugin (sole advertiser) | Google's standalone `nvidia-driver-installer` DaemonSet | **Every** GPU node carries `gke-no-default-nvidia-gpu-device-plugin=true` | Pools created with the label and `gpu-driver-version=disabled` | `devicePlugin.enabled=true` (profile-owned) |
 
 Both values keep `driver.enabled=false` in the GPU Operator values — the GPU
 Operator cannot install a driver on COS node images, so driver provisioning is
@@ -38,9 +38,9 @@ synthesizes the GPU-node universe from the snapshot's `NodeTopology.label`
 readings (nodes carrying `cloud.google.com/gke-accelerator`) and quantifies a
 label predicate over it, in both directions — the positive form
 `gke-no-default-nvidia-gpu-device-plugin=true` (every GPU node carries the
-label) qualifies `operator-managed`, and the negated form
+label) qualifies `driver-installer`, and the negated form
 `!gke-no-default-nvidia-gpu-device-plugin` (no GPU node carries the key)
-qualifies `gcp-managed`.
+qualifies `gke-default`.
 
 **End-to-end flow.** Three steps; the snapshot carries the label readings
 from step 1 on (recipe takes the snapshot, bundle takes the recipe):
@@ -53,9 +53,9 @@ aicr snapshot -o snapshot.yaml
 #    then bundle. Selection is explicit; the reading VERIFIES it.
 aicr recipe --service gke --accelerator h100 --os cos --intent training \
   --platform kubeflow \
-  --snapshot snapshot.yaml -o recipe.yaml                 # gcp-managed default
+  --snapshot snapshot.yaml -o recipe.yaml                 # gke-default default
 #   ... or, for labeled pools with the standalone driver installer:
-#   --profile gpuStack=operator-managed
+#   --profile gpuStack=driver-installer
 
 # 3. Bundle.
 aicr bundle -r recipe.yaml -o ./bundles
@@ -64,7 +64,7 @@ aicr bundle -r recipe.yaml -o ./bundles
 The reading qualifies the selection — it does not choose for you. Every
 combination is deterministic:
 
-| GPU-node labels read | Default (`gcp-managed`) | `--profile gpuStack=operator-managed` |
+| GPU-node labels read | Default (`gke-default`) | `--profile gpuStack=driver-installer` |
 |---|---|---|
 | all GPU nodes label-absent | ✅ resolves | ❌ fails closed: constraint expects the label on every GPU node |
 | all GPU nodes `gke-no-default-nvidia-gpu-device-plugin=true` | ❌ fails closed: constraint expects no labeled GPU node | ✅ resolves |
@@ -83,17 +83,17 @@ the snapshot, and the check is NEVER skipped when a snapshot is present:
 
 | Invocation | Selected value | Node-label check |
 |---|---|---|
-| no `--profile`, no `--snapshot` | declaration default (`gcp-managed`) | none possible (no cluster data) — the constraint is still recorded in the recipe and enforced at `aicr validate` readiness |
-| `--profile gpuStack=operator-managed`, no `--snapshot` | `operator-managed` | same — deferred to validate |
-| no `--profile`, `--snapshot` | default (`gcp-managed`) | checked at generation: no GPU node may carry the opt-out label, else generation fails closed naming the observed state |
-| `--profile gpuStack=operator-managed`, `--snapshot` | `operator-managed` | checked at generation: every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true`, else fails closed |
+| no `--profile`, no `--snapshot` | declaration default (`gke-default`) | none possible (no cluster data) — the constraint is still recorded in the recipe and enforced at `aicr validate` readiness |
+| `--profile gpuStack=driver-installer`, no `--snapshot` | `driver-installer` | same — deferred to validate |
+| no `--profile`, `--snapshot` | default (`gke-default`) | checked at generation: no GPU node may carry the opt-out label, else generation fails closed naming the observed state |
+| `--profile gpuStack=driver-installer`, `--snapshot` | `driver-installer` | checked at generation: every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true`, else fails closed |
 
 If you need an unverified recipe deliberately, generate criteria-only (drop
 `--snapshot`): the artifact is honest about being unqualified, and the
 `aicr validate` readiness pre-flight re-checks the constraint against a live
 snapshot before any check Job deploys (see [Validation](../user/validation.md)).
 
-### Default: Use the GCP-Managed Profile
+### Default: Use the GKE-Default Profile
 
 Create GPU node pools normally — no opt-out label, with GKE's managed driver
 install (`gpu-driver-version=default` or `latest`):
@@ -120,8 +120,8 @@ Two flags deserve care:
   explicitly and narrow `--node-locations` to the zones you intend.
 
 No changes to AICR recipes are needed — this is the GKE family's `gpuStack`
-configuration profile at its default value, `gcp-managed` (the resolved recipe
-records `metadata.selectedProfile: gpuStack=gcp-managed` with
+configuration profile at its default value, `gke-default` (the resolved recipe
+records `metadata.selectedProfile: gpuStack=gke-default` with
 `advertiser: external`). GKE's managed device plugin advertises
 `nvidia.com/gpu` and GKE's managed install provisions the driver, so the
 recipe disables the GPU Operator's device plugin (`devicePlugin.enabled=false`,
@@ -129,7 +129,7 @@ profile-owned) and keeps `driver.enabled=false`. AICR's GPU Operator still
 deploys and owns the rest of the GPU stack: the container toolkit, DCGM
 (the host engine), the DCGM exporter, GPU Feature Discovery, the MIG
 manager, and the operator validator — six DaemonSets on the GPU nodes.
-Under `gcp-managed` **no device-plugin DaemonSet is rendered at all**
+Under `gke-default` **no device-plugin DaemonSet is rendered at all**
 (`devicePlugin.enabled=false`): GKE's kube-system plugin is the sole
 `nvidia.com/gpu` advertiser.
 
@@ -146,7 +146,7 @@ advertisement, select the mode at recipe generation:
 ```shell
 aicr recipe --service gke --accelerator h100 --os cos --intent training \
   --platform kubeflow \
-  --profile gpuStack=operator-managed -o recipe.yaml
+  --profile gpuStack=driver-installer -o recipe.yaml
 aicr bundle -r recipe.yaml -o ./bundles
 ```
 
@@ -155,7 +155,7 @@ managed driver install: the managed install (`gpu-driver-version=default` or
 `latest`) is finalized by an init container of the **same** kube-system
 DaemonSet the label disables, so a labeled pool paired with the managed
 install comes up **driverless** — never combine the label with
-`gpu-driver-version=default`/`latest`. Pools for the `operator-managed` value
+`gpu-driver-version=default`/`latest`. Pools for the `driver-installer` value
 must instead be created with `gpu-driver-version=disabled`, with driver
 provisioning supplied by Google's standalone
 [`nvidia-driver-installer` DaemonSet](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers)
@@ -230,7 +230,7 @@ and GPU pods will not schedule. That brief advertiser-free window is the
 accepted cost of the handoff direction — do **not** invert it by deploying
 the Operator's plugin onto a still-unlabeled pool, which would put two
 advertisers on the same nodes (the dual-advertisement state the
-[allocation-policy gates](#the-three-operator-managed-settings) exist to
+[allocation-policy gates](#the-three-driver-installer-settings) exist to
 prevent). Have the bundle from step 5 generated in advance to keep the
 window short, and avoid scheduling GPU work during it.
 Note that `--node-labels` on update **replaces** the pool's full user-label
@@ -257,7 +257,7 @@ which the update rejects. Omitting an existing label removes it from the
 pool's nodes, which can break scheduling that depends on it.
 
 **Step 5 — deploy the GPU Operator and wait for its plugin.** Deploy the
-AICR bundle generated with `--profile gpuStack=operator-managed`, then wait
+AICR bundle generated with `--profile gpuStack=driver-installer`, then wait
 until the Operator's device-plugin pods are Running on the labeled nodes and
 every GPU node again reports non-zero allocatable `nvidia.com/gpu` — that
 closes the advertiser-free window opened in step 4. Confirm the full result
@@ -298,7 +298,7 @@ advertiser — if the GPU Operator is not yet deployed (or its plugin is not
 Ready), labeling leaves the node with **no** `nvidia.com/gpu` advertiser at
 all, and GPU pods will not schedule until the Operator's plugin comes up.
 
-#### The three operator-managed settings
+#### The three driver-installer settings
 
 The three settings cover different parts of the GPU stack:
 
@@ -335,17 +335,17 @@ the pairing "label + managed driver install" is never functional.
 
 **Fix — pick one exit:**
 
-- **Stay on the default `gcp-managed` value:** remove the label from the
+- **Stay on the default `gke-default` value:** remove the label from the
   labeled pools (a pool update passing the full label set with the opt-out
   label omitted — see the replacement caveat in
   [Retrofitting an existing pool](#retrofitting-an-existing-pool)) so GKE's
   DaemonSet returns and finalizes the managed install, and generate (or keep)
   recipes with the default selection.
-- **Commit to `operator-managed`:** apply Google's standalone
+- **Commit to `driver-installer`:** apply Google's standalone
   `nvidia-driver-installer` DaemonSet and recreate the pools with
   `gpu-driver-version=disabled` (or update their driver mode in place — see
   [Retrofitting an existing pool](#retrofitting-an-existing-pool)), then
-  generate recipes with `--profile gpuStack=operator-managed`.
+  generate recipes with `--profile gpuStack=driver-installer`.
 
 ### No advertiser at all
 

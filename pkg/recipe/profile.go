@@ -58,7 +58,7 @@ type ProfileDeclaration struct {
 // Advertiser declares who advertises nvidia.com/gpu for this value. The
 // vocabulary is closed (pkg/allocpolicy.ValidateAdvertiser): empty means
 // the recipe's own components advertise (the AKS shape), and "external"
-// (allocpolicy.AdvertiserExternal, the GKE gcp-managed shape) declares a
+// (allocpolicy.AdvertiserExternal, the GKE gke-default shape) declares a
 // provider-managed plugin outside the recipe as THE advertiser in the
 // #1327 exactly-one invariant — the declaration is copied into
 // metadata.selectedProfile.advertiser and extends the dual-advertisement
@@ -792,7 +792,7 @@ func (r *RecipeResult) validateProfileValuesWithContext(
 
 // checkAdvertiserCoherence runs the shared #1327 tuple-coherence rules
 // against the hydrated advertiser components for EVERY closure-triggering
-// profile — a declared external advertiser AND the empty (operator-managed)
+// profile — a declared external advertiser AND the empty (operator-advertised)
 // advertiser shape alike. The verdicts come from the single shared
 // evaluator (allocpolicy.CheckCoherence), which mirrors the validation-time
 // resolver (pkg/validator/v1 ResolveGPUAllocationPolicy) verdict-for-verdict

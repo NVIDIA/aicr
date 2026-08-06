@@ -860,10 +860,10 @@ func TestParseDynamoTemplate_RouterModeSubstituted(t *testing.T) {
 
 // TestParseDynamoTemplate_WorkerDriverLibPathAppend pins the worker command's
 // guarded LD_LIBRARY_PATH append in both Dynamo deployment templates. GKE's
-// managed device plugin (gcp-managed gpuStack value) mounts the node driver
+// managed device plugin (gke-default gpuStack value) mounts the node driver
 // tree at /usr/local/nvidia without touching the container environment, so
 // without this append vLLM cannot dlopen libcuda.so.1 and crashes with
-// "Failed to infer device type" (observed live in gcp-managed qualification).
+// "Failed to infer device type" (observed live in gke-default qualification).
 // The shape matters: a shell APPEND with the ${VAR:+} guard — a pod-level env
 // would clobber the image's own LD_LIBRARY_PATH (nixl/ucx/cuda entries), and
 // an unguarded "${LD_LIBRARY_PATH}:" append would create a leading empty

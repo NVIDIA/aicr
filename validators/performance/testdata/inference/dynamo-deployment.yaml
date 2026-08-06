@@ -86,12 +86,12 @@ spec:
             - name: main
               image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               workingDir: /workspace/examples/backends/vllm
-              # GKE's managed device plugin (the gcp-managed gpuStack value)
+              # GKE's managed device plugin (the gke-default gpuStack value)
               # mounts the node's driver tree at /usr/local/nvidia via its
               # device-plugin Allocate response WITHOUT touching the container
               # environment, so libcuda.so.1 is invisible to the dynamic
               # loader and vLLM dies with "RuntimeError: Failed to infer
-              # device type" (observed live: gcp-managed qualification, every
+              # device type" (observed live: gke-default qualification, every
               # worker in CrashLoopBackOff; A/B on the worker showed
               # LD_LIBRARY_PATH=/usr/local/nvidia/lib64 alone flips torch CUDA
               # to available — the mount is runtime-injected, only the env is

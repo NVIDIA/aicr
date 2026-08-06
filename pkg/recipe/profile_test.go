@@ -1002,7 +1002,7 @@ func TestProfileArtifactContract(t *testing.T) {
 			result: &RecipeResult{
 				APIVersion: RecipeProfileAPIVersion,
 				Metadata: RecipeResultMetadata{SelectedProfile: &SelectedProfile{
-					Name: "gpuStack", Value: "gcp-managed", Advertiser: "external",
+					Name: "gpuStack", Value: "gke-default", Advertiser: "external",
 					OwnedPaths: map[string][]string{},
 				}},
 			},

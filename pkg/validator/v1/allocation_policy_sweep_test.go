@@ -136,7 +136,7 @@ func TestStockCatalogResolvesDevicePluginPolicy(t *testing.T) {
 					t.Fatalf("%s lookup: %v", valuePathDevicePluginEnabled, err)
 				}
 				// The explicit pin's wanted VALUE follows the advertiser:
-				// on an external-advertiser recipe (the GKE gcp-managed
+				// on an external-advertiser recipe (the GKE gke-default
 				// default) the platform's plugin advertises and the
 				// operator's plugin must be explicitly false; everywhere
 				// else the operator's plugin is the advertiser and must be

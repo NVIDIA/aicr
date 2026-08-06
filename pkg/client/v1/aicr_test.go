@@ -1963,7 +1963,7 @@ func gpuHardwareSnapshotPools(poolMode string, driverLoaded bool) *aicr.Snapshot
 				).
 				Build(),
 			// Node-topology label readings in the collector's
-			// "<value>|<nodes>" encoding: the GKE gpuStack gcp-managed
+			// "<value>|<nodes>" encoding: the GKE gpuStack gke-default
 			// default quantifies its negated opt-out-label constraint over
 			// the GPU-node set (nodes carrying
 			// cloud.google.com/gke-accelerator — label absent everywhere,
