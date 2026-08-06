@@ -25,6 +25,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -215,6 +216,15 @@ func ValidateIdentityPattern(pattern string) error {
 
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("certificate identity pattern must contain %q to pin to the NVIDIA repository", requiredRepoPrefix))
+	}
+	// The anchor check above is a substring test, so a pattern can carry the
+	// required repository and still not be a valid regexp. Compile it here so
+	// callers that validate up-front report the failure against their own
+	// input (a CLI flag or a config field, with its spec path) rather than
+	// letting it surface later from the identity matcher.
+	if _, err := regexp.Compile(pattern); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"certificate identity pattern is not a valid regular expression", err)
 	}
 	return nil
 }

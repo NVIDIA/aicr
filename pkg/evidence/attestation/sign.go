@@ -90,7 +90,7 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 			"artifact descriptor (digest, mediaType, size) is required to sign an existing bundle")
 	}
 
-	bundle, _, err := loadOnDiskBundle(opts.BundleDir)
+	bundle, _, err := loadOnDiskBundle(ctx, opts.BundleDir)
 	if err != nil {
 		return err
 	}

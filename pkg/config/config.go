@@ -24,7 +24,7 @@ const Kind = "AICRConfig"
 const APIVersion = header.GroupVersion
 
 // AICRConfig is the top-level schema for the --config file accepted by
-// the aicr CLI's snapshot, recipe, bundle, and validate commands.
+// the aicr CLI's snapshot, recipe, bundle, validate, and verify commands.
 type AICRConfig struct {
 	Kind       string   `yaml:"kind" json:"kind"`
 	APIVersion string   `yaml:"apiVersion" json:"apiVersion"`
@@ -42,11 +42,16 @@ type Metadata struct {
 // Each section is optional: a config file used only with `aicr recipe` may
 // populate just Recipe; one used only with `aicr bundle` may populate just
 // Bundle. A single file may populate any combination for end-to-end workflows.
+//
+// Snapshot, Recipe, Bundle, and Validate are the producer pipeline; Verify is
+// the consumer side, so a single document can carry both the settings that
+// build an artifact and the policy a downstream consumer enforces against it.
 type Spec struct {
 	Snapshot *SnapshotSpec `yaml:"snapshot,omitempty" json:"snapshot,omitempty"`
 	Recipe   *RecipeSpec   `yaml:"recipe,omitempty" json:"recipe,omitempty"`
 	Bundle   *BundleSpec   `yaml:"bundle,omitempty" json:"bundle,omitempty"`
 	Validate *ValidateSpec `yaml:"validate,omitempty" json:"validate,omitempty"`
+	Verify   *VerifySpec   `yaml:"verify,omitempty" json:"verify,omitempty"`
 }
 
 // SnapshotSpec captures the inputs to `aicr snapshot`.
@@ -341,4 +346,93 @@ type ValidateExecutionSpec struct {
 	NoCluster bool   `yaml:"noCluster,omitempty" json:"noCluster,omitempty"`
 	NoCleanup bool   `yaml:"noCleanup,omitempty" json:"noCleanup,omitempty"`
 	Timeout   string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+}
+
+// VerifySpec captures the inputs to `aicr verify`, the one consumer-side
+// command in the schema. Every field is durable, non-secret verification
+// *policy* — a trust floor, a pinned creator identity, a KMS key reference,
+// a trusted-root path — so it belongs in the same version-controlled
+// document as the producer sections rather than being retyped on each
+// invocation. See issue #1567.
+//
+// The two sub-sections mirror how `aicr verify` consumes them: Policy feeds
+// verifier.Policy (assertions checked after verification runs) and Trust
+// feeds verifier.VerifyOptions (the material verification runs against).
+//
+// Three `aicr verify` flags are deliberately absent:
+//   - the bundle directory, which is a positional argument, not a flag
+//   - --format, which is presentation rather than policy
+//   - --insecure-ignore-tlog, which weakens the trust floor by dropping the
+//     transparency-log requirement; keeping it command-line-only means a
+//     checked-in file can never silently disable that check, and an air-gap
+//     override stays an explicit operator act
+type VerifySpec struct {
+	Policy *VerifyPolicySpec `yaml:"policy,omitempty" json:"policy,omitempty"`
+	Trust  *VerifyTrustSpec  `yaml:"trust,omitempty" json:"trust,omitempty"`
+}
+
+// VerifyPolicySpec captures the assertions `aicr verify` enforces against a
+// completed verification result (--min-trust-level / --require-creator /
+// --cli-version-constraint).
+type VerifyPolicySpec struct {
+	// MinTrustLevel is one of the verifier trust levels (unknown,
+	// unverified, attested, verified) or the meta-value "max", which
+	// auto-detects the highest level achievable for the bundle. Empty
+	// leaves the CLI flag's "max" default in place.
+	//
+	// This is operator policy, not an org-enforced guardrail: a committed
+	// value *lowers* the effective floor as readily as it raises it (for
+	// example "unknown" makes the trust check a no-op, since every level
+	// meets it). That is a deliberate, reviewable choice living in version
+	// control.
+	//
+	// A lowered floor admits any bundle whose actual trust level reaches it.
+	// That is broader than unsigned bundles: it also covers chains that
+	// legitimately degraded, such as an attested bundle whose binary
+	// attestation is absent, or one carrying external --data. Both report
+	// "attested" against a "verified" maximum, so the default "max" rejects
+	// them while a lowered floor does not, and neither records an entry in
+	// result.Errors.
+	//
+	// What no policy value can wave through: checksum failures and
+	// attestations that are present but fail verification. Those populate
+	// result.Errors, which is gated separately from the trust floor.
+	//
+	// `aicr verify` logs the floor at INFO when config is what supplies it:
+	// when --min-trust-level is absent and the configured value is anything
+	// other than "max". An explicit flag wins instead, and that override is
+	// logged by the flag-precedence path rather than this one.
+	MinTrustLevel string `yaml:"minTrustLevel,omitempty" json:"minTrustLevel,omitempty"`
+
+	// RequireCreator pins the OIDC identity in the bundle attestation's
+	// signing certificate.
+	RequireCreator string `yaml:"requireCreator,omitempty" json:"requireCreator,omitempty"`
+
+	// CLIVersionConstraint constrains the aicr version recorded in the
+	// attestation predicate. Supports >=, >, <=, <, ==, != ; a bare
+	// version (e.g. "0.16.0") is treated as ">= 0.16.0".
+	CLIVersionConstraint string `yaml:"cliVersionConstraint,omitempty" json:"cliVersionConstraint,omitempty"`
+}
+
+// VerifyTrustSpec captures the trust material `aicr verify` verifies against
+// (--certificate-identity-regexp / --key / --trust-root).
+//
+// All three are references, not secrets: a public-key URI or path, a
+// certificate-identity pattern, and a path to a trusted_root.json. No private
+// key material is ever part of the schema.
+type VerifyTrustSpec struct {
+	// CertificateIdentityRegexp overrides the certificate identity pattern
+	// used for binary attestation verification. Must contain "NVIDIA/aicr".
+	CertificateIdentityRegexp string `yaml:"certificateIdentityRegexp,omitempty" json:"certificateIdentityRegexp,omitempty"`
+
+	// Key is a KMS key URI (awskms:// | gcpkms:// | azurekms:// |
+	// hashivault://) or a local PEM public-key path, used to verify a
+	// key-signed bundle attestation. The verify counterpart to
+	// spec.bundle.attestation.signingKey.
+	Key string `yaml:"key,omitempty" json:"key,omitempty"`
+
+	// TrustRoot is a path to a private Sigstore trusted_root.json, additive
+	// to AICR's built-in public-good root. The verify counterpart to
+	// spec.bundle.attestation.fulcioURL / rekorURL.
+	TrustRoot string `yaml:"trustRoot,omitempty" json:"trustRoot,omitempty"`
 }

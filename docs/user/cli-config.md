@@ -1,24 +1,30 @@
 # CLI Configuration File (AICRConfig)
 
 `AICRConfig` is a Kubernetes-style YAML/JSON document that captures the inputs
-to the four workflow commands — `aicr snapshot`, `aicr recipe`, `aicr bundle`,
-and `aicr validate` — so an end-to-end run version-controls as a single file
-instead of a shell script full of flags. Each command accepts it through the
-same `--config` flag:
+to the five workflow commands — `aicr snapshot`, `aicr recipe`, `aicr bundle`,
+`aicr validate`, and `aicr verify` — so an end-to-end run version-controls as a
+single file instead of a shell script full of flags. Each command accepts it
+through the same `--config` flag:
 
 ```shell
 aicr snapshot --config aicr-config.yaml
 aicr recipe   --config aicr-config.yaml
 aicr bundle   --config aicr-config.yaml
 aicr validate --config aicr-config.yaml
+aicr verify   ./my-bundle --config aicr-config.yaml   # bundle dir is positional
 ```
+
+The first four are the producer pipeline; `spec.verify` is the consumer side, so
+one document can carry both how an artifact is built and the trust floor a
+downstream consumer enforces against it.
 
 This page documents the complete document schema in one place. The
 [CLI Reference](cli-reference.md) shows per-command usage in its
 [Snapshot](cli-reference.md#snapshot-config-file-mode),
 [Recipe](cli-reference.md#config-file-mode-recommended),
-[Validate](cli-reference.md#validate-config-file-mode), and
-[Bundle](cli-reference.md#bundle-config-file-mode) config-file-mode sections.
+[Validate](cli-reference.md#validate-config-file-mode),
+[Bundle](cli-reference.md#bundle-config-file-mode), and
+[Verify](cli-reference.md#verify-config-file-mode) config-file-mode sections.
 The schema's source of truth is
 [`pkg/config`](https://github.com/NVIDIA/aicr/tree/main/pkg/config).
 
@@ -34,11 +40,12 @@ spec:
   recipe: {}                   # at least ONE must be present
   bundle: {}
   validate: {}
+  verify: {}
 ```
 
 Each `spec.*` section is optional and each command reads only its own section,
 so a file may carry just one section or any combination. A document with none
-of the four sections is rejected.
+of the five sections is rejected.
 
 ## Loading, Precedence, and Secrets
 
@@ -183,6 +190,15 @@ spec:
         push: ""                     # OCI ref to push the signed bundle
         plainHTTP: false
         insecureTLS: false
+  verify:                            # consumer side: policy for `aicr verify`
+    policy:                          # assertions checked after verification
+      minTrustLevel: verified        # unknown | unverified | attested | verified | max
+      requireCreator: ci@myorg.example.com
+      cliVersionConstraint: ">= 0.16.0"
+    trust:                           # material verification runs against
+      certificateIdentityRegexp: ""  # must contain NVIDIA/aicr when set
+      key: ""                        # KMS URI or local PEM public-key path
+      trustRoot: ""                  # private Sigstore trusted_root.json
 ```
 
 ## Field Reference
@@ -270,9 +286,50 @@ Inputs to `aicr validate`.
 | `evidence.attestation.bom` / `.push` | string | BOM input; OCI ref for the signed bundle push |
 | `evidence.attestation.plainHTTP` / `.insecureTLS` | bool (tri-state) | Push transport options |
 
+### spec.verify
+
+Verification policy for `aicr verify`, the one consumer-side section. The two
+sub-sections mirror how the command consumes them: `policy` holds assertions
+checked after verification runs, `trust` holds the material it verifies against.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `policy.minTrustLevel` | string | `unknown` \| `unverified` \| `attested` \| `verified`, or `max` (the CLI default) to auto-detect the highest level the bundle can reach |
+| `policy.requireCreator` | string | Pins the OIDC identity in the bundle attestation's signing certificate |
+| `policy.cliVersionConstraint` | string | Constrains the `aicr` version in the attestation predicate; supports `>=`, `>`, `<=`, `<`, `==`, `!=`, and a bare version means `>=` |
+| `trust.certificateIdentityRegexp` | string | Certificate identity pattern for binary attestation verification; must contain `NVIDIA/aicr` |
+| `trust.key` | string | KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`) or local PEM public-key path; the verify counterpart to `spec.bundle.attestation.signingKey` |
+| `trust.trustRoot` | string | Path to a private Sigstore `trusted_root.json`, additive to the built-in public-good root |
+
+`policy.minTrustLevel` sets **operator policy, not an org-enforced guardrail**.
+A committed value lowers the effective floor as readily as it raises it
+(`unknown` makes the trust check a no-op, since every level meets it), so treat
+it as a reviewable choice rather than a control that cannot be relaxed.
+
+A lowered floor admits any bundle whose actual trust level reaches it, which is
+broader than unsigned bundles. It also covers chains that legitimately degraded:
+an attested bundle whose binary attestation is absent, or one carrying external
+`--data`, both report `attested` against a `verified` maximum, so the default
+`max` rejects them while a lowered floor does not.
+
+What no policy value can wave through: checksum failures, and attestations that
+are present but fail verification. Those are rejected regardless of the floor.
+
+`aicr verify` logs the floor at INFO when config is what supplies it: that is,
+when `--min-trust-level` is absent and the configured value is anything other
+than `max`. An explicit flag takes precedence instead, and that override is
+logged separately by the flag-precedence path.
+
+Every field is a durable, non-secret reference or policy value; no private key
+material is part of the schema. Three `aicr verify` flags are deliberately
+excluded: the bundle directory (a positional argument), `--format`
+(presentation, not policy), and `--insecure-ignore-tlog`, which weakens the
+trust floor and so stays command-line-only rather than something a committed
+file can silently enable. It still composes with a config-supplied `trust.key`.
+
 ## Cross-Section Rules
 
-- At least one of the four `spec.*` sections must be present.
+- At least one of the five `spec.*` sections must be present.
 - `spec.recipe.criteria` and `spec.recipe.input.snapshot` are mutually
   exclusive.
 - When **both** `spec.recipe.output.path` and `spec.bundle.input.recipe` are

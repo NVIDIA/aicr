@@ -138,6 +138,29 @@ func TestSignExisting_RejectsIncompleteDescriptor(t *testing.T) {
 	}
 }
 
+// TestSignExisting_CanceledContextSurfacesTimeout proves SignExisting threads
+// the caller's context into the on-disk bundle read: with a valid signable
+// pointer and a real bundle on disk (so the read would otherwise succeed), an
+// already-canceled context fails closed with ErrCodeTimeout instead of blocking
+// on a potentially hung mount (issue #2054).
+func TestSignExisting_CanceledContextSurfacesTimeout(t *testing.T) {
+	dir := emitUnsignedBundle(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := SignExisting(ctx, SignExistingOptions{
+		Pointer:     signableSignPointer(),
+		PointerPath: filepath.Join(t.TempDir(), "pointer.yaml"),
+		BundleDir:   dir,
+		Artifact:    MainArtifactDescriptor{Digest: "sha256:abc", MediaType: "application/json", Size: 1},
+	})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("expected ErrCodeTimeout, got %v", err)
+	}
+}
+
 func TestPointerSignerFromSignature(t *testing.T) {
 	if PointerSignerFromSignature(nil) != nil {
 		t.Errorf("nil signature should yield nil signer")
