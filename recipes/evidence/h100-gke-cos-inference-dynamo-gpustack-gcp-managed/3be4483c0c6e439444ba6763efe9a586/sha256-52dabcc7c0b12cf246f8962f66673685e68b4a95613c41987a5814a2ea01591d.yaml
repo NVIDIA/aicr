@@ -1,0 +1,13 @@
+attestations:
+  - attestedAt: 2026-08-06T00:10:04Z
+    bundle:
+      digest: sha256:52dabcc7c0b12cf246f8962f66673685e68b4a95613c41987a5814a2ea01591d
+      oci: ghcr.io/yuanchen8911/aicr-evidence:h100-gke-cos-inference-dynamo-gpustack-gcp-managed-3f9bc435476a
+      predicateType: https://aicr.run/recipe-evidence/v2
+    signer:
+      identity: https://github.com/yuanchen8911/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/gke-h100-inference
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 53980091
+profile: gpuStack=gcp-managed
+recipe: h100-gke-cos-inference-dynamo-gpustack-gcp-managed
+schemaVersion: 1.0.0
