@@ -2027,6 +2027,7 @@ function overviewRecipeNameHTML(recipe, mutedAxes){
     { axis:"intent", value:c.intent },
   ];
   if (c.platform) parts.push({ axis:"platform", value:c.platform });
+  if (recipe.profile) parts.push({ axis:"profile", value:recipe.profile });
 
   // Preserve unusual or future recipe naming schemes verbatim rather than
   // reconstructing a name that may not match its canonical identifier.
@@ -2276,15 +2277,17 @@ function renderCatalog(){
       if (!recipeMatchesK8s(recipe)) tr.classList.add("dimmed");
 
       const tdName = document.createElement("td");
-      // Fully qualified recipe name, but with the distinguishing intent[-platform]
+      // Fully qualified recipe name, but with the distinguishing
+      // intent[-platform][-profile]
       // tail emphasized and the redundant coordinate prefix (already stated by the
       // accelerator divider) muted, so the rows read as variations on a theme.
       const ip = coordParts(recipe.coord).ip;
-      const tail = "-" + ip;
+      const displayTail = recipe.profile ? `${ip}-${recipe.profile}` : ip;
+      const tail = "-" + displayTail;
       let nameHTML;
-      if (ip && recipe.name.endsWith(tail)){
-        const head = recipe.name.slice(0, recipe.name.length - ip.length); // keeps the joining "-"
-        nameHTML = `<span class="rn-head">${esc(head)}</span><span class="rn-tail">${esc(ip)}</span>`;
+      if (displayTail && recipe.name.endsWith(tail)){
+        const head = recipe.name.slice(0, recipe.name.length - displayTail.length); // keeps the joining "-"
+        nameHTML = `<span class="rn-head">${esc(head)}</span><span class="rn-tail">${esc(displayTail)}</span>`;
       } else {
         nameHTML = `<span class="rn-tail">${esc(recipe.name)}</span>`;
       }
