@@ -31,6 +31,9 @@ outputs:
   golangci_lint:
     description: 'golangci-lint version'
     value: ${{ steps.versions.outputs.golangci_lint }}
+  apidiff:
+    description: 'API-diff version pinned in .settings.yaml'
+    value: ${{ steps.versions.outputs.apidiff }}
   addlicense:
     description: 'addlicense version'
     value: ${{ steps.versions.outputs.addlicense }}
@@ -171,6 +174,7 @@ runs:
 
         # Linting
         echo "golangci_lint=$(yq eval '.linting.golangci_lint' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "apidiff=$(yq eval '.linting.apidiff' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yamllint=$(yq eval '.linting.yamllint' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense=$(yq eval '.linting.addlicense' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "go_licenses=$(yq eval '.linting.go_licenses' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -230,6 +234,7 @@ runs:
         echo "  ko: ${{ steps.versions.outputs.ko }}"
         echo "  crane: ${{ steps.versions.outputs.crane }}"
         echo "  golangci_lint: ${{ steps.versions.outputs.golangci_lint }}"
+        echo "  apidiff: ${{ steps.versions.outputs.apidiff }}"
         echo "  yamllint: ${{ steps.versions.outputs.yamllint }}"
         echo "  addlicense: ${{ steps.versions.outputs.addlicense }}"
         echo "  go_licenses: ${{ steps.versions.outputs.go_licenses }}"

@@ -30,6 +30,10 @@ inputs:
   helm_version:
     description: 'Helm version pinned in .settings.yaml (testing_tools.helm, via load-versions) — required by the argocd-helm live-render tests, which fail (not skip) in CI when helm is missing'
     required: true
+  apidiff_version:
+    description: 'Optional apidiff version pinned in .settings.yaml (linting.apidiff, via load-versions); leave empty to skip the SDK API compatibility check'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -71,9 +75,23 @@ runs:
       shell: bash
       run: make test
 
+    - name: Install API-diff tool
+      if: inputs.apidiff_version != ''
+      shell: bash
+      env:
+        APIDIFF_VERSION: ${{ inputs.apidiff_version }}
+      run: |
+        set -euo pipefail
+        GOFLAGS= go install "golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION}"
+
     - name: Coverage Report
       if: inputs.coverage_report == 'true'
       uses: ./.github/actions/go-coverage
       with:
         coverage_file: ./coverage.out
         threshold: ${{ inputs.coverage_threshold }}
+
+    - name: Check SDK API compatibility
+      if: inputs.apidiff_version != ''
+      shell: bash
+      run: make api-diff

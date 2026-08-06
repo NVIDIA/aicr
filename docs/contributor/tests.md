@@ -483,6 +483,8 @@ half of the pipeline and skips deploy-side assertions.
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
+- `api-diff` — exported `pkg/client/v1` compatibility against the latest stable
+  release.
 
 CI runs the equivalent. If `make qualify` passes locally on the
 current branch, push CI will pass.

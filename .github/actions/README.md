@@ -13,6 +13,20 @@ executable bits or `./script.sh` invocation.
 
 ### Core CI/CD Actions
 
+#### `go-test/`
+
+**Purpose**: Set up Go and Helm, verify vendored dependencies, and run unit tests with race detection and coverage
+**When to use**: Go CI workflows that use the repository's `make test` target
+**Inputs**:
+- `go_version` (required): Go version to install
+- `coverage_report` (optional): Whether to generate a coverage report (default: "false")
+- `coverage_threshold` (optional): Minimum coverage percentage (default: empty)
+- `helm_version` (required): Helm version from `load-versions`
+- `apidiff_version` (optional): apidiff version from `load-versions`; when set, installs apidiff and runs `make api-diff` (default: empty, which skips both steps)
+
+Callers that set `apidiff_version` must check out full history with
+`fetch-depth: 0` so `make api-diff` can resolve a reachable stable release tag.
+
 #### `security-scan/`
 **Purpose**: Anchore/Grype vulnerability scanning with SARIF upload
 **When to use**: Security validation in CI/CD pipelines
@@ -339,12 +353,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/load-versions
         id: versions
       - uses: ./.github/actions/go-test
         with:
           go_version: ${{ steps.versions.outputs.go }}
           helm_version: ${{ steps.versions.outputs.helm }}
+          apidiff_version: ${{ steps.versions.outputs.apidiff }}
           coverage_report: 'true'
       - uses: ./.github/actions/go-lint
         with:
@@ -360,12 +377,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/load-versions
         id: versions
       - uses: ./.github/actions/go-test
         with:
           go_version: ${{ steps.versions.outputs.go }}
           helm_version: ${{ steps.versions.outputs.helm }}
+          apidiff_version: ${{ steps.versions.outputs.apidiff }}
       - uses: ./.github/actions/go-build-release
         id: release
         with:
@@ -437,3 +457,7 @@ To use these actions in other repositories:
     helm_version: 'v4.2.2'
     coverage_report: 'true'
 ```
+
+The cross-repository example intentionally omits `apidiff_version`. Repositories
+without AICR's `make api-diff` target retain the original test behavior because
+an empty `apidiff_version` skips the API compatibility steps.
