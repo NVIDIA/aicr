@@ -175,7 +175,7 @@ select_profiles() {
         return "${PROFILE_SELECT_RC_NO_MATCH}"
     fi
 
-    local system_matches=() gpu_matches=() available_accels=()
+    local system_matches=() gpu_matches=() available_accels=() available_accel_paths=()
     local profile
     while IFS= read -r -d '' profile; do
         local provider nodeType accel relpath
@@ -185,10 +185,17 @@ select_profiles() {
         provider=$(_read_profile_label "${profile}" provider "${profiles_root}") || return 1
         nodeType=$(_read_profile_label "${profile}" nodeType "${profiles_root}") || return 1
         relpath="${profile#"${profiles_root}"/}"
-        # Skip anything whose provider label disagrees with its directory —
-        # protects against a mis-copied file living under the wrong service.
+        # A profile whose provider label disagrees with its parent
+        # directory is a tree-integrity fault, not a stray-file defense:
+        # if the mislabeled file is the SOLE profile for a role, silently
+        # continue'ing here degrades to an invisible rc=2 no-match
+        # (batch SKIP / CI drop) instead of surfacing the fault. Fail
+        # closed with a diagnostic naming the offending file and the
+        # expected provider so the operator can either move the file to
+        # kwok/profiles/<provider>/ or fix the label.
         if [[ "${provider}" != "${service}" ]]; then
-            continue
+            echo "[ERROR] KWOK profile ${relpath} under ${service}/ declares metadata.labels.provider='${provider}' — every profile in kwok/profiles/${service}/ must set provider=${service}. Move the file to kwok/profiles/${provider}/ or fix the label." >&2
+            return 1
         fi
         case "${nodeType}" in
             system)
@@ -196,10 +203,32 @@ select_profiles() {
                 ;;
             accelerated)
                 accel=$(_read_profile_label "${profile}" accelerator "${profiles_root}") || return 1
+                # An accelerated profile without an accelerator label is
+                # a tree fault: the loop would push "" into available_accels
+                # and, if the requested accelerator was also empty, hit
+                # a spurious match. Fail closed with a diagnostic naming
+                # the offending file rather than let a mislabeled profile
+                # silently degrade GPU-role coverage.
+                if [[ -z "${accel}" ]]; then
+                    echo "[ERROR] KWOK profile ${relpath} declares nodeType='accelerated' but is missing metadata.labels.accelerator — every accelerated profile must set an accelerator label so GPU-role matching works." >&2
+                    return 1
+                fi
                 available_accels+=("${accel}")
+                available_accel_paths+=("${relpath}")
                 if [[ "${accel}" == "${accelerator}" ]]; then
                     gpu_matches+=("${relpath}")
                 fi
+                ;;
+            *)
+                # No case arm at all previously — a typo'd nodeType
+                # ('sytem', 'accelerate') silently dropped the profile,
+                # and if it was the sole profile for a role the fault
+                # degraded to an invisible rc=2 no-match (batch SKIP /
+                # CI drop). Same coverage-lie the PR targets, via a
+                # different field. Same fatal treatment as the
+                # provider-mismatch check above.
+                echo "[ERROR] KWOK profile ${relpath} has unrecognized metadata.labels.nodeType='${nodeType}' (expected 'system' or 'accelerated')." >&2
+                return 1
                 ;;
         esac
     done < <(find "${service_dir}" -maxdepth 1 -name '*.yaml' -type f -print0)
@@ -213,6 +242,33 @@ select_profiles() {
         return 1
     fi
 
+    # Tree-scoped duplicate-accelerator check. Runs BEFORE the request-scoped
+    # gpu_matches count check below so a duplicate label is surfaced even
+    # when the current request wouldn't match it — e.g. two `accelerator=h100`
+    # profiles co-exist with a valid `gb200` profile and the request is
+    # `gb200`. Without this pass the h100 tree fault stays invisible until
+    # someone happens to request the duplicated accelerator.
+    if (( ${#available_accels[@]} > 1 )); then
+        local dup_labels dup_label i
+        dup_labels=$(printf '%s\n' "${available_accels[@]}" | sort | uniq -d)
+        if [[ -n "${dup_labels}" ]]; then
+            echo "[ERROR] Multiple profiles under ${service_dir} declare the same metadata.labels.accelerator — every accelerator label must appear exactly once across the service directory (tree-integrity check, independent of the requested accelerator):" >&2
+            while IFS= read -r dup_label; do
+                local dup_files_arr=() dup_files
+                for (( i = 0; i < ${#available_accels[@]}; i++ )); do
+                    if [[ "${available_accels[i]}" == "${dup_label}" ]]; then
+                        dup_files_arr+=("${available_accel_paths[i]}")
+                    fi
+                done
+                # Sort so the diagnostic is deterministic regardless of
+                # find(1)'s directory-order return.
+                dup_files=$(printf '%s\n' "${dup_files_arr[@]}" | sort | paste -sd' ' -)
+                echo "[ERROR]   accelerator='${dup_label}': ${dup_files}" >&2
+            done <<< "${dup_labels}"
+            return 1
+        fi
+    fi
+
     if (( ${#gpu_matches[@]} == 0 )); then
         echo "[ERROR] No GPU profile for service='${service}' accelerator='${accelerator}' under ${service_dir}" >&2
         if (( ${#available_accels[@]} > 0 )); then
@@ -222,10 +278,9 @@ select_profiles() {
         fi
         return "${PROFILE_SELECT_RC_NO_MATCH}"
     fi
-    if (( ${#gpu_matches[@]} > 1 )); then
-        echo "[ERROR] Multiple GPU profiles for service='${service}' accelerator='${accelerator}': ${gpu_matches[*]} — expected exactly one" >&2
-        return 1
-    fi
+    # No request-scoped ambiguity check needed here — the tree-scoped
+    # duplicate-accelerator pass above already fails closed on any
+    # duplication, including the specific requested-accelerator case.
 
     echo "${system_matches[0]}:${gpu_matches[0]}"
 }

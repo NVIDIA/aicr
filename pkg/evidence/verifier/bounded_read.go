@@ -15,32 +15,22 @@
 package verifier
 
 import (
-	"io"
-	"os"
-	"strconv"
+	"context"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
 )
 
-// readBoundedFile reads path into memory, capped at max bytes. The cap
-// guards against attacker-influenced bundle roots (extracted from an
-// untrusted archive, symlink-rich tarball, /proc symlink, NFS mount)
-// where os.ReadFile would allocate the whole file before any size check
-// fires. The +1 on the LimitReader lets us detect "at or over the cap"
-// without reading the entire oversized payload.
-func readBoundedFile(path, label string, max int64) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // path is bundle-local and validated by caller
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, "failed to read "+label, err)
-	}
-	defer func() { _ = f.Close() }()
-	body, err := io.ReadAll(io.LimitReader(f, max+1))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read "+label, err)
-	}
-	if int64(len(body)) > max {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			label+" exceeds maximum size of "+strconv.FormatInt(max, 10)+" bytes")
-	}
-	return body, nil
+// readBoundedFile reads path into memory, capped at max bytes and bounded by
+// the caller's context.
+//
+// The size cap guards against attacker-influenced bundle roots (extracted from
+// an untrusted archive, symlink-rich tarball, /proc symlink, NFS mount) where
+// os.ReadFile would allocate the whole file before any size check fires. The
+// context bound is what keeps `aicr evidence verify` from hanging forever on a
+// dead NFS/FUSE mount: a size cap bounds bytes, not time, and a bare os.Open
+// against a wedged mount blocks in the syscall indefinitely. See
+// pkg/evidence/internal/boundedio for why that requires a real cancellation
+// boundary rather than a ctx.Err() check between chunks.
+func readBoundedFile(ctx context.Context, path, label string, max int64) ([]byte, error) {
+	return boundedio.ReadFile(ctx, path, label, max)
 }

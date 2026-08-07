@@ -35,10 +35,10 @@ func gkeCriteria() *Criteria {
 
 // TestGKEGpuStackProfileResolution pins the GKE family conversion (issue
 // #1761 rollout PR 3): the gke-cos overlay declares gpuStack with default
-// gcp-managed (the only value a default-provisioned GKE cluster satisfies
+// gke-default (the only value a default-provisioned GKE cluster satisfies
 // — the opt-out label forfeits GKE's managed driver install, so
-// operator-managed requires the standalone installer) and alternative
-// operator-managed,
+// driver-installer requires the standalone installer) and alternative
+// driver-installer,
 // leaves inherit it, the selection is recorded with the advertiser, and
 // the #1755 node-set constraint is carried per value with the correct
 // predicate direction.
@@ -53,16 +53,16 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 		wantConstraint string
 	}{
 		{
-			name:           "default selection is gcp-managed with the external advertiser and the negated predicate",
+			name:           "default selection is gke-default with the external advertiser and the negated predicate",
 			selection:      "",
-			wantValue:      "gcp-managed",
+			wantValue:      "gke-default",
 			wantAdvertiser: allocpolicy.AdvertiserExternal,
 			wantConstraint: "!gke-no-default-nvidia-gpu-device-plugin",
 		},
 		{
-			name:           "explicit operator-managed records no advertiser and the positive label predicate",
-			selection:      "gpuStack=operator-managed",
-			wantValue:      "operator-managed",
+			name:           "explicit driver-installer records no advertiser and the positive label predicate",
+			selection:      "gpuStack=driver-installer",
+			wantValue:      "driver-installer",
 			wantAdvertiser: "",
 			wantConstraint: "gke-no-default-nvidia-gpu-device-plugin=true",
 		},
@@ -114,18 +114,18 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 // TestGKEGpuStackHappyPathThroughHydrationGate is the ADR-required
 // external-advertiser happy path: invalid-tuple tests alone would pass an
 // implementation that rejects every advertiser "external"; this proves the
-// gcp-managed value clears the hydrating coherence gate (devicePlugin off,
+// gke-default value clears the hydrating coherence gate (devicePlugin off,
 // DRA off) and the closure joins the effective lock set.
 func TestGKEGpuStackHappyPathThroughHydrationGate(t *testing.T) {
 	t.Parallel()
 
 	result, err := NewBuilder().BuildFromCriteriaWithProfile(
-		t.Context(), gkeCriteria(), "gpuStack=gcp-managed")
+		t.Context(), gkeCriteria(), "gpuStack=gke-default")
 	if err != nil {
 		t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 	}
 	if err := result.PrepareAndValidateWithContext(context.Background()); err != nil {
-		t.Fatalf("PrepareAndValidateWithContext() rejected the gcp-managed happy path: %v", err)
+		t.Fatalf("PrepareAndValidateWithContext() rejected the gke-default happy path: %v", err)
 	}
 
 	lock := result.EffectiveLockSet()
@@ -176,7 +176,7 @@ func TestGKEGpuStackClosureLockRejectsPolicyDivergence(t *testing.T) {
 	t.Parallel()
 
 	result, err := NewBuilder().BuildFromCriteriaWithProfile(
-		t.Context(), gkeCriteria(), "gpuStack=gcp-managed")
+		t.Context(), gkeCriteria(), "gpuStack=gke-default")
 	if err != nil {
 		t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 	}
@@ -283,14 +283,14 @@ func TestAKSShapedProfileDoesNotTriggerClosure(t *testing.T) {
 
 // TestCoherenceGateRejectsExternalWithDevicePluginEnabled pins the
 // hydration-boundary dual-advertisement rejection on a raw artifact: a
-// forged gcp-managed artifact whose overrides re-enable the device plugin
+// forged gke-default artifact whose overrides re-enable the device plugin
 // fails PrepareAndValidateWithContext — the invalid tuple never reaches an
 // output writer.
 func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 	t.Parallel()
 
 	result, err := NewBuilder().BuildFromCriteriaWithProfile(
-		t.Context(), gkeCriteria(), "gpuStack=gcp-managed")
+		t.Context(), gkeCriteria(), "gpuStack=gke-default")
 	if err != nil {
 		t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 	}
@@ -313,17 +313,17 @@ func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 	}
 }
 
-// TestCoherenceGateRejectsOperatorManagedIncoherentTuples pins the
-// empty-advertiser (operator-managed) side of the gate/resolver symmetry:
+// TestCoherenceGateRejectsDriverInstallerIncoherentTuples pins the
+// empty-advertiser (driver-installer) side of the gate/resolver symmetry:
 // the artifact gate applies the full #1327 tuple verdicts for EVERY
 // closure-triggering profile, not only a declared external advertiser. A
-// forged operator-managed artifact whose overrides enable DRA whole-GPU
+// forged driver-installer artifact whose overrides enable DRA whole-GPU
 // advertisement next to the operator's device plugin (dual advertisement),
 // or leave an inert chart-guard waiver, must fail
 // PrepareAndValidateWithContext — the same recipes
 // ResolveGPUAllocationPolicy rejects at validation time must never reach an
 // output writer, because validation is not guaranteed to run before deploy.
-func TestCoherenceGateRejectsOperatorManagedIncoherentTuples(t *testing.T) {
+func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -333,7 +333,7 @@ func TestCoherenceGateRejectsOperatorManagedIncoherentTuples(t *testing.T) {
 	}{
 		{
 			// Mark Chmarny's #2044 repro: operator plugin (enabled by the
-			// operator-managed fragment) plus DRA ResourceClaims would both
+			// driver-installer fragment) plus DRA ResourceClaims would both
 			// advertise whole GPUs.
 			name: "dual advertisement: DRA gpus enabled with waiver next to the operator plugin",
 			overrides: map[string]any{
@@ -357,22 +357,22 @@ func TestCoherenceGateRejectsOperatorManagedIncoherentTuples(t *testing.T) {
 			wantMsg: "inert waiver",
 		},
 	}
-	t.Run("stock operator-managed tuple passes the gate", func(t *testing.T) {
+	t.Run("stock driver-installer tuple passes the gate", func(t *testing.T) {
 		t.Parallel()
 		result, err := NewBuilder().BuildFromCriteriaWithProfile(
-			t.Context(), gkeCriteria(), "gpuStack=operator-managed")
+			t.Context(), gkeCriteria(), "gpuStack=driver-installer")
 		if err != nil {
 			t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 		}
 		if err := result.PrepareAndValidateWithContext(context.Background()); err != nil {
-			t.Fatalf("PrepareAndValidateWithContext() rejected the operator-managed happy path: %v", err)
+			t.Fatalf("PrepareAndValidateWithContext() rejected the driver-installer happy path: %v", err)
 		}
 	})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			result, err := NewBuilder().BuildFromCriteriaWithProfile(
-				t.Context(), gkeCriteria(), "gpuStack=operator-managed")
+				t.Context(), gkeCriteria(), "gpuStack=driver-installer")
 			if err != nil {
 				t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 			}
@@ -401,7 +401,7 @@ func TestCoherenceGateRejectsOperatorManagedIncoherentTuples(t *testing.T) {
 // TestCoherenceGateRejectsAbsentDRAGPUsEnabled pins the fail-closed reading
 // of an ABSENT resources.gpus.enabled on an enabled DRA component: the
 // pinned chart's declared default is true, so treating absence as unknown
-// would let a gcp-managed (external-advertiser) artifact whose custom
+// would let a gke-default (external-advertiser) artifact whose custom
 // values omit the stock pin pass generation and bundling while deploying a
 // second whole-GPU advertiser (#1327 dual advertisement). The gate must
 // reject the ambiguous state, mirroring the validation-time resolver. The
@@ -413,7 +413,7 @@ func TestCoherenceGateRejectsAbsentDRAGPUsEnabled(t *testing.T) {
 	t.Parallel()
 
 	result, err := NewBuilder().BuildFromCriteriaWithProfile(
-		t.Context(), gkeCriteria(), "gpuStack=gcp-managed")
+		t.Context(), gkeCriteria(), "gpuStack=gke-default")
 	if err != nil {
 		t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 	}

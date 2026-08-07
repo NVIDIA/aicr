@@ -76,6 +76,11 @@ func httpStatusFromCode(code aicrerrors.ErrorCode) int {
 		return http.StatusGatewayTimeout
 	case aicrerrors.ErrCodeConflict:
 		return http.StatusConflict
+	case aicrerrors.ErrCodeCanceled:
+		// Client-closed-request semantics; 499 is non-standard, so the
+		// closest standard code for "the request was abandoned" is used.
+		// This code originates in CLI paths and should not reach a handler.
+		return http.StatusRequestTimeout
 	case aicrerrors.ErrCodeInternal:
 		fallthrough
 	default:
@@ -89,7 +94,9 @@ func retryableFromCode(code aicrerrors.ErrorCode) bool {
 		aicrerrors.ErrCodeUnauthorized,
 		aicrerrors.ErrCodeNotFound,
 		aicrerrors.ErrCodeMethodNotAllowed,
-		aicrerrors.ErrCodeConflict:
+		aicrerrors.ErrCodeConflict,
+		// A deliberate abort is not retryable: the caller asked to stop.
+		aicrerrors.ErrCodeCanceled:
 		return false
 	case aicrerrors.ErrCodeTimeout,
 		aicrerrors.ErrCodeUnavailable,

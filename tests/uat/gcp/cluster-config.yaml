@@ -137,8 +137,8 @@ compute:
               # opt-out label disables, so a labeled fresh pool comes up
               # driverless (staged installer, no kernel module — run
               # 30930940652). The pool matches the gpuStack profile's
-              # gcp-managed default (#1761 PR 3), whose constraint requires
+              # gke-default default (#1761 PR 3), whose constraint requires
               # the label ABSENT on every GPU node; the label belongs only
-              # to the operator-managed value, paired with a label-surviving
+              # to the driver-installer value, paired with a label-surviving
               # driver path (gpu-driver-version=disabled + Google's
               # standalone nvidia-driver-installer DaemonSet).

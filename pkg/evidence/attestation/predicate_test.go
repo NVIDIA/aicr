@@ -63,7 +63,7 @@ func TestBuildPredicate_CarriesProfile(t *testing.T) {
 		{
 			name: "profiled input propagates the profile block",
 			profile: &ProfilePredicate{
-				Selection:                "gpuStack=gcp-managed",
+				Selection:                "gpuStack=gke-default",
 				Advertiser:               "external",
 				PolicyDescriptorIdentity: "abc123",
 			},
@@ -286,7 +286,7 @@ func TestStatementPredicateTypeSelection(t *testing.T) {
 		t.Errorf("unprofiled type = %q, want %q", got, PredicateTypeV1)
 	}
 	profiled := &Predicate{Profile: &ProfilePredicate{
-		Selection: "gpuStack=gcp-managed", PolicyDescriptorIdentity: "abc",
+		Selection: "gpuStack=gke-default", PolicyDescriptorIdentity: "abc",
 	}}
 	if got := StatementPredicateType(profiled); got != PredicateTypeV2 {
 		t.Errorf("profiled type = %q, want %q", got, PredicateTypeV2)

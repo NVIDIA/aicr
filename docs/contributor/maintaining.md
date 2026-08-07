@@ -27,6 +27,48 @@ The short form:
 
 Bi-weekly cadence; hotfix between cycles when a fix is critical.
 
+### SDK API Compatibility
+
+`make api-diff` compares the exported `pkg/client/v1` surface to the latest
+stable release tag. It runs through `make qualify` and the qualification
+workflow; additive changes are reported, while removals and incompatible type
+changes fail the gate.
+
+Local runs require the repository-pinned `apidiff` and `yq`; install them with
+`make tools-setup`. They also require full tag history and a stable release tag
+reachable from `HEAD`. The gate checks out that baseline in a temporary
+detached worktree, so it leaves the current working tree unchanged but adds
+checkout and filesystem I/O cost to `make qualify`.
+
+The gate compares declarations exported by `pkg/client/v1`. For external named
+types reached through transparent aliases, `apidiff` matches the target's
+package path and type name but does not recursively compare its definition. A
+change to such a target can therefore alter the facade contract without failing
+the gate. Reviewers must manually assess changes to aliased target types as
+changes to the stable facade until
+[#2019](https://github.com/NVIDIA/aicr/issues/2019) resolves this gap.
+
+To acknowledge an intentional break, first run `make api-diff`. Add a
+baseline-scoped entry to `pkg/client/v1/api-diff-exceptions.yaml` containing the
+reported baseline plus non-empty `issue`, `summary`, and `rationale` fields.
+Exactly one acknowledgement entry is allowed per baseline. Copy every reported
+incompatible line that begins with `- ` into `incompatible_changes`, omitting
+the `- ` prefix. The `incompatible_changes` list must exactly and completely
+match the command output; omissions and extras both fail the gate.
+
+The acknowledgement authorizes a break only for the active baseline, so keep it
+in place through the release that ships that break — it is what keeps the gate
+green until the release tag lands. Once the tag advances the baseline, the entry
+is obsolete and should be pruned. The gate is deliberately asymmetric about
+this. When the diff against the new baseline is clean there is nothing for a
+stale entry to authorize, so the gate only warns that the entry is prunable and
+still exits successfully; this is what lets the release pipeline and open pull
+requests stay green while the cleanup lands. When the diff is *not* clean, a
+stale entry is a hard failure: an acknowledgement scoped to an older baseline
+must never be accepted for a break against the current one. Prune the entry in a
+follow-up change after the release; Git history retains the release-notes record
+of the breaking change.
+
 ### Common Release Breakages
 
 **`goreleaser` fails with auth conflict.** `goreleaser` panics if both
@@ -470,7 +512,12 @@ committed pointer file and the PR description.
    [#1535](https://github.com/NVIDIA/aicr/issues/1535)). A structured `exit: 1` (in `--format json`) requires explicit disposition
    (see [Exit-1 Review Process](#exit-1-review-process)); `exit: 2` is a hard
    fail. Both collapse to OS exit code 2, so distinguish them by reading
-   `.exit` from `aicr evidence verify --format json`.
+   `.exit` from `aicr evidence verify --format json`. A structured `exit: 3` is **not** a verdict on
+   the bundle — verification never reached one. `failureCause.class:
+   transient` (OS exit code 5) means the bundle was not readable (dead mount,
+   unreachable registry); re-run the check. `failureCause.class: canceled`
+   (OS exit code 9) means the run was deliberately aborted. In neither case
+   should the contributor be asked to change anything.
 3. **Signer identity is acceptable.** Open the committed pointer file under
    `recipes/evidence/<recipe>/<src>/` and review its `signer` block. See
    [Signer Identity Trust Patterns](#signer-identity-trust-patterns).

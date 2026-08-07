@@ -346,9 +346,9 @@ argocd-helm install-time values are rejected on key *presence* alone —
 even when the value is identical to the selected one. The AKS family is the first embedded
 adopter: `gpuStack` with values `azure-managed` (default) and `operator-managed` —
 see [AKS GPU setup](../integrator/aks-gpu-setup.md#gpu-driver-setup).
-The GKE family declares `gpuStack` with values `gcp-managed` (default; GKE's
+The GKE family declares `gpuStack` with values `gke-default` (default; GKE's
 managed plugin stays the advertiser — recorded as `advertiser: external` —
-for default-provisioned clusters with no node label) and `operator-managed` (the GPU
+for default-provisioned clusters with no node label) and `driver-installer` (the GPU
 Operator's device plugin owns `nvidia.com/gpu`; GPU node pools carry
 `gke-no-default-nvidia-gpu-device-plugin=true` and, because that label
 forfeits GKE's managed driver install, are created
@@ -457,7 +457,7 @@ Generate recipes using direct system parameters:
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
-| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gcp-managed` on GKE) |
+| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or `gpuStack=driver-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
@@ -3164,19 +3164,31 @@ The positional argument is auto-detected as one of:
 | `--registry-insecure-tls` | | bool | `false` | Skip TLS verification for the registry (self-signed certificates). |
 | `--allow-unpinned-tag` | | bool | `false` | Accept tag-only OCI references. By default the verifier refuses unpinned refs because tags are registry-rewritable; opt in only for one-off debugging. Pointer-driven flows ignore this flag when the pointer carries a `sha256:` digest. |
 
-**Exit codes:**
+**Verdict codes:**
+
+These are the values of the `exit` field in the JSON/Markdown output, mirroring `VerifyResult.Exit` from the library API. They are **not** the process exit code — see the table below them.
 
 | Code | Meaning |
 |------|---------|
 | 0 | Bundle valid; every check passed (or valid but **unsigned** — see pending below). |
 | 1 | Bundle valid, but recorded validator phase results show failures (informational). |
 | 2 | Bundle invalid. The `failureCause.class` field gives the specific reason — registry access (`registry-forbidden`/`not-found`/`registry`), `signature`, `integrity`, `schema`, or `unknown` (see Failure cause below). |
+| 3 | Verification **did not complete**, so no verdict was reached. `failureCause.class` is `transient` (the bundle was not readable — dead NFS/FUSE mount, unreachable registry) or `canceled` (the operator aborted the run). This is **not** a statement about the bundle — nothing was proven about it either way. For `transient`, retry; do not reject the artifact. |
 
-The JSON/Markdown output's `exit` field mirrors `VerifyResult.Exit` from the library API. Shell consumers can branch via `jq '.exit'` on `--format json` output.
+**Process exit codes:**
+
+| Process code | Verdicts that map to it |
+|--------------|-------------------------|
+| 0 | verdict 0 |
+| 2 | verdicts 1 **and** 2 |
+| 5 | verdict 3 with `failureCause.class: transient` |
+| 9 | verdict 3 with `failureCause.class: canceled` |
+
+Verdicts 1 and 2 are indistinguishable at the process level because both map through `pkg/errors` to the same code. To tell them apart, branch on the JSON `exit` field via `jq '.exit'` rather than on `$?`. Verdict 3 is deliberately given its own process code so a CI gate can distinguish an infrastructure fault from an invalid attestation without parsing JSON.
 
 **Pending signature.** An unsigned bundle whose pointer carries no `signer` (e.g. one published with `--no-sign`, awaiting the signing leg) is **not** a `verify` failure: it verifies at exit `0` with `pending: true` in the JSON output and a "pending signature" verdict in the Markdown summary. This is a useful local check on a not-yet-signed bundle. The committed flat pending pointer is signed and relocated to its nested per-source path by the fork CI signing leg (`aicr evidence sign --relocate`); the blocking *Evidence Pointer Contract* gate (`pkg/evidence/verifier/discover.go`) requires that final signed, nested pointer. See [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci).
 
-**Failure cause.** On a non-zero exit, the JSON output carries a structured `failureCause` object — `class` (one of `registry-forbidden`, `not-found`, `registry`, `signature`, `integrity`, `schema`, `unknown`), an optional `httpStatus`, and an actionable `hint`. For example, a private fork registry returns `class: registry-forbidden`, `httpStatus: 403` with a hint to make the package public — so the reason is self-serviceable rather than a bare "invalid". The Markdown summary renders the same as **Cause**/**Hint** lines.
+**Failure cause.** On verdict 2 or 3, the JSON output carries a structured `failureCause` object — `class` (one of `registry-forbidden`, `not-found`, `registry`, `signature`, `integrity`, `schema`, `transient`, `canceled`, `unknown`), an optional `httpStatus`, and an actionable `hint`. For example, a private fork registry returns `class: registry-forbidden`, `httpStatus: 403` with a hint to make the package public — so the reason is self-serviceable rather than a bare "invalid". The Markdown summary renders the same as **Cause**/**Hint** lines.
 
 **Examples:**
 ```shell
@@ -3443,6 +3455,7 @@ AICR respects standard environment variables:
 | 6 | Unavailable (service temporarily unavailable) |
 | 7 | Rate limited (client exceeded rate limit) |
 | 8 | Internal error (unexpected failure) |
+| 9 | Operation aborted by the operator (SIGINT/SIGTERM) |
 
 ## Common Usage Patterns
 

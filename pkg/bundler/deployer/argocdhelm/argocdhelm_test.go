@@ -398,14 +398,14 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 			},
 		})
 		result.APIVersion = recipe.RecipeProfileAPIVersion
-		// gcp-managed shape: an external advertiser plus a disabled
+		// gke-default shape: an external advertiser plus a disabled
 		// gpu-operator device plugin. The external advertiser triggers the
 		// #1327 closure, so the guard must lock the recomputed closure
 		// paths of every enabled descriptor component — not only the
 		// declared ownedPaths.
 		result.Metadata.SelectedProfile = &recipe.SelectedProfile{
 			Name:       "gpuStack",
-			Value:      "gcp-managed",
+			Value:      "gke-default",
 			Advertiser: allocpolicy.AdvertiserExternal,
 			OwnedPaths: map[string][]string{
 				"gpu-operator": {allocpolicy.PathDevicePluginEnabled, "enabled"},

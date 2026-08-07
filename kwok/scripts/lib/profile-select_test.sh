@@ -28,11 +28,13 @@ if [[ "${PROFILE_SELECT_RC_NO_MATCH}" == "0" || "${PROFILE_SELECT_RC_NO_MATCH}" 
 fi
 
 fails=0
+ran=0
 # check <name> <want_rc> <want_stdout> <want_stderr_substring> <got_rc> <got_stdout> <got_stderr>
 # want_stderr_substring: empty string means "do not check stderr".
 check() {
     local name="$1" want_rc="$2" want_out="$3" want_err_sub="$4"
     local got_rc="$5" got_out="$6" got_err="$7"
+    ran=$((ran + 1))
     local ok=1
     [[ "${got_rc}" == "${want_rc}" ]] || ok=0
     [[ "${got_out}" == "${want_out}" ]] || ok=0
@@ -128,26 +130,44 @@ run_select gke gb300 "${FIXTURE_ROOT}"
 check "ambiguous-system-profile-fails-fatal" 1 "" "Multiple system profiles for service='gke'" \
     "${got_rc}" "${got_out}" "${got_err}"
 
-# 7. Ambiguous GPU — FATAL outcome (rc=1).
-#    Use a fresh fixture subtree so previous tests don't contaminate arity.
+# 7. Ambiguous GPU (request matches the duplicated accelerator) — FATAL
+#    outcome (rc=1). Use a fresh fixture subtree so previous tests don't
+#    contaminate arity.
 CLEAN_ROOT=$(mktemp -d)
 write_profile "${CLEAN_ROOT}/eks/system-m7i.yaml" eks system
 write_profile "${CLEAN_ROOT}/eks/p5-h100.yaml"    eks accelerated h100
 write_profile "${CLEAN_ROOT}/eks/p5-h100-alt.yaml" eks accelerated h100
 run_select eks h100 "${CLEAN_ROOT}"
-check "ambiguous-gpu-profile-fails-fatal" 1 "" "Multiple GPU profiles for service='eks' accelerator='h100'" \
+check "ambiguous-gpu-profile-fails-fatal" 1 "" "accelerator='h100': eks/p5-h100-alt.yaml eks/p5-h100.yaml" \
     "${got_rc}" "${got_out}" "${got_err}"
 rm -rf "${CLEAN_ROOT}"
 
-# 8. Provider-label mismatch inside the directory — file is silently ignored
-#    (defense against a mis-copied file living under the wrong service dir).
-#    Net outcome is no GPU match → SKIP.
+# 7b. Ambiguous GPU where the request does NOT match the duplicated
+#    label. Two h100 profiles co-exist with a valid gb200 profile; the
+#    request is for gb200. Historical (request-scoped) ambiguity check
+#    would return rc=0 with the gb200 match, silently hiding the h100
+#    tree fault. Tree-scoped check must surface it.
+CLEAN_ROOT=$(mktemp -d)
+write_profile "${CLEAN_ROOT}/eks/system-m7i.yaml"  eks system
+write_profile "${CLEAN_ROOT}/eks/p5-h100.yaml"     eks accelerated h100
+write_profile "${CLEAN_ROOT}/eks/p5-h100-alt.yaml" eks accelerated h100
+write_profile "${CLEAN_ROOT}/eks/p6-gb200.yaml"    eks accelerated gb200
+run_select eks gb200 "${CLEAN_ROOT}"
+check "ambiguous-gpu-different-accelerator-still-fails-fatal" 1 "" "accelerator='h100': eks/p5-h100-alt.yaml eks/p5-h100.yaml" \
+    "${got_rc}" "${got_out}" "${got_err}"
+rm -rf "${CLEAN_ROOT}"
+
+# 8. Provider-label mismatch inside the directory — FATAL outcome (rc=1)
+#    with a diagnostic naming the offending file. Silently ignoring the file
+#    would degrade to an invisible rc=2 no-match (batch SKIP / CI drop) when
+#    the mislabeled file is the sole profile for its role, hiding the tree
+#    fault. See #1997 follow-up.
 CLEAN_ROOT=$(mktemp -d)
 write_profile "${CLEAN_ROOT}/gke/system-n2.yaml" gke system
-# This file lives under gke/ but declares provider: eks — must NOT be picked.
+# This file lives under gke/ but declares provider: eks — must be rejected.
 write_profile "${CLEAN_ROOT}/gke/wrong-provider.yaml" eks accelerated gb300
 run_select gke gb300 "${CLEAN_ROOT}"
-check "mislabeled-provider-is-ignored" "${PROFILE_SELECT_RC_NO_MATCH}" "" "No GPU profile for service='gke' accelerator='gb300'" \
+check "mislabeled-provider-fails-fatal" 1 "" "gke/wrong-provider.yaml under gke/ declares metadata.labels.provider='eks'" \
     "${got_rc}" "${got_out}" "${got_err}"
 rm -rf "${CLEAN_ROOT}"
 
@@ -310,8 +330,60 @@ check "malformed-profile-fails-fatal" 1 "" "Malformed KWOK profile eks/broken.ya
     "${got_rc}" "${got_out}" "${got_err}"
 rm -rf "${BAD_ROOT}"
 
+# 23. Unknown nodeType (typo) — must fail fatally rather than being
+# silently dropped by a missing case arm. Same coverage-lie class as
+# provider-mismatch: a typo'd sole system profile would otherwise
+# degrade to invisible rc=2 no-match. Fixture uses `sytem` (missing s)
+# with no valid siblings for that role so a silent drop would fall out
+# as rc=2 rather than rc=1 without the default arm.
+CLEAN_ROOT=$(mktemp -d)
+write_profile "${CLEAN_ROOT}/eks/system-typo.yaml" eks sytem
+write_profile "${CLEAN_ROOT}/eks/p5-h100.yaml"     eks accelerated h100
+run_select eks h100 "${CLEAN_ROOT}"
+check "unknown-nodetype-fails-fatal" 1 "" "unrecognized metadata.labels.nodeType='sytem'" \
+    "${got_rc}" "${got_out}" "${got_err}"
+rm -rf "${CLEAN_ROOT}"
+
+# 24. Accelerated profile missing its accelerator label — must fail
+# fatally. Previously the profile joined available_accels as "" and,
+# if the requested accelerator was also empty (via an odd criteria
+# combination), could yield a spurious match; even without that path,
+# the empty label silently degrades GPU-role coverage.
+CLEAN_ROOT=$(mktemp -d)
+write_profile "${CLEAN_ROOT}/eks/system-m7i.yaml"    eks system
+# Omit accelerator arg → write_profile skips the label entirely.
+write_profile "${CLEAN_ROOT}/eks/p5-no-label.yaml"   eks accelerated
+run_select eks h100 "${CLEAN_ROOT}"
+check "accelerated-profile-missing-accelerator-label-fails-fatal" 1 "" \
+    "eks/p5-no-label.yaml declares nodeType='accelerated' but is missing metadata.labels.accelerator" \
+    "${got_rc}" "${got_out}" "${got_err}"
+rm -rf "${CLEAN_ROOT}"
+
+# 25. Mislabeled system-role profile — complements test 8 (which covers
+# a mislabeled accelerated profile). Provider-mismatch is fatal in
+# both roles, so a system profile carrying the wrong provider label
+# must also surface as rc=1 rather than degrading to rc=2 no-match.
+CLEAN_ROOT=$(mktemp -d)
+# system profile lives under gke/ but declares provider: eks
+write_profile "${CLEAN_ROOT}/gke/wrong-system.yaml" eks system
+write_profile "${CLEAN_ROOT}/gke/a3-h100.yaml"      gke accelerated h100
+run_select gke h100 "${CLEAN_ROOT}"
+check "mislabeled-provider-on-system-role-fails-fatal" 1 "" \
+    "gke/wrong-system.yaml under gke/ declares metadata.labels.provider='eks'" \
+    "${got_rc}" "${got_out}" "${got_err}"
+rm -rf "${CLEAN_ROOT}"
+
+# 26. Mixed explicit-service + defaulted-accelerator criteria — the two
+# fields normalize independently, so an overlay that names service but
+# omits accelerator must return the explicit service verbatim with the
+# accelerator defaulted to h100.
+write_overlay "${OVERLAY_DIR}/mixed-service-explicit.yaml" gke
+got_out=$(resolve_recipe_criteria "${OVERLAY_DIR}/mixed-service-explicit.yaml" 2>/dev/null)
+got_rc=$?
+check "resolve-explicit-service-defaulted-accelerator" 0 "gke h100" "" "${got_rc}" "${got_out}" ""
+
 if (( fails > 0 )); then
-    echo "${fails} test(s) failed"
+    echo "${fails} test(s) failed (${ran} attempted)"
     exit 1
 fi
-echo "All 22 tests passed"
+echo "All ${ran} tests passed"

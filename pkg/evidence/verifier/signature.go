@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -33,6 +34,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
 	"github.com/NVIDIA/aicr/pkg/trust"
 )
 
@@ -65,15 +67,38 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "materialized bundle is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled before signature verify", err)
+		// An operator abort must not be reported as a timeout: ErrCodeTimeout
+		// is the retryable/transient bucket, and a deliberate Ctrl-C is not
+		// something a CI gate should re-run.
+		if stderrors.Is(err, context.Canceled) {
+			return nil, errors.Wrap(errors.ErrCodeCanceled, "canceled before signature verify", err)
+		}
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "timed out before signature verify", err)
 	}
 
 	sigPath := filepath.Join(mat.BundleDir, attestation.AttestationFilename)
-	info, statErr := os.Stat(sigPath)
+	// Bounded: this stat decides signed-vs-unsigned, so on a wedged mount an
+	// unbounded call would hang the verifier before any read is attempted.
+	var info os.FileInfo
+	var statErr error
+	if bErr := boundedio.Do(ctx, "signature file "+attestation.AttestationFilename, func() error {
+		info, statErr = os.Stat(sigPath)
+		return nil
+	}); bErr != nil {
+		return nil, bErr
+	}
 	if statErr != nil && os.IsNotExist(statErr) {
 		return nil, ErrUnsignedBundle
 	}
 	if statErr != nil {
+		// A mount that cannot answer has not told us whether the bundle is
+		// signed. Reporting this as Internal let classifyFailure fall through
+		// to the step class — "signature" — so a storage fault read as
+		// "this bundle's signature failed verification".
+		if boundedio.IsStorageFault(statErr) {
+			return nil, errors.Wrap(errors.ErrCodeUnavailable,
+				"could not read signature file (storage fault)", statErr)
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to stat signature file", statErr)
 	}
 	if info.Size() > defaults.MaxSigstoreBundleSize {
@@ -81,7 +106,7 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 			"signature file exceeds maximum size — refusing to parse")
 	}
 
-	sigBundle, parseErr := loadSigstoreBundle(sigPath)
+	sigBundle, parseErr := loadSigstoreBundle(ctx, sigPath)
 	if parseErr != nil {
 		return nil, parseErr
 	}
@@ -183,8 +208,8 @@ func buildIdentityMatcher(opts VerifyOptions) (verify.CertificateIdentity, error
 	return identity, nil
 }
 
-func loadSigstoreBundle(path string) (*bundle.Bundle, error) {
-	data, err := readBoundedFile(path, "sigstore bundle", defaults.MaxSigstoreBundleSize)
+func loadSigstoreBundle(ctx context.Context, path string) (*bundle.Bundle, error) {
+	data, err := readBoundedFile(ctx, path, "sigstore bundle", defaults.MaxSigstoreBundleSize)
 	if err != nil {
 		return nil, err
 	}

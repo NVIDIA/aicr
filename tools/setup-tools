@@ -273,6 +273,7 @@ cd "${REPO_ROOT}"
 
 GO_VERSION=$(yq '.languages.go' .settings.yaml)
 GOLANGCI_LINT_VERSION=$(yq '.linting.golangci_lint' .settings.yaml)
+APIDIFF_VERSION=$(yq '.linting.apidiff' .settings.yaml)
 YAMLLINT_VERSION=$(yq '.linting.yamllint' .settings.yaml)
 ADDLICENSE_VERSION=$(yq '.linting.addlicense' .settings.yaml)
 GO_LICENSES_VERSION=$(yq '.linting.go_licenses' .settings.yaml)
@@ -301,6 +302,7 @@ echo ""
 log_info "Target Versions:"
 echo "  Go:              ${GO_VERSION}"
 echo "  golangci-lint:   ${GOLANGCI_LINT_VERSION}"
+echo "  apidiff:         ${APIDIFF_VERSION}"
 echo "  grype:           ${GRYPE_VERSION}"
 echo "  cosign:          ${COSIGN_VERSION}"
 echo "  syft:            ${SYFT_VERSION}"
@@ -785,7 +787,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 brew install tilt-dev/tap/ctlptl
             elif [[ "${OS}" == "linux" ]]; then
                 if command_exists go; then
-                    go install github.com/tilt-dev/ctlptl/cmd/ctlptl@v"${CTLPTL_VERSION}"
+                    GOFLAGS= go install github.com/tilt-dev/ctlptl/cmd/ctlptl@v"${CTLPTL_VERSION}"
                     sudo cp "$(go env GOPATH)/bin/ctlptl" /usr/local/bin/
                 else
                     log_warning "Go not installed, skipping ctlptl"
@@ -929,7 +931,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 brew install goreleaser
             elif [[ "${OS}" == "linux" ]]; then
                 if command_exists go; then
-                    go install github.com/goreleaser/goreleaser/v2@"${GORELEASER_VERSION}"
+                    GOFLAGS= go install github.com/goreleaser/goreleaser/v2@"${GORELEASER_VERSION}"
                     sudo cp "$(go env GOPATH)/bin/goreleaser" /usr/local/bin/
                 else
                     log_warning "Go not installed, skipping goreleaser"
@@ -995,13 +997,37 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         fi
     fi
 
+    # apidiff
+    APIDIFF_CURRENT_VERSION=""
+    if command_exists apidiff && [[ "${UPGRADE}" != "true" ]]; then
+        APIDIFF_PATH=$(command -v apidiff)
+        APIDIFF_CURRENT_VERSION=$(go_binary_module_version "${APIDIFF_PATH}" golang.org/x/exp || true)
+    fi
+
+    if [[ "${UPGRADE}" != "true" && "${APIDIFF_CURRENT_VERSION}" == "${APIDIFF_VERSION}" ]]; then
+        log_success "apidiff ${APIDIFF_VERSION} already installed"
+    else
+        if command_exists apidiff && [[ "${UPGRADE}" != "true" ]]; then
+            if [[ -n "${APIDIFF_CURRENT_VERSION}" ]]; then
+                log_warning "apidiff version mismatch at ${APIDIFF_PATH} (installed: ${APIDIFF_CURRENT_VERSION}, required: ${APIDIFF_VERSION}); reinstalling pinned version"
+            else
+                log_warning "Unable to verify apidiff module version at ${APIDIFF_PATH}; reinstalling pinned version ${APIDIFF_VERSION}"
+            fi
+        fi
+        log_info "Installing apidiff ${APIDIFF_VERSION}..."
+        if prompt_continue; then
+            GOFLAGS= go install golang.org/x/exp/cmd/apidiff@"${APIDIFF_VERSION}"
+            log_success "apidiff ${APIDIFF_VERSION} installed"
+        fi
+    fi
+
     # addlicense
     if command_exists addlicense && [[ "${UPGRADE}" != "true" ]]; then
         log_success "addlicense already installed"
     else
         log_info "Installing addlicense ${ADDLICENSE_VERSION}..."
         if prompt_continue; then
-            go install github.com/google/addlicense@"${ADDLICENSE_VERSION}"
+            GOFLAGS= go install github.com/google/addlicense@"${ADDLICENSE_VERSION}"
             log_success "addlicense installed"
         fi
     fi
@@ -1012,7 +1038,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
     else
         log_info "Installing go-licenses ${GO_LICENSES_VERSION}..."
         if prompt_continue; then
-            go install github.com/google/go-licenses/v2@"${GO_LICENSES_VERSION}"
+            GOFLAGS= go install github.com/google/go-licenses/v2@"${GO_LICENSES_VERSION}"
             log_success "go-licenses installed"
         fi
     fi

@@ -75,10 +75,10 @@ pointers) predate profiles and carry no such field: converting one to
 profiled evidence selects the value from the **target cluster** — the
 profile the refreshed evidence is meant to attest — not from anything in
 the legacy pointer. This hydrated-recipe path is the only way to regenerate
-`operator-managed` evidence (on GKE, validating the raw overlay selects
-the `gcp-managed` default, whose
-`!gke-no-default-nvidia-gpu-device-plugin` constraint fails against an
-operator-managed cluster's labeled pools).
+`driver-installer` evidence (on GKE, validating the raw overlay selects
+the `gke-default` default, whose
+`!gke-no-default-nvidia-gpu-device-plugin` constraint fails against a
+driver-installer cluster's labeled pools).
 State `--intent` (and `--platform` when the leaf pins one — omit it
 otherwise) explicitly: the snapshot fingerprint supplies service,
 accelerator, and OS, but intent and platform are author-selected and

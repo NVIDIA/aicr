@@ -374,7 +374,7 @@ func classifyConstraintsWellformed(result *recipe.RecipeResult) (state, detail s
 		// is deliberately NOT valid under the scalar expression parser —
 		// grading it with ParseConstraintExpression would fail every recipe
 		// carrying a well-formed node-set constraint (the GKE gpuStack
-		// profile's gcp-managed default declares the negated form).
+		// profile's gke-default default declares the negated form).
 		if c.Name == constraints.GPUNodesLabelConstraintName {
 			if err := constraints.ValidateGPUNodesLabelValue(c.Value); err != nil {
 				return StatusFail, fmt.Sprintf("constraint %q: malformed value %q: %v", c.Name, c.Value, err)

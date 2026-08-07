@@ -84,3 +84,25 @@ has_tools() {
         fi
     done
 }
+
+# Print the module version embedded in a Go binary's build metadata.
+# Returns non-zero when the binary metadata is unreadable or the requested
+# module is absent. Compatible with the Bash 3.x shipped by macOS.
+go_binary_module_version() {
+    local binary_path="$1"
+    local module_path="$2"
+    local build_info
+    local module_version
+
+    if ! build_info=$(go version -m "${binary_path}" 2>/dev/null); then
+        return 1
+    fi
+
+    module_version=$(printf '%s\n' "${build_info}" | awk -v module="${module_path}" \
+        '$1 == "mod" && $2 == module { print $3; exit }')
+    if [[ -z "${module_version}" ]]; then
+        return 1
+    fi
+
+    printf '%s\n' "${module_version}"
+}

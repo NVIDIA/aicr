@@ -50,6 +50,7 @@ fi
 # version_cmd: Command to extract version
 # match_strategy: How to compare versions
 #   - exact: Full version must match
+#   - strict_exact: Full version must match; missing/unverifiable/mismatch fails the check
 #   - major: Only major version must match
 #   - major_minor: Major.minor must match
 #   - presence: Only check if installed (no version comparison)
@@ -83,6 +84,9 @@ get_tool_metadata() {
         # Linting
         golangci_lint)
             echo "golangci-lint:::golangci-lint version --short 2>/dev/null:::major"
+            ;;
+        apidiff)
+            echo "apidiff:::go_binary_module_version \"\$(command -v apidiff)\" golang.org/x/exp:::strict_exact"
             ;;
         yamllint)
             echo "yamllint:::yamllint --version 2>/dev/null | awk '{print \$2}':::major"
@@ -168,7 +172,7 @@ compare_versions() {
     local strategy="$3"
 
     case "$strategy" in
-        exact)
+        exact|strict_exact)
             [[ "$installed" == "$expected" ]]
             ;;
         major)
@@ -225,6 +229,9 @@ check_tool() {
     # Check if command exists
     if ! command -v "$cmd_name" &>/dev/null; then
         print_row "$cmd_name" "$expected_version" "-" "✗"
+        if [[ "$match_strategy" == "strict_exact" ]]; then
+            CHECK_FAILED=1
+        fi
         return
     fi
 
@@ -243,10 +250,14 @@ check_tool() {
         print_row "$cmd_name" "$expected_version" "$installed_version" "✓"
     else
         print_row "$cmd_name" "$expected_version" "$installed_version" "⚠"
+        if [[ "$match_strategy" == "strict_exact" ]]; then
+            CHECK_FAILED=1
+        fi
     fi
 }
 
 # Main
+CHECK_FAILED=0
 echo "=== Tool Version Check ==="
 echo ""
 print_row "Tool" "Expected" "Installed" "Status"
@@ -283,3 +294,4 @@ fi
 
 echo ""
 echo "Legend: ✓ = installed, ⚠ = version mismatch or warning, ✗ = missing"
+exit "${CHECK_FAILED}"

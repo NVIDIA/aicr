@@ -51,6 +51,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Load versions
@@ -64,6 +65,7 @@ jobs:
           coverage_report: ${{ inputs.coverage_report }}
           coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
           helm_version: ${{ steps.versions.outputs.helm }}
+          apidiff_version: ${{ steps.versions.outputs.apidiff }}
 
   lint:
     name: Lint

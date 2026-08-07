@@ -288,8 +288,12 @@ scan: ## Scans for vulnerabilities with grype
 	echo "Running vulnerability scan..."; \
 	grype dir:. --config .grype.yaml --fail-on high --quiet
 
+.PHONY: api-diff
+api-diff: ## Checks pkg/client/v1 compatibility against the latest stable release
+	@bash tools/api-diff
+
 .PHONY: qualify
-qualify: test-coverage lint tuning-check e2e scan license-check ## Qualifies the codebase (test-coverage, lint, tuning-check, e2e, scan)
+qualify: test-coverage lint tuning-check e2e scan license-check api-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, e2e, scan, API compatibility)
 	@echo "Codebase qualification completed"
 
 .PHONY: bom

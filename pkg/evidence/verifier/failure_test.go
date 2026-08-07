@@ -36,7 +36,11 @@ func TestClassifyFailure_RegistryStatusTakesPrecedence(t *testing.T) {
 		{"forbidden", http.StatusForbidden, stepMaterialize, CauseRegistryForbidden, 403, true},
 		{"unauthorized", http.StatusUnauthorized, stepMaterialize, CauseRegistryForbidden, 401, true},
 		{"not found", http.StatusNotFound, stepMaterialize, CauseNotFound, 404, true},
-		{"other status", http.StatusInternalServerError, stepMaterialize, CauseRegistry, 500, false},
+		// A 4xx the classifier has no specific arm for. 5xx and 429 are no
+		// longer "other": they are server-side, so they classify as transient
+		// and carry a retry hint (see
+		// TestClassifyRegistryError_ServerFaultsAreNotVerdicts).
+		{"other client status", http.StatusBadRequest, stepMaterialize, CauseRegistry, 400, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,20 +93,53 @@ func TestClassifyFailure_StepWhenNoRegistryStatus(t *testing.T) {
 	}
 }
 
-func TestSetFailureCause_FirstWins(t *testing.T) {
+// TestRecordFailure_FirstVerdictWins keeps the original first-wins rule for two
+// real verdicts: verification runs in order, so the earliest genuine failure is
+// the root cause and later ones are usually fallout.
+func TestRecordFailure_FirstVerdictWins(t *testing.T) {
 	r := &VerifyResult{}
-	setFailureCause(r, stepMaterialize, errors.New(errors.ErrCodeUnavailable, "first"))
-	setFailureCause(r, stepInventory, errors.New(errors.ErrCodeInternal, "second"))
+	recordFailure(r, stepSignature, errors.New(errors.ErrCodeUnauthorized, "first"))
+	recordFailure(r, stepInventory, errors.New(errors.ErrCodeInvalidRequest, "second"))
 	if r.FailureCause == nil || !strings.Contains(r.FailureCause.Detail, "first") {
 		t.Fatalf("expected first failure to win; got %+v", r.FailureCause)
 	}
+	if r.Exit != ExitInvalid {
+		t.Errorf("exit = %d, want %d", r.Exit, ExitInvalid)
+	}
 }
 
-func TestSetFailureCause_IgnoresNil(t *testing.T) {
+// TestRecordFailure_HardVerdictSupersedesNonVerdict is the exception, and the
+// reason exit and cause are set together. An earlier transient must not leave a
+// tampered bundle reported as "exit 2, class transient, hint: retry" — that
+// tells a CI gate to re-run a bundle it should be rejecting.
+func TestRecordFailure_HardVerdictSupersedesNonVerdict(t *testing.T) {
 	r := &VerifyResult{}
-	setFailureCause(r, stepMaterialize, nil)
+	recordFailure(r, stepSignature, errors.New(errors.ErrCodeTimeout, "trusted root unavailable"))
+	if r.FailureCause == nil || r.FailureCause.Class != CauseTransient {
+		t.Fatalf("expected a transient cause first; got %+v", r.FailureCause)
+	}
+
+	recordFailure(r, stepInventory, errors.New(errors.ErrCodeInvalidRequest, "manifest digest mismatch"))
+	if r.Exit != ExitInvalid {
+		t.Errorf("exit = %d, want %d", r.Exit, ExitInvalid)
+	}
+	if r.FailureCause == nil || r.FailureCause.Class != CauseIntegrity {
+		t.Fatalf("cause = %+v, want class %q — an invalid verdict must not carry a transient cause",
+			r.FailureCause, CauseIntegrity)
+	}
+	if strings.Contains(r.FailureCause.Hint, "retry") {
+		t.Errorf("invalid bundle still carries a retry hint: %q", r.FailureCause.Hint)
+	}
+}
+
+func TestRecordFailure_IgnoresNil(t *testing.T) {
+	r := &VerifyResult{}
+	recordFailure(r, stepMaterialize, nil)
 	if r.FailureCause != nil {
 		t.Errorf("nil error should not set a cause; got %+v", r.FailureCause)
+	}
+	if r.Exit != ExitValidPassed {
+		t.Errorf("nil error should not change exit; got %d", r.Exit)
 	}
 }
 

@@ -508,8 +508,8 @@ converted workflow to v2 as one cut-over.
 `/v1/recipe` and `/v1/query` requests with `service=aks` or `service=gke` now
 reject. Move GET clients to `GET /v2/recipe` / `GET /v2/query` (identical
 query parameters, plus optional `profile=gpuStack=azure-managed` or
-`profile=gpuStack=operator-managed` on AKS, and `profile=gpuStack=gcp-managed`
-or `profile=gpuStack=operator-managed` on GKE); move POST
+`profile=gpuStack=operator-managed` on AKS, and `profile=gpuStack=gke-default`
+or `profile=gpuStack=driver-installer` on GKE); move POST
 clients to `POST /v2/recipe` / `POST /v2/query`, converting the body to the
 strict envelope described above (a plain `criteria` object with an explicit
 `Content-Type`, not the v1 `RecipeCriteria` resource). Then POST the
@@ -517,13 +517,13 @@ resulting `aicr.run/v1alpha3` recipes to `/v2/bundle`. Other families are
 unaffected on `/v1` until they adopt a profile.
 
 ```shell
-# GKE migration: /v2/recipe (omit profile= for the gcp-managed default,
-# or select gpuStack=operator-managed explicitly), then POST to /v2/bundle.
+# GKE migration: /v2/recipe (omit profile= for the gke-default default,
+# or select gpuStack=driver-installer explicitly), then POST to /v2/bundle.
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip.
 set -euo pipefail
 curl -fsS -o recipe.json \
-  "http://localhost:8080/v2/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=operator-managed"
+  "http://localhost:8080/v2/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=driver-installer"
 curl -fsS -X POST "http://localhost:8080/v2/bundle" \
   -H "Content-Type: application/json" -d @recipe.json -o bundles.zip
 ```
@@ -947,6 +947,7 @@ ls -la
 | `NOT_FOUND` | 404 | Selector path not found in the resolved configuration | No |
 | `METHOD_NOT_ALLOWED` | 405 | Wrong HTTP method | No |
 | `CONFLICT` | 409 | Resource state conflict (e.g., already exists or version mismatch) | No |
+| `CANCELED` | 408 | The operation was aborted before completion (CLI-originated; not expected from the HTTP API) | No |
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many requests | Yes |
 | `INTERNAL` | 500 | Server error | Yes |
 | `SERVICE_UNAVAILABLE` | 503 | Server temporarily unavailable | Yes |
