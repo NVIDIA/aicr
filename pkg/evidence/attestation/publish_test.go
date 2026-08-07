@@ -65,23 +65,30 @@ func wantInvalidRequest(t *testing.T, err error) {
 	}
 }
 
-func wantTimeout(t *testing.T, err error) {
+func wantAborted(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
-		t.Errorf("expected ErrCodeTimeout, got %v", err)
+	// A canceled parent is an operator abort, not a deadline: it must carry
+	// ErrCodeCanceled so IsTransient keeps a deliberate Ctrl-C out of the
+	// retryable bucket. What matters either way is that the reader fails
+	// closed rather than returning content or "not a bundle".
+	if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+		t.Errorf("expected ErrCodeCanceled, got %v", err)
 	}
 }
 
-// TestBundleReaders_CanceledContextSurfacesTimeout proves each on-disk reader
+// TestBundleReaders_CanceledContextSurfacesAbort proves each on-disk reader
 // path is bounded by the caller's context: against a real, valid bundle (so an
 // unbounded read would succeed instantly), an already-canceled context makes
-// every reader fail closed with ErrCodeTimeout rather than block on a
+// every reader fail closed with ErrCodeCanceled rather than block on a
 // potentially hung mount. This is the load-bearing guarantee of issue #2054 —
-// a dead NFS/FUSE mount surfaces as a timeout, not an indefinite hang.
-func TestBundleReaders_CanceledContextSurfacesTimeout(t *testing.T) {
+// an abandoned caller gets a coded error instead of an indefinite hang. The
+// code here is ErrCodeCanceled because the caller aborted; a mount that stalls
+// past the bound yields ErrCodeTimeout instead, covered separately in
+// pkg/evidence/internal/boundedio.
+func TestBundleReaders_CanceledContextSurfacesAbort(t *testing.T) {
 	dir := emitUnsignedBundle(t)
 	summaryDir := filepath.Join(dir, SummaryBundleDirName)
 
@@ -114,20 +121,20 @@ func TestBundleReaders_CanceledContextSurfacesTimeout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			wantTimeout(t, tt.run(ctx))
+			wantAborted(t, tt.run(ctx))
 		})
 	}
 }
 
-// TestWithFileReadTimeout_InFlightTimeout exercises the goroutine+select arm of
+// TestWithFileReadTimeout_InFlightCancel exercises the goroutine+select arm of
 // withFileReadTimeout — the part that actually delivers hang-immunity. The
 // canceled-context tests above return at the ctx.Err() pre-check and never
 // reach the select, so this covers the case a wedged mount hits: fn is already
 // running (blocked in the syscall) when the caller context is canceled. It uses
 // a started/release/finished handshake so the cancellation is observed
-// in-flight, asserts ErrCodeTimeout, then unblocks fn and joins it — proving
+// in-flight, asserts the abort code, then unblocks fn and joins it — proving
 // the parked worker returns rather than leaking.
-func TestWithFileReadTimeout_InFlightTimeout(t *testing.T) {
+func TestWithFileReadTimeout_InFlightCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -147,7 +154,7 @@ func TestWithFileReadTimeout_InFlightTimeout(t *testing.T) {
 
 	<-started // fn is now running inside the goroutine+select path
 	cancel()  // cancel the caller context while fn is still blocked
-	wantTimeout(t, <-errCh)
+	wantAborted(t, <-errCh)
 
 	close(release) // release the parked worker...
 	<-finished     // ...and confirm it returns (no leaked goroutine)

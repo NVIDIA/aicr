@@ -117,7 +117,7 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		}
 	}
 
-	bomBody, err := LoadOrGenerateBOM(opts.BOMPath, opts.Recipe, opts.Snapshot, opts.Catalog, opts.AICRVersion)
+	bomBody, err := LoadOrGenerateBOMContext(ctx, opts.BOMPath, opts.Recipe, opts.Snapshot, opts.Catalog, opts.AICRVersion)
 	if err != nil {
 		return nil, err
 	}

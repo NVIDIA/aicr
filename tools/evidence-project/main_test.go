@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
@@ -97,7 +98,7 @@ attestations:
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p, err := verifier.LoadAndValidatePointer(pointer)
+	p, err := verifier.LoadAndValidatePointerContext(context.Background(), pointer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,5 +283,93 @@ func TestSynthesizeVerified_Rejects(t *testing.T) {
 				t.Errorf("synthesizeVerified(%s) = nil error, want rejection", tt.name)
 			}
 		})
+	}
+}
+
+// TestIngestVerdictError_Matrix pins the ingest gate. Two properties matter and
+// neither is checked by "does it return an error":
+//
+//  1. Only 0 and 1 may be ingested. Anything else — including an exit value a
+//     future verifier adds — must fail closed.
+//  2. A refusal caused by an unreadable bundle must not share a process exit
+//     code with a refusal caused by a bad bundle, or an operator triaging a
+//     failed ingest cannot tell a dead mount from a rejected artifact.
+func TestIngestVerdictError_Matrix(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   *verifier.VerifyResult
+		wantErr  bool
+		wantExit int
+	}{
+		{
+			name:     "valid bundle is ingested",
+			result:   &verifier.VerifyResult{Exit: verifier.ExitValidPassed},
+			wantExit: errors.ExitSuccess,
+		},
+		{
+			name:     "recorded phase failures are still ingested",
+			result:   &verifier.VerifyResult{Exit: verifier.ExitValidPhaseFailures},
+			wantExit: errors.ExitSuccess,
+		},
+		{
+			name:     "invalid bundle is refused",
+			result:   &verifier.VerifyResult{Exit: verifier.ExitInvalid},
+			wantErr:  true,
+			wantExit: errors.ExitInvalidInput,
+		},
+		{
+			name: "storage fault is refused, but not as an invalid bundle",
+			result: &verifier.VerifyResult{
+				Exit:         verifier.ExitIncomplete,
+				FailureCause: &verifier.FailureCause{Class: verifier.CauseTransient},
+			},
+			wantErr:  true,
+			wantExit: errors.ExitTimeout,
+		},
+		{
+			name: "operator abort is refused, distinctly from a storage fault",
+			result: &verifier.VerifyResult{
+				Exit:         verifier.ExitIncomplete,
+				FailureCause: &verifier.FailureCause{Class: verifier.CauseCanceled},
+			},
+			wantErr:  true,
+			wantExit: errors.ExitCanceled,
+		},
+		{
+			name:     "unknown verdict fails closed",
+			result:   &verifier.VerifyResult{Exit: 99},
+			wantErr:  true,
+			wantExit: errors.ExitInternal,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ingestVerdictError(tt.result)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got := errors.ExitCodeFromError(err); got != tt.wantExit {
+				t.Errorf("process exit = %d, want %d (err %v)", got, tt.wantExit, err)
+			}
+		})
+	}
+}
+
+// TestIngestVerdictError_NoVerdictNeverSharesInvalidExit states the second
+// property directly, so a future refactor that folds the incomplete arm back
+// into the invalid one fails here rather than silently.
+func TestIngestVerdictError_NoVerdictNeverSharesInvalidExit(t *testing.T) {
+	invalid := errors.ExitCodeFromError(ingestVerdictError(
+		&verifier.VerifyResult{Exit: verifier.ExitInvalid}))
+
+	for _, class := range []string{verifier.CauseTransient, verifier.CauseCanceled} {
+		got := errors.ExitCodeFromError(ingestVerdictError(&verifier.VerifyResult{
+			Exit:         verifier.ExitIncomplete,
+			FailureCause: &verifier.FailureCause{Class: class},
+		}))
+		if got == invalid {
+			t.Errorf("class %q exits %d, colliding with the invalid-bundle exit", class, got)
+		}
 	}
 }

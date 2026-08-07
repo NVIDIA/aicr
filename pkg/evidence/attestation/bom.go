@@ -16,8 +16,7 @@ package attestation
 
 import (
 	"bytes"
-	"io"
-	"os"
+	"context"
 	"sort"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -26,6 +25,7 @@ import (
 	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -37,9 +37,20 @@ import (
 // recipe-bound BOM. Helm charts are not rendered at validate time (would
 // require the helm binary and a 60s+ budget); observed snapshot images
 // cover the same information for the typical post-deployment flow.
+//
+// Deprecated: prefer LoadOrGenerateBOMContext. This form derives its own
+// defaults.FileReadTimeout-bounded context; retained for source compatibility.
 func LoadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *catalog.ValidatorCatalog, version string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return LoadOrGenerateBOMContext(ctx, bomPath, rec, snap, cat, version)
+}
+
+// LoadOrGenerateBOMContext is LoadOrGenerateBOM bounded by the caller's
+// context, so an operator-supplied --bom path on a dead mount cannot hang emit.
+func LoadOrGenerateBOMContext(ctx context.Context, bomPath string, rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *catalog.ValidatorCatalog, version string) ([]byte, error) {
 	if bomPath != "" {
-		return readBOMFile(bomPath)
+		return readBOMFile(ctx, bomPath)
 	}
 	return BuildAutoBOM(rec, snap, cat, version)
 }
@@ -47,21 +58,8 @@ func LoadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshott
 // readBOMFile reads bomPath into memory, bounded by defaults.MaxBOMBytes
 // so an attacker-influenced path (e.g., /proc symlink, NFS mount) can't
 // OOM the process before the body is parsed.
-func readBOMFile(bomPath string) ([]byte, error) {
-	f, err := os.Open(bomPath) //nolint:gosec // bomPath is operator-supplied (CLI flag or config)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read BOM", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(f, defaults.MaxBOMBytes+1))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read BOM", err)
-	}
-	if int64(len(body)) > defaults.MaxBOMBytes {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "BOM exceeds maximum size")
-	}
-	return body, nil
+func readBOMFile(ctx context.Context, bomPath string) ([]byte, error) {
+	return boundedio.ReadFile(ctx, bomPath, "BOM", defaults.MaxBOMBytes)
 }
 
 // BuildAutoBOM synthesizes a CycloneDX 1.6 BOM from the recipe's enabled
