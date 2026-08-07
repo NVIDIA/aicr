@@ -346,9 +346,9 @@ argocd-helm install-time values are rejected on key *presence* alone —
 even when the value is identical to the selected one. The AKS family is the first embedded
 adopter: `gpuStack` with values `azure-managed` (default) and `operator-managed` —
 see [AKS GPU setup](../integrator/aks-gpu-setup.md#gpu-driver-setup).
-The GKE family declares `gpuStack` with values `gcp-managed` (default; GKE's
+The GKE family declares `gpuStack` with values `gke-default` (default; GKE's
 managed plugin stays the advertiser — recorded as `advertiser: external` —
-for default-provisioned clusters with no node label) and `operator-managed` (the GPU
+for default-provisioned clusters with no node label) and `driver-installer` (the GPU
 Operator's device plugin owns `nvidia.com/gpu`; GPU node pools carry
 `gke-no-default-nvidia-gpu-device-plugin=true` and, because that label
 forfeits GKE's managed driver install, are created
@@ -457,7 +457,7 @@ Generate recipes using direct system parameters:
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
-| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gcp-managed` on GKE) |
+| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or `gpuStack=driver-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |

@@ -328,7 +328,7 @@ func TestClassifyConstraintsWellformed(t *testing.T) {
 			// The node-set form (#1755) has its own grammar; the negated
 			// "!key" value is valid there but rejected by the scalar
 			// parser — grading must mirror constraints.Evaluate's dispatch
-			// (the GKE gpuStack gcp-managed default declares this form).
+			// (the GKE gpuStack gke-default default declares this form).
 			"node-set negated form passes",
 			result(constraint(constraints.GPUNodesLabelConstraintName, "!gke-no-default-nvidia-gpu-device-plugin")),
 			StatusPass, "",

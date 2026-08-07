@@ -96,11 +96,11 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 		switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
 		case recipe.CriteriaOSCOS:
 			return "On GKE COS node images the GPU Operator cannot install the " +
-				"driver. With the default gcp-managed gpuStack profile " +
+				"driver. With the default gke-default gpuStack profile " +
 				"(opt-out label absent) provision the GPU node pools with " +
 				"the GKE-managed driver install (node pool " +
 				"gpu-driver-version=default). With --profile " +
-				"gpuStack=operator-managed (pools labeled " +
+				"gpuStack=driver-installer (pools labeled " +
 				"gke-no-default-nvidia-gpu-device-plugin=true) the label " +
 				"forfeits the managed install — deploy Google's standalone " +
 				"nvidia-driver-installer DaemonSet and create the pools " +

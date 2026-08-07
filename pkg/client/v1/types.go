@@ -420,7 +420,7 @@ type SelectedProfile struct {
 	// recipe advertises nvidia.com/gpu (ADR-015 GKE allocation-policy
 	// amendment). It is "external" on selections whose advertiser is
 	// platform-owned — e.g. GKE's managed device plugin on the gpuStack
-	// gcp-managed value (the GKE default) — and empty when no external
+	// gke-default value (the GKE default) — and empty when no external
 	// advertiser is declared: the recipe's own components then determine
 	// advertisement (the GPU operator's device plugin, or DRA
 	// resources.gpus.enabled). "external" is the only non-empty value.

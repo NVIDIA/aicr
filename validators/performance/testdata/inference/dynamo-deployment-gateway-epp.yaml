@@ -103,7 +103,7 @@ spec:
               # plugin injects the mount but not the env, and a pod-level env
               # would clobber the image's own entries. No-op under the GPU
               # Operator toolkit flow. See the comment on the same wrapper in
-              # dynamo-deployment.yaml for the full rationale (gcp-managed
+              # dynamo-deployment.yaml for the full rationale (gke-default
               # qualification: vLLM "Failed to infer device type").
               command:
                 - /bin/bash

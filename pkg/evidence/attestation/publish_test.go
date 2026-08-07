@@ -348,7 +348,7 @@ apiVersion: aicr.run/v1alpha3
 metadata:
   selectedProfile:
     name: gpuStack
-    value: gcp-managed
+    value: gke-default
     advertiser: external
     ownedPaths:
       gpu-operator:
@@ -364,7 +364,7 @@ componentRefs:
 		t.Fatal(err)
 	}
 	body := []byte(`{"predicateType":"` + PredicateTypeV1 +
-		`","predicate":{"recipe":{"name":"h100-gke-cos-training-gpustack-gcp-managed","digest":"abc"}}}`)
+		`","predicate":{"recipe":{"name":"h100-gke-cos-training-gpustack-gke-default","digest":"abc"}}}`)
 	if err := os.WriteFile(filepath.Join(summaryDir, StatementFilename), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestLoadOnDiskBundle_ProfiledEmitRoundTrip(t *testing.T) {
 	}
 	rec.Metadata.SelectedProfile = &recipe.SelectedProfile{
 		Name:       "gpuStack",
-		Value:      "gcp-managed",
+		Value:      "gke-default",
 		Advertiser: allocpolicy.AdvertiserExternal,
 	}
 	if _, err := Emit(context.Background(), EmitOptions{
@@ -418,8 +418,8 @@ func TestLoadOnDiskBundle_ProfiledEmitRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadOnDiskBundle rejected a coherent profiled bundle: %v", err)
 	}
-	if bundle.Profile != "gpuStack=gcp-managed" {
-		t.Errorf("Profile = %q, want gpuStack=gcp-managed", bundle.Profile)
+	if bundle.Profile != "gpuStack=gke-default" {
+		t.Errorf("Profile = %q, want gpuStack=gke-default", bundle.Profile)
 	}
 	if bundle.Advertiser != allocpolicy.AdvertiserExternal {
 		t.Errorf("Advertiser = %q, want %q", bundle.Advertiser, allocpolicy.AdvertiserExternal)
@@ -462,7 +462,7 @@ apiVersion: aicr.run/v1alpha3
 metadata:
   selectedProfile:
     name: gpuStack
-    value: gcp-managed
+    value: gke-default
     advertiser: external
     ownedPaths:
       gpu-operator:
@@ -478,8 +478,8 @@ componentRefs:
 		t.Fatal(err)
 	}
 	body := []byte(`{"predicateType":"` + PredicateTypeV2 +
-		`","predicate":{"recipe":{"name":"h100-gke-cos-training-gpustack-gcp-managed","digest":"abc"},` +
-		`"profile":{"selection":"gpuStack=gcp-managed","advertiser":"external",` +
+		`","predicate":{"recipe":{"name":"h100-gke-cos-training-gpustack-gke-default","digest":"abc"},` +
+		`"profile":{"selection":"gpuStack=gke-default","advertiser":"external",` +
 		`"policyDescriptorIdentity":"stale-pre-expansion-identity"}}}`)
 	if err := os.WriteFile(filepath.Join(summaryDir, StatementFilename), body, 0o600); err != nil {
 		t.Fatal(err)
@@ -510,17 +510,17 @@ func TestValidateBundleProfileCoherence(t *testing.T) {
 		wantErr bool
 	}{
 		{"unprofiled coherent", &Bundle{Predicate: pred("")}, false},
-		{"profiled coherent", &Bundle{Profile: "gpuStack=gcp-managed", PolicyDescriptorIdentity: "d", Predicate: pred("gpuStack=gcp-managed")}, false},
-		{"profiled recipe with v1 predicate", &Bundle{Profile: "gpuStack=gcp-managed", Predicate: pred("")}, true},
-		{"unprofiled recipe with profile block", &Bundle{Predicate: pred("gpuStack=gcp-managed")}, true},
-		{"selection mismatch", &Bundle{Profile: "gpuStack=gcp-managed", Predicate: pred("gpuStack=operator-managed")}, true},
-		{"advertiser coherent", &Bundle{Profile: "gpuStack=gcp-managed", Advertiser: "external", PolicyDescriptorIdentity: "d", Predicate: predAdv("gpuStack=gcp-managed", "external")}, false},
-		{"advertiser mismatch: predicate missing it", &Bundle{Profile: "gpuStack=gcp-managed", Advertiser: "external", Predicate: pred("gpuStack=gcp-managed")}, true},
-		{"advertiser mismatch: recipe missing it", &Bundle{Profile: "gpuStack=gcp-managed", Predicate: predAdv("gpuStack=gcp-managed", "external")}, true},
-		{"descriptor-identity mismatch: evidence predates an expansion", &Bundle{Profile: "gpuStack=gcp-managed", PolicyDescriptorIdentity: "expanded", Predicate: pred("gpuStack=gcp-managed")}, true},
-		{"descriptor-identity mismatch: recipe recomputation empty", &Bundle{Profile: "gpuStack=gcp-managed", Predicate: pred("gpuStack=gcp-managed")}, true},
-		{"profile block with empty descriptor identity", &Bundle{Profile: "gpuStack=gcp-managed",
-			Predicate: &Predicate{Profile: &ProfilePredicate{Selection: "gpuStack=gcp-managed"}}}, true},
+		{"profiled coherent", &Bundle{Profile: "gpuStack=gke-default", PolicyDescriptorIdentity: "d", Predicate: pred("gpuStack=gke-default")}, false},
+		{"profiled recipe with v1 predicate", &Bundle{Profile: "gpuStack=gke-default", Predicate: pred("")}, true},
+		{"unprofiled recipe with profile block", &Bundle{Predicate: pred("gpuStack=gke-default")}, true},
+		{"selection mismatch", &Bundle{Profile: "gpuStack=gke-default", Predicate: pred("gpuStack=driver-installer")}, true},
+		{"advertiser coherent", &Bundle{Profile: "gpuStack=gke-default", Advertiser: "external", PolicyDescriptorIdentity: "d", Predicate: predAdv("gpuStack=gke-default", "external")}, false},
+		{"advertiser mismatch: predicate missing it", &Bundle{Profile: "gpuStack=gke-default", Advertiser: "external", Predicate: pred("gpuStack=gke-default")}, true},
+		{"advertiser mismatch: recipe missing it", &Bundle{Profile: "gpuStack=gke-default", Predicate: predAdv("gpuStack=gke-default", "external")}, true},
+		{"descriptor-identity mismatch: evidence predates an expansion", &Bundle{Profile: "gpuStack=gke-default", PolicyDescriptorIdentity: "expanded", Predicate: pred("gpuStack=gke-default")}, true},
+		{"descriptor-identity mismatch: recipe recomputation empty", &Bundle{Profile: "gpuStack=gke-default", Predicate: pred("gpuStack=gke-default")}, true},
+		{"profile block with empty descriptor identity", &Bundle{Profile: "gpuStack=gke-default",
+			Predicate: &Predicate{Profile: &ProfilePredicate{Selection: "gpuStack=gke-default"}}}, true},
 		{"nil bundle", nil, true},
 		{"nil predicate", &Bundle{}, true},
 	}

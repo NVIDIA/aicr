@@ -497,8 +497,8 @@ directions fail closed on a truncated node list (a snapshot captured with
 reading), on an empty GPU-node universe, and on malformed or ambiguous
 label readings (an encoding collision between a disambiguated entry and a
 distinct dotted label name — see #2003). It is consumed by the GKE
-`gpuStack` profile values (the positive form qualifies `operator-managed`, the
-negated form `gcp-managed`), where each selected value's constraint is
+`gpuStack` profile values (the positive form qualifies `driver-installer`, the
+negated form `gke-default`), where each selected value's constraint is
 verified at generation when generating from a snapshot (criteria-only
 generation has no snapshot evaluator and defers entirely to the
 pre-flight) and re-evaluated by the validate readiness pre-flight. Outside a profile declaration, declare it under
@@ -522,7 +522,7 @@ default rather than silently switching values. Unavailable, unknown, or
 mixed pool values fail closed against either selection. ADR-015 resolves
 this signal. The AKS family above was the first embedded adopter; the GKE
 family's `gpuStack` (device-plugin ownership over the #1755 node-set form,
-with `advertiser: external` on `gcp-managed`) is the second.
+with `advertiser: external` on `gke-default`) is the second.
 
 No equivalent reading exists for other services yet. Declare a
 driver-ownership profile only once the signal for that service exists, and
@@ -569,7 +569,7 @@ Profile declarations are intentionally narrow:
   for later validation. This qualification rule is enforced during catalog
   review; core admission does not infer whether arbitrary readings
   semantically distinguish two modes.
-- A profile value may declare `advertiser: external` (the GKE `gcp-managed`
+- A profile value may declare `advertiser: external` (the GKE `gke-default`
   shape) to record a provider-managed plugin outside the recipe as THE
   `nvidia.com/gpu` advertiser; the vocabulary is closed (empty or
   `external`), and the declaration extends the #1327 dual-advertisement

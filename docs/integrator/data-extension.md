@@ -231,8 +231,8 @@ When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 `recipes/overlays/aks.yaml` declares the `gpuStack` configuration profile
 (`azure-managed` default, `operator-managed` alternative) over the GPU driver/toolkit
 ownership paths, and `recipes/overlays/gke-cos.yaml` declares its own `gpuStack`
-(`gcp-managed` default, `operator-managed` alternative) over device-plugin ownership —
-the GKE default value (`gcp-managed`) additionally declares
+(`gke-default` default, `driver-installer` alternative) over device-plugin ownership —
+the GKE default value (`gke-default`) additionally declares
 `advertiser: external`, and both GKE values trigger the #1327
 allocation-policy closure, so their effective lock set is larger than the
 declared paths (see

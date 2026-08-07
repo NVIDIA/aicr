@@ -117,10 +117,10 @@ const (
 	// The prologue makes the probe advertiser-agnostic: under the GPU
 	// Operator's toolkit flow, nvidia-smi and libnvidia-ml are injected at
 	// standard paths and the exports are no-ops; under GKE's managed device
-	// plugin (the gcp-managed gpuStack value), the driver tree is mounted
+	// plugin (the gke-default gpuStack value), the driver tree is mounted
 	// at /usr/local/nvidia/{bin,lib64} without touching the container's
 	// environment, so a bare `nvidia-smi` fails to resolve even though the
-	// GPU allocation succeeded (observed live: gcp-managed qualification on
+	// GPU allocation succeeded (observed live: gke-default qualification on
 	// aicr-30948013962 — allocation fine, probe pod Failed).
 	// The ${VAR:+${VAR}:} guards matter in a security probe: appending to
 	// an UNSET LD_LIBRARY_PATH with a bare "${LD_LIBRARY_PATH}:..." yields

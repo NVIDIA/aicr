@@ -221,11 +221,16 @@ spec:
   profile:
     name: gpuStack
     description: Who owns GPU device advertisement.
-    # Amended at adoption: the value names ship following the AKS
-    # convention (<cloud>-managed / operator-managed) — csp-managed is
-    # adopted as gcp-managed and operator as operator-managed; the names
-    # drawn below are kept as originally proposed. csp-managed
-    # (gcp-managed) is the default. The opt-out label
+    # Amended at adoption, renamed after: the values shipped at adoption
+    # as gcp-managed / operator-managed following the AKS convention
+    # (<cloud>-managed / operator-managed), then were renamed to
+    # gke-default / driver-installer — on GKE the GPU Operator installs
+    # no driver in EITHER value (the driver is Google-supplied in both:
+    # GKE's bundled pool install, or Google's standalone
+    # nvidia-driver-installer DaemonSet that the renamed value is named
+    # after), so "operator-managed" overstated operator ownership. The
+    # names drawn below are kept as originally proposed. csp-managed
+    # (gke-default) is the default. The opt-out label
     # forfeits GKE's managed driver install (the install is finalized by an
     # init container of the SAME kube-system DaemonSet the label disables),
     # so the "GKE-installed driver + operator plugin" pairing originally
@@ -289,12 +294,12 @@ paths in the union — appear only at the DD5 landing event adoption
 step 2 describes. Selection:
 
 ```bash
-# gcp-managed (declared default; drawn above as csp-managed) — no flag needed
+# gke-default (declared default; drawn above as csp-managed) — no flag needed
 aicr recipe --service gke --os cos --accelerator h100 --intent inference
 
 # explicit alternative configuration (shipped name; drawn above as operator)
 aicr recipe --service gke --os cos --accelerator h100 --intent inference \
-  --profile gpuStack=operator-managed
+  --profile gpuStack=driver-installer
 ```
 
 A profile fragment may reference only components **enabled in the
@@ -1100,7 +1105,7 @@ criteria dimension. The envelope is minimal and normative — the
 ```yaml
 # POST /v2/recipe; /v2/query adds its query fields alongside
 criteria: {service: gke, os: cos, accelerator: h100, intent: inference}
-profile: gpuStack=gcp-managed   # optional
+profile: gpuStack=gke-default   # optional
 ```
 
 GET carries the same string in the `profile` parameter.
@@ -1408,11 +1413,30 @@ recurrence — the shape the Problem section expects.
    operator plugin" pairing originally drawn for `operator` is
    unreachable on fresh pools and unsupported; `operator` requires
    Google's standalone `nvidia-driver-installer` DaemonSet with pools
-   created `gpu-driver-version=disabled`. Adopter value names follow the
-   AKS convention (`<cloud>-managed` / `operator-managed`): the values
-   ship as `gcp-managed` and `operator-managed` (the deferred
-   `operator-selfdriver` correspondingly becomes a future
-   `operator-managed` variant per Deferred Decision 5).
+   created `gpu-driver-version=disabled`. Adopter value names name the
+   qualified cluster state rather than following the AKS convention
+   (`<cloud>-managed` / `operator-managed`): the values ship as
+   `gke-default` (the default-provisioned cluster) and
+   `driver-installer` (named after Google's standalone
+   `nvidia-driver-installer` DaemonSet that supplies the driver under
+   it). The convention names shipped at adoption (`gcp-managed` /
+   `operator-managed`) were renamed before the family's evidence
+   signing: the GPU Operator installs no driver in either GKE value, so
+   `operator-managed` overstated operator ownership — on AKS the same
+   name is accurate (the operator does install the driver on
+   `--gpu-driver none` pools) and is unchanged. The deferred
+   `operator-selfdriver` remains the value under which the operator
+   would own the driver (Deferred Decision 5).
+
+   The rename does not widen what the value qualifies: the verified
+   generation-time signal remains the device-plugin opt-out label alone
+   — per Deferred Decision 5 there is no durable installer-ownership
+   signal — while Google's standalone installer DaemonSet and
+   `gpu-driver-version=disabled` pools are documented operational
+   prerequisites whose effect (a present driver) is observed by the
+   deployment-phase validation, not proven at generation. Qualifying
+   installer readiness directly (DaemonSet presence, pool mode) is
+   tracked as follow-up work.
 
    The `operator-selfdriver` value additionally requires the
    `gcp-driver-installer` component (values-gated chart, new public
@@ -1462,8 +1486,8 @@ work that resolves it.
    GKE's managed driver install, so the standalone gate's prerequisite
    needed the profile's per-value pairing), and the GKE `gpuStack`
    profile now consumes the form per selected value (#1761 rollout
-   PR 3): positive for `operator-managed`, negated for the
-   `gcp-managed` default.
+   PR 3): positive for `driver-installer`, negated for the
+   `gke-default` default.
 3. **AKS node-pool-mode signal — resolved by the 2026-07-27 amendment.**
    The provider-facing AgentPool `gpuProfile.driver` property is the
    durable ownership marker. AKS adoption projects it into a snapshot

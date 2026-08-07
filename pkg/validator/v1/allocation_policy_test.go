@@ -451,7 +451,7 @@ func advertiserProfileRecipe(advertiser string, refs ...recipe.ComponentRef) *re
 		APIVersion:    recipe.RecipeProfileAPIVersion,
 		ComponentRefs: refs,
 		Metadata: recipe.RecipeResultMetadata{SelectedProfile: &recipe.SelectedProfile{
-			Name: "gpuStack", Value: "gcp-managed", Advertiser: advertiser,
+			Name: "gpuStack", Value: "gke-default", Advertiser: advertiser,
 			OwnedPaths: map[string][]string{
 				"gpu-operator": {"devicePlugin.enabled", "enabled"},
 			},
@@ -460,7 +460,7 @@ func advertiserProfileRecipe(advertiser string, refs ...recipe.ComponentRef) *re
 }
 
 // externalProfileRecipe builds a profile-bearing recipe declaring
-// advertiser "external" (the GKE gcp-managed shape) over the given
+// advertiser "external" (the GKE gke-default shape) over the given
 // component refs.
 func externalProfileRecipe(refs ...recipe.ComponentRef) *recipe.RecipeResult {
 	return advertiserProfileRecipe(allocpolicy.AdvertiserExternal, refs...)
@@ -483,7 +483,7 @@ func TestResolveGPUAllocationPolicyExternalAdvertiser(t *testing.T) {
 		wantMsg string
 	}{
 		{
-			// The GKE gcp-managed happy path: operator plugin off, DRA off.
+			// The GKE gke-default happy path: operator plugin off, DRA off.
 			name:   "external advertiser with device plugin off and DRA off resolves to device-plugin policy",
 			recipe: externalProfileRecipe(draDriverRef(false, false), gpuOperatorRef(false)),
 			want:   GPUAllocationPolicyDevicePluginExtendedResource,
