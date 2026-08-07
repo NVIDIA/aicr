@@ -32,6 +32,7 @@ import (
 const testRegistry = `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-0cbe491320188dfa6
     accelerator: h100
@@ -41,6 +42,7 @@ reservations:
     nightly-intents: [training, inference]
     daytime-intent: training
   - name: gcp-h100
+    slug: gh1
     cloud: gcp
     reservation-id: projects/p/reservations/r
     accelerator: h100
@@ -73,6 +75,9 @@ func TestReservationsResolve(t *testing.T) {
 		t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
 	}
 	for _, want := range []string{
+		// slug feeds needs.resolve.outputs.slug — the daytime cluster name's
+		// discovery key (ADR-017) — so the resolver must emit it.
+		"slug=ah1",
 		"cloud=aws",
 		"reservation-id=cr-0cbe491320188dfa6",
 		"accelerator=h100",
@@ -94,6 +99,7 @@ func TestReservationsResolveNightlyIntentsDefaults(t *testing.T) {
 	const reg = `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -122,6 +128,7 @@ func TestReservationsResolveNightlyIntentsOptOut(t *testing.T) {
 	const reg = `
 reservations:
   - name: azure-h100
+    slug: zh1
     cloud: azure
     accelerator: h100
     gpu-count: 8
@@ -279,6 +286,7 @@ func TestScheduleEmitsPerCellIntents(t *testing.T) {
 	const gatedRegistry = `
 reservations:
   - name: azure-h100
+    slug: zh1
     cloud: azure
     accelerator: h100
     gpu-count: 8

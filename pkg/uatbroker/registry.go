@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -30,6 +31,25 @@ import (
 // maxRegistryBytes bounds the registry file read so an attacker-influenced
 // path cannot OOM the process; the registry is a small hand-edited file.
 const maxRegistryBytes int64 = 1 << 20 // 1 MiB
+
+// slugPattern constrains a reservation slug to 2-4 lowercase-alphanumeric
+// characters starting with a letter (ADR-017). The slug is the discovery key
+// embedded in the daytime cluster name (aicr-uat-day-<slug>-<slot>-<run_id>),
+// so it must be a safe cluster-name segment and short enough to keep the name
+// inside GKE's 40-char cap.
+var slugPattern = regexp.MustCompile(`^[a-z][a-z0-9]{1,3}$`)
+
+// namePattern constrains a reservation name to lowercase alphanumerics and
+// internal hyphens, starting with a letter and ending with an alphanumeric.
+// Beyond being the lease key, the name is interpolated verbatim into the
+// daytime guard/teardown `grep -E` scans as the legacy discovery prefix
+// (aicr-uat-day-<name>-) during the ADR-017 migration; a name carrying an ERE
+// metacharacter ((, ), |, +, ?, .) would make that pattern invalid, and the
+// scans' `|| true` would then read the grep error as "no match" — silently
+// letting the guard provision into a held reservation or daytime-down skip a
+// teardown. Validating the charset here closes that at the single data source,
+// mirroring slugPattern. (It also keeps the name a valid cluster-name segment.)
+var namePattern = regexp.MustCompile(`^[a-z]([a-z0-9-]*[a-z0-9])?$`)
 
 // ParseRegistry parses and validates a reservations.yaml document. Decoding
 // is strict (KnownFields): a mistyped key like `nightly-intnts:` must fail
@@ -74,13 +94,22 @@ func LoadRegistryFile(path string) (*Registry, error) {
 
 // Validate enforces registry invariants: at least one row; every row has the
 // required fields (reservation-id is optional — quota-backed rows have none);
-// cloud is recognized; gpu-count is positive; and names are unique (the name
-// is the lease key, so a duplicate would make the lease ambiguous).
+// cloud is recognized; gpu-count is positive; names are unique (the name is the
+// lease key, so a duplicate would make the lease ambiguous) and match the
+// cluster-name/ERE-safe charset (the name becomes the legacy daytime discovery
+// prefix in a `grep -E` scan, ADR-017); and slugs are non-empty, unique, and
+// match the ADR-017 charset (the slug is the daytime cluster's cross-run
+// discovery key, so a duplicate would collide two reservations' guard/teardown
+// scans).
 func (r *Registry) Validate() error {
 	if len(r.Reservations) == 0 {
 		return errors.New(errors.ErrCodeInvalidRequest, "reservation registry has no reservations")
 	}
 	seen := make(map[string]bool, len(r.Reservations))
+	// seenSlug tracks which reservation already claimed each slug. The slug is
+	// the daytime cluster name's discovery key, so a duplicate would make the
+	// guard/teardown prefix scan ambiguous across reservations (ADR-017).
+	seenSlug := make(map[string]string, len(r.Reservations))
 	// daytimeCloud tracks which reservation already claimed each cloud's daytime
 	// slot. At most one reservation per cloud may opt into the daytime rotation
 	// (see below).
@@ -90,10 +119,39 @@ func (r *Registry) Validate() error {
 		if strings.TrimSpace(res.Name) == "" {
 			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("reservation[%d] has an empty name", i))
 		}
+		// The name is interpolated into the daytime guard/teardown `grep -E`
+		// scans as the legacy discovery prefix (ADR-017 migration), so reject any
+		// name carrying an ERE metacharacter — otherwise a malformed pattern's
+		// error is swallowed by the scans' `|| true` and read as "no match",
+		// silently letting the guard provision into a held reservation. Fail
+		// closed at the data source (see namePattern).
+		if !namePattern.MatchString(res.Name) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("reservation %s has an invalid name (want ^[a-z]([a-z0-9-]*[a-z0-9])?$: lowercase alnum + internal hyphens)", res.Name))
+		}
 		if seen[res.Name] {
 			return errors.New(errors.ErrCodeInvalidRequest, "duplicate reservation name "+res.Name)
 		}
 		seen[res.Name] = true
+		// slug is the daytime cluster name's cross-run discovery key (ADR-017):
+		// required, registry-unique, and constrained to a short cluster-name-safe
+		// charset so the derived name stays inside GKE's 40-char cap. Fail closed
+		// on an empty, malformed, or duplicate slug — a collision would let two
+		// reservations' guard/teardown scans match each other's daytime cluster.
+		if strings.TrimSpace(res.Slug) == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("reservation %s has an empty slug", res.Name))
+		}
+		if !slugPattern.MatchString(res.Slug) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("reservation %s has an invalid slug %q (want 2-4 chars matching ^[a-z][a-z0-9]{1,3}$)",
+					res.Name, res.Slug))
+		}
+		if prev, ok := seenSlug[res.Slug]; ok {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("duplicate reservation slug %q (%s and %s)", res.Slug, prev, res.Name))
+		}
+		seenSlug[res.Slug] = res.Name
 		if !validClouds[res.Cloud] {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("reservation %s has unknown cloud %q (want %s, %s, %s, or %s)",
