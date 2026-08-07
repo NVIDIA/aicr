@@ -695,10 +695,40 @@ func (r *RecipeResult) validateProfileMetadataItems() error {
 // for profiled artifacts, hydrates locked component values to reject an
 // incoherent ownership record. Legacy artifacts perform no additional I/O.
 func (r *RecipeResult) PrepareAndValidateWithContext(ctx context.Context) error {
+	return r.prepareAndValidateWithSource(ctx, "")
+}
+
+// prepareAndValidateWithSource is PrepareAndValidateWithContext with the
+// originating file name, so a rejected constraint path can name it.
+//
+// Only loader.go has a file: the other callers (pkg/bundler, pkg/mirror,
+// pkg/client/v1) receive a RecipeResult from an SDK caller with no source, and
+// use the exported form. An empty source omits the file prefix and the "file"
+// error-context key rather than reporting a placeholder.
+func (r *RecipeResult) prepareAndValidateWithSource(ctx context.Context, source string) error {
 	if err := r.PrepareAndValidate(); err != nil {
 		return err
 	}
-	if r == nil || r.Metadata.SelectedProfile == nil {
+	if r == nil {
+		return nil
+	}
+
+	// A hydrated RecipeResult read from disk never builds a metadata store, so
+	// the load-time constraint-path gate in buildMetadataStore does not see it.
+	// Without this, `aicr bundle -r hydrated.yaml` and `aicr validate -r
+	// hydrated.yaml` would skip the check on the very artifact whose
+	// constraints feed the readiness pre-flight (#1783).
+	if err := validateConstraintPaths(r.Constraints, source, locResultConstraints); err != nil {
+		return err
+	}
+	if r.Validation != nil && r.Validation.Readiness != nil {
+		if err := validateConstraintPaths(
+			r.Validation.Readiness.Constraints, source, locResultReadiness); err != nil {
+			return err
+		}
+	}
+
+	if r.Metadata.SelectedProfile == nil {
 		return nil
 	}
 	return r.ValidateProfileValuesWithContext(ctx)

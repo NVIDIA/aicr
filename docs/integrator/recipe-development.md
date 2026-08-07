@@ -471,12 +471,65 @@ actually emits** — a collector, or a provider projection attached at the
 snapshot orchestration layer (e.g. `K8s.aks-gpu-pools.gpu-driver` from
 `aicr snapshot --aks-gpu-pools`) — in
 `{Type}.{Subtype}.{Key}` form. The type must be one the snapshot carries —
-`K8s`, `GPU`, `OS`, `SystemD`, `NodeTopology`, or `NetworkTopology` —
-so `K8s.server.version` resolves while an unknown type is rejected outright as
-an invalid measurement type. Constraints are evaluated against the snapshot
-when one is supplied, and a name whose subtype nothing produces fails closed
-with `subtype not found`. Either way a fabricated path makes the whole value
-unselectable rather than unconstrained.
+`K8s`, `GPU`, `OS`, `SystemD`, `NodeTopology`, or `NetworkTopology`.
+
+**Paths are validated when recipe data is loaded, not when a snapshot is
+evaluated.** Every constraint name in `spec.constraints`,
+`spec.validation.readiness.constraints`, and `spec.profile.values.*.constraints`
+is checked against the measurement catalog (`pkg/measurement/catalog.go`) as the
+overlay, mixin, or base file is read. A path the catalog cannot address fails
+the load with the file, the field, and — where there is a near match — a
+suggestion:
+
+```text
+[INVALID_REQUEST] overlays/h100-eks-ubuntu-training.yaml: spec.constraints[0]:
+[INVALID_REQUEST] unknown key "verison" in subtype "server" of measurement
+type "K8s"; did you mean "version"?
+```
+
+This closes a false-PASS. Before, a typo'd-but-grammatical path evaluated as
+"reading absent from this snapshot", which the resolver treats as a signal to
+exclude the overlay gracefully — so the recipe resolved successfully with the
+constraint never evaluated. See
+[#1783](https://github.com/NVIDIA/aicr/issues/1783).
+
+Three rules follow from how the extractor addresses values, and each is
+enforced at load:
+
+- **Subtype-level `context` is not addressable.** `NetworkTopology.identity`
+  emits `identifier`, `machineType`, `gpuType`, `linkType`, and `nodeSelector`
+  to `context`, which extraction never reads. Only its `data` keys
+  (`pf-count`, `rail-count`) can be constrained.
+- **Item subtypes require a selector.** `NetworkTopology.pfs` carries only
+  `items`, so `NetworkTopology.pfs.rail` is rejected; write
+  `NetworkTopology.pfs[0].rail` or `NetworkTopology.pfs[rail=3].pciAddress`.
+- **Scalar subtypes reject a selector.** `NetworkTopology.capabilities` has no
+  `items`, so the `[0]` / `[key=value]` forms are invalid there and
+  `NetworkTopology.capabilities[0].sriov` is rejected. Write
+  `NetworkTopology.capabilities.sriov`.
+
+A predicate selector's key is validated too, so
+`NetworkTopology.pfs[raill=3].pciAddress` fails at load rather than silently
+matching nothing later. Index *values* are not checked — bounds depend on the
+snapshot, and an out-of-range index remains a runtime "not found".
+
+Where a producer's key space is genuinely open — `/etc/os-release` fields,
+sysctl paths, container image names, node label and taint keys, systemd unit
+names and their D-Bus properties — the catalog accepts any key, so those paths
+are still only as correct as the author makes them.
+
+**`SystemD` splits at the last dot, every other type at the first.** A SystemD
+subtype *is* a unit name that carries a dot (`containerd.service`) while its
+D-Bus property keys do not, so `SystemD.containerd.service.ActiveState` names
+subtype `containerd.service` and key `ActiveState`. Every other type has
+dot-free subtypes and possibly dotted keys, which is what makes
+`OS.sysctl./proc/sys/kernel/osrelease` and
+`NodeTopology.label.nvidia.com/gpu.present` resolve.
+
+Constraints are then evaluated against the snapshot when one is supplied. A
+path that is addressable but absent from a particular snapshot is still the
+designed graceful-exclusion signal: the catalog describes what a producer *can*
+emit, not what any one cluster does.
 
 Do not borrow paths from `validation.deployment.constraints`, such as
 `Deployment.gpu-operator.version`. Those are deployment-phase validator keys

@@ -1028,6 +1028,13 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 | `OS.sysctl./proc/sys/kernel/osrelease` | Kernel version |
 | `GPU.hardware.model` | GPU model (e.g. `h100`, `l40s`) |
 
+Constraint paths are validated against the measurement catalog when recipe data
+is loaded, so a typo such as `K8s.server.verison` fails immediately — naming the
+file, the field, and the nearest matching key — instead of silently evaluating
+as a missing reading. See
+[Recipe Development › Constraints](../integrator/recipe-development.md) for the
+addressing rules.
+
 Supported operators:
 
 | Operator | Example | Description |

@@ -411,6 +411,65 @@ Key resolution inside the chosen `ItemEntry`:
 - `Context` is consulted next (returns the string directly).
 - Missing key returns `ErrCodeNotFound`.
 
+### Addressable paths and the catalog
+
+`pkg/measurement/catalog.go` is the authority for which constraint paths are
+*addressable* — which `{Type, Subtype, Key}` triples a supported producer can
+emit and a path form can name — and `measurement.ValidatePath` is the check.
+Recipe loading applies it to every constraint name, so a path no producer could
+ever satisfy fails at load rather than degrading to `ErrCodeNotFound` at
+evaluation time ([#1783](https://github.com/NVIDIA/aicr/issues/1783)).
+
+Addressability is a static contract, not a claim about any snapshot. A path
+`ValidatePath` accepts can still return `ErrCodeNotFound` from extraction when
+the reading is genuinely absent — a cluster with no GPU pools emits no
+`K8s.aks-gpu-pools.gpu-driver` — and that remains the designed
+graceful-exclusion signal.
+
+The catalog models two independent address spaces per subtype, because
+extraction reads them from different places:
+
+| Space | Path form | Source |
+|-------|-----------|--------|
+| Scalar | `{Type}.{Subtype}.{Key}` | `Subtype.Data` |
+| Item | `{Type}.{Subtype}[<selector>].{Key}` | `ItemEntry.Data`, then `ItemEntry.Context` |
+
+**Where the subtype ends is Type-dependent.** `{Type}.{Subtype}.{Key}` is
+ambiguous when both parts may contain dots, so the catalog resolves it:
+
+| Type | Split | Rationale |
+|------|-------|-----------|
+| `SystemD` | last dot | the subtype IS a unit name (`containerd.service`); D-Bus property keys carry no dot |
+| everything else | first dot | subtype names carry no dot, so dotted *keys* resolve — `OS.sysctl./proc/sys/kernel/osrelease`, `NodeTopology.label.nvidia.com/gpu.present` |
+
+The bracket form needs no rule: `[` delimits the subtype explicitly.
+
+Consequences worth stating explicitly:
+
+- **`Subtype.Context` is never addressable.** It is emitted and it appears in
+  the snapshot, but no path form reads it, so the catalog deliberately omits
+  those keys. `NetworkTopology.identity.linkType` is rejected.
+- A subtype with an empty scalar space (e.g. `pfs`) rejects selector-free
+  paths; a subtype with no items rejects selector paths.
+- A predicate key is validated against the same item space as the result key,
+  since `itemMatchesPredicate` and the key lookup read the same fields.
+- Each space is either a closed key set or open (producer-defined). Open spaces
+  cover `/etc/os-release` fields, sysctl paths, image names, node label/taint
+  keys, and systemd unit names.
+
+**What a producer change requires here depends on the space it touches:**
+
+| Producer change | Catalog change |
+|-----------------|----------------|
+| New subtype | Required — an unlisted subtype fails at load unless its Type is open-subtype |
+| New key in a **closed** space | Required — an unlisted key fails at load |
+| New key in an **open** space | None — open spaces already accept producer-defined keys |
+| Space becomes addressable a new way (items added to a scalar-only subtype, subtype names start carrying dots) | Required — the addressing rules change |
+
+Omitting a required entry does not weaken a check; it makes a legitimate
+constraint path fail at load for whoever first writes it. When a key space is
+not provably fixed, declare it open rather than guessing a closed set.
+
 ## Stability contract
 
 `pkg/measurement` is part of aicr's public API surface (see

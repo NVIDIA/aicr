@@ -114,6 +114,18 @@ func Serve() error {
 			slog.Warn("aicr client close failed", "error", closeErr)
 		}
 	}()
+
+	// Load the recipe catalog eagerly. NewClient only builds the
+	// DataProvider; without this the first request pays the load and a data
+	// defect — a malformed overlay, a non-addressable constraint measurement
+	// path (#1783) — surfaces as a 5xx on an arbitrary later request instead
+	// of refusing to start. EmbeddedSource() is CI-gated so this cannot fail
+	// on a released binary today; it becomes load-bearing the moment the
+	// server is wired to an external --data overlay.
+	if catalogErr := client.LoadCatalog(ctx); catalogErr != nil {
+		return errors.PropagateOrWrap(catalogErr, errors.ErrCodeInternal, "failed to load recipe catalog")
+	}
+
 	h := newRecipeHandler(client, allowLists)
 
 	// Parse the operator-configured server signing identity from the
