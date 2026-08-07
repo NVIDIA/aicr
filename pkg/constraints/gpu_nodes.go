@@ -214,8 +214,9 @@ func decodeLabelEntriesFromItems(labels *measurement.Subtype, key string) ([]lab
 		if r.Key != key {
 			continue
 		}
-		// Truncated readings skip token validation: the "(+N more)" tail is
-		// not a node name by design.
+		// Rejected outright rather than validated: a partial node list cannot
+		// support a node-set predicate, and its "(+N more)" tail is not a node
+		// name anyway.
 		if r.Truncated {
 			return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("label reading %q is truncated — node-set constraints cannot be evaluated on a partial "+

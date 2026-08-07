@@ -301,6 +301,27 @@ func validItem() measurement.ItemEntry {
 	}
 }
 
+// refSubtype is a well-formed subtype whose single item references a data entry
+// instead of carrying node names inline.
+func refSubtype(name, key, value, entry string, count int) *measurement.Subtype {
+	ctx := map[string]string{itemCtxKey: key, itemCtxValue: value}
+	if name == "taint" {
+		ctx[itemCtxEffect] = "NoSchedule"
+	}
+	return &measurement.Subtype{
+		Name: name,
+		Data: map[string]measurement.Reading{key: measurement.Str(entry)},
+		Items: []measurement.ItemEntry{{
+			Context: ctx,
+			Data: map[string]measurement.Reading{
+				itemDataNodeCount: measurement.Int(count),
+				itemDataNodeRef:   measurement.Str(key),
+				itemDataTruncated: measurement.Bool(false),
+			},
+		}},
+	}
+}
+
 // TestReadingsMalformedItems pins that a structurally broken item is rejected
 // rather than decoded into a partial reading a caller might trust.
 func TestReadingsMalformedItems(t *testing.T) {
@@ -525,4 +546,208 @@ func sortedKeysOf(data map[string]measurement.Reading) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// TestReadingsResolveReference pins the cross-reference round trip: an item
+// naming a data entry decodes to the same reading an inline copy would.
+func TestReadingsResolveReference(t *testing.T) {
+	st := refSubtype("label", "zone", "us-west", "us-west|gpu-a,gpu-b", 2)
+	readings, err := LabelReadings(st)
+	if err != nil {
+		t.Fatalf("LabelReadings() error = %v", err)
+	}
+	if len(readings) != 1 {
+		t.Fatalf("got %d readings, want 1", len(readings))
+	}
+	if got := readings[0].Nodes; !slices.Equal(got, []string{"gpu-a", "gpu-b"}) {
+		t.Errorf("Nodes = %v, want [gpu-a gpu-b] resolved from the data entry", got)
+	}
+	if readings[0].NodeCount != 2 {
+		t.Errorf("NodeCount = %d, want 2", readings[0].NodeCount)
+	}
+}
+
+// TestReadingsRejectMalformedReference pins the guards on the reference form.
+// A reference that resolves to another reading's nodes would be well formed
+// and wrong, which is the failure this encoding exists to remove.
+func TestReadingsRejectMalformedReference(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(*measurement.Subtype)
+	}{
+		{
+			name: "reference names no data entry",
+			mutate: func(st *measurement.Subtype) {
+				st.Data = map[string]measurement.Reading{}
+			},
+		},
+		{
+			name: "reference names an entry this reading does not fold onto",
+			mutate: func(st *measurement.Subtype) {
+				st.Data["elsewhere"] = measurement.Str("other|gpu-z")
+				st.Items[0].Data[itemDataNodeRef] = measurement.Str("elsewhere")
+			},
+		},
+		{
+			name: "reference is not a string",
+			mutate: func(st *measurement.Subtype) {
+				st.Items[0].Data[itemDataNodeRef] = measurement.Int(3)
+			},
+		},
+		{
+			name: "carries both a list and a reference",
+			mutate: func(st *measurement.Subtype) {
+				st.Items[0].Data[itemDataNodeList] = measurement.Str("gpu-a,gpu-b")
+			},
+		},
+		{
+			name: "carries neither a list nor a reference",
+			mutate: func(st *measurement.Subtype) {
+				delete(st.Items[0].Data, itemDataNodeRef)
+			},
+		},
+		{
+			name: "node-count disagrees with the referenced entry",
+			mutate: func(st *measurement.Subtype) {
+				st.Items[0].Data[itemDataNodeCount] = measurement.Int(9)
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			st := refSubtype("label", "zone", "us-west", "us-west|gpu-a,gpu-b", 2)
+			tt.mutate(st)
+			_, err := LabelReadings(st)
+			assertDecodeRejected(t, err, "LabelReadings()")
+		})
+	}
+}
+
+// TestReadingsRejectUnusableTruncationMarker pins that a marker whose count
+// does not fit an int fails the decode. Reporting "no marker" would let a
+// visibly truncated list read as complete.
+func TestReadingsRejectUnusableTruncationMarker(t *testing.T) {
+	item := validItem()
+	item.Data[itemDataNodeList] = measurement.Str("n1 (+9223372036854775808 more)")
+	item.Data[itemDataNodeCount] = measurement.Int(1)
+	item.Data[itemDataTruncated] = measurement.Bool(false)
+
+	st := &measurement.Subtype{Name: "label", Items: []measurement.ItemEntry{item}}
+	_, err := LabelReadings(st)
+	assertDecodeRejected(t, err, "LabelReadings()")
+
+	// The same shape on the folded path must fail too.
+	_, err = LabelReadings(&measurement.Subtype{
+		Name: "label",
+		Data: map[string]measurement.Reading{"zone": measurement.Str("us-west|n1 (+9223372036854775808 more)")},
+	})
+	assertDecodeRejected(t, err, "LabelReadings() [data path]")
+}
+
+// TestTaintDataPathReportsLogicalKey pins that the folded taint decoder
+// reports the taint's real key rather than the synthesized "<key>.<effect>".
+// The item path reports the logical key, and two decoders disagreeing on
+// identity would surface as a phantom diff or a missed constraint match.
+func TestTaintDataPathReportsLogicalKey(t *testing.T) {
+	_, taintSt := collectSubtypes(t, 0,
+		makeNode("gpu-a", []corev1.Taint{
+			{Key: "node.kubernetes.io/unreachable", Effect: corev1.TaintEffectNoSchedule},
+			{Key: "node.kubernetes.io/unreachable", Effect: corev1.TaintEffectNoExecute},
+		}, nil),
+	)
+
+	legacy, err := TaintReadings(dataOnly(taintSt))
+	if err != nil {
+		t.Fatalf("TaintReadings() error = %v", err)
+	}
+	for _, r := range legacy {
+		if r.Key != "node.kubernetes.io/unreachable" {
+			t.Errorf("Key = %q, want the logical key without the effect suffix", r.Key)
+		}
+		if r.RawKey == r.Key {
+			t.Errorf("RawKey = %q, want the folded map key", r.RawKey)
+		}
+	}
+}
+
+// TestHydrateItems pins the helper pkg/diff uses to compare membership across
+// encodings: referenced lists are resolved inline so a caller sees node names
+// regardless of how the snapshot stored them, and keys carrying more than one
+// reading are reported as unusable for comparison.
+func TestHydrateItems(t *testing.T) {
+	t.Run("resolves a reference into an inline list", func(t *testing.T) {
+		st := refSubtype("label", "zone", "us-west", "us-west|gpu-a,gpu-b", 2)
+		items, ambiguous, err := HydrateItems(st)
+		if err != nil {
+			t.Fatalf("HydrateItems() error = %v", err)
+		}
+		if got := items[0].Data[itemDataNodeList].String(); got != "gpu-a,gpu-b" {
+			t.Errorf("node-list = %q, want the resolved names", got)
+		}
+		if _, still := items[0].Data[itemDataNodeRef]; still {
+			t.Error("hydrated item still carries the reference")
+		}
+		if len(ambiguous) != 0 {
+			t.Errorf("ambiguous = %v, want none", ambiguous)
+		}
+	})
+
+	t.Run("reports keys carrying more than one reading", func(t *testing.T) {
+		labelSt, _ := collectSubtypes(t, 0,
+			makeNode("gpu-a", nil, map[string]string{"zone": "us-west", "zone.us-west": "true"}),
+			makeNode("gpu-b", nil, map[string]string{"zone": "us-east", "zone.us-west": "true"}),
+		)
+		_, ambiguous, err := HydrateItems(labelSt)
+		if err != nil {
+			t.Fatalf("HydrateItems() error = %v", err)
+		}
+		if !ambiguous["zone.us-west"] {
+			t.Errorf("ambiguous = %v, want zone.us-west — two readings fold onto it", ambiguous)
+		}
+	})
+
+	t.Run("round-trips a truncated list", func(t *testing.T) {
+		labelSt, _ := collectSubtypes(t, 1,
+			makeNode("n1", nil, map[string]string{"shared": "yes"}),
+			makeNode("n2", nil, map[string]string{"shared": "yes"}),
+			makeNode("n3", nil, map[string]string{"shared": "yes"}),
+		)
+		items, _, err := HydrateItems(labelSt)
+		if err != nil {
+			t.Fatalf("HydrateItems() error = %v", err)
+		}
+		if got := items[0].Data[itemDataNodeList].String(); got != "n1 (+2 more)" {
+			t.Errorf("node-list = %q, want the marker preserved", got)
+		}
+	})
+
+	t.Run("taints hydrate too", func(t *testing.T) {
+		st := refSubtype("taint", "dedicated", "sys", "NoSchedule|sys|gpu-a", 1)
+		items, _, err := HydrateItems(st)
+		if err != nil {
+			t.Fatalf("HydrateItems() error = %v", err)
+		}
+		if got := items[0].Data[itemDataNodeList].String(); got != "gpu-a" {
+			t.Errorf("node-list = %q, want gpu-a", got)
+		}
+	})
+
+	t.Run("absent, foreign and malformed inputs", func(t *testing.T) {
+		if items, _, err := HydrateItems(nil); items != nil || err != nil {
+			t.Errorf("nil subtype = (%v, %v), want (nil, nil)", items, err)
+		}
+		if items, _, err := HydrateItems(&measurement.Subtype{Name: "label"}); items != nil || err != nil {
+			t.Errorf("no items = (%v, %v), want (nil, nil)", items, err)
+		}
+		other := &measurement.Subtype{Name: "summary", Items: []measurement.ItemEntry{validItem()}}
+		if items, _, err := HydrateItems(other); err != nil || len(items) != 1 {
+			t.Errorf("foreign subtype = (%v, %v), want its items unchanged", items, err)
+		}
+		bad := &measurement.Subtype{Name: "label", Items: []measurement.ItemEntry{{
+			Context: map[string]string{itemCtxKey: "k"},
+			Data:    map[string]measurement.Reading{itemDataNodeList: measurement.Str("n1")},
+		}}}
+		if _, _, err := HydrateItems(bad); err == nil {
+			t.Error("malformed items decoded without error")
+		}
+	})
 }

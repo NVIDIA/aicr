@@ -293,7 +293,7 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 // deliver integers as float64).
 func hasGPUData(snap *Snapshot) bool {
 	for _, m := range snap.Measurements {
-		if m.Type != measurement.TypeGPU {
+		if m == nil || m.Type != measurement.TypeGPU {
 			continue
 		}
 		for i := range m.Subtypes {
@@ -324,7 +324,7 @@ func verifyGPUCollected(snap *Snapshot) error {
 // "nvidia.com/gpu", which satisfies the prefix with no NFD label present.
 func hasGPUNodesInTopology(snap *Snapshot) bool {
 	for _, m := range snap.Measurements {
-		if m.Type != measurement.TypeNodeTopology {
+		if m == nil || m.Type != measurement.TypeNodeTopology {
 			continue
 		}
 		readings, err := topology.LabelReadings(m.GetSubtype("label"))

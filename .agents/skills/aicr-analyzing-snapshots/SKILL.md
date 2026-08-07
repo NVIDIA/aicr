@@ -137,13 +137,16 @@ entry per distinct reading, sorted by key/value (taints: key/effect/value):
 | `context.value` | Taint or label value (may be empty) |
 | `context.effect` | Taints only: `NoSchedule`, `PreferNoSchedule`, `NoExecute` |
 | `data.node-count` | True node total, including nodes dropped by truncation |
-| `data.node-list` | Comma-separated node names; may be truncated |
-| `data.truncated` | `true` when `node-list` is incomplete |
+| `data.node-list` | Comma-separated node names (one of `node-list` / `node-list-ref`) |
+| `data.node-list-ref` | Key into the subtype's `data` map whose entry holds the names (one of `node-list` / `node-list-ref`) |
+| `data.truncated` | `true` when the node list is capped and ends with `(+N more)` |
 
 Current snapshots also carry the older `data` map on both subtypes; `items` is
 authoritative. Take counts from `data.node-count` rather than splitting
 `node-list`, and read `data.truncated` rather than probing for a `(+N more)`
-suffix.
+suffix. Use `topology.LabelReadings` / `TaintReadings` to resolve items into
+hydrated readings — they expand `node-list-ref` automatically, so callers do
+not need to implement the reference logic themselves.
 
 **Older snapshots (no `items`):** fall back to the folded `data` map —
 `effect|value|node1,node2,...` for taints, `value|node1,node2,...` for labels.

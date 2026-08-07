@@ -15,6 +15,7 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -51,9 +52,32 @@ func topologySnap(labels map[string]string, items []measurement.ItemEntry, withI
 }
 
 func labelItem(key, value, nodes string) measurement.ItemEntry {
+	names := 0
+	if nodes != "" {
+		names = len(strings.Split(nodes, ","))
+	}
 	return measurement.ItemEntry{
 		Context: map[string]string{"key": key, "value": value},
-		Data:    map[string]measurement.Reading{"node-list": measurement.Str(nodes)},
+		Data: map[string]measurement.Reading{
+			"node-count": measurement.Int(names),
+			"node-list":  measurement.Str(nodes),
+			"truncated":  measurement.Bool(false),
+		},
+	}
+}
+
+// refLabelItem builds a label item that references its node list from the data
+// map rather than carrying it inline. dataKey must be the folded key that
+// encodeLabels would produce for this reading, and must not be shared with any
+// other reading (folds == 1), or the decoder will reject the reference.
+func refLabelItem(key, value, dataKey string, count int) measurement.ItemEntry {
+	return measurement.ItemEntry{
+		Context: map[string]string{"key": key, "value": value},
+		Data: map[string]measurement.Reading{
+			"node-count":    measurement.Int(count),
+			"node-list-ref": measurement.Str(dataKey),
+			"truncated":     measurement.Bool(false),
+		},
 	}
 }
 
@@ -253,5 +277,99 @@ func TestSnapshots_ItemsAuthoritativeOverData(t *testing.T) {
 		labelItem("accelerator", "h100", "gpu-a"))
 	if !Snapshots(base, changed).HasDrift() {
 		t.Error("an added item was not reported as drift")
+	}
+}
+
+// TestSnapshots_MixedVintageCollisionWinnerIsNotDrift pins that an upgrade or
+// rollback of an unchanged collision cluster is silent even when the two
+// snapshots captured different collision winners for the same key.
+func TestSnapshots_MixedVintageCollisionWinnerIsNotDrift(t *testing.T) {
+	labels, items := collidingCluster()
+
+	// Same cluster; the other reading won the contested zone.us-west key.
+	otherWinner := make(map[string]string, len(labels))
+	for k, v := range labels {
+		otherWinner[k] = v
+	}
+	otherWinner["zone.us-west"] = "us-west|gpu-a"
+
+	for _, tt := range []struct {
+		name            string
+		baseHas, tgtHas bool
+	}{
+		{"upgrade", false, true},
+		{"rollback", true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Snapshots(
+				topologySnap(otherWinner, items, tt.baseHas),
+				topologySnap(labels, items, tt.tgtHas),
+			)
+			if result.HasDrift() {
+				t.Errorf("collision winner differing across vintages reported as drift: %v", paths(result))
+			}
+		})
+	}
+}
+
+// TestSnapshots_HydratedItemsCompareMembership pins that node membership is
+// still compared when both sides carry items. Referenced lists must be
+// resolved first: comparing raw items would compare a reference string, so a
+// node moving between labels would go unreported.
+func TestSnapshots_HydratedItemsCompareMembership(t *testing.T) {
+	labels, items := collidingCluster()
+
+	moved := make([]measurement.ItemEntry, len(items))
+	copy(moved, items)
+	for i := range moved {
+		if moved[i].Context["value"] == "us-east" {
+			moved[i] = labelItem("zone", "us-east", "gpu-c")
+		}
+	}
+
+	result := Snapshots(topologySnap(labels, items, true), topologySnap(labels, moved, true))
+	if !result.HasDrift() {
+		t.Error("a node moving between readings was not reported as drift")
+	}
+}
+
+// TestSnapshots_HydrationResolvesReferences pins that node-list-ref items are
+// resolved before comparison so that node membership changes are detected.
+func TestSnapshots_HydrationResolvesReferences(t *testing.T) {
+	// Single-value key: fold key == key, folds["accelerator"]==1, so the
+	// encoder emits node-list-ref rather than node-list.
+	dataKey := "accelerator"
+	data := map[string]string{dataKey: "h100|gpu-a,gpu-b"}
+
+	refItem := refLabelItem("accelerator", "h100", dataKey, 2)
+	unchanged := []measurement.ItemEntry{refItem}
+
+	changedData := map[string]string{dataKey: "h100|gpu-a"}
+	changedItem := refLabelItem("accelerator", "h100", dataKey, 1)
+	changed := []measurement.ItemEntry{changedItem}
+
+	buildSnap := func(d map[string]string, its []measurement.ItemEntry) *snapshotter.Snapshot {
+		readings := make(map[string]measurement.Reading, len(d))
+		for k, v := range d {
+			readings[k] = measurement.Str(v)
+		}
+		return &snapshotter.Snapshot{
+			Measurements: []*measurement.Measurement{{
+				Type: measurement.TypeNodeTopology,
+				Subtypes: []measurement.Subtype{
+					{Name: "summary", Data: map[string]measurement.Reading{
+						"label-count": measurement.Int(len(its)),
+					}},
+					{Name: "label", Data: readings, Items: its},
+				},
+			}},
+		}
+	}
+
+	if result := Snapshots(buildSnap(data, unchanged), buildSnap(data, unchanged)); result.HasDrift() {
+		t.Errorf("identical reference items reported as drift: %v", paths(result))
+	}
+	if result := Snapshots(buildSnap(data, unchanged), buildSnap(changedData, changed)); !result.HasDrift() {
+		t.Error("a node leaving a reference item was not reported as drift")
 	}
 }

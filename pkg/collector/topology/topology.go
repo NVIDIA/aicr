@@ -201,8 +201,55 @@ const (
 
 	itemDataNodeCount = "node-count"
 	itemDataNodeList  = "node-list"
+	itemDataNodeRef   = "node-list-ref"
 	itemDataTruncated = "truncated"
 )
+
+// labelMapKeys replays encodeLabels' folding rule, returning the data map key
+// each reading writes to. Two readings sharing one key are the collision the
+// folded encoding cannot represent: its entry can describe only one of them,
+// so neither may reference it.
+func labelMapKeys(labels map[labelID][]string) map[labelID]string {
+	keyValues := make(map[string]int, len(labels))
+	for id := range labels {
+		keyValues[id.Key]++
+	}
+	out := make(map[labelID]string, len(labels))
+	for id := range labels {
+		if keyValues[id.Key] > 1 {
+			out[id] = id.Key + "." + id.Value
+			continue
+		}
+		out[id] = id.Key
+	}
+	return out
+}
+
+// taintMapKeys replays encodeTaints' folding rule. See labelMapKeys.
+func taintMapKeys(taints map[taintID][]string) map[taintID]string {
+	keyEffects := make(map[string]int, len(taints))
+	for id := range taints {
+		keyEffects[id.Key]++
+	}
+	out := make(map[taintID]string, len(taints))
+	for id := range taints {
+		if keyEffects[id.Key] > 1 {
+			out[id] = id.Key + "." + id.Effect
+			continue
+		}
+		out[id] = id.Key
+	}
+	return out
+}
+
+// refCounts counts how many readings fold onto each data map key.
+func refCounts[K comparable](mapKeys map[K]string) map[string]int {
+	out := make(map[string]int, len(mapKeys))
+	for _, mk := range mapKeys {
+		out[mk]++
+	}
+	return out
+}
 
 // encodeLabelItems renders one ItemEntry per aggregated label reading, keeping
 // key and value in separate fields so the collision encodeLabels cannot avoid
@@ -225,6 +272,9 @@ func encodeLabelItems(labels map[labelID][]string, maxNodes int) []measurement.I
 		return ids[i].Value < ids[j].Value
 	})
 
+	mapKeys := labelMapKeys(labels)
+	counts := refCounts(mapKeys)
+
 	items := make([]measurement.ItemEntry, 0, len(ids))
 	for _, id := range ids {
 		nodes := labels[id]
@@ -233,7 +283,7 @@ func encodeLabelItems(labels map[labelID][]string, maxNodes int) []measurement.I
 				itemCtxKey:   id.Key,
 				itemCtxValue: id.Value,
 			},
-			Data: nodeListData(nodes, maxNodes),
+			Data: membershipData(nodes, maxNodes, mapKeys[id], counts),
 		})
 	}
 	return items
@@ -261,6 +311,9 @@ func encodeTaintItems(taints map[taintID][]string, maxNodes int) []measurement.I
 		return ids[i].Value < ids[j].Value
 	})
 
+	mapKeys := taintMapKeys(taints)
+	counts := refCounts(mapKeys)
+
 	items := make([]measurement.ItemEntry, 0, len(ids))
 	for _, id := range ids {
 		nodes := taints[id]
@@ -270,10 +323,27 @@ func encodeTaintItems(taints map[taintID][]string, maxNodes int) []measurement.I
 				itemCtxValue:  id.Value,
 				itemCtxEffect: id.Effect,
 			},
-			Data: nodeListData(nodes, maxNodes),
+			Data: membershipData(nodes, maxNodes, mapKeys[id], counts),
 		})
 	}
 	return items
+}
+
+// membershipData renders one reading's node membership. When the reading is
+// the only one folding onto mapKey, the data entry describes it exactly, so
+// the item references that entry instead of repeating the names — the node
+// lists dominate snapshot size and are otherwise written twice. A reading
+// sharing mapKey keeps its own copy, because the shared entry can describe
+// only one of them and which one is not predictable.
+func membershipData(nodes []string, maxNodes int, mapKey string, counts map[string]int) map[string]measurement.Reading {
+	if counts[mapKey] != 1 {
+		return nodeListData(nodes, maxNodes)
+	}
+	return map[string]measurement.Reading{
+		itemDataNodeCount: measurement.Int(len(nodes)),
+		itemDataNodeRef:   measurement.Str(mapKey),
+		itemDataTruncated: measurement.Bool(maxNodes > 0 && len(nodes) > maxNodes),
+	}
 }
 
 // nodeListData renders one reading's node membership. node-count is the true
@@ -306,19 +376,20 @@ func IsTruncatedNodeList(nodes string) bool {
 // whether the suffix is present and parsable. N plus the names still rendered
 // is the pre-truncation total, so a decoder can check a declared node-count
 // against the list rather than merely against its length.
-func truncatedNodeListRemainder(nodes string) (int, bool) {
+func truncatedNodeListRemainder(nodes string) (n int, marked bool, err error) {
 	m := truncatedNodeListRE.FindStringSubmatch(nodes)
 	if m == nil {
-		return 0, false
+		return 0, false, nil
 	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		// Only reachable when N overflows int; treat as unparsable so the
-		// caller's marker/flag comparison fails closed rather than reading
-		// the suffix as absent.
-		return 0, false
+	n, convErr := strconv.Atoi(m[1])
+	if convErr != nil {
+		// The suffix matched but its count does not fit an int. Reporting
+		// "no marker" would let the list read as complete, so the caller is
+		// told the list is marked and unreadable.
+		return 0, true, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("node list truncation marker %q is not a usable count", m[1]))
 	}
-	return n, true
+	return n, true, nil
 }
 
 // formatNodeList joins sorted node names with commas, optionally truncating.

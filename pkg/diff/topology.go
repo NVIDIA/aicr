@@ -14,7 +14,10 @@
 
 package diff
 
-import "github.com/NVIDIA/aicr/pkg/measurement"
+import (
+	"github.com/NVIDIA/aicr/pkg/collector/topology"
+	"github.com/NVIDIA/aicr/pkg/measurement"
+)
 
 // NodeTopology carries every label and taint reading twice: as items, and as
 // the legacy folded data map. Diffing both halves makes an aicr upgrade look
@@ -53,10 +56,7 @@ func alignTopologyEncoding(base, target *measurement.Measurement) (*measurement.
 	baseIdx := indexSubtypes(base.Subtypes)
 	targetIdx := indexSubtypes(target.Subtypes)
 
-	// Count keys whose value must be restated because the two sides counted on
-	// different bases: older builds sized the folded map, newer ones the items.
-	restate := map[string]string{}
-	drop := map[string]bool{}
+	plan := map[string]subtypePlan{}
 	for subtype, countKey := range map[string]string{
 		topologyLabelSubtype: topologyLabelCountKey,
 		topologyTaintSubtype: topologyTaintCountKey,
@@ -68,22 +68,52 @@ func alignTopologyEncoding(base, target *measurement.Measurement) (*measurement.
 		baseHas, targetHas := len(b.Items) > 0, len(t.Items) > 0
 		switch {
 		case baseHas && targetHas:
-			drop[subtype] = true // items are richer and stable; ignore the map
+			// Items are the richer record and, once hydrated, carry node
+			// membership on both sides. The folded map adds nothing and is not
+			// stable even within one build, since a collision resolves by map
+			// iteration order.
+			plan[subtype] = subtypePlan{hydrate: true, dropData: true}
 		case baseHas != targetHas:
-			restate[subtype] = countKey // one side predates items
+			// One side predates items. Drop items and compare the folded map.
+			// Exclude collision-ambiguous keys: Go map iteration decides the
+			// winner, so an unchanged cluster can write different values on each
+			// side across an upgrade/rollback.
+			_, ambiguous, err := topology.HydrateItems(itemSide(b, t))
+			if err != nil {
+				plan[subtype] = subtypePlan{dropItems: true, countKey: countKey}
+				continue
+			}
+			plan[subtype] = subtypePlan{dropItems: true, countKey: countKey, skipKeys: ambiguous}
 		}
 		// Neither carries items: one vintage, nothing to reconcile. Restating
 		// the count here would mask a corrupted one rather than report it.
 	}
-	if len(restate) == 0 && len(drop) == 0 {
+	if len(plan) == 0 {
 		return base, target
 	}
 
-	return alignMeasurement(base, restate, drop), alignMeasurement(target, restate, drop)
+	return alignMeasurement(base, plan), alignMeasurement(target, plan)
+}
+
+// subtypePlan is how one subtype is reduced before comparison.
+type subtypePlan struct {
+	hydrate   bool            // resolve referenced node lists into the items
+	dropData  bool            // compare items only
+	dropItems bool            // compare the folded map only
+	countKey  string          // summary count to restate over the folded map
+	skipKeys  map[string]bool // folded keys too ambiguous to compare safely
+}
+
+// itemSide returns whichever subtype carries items.
+func itemSide(a, b *measurement.Subtype) *measurement.Subtype {
+	if len(a.Items) > 0 {
+		return a
+	}
+	return b
 }
 
 // alignMeasurement copies m with the topology subtypes reduced as directed.
-func alignMeasurement(m *measurement.Measurement, restate map[string]string, drop map[string]bool) *measurement.Measurement {
+func alignMeasurement(m *measurement.Measurement, plan map[string]subtypePlan) *measurement.Measurement {
 	out := *m
 	out.Subtypes = make([]measurement.Subtype, len(m.Subtypes))
 	copy(out.Subtypes, m.Subtypes)
@@ -91,12 +121,34 @@ func alignMeasurement(m *measurement.Measurement, restate map[string]string, dro
 	folded := map[string]int{}
 	for i := range out.Subtypes {
 		st := &out.Subtypes[i]
-		switch {
-		case drop[st.Name]:
+		p, ok := plan[st.Name]
+		if !ok {
+			continue
+		}
+		if p.hydrate {
+			if items, _, err := topology.HydrateItems(st); err == nil {
+				st.Items = items
+			} else {
+				p.dropData = false // keep data when hydration fails
+			}
+		}
+		if p.dropData {
 			st.Data = nil
-		case restate[st.Name] != "":
-			folded[restate[st.Name]] = len(st.Data)
+		}
+		if p.dropItems {
 			st.Items = nil
+		}
+		if p.countKey != "" {
+			folded[p.countKey] = len(st.Data)
+		}
+		if len(p.skipKeys) > 0 && st.Data != nil {
+			data := make(map[string]measurement.Reading, len(st.Data))
+			for k, v := range st.Data {
+				if !p.skipKeys[k] {
+					data[k] = v
+				}
+			}
+			st.Data = data
 		}
 	}
 	if len(folded) == 0 {

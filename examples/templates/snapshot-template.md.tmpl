@@ -1,3 +1,14 @@
+{{- /* An item carries its node names inline only when its folded key is
+       shared; otherwise it references the data entry holding them. The node
+       list is the final field of every folded encoding. */}}
+{{- define "nodeList" }}
+{{-   $item := index . 0 }}{{ $folded := index . 1 }}
+{{-   if index $item.Data "node-list" }}{{ (index $item.Data "node-list").String }}
+{{-   else if index $item.Data "node-list-ref" }}
+{{-     $entry := index $folded (index $item.Data "node-list-ref").String }}
+{{-     if $entry }}{{ last (splitList "|" $entry.String) }}{{ end }}
+{{-   end }}
+{{- end }}
 # Cluster Snapshot Report
 
 {{- /* Extract data from measurements */ -}}
@@ -134,7 +145,7 @@
 |-----------|--------|-------|-------|
 {{- if $topoTaintItems }}
 {{- range $topoTaintItems }}
-| {{ index .Context "key" }} | {{ index .Context "effect" }} | {{ index .Context "value" }} | {{ (index .Data "node-list").String }} |
+| {{ index .Context "key" }} | {{ index .Context "effect" }} | {{ index .Context "value" }} | {{ template "nodeList" (list . $topoTaints) }} |
 {{- end }}
 {{- else }}
 {{- range $key, $reading := $topoTaints }}
@@ -156,7 +167,7 @@
 |-----------|-------|-------|
 {{- if $topoLabelItems }}
 {{- range $topoLabelItems }}
-| {{ index .Context "key" }} | {{ index .Context "value" }} | {{ (index .Data "node-list").String }} |
+| {{ index .Context "key" }} | {{ index .Context "value" }} | {{ template "nodeList" (list . $topoLabels) }} |
 {{- end }}
 {{- else }}
 {{- range $key, $reading := $topoLabels }}
