@@ -824,15 +824,18 @@ func (r *RecipeResult) validateProfileValuesWithContext(
 // against the hydrated advertiser components for EVERY closure-triggering
 // profile — a declared external advertiser AND the empty (operator-advertised)
 // advertiser shape alike. The verdicts come from the single shared
-// evaluator (allocpolicy.CheckCoherence), which mirrors the validation-time
-// resolver (pkg/validator/v1 ResolveGPUAllocationPolicy) verdict-for-verdict
-// — gate/resolver symmetry (ADR-015): an artifact this gate emits is
-// exactly an artifact validation accepts. The gate is gated on the profile
-// owning advertisement: an AKS-shaped profile performs no evaluation here,
-// and the conflicting toggle typically lives in a component values file —
-// which is exactly why this runs at the hydration boundary rather than
-// only at resolution (disk-loaded, POSTed, and direct-bundler recipes
-// bypass resolution).
+// evaluator (allocpolicy.CheckCoherence), which applies the same #1327
+// tuple-coherence rows as the validation-time resolver (pkg/validator/v1
+// ResolveGPUAllocationPolicy) — gate/resolver symmetry over the shared
+// tuple verdicts (ADR-015): for those tuple rows, an artifact this gate
+// emits is exactly an artifact validation accepts. The #1685 dual-operator
+// rejection is resolution-time-only and deliberately not mirrored here
+// (it is outside #1685's scope); bundle-time rejection is a separate
+// follow-up. The gate is gated on the profile owning advertisement: an
+// AKS-shaped profile performs no evaluation here, and the conflicting
+// toggle typically lives in a component values file — which is exactly
+// why this runs at the hydration boundary rather than only at resolution
+// (disk-loaded, POSTed, and direct-bundler recipes bypass resolution).
 func (r *RecipeResult) checkAdvertiserCoherence(hydrated map[string]map[string]any) error {
 	if !r.profileClosureTriggered() {
 		return nil
@@ -843,12 +846,15 @@ func (r *RecipeResult) checkAdvertiserCoherence(hydrated map[string]map[string]a
 	// hydrated above. An absent devicePlugin.enabled on an enabled
 	// operator component follows the upstream chart default (true) — the
 	// same reading the #1327 resolver applies. The aggregation mirrors the
-	// resolver's per-advertiser reading exactly: under a declared external
-	// advertiser EVERY enabled operator component is a potential second
-	// advertiser (OR semantics); under an empty advertiser the resolver
-	// reads the preferred component only (gpu-operator wins over
-	// gpu-operator-ocp when both are enabled) — diverging here would emit
-	// artifacts validation resolves differently.
+	// resolver's per-advertiser reading for the shared tuple verdicts:
+	// under a declared external advertiser EVERY enabled operator
+	// component is a potential second advertiser (OR semantics); under an
+	// empty advertiser the gate reads the first present operator component
+	// (gpu-operator before gpu-operator-ocp in the iteration). The
+	// resolver's #1685 rejection of a recipe with both operators enabled
+	// is resolution-time-only and deliberately not mirrored here —
+	// diverging on the shared tuple rows would emit artifacts validation
+	// resolves differently.
 	for _, component := range []string{allocpolicy.ComponentGPUOperator, allocpolicy.ComponentGPUOperatorOCP} {
 		values, ok := hydrated[component]
 		if !ok {
