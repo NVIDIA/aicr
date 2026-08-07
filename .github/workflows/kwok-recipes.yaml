@@ -113,57 +113,12 @@ jobs:
           # recipe whose (service, accelerator) has no matching KWOK profile
           # on disk, so the matrix never dispatches a job that would silently
           # "SKIP" and return green without validating anything (#1997).
+          # The library defines read_criteria + profile_status (used below)
+          # alongside the direct-path selector; keeping them there lets
+          # profile-select_test.sh cover both wrappers.
           # shellcheck source=kwok/scripts/lib/profile-select.sh
           source kwok/scripts/lib/profile-select.sh
           PROFILES_ROOT="${GITHUB_WORKSPACE}/kwok/profiles"
-
-          # read_overlay_field <overlay> <yq_expr> — prints the resolved
-          # value on stdout (or "" when the field is absent/null). yq
-          # evaluation failures — a malformed overlay YAML — surface as
-          # a ::error:: annotation and return 1 rather than being
-          # swallowed by `|| true` and collapsed to an empty string,
-          # which the downstream filter would misread as "non-testable,
-          # skip". Same silent-swallow class the rest of the PR is
-          # closing.
-          #
-          # Diagnostics go to stderr so they don't get captured into the
-          # caller's variable via $(...) and become an annotation only in
-          # the step log. Caller MUST use `|| exit 1` — an inner exit
-          # inside command substitution only kills the subshell.
-          read_overlay_field() {
-            local overlay="$1" expr="$2" value
-            if ! value=$(yq eval "${expr} // \"\"" "${overlay}" 2>/dev/null); then
-              echo "::error file=${overlay}::yq failed to parse overlay (reading ${expr})" >&2
-              yq eval "${expr}" "${overlay}" >&2 || true
-              return 1
-            fi
-            echo "${value}"
-          }
-
-          # profile_status <overlay> — prints 0 to stdout if a profile exists
-          # for the recipe's (service, accelerator), PROFILE_SELECT_RC_NO_MATCH
-          # (2) if no profile exists (recipe is not in scope for this
-          # checkout), or exits 1 with an ::error:: annotation on any other
-          # selector failure (malformed criteria, malformed profile,
-          # ambiguous match — the tree is broken and must not be masked by
-          # dropping the recipe from the matrix).
-          profile_status() {
-            local overlay="$1" criteria svc accel rc=0
-            if ! criteria=$(resolve_recipe_criteria "${overlay}" 2>/dev/null); then
-              echo "::error file=${overlay}::resolve_recipe_criteria failed"
-              resolve_recipe_criteria "${overlay}" >&2 || true
-              exit 1
-            fi
-            read -r svc accel <<< "${criteria}"
-            select_profiles "${svc}" "${accel}" "${PROFILES_ROOT}" >/dev/null 2>&1 || rc=$?
-            if (( rc == 0 || rc == PROFILE_SELECT_RC_NO_MATCH )); then
-              echo "${rc}"
-              return 0
-            fi
-            echo "::error file=${overlay}::select_profiles failed (rc=${rc}) for service=${svc} accelerator=${accel} — see stderr"
-            select_profiles "${svc}" "${accel}" "${PROFILES_ROOT}" >&2 || true
-            exit 1
-          }
 
           dropped="[]"   # recipes filtered out of the matrix (no profile)
 
@@ -185,11 +140,11 @@ jobs:
             # workflow_dispatch is an explicit ask; an unmapped recipe here
             # must fail (not silently produce an empty matrix) so the
             # operator knows their request cannot be validated.
-            # Capture rc separately: an exit 1 inside profile_status only
-            # kills the $(...) subshell, so a fatal path (malformed
-            # profile / ambiguous match) would otherwise be swallowed
-            # and misread as the unmapped-skip case below.
-            status=$(profile_status "${dispatch_overlay}") || exit 1
+            # Capture rc separately: profile_status's return 1 on a fatal
+            # path (malformed profile / ambiguous match) only manifests
+            # as the substitution's rc, so an unchecked call would be
+            # misread as the unmapped-skip case below.
+            status=$(profile_status "${dispatch_overlay}" "${PROFILES_ROOT}") || exit 1
             if [[ "${status}" == "${PROFILE_SELECT_RC_NO_MATCH}" ]]; then
               echo "::error::Dispatch recipe '${DISPATCH_RECIPE}' has no KWOK profile for its"
               echo "::error::(service, accelerator). Add one under kwok/profiles/<service>/ or"
@@ -211,21 +166,28 @@ jobs:
 
           for overlay in recipes/overlays/*.yaml; do
             name=$(basename "$overlay" .yaml)
-            service=$(read_overlay_field "$overlay" '.spec.criteria.service') || exit 1
+            # Read BOTH criteria up front so type validation runs on the
+            # accelerator even when the overlay would be skipped for
+            # service reasons below — an ocp / empty-service recipe with
+            # `accelerator: false` must still fail closed, since the
+            # invalid type is a tree fault regardless of testability.
+            # Same fail-closed contract as the direct path.
+            service=$(read_criteria "$overlay" service) || exit 1
+            accel=$(read_criteria "$overlay" accelerator) || exit 1
 
-            # Skip non-testable overlays (no service, or OCP — needs OpenShift operators)
-            if [[ -z "$service" || "$service" == "null" || "$service" == "any" || "$service" == "ocp" ]]; then
+            # Skip non-testable overlays (no service, or OCP — needs OpenShift operators).
+            if [[ -z "$service" || "$service" == "ocp" ]]; then
               continue
             fi
 
             # Drop recipes with no matching KWOK profile so the matrix cell
             # can't report green without running anything. Fatal selector
-            # errors (ambiguous match, malformed profile) inside
-            # profile_status call exit 1, but that only kills the $(...)
-            # subshell — the outer script has to check the substitution's
-            # rc explicitly and propagate it, otherwise a broken tree gets
+            # errors (ambiguous match, malformed profile) surface as
+            # profile_status returning 1 — that only manifests as the
+            # substitution's rc, so the outer script has to check it
+            # explicitly and propagate, otherwise a broken tree gets
             # silently reclassified as an unmapped-skip and hidden.
-            status=$(profile_status "${overlay}") || exit 1
+            status=$(profile_status "${overlay}" "${PROFILES_ROOT}") || exit 1
             if [[ "${status}" == "${PROFILE_SELECT_RC_NO_MATCH}" ]]; then
               dropped=$(echo "$dropped" | jq -c --arg r "$name" '. + [$r]')
               echo "::notice file=${overlay}::${name} filtered from KWOK matrix — no profile for its (service, accelerator)"
@@ -234,8 +196,7 @@ jobs:
 
             all=$(echo "$all" | jq -c --arg r "$name" '. + [$r]')
 
-            accel=$(read_overlay_field "$overlay" '.spec.criteria.accelerator') || exit 1
-            if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
+            if [[ -z "$accel" ]]; then
               tier1=$(echo "$tier1" | jq -c --arg r "$name" '. + [$r]')
             fi
           done
@@ -263,24 +224,24 @@ jobs:
             # Build set of affected accelerator-specific overlays
             for overlay in recipes/overlays/*.yaml; do
               name=$(basename "$overlay" .yaml)
-              service=$(read_overlay_field "$overlay" '.spec.criteria.service') || exit 1
-              accel=$(read_overlay_field "$overlay" '.spec.criteria.accelerator') || exit 1
+              service=$(read_criteria "$overlay" service) || exit 1
+              accel=$(read_criteria "$overlay" accelerator) || exit 1
 
               # Only accelerator-specific, KWOK-testable overlays belong in Tier 2
-              if [[ -z "$service" || "$service" == "null" || "$service" == "any" || "$service" == "ocp" ]]; then
+              if [[ -z "$service" || "$service" == "ocp" ]]; then
                 continue
               fi
-              if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
+              if [[ -z "$accel" ]]; then
                 continue
               fi
 
               # Same profile-availability filter as the main loop — an
               # unmapped accelerator recipe must not enter the matrix, or
               # its Tier 2 cell reports green after skipping (#1997).
-              # Same subshell-exit trap as above: capture rc explicitly
+              # Same substitution-rc trap as above: capture rc explicitly
               # so fatal selector errors propagate instead of being
               # silently reclassified as unmapped-skips.
-              status=$(profile_status "${overlay}") || exit 1
+              status=$(profile_status "${overlay}" "${PROFILES_ROOT}") || exit 1
               if [[ "${status}" == "${PROFILE_SELECT_RC_NO_MATCH}" ]]; then
                 continue
               fi

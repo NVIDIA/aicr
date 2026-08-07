@@ -82,18 +82,39 @@ candidate's `metadata.labels`:
 | system | `provider == <service>` and `nodeType == system` |
 | gpu | `provider == <service>` and `nodeType == accelerated` and `accelerator == <accelerator>` |
 
-Exactly one match per role is required. Zero or multiple matches — or an
-unknown service or accelerator — is a hard error; there is no silent
-fallback to another provider (see #1997). Selection is implemented in
-`kwok/scripts/lib/profile-select.sh` and unit-tested by the sibling
-`profile-select_test.sh` (wired into the `kwok-recipes.yaml` discover job).
+Exactly one match per role is required. There is no silent fallback to
+another provider (see #1997). The selector distinguishes two failure
+classes so batch mode can be forgiving about coverage without hiding
+tree faults:
 
-**Direct vs batch semantics.** `apply-nodes.sh <recipe>` (and
-`make kwok-e2e RECIPE=...`) fails closed with the full diagnostic when
-no profile matches. `run-all-recipes.sh` (and `make kwok-test-all`,
-plus the CI matrix) instead **skips** unmapped recipes with a WARN so
-batch coverage stays green while profiles are backfilled — a recipe
-you can't test isn't the same as a recipe that failed.
+- **No match** (zero matching profiles for `(service, accelerator)`) —
+  the recipe is out of scope for what is currently on disk. This
+  covers both an unknown service (its `kwok/profiles/<service>/`
+  directory doesn't exist) and an unknown accelerator (the directory
+  exists but has no `accelerated` profile carrying that label).
+  Selector returns `PROFILE_SELECT_RC_NO_MATCH` (2); how the caller
+  treats it depends on the entry point (see below).
+- **Ambiguous or invalid** (multiple matching profiles, malformed
+  profile YAML, or a profile whose `metadata.labels.provider` label
+  disagrees with its parent directory) — always a hard error (rc=1),
+  never skippable. All three are real tree faults the caller must
+  surface; a mislabeled file that happens to be the sole profile for
+  its role would otherwise silently degrade to a no-match and zero
+  coverage without warning.
+
+Selection is implemented in `kwok/scripts/lib/profile-select.sh` and
+unit-tested by the sibling `profile-select_test.sh` (wired into the
+`kwok-recipes.yaml` discover job).
+
+**Entry-point behavior on `no match`.** The three entry points treat
+rc=2 differently — a recipe you can't test isn't the same as a recipe
+that failed, but explicit user asks must never silently do nothing:
+
+| Entry point | Behavior on `no match` (rc=2) | Behavior on `ambiguous/invalid` (rc=1) |
+|-------------|-------------------------------|----------------------------------------|
+| Direct: `apply-nodes.sh <recipe>` / `make kwok-e2e RECIPE=...` | **Fail closed** with the full diagnostic — user named a specific recipe. | Fail closed. |
+| Implicit batch: `run-all-recipes.sh` / `make kwok-test-all` | **SKIP with WARN** so backfilling profiles doesn't turn every batch red. | Fail closed (batch cannot mask a broken tree). |
+| CI matrix: `.github/workflows/kwok-recipes.yaml` | **DROP at classify** (`::notice`), never dispatched — the tier-2/3 cell would otherwise report green without validating anything. `workflow_dispatch` of a specific recipe **fails closed** (explicit ask). | Fail closed at classify. |
 
 Currently on disk:
 

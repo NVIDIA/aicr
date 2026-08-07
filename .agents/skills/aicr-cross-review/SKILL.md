@@ -16,7 +16,7 @@ user-invocable: true
 # automatic path that removing the explicit nested call did not.
 disallowed-tools: Skill
 argument-hint: "<PR-number-or-URL>"
-version: 0.3.19
+version: 0.3.20
 ---
 
 # AICR Cross-Review: Multi-Agent PR Review with Consensus
@@ -226,7 +226,10 @@ the consensus mechanics):
 
 - **Review** — Claude Code (reviews the pinned diff directly; it deliberately does
   *not* delegate to the `code-review` command, whose step 8 instructs its agent to
-  `gh pr comment` the result back to the PR), Codex (background dispatch, a 9-min
+  `gh pr comment` the result back to the PR), Codex (two chained agents: a dispatch
+  agent starts the remote background job and hands back its id, which the workflow
+  immediately writes to the progress log — `Codex job <id> dispatched — review running
+  remotely` — then a wait agent runs a 9-min
   bounded wait plus up to four continuation waits when the job is still running — about 45 min
   for a live job), CodeRabbit (CLI against a detached worktree at `HEAD_SHA`, explicit
   600000 ms timeout — the Bash tool caps any single call at 10 minutes, which is why
@@ -356,8 +359,21 @@ the consensus mechanics):
 - If it dies mid-run, **resume, don't restart**:
   `Workflow({scriptPath: ..., resumeFromRunId: "<wf_...>"})` — completed lanes replay
   from cache. Empty or odd result → read `<transcriptDir>/journal.jsonl` first.
-- The Codex lane fails in three distinct ways, and the dispatch protocol treats them
-  differently:
+- **The Codex round-1 lane is two agents, deliberately.** A dispatch agent composes the
+  lean Codex task, starts the background job (and owns the fast-transient retry-once
+  rule, decided inside a brief ~90-second launch watch that exactly covers the
+  under-60s retry window), and returns `{jobId, dispatchNote}`; the workflow then logs
+  `Codex job <id> dispatched — review running remotely` and hands the id to a wait
+  agent that runs the continuation-wait protocol unchanged and translates the result.
+  The split exists for progress visibility: a single opaque agent call shows "running"
+  from spawn, which cannot distinguish "remote job dispatched and working" from
+  "dispatch never happened" — a real run sat silent for 19 minutes with no way to tell
+  which. The logged job id is the visible "started" signal, and it doubles as the
+  recovery handle when everything after dispatch dies: a dispatch-agent failure or a
+  wait-agent loss surfaces exactly like any Codex-lane unavailability (`incomplete`,
+  with `codexJobId` whenever a live job id exists). The wait agent never dispatches.
+- The Codex lane fails in three distinct ways, and the dispatch and wait protocols
+  treat them differently:
   - **Lookup miss** — the status call exits 1 with empty stdout and `No job found` on
     stderr. Companion state is keyed by workspace root and each Bash call is a fresh
     shell, so an unpinned lookup resolves to a different workspace and reports a live job
@@ -373,7 +389,8 @@ the consensus mechanics):
     a pinned recheck has also missed, return `unavailable` saying the job could not be
     located — never re-dispatch (the original may still be running) and never record it as
     exhausted budget.
-  - **Fast transient failure** — retried **once**, and only when all three hold:
+  - **Fast transient failure** — retried **once**, in the dispatch agent's launch
+    watch (the wait agent never dispatches), and only when all three hold:
     `.job.status` is `failed` (never `cancelled`), the job died in **under 60 seconds**
     by its own timestamps, and the error names a known-retryable cause such as an upstream
     capacity rejection (`Selected model is at capacity`) or a transient dispatch fault.
@@ -416,15 +433,26 @@ the consensus mechanics):
   it was waiting on (`jobId`), so even that kill stays resumable.
 - Codex is required, so a lane that is still unavailable after its retry makes the run
   report `incomplete`; re-run rather than interpreting a partial result.
-- **`incomplete` with a `codexJobId` means the review is NOT lost.** That field is the
-  live Codex job that outlasted the wait budget, surfaced top-level (alongside
-  `reviewerStatus`) precisely so recovery is mechanical, not improvised. Poll the job
+- **`incomplete` with a `codexJobId` usually means the review is NOT lost.** That field
+  is the Codex job the run was waiting on, surfaced top-level (alongside
+  `reviewerStatus`) precisely so recovery is mechanical, not improvised. The lane
+  attaches it to every unavailable wait result deliberately — losing a live id costs a
+  whole review, a wasted resume costs minutes — so it can also reference a job that
+  already failed or was cancelled: a poll that shows a terminal non-completed state, or
+  a resume that comes back unavailable again, confirms the job is dead and the review
+  must be re-run rather than resumed. For a live job: poll it
   with the companion status command until it is terminal (a background 60-second loop is
   fine — polling is cheap once the workflow is no longer holding a lane open for it),
   then resume: `Workflow({scriptPath, resumeFromRunId: "<wf_...>", args: {...prevArgs,
   codexResumeJobId: "<job id>"}})` — `prevArgs` is the previous run's args object, unchanged. The three completed lanes replay from cache, the
-  Codex lane fetches the existing job's result without dispatching a second one, and the
-  run proceeds to cross-review and verification normally. Proven live on PR 2097: a
+  Codex dispatch agent is skipped entirely (the workflow logs
+  `Codex resume: waiting on existing job <id>`), the wait agent collects the existing
+  job without dispatching a second one, and the
+  run proceeds to cross-review and verification normally. A run interrupted *between*
+  dispatch and result needs no `codexResumeJobId` at all: on `resumeFromRunId` the
+  dispatch agent's cached `{jobId}` replays instantly, so the wait prompt is
+  byte-identical to the original run's and the resume lands in the same wait with no
+  re-dispatch. Proven live on PR 2097: a
   ~53-minute job outlasted the then-three-wait budget, and the resumed run recovered it
   with zero re-dispatched work.
 - **Execute the CodeRabbit lane's STEP blocks verbatim** — same commands and paths, no
@@ -690,7 +718,7 @@ a shell variable, so substitute the literal path here.
 - **The tool shell is zsh, and every prompt that hands out a shell command says so.**
   `scripts/workflow.mjs` defines a single `SHELL_CONTRACT` constant, interpolated in
   **exactly one place** — `NO_EXECUTION`, which every prompt builder composes exactly
-  once. So all six assembled prompts carry it exactly once. Do not add a second
+  once. So all seven assembled prompts carry it exactly once. Do not add a second
   interpolation: `NO_EXECUTION` already embeds `PINNED_READS`, so putting it in
   `PINNED_READS` or `CODEX_LEAN` as well silently doubles it in every lane. That is how
   the first attempt got it wrong, and no block-level check can see it — the duplication

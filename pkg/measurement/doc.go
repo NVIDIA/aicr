@@ -37,6 +37,35 @@
 //   - ItemEntry: One element of a Subtype.Items list. Data holds Reading
 //     scalars; Context holds string metadata. Mirrors Subtype's payload contract.
 //   - Reading: Interface for type-safe scalar values (int, float64, string, bool, etc.)
+//   - Path: A parsed constraint measurement path ("K8s.server.version",
+//     "NetworkTopology.pfs[rail=3].pciAddress") and its extraction against a
+//     set of Measurements
+//
+// # Constraint path catalog
+//
+// catalog.go enumerates which paths are ADDRESSABLE — which {Type, Subtype,
+// Key} triples a supported producer can emit and a path form can name — and
+// ValidatePath is the check. Recipe loading applies it to every constraint
+// name so an unaddressable path fails at load instead of degrading to
+// ErrCodeNotFound during evaluation, where the resolver would read it as
+// "reading absent from this snapshot" and silently skip the gate
+// (issue #1783).
+//
+// Addressability is a static contract, not a claim about any snapshot.
+// ValidatePath answering nil does NOT mean Path.Extract will find a value:
+// an addressable path absent from a particular snapshot still returns
+// ErrCodeNotFound at evaluation, and that remains the designed
+// graceful-exclusion signal. The catalog only rules out paths that could
+// never resolve against any snapshot.
+//
+// A COLLECTOR CHANGE MAY REQUIRE A CATALOG ENTRY: a new subtype does (unless
+// its Type is open-subtype), as does a new key in a CLOSED key space, or a
+// change to how a space is addressed. A new key in an OPEN space does not.
+// Omitting a required entry does not weaken a check; it makes a legitimate
+// constraint path fail at load. When a producer's key space is not provably
+// fixed, declare it open rather than guessing a closed set. Note that
+// Subtype.Context is never addressable — no path form reads it — so its keys
+// are deliberately absent.
 //
 // # Creating Measurements
 //

@@ -53,7 +53,23 @@ func Evaluate(constraint recipe.Constraint, snap *snapshotter.Snapshot) EvalResu
 		return result
 	}
 
-	actual, err := path.ExtractValue(snap)
+	// Path.Extract takes the measurement slice, so the nil-snapshot guard that
+	// used to live inside ExtractValue has to be re-acquired here — otherwise
+	// snap.Measurements panics (issue #1783).
+	//
+	// Its placement is load-bearing: it MUST stay below the node-set dispatch
+	// above. evaluateGPUNodesLabel handles a nil snapshot itself, via
+	// findLabelSubtype, and reports ErrCodeNotFound; the scalar path reports
+	// ErrCodeInvalidRequest. evaluateOverlayConstraints branches on exactly
+	// that distinction — NotFound is graceful exclusion, anything else fails
+	// resolution closed — so hoisting one guard to the top of Evaluate would
+	// silently turn an excluded overlay into a failed resolve.
+	if snap == nil {
+		result.Error = errors.New(errors.ErrCodeInvalidRequest, "snapshot is nil")
+		return result
+	}
+
+	actual, err := path.Extract(snap.Measurements)
 	if err != nil {
 		result.Error = errors.Wrap(errors.ErrCodeNotFound, "value not found in snapshot", err)
 		return result
