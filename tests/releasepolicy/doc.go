@@ -12,5 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package releasepolicy verifies the release workflow's artifact-promotion boundary.
+// Package releasepolicy verifies the release workflow's artifact-promotion
+// boundary, plus the build-input policies that decide what a published image
+// actually contains (see image_cache_policy_test.go).
 package releasepolicy
