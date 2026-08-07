@@ -122,7 +122,7 @@ and serializes the `ErrorResponse` shape (`code`, `message`, `details`,
 
 Critical rule, enforced at this single chokepoint:
 
-> Embed `Cause.Error()` in `details["error"]` **only when status < 500**.
+> Embed `Cause.Error()` in `details["error"]` **only when `status < 500`**.
 > 4xx errors typically carry validator feedback the client needs;
 > 5xx errors carry internal paths, kubeconfig contents, or upstream
 > service hostnames that must not leak.

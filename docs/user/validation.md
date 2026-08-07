@@ -530,7 +530,7 @@ exits 8 by default, and is informational only under `--fail-on-error=false`.)
 | **B** | `inference-perf` is selected but `dynamo-platform` is not in recipe `componentRefs` | `skipped - dynamo-platform not in recipe components` |
 | **C** | `dynamo-platform` is declared but the `DynamoGraphDeployment` CRD is not installed on the cluster (operator not deployed yet) | `skipped - DynamoGraphDeployment CRD not installed on cluster (dynamo-platform component declared but operator not deployed yet)` |
 
-Guards fire before any cluster mutation, so skips are cheap (typically < 10 s).
+Guards fire before any cluster mutation, so skips are cheap (typically `< 10 s`).
 
 ## Configured GPU allocation policy
 
