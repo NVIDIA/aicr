@@ -60,13 +60,13 @@ resolve_recipe_criteria() {
     fi
 
     local svc accel
-    svc=$(_read_criteria_field "${overlay_file}" service eks) || return 1
-    accel=$(_read_criteria_field "${overlay_file}" accelerator h100) || return 1
+    svc=$(read_criteria_field "${overlay_file}" service eks) || return 1
+    accel=$(read_criteria_field "${overlay_file}" accelerator h100) || return 1
 
     echo "${svc} ${accel}"
 }
 
-# _read_criteria_field <overlay_file> <field> <default>
+# read_criteria_field <overlay_file> <field> <default>
 #
 # Reads .spec.criteria.<field> and normalizes by yq tag:
 #   - !!null / missing        -> <default>
@@ -78,7 +78,13 @@ resolve_recipe_criteria() {
 # instead of the alternative-operator (`//`) silently swallowing them
 # into the default value. `false` in particular is falsy under `//`, so
 # `service: false` used to collapse to "eks" without a warning.
-_read_criteria_field() {
+#
+# Callers that want to distinguish "field is placeholder/absent" from
+# "field is set" (e.g. the CI classify step deciding dispatchability)
+# pass an empty default: the tag validation still runs, so a mistyped
+# value errors, but a missing/"any" value returns "" and can be
+# short-circuited.
+read_criteria_field() {
     local overlay_file="$1" field="$2" default="$3"
     local expr=".spec.criteria.${field}"
 
@@ -283,4 +289,92 @@ select_profiles() {
     # duplication, including the specific requested-accelerator case.
 
     echo "${system_matches[0]}:${gpu_matches[0]}"
+}
+
+# read_criteria <overlay_file> <field>
+#
+# Thin wrapper over read_criteria_field with an empty default. Missing /
+# !!null / "any" / "" all return "" so the caller can treat them as
+# "not testable, skip"; any non-string type (e.g. `service: false`) is
+# rejected with a GitHub-Actions ::error:: annotation on stderr and
+# rc=1.
+#
+# Diagnostics go to stderr so command-substitution callers
+# (`v=$(read_criteria ...)`) never capture annotation text into the
+# value. Callers MUST guard with `|| return 1` (or `|| exit 1`): the
+# inner rc only manifests as the substitution rc, so an unchecked
+# call silently swallows the failure.
+#
+# Named for the CI classify step but usable anywhere a strict,
+# skip-safe criterion read is needed.
+read_criteria() {
+    local overlay="${1:-}" field="${2:-}" value
+    if [[ -z "${overlay}" || -z "${field}" ]]; then
+        echo "[ERROR] read_criteria: overlay and field are required" >&2
+        return 1
+    fi
+    if ! value=$(read_criteria_field "${overlay}" "${field}" "" 2>/dev/null); then
+        echo "::error file=${overlay}::read_criteria_field failed for .spec.criteria.${field} — see stderr" >&2
+        read_criteria_field "${overlay}" "${field}" "" >&2 || true
+        return 1
+    fi
+    echo "${value}"
+}
+
+# profile_status <overlay_file> <profiles_root>
+#
+# "Is this recipe currently testable?" query for the CI classify step.
+# Prints:
+#   - "0" (success) on unique match,
+#   - "${PROFILE_SELECT_RC_NO_MATCH}" (2) when the recipe is out of
+#     scope for the profile tree — the caller can skip / DROP,
+#   - nothing on stdout when a tree fault is detected (malformed
+#     criteria, malformed profile, ambiguous match, provider mismatch,
+#     etc.); an ::error:: annotation is emitted on stderr and the
+#     function returns 1.
+#
+# Service is the testability signal — an overlay with no concrete
+# service (missing / !!null / "" / "any") is a placeholder rather than
+# a testable recipe. Without this pre-check, resolve_recipe_criteria
+# would silently upgrade it to the "eks" default and classify would
+# dispatch against coverage the author never targeted. read_criteria
+# also tag-validates, so `service: false` fails closed here before the
+# default can hide the type error.
+#
+# Accelerator, in contrast, has a legitimate direct-path default
+# (h100): generic Tier-1 overlays (eks-inference, gke-training, ...)
+# intentionally set `service` alone and expect the h100 default to
+# apply. Delegate resolution (including that default) to
+# resolve_recipe_criteria once the service pre-check passes so those
+# overlays remain testable.
+#
+# `return 1` (not `exit 1`) so the function is safe to source and
+# call directly from a test harness without terminating the script.
+# Callers via $(...) get the same effect: the substitution rc is 1
+# and the standard `|| exit 1` / `|| return 1` guard fires.
+profile_status() {
+    local overlay="${1:-}" profiles_root="${2:-}" svc_raw criteria svc accel rc=0
+    if [[ -z "${overlay}" || -z "${profiles_root}" ]]; then
+        echo "[ERROR] profile_status: overlay and profiles_root are required" >&2
+        return 1
+    fi
+    svc_raw=$(read_criteria "${overlay}" service) || return 1
+    if [[ -z "${svc_raw}" ]]; then
+        echo "${PROFILE_SELECT_RC_NO_MATCH}"
+        return 0
+    fi
+    if ! criteria=$(resolve_recipe_criteria "${overlay}" 2>/dev/null); then
+        echo "::error file=${overlay}::resolve_recipe_criteria failed — see stderr" >&2
+        resolve_recipe_criteria "${overlay}" >&2 || true
+        return 1
+    fi
+    read -r svc accel <<< "${criteria}"
+    select_profiles "${svc}" "${accel}" "${profiles_root}" >/dev/null 2>&1 || rc=$?
+    if (( rc == 0 || rc == PROFILE_SELECT_RC_NO_MATCH )); then
+        echo "${rc}"
+        return 0
+    fi
+    echo "::error file=${overlay}::select_profiles failed (rc=${rc}) for service=${svc} accelerator=${accel} — see stderr" >&2
+    select_profiles "${svc}" "${accel}" "${profiles_root}" >&2 || true
+    return 1
 }

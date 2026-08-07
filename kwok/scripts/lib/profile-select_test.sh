@@ -382,6 +382,164 @@ got_out=$(resolve_recipe_criteria "${OVERLAY_DIR}/mixed-service-explicit.yaml" 2
 got_rc=$?
 check "resolve-explicit-service-defaulted-accelerator" 0 "gke h100" "" "${got_rc}" "${got_out}" ""
 
+# --- read_criteria (CI classify wrapper) ---
+#
+# The CI classify step calls read_criteria to read overlay criteria
+# with the "strict type, skip on missing/any" contract. Cover the two
+# axes the workflow relies on: (1) command substitution captures ONLY
+# the value on stdout, so annotations never leak into a shell
+# variable; (2) failures propagate as rc=1 with a ::error:: annotation
+# on stderr so the outer `|| exit 1` guard fires.
+
+# 27. Happy path — a valid explicit string round-trips on stdout and
+# emits nothing on stderr, so `v=$(read_criteria ...)` cannot capture
+# any spurious content.
+write_overlay "${OVERLAY_DIR}/rc-happy.yaml" gke gb200
+err_file=$(mktemp)
+got_out=$(read_criteria "${OVERLAY_DIR}/rc-happy.yaml" service 2>"${err_file}")
+got_rc=$?
+got_err=$(cat "${err_file}"); rm -f "${err_file}"
+check "read_criteria-happy-path-captures-only-value" 0 "gke" "" \
+    "${got_rc}" "${got_out}" "${got_err}"
+# Assert stderr is genuinely empty (an empty want_err_sub in `check`
+# means "do not check stderr"; here we specifically want it empty).
+ran=$((ran + 1))
+if [[ -n "${got_err}" ]]; then
+    echo "FAIL: read_criteria-happy-path-stderr-empty (got: ${got_err})"
+    fails=$((fails + 1))
+else
+    echo "PASS: read_criteria-happy-path-stderr-empty"
+fi
+
+# 28. Missing / defaulted criterion — empty stdout, rc=0. Proves the
+# caller can distinguish "not set" (empty capture) from "set to a bad
+# type" (rc=1) without extra plumbing.
+write_overlay "${OVERLAY_DIR}/rc-missing.yaml"
+got_out=$(read_criteria "${OVERLAY_DIR}/rc-missing.yaml" service 2>/dev/null)
+got_rc=$?
+check "read_criteria-missing-returns-empty-string" 0 "" "" \
+    "${got_rc}" "${got_out}" ""
+
+# 29. Non-string criterion (`service: false`) — must fail with rc=1,
+# emit an ::error:: annotation on stderr, and leave stdout empty so
+# `v=$(read_criteria ...)` doesn't paint an empty string over a real
+# fault (`|| exit 1` is what surfaces it to the CI job).
+write_overlay "${OVERLAY_DIR}/rc-bool.yaml" false h100
+err_file=$(mktemp)
+got_out=$(read_criteria "${OVERLAY_DIR}/rc-bool.yaml" service 2>"${err_file}")
+got_rc=$?
+got_err=$(cat "${err_file}"); rm -f "${err_file}"
+check "read_criteria-non-string-fails-with-annotation" 1 "" \
+    "::error file=${OVERLAY_DIR}/rc-bool.yaml::read_criteria_field failed for .spec.criteria.service" \
+    "${got_rc}" "${got_out}" "${got_err}"
+
+# --- profile_status (CI classify wrapper) ---
+#
+# profile_status folds a strict service pre-check + resolve_recipe_criteria
+# + select_profiles into a single "is this recipe currently testable?"
+# reply used by the classify step. Cover the outcomes it distinguishes:
+# unique match, no-match (skippable), ambiguous (fatal), malformed
+# criteria (fatal), placeholder criteria, and the generic Tier-1 regression.
+
+# Shared fixtures for the success paths.
+PS_ROOT=$(mktemp -d)
+trap 'rm -rf "${FIXTURE_ROOT}" "${OVERLAY_DIR}" "${PS_ROOT}"' EXIT
+write_profile "${PS_ROOT}/eks/system-m7i.yaml" eks system
+write_profile "${PS_ROOT}/eks/p5-h100.yaml"    eks accelerated h100
+
+# 30. Happy path — profile_status echoes "0" (success) to stdout and
+# nothing to stderr. Captures behavior classify relies on when
+# deciding a recipe belongs in the matrix.
+write_overlay "${OVERLAY_DIR}/ps-happy.yaml" eks h100
+err_file=$(mktemp)
+got_out=$(profile_status "${OVERLAY_DIR}/ps-happy.yaml" "${PS_ROOT}" 2>"${err_file}")
+got_rc=$?
+got_err=$(cat "${err_file}"); rm -f "${err_file}"
+check "profile_status-happy-path-echoes-0" 0 "0" "" \
+    "${got_rc}" "${got_out}" "${got_err}"
+
+# 31. No-match — profile_status echoes PROFILE_SELECT_RC_NO_MATCH (2)
+# to stdout and returns rc=0. This is the branch classify treats as
+# "drop from matrix"; MUST NOT be conflated with the rc=1 fatal
+# branch.
+write_overlay "${OVERLAY_DIR}/ps-no-match.yaml" oke gb200
+got_out=$(profile_status "${OVERLAY_DIR}/ps-no-match.yaml" "${PS_ROOT}" 2>/dev/null)
+got_rc=$?
+check "profile_status-no-match-echoes-skip-rc" 0 "${PROFILE_SELECT_RC_NO_MATCH}" "" \
+    "${got_rc}" "${got_out}" ""
+
+# 32. Ambiguous — a duplicate system profile makes select_profiles
+# return rc=1. profile_status must propagate that as rc=1, emit an
+# ::error:: annotation on stderr, and leave stdout empty so the
+# caller's `|| exit 1` fires instead of parsing a bogus stdout value.
+DUP_ROOT=$(mktemp -d)
+write_profile "${DUP_ROOT}/eks/system-a.yaml" eks system
+write_profile "${DUP_ROOT}/eks/system-b.yaml" eks system
+write_profile "${DUP_ROOT}/eks/p5-h100.yaml"  eks accelerated h100
+err_file=$(mktemp)
+got_out=$(profile_status "${OVERLAY_DIR}/ps-happy.yaml" "${DUP_ROOT}" 2>"${err_file}")
+got_rc=$?
+got_err=$(cat "${err_file}"); rm -f "${err_file}"
+check "profile_status-ambiguous-fails-with-annotation-and-empty-stdout" 1 "" \
+    "select_profiles failed (rc=1)" \
+    "${got_rc}" "${got_out}" "${got_err}"
+rm -rf "${DUP_ROOT}"
+
+# 33. Non-string criterion — read_criteria rejects the type and
+# profile_status must propagate rc=1 with an ::error:: annotation
+# instead of proceeding to select_profiles with garbage input.
+write_overlay "${OVERLAY_DIR}/ps-bool.yaml" false h100
+err_file=$(mktemp)
+got_out=$(profile_status "${OVERLAY_DIR}/ps-bool.yaml" "${PS_ROOT}" 2>"${err_file}")
+got_rc=$?
+got_err=$(cat "${err_file}"); rm -f "${err_file}"
+check "profile_status-invalid-criteria-fails-with-annotation" 1 "" \
+    "::error file=${OVERLAY_DIR}/ps-bool.yaml::read_criteria_field failed for .spec.criteria.service" \
+    "${got_rc}" "${got_out}" "${got_err}"
+
+# 34. Missing service — the overlay is a template rather than a
+# concrete testable recipe. profile_status must echo
+# PROFILE_SELECT_RC_NO_MATCH and NOT invoke select_profiles, which
+# would otherwise match against the defaulted eks/h100 pair and
+# dispatch meaningless coverage. Accelerator is left missing too, but
+# the SERVICE emptiness is what triggers no-match (see test 36 for the
+# service-set-accel-missing counter-case).
+write_overlay "${OVERLAY_DIR}/ps-missing.yaml"
+got_out=$(profile_status "${OVERLAY_DIR}/ps-missing.yaml" "${PS_ROOT}" 2>/dev/null)
+got_rc=$?
+check "profile_status-missing-service-treated-as-no-match" 0 "${PROFILE_SELECT_RC_NO_MATCH}" "" \
+    "${got_rc}" "${got_out}" ""
+
+# 35. Explicit "any" service — same treatment as missing. "any" means
+# "author didn't target a specific service" and must not be dispatched.
+write_overlay "${OVERLAY_DIR}/ps-any.yaml" any any
+got_out=$(profile_status "${OVERLAY_DIR}/ps-any.yaml" "${PS_ROOT}" 2>/dev/null)
+got_rc=$?
+check "profile_status-any-service-treated-as-no-match" 0 "${PROFILE_SELECT_RC_NO_MATCH}" "" \
+    "${got_rc}" "${got_out}" ""
+
+# 36. Regression: generic Tier-1 overlay (service set, accelerator
+# omitted) MUST remain testable via the h100 default. This is exactly
+# the shape of recipes/overlays/eks-inference.yaml and every other
+# generic overlay classify assigns to Tier 1; a change that dropped
+# these silently would zero Tier-1 coverage in CI. profile_status must
+# echo "0" (unique match found) and select_profiles must have been
+# invoked with the defaulted (eks, h100) pair.
+cat > "${OVERLAY_DIR}/ps-generic-tier1.yaml" <<'EOF'
+apiVersion: aicr.run/v1alpha2
+kind: recipeMetadata
+metadata:
+  name: ps-generic-tier1
+spec:
+  criteria:
+    service: eks
+    intent: inference
+EOF
+got_out=$(profile_status "${OVERLAY_DIR}/ps-generic-tier1.yaml" "${PS_ROOT}" 2>/dev/null)
+got_rc=$?
+check "profile_status-generic-tier1-defaults-accelerator-to-h100" 0 "0" "" \
+    "${got_rc}" "${got_out}" ""
+
 if (( fails > 0 )); then
     echo "${fails} test(s) failed (${ran} attempted)"
     exit 1
