@@ -16,9 +16,16 @@ package job
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestEnsureRBAC(t *testing.T) {
@@ -166,5 +173,73 @@ func TestCleanupRBACNotFound(t *testing.T) {
 	// Cleanup without creating — should not error
 	if err := CleanupRBAC(context.Background(), testClientset, ns, "test-cleanup-notfound"); err != nil {
 		t.Fatalf("CleanupRBAC() on nonexistent resources should not error, got: %v", err)
+	}
+}
+
+// TestCleanupRBACDeletesClusterRoleBindingBeforeServiceAccount guards the
+// ordering fix: the cluster-admin ClusterRoleBinding must be revoked BEFORE the
+// ServiceAccount is deleted, so the privilege-escalation window closes first. A
+// reactor records delete order without handling the delete (returns handled =
+// false to fall through to the tracker). Reverting the reorder in CleanupRBAC
+// flips the recorded order and fails this test.
+func TestCleanupRBACDeletesClusterRoleBindingBeforeServiceAccount(t *testing.T) {
+	cs := k8sfake.NewSimpleClientset()
+
+	var order []string
+	cs.PrependReactor("delete", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		order = append(order, action.GetResource().Resource)
+		return false, nil, nil // fall through to the default tracker
+	})
+
+	if err := CleanupRBAC(context.Background(), cs, "ns", "run"); err != nil {
+		t.Fatalf("CleanupRBAC() error = %v, want nil", err)
+	}
+
+	want := []string{"clusterrolebindings", "serviceaccounts"}
+	if len(order) != len(want) {
+		t.Fatalf("delete order = %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("delete order = %v, want %v", order, want)
+		}
+	}
+}
+
+// TestCleanupRBACClusterRoleBindingDeleteFailureSurfaced proves CleanupRBAC
+// fails closed AND does not short-circuit: a ClusterRoleBinding delete error
+// (anything other than NotFound) is surfaced as an ErrCodeInternal error rather
+// than swallowed, so a leaked cluster-admin binding cannot masquerade as a
+// clean teardown — and cleanup still proceeds to delete the ServiceAccount so a
+// binding failure does not strand the SA behind an early return.
+func TestCleanupRBACClusterRoleBindingDeleteFailureSurfaced(t *testing.T) {
+	const ns, runID = "ns", "run"
+	saName := ServiceAccountName(runID)
+
+	// Seed the ServiceAccount so its post-cleanup absence proves the delete ran.
+	cs := k8sfake.NewSimpleClientset(&corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: ns},
+	})
+
+	wantCause := stderrors.New("apiserver unavailable")
+	cs.PrependReactor("delete", "clusterrolebindings", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, wantCause
+	})
+
+	err := CleanupRBAC(context.Background(), cs, ns, runID)
+	if err == nil {
+		t.Fatal("CleanupRBAC() error = nil, want error when ClusterRoleBinding delete fails")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Errorf("CleanupRBAC() error = %v, want ErrCodeInternal", err)
+	}
+	if !stderrors.Is(err, wantCause) {
+		t.Errorf("CleanupRBAC() error = %v, want wrapped underlying cause", err)
+	}
+
+	// Despite the binding-delete failure, the ServiceAccount delete must still
+	// have run — proving CleanupRBAC does not return early on the first error.
+	if _, getErr := cs.CoreV1().ServiceAccounts(ns).Get(context.Background(), saName, metav1.GetOptions{}); !apierrors.IsNotFound(getErr) {
+		t.Errorf("ServiceAccount %q still present after cleanup (Get err = %v); cleanup returned early on binding failure", saName, getErr)
 	}
 }
