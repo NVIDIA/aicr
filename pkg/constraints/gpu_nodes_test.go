@@ -798,3 +798,187 @@ func TestGPUNodesLabelLegacyDataSnapshotStillEvaluates(t *testing.T) {
 		t.Errorf("legacy Data-only snapshot: Passed = false, want true (actual=%q)", result.Actual)
 	}
 }
+
+// labelItem is one hand-written label reading. The real collector aggregates
+// through map[labelID][]string and so can never place a node under two values
+// of one key; forging the item list is the only way to reach the guard.
+type labelItem struct{ key, value, nodes string }
+
+func itemsSnapshot(items ...labelItem) *snapshotter.Snapshot {
+	entries := make([]measurement.ItemEntry, 0, len(items))
+	for _, it := range items {
+		names := strings.Split(it.nodes, ",")
+		entries = append(entries, measurement.ItemEntry{
+			Context: map[string]string{"key": it.key, "value": it.value},
+			Data: map[string]measurement.Reading{
+				"node-count": measurement.Int(len(names)),
+				"node-list":  measurement.Str(it.nodes),
+				"truncated":  measurement.Bool(false),
+			},
+		})
+	}
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{{
+			Type:     measurement.TypeNodeTopology,
+			Subtypes: []measurement.Subtype{{Name: "label", Items: entries}},
+		}},
+	}
+}
+
+// TestGPUNodesLabelRejectsNonPartitionedItems pins that entries for one label
+// key must partition their nodes. Without it a node listed under both "true"
+// and "false" passes "=true": evaluateEveryGPUNodeHasValue skips the entry
+// whose value does not match, so the contradiction never reaches the tally and
+// a readiness gate returns PASS on a cluster that cannot exist.
+func TestGPUNodesLabelRejectsNonPartitionedItems(t *testing.T) {
+	t.Parallel()
+
+	const accel = "cloud.google.com/gke-accelerator"
+	universe := []labelItem{{accel, "nvidia-h100-80gb", "gpu-a,gpu-b"}}
+
+	tests := []struct {
+		name    string
+		items   []labelItem
+		wantErr bool
+		// Checked only when wantErr is false.
+		wantPassed bool
+	}{
+		{
+			name:    "node under two values of the target key",
+			items:   append(universe, labelItem{optOutLabel, "true", "gpu-a,gpu-b"}, labelItem{optOutLabel, "false", "gpu-a"}),
+			wantErr: true,
+		},
+		{
+			// Order must not matter: the contradiction is the same fact.
+			name:    "node under two values, contradicting entry first",
+			items:   append(universe, labelItem{optOutLabel, "false", "gpu-a"}, labelItem{optOutLabel, "true", "gpu-a,gpu-b"}),
+			wantErr: true,
+		},
+		{
+			// The guard also covers the universe key, which is decoded by the
+			// same function before the target key is read.
+			name: "node under two values of the universe key",
+			items: []labelItem{
+				{accel, "nvidia-h100-80gb", "gpu-a"},
+				{accel, "nvidia-a100-80gb", "gpu-a"},
+				{optOutLabel, "true", "gpu-a"},
+			},
+			wantErr: true,
+		},
+		{
+			// Redundant, not contradictory — and the folded encoding accepts
+			// it, so rejecting here would split the two paths.
+			name:       "node repeated under the same value",
+			items:      append(universe, labelItem{optOutLabel, "true", "gpu-a,gpu-b"}, labelItem{optOutLabel, "true", "gpu-a"}),
+			wantErr:    false,
+			wantPassed: true,
+		},
+		{
+			name:       "node repeated within a single entry",
+			items:      append(universe, labelItem{optOutLabel, "true", "gpu-a,gpu-a,gpu-b"}),
+			wantErr:    false,
+			wantPassed: true,
+		},
+		{
+			// The guard must not turn an honest disagreement into an error:
+			// disjoint node sets are a real cluster that simply fails.
+			name:       "honest mixed cluster still fails rather than errors",
+			items:      append(universe, labelItem{optOutLabel, "true", "gpu-a"}, labelItem{optOutLabel, "false", "gpu-b"}),
+			wantErr:    false,
+			wantPassed: false,
+		},
+	}
+
+	c := recipe.Constraint{Name: GPUNodesLabelConstraintName, Value: optOutLabel + "=true"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Evaluate(c, itemsSnapshot(tt.items...))
+
+			if !tt.wantErr {
+				if result.Error != nil {
+					t.Fatalf("unexpected error: %v", result.Error)
+				}
+				if result.Passed != tt.wantPassed {
+					t.Errorf("passed = %v, want %v (actual: %q)", result.Passed, tt.wantPassed, result.Actual)
+				}
+				return
+			}
+			if result.Error == nil {
+				t.Fatalf("expected an error, got passed=%v actual=%q", result.Passed, result.Actual)
+			}
+			if !stderrors.Is(result.Error, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %s", result.Error, errors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}
+
+// rawItemsSnapshot builds a label subtype from items given verbatim, so a test
+// can express shapes itemsSnapshot's well-formed builder cannot.
+func rawItemsSnapshot(items ...measurement.ItemEntry) *snapshotter.Snapshot {
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{{
+			Type:     measurement.TypeNodeTopology,
+			Subtypes: []measurement.Subtype{{Name: "label", Items: items}},
+		}},
+	}
+}
+
+// TestGPUNodesLabelItemsFailClosed pins the two rejection paths on the item
+// side. Both must surface as an evaluation error rather than a verdict: a
+// snapshot the decoder cannot read is not evidence that the cluster is ready.
+func TestGPUNodesLabelItemsFailClosed(t *testing.T) {
+	t.Parallel()
+
+	const accel = "cloud.google.com/gke-accelerator"
+	wellFormed := func(key, value, nodes string) measurement.ItemEntry {
+		return measurement.ItemEntry{
+			Context: map[string]string{"key": key, "value": value},
+			Data: map[string]measurement.Reading{
+				"node-count": measurement.Int(len(strings.Split(nodes, ","))),
+				"node-list":  measurement.Str(nodes),
+				"truncated":  measurement.Bool(false),
+			},
+		}
+	}
+
+	tests := []struct {
+		name  string
+		items []measurement.ItemEntry
+	}{
+		{
+			// A structurally broken item fails the shared accessor, and the
+			// constraint must wrap rather than treat it as "no readings".
+			name: "item rejected by the decoder",
+			items: []measurement.ItemEntry{{
+				Context: map[string]string{"key": accel, "value": "nvidia-h100-80gb"},
+				Data:    map[string]measurement.Reading{"node-list": measurement.Str("gpu-a")},
+			}},
+		},
+		{
+			// Structurally valid, but the node token is not a node name. A
+			// name that can never equal a universe member would make the
+			// negated predicate pass vacuously.
+			name: "node token is not a canonical node name",
+			items: []measurement.ItemEntry{
+				wellFormed(accel, "nvidia-h100-80gb", "gpu-a"),
+				wellFormed(optOutLabel, "true", "gpu a"),
+			},
+		},
+	}
+
+	c := recipe.Constraint{Name: GPUNodesLabelConstraintName, Value: optOutLabel + "=true"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Evaluate(c, rawItemsSnapshot(tt.items...))
+			if result.Error == nil {
+				t.Fatalf("expected an error, got passed=%v actual=%q", result.Passed, result.Actual)
+			}
+			if !stderrors.Is(result.Error, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %s", result.Error, errors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}

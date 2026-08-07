@@ -235,6 +235,29 @@ func decodeLabelEntriesFromItems(labels *measurement.Subtype, key string) ([]lab
 			truncated: false,
 		})
 	}
+
+	// A node carries exactly one value of a given label key, so the entries
+	// must partition their nodes. Overlap means the snapshot records no real
+	// cluster, and accepting it lets one node satisfy key=a and key=b at once
+	// because evaluateEveryGPUNodeHasValue skips the non-matching entry.
+	// Mirrors the folded encoding's guard in decodeLabelEntriesFromData.
+	//
+	// Compared on value, not mere reappearance: a node repeated under the same
+	// value is redundant rather than contradictory, and the Data path accepts
+	// that shape.
+	seen := make(map[string]string, len(entries))
+	for _, e := range entries {
+		for _, n := range e.nodes {
+			if prev, dup := seen[n]; dup && prev != e.value {
+				return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("label readings for %q are inconsistent: node %q appears under both value %q and "+
+						"value %q, but a node carries exactly one value per label key — the snapshot is corrupt "+
+						"or hand-edited; regenerate it with a current aicr build", key, n, prev, e.value),
+					map[string]any{ctxConstraint: GPUNodesLabelConstraintName, keyKey: key, "node": n})
+			}
+			seen[n] = e.value
+		}
+	}
 	return entries, nil
 }
 
