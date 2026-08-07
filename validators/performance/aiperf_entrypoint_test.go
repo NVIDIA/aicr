@@ -414,3 +414,154 @@ func TestAIPerfEntrypointPathsMatchDockerfile(t *testing.T) {
 			aiperfBenchDockerfile, aiperfEntrypointScript)
 	}
 }
+
+// TestAIPerfBenchShipsNoPackageInstaller pins that the runtime image carries no
+// pip. `python -m venv` bootstraps pip into the venv, and the final stage copies
+// that venv wholesale, so pip ships unless the builder removes it again.
+//
+// Two things regress if it comes back. A distroless runtime image gains a
+// package installer no legitimate caller needs, and pip becomes third-party
+// software this layer adds on top of an approved base that carries no Python
+// distributions of its own — which obliges us to publish pip's source. That
+// source is also the awkward kind to publish: pip is not in requirements.txt,
+// so its version is whatever CPython's bundled ensurepip wheel provides and
+// moves with the builder base image rather than with anything we declare.
+//
+// Nothing in the installed closure declares pip as a dependency, so removing it
+// cannot break a runtime import.
+//
+// Asserted against the Dockerfile rather than a built image because the test
+// suite has no container runtime. The behavioral check — that `aiperf` and
+// aiperf_entrypoint.py are unaffected — was done by building both ways.
+// TestAIPerfBenchShipsNoPackageInstaller asserts the builder removes pip after
+// installing the closure. The Dockerfile documents why; this pins that it holds.
+//
+// Checks ordering and same-RUN placement, not mere presence: `pip uninstall &&
+// pip install -r requirements.txt`, and `pip uninstall && python -m ensurepip`,
+// both ship pip while containing every expected substring.
+func TestAIPerfBenchShipsNoPackageInstaller(t *testing.T) {
+	raw, err := os.ReadFile(aiperfBenchDockerfile)
+	if err != nil {
+		t.Fatalf("read %s: %v", aiperfBenchDockerfile, err)
+	}
+
+	cmds := dockerfileRunCommands(string(raw))
+	if len(cmds) == 0 {
+		t.Fatalf("parsed no RUN commands from %s", aiperfBenchDockerfile)
+	}
+
+	install, uninstall := -1, -1
+	for i, c := range cmds {
+		isInstall := strings.Contains(c.text, "pip install") &&
+			strings.Contains(c.text, "requirements.txt")
+
+		if install < 0 && isInstall {
+			install = i
+			continue
+		}
+		if install >= 0 && uninstall < 0 && strings.Contains(c.text, "pip uninstall") {
+			uninstall = i
+		}
+	}
+
+	if install < 0 {
+		t.Fatal("no RUN command installs the requirements")
+	}
+	if uninstall < 0 {
+		t.Fatal("pip is never uninstalled after the requirements install; it would " +
+			"ship in the runtime image")
+	}
+	if cmds[install].run != cmds[uninstall].run {
+		t.Errorf("pip uninstalled in RUN %d but installed in RUN %d; keep them in "+
+			"one layer so no intermediate layer retains pip",
+			cmds[uninstall].run, cmds[install].run)
+	}
+
+	// `ensurepip` reinstalls pip without "install" appearing as a subcommand.
+	for _, marker := range []string{"ensurepip", "install pip", "upgrade pip"} {
+		for i := uninstall + 1; i < len(cmds); i++ {
+			if strings.Contains(cmds[i].text, marker) {
+				t.Errorf("command after the uninstall reinstates pip (%q): %q",
+					marker, cmds[i].text)
+			}
+		}
+	}
+}
+
+type runCommand struct {
+	run  int // index of the RUN instruction this came from
+	text string
+}
+
+// dockerfileRunCommands flattens RUN instructions into their individual shell
+// commands, in order, with comments stripped and continuations joined.
+//
+// Substring searching the raw file cannot do this: a comment mentioning pip
+// satisfies the assertion, and command order within one RUN is invisible.
+func dockerfileRunCommands(raw string) []runCommand {
+	var (
+		out        []runCommand
+		current    strings.Builder
+		continuing bool
+		runIndex   int
+	)
+
+	flush := func() {
+		joined := strings.ReplaceAll(current.String(), "\\", " ")
+		for _, part := range splitShellCommands(joined) {
+			if part = strings.TrimSpace(part); part != "" {
+				out = append(out, runCommand{run: runIndex, text: part})
+			}
+		}
+		runIndex++
+	}
+
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(stripShellComment(line))
+		if trimmed == "" {
+			continue
+		}
+
+		if !continuing {
+			if !strings.HasPrefix(trimmed, "RUN ") {
+				continue
+			}
+			current.Reset()
+			current.WriteString(strings.TrimPrefix(trimmed, "RUN "))
+		} else {
+			current.WriteString(" ")
+			current.WriteString(trimmed)
+		}
+
+		if strings.HasSuffix(trimmed, "\\") {
+			continuing = true
+			continue
+		}
+		continuing = false
+		flush()
+	}
+	if continuing {
+		flush()
+	}
+	return out
+}
+
+// stripShellComment drops whole-line comments and truncates trailing ones.
+// Quoting is not modeled: over-trimming a command this test ignores is safe,
+// mistaking a comment for a command is not.
+func stripShellComment(line string) string {
+	if strings.HasPrefix(strings.TrimSpace(line), "#") {
+		return ""
+	}
+	if i := strings.Index(line, " #"); i >= 0 {
+		return line[:i]
+	}
+	return line
+}
+
+func splitShellCommands(s string) []string {
+	for _, sep := range []string{"&&", "||", ";"} {
+		s = strings.ReplaceAll(s, sep, "\x00")
+	}
+	return strings.Split(s, "\x00")
+}
