@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -293,12 +294,31 @@ func nodeListData(nodes []string, maxNodes int) map[string]measurement.Reading {
 // membership lists (pkg/constraints' node-set form, issue #1755) call
 // IsTruncatedNodeList instead of re-encoding this knowledge. A structured
 // marker is tracked in #2002.
-var truncatedNodeListRE = regexp.MustCompile(`\(\+\d+ more\)$`)
+var truncatedNodeListRE = regexp.MustCompile(`\(\+(\d+) more\)$`)
 
 // IsTruncatedNodeList reports whether an encoded node list carries the
 // truncation suffix formatNodeList appends under --max-nodes-per-entry.
 func IsTruncatedNodeList(nodes string) bool {
 	return truncatedNodeListRE.MatchString(nodes)
+}
+
+// truncatedNodeListRemainder returns the N from the "(+N more)" suffix, and
+// whether the suffix is present and parsable. N plus the names still rendered
+// is the pre-truncation total, so a decoder can check a declared node-count
+// against the list rather than merely against its length.
+func truncatedNodeListRemainder(nodes string) (int, bool) {
+	m := truncatedNodeListRE.FindStringSubmatch(nodes)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		// Only reachable when N overflows int; treat as unparsable so the
+		// caller's marker/flag comparison fails closed rather than reading
+		// the suffix as absent.
+		return 0, false
+	}
+	return n, true
 }
 
 // formatNodeList joins sorted node names with commas, optionally truncating.

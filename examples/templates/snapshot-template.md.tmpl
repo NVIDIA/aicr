@@ -142,7 +142,10 @@
 {{- if eq (len $parts) 3 }}
 | {{ $key }} | {{ index $parts 0 }} | {{ index $parts 1 }} | {{ index $parts 2 }} |
 {{- else }}
-| {{ $key }} | | {{ index $parts 0 }} | {{ index $parts 1 }} |
+{{- /* Two fields means encodeTaints moved the effect into the key to keep two
+       effects of one key apart, so the last dotted segment is the effect. */}}
+{{- $segments := splitList "." $key }}
+| {{ join "." (initial $segments) }} | {{ last $segments }} | {{ index $parts 0 }} | {{ index $parts 1 }} |
 {{- end }}
 {{- end }}
 {{- end }}

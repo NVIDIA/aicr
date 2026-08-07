@@ -83,7 +83,11 @@ func TestShippedTemplateRendersBothEncodings(t *testing.T) {
 
 	out := render(t)
 	for _, want := range []string{
+		// Both values of nvidia.com/gpu.product: one reading surviving proves
+		// nothing, since the folded encoding also renders one. The second is
+		// the reading this encoding exists to keep.
 		"NVIDIA-H100-80GB-HBM3",
+		"NVIDIA-B200",
 		"node.kubernetes.io/unreachable",
 		"NoExecute",
 		"NoSchedule",
@@ -102,7 +106,22 @@ func TestShippedTemplateRendersBothEncodings(t *testing.T) {
 	for i := range snap.Measurements[0].Subtypes {
 		snap.Measurements[0].Subtypes[i].Items = nil
 	}
-	if legacy := render(t); !strings.Contains(legacy, "gpu-a") {
+	legacy := render(t)
+	if !strings.Contains(legacy, "gpu-a") {
 		t.Errorf("legacy rendering is missing node names\n%s", legacy)
+	}
+	// The two-field shape exists only because encodeTaints moved the effect
+	// into the key, so the row is recoverable: the key column must hold the
+	// true key and the effect must land in its own column.
+	for _, want := range []string{
+		"| node.kubernetes.io/unreachable | NoExecute |",
+		"| node.kubernetes.io/unreachable | NoSchedule |",
+	} {
+		if !strings.Contains(legacy, want) {
+			t.Errorf("legacy rendering is missing row %q\n%s", want, legacy)
+		}
+	}
+	if strings.Contains(legacy, "unreachable.NoExecute |") {
+		t.Errorf("legacy rendering leaked the folded key into the Taint Key column\n%s", legacy)
 	}
 }

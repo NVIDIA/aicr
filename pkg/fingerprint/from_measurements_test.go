@@ -640,3 +640,51 @@ func TestFromMeasurements_ItemsRegion(t *testing.T) {
 		})
 	}
 }
+
+// malformedItemSubtype returns a label subtype whose single item omits a
+// required field, so the shared accessor rejects the whole subtype.
+func malformedItemSubtype() *measurement.Subtype {
+	return &measurement.Subtype{
+		Name: "label",
+		Items: []measurement.ItemEntry{{
+			Context: map[string]string{"key": labelKeyGPUProduct, "value": "NVIDIA-H100-80GB-HBM3"},
+			Data:    map[string]measurement.Reading{"node-list": measurement.Str("gpu-a")},
+		}},
+	}
+}
+
+// TestItemReadersDegradeOnDecodeError pins that a rejected subtype yields an
+// empty dimension rather than a partial one. Both readers deliberately swallow
+// the error — the fingerprint is advisory — so nothing else would notice if
+// they started returning half-decoded data instead.
+func TestItemReadersDegradeOnDecodeError(t *testing.T) {
+	st := malformedItemSubtype()
+
+	if got := distinctLabelValues(st, labelKeyGPUProduct); got != nil {
+		t.Errorf("distinctLabelValues() = %v, want nil on a rejected subtype", got)
+	}
+	if got := countGPUNodesFromItems(st); got != 0 {
+		t.Errorf("countGPUNodesFromItems() = %d, want 0 on a rejected subtype", got)
+	}
+}
+
+// TestDistinctLabelValuesDedupes pins that two readings sharing a key and a
+// value collapse to one. The collector cannot emit that pair, but a hand-built
+// snapshot can, and counting it twice would read as a heterogeneous cluster.
+func TestDistinctLabelValuesDedupes(t *testing.T) {
+	item := func(nodes string) measurement.ItemEntry {
+		return measurement.ItemEntry{
+			Context: map[string]string{"key": labelKeyGPUProduct, "value": "NVIDIA-H100-80GB-HBM3"},
+			Data: map[string]measurement.Reading{
+				"node-count": measurement.Int(1),
+				"node-list":  measurement.Str(nodes),
+				"truncated":  measurement.Bool(false),
+			},
+		}
+	}
+	st := &measurement.Subtype{Name: "label", Items: []measurement.ItemEntry{item("gpu-a"), item("gpu-b")}}
+
+	if got := distinctLabelValues(st, labelKeyGPUProduct); len(got) != 1 {
+		t.Errorf("distinctLabelValues() = %v, want one distinct value", got)
+	}
+}

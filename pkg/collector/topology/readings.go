@@ -203,7 +203,7 @@ func itemNodes(item measurement.ItemEntry, idx int) (nodes []string, count int, 
 			fmt.Sprintf("topology item %d: data field %q is not a string", idx, itemDataNodeList))
 	}
 	nodes = splitNodeList(list)
-	marker := IsTruncatedNodeList(list)
+	hidden, marker := truncatedNodeListRemainder(list)
 
 	count, err = itemInt(item, itemDataNodeCount, idx)
 	if err != nil {
@@ -214,24 +214,20 @@ func itemNodes(item measurement.ItemEntry, idx int) (nodes []string, count int, 
 		return nil, 0, false, err
 	}
 
-	// All three describe the same node set, so a disagreement makes the item
-	// unreadable rather than imprecise. Both count directions matter: too low
-	// understates the cluster, too high lets a consumer read a partial list as
-	// a complete one.
+	// The list states the pre-truncation total exactly — the names it still
+	// renders plus the N its marker withholds — so node-count is checked for
+	// equality rather than for a direction. A complete list has hidden == 0,
+	// which collapses to "count equals the names".
 	switch {
 	case marker != truncated:
 		return nil, 0, false, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("topology item %d: %q is %v but %q %s the truncation marker",
 				idx, itemDataTruncated, truncated, itemDataNodeList,
 				map[bool]string{true: "carries", false: "does not carry"}[marker]))
-	case truncated && count <= len(nodes):
+	case count != len(nodes)+hidden:
 		return nil, 0, false, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("topology item %d: %q is truncated but %q (%d) does not exceed the %d nodes named",
-				idx, itemDataNodeList, itemDataNodeCount, count, len(nodes)))
-	case !truncated && count != len(nodes):
-		return nil, 0, false, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("topology item %d: %q is complete but %q is %d against %d nodes named",
-				idx, itemDataNodeList, itemDataNodeCount, count, len(nodes)))
+			fmt.Sprintf("topology item %d: %q is %d but %q names %d nodes and withholds %d",
+				idx, itemDataNodeCount, count, itemDataNodeList, len(nodes), hidden))
 	}
 	return nodes, count, truncated, nil
 }
@@ -299,12 +295,13 @@ func labelReadingsFromData(data map[string]measurement.Reading) []LabelReading {
 	for key, reading := range data {
 		value, list, _ := strings.Cut(reading.String(), "|")
 		nodes := splitNodeList(list)
+		hidden, truncated := truncatedNodeListRemainder(list)
 		out = append(out, LabelReading{
 			Key:       key,
 			Value:     value,
 			Nodes:     nodes,
-			NodeCount: len(nodes),
-			Truncated: IsTruncatedNodeList(list),
+			NodeCount: len(nodes) + hidden,
+			Truncated: truncated,
 			RawKey:    key,
 		})
 	}
@@ -337,13 +334,14 @@ func taintReadingsFromData(data map[string]measurement.Reading) []TaintReading {
 			value = parts[0]
 		}
 		nodes := splitNodeList(list)
+		hidden, truncated := truncatedNodeListRemainder(list)
 		out = append(out, TaintReading{
 			Key:       key,
 			Effect:    effect,
 			Value:     value,
 			Nodes:     nodes,
-			NodeCount: len(nodes),
-			Truncated: IsTruncatedNodeList(list),
+			NodeCount: len(nodes) + hidden,
+			Truncated: truncated,
 			RawKey:    key,
 		})
 	}

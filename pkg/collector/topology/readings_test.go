@@ -16,13 +16,31 @@ package topology
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
+	"slices"
 	"sort"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// assertDecodeRejected fails unless err carries the code the exported
+// accessors promise for a structurally invalid item. Callers branch on the
+// code, not the message, so asserting only err != nil would let the contract
+// change silently.
+func assertDecodeRejected(t *testing.T, err error, accessor string) {
+	t.Helper()
+	if err == nil {
+		t.Errorf("%s error = nil, want a decode error", accessor)
+		return
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("%s error = %v, want code %s", accessor, err, errors.ErrCodeInvalidRequest)
+	}
+}
 
 // collectSubtypes runs the real collector over a fake cluster and returns its
 // label and taint subtypes. Readings are asserted against collector output
@@ -72,7 +90,9 @@ func TestLabelReadingsRecoversEveryReading(t *testing.T) {
 			t.Errorf("reading %d = {%q %q n=%d}, want {%q %q n=%d}",
 				i, got.Key, got.Value, got.NodeCount, w.Key, w.Value, w.NodeCount)
 		}
-		if len(got.Nodes) != len(w.Nodes) {
+		// Names, not just the count: a collision's characteristic failure is
+		// the right number of nodes attributed to the wrong reading.
+		if !slices.Equal(got.Nodes, w.Nodes) {
 			t.Errorf("reading %d nodes = %v, want %v", i, got.Nodes, w.Nodes)
 		}
 	}
@@ -248,14 +268,19 @@ func TestReadingsTruncation(t *testing.T) {
 		t.Errorf("NodeCount = %d, want 3 (the pre-truncation total)", readings[0].NodeCount)
 	}
 
-	// The legacy path can only infer truncation from the rendered suffix, and
-	// cannot recover the true count — it reports what it can see.
+	// The marker states how many names were dropped, so the legacy path
+	// recovers the same total: NodeCount means one thing regardless of which
+	// encoding a snapshot carries.
 	legacy, err := LabelReadings(dataOnly(labelSt))
 	if err != nil {
 		t.Fatalf("legacy LabelReadings(): %v", err)
 	}
 	if !legacy[0].Truncated {
 		t.Error("legacy Truncated = false, want true (suffix detection)")
+	}
+	if legacy[0].NodeCount != readings[0].NodeCount {
+		t.Errorf("legacy NodeCount = %d, want %d — the two encodings must agree",
+			legacy[0].NodeCount, readings[0].NodeCount)
 	}
 }
 
@@ -327,6 +352,25 @@ func TestReadingsMalformedItems(t *testing.T) {
 			},
 		},
 		{
+			// "n1,n2 (+3 more)" states 2 + 3 = 5. A count above the names but
+			// below that total passes a direction check and fails an equality
+			// one — the case a ">" rule cannot see.
+			name: "truncated node-count below the total the suffix states",
+			mutate: func(i *measurement.ItemEntry) {
+				i.Data[itemDataNodeList] = measurement.Str("n1,n2 (+3 more)")
+				i.Data[itemDataTruncated] = measurement.Bool(true)
+				i.Data[itemDataNodeCount] = measurement.Int(3)
+			},
+		},
+		{
+			name: "truncated node-count above the total the suffix states",
+			mutate: func(i *measurement.ItemEntry) {
+				i.Data[itemDataNodeList] = measurement.Str("n1,n2 (+3 more)")
+				i.Data[itemDataTruncated] = measurement.Bool(true)
+				i.Data[itemDataNodeCount] = measurement.Int(900)
+			},
+		},
+		{
 			name:   "missing truncated",
 			mutate: func(i *measurement.ItemEntry) { delete(i.Data, itemDataTruncated) },
 		},
@@ -354,12 +398,10 @@ func TestReadingsMalformedItems(t *testing.T) {
 			item := validItem()
 			tt.mutate(&item)
 			st := &measurement.Subtype{Name: "label", Items: []measurement.ItemEntry{item}}
-			if _, err := LabelReadings(st); err == nil {
-				t.Error("LabelReadings() error = nil, want a decode error")
-			}
-			if _, err := TaintReadings(st); err == nil {
-				t.Error("TaintReadings() error = nil, want a decode error")
-			}
+			_, labelErr := LabelReadings(st)
+			assertDecodeRejected(t, labelErr, "LabelReadings()")
+			_, taintErr := TaintReadings(st)
+			assertDecodeRejected(t, taintErr, "TaintReadings()")
 		})
 	}
 }
@@ -378,9 +420,8 @@ func TestTaintReadingsRequireEffect(t *testing.T) {
 			item := validItem()
 			tt.mutate(&item)
 			st := &measurement.Subtype{Name: "taint", Items: []measurement.ItemEntry{item}}
-			if _, err := TaintReadings(st); err == nil {
-				t.Error("TaintReadings() error = nil, want a decode error")
-			}
+			_, taintErr := TaintReadings(st)
+			assertDecodeRejected(t, taintErr, "TaintReadings()")
 			if _, err := LabelReadings(st); err != nil {
 				t.Errorf("LabelReadings() error = %v, want nil — labels have no effect", err)
 			}
