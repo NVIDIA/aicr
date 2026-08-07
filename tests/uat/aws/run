@@ -128,4 +128,29 @@ aws_sts_federated_refresh() {
 CLOUD_REFRESH_INTERVAL_SECONDS="${AWS_STS_REFRESH_INTERVAL_SECONDS}"
 cloud_refresh_credentials() { aws_sts_federated_refresh; }
 
+# Readiness census (issue #2096): tell the readiness gate how many GPU-worker
+# nodes this cluster-config declares so it can detect a still-GROWING node
+# census. A GPU node that joins late (capacity backfill, a replaced instance)
+# re-opens Skyhook convergence mid-validate; without an expected count the gate
+# cannot distinguish a settled 2-node cluster from one still scaling up.
+# phases.sh reads EXPECTED_GPU_NODES (label selector defaults to
+# nodeGroup=gpu-worker); an absent/empty value degrades it to stability-only
+# mode. CLUSTER_CONFIG is exported job-wide by .github/workflows/uat-aws.yaml, so
+# it is visible here with no workflow change; it is unset in local dev (degrade).
+if [[ -n "${CLUSTER_CONFIG:-}" ]]; then
+  if [[ -f "${CLUSTER_CONFIG}" ]]; then
+    # Select the GPU pool by its label (not a positional index, so reordering
+    # the pools cannot silently read the wrong count) and read AWS's node-count
+    # field, capacity.desired.
+    expected_gpu_nodes="$(yq -r '[.compute.eks.nodeGroups.workers[] | select(.labels.nodeGroup == "gpu-worker") | .capacity.desired] | .[0]' "${CLUSTER_CONFIG}" 2>/dev/null || true)"
+    if [[ "${expected_gpu_nodes}" =~ ^[1-9][0-9]*$ ]]; then
+      export EXPECTED_GPU_NODES="${expected_gpu_nodes}"
+    else
+      echo "::warning::could not derive EXPECTED_GPU_NODES from ${CLUSTER_CONFIG} (got '${expected_gpu_nodes:-<empty>}'); readiness census degrades to stability-only mode" >&2
+    fi
+  else
+    echo "::warning::could not derive EXPECTED_GPU_NODES from ${CLUSTER_CONFIG} (file not found); readiness census degrades to stability-only mode" >&2
+  fi
+fi
+
 uat_main "$@"
