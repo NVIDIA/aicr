@@ -184,11 +184,22 @@ and add:
 - **exactly one** accelerated profile *per supported accelerator* with `metadata.labels.{provider: <provider>, nodeType: accelerated, accelerator: <accelerator>}`.
 
 `select_profiles` requires a unique match in each role and returns a
-fatal error (not a skip) on ambiguity, so a duplicate `nodeType: system`
-or two profiles carrying the same accelerator label will break both
-direct invocations and batch CI. The accelerator label is required —
-without it, a profile is silently skipped for GPU-role lookups.
-`apply-nodes.sh` picks up the new profiles on the next run.
+fatal error (not a skip) on any tree-integrity fault, so all of the
+following break both direct invocations and batch CI:
+
+- a duplicate `nodeType: system` under the same provider,
+- two profiles carrying the same accelerator label,
+- a profile whose `provider` label disagrees with its parent directory
+  (e.g. an `eks`-labeled file dropped under `kwok/profiles/gke/`),
+- an accelerated profile missing its `accelerator` label,
+- a profile whose `nodeType` label is neither `system` nor
+  `accelerated` (typos such as `sytem`).
+
+All of these are treated fatally rather than silently skipped — if the
+mislabeled file is the sole profile for its role, silent skipping
+would zero coverage without a warning (the same coverage-lie #1997
+targets, via a different field). `apply-nodes.sh` picks up the new
+profiles on the next run.
 
 ## CI Integration
 
