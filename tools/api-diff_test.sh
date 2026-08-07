@@ -22,6 +22,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API_DIFF="${SCRIPT_DIR}/api-diff"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+export API_DIFF_TEST_REPO_ROOT="${REPO_ROOT}"
 
 # Without yq every assertion below fails inside has_tools, which reads as dozens
 # of unrelated defects rather than one missing tool. Skip with a single clear
@@ -70,6 +71,80 @@ if [[ "$1" == "version" && "$2" == "-m" ]]; then
             exit 1
             ;;
     esac
+fi
+if [[ "$1" == "run" && "$2" == "./tools/api-diff-closure" ]]; then
+    alias_mode=false
+    closure_dir=""
+    previous_arg=""
+    for arg in "$@"; do
+        if [[ "${arg}" == "-aliases" ]]; then
+            alias_mode=true
+        elif [[ "${previous_arg}" == "-dir" ]]; then
+            closure_dir="${arg}"
+        fi
+        previous_arg="${arg}"
+    done
+    if [[ "${alias_mode}" == "true" ]]; then
+        if [[ "${ALIAS_MAPPING_SCENARIO:-correct}" == "failure" ]]; then
+            echo "mock alias mapping failure" >&2
+            exit 42
+        fi
+        cat <<'ALIASES'
+BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output
+BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester
+ALIASES
+        if [[ "${ALIAS_MAPPING_SCENARIO:-correct}" == "retarget" ]]; then
+            echo 'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/result|Output'
+        else
+            echo 'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config'
+        fi
+        echo 'CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry'
+        if [[ "${ALIAS_MAPPING_SCENARIO:-correct}" == "extra-generic" ]]; then
+            echo 'GenericAlias|github.com/NVIDIA/aicr/pkg/bundler/result|Result'
+        fi
+        echo 'OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions'
+        exit 0
+    fi
+    if [[ "${ALIAS_CLOSURE_SCENARIO:-correct}" == "failure" ]]; then
+        echo "mock alias closure failure" >&2
+        exit 42
+    fi
+    cat <<'CLOSURE'
+github.com/NVIDIA/aicr/pkg/bundler/attestation|AttestSubject
+github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester
+github.com/NVIDIA/aicr/pkg/bundler/attestation|Dependency
+github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions
+github.com/NVIDIA/aicr/pkg/bundler/attestation|StatementMetadata
+github.com/NVIDIA/aicr/pkg/bundler/config|Config
+github.com/NVIDIA/aicr/pkg/bundler/config|DeployerType
+github.com/NVIDIA/aicr/pkg/bundler/result|Output
+github.com/NVIDIA/aicr/pkg/bundler/result|Result
+github.com/NVIDIA/aicr/pkg/bundler/types|BundleType
+github.com/NVIDIA/aicr/pkg/recipe|CriteriaAcceleratorType
+github.com/NVIDIA/aicr/pkg/recipe|CriteriaField
+github.com/NVIDIA/aicr/pkg/recipe|CriteriaIntentType
+github.com/NVIDIA/aicr/pkg/recipe|CriteriaOSType
+github.com/NVIDIA/aicr/pkg/recipe|CriteriaOrigin
+github.com/NVIDIA/aicr/pkg/recipe|CriteriaPlatformType
+github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry
+github.com/NVIDIA/aicr/pkg/recipe|CriteriaServiceType
+CLOSURE
+    if [[ "${ALIAS_CLOSURE_SCENARIO:-correct}" == "different-membership" ]]; then
+        if [[ "${closure_dir}" == "${API_DIFF_TEST_REPO_ROOT}" ]]; then
+            echo 'github.com/NVIDIA/aicr/pkg/bundler/result|DeploymentInfo'
+        else
+            echo 'github.com/NVIDIA/aicr/pkg/bundler/result|BundleError'
+        fi
+    else
+        cat <<'CLOSURE'
+github.com/NVIDIA/aicr/pkg/bundler/result|BundleError
+github.com/NVIDIA/aicr/pkg/bundler/result|DeploymentInfo
+CLOSURE
+    fi
+    if [[ "${ALIAS_CLOSURE_SCENARIO:-correct}" == "generic-argument" ]]; then
+        echo 'github.com/NVIDIA/aicr/pkg/payload|Contract'
+    fi
+    exit 0
 fi
 exit 1
 STUB
@@ -122,8 +197,11 @@ if [[ "${1:-}" == "-incompatible" ]]; then
     exit 99
 fi
 
-printf 'mode=report cwd=%s\n' "$(pwd)" >>"${APIDIFF_LOG}"
-if [[ -n "${APIDIFF_REPORT:-}" ]]; then
+package="${2:-}"
+printf 'mode=report package=%s cwd=%s\n' "${package}" "$(pwd)" >>"${APIDIFF_LOG}"
+if [[ -n "${APIDIFF_TARGET_REPORT_PACKAGE:-}" && "${package}" == "${APIDIFF_TARGET_REPORT_PACKAGE}" ]]; then
+    printf '%s' "${APIDIFF_TARGET_REPORT:-}"
+elif [[ -n "${APIDIFF_REPORT:-}" ]]; then
     printf '%s' "${APIDIFF_REPORT}"
 elif [[ -n "${APIDIFF_INCOMPATIBLE:-}" ]]; then
     printf 'Incompatible changes:\n%s' "${APIDIFF_INCOMPATIBLE}"
@@ -266,12 +344,20 @@ run() {
         OUT="$(cd "${caller_dir}" && GIT_SCENARIO="${scenario}" API_DIFF_BASELINE="${baseline}" \
             APIDIFF_INCOMPATIBLE="${incompatible}" \
             APIDIFF_REPORT="${APIDIFF_REPORT:-}" \
+            APIDIFF_TARGET_REPORT_PACKAGE="${APIDIFF_TARGET_REPORT_PACKAGE:-}" \
+            APIDIFF_TARGET_REPORT="${APIDIFF_TARGET_REPORT:-}" \
+            ALIAS_MAPPING_SCENARIO="${ALIAS_MAPPING_SCENARIO:-correct}" \
+            ALIAS_CLOSURE_SCENARIO="${ALIAS_CLOSURE_SCENARIO:-correct}" \
             API_DIFF_EXCEPTIONS_FILE="${exceptions_file}" \
             APIDIFF_VERSION_SCENARIO="${version_scenario}" \
             GOPATH_SCENARIO="${gopath_scenario}" "${API_DIFF}" 2>&1)"
     else
         OUT="$(cd "${caller_dir}" && GIT_SCENARIO="${scenario}" APIDIFF_INCOMPATIBLE="${incompatible}" \
             APIDIFF_REPORT="${APIDIFF_REPORT:-}" \
+            APIDIFF_TARGET_REPORT_PACKAGE="${APIDIFF_TARGET_REPORT_PACKAGE:-}" \
+            APIDIFF_TARGET_REPORT="${APIDIFF_TARGET_REPORT:-}" \
+            ALIAS_MAPPING_SCENARIO="${ALIAS_MAPPING_SCENARIO:-correct}" \
+            ALIAS_CLOSURE_SCENARIO="${ALIAS_CLOSURE_SCENARIO:-correct}" \
             API_DIFF_EXCEPTIONS_FILE="${exceptions_file}" \
             APIDIFF_VERSION_SCENARIO="${version_scenario}" \
             GOPATH_SCENARIO="${gopath_scenario}" "${API_DIFF}" 2>&1)"
@@ -312,6 +398,17 @@ check_occurrences() {
     if [[ "${occurrences}" == "$3" ]]; then pass "$1"; else fail "$1" "want $3 occurrence(s) of: $2 got ${occurrences}"; fi
 }
 
+expected_apidiff_log() {
+    local cwd=$1
+
+    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/client/v1 cwd=%s\n' "${cwd}"
+    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/attestation cwd=%s\n' "${cwd}"
+    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/config cwd=%s\n' "${cwd}"
+    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/result cwd=%s\n' "${cwd}"
+    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/types cwd=%s\n' "${cwd}"
+    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/recipe cwd=%s' "${cwd}"
+}
+
 run failure v9.8.7 "" "${EMPTY_EXCEPTIONS}" correct "${SCRIPT_DIR}" failure
 check_rc "gopath-lookup-failure-fails" 1
 check_contains "gopath-lookup-failure-is-diagnostic" "Could not determine GOPATH"
@@ -326,6 +423,39 @@ run failure v9.8.7 "" "${EMPTY_EXCEPTIONS}" unreadable
 check_rc "unverifiable-apidiff-version-fails" 17
 check_contains "unverifiable-apidiff-version-is-diagnostic" "Could not verify the module version of apidiff"
 check_log_absent "unverifiable-apidiff-version-stops-before-git" "prune"
+
+run alias-contract-current-map v9.8.7
+check_rc "current-transparent-alias-map-succeeds" 0
+
+ALIAS_MAPPING_SCENARIO=extra-generic
+run alias-contract-generic-mismatch v9.8.7
+unset ALIAS_MAPPING_SCENARIO
+check_rc "unscoped-generic-transparent-alias-fails" 18
+check_contains "unscoped-generic-transparent-alias-is-diagnostic" "Transparent alias contract is out of sync"
+check_contains "unscoped-generic-transparent-alias-is-named" "GenericAlias"
+check_log_absent "unscoped-generic-transparent-alias-stops-before-git" "prune"
+
+ALIAS_MAPPING_SCENARIO=retarget
+run alias-contract-retargeted v9.8.7
+unset ALIAS_MAPPING_SCENARIO
+check_rc "retargeted-transparent-alias-fails" 18
+check_contains "retargeted-transparent-alias-is-diagnostic" "Transparent alias contract is out of sync"
+check_contains "retargeted-transparent-alias-reports-actual-target" "BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/result|Output"
+check_contains "retargeted-transparent-alias-reports-scoped-target" "BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config"
+check_log_absent "retargeted-transparent-alias-stops-before-git" "prune"
+
+ALIAS_MAPPING_SCENARIO=failure
+run alias-mapping-failure v9.8.7
+unset ALIAS_MAPPING_SCENARIO
+check_rc "alias-mapping-failure-fails-closed" 18
+check_contains "alias-mapping-failure-is-diagnostic" "Could not inspect exported transparent aliases"
+check_log_absent "alias-mapping-failure-stops-before-git" "prune"
+
+ALIAS_CLOSURE_SCENARIO=failure
+run alias-closure-failure v9.8.7
+unset ALIAS_CLOSURE_SCENARIO
+check_rc "alias-closure-derivation-failure-fails-closed" 18
+check_contains "alias-closure-derivation-failure-is-diagnostic" "Could not derive the current transparent-alias reachable type closure"
 
 run no-tags
 check_rc "empty-tag-list-fails" 10
@@ -350,8 +480,8 @@ outside_module_dir="${STUB_DIR}/outside-module"
 mkdir -p "${outside_module_dir}"
 run failure v9.8.7 "" "${EMPTY_EXCEPTIONS}" correct "${outside_module_dir}"
 check_rc "new-side-from-outside-module-succeeds" 0
-check_apidiff_log_equals "new-side-loads-once-from-repository-root" \
-    "mode=report cwd=${REPO_ROOT}"
+check_apidiff_log_equals "facade-and-alias-targets-load-once-from-repository-root" \
+    "$(expected_apidiff_log "${REPO_ROOT}")"
 
 run decision v9.8.7 "" "${MISSING_EXCEPTIONS}"
 check_rc "missing-exceptions-file-fails" 11
@@ -369,8 +499,8 @@ check_contains "plain-report-keeps-incompatible-header" "Incompatible changes:"
 check_contains "plain-report-keeps-compatible-header" "Compatible changes:"
 check_contains "plain-report-keeps-compatible-change" "Client.New: added"
 check_occurrences "incompatible-change-is-not-printed-twice" "Client.Legacy: removed" 1
-check_apidiff_log_equals "plain-report-loads-new-side-once" \
-    "mode=report cwd=${REPO_ROOT}"
+check_apidiff_log_equals "plain-report-loads-facade-and-alias-targets-once" \
+    "$(expected_apidiff_log "${REPO_ROOT}")"
 check_contains "unacknowledged-method-removal-is-diagnostic" "Add a baseline-scoped acknowledgement"
 
 compatible_only_report=$'Compatible changes:\n- Client.New: added\n'
@@ -380,8 +510,83 @@ unset APIDIFF_REPORT
 check_rc "compatible-only-report-succeeds" 0
 check_contains "compatible-only-change-is-reported" "Client.New: added"
 check_contains "compatible-only-report-is-clean" "No incompatible"
-check_apidiff_log_equals "compatible-only-report-loads-new-side-once" \
-    "mode=report cwd=${REPO_ROOT}"
+check_apidiff_log_equals "compatible-only-report-loads-facade-and-alias-targets-once" \
+    "$(expected_apidiff_log "${REPO_ROOT}")"
+
+alias_target_cases=(
+    'bundle-config|github.com/NVIDIA/aicr/pkg/bundler/config|(*Config).Deployer: removed'
+    'bundle-attester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester.Identity: removed'
+    'oidc-resolve-options|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions.Attest: removed'
+    'bundle-artifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output.OutputDir: removed'
+    'bundle-artifact-nested-result|github.com/NVIDIA/aicr/pkg/bundler/result|Result.Checksum: removed'
+    'bundle-artifact-cross-package-type|github.com/NVIDIA/aicr/pkg/bundler/types|BundleType.String: removed'
+    'criteria-registry|github.com/NVIDIA/aicr/pkg/recipe|(*CriteriaRegistry).Values: removed'
+    'criteria-registry-signature-type|github.com/NVIDIA/aicr/pkg/recipe|CriteriaField: changed from string to int'
+)
+for case_spec in "${alias_target_cases[@]}"; do
+    IFS='|' read -r case_name target_package target_change <<< "${case_spec}"
+    APIDIFF_TARGET_REPORT_PACKAGE="${target_package}"
+    APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- '"${target_change}"$'\n- Unrelated.Legacy: removed\n'
+    run "alias-${case_name}" v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+    unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
+    check_rc "${case_name}-break-fails" 16
+    check_contains "${case_name}-break-is-reported" "${target_change}"
+    check_absent "${case_name}-does-not-freeze-unrelated-export" "Unrelated.Legacy: removed"
+done
+
+# These receiver spellings are copied from the pinned apidiff report for a
+# generic Target[P] with changed pointer and removed value methods. ConfigExtra
+# deliberately shares Config's prefix so the scope check cannot pass by merely
+# accepting any subject that starts with the target type name.
+APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/config'
+APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- (*Config[P]).Deployer: changed from func(P) P to func([]P) P\n- Config[P].Validate: removed\n- ConfigExtra[P].Validate: removed\n'
+run alias-generic-receivers v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
+check_rc "generic-target-receiver-breaks-fail" 16
+check_contains "generic-pointer-receiver-break-is-reported" "(*Config[P]).Deployer: changed from func(P) P to func([]P) P"
+check_contains "generic-value-receiver-break-is-reported" "Config[P].Validate: removed"
+check_absent "similarly-named-generic-type-remains-excluded" "ConfigExtra[P].Validate: removed"
+
+APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/attestation'
+APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- VerificationIdentity.Issuer: removed\n'
+run alias-unrelated-only v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
+check_rc "unrelated-target-package-break-succeeds" 0
+check_absent "unrelated-target-package-break-is-not-reported" "VerificationIdentity.Issuer: removed"
+check_contains "unrelated-target-package-break-keeps-gate-clean" "No incompatible SDK facade or transparent-alias target changes"
+
+ALIAS_CLOSURE_SCENARIO=generic-argument
+APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/payload'
+APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- Contract.Legacy: removed\n- Unrelated.Legacy: removed\n'
+run alias-generic-argument v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+unset ALIAS_CLOSURE_SCENARIO APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
+check_rc "generic-alias-argument-break-fails" 16
+check_contains "generic-alias-argument-break-is-reported" "Contract.Legacy: removed"
+check_absent "generic-alias-argument-does-not-freeze-unrelated-export" "Unrelated.Legacy: removed"
+
+ALIAS_CLOSURE_SCENARIO=different-membership
+APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/result'
+APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- DeploymentInfo.Legacy: removed\n'
+run alias-current-only-reachable-type v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
+check_rc "current-only-reachable-type-break-succeeds" 0
+check_absent "current-only-reachable-type-break-is-not-reported" "DeploymentInfo.Legacy: removed"
+check_contains "current-only-reachable-type-break-keeps-gate-clean" "No incompatible SDK facade or transparent-alias target changes"
+
+APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/result'
+APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- BundleError.Legacy: removed\n'
+run alias-baseline-only-reachable-type v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
+check_rc "baseline-only-reachable-type-break-fails" 16
+check_contains "baseline-only-reachable-type-break-is-reported" "BundleError.Legacy: removed"
+
+APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/result'
+APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- Output.Result: changed from Result to DeploymentInfo\n- DeploymentInfo.Legacy: removed\n'
+run alias-current-only-type-parent-break v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+unset ALIAS_CLOSURE_SCENARIO APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
+check_rc "current-only-type-parent-break-fails" 16
+check_contains "current-only-type-parent-break-is-reported" "Output.Result: changed from Result to DeploymentInfo"
+check_absent "current-only-nested-type-remains-unreported" "DeploymentInfo.Legacy: removed"
 
 run decision v9.8.7 "${removed_method}" "${EXACT_EXCEPTIONS}"
 check_rc "exact-baseline-acknowledgement-succeeds" 0

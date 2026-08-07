@@ -40,13 +40,15 @@ reachable from `HEAD`. The gate checks out that baseline in a temporary
 detached worktree, so it leaves the current working tree unchanged but adds
 checkout and filesystem I/O cost to `make qualify`.
 
-The gate compares declarations exported by `pkg/client/v1`. For external named
-types reached through transparent aliases, `apidiff` matches the target's
-package path and type name but does not recursively compare its definition. A
-change to such a target can therefore alter the facade contract without failing
-the gate. Reviewers must manually assess changes to aliased target types as
-changes to the stable facade until
-[#2019](https://github.com/NVIDIA/aicr/issues/2019) resolves this gap.
+The gate compares declarations exported by `pkg/client/v1`. Because `apidiff`
+does not recursively compare an external named type reached through an alias,
+the gate derives the repository-local named-type closure exposed by
+`BundleConfig`, `BundleAttester`, `BundleArtifact`, `OIDCResolveOptions`, and
+`CriteriaRegistry` from both the release baseline and current source. It then
+compares only that baseline/current closure, including nested fields and method
+signatures; unrelated exports in the evolving target packages remain filtered
+out. Closure derivation and an out-of-sync transparent-alias root list both fail
+the gate closed.
 
 To acknowledge an intentional break, first run `make api-diff`. Add a
 baseline-scoped entry to `pkg/client/v1/api-diff-exceptions.yaml` containing the

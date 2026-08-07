@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package aicr is the stable, public Go library surface for external
-// consumers of the AI Cluster Runtime.
+// Package aicr is the public, compatibility-reviewed Go library surface for
+// external consumers of the AI Cluster Runtime.
 //
 // External projects should import THIS package and use the types and
 // constructors re-exported here. The underlying pkg/* packages are
-// public and will remain importable, but this facade is the contract
-// the project commits to via semver.
+// public and will remain importable, but this facade is the reviewed
+// compatibility contract the project intends to stabilize at v1.0.
 //
 // # Surface
 //
@@ -36,6 +36,14 @@
 // RecipeResult, ComponentBundle, ComponentRef, PhaseResult, AllowLists)
 // are facade-owned structs translated to and from the upstream pkg/*
 // shapes, so internal field renames don't churn external callers.
+//
+// Five types remain deliberate transparent aliases: BundleConfig,
+// BundleAttester, BundleArtifact, OIDCResolveOptions, and CriteriaRegistry.
+// They preserve direct interoperability with the configuration builders,
+// attestation implementations, bundle results, and provider-scoped criteria
+// registry used elsewhere in AICR. The API compatibility gate compares their
+// repository-local reachable type closure without freezing unrelated exports
+// in the evolving target packages.
 //
 // # Example
 //
@@ -57,10 +65,16 @@
 //
 // # Stability
 //
-// This package's exported API follows semver. The underlying pkg/*
-// packages may introduce breaking changes between minor releases; if
-// you depend on them directly, pin AICR to a patch version and audit
-// upgrades.
+// AICR is currently pre-1.0. Under Go module versioning, a v0 minor release may
+// contain breaking API changes. The project detects and explicitly records
+// incompatible changes to this facade, but v0 consumers must pin a patch
+// version and audit upgrades.
+//
+// Starting with v1.0, this package's exported API follows semantic versioning:
+// breaking changes require a major release, minor releases may add API, and
+// patch releases contain compatible fixes. The underlying pkg/* packages may
+// continue to evolve under the stability tiers documented in
+// docs/integrator/public-api.md.
 //
 // # Concurrency and Client lifecycle
 //

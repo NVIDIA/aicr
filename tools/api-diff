@@ -13,9 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# api-diff compares pkg/client/v1 with the most recent stable release. The
-# current working tree is never modified: the release source is materialized in
-# a temporary detached worktree and apidiff consumes its export data.
+# api-diff compares pkg/client/v1 and the definitions exposed through its
+# transparent aliases with the most recent stable release. The current working
+# tree is never modified: the release source is materialized in a temporary
+# detached worktree and apidiff consumes its export data.
 
 set -euo pipefail
 
@@ -38,6 +39,22 @@ has_tools apidiff git yq
 cd "${REPO_ROOT}"
 
 readonly PACKAGE='github.com/NVIDIA/aicr/pkg/client/v1'
+# apidiff treats an alias to an external named type as only the target package
+# path plus type name; it does not recursively compare the target definition.
+# These are the facade-to-target mappings. tools/api-diff-closure starts its
+# traversal at each facade alias declaration so instantiated type arguments are
+# retained, then derives every repository-local named type reachable through
+# the complete target and its public fields and method signatures. This covers
+# nested contract types without freezing unrelated exports. Format: facade
+# alias|target package|root type. Each mapping is kept explicit so the
+# syntax-aware exhaustiveness check can detect alias retargeting.
+readonly ALIAS_TARGETS=(
+    'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config'
+    'BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester'
+    'OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions'
+    'BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output'
+    'CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry'
+)
 readonly VERSIONS_FILE="${REPO_ROOT}/.settings.yaml"
 readonly EXCEPTIONS_FILE="${API_DIFF_EXCEPTIONS_FILE:-${REPO_ROOT}/pkg/client/v1/api-diff-exceptions.yaml}"
 readonly EXIT_NO_BASELINE=10
@@ -48,6 +65,7 @@ readonly EXIT_STALE_ACKNOWLEDGEMENT=14
 readonly EXIT_DUPLICATE_ACKNOWLEDGEMENT=15
 readonly EXIT_INCOMPATIBLE_CHANGES=16
 readonly EXIT_APIDIFF_VERSION_MISMATCH=17
+readonly EXIT_ALIAS_CONTRACT_MISMATCH=18
 
 # These statuses are part of the decision-flow test contract. They prevent a
 # failure in an earlier branch from satisfying an assertion for a later one.
@@ -57,6 +75,154 @@ api_diff_err() {
 
     printf "${COLOR_RED}[ERR]${COLOR_RESET} %s\n" "${message}" >&2
     exit "${status}"
+}
+
+# Keep the scoped target mappings exhaustive. A newly exported transparent
+# alias is a stable SDK dependency after its first release, and retargeting an
+# existing alias must update the reachable compatibility scope even when the
+# facade-level break is explicitly acknowledged.
+if ! actual_alias_targets="$(go run ./tools/api-diff-closure -dir "${REPO_ROOT}" -aliases "${PACKAGE}")"; then
+    api_diff_err "${EXIT_ALIAS_CONTRACT_MISMATCH}" "Could not inspect exported transparent aliases in ${PACKAGE}."
+fi
+contract_alias_targets="$(printf '%s\n' "${ALIAS_TARGETS[@]}" | LC_ALL=C sort)"
+if [[ "${actual_alias_targets}" != "${contract_alias_targets}" ]]; then
+    api_diff_err "${EXIT_ALIAS_CONTRACT_MISMATCH}" "Transparent alias contract is out of sync. Actual mappings: [${actual_alias_targets//$'\n'/, }]. Scoped mappings: [${contract_alias_targets//$'\n'/, }]. Update ALIAS_TARGETS in tools/api-diff for every exported alias and target."
+fi
+
+# Filter a package-level apidiff report down to changes whose subject is one of
+# the aliased target types. apidiff names direct fields and methods as T.X (or
+# T[P].X for a generic receiver), pointer methods as (*T).X (or (*T[P]).X),
+# and promoted methods with a "method set of T" suffix. Package
+# additions/removals and changes to unrelated declarations are intentionally
+# excluded.
+filter_alias_target_report() {
+    local target_types=$1
+
+    awk -v target_types="${target_types}" '
+        BEGIN {
+            split(target_types, targets, ",")
+        }
+        function after_type_arguments(tail, closing_bracket) {
+            if (substr(tail, 1, 1) != "[") {
+                return tail
+            }
+            closing_bracket = index(tail, "]")
+            if (closing_bracket == 0) {
+                return ""
+            }
+            return substr(tail, closing_bracket + 1)
+        }
+        function is_direct_target_subject(message, target, tail) {
+            if (index(message, target) != 1) {
+                return 0
+            }
+            tail = after_type_arguments(substr(message, length(target) + 1))
+            return substr(tail, 1, 1) == ":" || substr(tail, 1, 1) == "."
+        }
+        function is_pointer_target_subject(message, target, prefix, tail) {
+            prefix = "(*" target
+            if (index(message, prefix) != 1) {
+                return 0
+            }
+            tail = after_type_arguments(substr(message, length(prefix) + 1))
+            return index(tail, ").") == 1
+        }
+        function names_target_method_set(message, target, pointer, marker, start, tail) {
+            marker = "method set of " (pointer ? "*" : "") target
+            start = index(message, marker)
+            if (start == 0) {
+                return 0
+            }
+            tail = after_type_arguments(substr(message, start + length(marker)))
+            return substr(tail, 1, 1) == ":"
+        }
+        function is_target_change(line, message, i, target) {
+            message = line
+            sub(/^- /, "", message)
+            for (i in targets) {
+                target = targets[i]
+                if (is_direct_target_subject(message, target) ||
+                    is_pointer_target_subject(message, target) ||
+                    names_target_method_set(message, target, 0) ||
+                    names_target_method_set(message, target, 1)) {
+                    return 1
+                }
+            }
+            return 0
+        }
+        $0 == "Incompatible changes:" {
+            section = "incompatible"
+            next
+        }
+        $0 == "Compatible changes:" {
+            section = "compatible"
+            next
+        }
+        /^- / && is_target_change($0) {
+            if (section == "incompatible") {
+                incompatible = incompatible $0 "\n"
+            } else if (section == "compatible") {
+                compatible = compatible $0 "\n"
+            }
+        }
+        END {
+            if (incompatible != "") {
+                printf "Incompatible changes:\n%s", incompatible
+            }
+            if (compatible != "") {
+                printf "Compatible changes:\n%s", compatible
+            }
+        }
+    '
+}
+
+# Return the baseline-reachable closure types, retaining baseline/current
+# membership per type. A current-only type is a newly exposed API contract even
+# when its package was already reachable; comparing it with the package's older
+# unrelated definition would incorrectly freeze its pre-exposure history. Its
+# direct parent remains in scope, so incompatible signature changes that expose
+# it are still reported. A baseline-only type also remains in scope so removal
+# cannot erase the evidence needed to report its own incompatibility.
+build_alias_scope() {
+    local baseline_closure=$1
+    local current_closure=$2
+
+    {
+        while IFS= read -r entry; do
+            if [[ -n "${entry}" ]]; then
+                printf 'baseline|%s\n' "${entry}"
+            fi
+        done <<< "${baseline_closure}"
+        while IFS= read -r entry; do
+            if [[ -n "${entry}" ]]; then
+                printf 'current|%s\n' "${entry}"
+            fi
+        done <<< "${current_closure}"
+    } | awk -F '|' '
+        NF == 3 { membership[$2 SUBSEP $3] = membership[$2 SUBSEP $3] $1 SUBSEP }
+        END {
+            for (key in membership) {
+                if (index(membership[key], "baseline" SUBSEP) != 0) {
+                    split(key, parts, SUBSEP)
+                    print parts[1] "|" parts[2]
+                }
+            }
+        }
+    ' | LC_ALL=C sort -u | awk -F '|' '
+        package != "" && $1 != package {
+            print package "|" names
+            names = ""
+        }
+        {
+            package = $1
+            names = names (names == "" ? "" : ",") $2
+        }
+        END {
+            if (package != "") {
+                print package "|" names
+            }
+        }
+    '
 }
 
 if ! required_apidiff_version="$(yq eval -r '.linting.apidiff' "${VERSIONS_FILE}")"; then
@@ -101,12 +267,48 @@ cleanup() {
 }
 trap cleanup EXIT
 
-msg "Comparing ${PACKAGE} against ${baseline}"
+msg "Comparing ${PACKAGE} and its transparent alias targets against ${baseline}"
 git worktree prune
 git worktree add --detach "${release_worktree}" "${baseline}" >/dev/null
+
+current_root_args=()
+for spec in "${ALIAS_TARGETS[@]}"; do
+    IFS='|' read -r alias_name _ _ <<< "${spec}"
+    current_root_args+=("-root" "${PACKAGE}=${alias_name}")
+done
+if ! current_alias_closure="$(go run ./tools/api-diff-closure -dir "${REPO_ROOT}" "${current_root_args[@]}")"; then
+    api_diff_err "${EXIT_ALIAS_CONTRACT_MISMATCH}" "Could not derive the current transparent-alias reachable type closure."
+fi
+
+if ! baseline_alias_targets="$(go run ./tools/api-diff-closure -dir "${release_worktree}" -aliases "${PACKAGE}")"; then
+    api_diff_err "${EXIT_ALIAS_CONTRACT_MISMATCH}" "Could not inspect exported transparent aliases in ${PACKAGE} at baseline ${baseline}."
+fi
+baseline_root_args=()
+while IFS='|' read -r alias_name _ _; do
+    if [[ -n "${alias_name}" ]]; then
+        baseline_root_args+=("-root" "${PACKAGE}=${alias_name}")
+    fi
+done <<< "${baseline_alias_targets}"
+
+baseline_alias_closure=""
+if (( ${#baseline_root_args[@]} > 0 )); then
+    if ! baseline_alias_closure="$(go run ./tools/api-diff-closure -dir "${release_worktree}" "${baseline_root_args[@]}")"; then
+        api_diff_err "${EXIT_ALIAS_CONTRACT_MISMATCH}" "Could not derive the transparent-alias reachable type closure at baseline ${baseline}."
+    fi
+fi
+alias_scope="$(build_alias_scope "${baseline_alias_closure}" "${current_alias_closure}")"
+
 (
     cd "${release_worktree}"
     apidiff -w "${release_export}" "${PACKAGE}"
+    alias_index=0
+    while IFS='|' read -r target_package _; do
+        if [[ -z "${target_package}" ]]; then
+            continue
+        fi
+        apidiff -w "${release_export}.alias-${alias_index}" "${target_package}"
+        alias_index=$((alias_index + 1))
+    done <<< "${alias_scope}"
 )
 
 # Additions are informational and intentionally do not fail the gate. Capture
@@ -114,6 +316,23 @@ git worktree add --detach "${release_worktree}" "${baseline}" >/dev/null
 # acknowledgement decisions. A second apidiff invocation would reload the
 # working-tree package and its dependency graph.
 report="$(apidiff "${release_export}" "${PACKAGE}")"
+alias_index=0
+while IFS='|' read -r target_package target_types; do
+    if [[ -z "${target_package}" ]]; then
+        continue
+    fi
+    target_report="$(apidiff "${release_export}.alias-${alias_index}" "${target_package}")"
+    scoped_report="$(printf '%s\n' "${target_report}" | filter_alias_target_report "${target_types}")"
+    if [[ -n "${scoped_report}" ]]; then
+        msg "Transparent alias reachable-type changes: ${target_package} (${target_types})"
+        if [[ -n "${report}" ]]; then
+            report="${report}"$'\n'"${scoped_report}"
+        else
+            report="${scoped_report}"
+        fi
+    fi
+    alias_index=$((alias_index + 1))
+done <<< "${alias_scope}"
 incompatible="$(printf '%s\n' "${report}" | awk '
     $0 == "Incompatible changes:" { in_incompatible = 1; next }
     $0 == "Compatible changes:" { in_incompatible = 0 }
@@ -153,7 +372,7 @@ fi
 # exists becomes stale the moment that tag advances the baseline. Warn instead
 # so the maintainer can prune it on a green build.
 if [[ -z "${incompatible}" ]]; then
-    msg "No incompatible ${PACKAGE} changes since ${baseline}."
+    msg "No incompatible SDK facade or transparent-alias target changes since ${baseline}."
     if [[ -n "${stale_baselines}" ]]; then
         log_warning "Prunable API-diff acknowledgement baseline(s) in ${EXCEPTIONS_FILE}: ${stale_baselines}; active baseline is ${baseline} and its diff is clean. Remove the acknowledgement(s) for non-active baselines."
     fi
@@ -180,4 +399,4 @@ if (( acknowledgement_count == 1 )); then
     log_error "Acknowledged changes: ${acknowledged_changes}"
 fi
 
-api_diff_err "${EXIT_INCOMPATIBLE_CHANGES}" "Incompatible ${PACKAGE} changes since ${baseline}. Add a baseline-scoped acknowledgement to ${EXCEPTIONS_FILE} only for an intentional breaking change."
+api_diff_err "${EXIT_INCOMPATIBLE_CHANGES}" "Incompatible SDK facade or transparent-alias target changes since ${baseline}. Add a baseline-scoped acknowledgement to ${EXCEPTIONS_FILE} only for an intentional breaking change."
