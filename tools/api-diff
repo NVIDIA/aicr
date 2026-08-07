@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# api-diff compares pkg/client/v1 with the most recent stable release. The
+# current working tree is never modified: the release source is materialized in
+# a temporary detached worktree and apidiff consumes its export data.
+
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/common
+. "${DIR}/common"
+
+if command -v go >/dev/null 2>&1; then
+    if ! go_path="$(go env GOPATH)" || [[ -z "${go_path}" ]]; then
+        err "Could not determine GOPATH with 'go env GOPATH'."
+    fi
+    export PATH="${go_path}/bin:${PATH}"
+fi
+
+has_tools apidiff git yq
+
+# apidiff resolves the new side from its working directory. Anchor it to this
+# checkout so callers outside the module cannot accidentally compare releases
+# from the module cache instead of the current source tree.
+cd "${REPO_ROOT}"
+
+readonly PACKAGE='github.com/NVIDIA/aicr/pkg/client/v1'
+readonly VERSIONS_FILE="${REPO_ROOT}/.settings.yaml"
+readonly EXCEPTIONS_FILE="${API_DIFF_EXCEPTIONS_FILE:-${REPO_ROOT}/pkg/client/v1/api-diff-exceptions.yaml}"
+readonly EXIT_NO_BASELINE=10
+readonly EXIT_EXCEPTIONS_FILE_MISSING=11
+readonly EXIT_EXCEPTIONS_EVALUATION_FAILED=12
+readonly EXIT_EXCEPTIONS_MALFORMED=13
+readonly EXIT_STALE_ACKNOWLEDGEMENT=14
+readonly EXIT_DUPLICATE_ACKNOWLEDGEMENT=15
+readonly EXIT_INCOMPATIBLE_CHANGES=16
+readonly EXIT_APIDIFF_VERSION_MISMATCH=17
+
+# These statuses are part of the decision-flow test contract. They prevent a
+# failure in an earlier branch from satisfying an assertion for a later one.
+api_diff_err() {
+    local status=$1
+    local message=$2
+
+    printf "${COLOR_RED}[ERR]${COLOR_RESET} %s\n" "${message}" >&2
+    exit "${status}"
+}
+
+if ! required_apidiff_version="$(yq eval -r '.linting.apidiff' "${VERSIONS_FILE}")"; then
+    api_diff_err "${EXIT_APIDIFF_VERSION_MISMATCH}" "Could not read the pinned apidiff version from ${VERSIONS_FILE}."
+fi
+if [[ -z "${required_apidiff_version}" || "${required_apidiff_version}" == "null" ]]; then
+    api_diff_err "${EXIT_APIDIFF_VERSION_MISMATCH}" "No apidiff version is pinned in ${VERSIONS_FILE}."
+fi
+
+if ! installed_apidiff_version="$(go_binary_module_version "$(command -v apidiff)" golang.org/x/exp)"; then
+    api_diff_err "${EXIT_APIDIFF_VERSION_MISMATCH}" "Could not verify the module version of apidiff; run make tools-setup to install ${required_apidiff_version}."
+fi
+if [[ "${installed_apidiff_version}" != "${required_apidiff_version}" ]]; then
+    api_diff_err "${EXIT_APIDIFF_VERSION_MISMATCH}" "apidiff version mismatch: installed ${installed_apidiff_version}, required ${required_apidiff_version}; run make tools-setup."
+fi
+
+baseline="${API_DIFF_BASELINE:-}"
+if [[ -z "${baseline}" ]]; then
+    tags="$(git tag --merged HEAD -l 'v*' --sort=-v:refname)"
+    while IFS= read -r tag; do
+        if [[ "${tag}" != *-* ]]; then
+            baseline="${tag}"
+            break
+        fi
+    done <<< "${tags}"
+fi
+if [[ -z "${baseline}" ]]; then
+    api_diff_err "${EXIT_NO_BASELINE}" "No stable release tag reachable from HEAD; cannot check ${PACKAGE} compatibility."
+fi
+
+if [[ ! -f "${EXCEPTIONS_FILE}" ]]; then
+    api_diff_err "${EXIT_EXCEPTIONS_FILE_MISSING}" "API-diff exceptions file not found: ${EXCEPTIONS_FILE}"
+fi
+
+temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/aicr-api-diff.XXXXXX")"
+release_worktree="${temp_dir}/release"
+release_export="${temp_dir}/release.export"
+
+cleanup() {
+    git worktree remove "${release_worktree}" >/dev/null 2>&1 || true
+    rm -rf "${temp_dir}"
+}
+trap cleanup EXIT
+
+msg "Comparing ${PACKAGE} against ${baseline}"
+git worktree prune
+git worktree add --detach "${release_worktree}" "${baseline}" >/dev/null
+(
+    cd "${release_worktree}"
+    apidiff -w "${release_export}" "${PACKAGE}"
+)
+
+# Additions are informational and intentionally do not fail the gate. Capture
+# the complete report once, then extract its incompatible section for
+# acknowledgement decisions. A second apidiff invocation would reload the
+# working-tree package and its dependency graph.
+report="$(apidiff "${release_export}" "${PACKAGE}")"
+incompatible="$(printf '%s\n' "${report}" | awk '
+    $0 == "Incompatible changes:" { in_incompatible = 1; next }
+    $0 == "Compatible changes:" { in_incompatible = 0 }
+    in_incompatible { print }
+')"
+if [[ -n "${report}" ]]; then
+    printf '%s\n' "${report}"
+fi
+
+if ! acknowledgements_valid="$(yq eval -r '
+    (.acknowledgements | tag == "!!seq") and
+    (.acknowledgements | all_c(
+        (tag == "!!map") and
+        (.baseline | tag == "!!str" and length > 0) and
+        (.issue | tag == "!!str" and length > 0) and
+        (.summary | tag == "!!str" and length > 0) and
+        (.rationale | tag == "!!str" and length > 0) and
+        (.incompatible_changes | tag == "!!seq" and length > 0) and
+        (.incompatible_changes | all_c(tag == "!!str" and length > 0))
+    ))
+' "${EXCEPTIONS_FILE}")"; then
+    api_diff_err "${EXIT_EXCEPTIONS_EVALUATION_FAILED}" "Could not validate API-diff acknowledgements in ${EXCEPTIONS_FILE}."
+fi
+if [[ "${acknowledgements_valid}" != "true" ]]; then
+    api_diff_err "${EXIT_EXCEPTIONS_MALFORMED}" "Malformed API-diff acknowledgements in ${EXCEPTIONS_FILE}: acknowledgements must be an array of entries with non-empty baseline, issue, summary, and rationale strings plus a non-empty incompatible_changes string array."
+fi
+
+stale_baselines="$(BASELINE="${baseline}" yq eval -r '[.acknowledgements[] | select(.baseline != strenv(BASELINE)) | .baseline] | unique | sort | join(", ")' "${EXCEPTIONS_FILE}")"
+acknowledgement_count="$(BASELINE="${baseline}" yq eval -r '[.acknowledgements[] | select(.baseline == strenv(BASELINE))] | length' "${EXCEPTIONS_FILE}")"
+if (( acknowledgement_count > 1 )); then
+    api_diff_err "${EXIT_DUPLICATE_ACKNOWLEDGEMENT}" "Duplicate API-diff acknowledgements for baseline ${baseline} in ${EXCEPTIONS_FILE}; exactly one entry is allowed."
+fi
+
+# A clean diff has nothing to adjudicate, so a stale acknowledgement cannot
+# authorize anything: it is merely obsolete bookkeeping. Failing here would
+# deadlock releases, because an entry that is required before the release tag
+# exists becomes stale the moment that tag advances the baseline. Warn instead
+# so the maintainer can prune it on a green build.
+if [[ -z "${incompatible}" ]]; then
+    msg "No incompatible ${PACKAGE} changes since ${baseline}."
+    if [[ -n "${stale_baselines}" ]]; then
+        log_warning "Prunable API-diff acknowledgement baseline(s) in ${EXCEPTIONS_FILE}: ${stale_baselines}; active baseline is ${baseline} and its diff is clean. Remove the acknowledgement(s) for non-active baselines."
+    fi
+    exit 0
+fi
+
+# There are incompatible changes to adjudicate: a stale acknowledgement must
+# never stand in for one scoped to the active baseline.
+if [[ -n "${stale_baselines}" ]]; then
+    api_diff_err "${EXIT_STALE_ACKNOWLEDGEMENT}" "Stale API-diff acknowledgement baseline(s) in ${EXCEPTIONS_FILE}: ${stale_baselines}; active baseline is ${baseline}. Remove acknowledgements for non-active baselines."
+fi
+
+actual_changes="$(printf '%s\n' "${incompatible}" | sed -n 's/^- //p' | sort)"
+
+if (( acknowledgement_count == 1 )); then
+    issue="$(BASELINE="${baseline}" yq eval -r '.acknowledgements[] | select(.baseline == strenv(BASELINE)) | .issue' "${EXCEPTIONS_FILE}")"
+    summary="$(BASELINE="${baseline}" yq eval -r '.acknowledgements[] | select(.baseline == strenv(BASELINE)) | .summary' "${EXCEPTIONS_FILE}")"
+    acknowledged_changes="$(BASELINE="${baseline}" yq eval -r '.acknowledgements[] | select(.baseline == strenv(BASELINE)) | .incompatible_changes[]' "${EXCEPTIONS_FILE}" | sort)"
+    if [[ "${actual_changes}" == "$(printf '%s\n' "${acknowledged_changes}" | sort)" ]]; then
+        log_warning "Allowing acknowledged incompatible API change(s) for ${baseline}: ${issue}: ${summary}"
+        exit 0
+    fi
+    log_error "The incompatible API changes do not exactly match the acknowledgement for ${baseline}."
+    log_error "Acknowledged changes: ${acknowledged_changes}"
+fi
+
+api_diff_err "${EXIT_INCOMPATIBLE_CHANGES}" "Incompatible ${PACKAGE} changes since ${baseline}. Add a baseline-scoped acknowledgement to ${EXCEPTIONS_FILE} only for an intentional breaking change."

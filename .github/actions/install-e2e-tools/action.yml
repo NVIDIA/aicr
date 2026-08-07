@@ -49,8 +49,16 @@ runs:
         chmod +x tools/setup-tools
         AUTO_MODE=true ./tools/setup-tools --skip-go --skip-docker
 
-    - name: Verify tool installations
+    - name: Report tool installations
       shell: bash
       run: |
         echo "=== Installed Tools ==="
-        make tools-check
+        # This action reports the shared development-tool state, but E2E owns
+        # its required-tool contract. Do not make future strict_exact tools
+        # outside that contract a prerequisite for every E2E workflow.
+        if make tools-check; then
+          tools_check_rc=0
+        else
+          tools_check_rc=$?
+          printf '%s\n' "::warning title=Non-gating tool check failed::make tools-check exited with status ${tools_check_rc}; E2E continues because its required-tool contract is narrower."
+        fi

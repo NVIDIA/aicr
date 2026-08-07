@@ -56,6 +56,13 @@ The `github.com/NVIDIA/aicr/pkg/client/v1` package is Public (stable). Types
 reachable from this surface are either facade-owned structs or transparent
 aliases — the table below documents which.
 
+Transparent aliases extend that stable contract to their target types. The
+automated API-diff gate matches an external named target by package path and
+type name, but does not recursively compare the target's definition. Until
+[#2019](https://github.com/NVIDIA/aicr/issues/2019) resolves this limitation,
+changes to those definitions require manual compatibility review because they
+can affect facade consumers without failing the gate.
+
 | Facade symbol | Translates to/from | Notes |
 |---|---|---|
 | `aicr.Snapshot` | `pkg/snapshotter.Snapshot` | **Facade-owned struct**. Public fields are identifying metadata; full measurement payload is preserved in an unexported field for round-trip through `ValidateState`. Use `aicr.WrapSnapshot` to lift a `*snapshotter.Snapshot` loaded externally. |
