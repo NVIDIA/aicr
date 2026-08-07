@@ -20,12 +20,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestNvidiaSMICoverageExtra(t *testing.T) {
@@ -326,5 +331,135 @@ func TestPartitionGpuNodes_ContextCanceled(t *testing.T) {
 	})
 	if !strings.Contains(err.Error(), "canceled while partitioning GPU nodes") {
 		t.Errorf("partitionGpuNodes() error = %v, want cancellation error", err)
+	}
+}
+
+// TestCheckNvidiaSMI_NoGpuNodesApplicability applies the #2122 applicability
+// contract to the "no GPU nodes found" exit path. gpu-operator supplies the GPU
+// nodes this check verifies, so when the resolved recipe DECLARES it a cluster
+// with zero GPU nodes is a declared-but-absent prerequisite that must fail
+// closed — a GPU-less cluster must not PASS conformance by masquerading absence
+// as an inapplicable Skip. A recipe that omits gpu-operator, disables it, or
+// carries no ComponentRefs (the standalone #1327 shape) keeps the genuine
+// inapplicability Skip.
+func TestCheckNvidiaSMI_NoGpuNodesApplicability(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		refs     []recipe.ComponentRef
+		wantSkip bool
+		wantSub  string
+	}{
+		{
+			name:     "gpu-operator declared, zero GPU nodes fails closed",
+			refs:     []recipe.ComponentRef{{Name: "gpu-operator"}},
+			wantSkip: false,
+			wantSub:  "recipe declares gpu-operator but the cluster has no GPU nodes",
+		},
+		{
+			name:     "no recipe context (standalone #1327) skips",
+			refs:     nil,
+			wantSkip: true,
+			wantSub:  "no GPU nodes found in the cluster",
+		},
+		{
+			name:     "unrelated component declared skips",
+			refs:     []recipe.ComponentRef{{Name: "kai-scheduler"}},
+			wantSkip: true,
+			wantSub:  "no GPU nodes found in the cluster",
+		},
+		{
+			name: "gpu-operator declared but disabled skips",
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Overrides: map[string]any{"enabled": false}},
+			},
+			wantSkip: true,
+			wantSub:  "no GPU nodes found in the cluster",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t, []runtime.Object{}, nil, tt.refs)
+			err := checkNvidiaSMI(ctx)
+
+			if got := validators.IsSkip(err); got != tt.wantSkip {
+				t.Fatalf("checkNvidiaSMI() IsSkip = %v (err=%v), want %v", got, err, tt.wantSkip)
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("checkNvidiaSMI() error = %v, want it to contain %q", err, tt.wantSub)
+			}
+			// The declared-but-absent conversion must be a blocking NotFound, not
+			// any other verdict that a report consumer might read as benign.
+			if !tt.wantSkip && !strings.Contains(err.Error(), "[NOT_FOUND]") {
+				t.Errorf("declared-but-absent must fail closed with NotFound, got %v", err)
+			}
+		})
+	}
+}
+
+// TestCheckNvidiaSMI_CordonedKeepsSkipEvenWhenDeclared proves the #2122 KEEP
+// decision for the all-cordoned path: the GPU-node prerequisite IS satisfied
+// (GPU nodes exist), so declaring gpu-operator must NOT convert the
+// scope-narrowing cordon Skip into a failure. Cordoning is an intentional
+// operator action, not an absent prerequisite or an infra probe error.
+func TestCheckNvidiaSMI_CordonedKeepsSkipEvenWhenDeclared(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		cordon(gpuNode("cordoned-1", 8, -1)),
+		cordon(gpuNode("cordoned-2", 8, -1)),
+	}, nil, []recipe.ComponentRef{{Name: "gpu-operator"}})
+
+	err := checkNvidiaSMI(ctx)
+	if !validators.IsSkip(err) {
+		t.Fatalf("checkNvidiaSMI() error = %v, want a skip (cordon narrows scope, never fails closed)", err)
+	}
+	if !strings.Contains(err.Error(), "all 2 GPU node(s) are cordoned") {
+		t.Errorf("checkNvidiaSMI() error = %v, want the cordon skip reason", err)
+	}
+}
+
+// TestCheckNvidiaSMI_BusyProbeAllErrorsFailClosed applies the #2122 contract to
+// the busy-probe path: when the GPU busy-probe ERRORS on every schedulable node
+// (nothing CONFIRMED busy), the probe proved no occupancy, so the check must
+// fail closed and preserve the probe's error class rather than skip — an
+// unreadable cluster (RBAC denial, timeout, transport failure) must not PASS
+// conformance by masquerading as "nodes busy".
+func TestCheckNvidiaSMI_BusyProbeAllErrorsFailClosed(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		gpuNode("gpu-1", 8, -1),
+	}, nil, nil)
+
+	// Force the busy-probe's pod List to fail on every node. helper.IsNodeGpuBusy
+	// returns (busy=true, err); the loop records it as a probe error, never as
+	// CONFIRMED occupancy, so confirmedBusy stays false and the all-errors branch
+	// fires.
+	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods",
+		func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: "pods"}, "", nil)
+		})
+
+	err := checkNvidiaSMI(ctx)
+	if validators.IsSkip(err) {
+		t.Fatalf("checkNvidiaSMI() = skip, want fail closed on an all-probe-error busy check")
+	}
+	if err == nil {
+		t.Fatal("checkNvidiaSMI() = nil, want a blocking error")
+	}
+	// Error class preserved: helper.IsNodeGpuBusy wraps the List failure as
+	// [INTERNAL] and PropagateOrWrap keeps that code; the probe's own message
+	// survives so operators see the underlying cause.
+	if !strings.Contains(err.Error(), "[INTERNAL]") {
+		t.Errorf("checkNvidiaSMI() error = %v, want the [INTERNAL] class preserved", err)
+	}
+	if !strings.Contains(err.Error(), "failed to list pods") {
+		t.Errorf("checkNvidiaSMI() error = %v, want the underlying probe cause", err)
 	}
 }

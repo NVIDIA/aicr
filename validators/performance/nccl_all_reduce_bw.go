@@ -81,15 +81,62 @@ func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) e
 	name := constraintNameForVariant(variant)
 	constraint, found := findPerformanceConstraint(ctx, name)
 	if !found {
+		// Genuine recipe-driven inapplicability: no run of this variant was
+		// requested. A standalone/no-recipe validator run (nil ValidationInput)
+		// also lands here — performanceConstraints returns nil, so found is
+		// false — which is the #1327 boundary: fail-closed only fires once the
+		// recipe actually declares the constraint (see classification below).
 		return validators.Skip(fmt.Sprintf("no %s constraint in recipe", name))
 	}
 
 	actual, passed, err := validateNcclAllReduceBw(ctx, constraint, variant)
+	return classifyNCCLAllReduceBWResult(name, constraint, actual, passed, err)
+}
+
+// classifyNCCLAllReduceBWResult turns the inner validateNcclAllReduceBw outcome
+// into a check verdict, applying the #2122 applicability contract to the
+// "skipped"-prefixed strings the inner function folds an inapplicable outcome
+// into (see the skipMsg* constants in nccl_all_reduce_bw_constraint.go). It is
+// pure apart from evidence written to stdout on the pass path, so the
+// fail-closed classification is unit-testable without a live cluster.
+//
+// Reaching this function means the recipe declared the nccl-all-reduce-bw*
+// performance constraint — a standalone/no-recipe run has no such constraint
+// and already returned Skip in the caller (the #1327 boundary), so every
+// classification below is evaluated in the "recipe declares the capability"
+// column of the applicability contract.
+func classifyNCCLAllReduceBWResult(name string, constraint recipe.Constraint, actual string, passed bool, err error) error {
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "NCCL All Reduce bandwidth check failed", err)
+		// Preserve a specific inner code (InvalidRequest / Timeout /
+		// Unauthorized / NotFound / ...) instead of flattening every inner
+		// failure to Internal; only an uncoded error falls back to Internal.
+		// The previous errors.Wrap(ErrCodeInternal, ...) force-set the code and
+		// masked, e.g., a preflight RBAC denial (Unauthorized) or the TrainJob
+		// admission timeout the inner function classifies deliberately.
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "NCCL All Reduce bandwidth check failed")
 	}
 
-	// The inner function returns "skipped - ..." when the check is not applicable.
+	// #2122 fail-closed: a DECLARED-but-unavailable prerequisite must BLOCK, not
+	// Skip. The recipe asked to benchmark the East-West fabric, which is
+	// meaningless below two GPU nodes; the inner check folds that into
+	// skipMsgNCCLFewNodes. Treating it as a Skip is the false-PASS this contract
+	// forbids — an under-provisioned or half-drained cluster would silently pass
+	// conformance. The GPU-node List already succeeded cleanly to reach this
+	// string (a Forbidden / timeout / transport failure returns via the err!=nil
+	// path above and never folds into a skip string), so the >=2-node
+	// prerequisite is cleanly ABSENT → ErrCodeNotFound, mirroring the
+	// clean-NotFound row of the capability contract.
+	if actual == skipMsgNCCLFewNodes {
+		return errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("recipe declares the %s NCCL benchmark but the cluster has fewer than 2 GPU nodes required for the East-West fabric test — provision at least 2 GPU nodes or remove the constraint", name))
+	}
+
+	// The remaining "skipped" reasons are functions of the recipe criteria alone
+	// (nil ValidationInput, an unsupported service+accelerator combination, or a
+	// benchmark profile that does not implement this variant). They are
+	// deterministic regardless of cluster state, so no broken or unauthorized
+	// cluster can turn them into a false pass — they are genuinely inapplicable
+	// and remain Skips.
 	if strings.HasPrefix(actual, "skipped") {
 		return validators.Skip(actual)
 	}

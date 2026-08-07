@@ -16,10 +16,12 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -53,7 +55,10 @@ func TestDetectPlatform(t *testing.T) {
 				Ctx:       context.Background(),
 				Clientset: client,
 			}
-			got := detectPlatform(vctx)
+			got, err := detectPlatform(vctx)
+			if err != nil {
+				t.Fatalf("detectPlatform() unexpected error: %v", err)
+			}
 			if got != tt.want {
 				t.Errorf("detectPlatform() = %q, want %q", got, tt.want)
 			}
@@ -62,14 +67,123 @@ func TestDetectPlatform(t *testing.T) {
 }
 
 func TestDetectPlatformNoNodes(t *testing.T) {
+	// A genuinely empty node list (Kind CI, KWOK) is legitimately unrecognized,
+	// not an infrastructure failure: ("", nil) so the caller can Skip.
 	client := k8sfake.NewClientset()
 	vctx := &validators.Context{
 		Ctx:       context.Background(),
 		Clientset: client,
 	}
-	got := detectPlatform(vctx)
+	got, err := detectPlatform(vctx)
+	if err != nil {
+		t.Fatalf("detectPlatform() unexpected error: %v", err)
+	}
 	if got != "" {
 		t.Errorf("detectPlatform() = %q, want empty string", got)
+	}
+}
+
+// TestDetectPlatformListError_FailsClosed proves the #2122 fix: a Nodes().List
+// error (RBAC denial, apiserver timeout, transport failure) must NOT be
+// flattened to "" (which the caller would turn into an inapplicable Skip and a
+// false PASS). It must fail closed with a classified pkg/errors code and never
+// a Skip. Each case fails against the pre-fix code, which returned ("") with no
+// error for any List failure.
+func TestDetectPlatformListError_FailsClosed(t *testing.T) {
+	gr := schema.GroupResource{Group: "", Resource: "nodes"}
+	tests := []struct {
+		name     string
+		listErr  error
+		wantCode errors.ErrorCode
+	}{
+		{
+			name:     "Forbidden → Unauthorized",
+			listErr:  k8serrors.NewForbidden(gr, "", fmt.Errorf("rbac denied")),
+			wantCode: errors.ErrCodeUnauthorized,
+		},
+		{
+			name:     "apiserver ServerTimeout → Timeout",
+			listErr:  k8serrors.NewServerTimeout(gr, "list", 1),
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name:     "context deadline → Timeout",
+			listErr:  context.DeadlineExceeded,
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name:     "ServiceUnavailable → Unavailable",
+			listErr:  k8serrors.NewServiceUnavailable("aggregated apiserver down"),
+			wantCode: errors.ErrCodeUnavailable,
+		},
+		{
+			// A NotFound on a *collection* List is an apiserver/aggregation-layer
+			// anomaly, never the clean absence of a single object — so it must
+			// block, not Skip. This case fails against a path that routes the List
+			// error through Capability.Require (which would Skip on NotFound for an
+			// undeclared capability); RequireList keeps it a blocking Internal.
+			name:     "collection NotFound → Internal (never Skip)",
+			listErr:  k8serrors.NewNotFound(gr, ""),
+			wantCode: errors.ErrCodeInternal,
+		},
+		{
+			name:     "generic error → Internal",
+			listErr:  stderrors.New("boom"),
+			wantCode: errors.ErrCodeInternal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := k8sfake.NewClientset()
+			client.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, tt.listErr
+			})
+			vctx := &validators.Context{
+				Ctx:       context.Background(),
+				Clientset: client,
+			}
+			got, err := detectPlatform(vctx)
+			if got != "" {
+				t.Errorf("detectPlatform() platform = %q, want empty on error", got)
+			}
+			if err == nil {
+				t.Fatal("detectPlatform() = nil error, want a blocking failure (#2122)")
+			}
+			if validators.IsSkip(err) {
+				t.Fatalf("detectPlatform() = %v, want a blocking failure but got a Skip — an infra error must never masquerade as inapplicable (#2122)", err)
+			}
+			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				t.Errorf("detectPlatform() code = %v, want %v", err, tt.wantCode)
+			}
+		})
+	}
+}
+
+// TestCheckPlatformAutoscalingListError_FailsClosed is the integration-level
+// #2122 guard: a node-list RBAC denial reaching the platform fallback must
+// block the gate, not fall through to the unrecognized-platform Skip.
+func TestCheckPlatformAutoscalingListError_FailsClosed(t *testing.T) {
+	client := k8sfake.NewClientset()
+	client.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, k8serrors.NewForbidden(
+			schema.GroupResource{Group: "", Resource: "nodes"}, "", fmt.Errorf("rbac denied"))
+	})
+	vctx := &validators.Context{
+		Ctx:       context.Background(),
+		Clientset: client,
+	}
+	err := checkPlatformAutoscaling(vctx)
+	if err == nil {
+		t.Fatal("checkPlatformAutoscaling() = nil, want a blocking failure (#2122)")
+	}
+	if validators.IsSkip(err) {
+		t.Fatalf("checkPlatformAutoscaling() = %v, want a blocking failure but got a Skip (#2122)", err)
+	}
+	if strings.Contains(err.Error(), "not recognized") {
+		t.Errorf("checkPlatformAutoscaling() masqueraded infra error as unrecognized-platform skip: %v", err)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeUnauthorized, "")) {
+		t.Errorf("checkPlatformAutoscaling() code = %v, want Unauthorized", err)
 	}
 }
 

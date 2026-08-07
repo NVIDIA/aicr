@@ -3326,10 +3326,19 @@ func TestRejectUnsupportedGPUTopology(t *testing.T) {
 func TestInferenceSkipMessagesHaveContractualPrefix(t *testing.T) {
 	for _, msg := range []string{
 		inferenceSkipMsgNoDynamoPlatform,
-		inferenceSkipMsgCRDNotInstalled,
 	} {
 		if !strings.HasPrefix(msg, "skipped") {
 			t.Fatalf("skip status %q is missing contractual 'skipped' prefix — inference_perf.go dispatches on it", msg)
 		}
+	}
+}
+
+// TestInferenceFailMsgCRDNotInstalledIsNotASkip guards the #2122 fail-closed
+// contract: the guard-C message must NOT carry the "skipped" prefix, or
+// inference_perf.go would misroute a fail-closed CRD-absent result as a Skip.
+func TestInferenceFailMsgCRDNotInstalledIsNotASkip(t *testing.T) {
+	if strings.HasPrefix(inferenceFailMsgCRDNotInstalled, "skipped") {
+		t.Fatalf("guard-C fail message %q must not carry the 'skipped' prefix — a declared dynamo-platform with a missing CRD must fail, not skip (#2122)",
+			inferenceFailMsgCRDNotInstalled)
 	}
 }

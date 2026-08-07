@@ -35,6 +35,15 @@ const (
 	gpuCheckSuccessMsg       = "GPU_CHECK_SUCCESS"
 	nvidiaSMILogContextLines = 20
 
+	// gpuOperatorComponent is the recipe componentRef name that supplies the GPU
+	// driver stack — and therefore the GPU nodes this check verifies. When the
+	// resolved recipe declares it, a cluster with zero GPU nodes is a
+	// declared-but-absent prerequisite (#2122), not benign inapplicability: a
+	// GPU-less cluster must BLOCK the gate rather than PASS by skipping. Only a
+	// recipe that does not declare gpu-operator (standalone runs carry no
+	// ComponentRefs, #1327) treats GPU absence as genuine inapplicability.
+	gpuOperatorComponent = "gpu-operator"
+
 	// skipReason* are the low-cardinality enum codes emitted via EmitExtra when
 	// the check skips. Unlike the human-readable RESULT/enumeration stdout lines
 	// (which the default redaction policy strips), these survive minimal
@@ -138,6 +147,19 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 
 	if len(allNodes) == 0 {
 		printLines(coverage.coverageLine(0))
+		// #2122 applicability gate. gpu-operator supplies the GPU nodes this check
+		// verifies. When the recipe DECLARES it, zero GPU nodes is a
+		// declared-but-absent prerequisite — fail closed so a GPU-less cluster
+		// cannot PASS conformance by masquerading absence as an inapplicable Skip.
+		// A recipe that does NOT declare gpu-operator (standalone #1327 runs carry
+		// no ComponentRefs) keeps the original Skip: GPU verification is genuinely
+		// out of scope. The coverageLine above satisfies the #1668 node-count
+		// disclosure on both exit paths.
+		if validators.RecipeDeclares(ctx, gpuOperatorComponent) {
+			return errors.New(errors.ErrCodeNotFound,
+				"recipe declares gpu-operator but the cluster has no GPU nodes to verify — "+
+					"check node provisioning, the GPU Operator rollout, or validator RBAC")
+		}
 		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNoGPUNodes))
 		return validators.Skip("no GPU nodes found in the cluster")
 	}
@@ -145,24 +167,35 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 	gpuNodes := coverage.schedulable
 	if len(gpuNodes) == 0 {
 		printLines(coverage.coverageLine(0))
-		// GPU nodes exist but all cordoned — a distinct, accurate code, never a
-		// false "no-gpu-nodes" in the signed evidence.
+		// #2122 KEEP: this is a genuine scope-narrowing Skip, not a masqueraded
+		// absence. The GPU-node prerequisite IS satisfied (GPU nodes exist); they
+		// are merely administratively cordoned (Spec.Unschedulable) — an
+		// intentional operator action, not an absent prerequisite or an infra
+		// probe error. There is nothing schedulable to verify, so Skip with a
+		// distinct, accurate code — never a false "no-gpu-nodes" in the signed
+		// evidence.
 		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNoSchedulableGPUNodes))
 		return validators.Skip(fmt.Sprintf(
 			"all %d GPU node(s) are cordoned; nothing to verify", len(coverage.cordoned)))
 	}
 
-	// Check if any nodes are busy
+	// Check if any nodes are busy.
 	// A probe error is treated as busy (fail-safe: don't run on a node we can't
 	// clear), but tracked separately from CONFIRMED occupancy so an all-errors
-	// skip is not signed as "nodes-busy".
+	// outcome is not signed as "nodes-busy" — and, per #2122, is not skipped at
+	// all. firstProbeErr preserves the probe's error class for the fail-closed
+	// path below.
 	var busyNodes []string
+	var firstProbeErr error
 	confirmedBusy := false
 	for _, node := range gpuNodes {
 		busy, busyErr := helper.IsNodeGpuBusy(ctx.Ctx, ctx.Clientset, node.Name)
 		if busyErr != nil {
 			slog.Warn("error checking busy status, treating as busy", "node", node.Name, "error", busyErr)
 			busyNodes = append(busyNodes, node.Name)
+			if firstProbeErr == nil {
+				firstProbeErr = busyErr
+			}
 			continue
 		}
 		if busy {
@@ -173,13 +206,20 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 
 	if len(busyNodes) > 0 {
 		printLines(coverage.coverageLine(0))
-		// Only sign nodes-busy when at least one node was CONFIRMED occupied; a
-		// skip driven solely by probe errors must not masquerade as occupancy in
-		// the signed evidence (the error is already logged above).
 		if confirmedBusy {
+			// At least one node was CONFIRMED occupied: a legitimate
+			// scope-narrowing Skip. Sign nodes-busy so the signed evidence records
+			// the occupancy. Probe errors on other nodes are already logged above.
 			emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNodesBusy))
+			return validators.Skip(fmt.Sprintf("GPU nodes busy with existing workloads: %v", busyNodes))
 		}
-		return validators.Skip(fmt.Sprintf("GPU nodes busy with existing workloads: %v", busyNodes))
+		// #2122 fail-closed: every "busy" node was actually a busy-probe ERROR —
+		// the probe proved occupancy on no node. An infra error (RBAC denial,
+		// timeout, transport failure) masquerading as a busy Skip would let an
+		// unreadable cluster PASS conformance. Block the gate and preserve the
+		// probe's error class instead of flattening it to a Skip.
+		return errors.PropagateOrWrap(firstProbeErr, errors.ErrCodeInternal,
+			"could not determine GPU node occupancy — the busy-probe failed on all schedulable GPU nodes")
 	}
 
 	fmt.Printf("All %d GPU node(s) available. Verifying...\n", len(gpuNodes))
