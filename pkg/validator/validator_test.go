@@ -304,6 +304,181 @@ func TestValidatePhaseNoCluster(t *testing.T) {
 	}
 }
 
+// validationWithChecks builds a ValidationInput declaring the given check
+// names per phase. Used by the preflight tests to exercise unmatched,
+// cross-phase, and duplicate declarations.
+func validationWithChecks(checksByPhase map[Phase][]string) *v1.ValidationInput {
+	vi := &v1.ValidationInput{}
+	for phase, checks := range checksByPhase {
+		vp := &v1.ValidationPhase{Checks: checks}
+		switch phase {
+		case PhaseDeployment:
+			vi.Config.Deployment = vp
+		case PhasePerformance:
+			vi.Config.Performance = vp
+		case PhaseConformance:
+			vi.Config.Conformance = vp
+		}
+	}
+	return vi
+}
+
+func TestPreflightDeclaredChecks(t *testing.T) {
+	cat := &catalog.ValidatorCatalog{
+		Validators: []catalog.ValidatorEntry{
+			{Name: "operator-health", Phase: "deployment"},
+			{Name: "expected-resources", Phase: "deployment"},
+			{Name: "nccl-all-reduce", Phase: "performance"},
+		},
+	}
+	v := New(WithVersion("1.0.0"))
+
+	tests := []struct {
+		name        string
+		phases      []Phase
+		checks      map[Phase][]string
+		wantErr     bool
+		wantSubstrs []string
+		notSubstrs  []string
+	}{
+		{
+			name:   "all matched",
+			phases: []Phase{PhaseDeployment},
+			checks: map[Phase][]string{PhaseDeployment: {"operator-health", "expected-resources"}},
+		},
+		{
+			name:        "typo unmatched anywhere",
+			phases:      []Phase{PhaseDeployment},
+			checks:      map[Phase][]string{PhaseDeployment: {"operator-health", "expected-resoures"}},
+			wantErr:     true,
+			wantSubstrs: []string{"expected-resoures", "matches no validator in the catalog"},
+		},
+		{
+			name:        "declared under wrong phase names the other phase",
+			phases:      []Phase{PhaseDeployment},
+			checks:      map[Phase][]string{PhaseDeployment: {"nccl-all-reduce"}},
+			wantErr:     true,
+			wantSubstrs: []string{"nccl-all-reduce", "found under phase: performance"},
+		},
+		{
+			name:        "mixed valid and invalid surfaces only the invalid",
+			phases:      []Phase{PhaseDeployment},
+			checks:      map[Phase][]string{PhaseDeployment: {"operator-health", "bogus-check"}},
+			wantErr:     true,
+			wantSubstrs: []string{"bogus-check"},
+			// The valid check must not be reported as a problem.
+			notSubstrs: []string{"operator-health"},
+		},
+		{
+			name:        "duplicate declaration",
+			phases:      []Phase{PhaseDeployment},
+			checks:      map[Phase][]string{PhaseDeployment: {"operator-health", "operator-health"}},
+			wantErr:     true,
+			wantSubstrs: []string{"operator-health", "more than once"},
+		},
+		{
+			name:   "aggregates offenders across all requested phases",
+			phases: []Phase{PhaseDeployment, PhasePerformance},
+			checks: map[Phase][]string{
+				PhaseDeployment:  {"typo-a"},
+				PhasePerformance: {"typo-b"},
+			},
+			wantErr:     true,
+			wantSubstrs: []string{"typo-a", "typo-b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vi := validationWithChecks(tt.checks)
+			err := v.preflightDeclaredChecks(cat, tt.phases, vi)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("preflightDeclaredChecks() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+			}
+			for _, sub := range tt.wantSubstrs {
+				if !strings.Contains(err.Error(), sub) {
+					t.Errorf("error %q missing expected substring %q", err.Error(), sub)
+				}
+			}
+			for _, sub := range tt.notSubstrs {
+				if strings.Contains(err.Error(), sub) {
+					t.Errorf("error %q unexpectedly contains %q", err.Error(), sub)
+				}
+			}
+		})
+	}
+}
+
+// TestPreflightDeclaredChecks_ExternalCatalogMissingCheck models an incomplete
+// external (--data) catalog: a recipe declares a check that the loaded catalog
+// does not supply. The preflight must fail closed rather than let the phase
+// filter down to zero tests and pass spuriously.
+func TestPreflightDeclaredChecks_ExternalCatalogMissingCheck(t *testing.T) {
+	externalCatalog := &catalog.ValidatorCatalog{
+		Validators: []catalog.ValidatorEntry{
+			{Name: "operator-health", Phase: "deployment"},
+			// A required gate the external catalog forgot to include.
+		},
+	}
+	v := New(WithVersion("1.0.0"))
+
+	vi := validationWithChecks(map[Phase][]string{
+		PhaseDeployment: {"operator-health", "expected-resources"},
+	})
+
+	err := v.preflightDeclaredChecks(externalCatalog, []Phase{PhaseDeployment}, vi)
+	if err == nil {
+		t.Fatal("preflightDeclaredChecks() = nil error, want fail-closed on missing external-catalog check")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+	if !strings.Contains(err.Error(), "expected-resources") {
+		t.Errorf("error %q missing the unmatched check name", err.Error())
+	}
+}
+
+// TestValidatePhaseNoClusterRejectsUnmatchedCheck proves the fail-closed gate
+// runs in --no-cluster mode through the real entry point: an unmatched check
+// must error, not report a spuriously passing skipped phase (issue #2121).
+func TestValidatePhaseNoClusterRejectsUnmatchedCheck(t *testing.T) {
+	v := New(WithVersion("1.0.0"), WithNoCluster(true))
+	vi := validationWithChecks(map[Phase][]string{
+		PhaseDeployment: {"this-check-does-not-exist"},
+	})
+
+	pr, err := v.ValidatePhase(context.Background(), PhaseDeployment, vi, nil)
+	if err == nil {
+		t.Fatalf("ValidatePhase(--no-cluster) = %+v, nil error; want fail-closed on unmatched check", pr)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+}
+
+// TestValidatePhasesNoClusterRejectsUnmatchedCheck is the plural-path twin: the
+// default client validate route (ValidatePhases) must also fail closed offline.
+func TestValidatePhasesNoClusterRejectsUnmatchedCheck(t *testing.T) {
+	v := New(WithVersion("1.0.0"), WithNoCluster(true))
+	vi := validationWithChecks(map[Phase][]string{
+		PhaseDeployment: {"this-check-does-not-exist"},
+	})
+
+	results, err := v.ValidatePhases(context.Background(), []Phase{PhaseDeployment}, vi, nil)
+	if err == nil {
+		t.Fatalf("ValidatePhases(--no-cluster) = %+v, nil error; want fail-closed on unmatched check", results)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+}
+
 func TestValidatePhaseRunsReadinessPreflight(t *testing.T) {
 	// The per-phase SDK entry point must enforce the same readiness gate as
 	// ValidatePhases: a caller running a single phase must not be able to

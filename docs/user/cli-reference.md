@@ -1003,6 +1003,8 @@ Validation can be run in different phases to validate different aspects of the d
 
 > **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs and exits 2 (`INVALID_REQUEST`). This gate always fails closed — `--fail-on-error=false` scopes to phase check results and does not downgrade a readiness failure.
 >
+> **Declared-check pre-flight:** Every check named under a phase's `checks` list must resolve to exactly one catalog validator in that phase. Before any Job is deployed, `validate` fails closed with exit 2 (`INVALID_REQUEST`) if a declared check matches no validator (a typo, or a check missing from the loaded `--data` catalog), exists only under a different phase, or is declared more than once — reporting every offender at once. This runs in `--no-cluster` mode too, and like readiness it is independent of `--fail-on-error`. It replaces the previous warn-and-continue behavior, which let a phase with only unresolved checks report `skipped` and exit `0`.
+>
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
 > **apiVersion gate:** Snapshots and catalog artifacts use `aicr.run/v1alpha2`;
@@ -1301,7 +1303,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 | Code | Description |
 |------|-------------|
 | `0` | All phases passed or were skipped (also returned under `--fail-on-error=false` even when phases report `failed`/`other`) |
-| `2` | Invalid input (bad flags, missing recipe), or a readiness pre-flight constraint not met — the readiness gate always fails closed here regardless of `--fail-on-error` |
+| `2` | Invalid input (bad flags, missing recipe), a readiness pre-flight constraint not met, or a declared check that does not resolve to exactly one catalog validator in its phase (unmatched, cross-phase, or duplicate) — these pre-flight gates always fail closed here regardless of `--fail-on-error` |
 | `5` | Timeout (validator section or context deadline exceeded) |
 | `8` | One or more phase checks reported `failed` or `other` (crash/OOM/deadline) — when `--fail-on-error` is set |
 

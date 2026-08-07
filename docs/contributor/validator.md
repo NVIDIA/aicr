@@ -44,6 +44,25 @@ spec:
           value: ">= 450"            # GB/s
 ```
 
+**Declared checks are resolved fail-closed.** Before the cluster is
+prepared or any Job runs, `Validator.preflightDeclaredChecks`
+(`pkg/validator/validator.go`) rejects the run with `ErrCodeInvalidRequest`
+if any declared check name does not resolve to exactly one catalog validator
+in its declared phase — a name matching nothing (typo or a check missing from
+the loaded, possibly `--data`, catalog), a name that exists only under a
+different phase (`nccl-all-reduce-bw` declared under `deployment`), or a name
+declared more than once in one phase's `checks` list. All offenders across
+every requested phase are aggregated into a single error. This closes the
+fail-open path where an all-unmatched phase silently filtered to zero tests →
+`skipped` → nonblocking, letting `aicr validate --fail-on-error` exit `0` on a
+recipe whose required gate the catalog cannot supply
+([#2121](https://github.com/NVIDIA/aicr/issues/2121)). The gate runs in
+`--no-cluster` mode too, so typos are caught in offline recipe validation.
+There is no opt-out: a declared name that resolves nowhere is always an
+authoring error. A check that is *legitimately* not applicable at runtime
+reports its own `skip` sentinel from inside the container — it is still
+declared and still resolves to a catalog entry.
+
 Top-level `constraints` — and any declared under
 `validation.readiness.constraints` — are evaluated as a **pre-flight
 gate** before phase checks run; other phases' `constraints` are

@@ -293,6 +293,76 @@ func TestUnmatchedChecks(t *testing.T) {
 	}
 }
 
+func TestDuplicateChecks(t *testing.T) {
+	tests := []struct {
+		name   string
+		phase  Phase
+		checks []string
+		want   []string
+	}{
+		{
+			name:   "no duplicates",
+			phase:  PhaseDeployment,
+			checks: []string{"operator-health", "expected-resources"},
+			want:   nil,
+		},
+		{
+			name:   "single duplicate reported once",
+			phase:  PhaseDeployment,
+			checks: []string{"operator-health", "operator-health"},
+			want:   []string{"operator-health"},
+		},
+		{
+			name:   "triple occurrence reported once",
+			phase:  PhasePerformance,
+			checks: []string{"nccl", "nccl", "nccl"},
+			want:   []string{"nccl"},
+		},
+		{
+			name:   "multiple distinct duplicates in declaration order",
+			phase:  PhaseConformance,
+			checks: []string{"a", "b", "a", "c", "b"},
+			want:   []string{"a", "b"},
+		},
+		{
+			name:   "empty checks",
+			phase:  PhaseDeployment,
+			checks: nil,
+			want:   nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vi := &ValidationInput{}
+			switch tt.phase {
+			case PhaseDeployment:
+				vi.Config.Deployment = &ValidationPhase{Checks: tt.checks}
+			case PhasePerformance:
+				vi.Config.Performance = &ValidationPhase{Checks: tt.checks}
+			case PhaseConformance:
+				vi.Config.Conformance = &ValidationPhase{Checks: tt.checks}
+			}
+
+			got := DuplicateChecks(tt.phase, vi)
+			if len(got) != len(tt.want) {
+				t.Fatalf("DuplicateChecks() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("DuplicateChecks()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestDuplicateChecks_NilValidationInput(t *testing.T) {
+	if got := DuplicateChecks(PhaseDeployment, nil); got != nil {
+		t.Errorf("DuplicateChecks(nil) = %v, want nil", got)
+	}
+}
+
 func TestUnmatchedChecks_NilReceiverAndNoChecks(t *testing.T) {
 	var nilCat *ValidatorCatalog
 	if got := nilCat.UnmatchedChecks(PhaseDeployment, &ValidationInput{}); got != nil {

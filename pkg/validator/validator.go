@@ -242,6 +242,14 @@ func (v *Validator) ValidatePhases(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
 	}
 
+	// Fail closed on unmatched, cross-phase, or duplicate declared checks
+	// before preparing the cluster or running any Job. Runs for the normalized
+	// phase set and in --no-cluster mode too, so an unresolved required gate
+	// cannot masquerade as a skipped (spuriously passing) phase (issue #2121).
+	if err = v.preflightDeclaredChecks(cat, phases, validationInput); err != nil {
+		return nil, err
+	}
+
 	// --no-cluster: report all as skipped, no K8s calls
 	if v.NoCluster {
 		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
@@ -336,10 +344,15 @@ func (v *Validator) ValidatePhase(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
 	}
 
+	// Fail closed on unmatched, cross-phase, or duplicate declared checks
+	// before the no-cluster short-circuit and before any cluster preparation,
+	// matching ValidatePhases: a per-phase caller must not be able to skip an
+	// unresolved required gate into a spuriously passing run (issue #2121).
+	if err = v.preflightDeclaredChecks(cat, []Phase{phase}, validationInput); err != nil {
+		return nil, err
+	}
+
 	if v.NoCluster {
-		// Warn on unmatched check names even in no-cluster mode so typos are
-		// caught during offline recipe validation, not just live runs.
-		warnUnmatchedChecks(cat, phase, validationInput)
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
 	}
 
@@ -353,21 +366,56 @@ func (v *Validator) ValidatePhase(
 	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
 }
 
-// warnUnmatchedChecks emits a structured warning for every declared check name
-// that matched no catalog entry in its phase. A name that exists under a
-// different phase is called out as a likely misplacement; anything else is a
-// probable typo or a check missing from the loaded (possibly --data) catalog.
-// Advisory only — it never fails the run.
-func warnUnmatchedChecks(cat *catalog.ValidatorCatalog, phase Phase, validationInput *v1.ValidationInput) {
-	for _, u := range cat.UnmatchedChecks(phase, validationInput) {
-		if u.OtherPhase != "" {
-			slog.Warn("declared check matches no validator in this phase; it exists under a different phase",
-				"check", u.Name, "phase", u.Phase, "foundInPhase", u.OtherPhase)
-			continue
+// preflightDeclaredChecks fails closed when any declared check name does not
+// resolve to exactly one catalog entry in its declared phase. It aggregates
+// three defects across every requested phase into a single error so mixed
+// valid/invalid lists surface every problem in one pass:
+//
+//   - unmatched: a name matching no validator in the catalog at all (typo, a
+//     check missing from an incomplete external --data catalog, or a missing
+//     embedded validator);
+//   - cross-phase: a name that exists but under a different phase (a
+//     misplacement, e.g. a performance check declared under deployment);
+//   - duplicate: a name declared more than once in one phase's checks list.
+//
+// This runs BEFORE the cluster is prepared or any Job is deployed, in both
+// live and --no-cluster modes. Without it an all-unmatched phase silently
+// filters down to zero tests → StatusSkipped → nonblocking, so
+// `aicr validate --fail-on-error` exits 0 on a recipe that names a required
+// gate the catalog cannot supply (issue #2121). Returns nil when every
+// declared check for every requested phase resolves exactly once.
+func (v *Validator) preflightDeclaredChecks(
+	cat *catalog.ValidatorCatalog,
+	phases []Phase,
+	validationInput *v1.ValidationInput,
+) error {
+
+	var problems []string
+	for _, phase := range phases {
+		for _, u := range cat.UnmatchedChecks(phase, validationInput) {
+			if u.OtherPhase != "" {
+				problems = append(problems, fmt.Sprintf(
+					"declared check %q in phase %s matches no validator in that phase (found under phase: %s)",
+					u.Name, u.Phase, u.OtherPhase))
+				continue
+			}
+			problems = append(problems, fmt.Sprintf(
+				"declared check %q in phase %s matches no validator in the catalog",
+				u.Name, u.Phase))
 		}
-		slog.Warn("declared check matches no validator in the catalog; it will not run",
-			"check", u.Name, "phase", u.Phase)
+		for _, name := range v1.DuplicateChecks(phase, validationInput) {
+			problems = append(problems, fmt.Sprintf(
+				"declared check %q is declared more than once in phase %s", name, phase))
+		}
 	}
+
+	if len(problems) == 0 {
+		return nil
+	}
+
+	return errors.New(errors.ErrCodeInvalidRequest,
+		"validation declares checks that do not match the validator catalog:\n  - "+
+			strings.Join(problems, "\n  - "))
 }
 
 // runPhase executes all validators for a single phase sequentially.
@@ -391,11 +439,10 @@ func (v *Validator) runPhase(
 	slog.Info("running validation phase", "phase", phase,
 		"catalog", len(allEntries), "selected", len(entries))
 
-	// Surface declared check names that matched no catalog entry for this
-	// phase. Silently dropping them lets a typo'd or misplaced check name
-	// (e.g. a performance check declared under deployment) produce an empty,
-	// spuriously-passing phase — the fail-open direction for a gate.
-	warnUnmatchedChecks(cat, phase, validationInput)
+	// Note: unmatched, cross-phase, and duplicate declared checks are rejected
+	// up front by preflightDeclaredChecks (in ValidatePhase/ValidatePhases)
+	// before this phase ever runs, so by here every declared check for the
+	// phase resolves to exactly one catalog entry.
 
 	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
 
