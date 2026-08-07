@@ -88,6 +88,20 @@ const FINDINGS_SCHEMA = {
   },
 }
 
+// Result contract for the dispatch half of the Codex lane. Tiny by design: the
+// orchestrator needs the job id (to log it and to build the wait prompt) and one line
+// of context — everything else about the job belongs to the wait agent.
+const CODEX_DISPATCH_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'dispatchNote'],
+  properties: {
+    status: { type: 'string', enum: ['ok', 'unavailable'] },
+    jobId: { type: 'string', description: 'the dispatched background job id (the replacement job\'s id when the retry-once rule fired) — REQUIRED when status is "ok"' },
+    dispatchNote: { type: 'string', description: 'one short line for the progress log (dispatch time, whether the retry fired); on unavailable, the broker error text' },
+  },
+}
+
 const EVAL_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -192,14 +206,40 @@ Context rules (IMPORTANT — the Codex broker reproducibly crashes mid-generatio
 - Do NOT read CLAUDE.md.
 - Before reporting a missing path/key/field/API, confirm absence at the pinned commit with a targeted check, not a full-file read.`
 
+// The Codex round-1 lane is deliberately TWO agents — dispatch, then wait — with an
+// orchestrator log() between them (see codexLane below). A single opaque agent call
+// showed "running" from spawn, which cannot distinguish "remote job dispatched and
+// working" from "dispatch never happened"; a real run sat silent for 19 minutes with no
+// way to tell which. The old single protocol is split between two constants: dispatch-
+// side rules (the dispatch command and the fast-transient retry-once rule) live in
+// CODEX_DISPATCH; wait-side rules (status/result commands, continuation waits, the
+// classification ladder) live in CODEX_WAIT. Each rule lives in exactly one constant —
+// the cross-review round still dispatches and waits in ONE agent, so crossPrompt
+// composes both constants to recover the full protocol.
 const CODEX_DISPATCH = `
 Codex dispatch protocol (mandatory):
-1. comp=$(ls -t ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | head -1)
-2. Dispatch the review as a BACKGROUND job (pass --background to codex-companion task) so it returns a job id immediately. NEVER run foreground: a foreground call hangs forever if the broker dies mid-turn.
+D1. comp=$(ls -t ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | head -1)
+D2. Dispatch the review as a BACKGROUND job (pass --background to codex-companion task) so it returns a job id immediately. NEVER run foreground: a foreground call hangs forever if the broker dies mid-turn.
    Pass --cwd "${repoPath}" on this call and on EVERY later status/result call. Companion state is keyed by the workspace root derived from the working directory, and each Bash call is a fresh shell that may start somewhere else — an unpinned lookup silently resolves to a different workspace and reports the job as unknown.
-3. Wait for it with the companion's own bounded wait — do NOT hand-roll a poll loop:
+D3. Watch the just-dispatched job BRIEFLY — only to catch a fast transient failure while a retry is still cheap, NOT to wait for the review, which takes many minutes and belongs to the wait protocol:
+     node "$comp" status <job-id> --cwd "${repoPath}" --wait --timeout-ms 90000 --poll-interval-ms 15000 --json
+   Run that Bash call with a timeout of 150000 ms. Read the JSON yourself: the job state is at .job.status (NOT a top-level "status" field). .waitTimedOut true with the job still "queued" or "running" is the HEALTHY outcome here — the job survived its launch window; stop watching. A "No job found" lookup miss on this call is NOT evidence the job died either: treat the job as live and stop watching (the pinned-recheck rule belongs to the wait protocol; do not run it here). When this prompt also carries the wait protocol, proceed to it after the watch; when it does not, dispatch is your whole job — report the job id and stop.
+D4. Retry ONLY a failure that is demonstrably both fast and transient. All three conditions must hold:
+   a. .job.status is "failed" — NOT "cancelled". The companion emits "cancelled" only for explicit cancellation, so retrying it restarts work something or someone deliberately stopped.
+   b. .waitTimedOut is false AND the job died in UNDER 60 SECONDS — compute elapsed from the job's own timestamps, not from the absence of a timeout. Use the number, not a judgment call: the two observed cases sit far apart (an upstream capacity rejection landed at ~10s, a genuine timeout at 10m19s), and leaving "quickly" undefined is how a one-retry budget turns into retry-whenever-it-feels-right. A job that fails at 8:59 also satisfies .waitTimedOut == false while having consumed nearly the whole window; that is not a transient blip and retrying it costs another full window.
+   c. The error text names a known-retryable cause: an upstream capacity rejection ("Selected model is at capacity"), a broker startup error, or a transient dispatch fault. An unrecognised error is not assumed retryable.
+   All three true → dispatch ONE new background job per step D2 and watch it once per step D3; the new job id supersedes the original everywhere a job id is used from here on. If the second attempt also fails inside its watch window, the dispatch is unavailable — report BOTH observed .job.status values and the broker error text.
+   Anything else — "cancelled", a late failure, or an unrecognised error — is a deliberate stop or an unexplained failure. Do NOT retry; report the dispatch unavailable with what you observed.
+   Retry budget is exactly one, and only when a, b and c all hold. Never loop. Every retry decision is made HERE, inside the dispatch watch window, and the wait protocol never dispatches regardless. (A launch-window lookup miss can defer first observation of an under-60s death into the wait; that rare retry opportunity is deliberately forfeited rather than giving the wait dispatch authority.)
+Every Codex task you dispatch must carry the execution rules verbatim in its own prompt — Codex runs in its own shell and does not inherit this one's constraints. That includes the shell contract stated elsewhere in this prompt: it arrives via NO_EXECUTION, which every prompt builder composes exactly once, so it is deliberately not repeated here.
+Sandbox: the review itself runs sandboxed. The one known exception is the companion's own job log under ~/.claude/plugins/data, which is sandbox-denied — if dispatch fails on that write, bypass for that call only. Never bypass for anything else, and never for a call that performs a Git operation, mutates the working copy, or writes to GitHub. Reading a path is not the boundary; acting on it is.`
+
+const CODEX_WAIT = `
+Codex wait protocol (mandatory). The job this protocol waits on is ALREADY dispatched; waiting, classification and translation are all that happens here — dispatching, and the one permitted retry, belong to the dispatch protocol, never to this one.
+W1. comp=$(ls -t ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | head -1)
+W2. Wait for it with the companion's own bounded wait — do NOT hand-roll a poll loop:
      node "$comp" status <job-id> --cwd "${repoPath}" --wait --timeout-ms 540000 --poll-interval-ms 30000 --json
-   Run that Bash call with a timeout of 600000 ms. The inner wait is deliberately 60s SHORTER than the outer cap: the two must not be equal, or Bash can kill the command before it prints its JSON, leaving you with no .waitTimedOut to classify on — and an unclassifiable kill is the one case step 5 must never guess at, since retrying a genuine timeout doubles the wall clock for nothing.
+   Run that Bash call with a timeout of 600000 ms. The inner wait is deliberately 60s SHORTER than the outer cap: the two must not be equal, or Bash can kill the command before it prints its JSON, leaving you with no .waitTimedOut to classify on — and an unclassifiable kill is the one case the classification below must never guess at, since retrying a genuine timeout doubles the wall clock for nothing.
    Read the returned JSON yourself. The job state is at .job.status (NOT a top-level "status" field), and .waitTimedOut is true if the inner deadline expired while the job was still queued/running.
    Absent JSON has TWO causes and they are not interchangeable — distinguish them before classifying:
      - Exit status 1 with EMPTY stdout and "No job found" on stderr (measured on companion v1.0.2; the message goes to stderr even with --json, so capture both streams before deciding): this is a LOOKUP MISS. It is NOT evidence the job died — it may still be running. Never classify a lookup miss as exhausted budget; doing so abandons a live required lane. Note the exit status is a reliable discriminator here, so read it directly rather than inferring from output — and do not read it through a pipe, where $? is the last stage's status, not the companion's.
@@ -208,22 +248,14 @@ Codex dispatch protocol (mandatory):
          - A pinned lookup can miss TRANSIENTLY. In companion v1.0.2, saveState writes state.json with a plain fs.writeFileSync (truncate-then-write, no temp-file-and-rename), and loadState wraps JSON.parse in a bare catch that returns the DEFAULT state — whose jobs list is empty. A read landing inside that write window therefore yields a well-formed "No job found" rather than an error, and the background worker is updating that file precisely while the status call runs. So an identical repeat is NOT guaranteed to return an identical answer; a brief pause before the recheck makes it likelier to clear.
        Once a pinned recheck has also missed, return status:"unavailable" saying the job could not be located, and stop. Do NOT re-dispatch the task: the original may still be running, and a second dispatch doubles the work while the first result becomes unreachable. Do NOT call it exhausted budget either; the distinction belongs in statusNote.
      - No output at all because your Bash call hit its 600000 ms timeout: that IS exhausted budget. Do not retry; say so in statusNote — and still set the structured jobId field to the job id you were waiting on (you know it before the call is killed; without it the orchestrator cannot resume the still-running job).
-4. .job.status == "completed" → fetch the payload with: node "$comp" result <job-id> --cwd "${repoPath}" --json  (NOT status, which returns only a job summary).
-5. Otherwise classify, and retry ONLY a failure that is demonstrably both fast and transient. All three conditions must hold:
-   a. .job.status is "failed" — NOT "cancelled". The companion emits "cancelled" only for explicit cancellation, so retrying it restarts work something or someone deliberately stopped.
-   b. .waitTimedOut is false AND the job died in UNDER 60 SECONDS — compute elapsed from the job's own timestamps, not from the absence of a timeout. Use the number, not a judgment call: the two observed cases sit far apart (an upstream capacity rejection landed at ~10s, a genuine timeout at 10m19s), and leaving "quickly" undefined is how a one-retry budget turns into retry-whenever-it-feels-right. A job that fails at 8:59 also satisfies .waitTimedOut == false while having consumed nearly the whole window; that is not a transient blip and retrying it costs another full window.
-   c. The error text names a known-retryable cause: an upstream capacity rejection ("Selected model is at capacity"), a broker startup error, or a transient dispatch fault. An unrecognised error is not assumed retryable.
-   All three true → dispatch ONE new background job per step 2 and wait once more per step 3. If the second attempt also fails, return status:"unavailable" with BOTH observed .job.status values and the broker error text in statusNote.
-   Anything else — "cancelled", a late failure, or an unrecognised error — is a deliberate stop or an unexplained failure. Do NOT retry. Return status:"unavailable" with .job.status, .waitTimedOut, elapsed time, and whether the job log showed active progress.
-   Retry budget is exactly one, and only when a, b and c all hold. Never loop.
-6. .waitTimedOut true is DIFFERENT from all of the above, and is NOT the end of the lane. It means only that the inner wait elapsed — it says nothing about the job, which is dispatched in the background and outlives the Bash call that was waiting on it. Re-read .job.status:
-   - Still "queued" or "running" → the job is ALIVE and needs more TIME, not another attempt. Wait once more on the SAME job id, in a NEW Bash call, exactly as in step 3 (same 540000 ms inner wait, same 600000 ms outer timeout). This is a CONTINUATION, not a retry: no second job is dispatched, no work is duplicated, and the first job's result stays the one you collect. The budget is not discretionary: a live job gets ALL five waits before the lane may return unavailable — returning early discards a required lane over a job that merely has not finished (observed live: a lane quit after two of its granted waits and the abandoned job completed successfully soon after). Then classify each further wait's outcome by these same rules — except that this continuation is granted FOUR times (five waits total), so a FIFTH .waitTimedOut IS exhausted budget: return status:"unavailable" saying the job was still running after all five waits, set the structured jobId field to the job id (REQUIRED — prose alone is not machine-recoverable; the orchestrator resumes the run from that field), and mention the job's last observed state in statusNote. The result stays fetchable later with: node "$comp" result <job-id> --cwd "${repoPath}" --json
-   - Any terminal state ("completed", "failed", "cancelled") → it finished while you were between calls. Handle it under step 4 or step 5; do not treat the earlier timeout as the verdict.
+W3. .job.status == "completed" → fetch the payload with: node "$comp" result <job-id> --cwd "${repoPath}" --json  (NOT status, which returns only a job summary).
+W4. .job.status "failed" or "cancelled" → the lane ends without a payload. NEVER dispatch a replacement from this protocol: retry authority lives with the dispatch protocol's brief launch watch, where the one permitted fast-transient retry already fired or was ruled out — a failure that only becomes visible during this wait is not fast. Return status:"unavailable" with .job.status, .waitTimedOut, elapsed time computed from the job's own timestamps, and whether the job log showed active progress.
+W5. .waitTimedOut true is DIFFERENT from all of the above, and is NOT the end of the lane. It means only that the inner wait elapsed — it says nothing about the job, which is dispatched in the background and outlives the Bash call that was waiting on it. Re-read .job.status:
+   - Still "queued" or "running" → the job is ALIVE and needs more TIME, not another attempt. Wait once more on the SAME job id, in a NEW Bash call, exactly as in step W2 (same 540000 ms inner wait, same 600000 ms outer timeout). This is a CONTINUATION, not a retry: no second job is dispatched, no work is duplicated, and the first job's result stays the one you collect. The budget is not discretionary: a live job gets ALL five waits before the lane may return unavailable — returning early discards a required lane over a job that merely has not finished (observed live: a lane quit after two of its granted waits and the abandoned job completed successfully soon after). Then classify each further wait's outcome by these same rules — except that this continuation is granted FOUR times (five waits total), so a FIFTH .waitTimedOut IS exhausted budget: return status:"unavailable" saying the job was still running after all five waits, set the structured jobId field to the job id (REQUIRED — prose alone is not machine-recoverable; the orchestrator resumes the run from that field), and mention the job's last observed state in statusNote. The result stays fetchable later with: node "$comp" result <job-id> --cwd "${repoPath}" --json
+   - Any terminal state ("completed", "failed", "cancelled") → it finished while you were between calls. Handle it under step W3 or W4; do not treat the earlier timeout as the verdict.
    Why this exists: measured on a real run, the lane hit .waitTimedOut at the full 540000 ms while the job was demonstrably mid-work (its log showed pinned git greps completing, exit 0), the job was STILL "running" long after the review was abandoned, and its result remained retrievable. Reporting "exhausted budget" there discarded a required lane, and with it the whole review, over a job that simply had not finished yet. Re-dispatching would have been wrong — waiting again was not.
    Never substitute your own review for an unavailable Codex lane in either case — an unavailable lane is an expected outcome the workflow handles.
-   The 600000 ms outer ceiling is not tunable: the wait runs inside a Bash call, and the Bash tool silently kills any foreground command at that point. The inner wait is 540000 ms precisely so it finishes and prints its JSON before that happens — do not raise it to match. Step 6 is how a job legitimately exceeds ten minutes: not a longer wait, but a second one across a fresh call, which is the "polling across several calls" the ceiling leaves open. Total budget for a live job is therefore five waits, about forty-five minutes. It was three waits (about twenty-seven minutes), sized above the then-measured maximum of recent review jobs (~19 min) — until a real review job on a +1951/−153 PR ran ~53 minutes and outlasted even that, so a healthy long job was misclassified as exhausted budget. Five waits covers most such jobs, and exhaustion now hands back a resumable job id (the structured jobId field above) instead of losing the work, so even a job that outlasts all five waits stays recoverable.
-Every Codex task you dispatch must carry the execution rules verbatim in its own prompt — Codex runs in its own shell and does not inherit this one's constraints. That includes the shell contract stated elsewhere in this prompt: it arrives via NO_EXECUTION, which every prompt builder composes exactly once, so it is deliberately not repeated here.
-Sandbox: the review itself runs sandboxed. The one known exception is the companion's own job log under ~/.claude/plugins/data, which is sandbox-denied — if dispatch fails on that write, bypass for that call only. Never bypass for anything else, and never for a call that performs a Git operation, mutates the working copy, or writes to GitHub. Reading a path is not the boundary; acting on it is.`
+   The 600000 ms outer ceiling is not tunable: the wait runs inside a Bash call, and the Bash tool silently kills any foreground command at that point. The inner wait is 540000 ms precisely so it finishes and prints its JSON before that happens — do not raise it to match. Step W5 is how a job legitimately exceeds ten minutes: not a longer wait, but a second one across a fresh call, which is the "polling across several calls" the ceiling leaves open. Total budget for a live job is therefore five waits, about forty-five minutes. It was three waits (about twenty-seven minutes), sized above the then-measured maximum of recent review jobs (~19 min) — until a real review job on a +1951/−153 PR ran ~53 minutes and outlasted even that, so a healthy long job was misclassified as exhausted budget. Five waits covers most such jobs, and exhaustion now hands back a resumable job id (the structured jobId field above) instead of losing the work, so even a job that outlasts all five waits stays recoverable.`
 
 const REVIEW_FOCUS = {
   'code-change': `Review for bugs, regressions, broken consumers, security issues, and instruction/config compliance.
@@ -277,20 +309,14 @@ ${NO_EXECUTION}
 ${OUTPUT_RULES}`
 }
 
-function codexReviewPrompt() {
-  // Resume path: a previous run of this exact review already dispatched a Codex job and
-  // exhausted its wait budget; the orchestrator passes that job id back so this lane
-  // collects it instead of dispatching a duplicate. ONLY this prompt may vary with
-  // codexResumeJobId — resume caching is keyed on (prompt, opts), so the claude,
-  // coderabbit and integration prompts must stay byte-identical for their cached
-  // round-1 results to replay.
-  const resumeNote = typeof codexResumeJobId === 'string' && codexResumeJobId.trim()
-    ? `RESUME NOTE (read before the dispatch protocol below): a Codex job for this exact review was already dispatched on a previous run and MUST NOT be dispatched again. The job id is ${codexResumeJobId} (workspace ${repoPath}). Skip dispatch (step 2) entirely. First check the job's state: node "$comp" status "${codexResumeJobId}" --cwd "${repoPath}" --json. If it is terminal ("completed"), fetch the payload with the result command (step 4); if "failed"/"cancelled", classify under step 5. If it is still queued or running, wait on THIS job id per the continuation-wait protocol (steps 3 and 6). All other rules — classification, the lookup-miss recheck, no re-dispatch, output translation — apply unchanged.
-`
-    : ''
-  return `You drive the Codex reviewer in a multi-reviewer cross-review.
+// Round 1 Codex lane, part 1 of 2: dispatch only. Small prompt, small structured
+// result — its whole job is to compose the lean Codex task and start the background
+// job, so the orchestrator can log the job id the moment dispatch succeeds instead of
+// the lane staying opaque until the review finishes.
+function codexDispatchPrompt() {
+  return `You dispatch the Codex reviewer's background job in a multi-reviewer cross-review. Dispatch is your WHOLE job: a separate wait agent collects and translates the result. Do NOT wait for the review to finish and do NOT fetch its result — after the brief launch watch in the dispatch protocol, report the job id and stop.
 ${header}
-${resumeNote}${CODEX_DISPATCH}
+${CODEX_DISPATCH}
 
 ${NO_EXECUTION}
 
@@ -298,7 +324,73 @@ Compose a LEAN Codex task prompt containing the saved-diff path, these review in
 ${REVIEW_FOCUS[prType] || REVIEW_FOCUS['code-change']}
 ${CODEX_LEAN}
 ${OUTPUT_RULES}
-Translate Codex's raw output into the structured result yourself.`
+
+Return status:"ok" with jobId — the background job id you dispatched (the second job's id if the retry-once rule fired) — and a one-line dispatchNote (dispatch time, whether the retry fired). If dispatch failed and the retry rule does not permit another attempt, return status:"unavailable" with the broker error text in dispatchNote and no jobId.`
+}
+
+// Round 1 Codex lane, part 2 of 2: wait and translate. A pure function of the job id
+// (plus the run's fixed args): a resumed run building this prompt for codexResumeJobId
+// produces byte-identical text to a fresh run that dispatched the same id, so
+// agent-result caching and resumeFromRunId behave identically on either path.
+function codexWaitPrompt(jobId) {
+  return `You collect the Codex reviewer's result in a multi-reviewer cross-review. A background Codex job carrying the full review instructions was already dispatched for this exact review; NEVER dispatch a job yourself — your job is to wait for it, classify the outcome, and translate its result.
+${header}
+The job id is ${jobId} (workspace ${repoPath}). Every companion status/result command below runs against this job id.
+${CODEX_WAIT}
+
+${NO_EXECUTION}
+
+Translate Codex's raw output into the structured result yourself.
+${OUTPUT_RULES}`
+}
+
+// The Codex round-1 lane as a two-step pipeline inside the parallel round:
+// dispatch agent → log() → wait agent. The log line between the two is the point of
+// the split — it appears in the workflow progress view the moment the remote job
+// exists, so a watcher can tell "dispatched and working" from "dispatch never
+// happened" instead of staring at one opaque "running" lane.
+// Resume-cache property: agent results replay from a cache keyed on (prompt, opts)
+// under resumeFromRunId. The dispatch prompt is a pure function of this run's args, so
+// a resumed run replays the cached {jobId} instantly — no second dispatch — which
+// makes the wait prompt (a pure function of that job id) byte-identical to the
+// original run's: an interrupted run resumes into the SAME wait. The claude,
+// coderabbit and integration prompts must likewise stay byte-identical for their
+// cached round-1 results to replay.
+// With codexResumeJobId set (a previous RUN's wait budget was exhausted and the
+// orchestrator passed the live job id back), the dispatch agent is skipped entirely
+// and only the wait agent runs, on the id passed in.
+async function codexLane() {
+  let jobId = typeof codexResumeJobId === 'string' && codexResumeJobId.trim() ? codexResumeJobId.trim() : null
+  if (jobId) {
+    log(`Codex resume: waiting on existing job ${jobId}`)
+  } else {
+    const d = await agent(codexDispatchPrompt(), { label: 'review:codex-dispatch', phase: 'Review', schema: CODEX_DISPATCH_SCHEMA, agentType: AGENT_TYPE.codex })
+    if (!d || d.status !== 'ok') {
+      return { status: 'unavailable', statusNote: `Codex dispatch failed — ${d ? (d.dispatchNote || 'no dispatchNote returned') : 'dispatch agent returned no result'}`, findings: [], openQuestions: [], filesChecked: [] }
+    }
+    const jid = typeof d.jobId === 'string' ? d.jobId.trim() : ''
+    // Same fail-closed rule as the codexResumeJobId intake check, for the same reason:
+    // this id is interpolated into the wait prompt and pasted into shell commands.
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(jid)) {
+      return { status: 'unavailable', statusNote: `Codex dispatch returned ok without a usable job id (got ${JSON.stringify(d.jobId)}) — cannot hand the job to the wait agent`, findings: [], openQuestions: [], filesChecked: [] }
+    }
+    jobId = jid
+    const note = (d.dispatchNote || '').trim()
+    log(`Codex job ${jobId} dispatched — review running remotely${note ? ` (${note})` : ''}`)
+  }
+  const w = await agent(codexWaitPrompt(jobId), { label: 'review:codex', phase: 'Review', schema: FINDINGS_SCHEMA, agentType: AGENT_TYPE.codex })
+  // A dead or unavailable wait agent must not lose the live job id: attach it so
+  // incomplete() surfaces codexJobId and the run stays mechanically resumable.
+  // Deliberately unconditional — a W4 terminal classification gets a codexJobId too,
+  // even though that job is dead (a resume then just reconfirms unavailability).
+  // Losing a live id costs a whole review; a wasted resume costs minutes. SKILL.md's
+  // recovery bullet documents this asymmetry.
+  if (!w) return { status: 'unavailable', statusNote: `Codex wait agent returned no result for job ${jobId} — the job may still be live`, jobId, findings: [], openQuestions: [], filesChecked: [] }
+  // The orchestrator's jobId is the trusted recovery handle — override whatever the
+  // wait agent returned rather than keep it: a malformed or wrong agent-returned id
+  // would replace the handle and lose the live job on the next resume.
+  if (w.status !== 'ok') return { ...w, jobId }
+  return w
 }
 
 // The CodeRabbit CLI runs exactly once, in round 1; the cross-review round replays
@@ -645,7 +737,7 @@ function crossPrompt(k, items) {
   const list = items.map(findingBlock).join('\n\n')
   const perReviewer =
     k === 'codex'
-      ? `${CODEX_DISPATCH}\n${CODEX_LEAN}\nFor each candidate, have Codex read just the cited lines at the pinned commit (git -C "${repoPath}" show '${headSha}:<path>' | sed -n) before returning a verdict.${prType === 'code-change' ? '\nDuring the independent re-review apply the behavioral correctness checks: trace inputs through happy/error/edge paths; verify the scope of fallback/reset/retry logic; verify diagnostic metadata derives from real context; check multi-branch state consistency.' : ''}`
+      ? `${CODEX_DISPATCH}\n${CODEX_WAIT}\n${CODEX_LEAN}\nFor each candidate, have Codex read just the cited lines at the pinned commit (git -C "${repoPath}" show '${headSha}:<path>' | sed -n) before returning a verdict.${prType === 'code-change' ? '\nDuring the independent re-review apply the behavioral correctness checks: trace inputs through happy/error/edge paths; verify the scope of fallback/reset/retry logic; verify diagnostic metadata derives from real context; check multi-branch state consistency.' : ''}`
       : `Re-read the saved diff at ${diffPath} and search/read the repo at the pinned commit (not the mutable working copy):
 ${PINNED_READS}
 For "missing X" candidates, read the full existing file at the pinned commit to confirm absence.`
@@ -674,7 +766,9 @@ Evaluation rules:
 log(`Round 1: launching Claude Code, Codex, CodeRabbit + integration analysis for PR #${pr} (${prType})`)
 const [claudeR, codexR, rabbitR, integR] = await parallel([
   () => agent(claudeReviewPrompt(), { label: 'review:claude', phase: 'Review', schema: FINDINGS_SCHEMA, agentType: AGENT_TYPE.claude }),
-  () => agent(codexReviewPrompt(), { label: 'review:codex', phase: 'Review', schema: FINDINGS_SCHEMA, agentType: AGENT_TYPE.codex }),
+  // Two chained agents with a progress log between them, not one opaque call —
+  // the log line is the visible "started" signal. See codexLane above.
+  () => codexLane(),
   () => agent(coderabbitReviewPrompt(), { label: 'review:coderabbit', phase: 'Review', schema: FINDINGS_SCHEMA, agentType: AGENT_TYPE.coderabbit }),
   // general-purpose, not Explore: Explore reads excerpts to locate code and is
   // explicitly not a review/audit agent, which is exactly what this lane does.
