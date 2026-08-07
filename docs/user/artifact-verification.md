@@ -413,8 +413,13 @@ aicr verify ./my-bundle --format json
 aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json
 ```
 
-`aicr evidence verify` exits `0` when every check passes and `2` when the
-bundle is invalid or recorded validator results show failures. The JSON
+`aicr evidence verify` exits `0` when every check passes, `2` when the
+bundle is invalid or recorded validator results show failures, `5` when
+verification could not complete because the bundle was not readable (a dead
+mount or an unreachable registry), and `9` when the run was aborted by the
+operator. The last two are deliberately distinct process codes: nothing was
+proven about the bundle in either case, so a gate must not reject the artifact.
+Retry the `5` case; a `9` means someone stopped the run on purpose. The JSON
 output's `exit` field further distinguishes recorded phase failures (`1`) from
 an invalid bundle (`2`), so a shell consumer can branch on it. Write the JSON to
 a file and read the `exit` field from it rather than piping `aicr evidence
@@ -428,6 +433,8 @@ case "$(jq '.exit' result.json)" in
   0) echo "evidence valid" ;;
   1) echo "validator phases failed" ;;
   2) echo "bundle invalid" ;;
+  3) echo "no verdict reached (infrastructure fault or aborted) — do not reject" ;;
+  *) echo "unrecognized verdict — treat as a failure" ;;
 esac
 ```
 

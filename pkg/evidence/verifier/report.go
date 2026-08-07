@@ -206,6 +206,10 @@ func writeVerdict(b *strings.Builder, r *VerifyResult) {
 	case ExitInvalid:
 		b.WriteString("**Verdict:** bundle invalid — verification failed (exit 2)\n")
 		writeFailureCause(b, r.FailureCause)
+	case ExitIncomplete:
+		b.WriteString("**Verdict:** verification did not complete (exit 3) — no verdict was reached. " +
+			"This is NOT a statement about the bundle's validity.\n")
+		writeFailureCause(b, r.FailureCause)
 	}
 }
 

@@ -43,6 +43,14 @@ const (
 	ExitValidPassed        = 0
 	ExitValidPhaseFailures = 1
 	ExitInvalid            = 2
+
+	// ExitIncomplete reports that verification never reached a verdict: the
+	// bundle was not readable (dead NFS/FUSE mount, registry timeout) or the
+	// operator aborted the run. Distinct from a bundle that was read and found
+	// invalid — a CI gate that rejects a contribution on ExitInvalid must not
+	// fire on this, because nothing was proven about the bundle either way.
+	// FailureCause.Class separates the two reasons (transient vs canceled).
+	ExitIncomplete = 3
 )
 
 // VerifyOptions configures one Verify run.
@@ -116,6 +124,8 @@ const (
 	CauseSignature         = "signature"          // signature/cert/identity verification failed
 	CauseIntegrity         = "integrity"          // manifest hash-chain mismatch
 	CauseSchema            = "schema"             // predicate parse / schema / type error
+	CauseTransient         = "transient"          // storage/transport fault — bundle not readable, NOT invalid
+	CauseCanceled          = "canceled"           // operator aborted the run — no verdict reached
 	CauseUnknown           = "unknown"            // unclassified
 )
 
@@ -153,9 +163,10 @@ type VerifyResult struct {
 	// "all checks passed" or a false "invalid".
 	Pending bool `json:"pending,omitempty" yaml:"pending,omitempty"`
 
-	// FailureCause classifies why the bundle was rejected. Set only when
-	// Exit is ExitInvalid (2); nil for Exit 0 (valid, possibly pending) and
-	// Exit 1 (valid bundle with recorded phase failures), which are not
-	// bundle-invalid outcomes.
+	// FailureCause classifies why verification did not pass. Set when Exit is
+	// ExitInvalid (2) or ExitIncomplete (3); nil for Exit 0 (valid, possibly
+	// pending) and Exit 1 (valid bundle with recorded phase failures), neither
+	// of which is a failure. For Exit 3 the Class distinguishes an
+	// environmental fault (transient) from an operator abort (canceled).
 	FailureCause *FailureCause `json:"failureCause,omitempty" yaml:"failureCause,omitempty"`
 }

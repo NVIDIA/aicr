@@ -138,12 +138,12 @@ func TestSignExisting_RejectsIncompleteDescriptor(t *testing.T) {
 	}
 }
 
-// TestSignExisting_CanceledContextSurfacesTimeout proves SignExisting threads
+// TestSignExisting_CanceledContextSurfacesAbort proves SignExisting threads
 // the caller's context into the on-disk bundle read: with a valid signable
 // pointer and a real bundle on disk (so the read would otherwise succeed), an
-// already-canceled context fails closed with ErrCodeTimeout instead of blocking
+// already-canceled context fails closed with ErrCodeCanceled instead of blocking
 // on a potentially hung mount (issue #2054).
-func TestSignExisting_CanceledContextSurfacesTimeout(t *testing.T) {
+func TestSignExisting_CanceledContextSurfacesAbort(t *testing.T) {
 	dir := emitUnsignedBundle(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -156,8 +156,8 @@ func TestSignExisting_CanceledContextSurfacesTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
-		t.Errorf("expected ErrCodeTimeout, got %v", err)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+		t.Errorf("expected ErrCodeCanceled, got %v", err)
 	}
 }
 

@@ -122,7 +122,7 @@ func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
 
 	relocate := cmd.Bool(flagRelocate)
 
-	pointer, err := verifier.LoadAndValidatePointer(path)
+	pointer, err := verifier.LoadAndValidatePointerContext(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
 	// the nested path directly). Closing that gap (verify the signature before
 	// honoring a committed signer) is tracked repo-wide in #1535.
 	if relocate && pointer.Attestations[0].Signer != nil {
-		dest, rerr := attestation.RelocatePointerToCanonical(path, pointer)
+		dest, rerr := attestation.RelocatePointerToCanonicalContext(ctx, path, pointer)
 		if rerr != nil {
 			return rerr
 		}
@@ -210,7 +210,7 @@ func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
 	// canonical <source> path is now derivable. Relocate it home to satisfy
 	// the per-source contract gate.
 	if relocate {
-		dest, rerr := attestation.RelocatePointerToCanonical(path, pointer)
+		dest, rerr := attestation.RelocatePointerToCanonicalContext(ctx, path, pointer)
 		if rerr != nil {
 			// The bundle is already signed in the registry; only the local move
 			// failed. Surface that explicitly: PropagateOrWrap returns the inner

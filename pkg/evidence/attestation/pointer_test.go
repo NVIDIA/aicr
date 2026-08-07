@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	"context"
 	stderrors "errors"
 	"os"
 	"path/filepath"
@@ -235,8 +236,8 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 		if _, err := WritePointerFile(canonical, signed()); err != nil {
 			t.Fatalf("write canonical: %v", err)
 		}
-		if sameInode(flat, canonical) {
-			t.Fatal("precondition: flat and canonical should be distinct inodes")
+		if same, sErr := sameInode(context.Background(), flat, canonical); sErr != nil || same {
+			t.Fatalf("precondition: flat and canonical should be distinct inodes (same=%v err=%v)", same, sErr)
 		}
 		dest, err := RelocatePointerToCanonical(flat, signed())
 		if err != nil {
@@ -631,4 +632,60 @@ func TestBuildPointer_RecordsProfile(t *testing.T) {
 			t.Errorf("marshaled unprofiled pointer must omit profile field:\n%s", body)
 		}
 	})
+}
+
+// TestSameInode_AbsenceIsNotAFault guards the split introduced when sameInode
+// started surfacing storage faults: a *confirmed absence* must keep reporting
+// (false, nil). pointerAlreadyPlaced calls this on a destination that usually
+// does not exist yet, so turning ENOENT into an error would break every
+// first-time relocation.
+func TestSameInode_AbsenceIsNotAFault(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "pointer.yaml")
+	if err := os.WriteFile(existing, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "not-there.yaml")
+
+	tests := []struct {
+		name string
+		a, b string
+	}{
+		{"destination absent", existing, missing},
+		{"source absent", missing, existing},
+		{"both absent", missing, missing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			same, err := sameInode(context.Background(), tt.a, tt.b)
+			if err != nil {
+				t.Fatalf("absence reported as a fault: %v", err)
+			}
+			if same {
+				t.Error("absent path reported as the same inode")
+			}
+		})
+	}
+}
+
+// TestSameInode_IdentifiesHardLinks is the positive case, so the fault handling
+// above cannot be satisfied by a function that always answers false.
+func TestSameInode_IdentifiesHardLinks(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.yaml")
+	if err := os.WriteFile(a, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := filepath.Join(dir, "b.yaml")
+	if err := os.Link(a, b); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+
+	same, err := sameInode(context.Background(), a, b)
+	if err != nil {
+		t.Fatalf("sameInode: %v", err)
+	}
+	if !same {
+		t.Error("hard links to one inode reported as different files")
+	}
 }

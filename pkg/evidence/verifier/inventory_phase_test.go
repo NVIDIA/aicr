@@ -15,6 +15,7 @@
 package verifier
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,12 +30,12 @@ func TestCheckPhaseDigests_Match(t *testing.T) {
 	summary := summaryDirOf(t, buildTestBundle(t))
 	mat := &MaterializedBundle{BundleDir: summary}
 
-	pred, err := loadUnsignedPredicate(mat)
+	pred, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
 
-	rows, err := CheckPhaseDigests(mat, pred)
+	rows, err := CheckPhaseDigestsContext(context.Background(), mat, pred)
 	if err != nil {
 		t.Fatalf("CheckPhaseDigests = %v (rows %+v), want nil", err, rows)
 	}
@@ -47,7 +48,7 @@ func TestCheckPhaseDigests_TamperedReportFails(t *testing.T) {
 	summary := summaryDirOf(t, buildTestBundle(t))
 	mat := &MaterializedBundle{BundleDir: summary}
 
-	pred, err := loadUnsignedPredicate(mat)
+	pred, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestCheckPhaseDigests_TamperedReportFails(t *testing.T) {
 		t.Fatalf("tamper ctrf report: %v", writeErr)
 	}
 
-	rows, err := CheckPhaseDigests(mat, pred)
+	rows, err := CheckPhaseDigestsContext(context.Background(), mat, pred)
 	if err == nil {
 		t.Fatalf("CheckPhaseDigests = nil, want mismatch error")
 	}
@@ -78,7 +79,7 @@ func TestCheckPhaseDigests_MissingReportFails(t *testing.T) {
 	summary := summaryDirOf(t, buildTestBundle(t))
 	mat := &MaterializedBundle{BundleDir: summary}
 
-	pred, err := loadUnsignedPredicate(mat)
+	pred, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestCheckPhaseDigests_MissingReportFails(t *testing.T) {
 		t.Fatalf("remove ctrf report: %v", err)
 	}
 
-	if _, err := CheckPhaseDigests(mat, pred); err == nil {
+	if _, err := CheckPhaseDigestsContext(context.Background(), mat, pred); err == nil {
 		t.Fatalf("CheckPhaseDigests = nil, want error for missing report")
 	}
 }
@@ -99,7 +100,7 @@ func TestCheckPhaseDigests_EmptyDigestFails(t *testing.T) {
 	summary := summaryDirOf(t, buildTestBundle(t))
 	mat := &MaterializedBundle{BundleDir: summary}
 
-	pred, err := loadUnsignedPredicate(mat)
+	pred, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestCheckPhaseDigests_EmptyDigestFails(t *testing.T) {
 	ps.CTRFDigest = ""
 	pred.Phases[attestation.PhaseDeployment] = ps
 
-	rows, err := CheckPhaseDigests(mat, pred)
+	rows, err := CheckPhaseDigestsContext(context.Background(), mat, pred)
 	if err == nil {
 		t.Fatalf("CheckPhaseDigests = nil, want error for empty digest")
 	}
@@ -124,10 +125,10 @@ func TestCheckPhaseDigests_EmptyDigestFails(t *testing.T) {
 
 // TestCheckPhaseDigests_InvalidArgs covers the nil-guard paths.
 func TestCheckPhaseDigests_InvalidArgs(t *testing.T) {
-	if _, err := CheckPhaseDigests(nil, &attestation.Predicate{}); err == nil {
-		t.Errorf("CheckPhaseDigests(nil mat) = nil, want error")
+	if _, err := CheckPhaseDigestsContext(context.Background(), nil, &attestation.Predicate{}); err == nil {
+		t.Errorf("CheckPhaseDigestsContext(context.Background(), nil mat) = nil, want error")
 	}
-	if _, err := CheckPhaseDigests(&MaterializedBundle{BundleDir: t.TempDir()}, nil); err == nil {
-		t.Errorf("CheckPhaseDigests(nil pred) = nil, want error")
+	if _, err := CheckPhaseDigestsContext(context.Background(), &MaterializedBundle{BundleDir: t.TempDir()}, nil); err == nil {
+		t.Errorf("CheckPhaseDigestsContext(context.Background(), nil pred) = nil, want error")
 	}
 }

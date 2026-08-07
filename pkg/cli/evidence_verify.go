@@ -54,11 +54,18 @@ Input is auto-detected as one of:
 The rendered output goes to stdout by default; -o writes it to a file
 instead. -t selects the format (text = Markdown, json = structured).
 
-Exit codes:
+Verdict codes (the "exit" field in --format json):
 
   0   bundle valid; every check passed.
   1   bundle valid; recorded validator results show failures (informational).
   2   bundle invalid (signature, schema, or integrity failure).
+  3   verification did not complete, so no verdict was reached — either the
+      bundle was not readable (failureCause.class "transient": dead mount,
+      unreachable registry) or the run was aborted ("canceled").
+
+Process exit codes differ: verdicts 1 and 2 both exit 2; verdict 3 exits 5
+when transient and 9 when canceled. Branch on the JSON "exit" field to
+tell 1 from 2.
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -148,12 +155,37 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) (err error) {
 		return writeErr
 	}
 
+	return verdictError(result)
+}
+
+// verdictError maps a verifier verdict to the coded error whose exit code the
+// process returns. Extracted from the command so the full mapping — including
+// the two ways a run can end without a verdict — is directly testable.
+//
+// Verdicts 1 and 2 both land on process exit 2 (ErrCodeConflict and
+// ErrCodeInvalidRequest share it); consumers that need to tell them apart read
+// the JSON "exit" field. Verdict 3 gets its own codes precisely so a CI gate
+// can distinguish "we could not check this" from "we checked it and it failed".
+func verdictError(result *verifier.VerifyResult) error {
 	switch result.Exit {
 	case verifier.ExitValidPassed:
 		return nil
 	case verifier.ExitValidPhaseFailures:
 		return errors.New(errors.ErrCodeConflict,
 			"bundle valid; recorded validator results show failures")
+	case verifier.ExitIncomplete:
+		if result.FailureCause != nil && result.FailureCause.Class == verifier.CauseCanceled {
+			return errors.New(errors.ErrCodeCanceled,
+				"bundle verification aborted before a verdict was reached")
+		}
+		// ErrCodeTimeout (exit 5) is the deliberate umbrella for every
+		// non-canceled transient cause, including registry 5xx/429 where
+		// ErrCodeUnavailable (exit 6) would be the literal match. The verdict
+		// contract is two-valued on purpose — 5 transient, 9 canceled — so a
+		// gate branches on two codes rather than tracking the full ErrCode
+		// taxonomy. Reading exit 5 back as "timeout" is the cost of that.
+		return errors.New(errors.ErrCodeTimeout,
+			"bundle verification could not complete; the bundle was not readable (storage or registry fault)")
 	default:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle verification failed; see the verifier output for details")
