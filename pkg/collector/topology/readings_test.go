@@ -450,6 +450,29 @@ func TestTaintReadingsRequireEffect(t *testing.T) {
 	}
 }
 
+// TestTaintDataPathRejectsSingleField is the folded-encoding half of
+// TestTaintReadingsRequireEffect. encodeTaints always writes at least one pipe,
+// so a value without one cannot come from this collector — but a snapshot is a
+// file a caller supplies, and a pipe-less value carries no effect to recover.
+// Decoding it would hand back Effect:"" and satisfy a caller matching on one.
+func TestTaintDataPathRejectsSingleField(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		entry string
+	}{
+		{"no separator", "NoSchedule"},
+		{"empty value", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := TaintReadings(&measurement.Subtype{
+				Name: "taint",
+				Data: map[string]measurement.Reading{"dedicated": measurement.Str(tt.entry)},
+			})
+			assertDecodeRejected(t, err, "TaintReadings() [data path]")
+		})
+	}
+}
+
 // TestTaintReadingsAcceptUnknownEffect pins that the decoder does not gate on
 // the effects Kubernetes defines today, so a newer cluster stays readable.
 func TestTaintReadingsAcceptUnknownEffect(t *testing.T) {
@@ -610,6 +633,53 @@ func TestReadingsRejectMalformedReference(t *testing.T) {
 			name: "node-count disagrees with the referenced entry",
 			mutate: func(st *measurement.Subtype) {
 				st.Items[0].Data[itemDataNodeCount] = measurement.Int(9)
+			},
+		},
+		{
+			// Two readings produce the same fold key (zone=us-west with a sibling
+			// zone=us-east makes applyLabelRawKeys suffix both to zone.us-west /
+			// zone.us-east; the label literally named zone.us-west also gets
+			// rawKey=zone.us-west). That makes folds["zone.us-west"]==2, so the
+			// reference on item[0] is rejected even though ref==rawKey.
+			name: "reference fold key is shared with another reading",
+			mutate: func(st *measurement.Subtype) {
+				// Three items: zone=us-west (ref), zone=us-east (inline),
+				// zone.us-west=true (inline). applyLabelRawKeys sees two zone
+				// readings, so zone=us-west → rawKey "zone.us-west", same as
+				// the literal key. folds["zone.us-west"]==2 → rejected.
+				*st = measurement.Subtype{
+					Name: "label",
+					Data: map[string]measurement.Reading{
+						"zone.us-west": measurement.Str("us-west|gpu-a,gpu-b"),
+						"zone.us-east": measurement.Str("us-east|gpu-b"),
+					},
+					Items: []measurement.ItemEntry{
+						{
+							Context: map[string]string{itemCtxKey: "zone", itemCtxValue: "us-west"},
+							Data: map[string]measurement.Reading{
+								itemDataNodeCount: measurement.Int(2),
+								itemDataNodeRef:   measurement.Str("zone.us-west"),
+								itemDataTruncated: measurement.Bool(false),
+							},
+						},
+						{
+							Context: map[string]string{itemCtxKey: "zone", itemCtxValue: "us-east"},
+							Data: map[string]measurement.Reading{
+								itemDataNodeCount: measurement.Int(1),
+								itemDataNodeList:  measurement.Str("gpu-b"),
+								itemDataTruncated: measurement.Bool(false),
+							},
+						},
+						{
+							Context: map[string]string{itemCtxKey: "zone.us-west", itemCtxValue: "true"},
+							Data: map[string]measurement.Reading{
+								itemDataNodeCount: measurement.Int(2),
+								itemDataNodeList:  measurement.Str("gpu-a,gpu-b"),
+								itemDataTruncated: measurement.Bool(false),
+							},
+						},
+					},
+				}
 			},
 		},
 	} {

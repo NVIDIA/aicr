@@ -94,6 +94,8 @@ func HasLosslessReadings(st *measurement.Subtype) bool {
 	return st != nil && len(st.Items) > 0
 }
 
+// labelReadingsFromItems preserves item order: readings[i] always describes
+// items[i]. HydrateItems relies on this to pair node lists with items by index.
 func labelReadingsFromItems(st *measurement.Subtype) ([]LabelReading, error) {
 	items := st.Items
 	out := make([]LabelReading, 0, len(items))
@@ -162,6 +164,8 @@ func applyLabelRawKeys(readings []LabelReading) {
 	}
 }
 
+// taintReadingsFromItems preserves item order: readings[i] always describes
+// items[i]. HydrateItems relies on this to pair node lists with items by index.
 func taintReadingsFromItems(st *measurement.Subtype) ([]TaintReading, error) {
 	items := st.Items
 	out := make([]TaintReading, 0, len(items))
@@ -443,7 +447,8 @@ func taintReadingsFromData(data map[string]measurement.Reading) ([]TaintReading,
 				key = rawKey[:i]
 			}
 		default:
-			value = parts[0]
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("taint reading %q: expected 2 or 3 pipe-separated fields, got 1", rawKey))
 		}
 		nodes := splitNodeList(list)
 		hidden, truncated, err := truncatedNodeListRemainder(list)
