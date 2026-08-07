@@ -65,8 +65,12 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Self-contained venv so the entire dependency closure copies to the final
-# stage as a single directory. Upgrade pip first so the install uses a pip
-# with current CVE fixes (the base image ships an older pinned pip).
+# stage as a single directory.
+#
+# pip is deliberately not upgraded first: it no longer ships (see the uninstall
+# below), so a build tool has no runtime CVE surface, and `--upgrade pip` is an
+# unpinned fetch on every build. The bundled ensurepip wheel resolves the same
+# closure -- verified byte-identical -- without the download.
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
@@ -83,8 +87,13 @@ COPY validators/performance/requirements.txt /tmp/requirements.txt
 RUN grep -qE "^aiperf==${AIPERF_VERSION}([[:space:]]|$)" /tmp/requirements.txt \
  || { echo "ARG AIPERF_VERSION=${AIPERF_VERSION} does not match requirements.txt" >&2; exit 1; }
 
-RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r /tmp/requirements.txt
+# pip uninstalls itself: `python -m venv` bootstraps it and the venv is copied
+# wholesale, so it would otherwise ship. Two reasons to drop it -- a distroless
+# runtime needs no package installer, and pip is third-party software added on
+# top of the approved base (which carries no Python distributions), so shipping
+# it obliges us to publish its source. Nothing in the closure depends on it.
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+ && pip uninstall --yes pip
 
 # Syntax-gate the framing wrapper here, where a shell and a compiler still
 # exist. The runtime stage has neither, and the repo runs no Python test
