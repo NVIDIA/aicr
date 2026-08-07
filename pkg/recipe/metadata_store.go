@@ -234,6 +234,10 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 					fmt.Sprintf("duplicate mixin name %q in %s", mixin.Metadata.Name, path))
 			}
+			if pathErr := validateConstraintPaths(
+				mixin.Spec.Constraints, path, locSpecConstraints); pathErr != nil {
+				return pathErr
+			}
 			store.Mixins[mixin.Metadata.Name] = &mixin
 			slog.Debug("loaded mixin", "name", mixin.Metadata.Name, "path", path)
 			return nil
@@ -314,6 +318,14 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 		if metadata.APIVersion == RecipeProfileAPIVersion && metadata.Metadata.Name == "" {
 			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile RecipeMetadata %s requires metadata.name", path))
+		}
+
+		// Reject non-addressable constraint measurement paths before this file
+		// joins the store (#1783). Returning here also keeps the staged
+		// criteria registry transactional: the seedCriteriaRegistry commit
+		// loop below the walk never runs.
+		if pathErr := validateSpecConstraintPaths(&metadata.Spec, path); pathErr != nil {
+			return pathErr
 		}
 
 		// Categorize as base or overlay

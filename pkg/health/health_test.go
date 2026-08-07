@@ -740,13 +740,22 @@ components:
 	}
 }
 
-// TestComputeConstraintsWellformedFailThroughBuilder drives a
-// constraints_wellformed fail through the real builder: a leaf carrying a
-// malformed constraint (a path with too few segments). The recipe resolves
-// cleanly (resolves=pass) but the snapshot-free parser rejects the constraint,
-// so constraints_wellformed must fail and drag the rolled-up status to fail —
-// a malformed constraint is never a silent pass. Hermetic: no snapshot.
-func TestComputeConstraintsWellformedFailThroughBuilder(t *testing.T) {
+// TestComputeMalformedConstraintPathFailsCatalogLoad pins where a malformed
+// constraint PATH now fails.
+//
+// This test previously drove a constraints_wellformed=fail through the builder:
+// the recipe resolved cleanly and the dimension graded fail. Since #1783 the
+// catalog load rejects a non-addressable constraint path outright, so such a
+// leaf never reaches health grading at all. That is strictly stronger — the
+// same "a malformed constraint is never a silent pass" guarantee, enforced at
+// load with a message naming the file and field instead of a report dimension a
+// caller has to read.
+//
+// The dimension's own fail branch stays covered two ways: by direct injection
+// in TestClassifyConstraintsWellformed, and end-to-end through the builder by
+// TestComputeConstraintsWellformedFailThroughBuilder below, which uses a
+// malformed constraint VALUE — an axis #1783 deliberately does not gate.
+func TestComputeMalformedConstraintPathFailsCatalogLoad(t *testing.T) {
 	provider := newInMemoryProvider(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
@@ -773,6 +782,51 @@ components: []
 `),
 	})
 
+	_, err := Compute(context.Background(), Options{Provider: provider})
+	if err == nil {
+		t.Fatal("Compute() = nil error, want the catalog load to reject the malformed constraint path")
+	}
+	for _, want := range []string{"malformed-constraint-leaf.yaml", "spec.constraints[0]"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Compute() error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+}
+
+// TestComputeConstraintsWellformedFailThroughBuilder drives a
+// constraints_wellformed fail through the real builder: a leaf whose
+// constraint path is addressable (so the catalog load accepts it) but whose
+// VALUE does not parse. The recipe resolves cleanly (resolves=pass) and the
+// snapshot-free expression parser rejects the value, so
+// constraints_wellformed must fail and drag the rolled-up status to fail.
+// Hermetic: no snapshot.
+func TestComputeConstraintsWellformedFailThroughBuilder(t *testing.T) {
+	provider := newInMemoryProvider(map[string][]byte{
+		"overlays/base.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`),
+		"overlays/malformed-constraint-leaf.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: malformed-constraint-leaf
+spec:
+  criteria:
+    service: eks
+  componentRefs: []
+  constraints:
+    - name: K8s.server.version
+      value: "!1.33"
+`),
+		"registry.yaml": []byte(`apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components: []
+`),
+	})
+
 	report, err := Compute(context.Background(), Options{Provider: provider})
 	if err != nil {
 		t.Fatalf("Compute() error = %v", err)
@@ -791,12 +845,12 @@ components: []
 		t.Errorf("resolves = %q, want %q (recipe should resolve cleanly)", got, StatusPass)
 	}
 	if got := combo.Structure.Dimensions[DimConstraintsWellformed]; got != StatusFail {
-		t.Errorf("constraints_wellformed = %q, want %q (malformed constraint path)", got, StatusFail)
+		t.Errorf("constraints_wellformed = %q, want %q (malformed constraint value)", got, StatusFail)
 	}
 	if combo.Structure.Status != StatusFail {
 		t.Errorf("status = %q, want %q", combo.Structure.Status, StatusFail)
 	}
-	if d := combo.Structure.Detail[DimConstraintsWellformed]; !strings.Contains(d, "not-a-valid-path") {
+	if d := combo.Structure.Detail[DimConstraintsWellformed]; !strings.Contains(d, "K8s.server.version") {
 		t.Errorf("detail = %q, want it to name the malformed constraint", d)
 	}
 }

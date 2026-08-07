@@ -736,6 +736,24 @@ prevents.
   advisory; trust-bearing consumers recompute via
   `fingerprint.FromMeasurements(...)` before acting. See the
   collector docs and ADR-007 for details.
+- **Adding a collector subtype or closed-space key without updating the
+  constraint path catalog.** `pkg/measurement/catalog.go` enumerates
+  every addressable path, and recipe loading rejects anything it cannot
+  address (#1783). Each subtype declares *two* independent key spaces,
+  because extraction reads them from different places:
+  `{Type}.{Subtype}.{Key}` resolves against `Subtype.Data` (scalar), and
+  `{Type}.{Subtype}[<selector>].{Key}` resolves against
+  `ItemEntry.Data` then `ItemEntry.Context` (item). Register a new key
+  in whichever space emits it — an item-only subtype needs its keys in
+  the item space, or every selector path through it is rejected. An
+  entry is required for a new subtype (unless the Type is open-subtype)
+  and for a new key in a *closed* space; a new key in an *open* space
+  needs nothing. A missing entry does not weaken a check — it makes a
+  legitimate constraint path fail at load for whoever first writes it.
+  Declare a key space open when it is not provably fixed (image names,
+  sysctl paths, label keys). Note that `ItemEntry.Context` keys **are**
+  addressable and belong in the item space; only `Subtype.Context` is
+  never addressable, so do not list those.
 
 ## See Also
 

@@ -196,7 +196,7 @@ func LoadFromFileWithProviderProfile(
 	// Kustomize tag/path would reach the bundler/attestation unchecked, and a
 	// lowercase type would deploy inconsistently — while a type-less registry
 	// ref (valid before #1584) must still resolve, not be rejected. See #1584.
-	if err := rec.PrepareAndValidateWithContext(ctx); err != nil {
+	if err := rec.prepareAndValidateWithSource(ctx, path); err != nil {
 		return nil, err
 	}
 

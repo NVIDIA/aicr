@@ -12,26 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package constraints
+package measurement
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// Structured-error context keys used by this package.
+// Structured-error context keys used by path parsing and extraction.
 const (
-	keyType     = "type"
-	keyPath     = "path"
-	keyKey      = "key"
-	keySubtype  = "subtype"
-	keySelector = "selector"
+	keyType         = "type"
+	keyPath         = "path"
+	keyKey          = "key"
+	keySubtype      = "subtype"
+	keySelector     = "selector"
+	keyPredicateKey = "predicateKey"
+	keySuggestion   = "suggestion"
 )
+
+// PathGPUNodesLabel is the node-set constraint form from issue #1755. Unlike
+// a scalar path it does not name a reading any producer emits: the evaluator
+// in pkg/constraints synthesizes the GPU-node set from the snapshot's
+// NodeTopology.label readings and quantifies a label predicate over it.
+//
+// It lives here rather than in pkg/constraints so the catalog can accept it
+// without an import cycle (pkg/constraints imports pkg/recipe, which imports
+// this package).
+const PathGPUNodesLabel = "NodeTopology.gpu-nodes.label"
 
 // itemSelector represents an addressable element of a Subtype.Items list.
 // It is either an integer index (Index != nil) or a key=value predicate
@@ -47,7 +57,7 @@ type itemPredicate struct {
 	Value string
 }
 
-// ConstraintPath represents a parsed fully qualified constraint path.
+// Path represents a parsed fully qualified constraint path.
 //
 // Without item selector: "{Type}.{Subtype}.{Key}"
 //
@@ -63,22 +73,25 @@ type itemPredicate struct {
 // the legacy behavior of looking up Key in Subtype.Data.
 //
 // The key portion may contain dots (e.g., "/proc/sys/kernel/osrelease").
-type ConstraintPath struct {
-	Type     measurement.Type
+//
+// The selector is deliberately unexported: the selector grammar is an
+// implementation detail of the path syntax, not a public shape.
+type Path struct {
+	Type     Type
 	Subtype  string
 	Key      string
-	Selector *itemSelector
+	selector *itemSelector
 }
 
-// ParseConstraintPath parses a fully qualified constraint path.
-func ParseConstraintPath(path string) (*ConstraintPath, error) {
+// ParsePath parses a fully qualified constraint path.
+func ParsePath(path string) (*Path, error) {
 	if path == "" {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "constraint path cannot be empty")
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "constraint path cannot be empty")
 	}
 
 	typeDot := strings.Index(path, ".")
 	if typeDot < 0 {
-		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 			"invalid constraint path: expected format {Type}.{Subtype}[selector].{Key}",
 			map[string]any{keyPath: path})
 	}
@@ -86,31 +99,39 @@ func ParseConstraintPath(path string) (*ConstraintPath, error) {
 	typeStr := path[:typeDot]
 	rest := path[typeDot+1:]
 
-	measurementType, valid := measurement.ParseType(typeStr)
+	measurementType, valid := ParseType(typeStr)
 	if !valid {
-		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 			"invalid measurement type in constraint path",
-			map[string]any{keyType: typeStr, keyPath: path, "validTypes": measurement.Types})
+			map[string]any{keyType: typeStr, keyPath: path, "validTypes": Types})
 	}
 
-	subtype, selector, key, err := parseSubtypeSelectorKey(rest, path)
+	subtype, selector, key, err := parseSubtypeSelectorKey(rest, path, measurementType)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ConstraintPath{
+	return &Path{
 		Type:     measurementType,
 		Subtype:  subtype,
 		Key:      key,
-		Selector: selector,
+		selector: selector,
 	}, nil
 }
 
 // parseSubtypeSelectorKey parses the portion of the path after "{Type}." into
-// (subtype, optional selector, key). The Key may contain dots; everything
-// after the first separating dot (or after the closing `]` and its `.`)
-// belongs to Key.
-func parseSubtypeSelectorKey(rest, fullPath string) (string, *itemSelector, string, error) {
+// (subtype, optional selector, key).
+//
+// The Key may contain dots; everything after the separating dot (or after the
+// closing `]` and its `.`) belongs to Key. Which dot separates depends on the
+// Type: subtype names normally carry no dot, so the FIRST one separates and a
+// dotted key like "/proc/sys/kernel/osrelease" resolves. Types whose subtype
+// names do carry dots — SystemD unit names — separate at the LAST dot instead.
+// See splitsOnLastDot.
+//
+// The bracket form needs no rule: `[` delimits the subtype explicitly, so a
+// dotted subtype is unambiguous there.
+func parseSubtypeSelectorKey(rest, fullPath string, t Type) (string, *itemSelector, string, error) {
 	bracketStart := strings.Index(rest, "[")
 	dotIdx := strings.Index(rest, ".")
 
@@ -118,14 +139,14 @@ func parseSubtypeSelectorKey(rest, fullPath string) (string, *itemSelector, stri
 		// Subtype[selector].Key form.
 		subtype := rest[:bracketStart]
 		if subtype == "" {
-			return "", nil, "", errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			return "", nil, "", aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 				"invalid constraint path: subtype before '[' is empty",
 				map[string]any{keyPath: fullPath})
 		}
 
 		bracketEnd := strings.Index(rest[bracketStart:], "]")
 		if bracketEnd < 0 {
-			return "", nil, "", errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			return "", nil, "", aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 				"invalid constraint path: unclosed item selector bracket",
 				map[string]any{keyPath: fullPath})
 		}
@@ -138,18 +159,18 @@ func parseSubtypeSelectorKey(rest, fullPath string) (string, *itemSelector, stri
 
 		after := rest[bracketEnd+1:]
 		if after == "" {
-			return "", nil, "", errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			return "", nil, "", aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 				"invalid constraint path: missing key after item selector",
 				map[string]any{keyPath: fullPath})
 		}
 		if after[0] != '.' {
-			return "", nil, "", errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			return "", nil, "", aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 				"invalid constraint path: expected '.' after item selector",
 				map[string]any{keyPath: fullPath})
 		}
 		key := after[1:]
 		if key == "" {
-			return "", nil, "", errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			return "", nil, "", aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 				"invalid constraint path: missing key after item selector",
 				map[string]any{keyPath: fullPath})
 		}
@@ -158,14 +179,17 @@ func parseSubtypeSelectorKey(rest, fullPath string) (string, *itemSelector, stri
 
 	// Subtype.Key form (no selector).
 	if dotIdx < 0 {
-		return "", nil, "", errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return "", nil, "", aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 			"invalid constraint path: expected format {Type}.{Subtype}.{Key}",
 			map[string]any{keyPath: fullPath})
+	}
+	if splitsOnLastDot(t) {
+		dotIdx = strings.LastIndex(rest, ".")
 	}
 	subtype := rest[:dotIdx]
 	key := rest[dotIdx+1:]
 	if subtype == "" || key == "" {
-		return "", nil, "", errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return "", nil, "", aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 			"invalid constraint path: subtype or key is empty",
 			map[string]any{keyPath: fullPath})
 	}
@@ -178,7 +202,7 @@ func parseSubtypeSelectorKey(rest, fullPath string) (string, *itemSelector, stri
 //   - key=value                -> predicate selector (LHS and RHS non-empty)
 func parseItemSelector(raw, fullPath string) (*itemSelector, error) {
 	if raw == "" {
-		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 			"invalid constraint path: item selector is empty",
 			map[string]any{keyPath: fullPath})
 	}
@@ -186,7 +210,7 @@ func parseItemSelector(raw, fullPath string) (*itemSelector, error) {
 		k := raw[:eq]
 		v := raw[eq+1:]
 		if k == "" || v == "" {
-			return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			return nil, aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 				"invalid constraint path: predicate selector requires non-empty key and value",
 				map[string]any{keyPath: fullPath, keySelector: raw})
 		}
@@ -194,12 +218,12 @@ func parseItemSelector(raw, fullPath string) (*itemSelector, error) {
 	}
 	idx, err := strconv.Atoi(raw)
 	if err != nil {
-		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 			"invalid constraint path: item selector must be an integer index or 'key=value' predicate",
 			map[string]any{keyPath: fullPath, keySelector: raw})
 	}
 	if idx < 0 {
-		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 			"invalid constraint path: item index cannot be negative",
 			map[string]any{keyPath: fullPath, keySelector: raw})
 	}
@@ -207,60 +231,64 @@ func parseItemSelector(raw, fullPath string) (*itemSelector, error) {
 }
 
 // String returns the fully qualified path string.
-func (cp *ConstraintPath) String() string {
-	if cp.Selector != nil {
-		return fmt.Sprintf("%s.%s[%s].%s", cp.Type, cp.Subtype, cp.Selector.Raw, cp.Key)
+func (p *Path) String() string {
+	if p.selector != nil {
+		return fmt.Sprintf("%s.%s[%s].%s", p.Type, p.Subtype, p.selector.Raw, p.Key)
 	}
-	return fmt.Sprintf("%s.%s.%s", cp.Type, cp.Subtype, cp.Key)
+	return fmt.Sprintf("%s.%s.%s", p.Type, p.Subtype, p.Key)
 }
 
-// ExtractValue extracts the value at this path from a snapshot.
+// Extract extracts the value at this path from a set of measurements.
 // Returns the value as a string, or an error if the path doesn't exist.
-func (cp *ConstraintPath) ExtractValue(snap *snapshotter.Snapshot) (string, error) {
-	if snap == nil {
-		return "", errors.New(errors.ErrCodeInvalidRequest, "snapshot is nil")
+//
+// Callers hold a *snapshotter.Snapshot pass snap.Measurements; the nil-snapshot
+// guard belongs at that call site, not here — a nil measurement slice is a
+// legitimate "nothing collected" input, distinct from "no snapshot supplied".
+func (p *Path) Extract(ms []*Measurement) (string, error) {
+	if p == nil {
+		return "", aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "constraint path is nil")
 	}
 
 	// Find the measurement with matching type
-	var targetMeasurement *measurement.Measurement
-	for _, m := range snap.Measurements {
-		if m.Type == cp.Type {
+	var targetMeasurement *Measurement
+	for _, m := range ms {
+		if m != nil && m.Type == p.Type {
 			targetMeasurement = m
 			break
 		}
 	}
 
 	if targetMeasurement == nil {
-		return "", errors.NewWithContext(errors.ErrCodeNotFound,
+		return "", aicrerrors.NewWithContext(aicrerrors.ErrCodeNotFound,
 			"measurement type not found in snapshot",
-			map[string]any{keyType: cp.Type})
+			map[string]any{keyType: p.Type})
 	}
 
 	// Find the subtype
-	var targetSubtype *measurement.Subtype
+	var targetSubtype *Subtype
 	for i := range targetMeasurement.Subtypes {
-		if targetMeasurement.Subtypes[i].Name == cp.Subtype {
+		if targetMeasurement.Subtypes[i].Name == p.Subtype {
 			targetSubtype = &targetMeasurement.Subtypes[i]
 			break
 		}
 	}
 
 	if targetSubtype == nil {
-		return "", errors.NewWithContext(errors.ErrCodeNotFound,
+		return "", aicrerrors.NewWithContext(aicrerrors.ErrCodeNotFound,
 			"subtype not found in measurement",
-			map[string]any{keySubtype: cp.Subtype, keyType: cp.Type})
+			map[string]any{keySubtype: p.Subtype, keyType: p.Type})
 	}
 
-	if cp.Selector != nil {
-		return extractFromItems(targetSubtype, cp)
+	if p.selector != nil {
+		return extractFromItems(targetSubtype, p)
 	}
 
 	// Find the key in data (legacy path).
-	reading, exists := targetSubtype.Data[cp.Key]
+	reading, exists := targetSubtype.Data[p.Key]
 	if !exists {
-		return "", errors.NewWithContext(errors.ErrCodeNotFound,
+		return "", aicrerrors.NewWithContext(aicrerrors.ErrCodeNotFound,
 			"key not found in subtype",
-			map[string]any{keyKey: cp.Key, keySubtype: cp.Subtype, keyType: cp.Type})
+			map[string]any{keyKey: p.Key, keySubtype: p.Subtype, keyType: p.Type})
 	}
 
 	// Convert reading to string
@@ -268,36 +296,36 @@ func (cp *ConstraintPath) ExtractValue(snap *snapshotter.Snapshot) (string, erro
 }
 
 // extractFromItems resolves a path with an item selector against
-// targetSubtype.Items, then looks up cp.Key in the chosen ItemEntry.
-func extractFromItems(st *measurement.Subtype, cp *ConstraintPath) (string, error) {
+// targetSubtype.Items, then looks up p.Key in the chosen ItemEntry.
+func extractFromItems(st *Subtype, p *Path) (string, error) {
 	if len(st.Items) == 0 {
-		return "", errors.NewWithContext(errors.ErrCodeNotFound,
+		return "", aicrerrors.NewWithContext(aicrerrors.ErrCodeNotFound,
 			"subtype has no items but path uses an item selector",
-			map[string]any{keySubtype: cp.Subtype, keyType: cp.Type, keySelector: cp.Selector.Raw})
+			map[string]any{keySubtype: p.Subtype, keyType: p.Type, keySelector: p.selector.Raw})
 	}
 
-	if cp.Selector.Index != nil {
-		idx := *cp.Selector.Index
+	if p.selector.Index != nil {
+		idx := *p.selector.Index
 		if idx >= len(st.Items) {
-			return "", errors.NewWithContext(errors.ErrCodeNotFound,
+			return "", aicrerrors.NewWithContext(aicrerrors.ErrCodeNotFound,
 				"item index out of bounds",
-				map[string]any{keySubtype: cp.Subtype, keyType: cp.Type, "index": idx, "itemCount": len(st.Items)})
+				map[string]any{keySubtype: p.Subtype, keyType: p.Type, "index": idx, "itemCount": len(st.Items)})
 		}
-		return lookupInItem(&st.Items[idx], cp)
+		return lookupInItem(&st.Items[idx], p)
 	}
 
 	// Predicate match.
-	pred := cp.Selector.Predicate
+	pred := p.selector.Predicate
 	var matchIdx = -1
 	for i := range st.Items {
 		if itemMatchesPredicate(&st.Items[i], pred) {
 			if matchIdx >= 0 {
-				return "", errors.NewWithContext(errors.ErrCodeConflict,
+				return "", aicrerrors.NewWithContext(aicrerrors.ErrCodeConflict,
 					"item predicate matches multiple entries",
 					map[string]any{
-						keySubtype:  cp.Subtype,
-						keyType:     cp.Type,
-						"predicate": cp.Selector.Raw,
+						keySubtype:  p.Subtype,
+						keyType:     p.Type,
+						"predicate": p.selector.Raw,
 						"matchedAt": []int{matchIdx, i},
 					})
 			}
@@ -305,16 +333,16 @@ func extractFromItems(st *measurement.Subtype, cp *ConstraintPath) (string, erro
 		}
 	}
 	if matchIdx < 0 {
-		return "", errors.NewWithContext(errors.ErrCodeNotFound,
+		return "", aicrerrors.NewWithContext(aicrerrors.ErrCodeNotFound,
 			"no item matches predicate",
-			map[string]any{keySubtype: cp.Subtype, keyType: cp.Type, "predicate": cp.Selector.Raw})
+			map[string]any{keySubtype: p.Subtype, keyType: p.Type, "predicate": p.selector.Raw})
 	}
-	return lookupInItem(&st.Items[matchIdx], cp)
+	return lookupInItem(&st.Items[matchIdx], p)
 }
 
 // itemMatchesPredicate reports whether an ItemEntry has a field (in Data or
 // Context) named pred.Key whose stringified value equals pred.Value.
-func itemMatchesPredicate(item *measurement.ItemEntry, pred *itemPredicate) bool {
+func itemMatchesPredicate(item *ItemEntry, pred *itemPredicate) bool {
 	if r, ok := item.Data[pred.Key]; ok && r != nil {
 		return r.String() == pred.Value
 	}
@@ -324,16 +352,16 @@ func itemMatchesPredicate(item *measurement.ItemEntry, pred *itemPredicate) bool
 	return false
 }
 
-// lookupInItem looks up cp.Key in the ItemEntry: Data (Reading.String()) first,
+// lookupInItem looks up p.Key in the ItemEntry: Data (Reading.String()) first,
 // then Context (string), then errors.
-func lookupInItem(item *measurement.ItemEntry, cp *ConstraintPath) (string, error) {
-	if r, ok := item.Data[cp.Key]; ok && r != nil {
+func lookupInItem(item *ItemEntry, p *Path) (string, error) {
+	if r, ok := item.Data[p.Key]; ok && r != nil {
 		return r.String(), nil
 	}
-	if v, ok := item.Context[cp.Key]; ok {
+	if v, ok := item.Context[p.Key]; ok {
 		return v, nil
 	}
-	return "", errors.NewWithContext(errors.ErrCodeNotFound,
+	return "", aicrerrors.NewWithContext(aicrerrors.ErrCodeNotFound,
 		"key not found in item",
-		map[string]any{keyKey: cp.Key, keySubtype: cp.Subtype, keyType: cp.Type, keySelector: cp.Selector.Raw})
+		map[string]any{keyKey: p.Key, keySubtype: p.Subtype, keyType: p.Type, keySelector: p.selector.Raw})
 }

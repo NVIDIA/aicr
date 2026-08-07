@@ -44,7 +44,10 @@ import (
 // Both directions fail closed: on truncated node lists (snapshots taken
 // with --max-nodes-per-entry), on an empty GPU-node universe, and on a
 // value that parses as neither form.
-const GPUNodesLabelConstraintName = "NodeTopology.gpu-nodes.label"
+//
+// The literal lives in pkg/measurement so the constraint-path catalog can
+// accept it as a virtual path (issue #1783) without importing this package.
+const GPUNodesLabelConstraintName = measurement.PathGPUNodesLabel
 
 // gpuNodeUniverseLabel defines the authoritative GPU-node universe: nodes
 // carrying GKE's native accelerator label. It is present on GKE GPU nodes
@@ -61,6 +64,7 @@ const (
 	ctxValue      = "value"
 	ctxConstraint = "constraint"
 	ctxReading    = "reading"
+	keyKey        = "key"
 )
 
 // labelNodeSet is one decoded NodeTopology.label entry: the label value,
