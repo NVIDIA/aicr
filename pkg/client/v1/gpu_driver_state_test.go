@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/collector/topology"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -764,5 +765,171 @@ func TestHasHeterogeneousGPUPoolLegacyFalsePositive(t *testing.T) {
 	if hasHeterogeneousGPUPool(lossless) {
 		t.Error("item path: got true, want false — the same cluster must not be reported " +
 			"heterogeneous once the encoding is lossless")
+	}
+}
+
+// topologySnapshotWithMultiNodeItems builds an item-encoded snapshot in which
+// each reading spans an explicit node set. topologySnapshotWithItems puts a
+// single node under every reading, so it cannot tell a label that is uniform
+// across the fleet from one observed on one node, and never produces a
+// node-count above 1 or a comma-joined list for the decoder to check.
+//
+// readings is keyed key -> value -> nodes. Node sets under one key must be
+// disjoint: a node carries exactly one value of a given label key, and the
+// decoder rejects items that say otherwise.
+func topologySnapshotWithMultiNodeItems(readings map[string]map[string][]string) *snapshotter.Snapshot {
+	var items []measurement.ItemEntry
+	for key, byValue := range readings {
+		for value, nodes := range byValue {
+			items = append(items, measurement.ItemEntry{
+				Context: map[string]string{"key": key, "value": value},
+				Data: map[string]measurement.Reading{
+					"node-count": measurement.Int(len(nodes)),
+					"node-list":  measurement.Str(strings.Join(nodes, ",")),
+					"truncated":  measurement.Bool(false),
+				},
+			})
+		}
+	}
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			measurement.NewMeasurement(measurement.TypeNodeTopology).
+				WithSubtype(measurement.Subtype{Name: "label", Items: items}).
+				Build(),
+		},
+	}
+}
+
+// TestHasHeterogeneousGPUPoolMultiNode covers the same decision over readings
+// that span several nodes, which is the shape a real fleet produces. The
+// single-node fixtures elsewhere in this file leave node-count > 1 and
+// comma-joined node lists undecoded, and they cannot express the case that
+// matters most in practice: one label value shared by the whole fleet.
+func TestHasHeterogeneousGPUPoolMultiNode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		readings map[string]map[string][]string
+		want     bool
+	}{
+		{
+			name: "gpu.product uniform across the whole fleet",
+			readings: map[string]map[string][]string{
+				"nvidia.com/gpu.product": {
+					"NVIDIA-H100-80GB-HBM3": {"node-a", "node-b", "node-c", "node-d"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "gpu.product split across two multi-node pools",
+			readings: map[string]map[string][]string{
+				"nvidia.com/gpu.product": {
+					"NVIDIA-H100-80GB-HBM3": {"node-a", "node-b"},
+					"NVIDIA-B200":           {"node-c", "node-d"},
+				},
+			},
+			want: true,
+		},
+		{
+			// Distinct keys of one family, each uniform. Counting values per
+			// family rather than per key would read these as divergence.
+			name: "whole gpu family uniform across the fleet",
+			readings: map[string]map[string][]string{
+				"nvidia.com/gpu.product":       {"NVIDIA-H100-80GB-HBM3": {"node-a", "node-b", "node-c"}},
+				"nvidia.com/gpu.count":         {"8": {"node-a", "node-b", "node-c"}},
+				"nvidia.com/gpu.memory":        {"81559": {"node-a", "node-b", "node-c"}},
+				"nvidia.com/gpu.compute.major": {"9": {"node-a", "node-b", "node-c"}},
+			},
+			want: false,
+		},
+		{
+			name: "instance-type uniform across the fleet",
+			readings: map[string]map[string][]string{
+				"node.kubernetes.io/instance-type": {"p5.48xlarge": {"node-a", "node-b", "node-c"}},
+			},
+			want: false,
+		},
+		{
+			name: "instance-type split across two multi-node pools",
+			readings: map[string]map[string][]string{
+				"node.kubernetes.io/instance-type": {
+					"p5.48xlarge":  {"node-a", "node-b"},
+					"p4d.24xlarge": {"node-c", "node-d"},
+				},
+			},
+			want: true,
+		},
+		{
+			// A uniform GPU fleet that merely spans zones is not a mixed pool.
+			name: "unrelated label diverges across nodes",
+			readings: map[string]map[string][]string{
+				"nvidia.com/gpu.product": {"NVIDIA-H100-80GB-HBM3": {"node-a", "node-b", "node-c", "node-d"}},
+				"topology.kubernetes.io/zone": {
+					"us-east-1a": {"node-a", "node-b"},
+					"us-east-1b": {"node-c", "node-d"},
+				},
+			},
+			want: false,
+		},
+		{
+			// Divergence on one node out of many is still divergence; a
+			// majority rule would hide the pool that breaks the sample.
+			name: "single odd node in an otherwise uniform fleet",
+			readings: map[string]map[string][]string{
+				"nvidia.com/gpu.product": {
+					"NVIDIA-H100-80GB-HBM3": {"node-a", "node-b", "node-c"},
+					"NVIDIA-A100-80GB":      {"node-d"},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			snap := topologySnapshotWithMultiNodeItems(tt.readings)
+
+			// hasHeterogeneousGPUPool degrades to false on a snapshot it cannot
+			// decode, so a malformed fixture would let every want:false case
+			// pass without exercising the decision. Decode first and fail loudly.
+			if _, err := topology.LabelReadings(snap.Measurements[0].GetSubtype("label")); err != nil {
+				t.Fatalf("fixture does not decode, so the result below would be vacuous: %v", err)
+			}
+
+			if got := hasHeterogeneousGPUPool(snap); got != tt.want {
+				t.Errorf("hasHeterogeneousGPUPool() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHasHeterogeneousGPUPoolLegacyMultiNode is the folded-encoding half:
+// several nodes per entry, where divergence is inferred from key shape rather
+// than by counting values.
+func TestHasHeterogeneousGPUPoolLegacyMultiNode(t *testing.T) {
+	t.Parallel()
+
+	uniform := topologySnapshotWith(map[string]measurement.Reading{
+		"nvidia.com/gpu.product": measurement.Str("NVIDIA-H100-80GB-HBM3|node-a,node-b,node-c"),
+		"nvidia.com/gpu.count":   measurement.Str("8|node-a,node-b,node-c"),
+	})
+	if hasHeterogeneousGPUPool(uniform) {
+		t.Error("legacy Data path: got true, want false — single-segment GFD keys over " +
+			"many nodes carry no appended value and must not read as disambiguated")
+	}
+
+	// Two products across two pools: the encoder folds both onto
+	// "<key>.<value>", which is the shape the heuristic looks for.
+	mixed := topologySnapshotWith(map[string]measurement.Reading{
+		"nvidia.com/gpu.product.NVIDIA-H100-80GB-HBM3": measurement.Str("NVIDIA-H100-80GB-HBM3|node-a,node-b"),
+		"nvidia.com/gpu.product.NVIDIA-B200":           measurement.Str("NVIDIA-B200|node-c,node-d"),
+	})
+	if !hasHeterogeneousGPUPool(mixed) {
+		t.Error("legacy Data path: got false, want true — two folded gpu.product entries " +
+			"are the divergence signal the heuristic exists to catch")
 	}
 }

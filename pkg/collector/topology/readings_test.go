@@ -450,23 +450,25 @@ func TestTaintReadingsRequireEffect(t *testing.T) {
 	}
 }
 
-// TestTaintDataPathRejectsSingleField is the folded-encoding half of
-// TestTaintReadingsRequireEffect. encodeTaints always writes at least one pipe,
-// so a value without one cannot come from this collector — but a snapshot is a
-// file a caller supplies, and a pipe-less value carries no effect to recover.
-// Decoding it would hand back Effect:"" and satisfy a caller matching on one.
-func TestTaintDataPathRejectsSingleField(t *testing.T) {
+// TestTaintDataPathRejectsUnrecoverableEffect is the folded-encoding half of
+// TestTaintReadingsRequireEffect. encodeTaints writes the two-field form only
+// under a "<key>.<effect>" map key and the three-field form otherwise, so none
+// of these can come from this collector — but a snapshot is a file a caller
+// supplies, and each shape below leaves no effect to recover. Decoding one
+// would hand back Effect:"" and satisfy a caller matching on one.
+func TestTaintDataPathRejectsUnrecoverableEffect(t *testing.T) {
 	for _, tt := range []struct {
-		name  string
-		entry string
+		name, key, entry string
 	}{
-		{"no separator", "NoSchedule"},
-		{"empty value", ""},
+		{"one field, no separator", "dedicated", "NoSchedule"},
+		{"one field, empty", "dedicated", ""},
+		{"two fields, key carries no effect suffix", "dedicated", "sys|gpu-a"},
+		{"two fields, key ends in the separator", "dedicated.", "sys|gpu-a"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := TaintReadings(&measurement.Subtype{
 				Name: "taint",
-				Data: map[string]measurement.Reading{"dedicated": measurement.Str(tt.entry)},
+				Data: map[string]measurement.Reading{tt.key: measurement.Str(tt.entry)},
 			})
 			assertDecodeRejected(t, err, "TaintReadings() [data path]")
 		})

@@ -441,11 +441,15 @@ func taintReadingsFromData(data map[string]measurement.Reading) ([]TaintReading,
 			// key — the same identity the item path reports. Which is still a
 			// guess for a taint key that legitimately contains a dot: the
 			// ambiguity the item encoding removes.
-			value, list = parts[0], parts[1]
-			if i := strings.LastIndex(rawKey, "."); i >= 0 {
-				effect = rawKey[i+1:]
-				key = rawKey[:i]
+			// A key with no separator, or nothing after it, carries no effect
+			// to recover — decoding it would hand back Effect:"".
+			i := strings.LastIndex(rawKey, ".")
+			if i < 0 || i == len(rawKey)-1 {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("taint reading %q: two-field form requires an effect suffix in the key", rawKey))
 			}
+			value, list = parts[0], parts[1]
+			effect, key = rawKey[i+1:], rawKey[:i]
 		default:
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("taint reading %q: expected 2 or 3 pipe-separated fields, got 1", rawKey))
