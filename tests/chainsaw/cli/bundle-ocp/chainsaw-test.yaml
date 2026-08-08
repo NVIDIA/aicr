@@ -149,11 +149,13 @@ spec:
 
     - name: generate-argocd-helm-bundle
       description: >-
-        Bundle the same OCP recipe with --deployer argocd-helm. Every OCP
-        component is a local chart, so none contributes a static/ values file.
-        Emitting that directory anyway made it empty, and the bundle inventory
-        validator rejects a directory contributing no files, which failed
-        generation outright. See issue #1942.
+        Bundle the same OCP recipe with --deployer argocd-helm. Most OCP
+        components are local charts (OLM installer + CR pairs), but
+        prometheus-adapter-ocp and nvidia-dra-driver-gpu-ocp reuse their
+        upstream Helm chart (no certified OCP operator exists for them),
+        so static/ is expected to contain exactly those two values files.
+        See issue #1942 for the original all-local-chart empty-directory
+        bug this step guards against.
       try:
         - script:
             content: |
@@ -166,18 +168,18 @@ spec:
             check:
               ($error == null): true
 
-    - name: assert-argocd-helm-omits-empty-static
+    - name: assert-argocd-helm-static-has-helm-reuse-components-only
       description: >-
-        The bundle must be emitted without a static/ directory rather than with
-        an empty one, and must still carry its chart scaffold.
+        static/ must contain exactly the two Helm-reuse OCP components'
+        values files (prometheus-adapter-ocp, nvidia-dra-driver-gpu-ocp)
+        and must NOT contain their non-OCP base equivalents (which aren't
+        part of this OCP recipe) or an empty/missing directory.
       try:
         - script:
             content: |
-              # As above: the explicit `|| { …; exit 1; }` on each check is
-              # the safeguard, and set -eu covers anything added later without
-              # one. That matters most here, where the script ends in an `if`
-              # that yields 0 whenever static/ is absent, so an unguarded
-              # scaffold check would never fail the step.
+              # The explicit `|| { …; exit 1; }` on each check is the
+              # safeguard, and set -eu covers anything added later without
+              # one.
               set -eu
               WORK="/tmp/chainsaw-bundle-ocp"
               BUNDLE="${WORK}/bundle-argocd-helm"
@@ -187,14 +189,24 @@ spec:
               done
               ls "${BUNDLE}"/[0-9][0-9][0-9]-*/ >/dev/null 2>&1 \
                 || { echo "no numbered component folders found" >&2; exit 1; }
-              # -e dereferences, so it reads false for a dangling symlink;
-              # -L catches that case and keeps the assertion honest about any
-              # entry at this path, not just a resolvable one.
-              if [ -e "${BUNDLE}/static" ] || [ -L "${BUNDLE}/static" ]; then
-                echo "static/ present; expected omitted for an all-local recipe" >&2
-                ls -la "${BUNDLE}/static" >&2
-                exit 1
-              fi
+              # static/ must exist (two upstream-Helm-reuse OCP components
+              # contribute values files) and contain exactly the expected
+              # pair — no more, no less.
+              test -d "${BUNDLE}/static" \
+                || { echo "static/ missing; expected values files for prometheus-adapter-ocp and nvidia-dra-driver-gpu-ocp" >&2; exit 1; }
+              for f in prometheus-adapter-ocp.yaml nvidia-dra-driver-gpu-ocp.yaml; do
+                test -f "${BUNDLE}/static/${f}" \
+                  || { echo "missing expected static/ file: ${f}" >&2; ls -la "${BUNDLE}/static" >&2; exit 1; }
+              done
+              for f in prometheus-adapter.yaml nvidia-dra-driver-gpu.yaml; do
+                if [ -e "${BUNDLE}/static/${f}" ]; then
+                  echo "unexpected non-OCP base component file in static/: ${f} (not part of this OCP recipe)" >&2
+                  exit 1
+                fi
+              done
+              actual_count=$(ls "${BUNDLE}/static" | wc -l)
+              [ "${actual_count}" -eq 2 ] \
+                || { echo "static/ has ${actual_count} files, expected exactly 2" >&2; ls -la "${BUNDLE}/static" >&2; exit 1; }
             check:
               ($error == null): true
       cleanup:

@@ -1,0 +1,39 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# cert-manager OCP OLM values
+# Controls the OLM Subscription that installs the cert-manager Operator
+# for Red Hat OpenShift (github.com/openshift/cert-manager-operator).
+#
+# AllNamespaces install mode (targetNamespaces: []) — cert-manager issues
+# certificates cluster-wide (e.g. for k8s-nim-operator's admission webhook
+# in nvidia-nim), so it cannot be scoped to a single consuming namespace
+# the way gpu-operator/nfd are.
+#
+# NOTE: the operator itself runs in this "cert-manager-operator" namespace,
+# but its operand Deployments (cert-manager, cert-manager-cainjector,
+# cert-manager-webhook) always land in a separate, hardcoded "cert-manager"
+# namespace — the operator does not allow this to be changed. See
+# components/cert-manager-ocp/values.yaml.
+
+namespace: cert-manager-operator
+subscription:
+  name: openshift-cert-manager-operator
+  channel: stable-v1
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+operatorGroup:
+  name: cert-manager-operator-group
+  targetNamespaces: []

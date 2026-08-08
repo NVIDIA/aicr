@@ -12,21 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+# cert-manager OCP OLM Health Check — intentionally a no-op.
+#
+# OLM operator readiness is verified at deploy time by the bundler's
+# --readiness-hooks gate (components/cert-manager-ocp-olm/readiness.yaml).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
 metadata:
-  name: ocp-training
-
+  name: cert-manager-ocp-olm-health-check
+  annotations:
+    aicr/no-op-check: "true"
 spec:
-  base: ocp
-
-  criteria:
-    service: ocp
-    intent: training
-
-  constraints:
-    - name: K8s.server.version
-      value: ">= 1.32"
-
-# No training-specific component overrides — all GPU Operator settings
-# (including gdrcopy) are in the base OCP values.
+  timeouts:
+    assert: 5m
+  steps: []

@@ -22,14 +22,24 @@ spec:
     service: ocp
 
   constraints:
+    # nvidia-dra-driver-gpu-ocp (chart 0.4.1) declares kubeVersion:
+    # '>=1.32.0-0'. Raised from >= 1.29 so DRA's floor doesn't silently
+    # pass recipe-time constraint checks and then fail at `helm install`.
+    # This effectively requires OCP 4.19+ (first OCP minor shipping k8s 1.32).
     - name: K8s.server.version
-      value: ">= 1.29"
+      value: ">= 1.32"
 
   componentRefs:
-    # OCP uses OLM-managed operators via in-tree Helm charts.
-    # Each operator has two phases:
+    # OCP uses OLM-managed operators via in-tree Helm charts where a
+    # matching certified/Red Hat operator exists (nfd, gpu-operator,
+    # network-operator, cert-manager). Each such operator has two phases:
     #   *-ocp-olm — OLM installer (Namespace, OperatorGroup, Subscription)
     #   *-ocp     — operator CR (ClusterPolicy, NodeFeatureDiscovery, etc.)
+    #
+    # Components with no matching OCP operator (prometheus-adapter,
+    # nvidia-dra-driver-gpu) reuse the same upstream chart as their base
+    # componentRef, with OCP-specific manifests (SCC, RBAC) layered on —
+    # see the registry.yaml "OCP Helm-reuse components" comment.
 
     # NFD via OLM
     - name: nfd-ocp-olm
@@ -84,6 +94,50 @@ spec:
       dependencyRefs:
         - network-operator-ocp-olm
 
+    # cert-manager via OLM (issue #1818) — required by k8s-nim-operator-ocp
+    # (see overlays/ocp-inference-nim.yaml) for admission-webhook TLS.
+    - name: cert-manager-ocp-olm
+      type: Helm
+      valuesFile: components/cert-manager-ocp-olm/values.yaml
+      manifestFiles:
+        - components/cert-manager-ocp-olm/manifests/operatorgroup.yaml
+        - components/cert-manager-ocp-olm/manifests/subscription.yaml
+      dependencyRefs:
+        - nfd-ocp
+
+    - name: cert-manager-ocp
+      type: Helm
+      valuesFile: components/cert-manager-ocp/values.yaml
+      manifestFiles:
+        - components/cert-manager-ocp/manifests/certmanager.yaml
+      dependencyRefs:
+        - cert-manager-ocp-olm
+
+    # Prometheus Adapter (issue #1818) — "adapter only" pattern, reuses
+    # the same chart as the base component but points it at OCP's
+    # built-in Thanos Querier instead of kube-prometheus-stack (which
+    # stays disabled below).
+    - name: prometheus-adapter-ocp
+      type: Helm
+      valuesFile: components/prometheus-adapter-ocp/values.yaml
+      preManifestFiles:
+        - components/prometheus-adapter-ocp/manifests/auth-config-configmap.yaml
+        - components/prometheus-adapter-ocp/manifests/ca-bundle-configmap.yaml
+      manifestFiles:
+        - components/prometheus-adapter-ocp/manifests/rbac.yaml
+
+    # nvidia-dra-driver-gpu (issue #1818) — "inherit the generic helm
+    # repo" pattern, reuses the exact upstream chart with an added SCC
+    # RoleBinding. dependencyRefs mirrors overlays/base.yaml's
+    # `dependencyRefs: [gpu-operator]` but pointed at the OCP variant.
+    - name: nvidia-dra-driver-gpu-ocp
+      type: Helm
+      valuesFile: components/nvidia-dra-driver-gpu-ocp/values.yaml
+      preManifestFiles:
+        - components/nvidia-dra-driver-gpu-ocp/manifests/scc-rolebinding.yaml
+      dependencyRefs:
+        - gpu-operator-ocp
+
     # nvsentinel — upstream Helm chart, no OLM variant needed
     - name: nvsentinel
       type: Helm
@@ -103,6 +157,14 @@ spec:
       type: Helm
       overrides:
         enabled: false
+    - name: prometheus-adapter
+      type: Helm
+      overrides:
+        enabled: false
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        enabled: false
     - name: kube-prometheus-stack
       type: Helm
       overrides:
@@ -111,19 +173,11 @@ spec:
       type: Helm
       overrides:
         enabled: false
-    - name: prometheus-adapter
-      type: Helm
-      overrides:
-        enabled: false
     - name: k8s-ephemeral-storage-metrics
       type: Helm
       overrides:
         enabled: false
     - name: nodewright-operator
-      type: Helm
-      overrides:
-        enabled: false
-    - name: nvidia-dra-driver-gpu
       type: Helm
       overrides:
         enabled: false
