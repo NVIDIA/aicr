@@ -15,9 +15,14 @@
 # Gang scheduling test with PodGroup, device-plugin GPU requests, and KAI
 # scheduler. GPUs are requested as scalar nvidia.com/gpu limits — the
 # device-plugin production default (#1327).
-# Demonstrates all-or-nothing scheduling: both pods must be scheduled together.
+# Demonstrates all-or-nothing scheduling in TWO phases (see collect_gang in
+# collect-evidence.sh): under constrained capacity NEITHER pod may schedule
+# (the barrier), then capacity is freed and BOTH must run together. Both
+# workers are pinned to a single node via the GANG_TEST_NODE placeholder,
+# which the script substitutes with a chosen GPU node before applying.
 # Requires: KAI scheduler with PodGroup CRD, NVIDIA device plugin (nvidia.com/gpu)
-# Usage: kubectl apply -f pkg/evidence/cncf/scripts/manifests/gang-scheduling-test.yaml
+# Standalone usage (substitute a node name with >= 2 allocatable GPUs):
+#   sed "s/GANG_TEST_NODE/<gpu-node>/" gang-scheduling-test.yaml | kubectl apply -f -
 ---
 apiVersion: v1
 kind: Namespace
@@ -38,12 +43,35 @@ kind: Pod
 metadata:
   name: gang-worker-0
   namespace: gang-scheduling-test
+  # pod-group-name is the LOAD-BEARING association: KAI's pod-grouper skips a
+  # bare pod carrying this annotation (no auto-created per-pod PodGroup) and
+  # the scheduler joins it to the named PodGroup (verified against KAI
+  # v0.14.1: PodGroupAnnotationForPod in pod_controller.go/pod_info.go). The
+  # pod-group labels alone do NOT associate — the pod-grouper ignores them
+  # and creates per-pod groups, silently degrading the test to individual
+  # scheduling (observed live on the gb200 conformance cluster). The labels
+  # are retained deliberately: inert at KAI v0.14.1, kept for reporting and
+  # forward compatibility.
+  annotations:
+    pod-group-name: gang-test-group
   labels:
     pod-group.scheduling.run.ai/name: gang-test-group
     pod-group.scheduling.run.ai/group-id: gang-test-group
 spec:
   schedulerName: kai-scheduler
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - GANG_TEST_NODE
   restartPolicy: Never
+  # Kubelet-enforced GPU-tenancy bound, independent of the collector's
+  # liveness (its section timeout is an uncatchable SIGKILL of the script).
+  activeDeadlineSeconds: 600
   securityContext:
     runAsNonRoot: false
     seccompProfile:
@@ -65,12 +93,27 @@ kind: Pod
 metadata:
   name: gang-worker-1
   namespace: gang-scheduling-test
+  # See gang-worker-0: the annotation is the load-bearing group association.
+  annotations:
+    pod-group-name: gang-test-group
   labels:
     pod-group.scheduling.run.ai/name: gang-test-group
     pod-group.scheduling.run.ai/group-id: gang-test-group
 spec:
   schedulerName: kai-scheduler
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - GANG_TEST_NODE
   restartPolicy: Never
+  # Kubelet-enforced GPU-tenancy bound, independent of the collector's
+  # liveness (its section timeout is an uncatchable SIGKILL of the script).
+  activeDeadlineSeconds: 600
   securityContext:
     runAsNonRoot: false
     seccompProfile:

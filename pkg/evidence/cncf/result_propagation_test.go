@@ -65,14 +65,164 @@ case "${mode}" in
         SECTION="operator"
         ;;
     operator-dynamo-no-dgd)
-        # Dynamo operator is installed but no DynamoGraphDeployment exists and the
-        # DGD query itself succeeds: an absent inference workload is an absent
-        # prerequisite (SKIP), not a failure.
+        # Dynamo operator is installed, its webhook DEMONSTRABLY rejects the
+        # probe (the stub returns the webhook-attributed denial — the SKIP
+        # branch sits behind the required webhook gate), but no
+        # DynamoGraphDeployment exists and the DGD query itself succeeds:
+        # an absent inference workload is an absent prerequisite (SKIP),
+        # not a failure.
         kubectl() {
             if [ "${1:-}" = "cluster-info" ]; then
                 return 0
             fi
             case " $* " in
+                *"--dry-run=server"*)
+                    echo 'Error from server (Forbidden): error when creating "STDIN": admission webhook "vdynamographdeployment.kb.io" denied the request: spec.services must have at least one service' >&2
+                    return 1 ;;
+                *"dynamo-platform-dynamo-operator-controller-manager"*) echo "dynamo-operator 1/1" ;;
+                *" dynamographdeployments "*) return 0 ;;
+            esac
+            return 0
+        }
+        SECTION="operator"
+        ;;
+    operator-dynamo-no-dgd-no-webhook)
+        # Operator present, DGD query succeeds with zero rows, and the
+        # webhook probe is ADMITTED (server dry-run succeeds — no denial of
+        # any kind): the webhook gate must FAIL the section before the
+        # absent-DGD SKIP branch can swallow the observed webhook failure.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *"--dry-run=server"*)
+                    echo "dynamographdeployment.nvidia.com/webhook-test-invalid created (server dry run)"
+                    return 0 ;;
+                *"dynamo-platform-dynamo-operator-controller-manager"*) echo "dynamo-operator 1/1" ;;
+                *" dynamographdeployments "*) return 0 ;;
+            esac
+            return 0
+        }
+        SECTION="operator"
+        ;;
+    gang-barrier-pass)
+        # Full two-phase gang happy path through the REAL collect_gang:
+        # idle-node pick, blocker staging, occupancy gates at both ends,
+        # binding + two-part gang-evaluation reads, release-phase waits,
+        # and the verdict ladder. The occupancy read is stateful: 0 GPUs
+        # used at pick time, 3 (the blocker) at the post-blocker gate and
+        # the post-window re-check.
+        sleep() { return 0; }
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *"get namespace gang-scheduling-test"*)
+                    return 1 ;;
+                *"--field-selector"*)
+                    local n=0
+                    [ -f "${SCRIPT_DIR}/occ-count" ] && IFS= read -r n < "${SCRIPT_DIR}/occ-count"
+                    n=$((n + 1)); printf '%s' "${n}" > "${SCRIPT_DIR}/occ-count"
+                    if [ "${n}" -ge 2 ]; then
+                        echo "Running A 3 I "
+                    fi
+                    return 0 ;;
+                *"PodScheduled"*)
+                    echo "False/Unschedulable"
+                    return 0 ;;
+                *" podgroup gang-test-group "*)
+                    echo "PodSchedulingErrors: Resources were found for 1 pods while 2 are required for gang scheduling. Additional pods cannot be scheduled."
+                    return 0 ;;
+                *"spec.nodeName"*)
+                    return 0 ;;
+                *"containerStatuses"*)
+                    return 0 ;;
+                *"status.phase"*)
+                    if [[ "$*" == *"gang-capacity-blocker"* ]]; then
+                        echo "Running"
+                    else
+                        echo "Succeeded"
+                    fi
+                    return 0 ;;
+                *"nvidia.com/gpu.present"*)
+                    echo "gang-test-node 4 cordoned= ready=True"
+                    return 0 ;;
+            esac
+            return 0
+        }
+        SECTION="gang"
+        ;;
+    operator-kubeflow-webhook-pass)
+        # Exercises the Kubeflow branch of the operator dispatch (every
+        # other operator lane routes to Dynamo): the exact-name webhook
+        # grep for validator.trainjob.trainer.kubeflow.org AND the
+        # readyReplicas >= 1 controller readiness (an HA-scaled 2-replica
+        # controller must not be misread as unready under the stricter
+        # webhook-required verdict).
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *"dynamo-platform-dynamo-operator-controller-manager"*)
+                    return 0 ;;
+                *"k8s-nim-operator"*)
+                    return 0 ;;
+                *"readyReplicas"*)
+                    echo "2"
+                    return 0 ;;
+                *"kubeflow-trainer-controller-manager --no-headers"*)
+                    echo "kubeflow-trainer-controller-manager 2/2 2 2 5d"
+                    return 0 ;;
+                *"--dry-run=server"*)
+                    echo 'Error from server (Forbidden): error when creating "STDIN": admission webhook "validator.trainjob.trainer.kubeflow.org" denied the request: specified clusterTrainingRuntime must be created before the TrainJob is created' >&2
+                    return 1 ;;
+                *" get crds "*)
+                    printf '%s\n' "trainjobs.trainer.kubeflow.org" "trainingruntimes.trainer.kubeflow.org" "clustertrainingruntimes.trainer.kubeflow.org"
+                    return 0 ;;
+            esac
+            return 0
+        }
+        SECTION="operator"
+        ;;
+    operator-dynamo-schema-reject)
+        # A schema-shaped rejection (Required value) must land in the
+        # NOT-the-webhook branch and FAIL — the exact regression the
+        # schema-valid probe payloads guard against.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *"--dry-run=server"*)
+                    echo 'The DynamoGraphDeployment "webhook-test-invalid" is invalid: spec.services: Required value' >&2
+                    return 1 ;;
+                *"dynamo-platform-dynamo-operator-controller-manager"*) echo "dynamo-operator 1/1" ;;
+                *" dynamographdeployments "*) return 0 ;;
+            esac
+            return 0
+        }
+        SECTION="operator"
+        ;;
+    operator-dynamo-foreign-webhook)
+        # The probe is denied by a DIFFERENT admission webhook (a cluster
+        # policy webhook) — the exact-name gate must classify this as NOT
+        # demonstrating the operator's webhook and FAIL, never PASS or
+        # SKIP. This is the discriminating branch of the name-pinned grep.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *"--dry-run=server"*)
+                    # The foreign name deliberately EMBEDS the operator's
+                    # webhook name as a prefix: a naive substring grep would
+                    # match it, so this lane fails if the exact-name
+                    # (quote-anchored) matching is ever loosened.
+                    echo 'Error from server (Forbidden): error when creating "STDIN": admission webhook "vdynamographdeployment.kb.io.evil.example.com" denied the request: denied by cluster policy' >&2
+                    return 1 ;;
                 *"dynamo-platform-dynamo-operator-controller-manager"*) echo "dynamo-operator 1/1" ;;
                 *" dynamographdeployments "*) return 0 ;;
             esac
@@ -249,6 +399,55 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 			singleVerdictFile: "robust-operator.md",
 		},
 		{
+			// The central regression case for the webhook-before-SKIP rule:
+			// with no operator-attributed denial, an absent workload DGD
+			// must NOT convert the webhook failure into a non-failing SKIP.
+			name:              "present operator without DGD and without webhook denial fails",
+			mode:              "operator-dynamo-no-dgd-no-webhook",
+			displayName:       "Robust AI Operator",
+			wantStatus:        "FAIL",
+			singleVerdictFile: "robust-operator.md",
+			wantErr:           true,
+		},
+		{
+			// The PR's headline behavioral logic end to end: barrier
+			// staging, both occupancy gates, the two-part gang-evaluation
+			// gate, and joint completion — through the real collect_gang.
+			name:              "gang two-phase barrier passes with full affirmative evidence",
+			mode:              "gang-barrier-pass",
+			displayName:       "Gang Scheduling",
+			wantStatus:        "PASS",
+			singleVerdictFile: "gang-scheduling.md",
+		},
+		{
+			// The Kubeflow dispatch branch: exact-name webhook grep plus
+			// readyReplicas>=1 (HA controller must not read as unready).
+			name:              "kubeflow webhook rejection passes with HA controller",
+			mode:              "operator-kubeflow-webhook-pass",
+			displayName:       "Robust AI Operator",
+			wantStatus:        "PASS",
+			singleVerdictFile: "robust-operator.md",
+		},
+		{
+			// A schema-shaped rejection must not read as a webhook denial.
+			name:              "schema rejection does not demonstrate the operator webhook",
+			mode:              "operator-dynamo-schema-reject",
+			displayName:       "Robust AI Operator",
+			wantStatus:        "FAIL",
+			singleVerdictFile: "robust-operator.md",
+			wantErr:           true,
+		},
+		{
+			// The discriminating branch of the exact-name webhook gate: a
+			// denial from a foreign (policy) webhook must FAIL, not count.
+			name:              "foreign webhook denial does not demonstrate the operator webhook",
+			mode:              "operator-dynamo-foreign-webhook",
+			displayName:       "Robust AI Operator",
+			wantStatus:        "FAIL",
+			singleVerdictFile: "robust-operator.md",
+			wantErr:           true,
+		},
+		{
 			name:              "operator DGD query failure fails closed",
 			mode:              "operator-dynamo-query-failed",
 			displayName:       "Robust AI Operator",
@@ -397,6 +596,16 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 				manifestPath := filepath.Join(manifestDir, "trainer-pytorch-test.yaml")
 				if err := os.WriteFile(manifestPath, []byte("---\n"), 0o600); err != nil {
 					t.Fatalf("write trainer manifest fixture: %v", err)
+				}
+			}
+			if strings.HasPrefix(tt.mode, "gang-") {
+				manifestDir := filepath.Join(dir, "manifests")
+				if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+					t.Fatalf("create manifest directory: %v", err)
+				}
+				manifestPath := filepath.Join(manifestDir, "gang-scheduling-test.yaml")
+				if err := os.WriteFile(manifestPath, []byte("# GANG_TEST_NODE placeholder fixture\n---\n"), 0o600); err != nil {
+					t.Fatalf("write gang manifest fixture: %v", err)
 				}
 			}
 			if tt.collectorFails {
