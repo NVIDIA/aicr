@@ -312,11 +312,34 @@ func CheckHostMofedWithoutNetworkOperator(ctx context.Context, componentName str
 	return []string{msg}, nil
 }
 
-// draDriverComponentName is the ComponentRef.Name used by the recipe
-// registry for the NVIDIA DRA GPU driver. Kept in sync with
-// recipes/registry.yaml — CheckDriverOwnershipCoherence reads its
-// nvidiaDriverRoot to enforce the driver-root lockstep.
+// draDriverComponentName is the CANONICAL ComponentRef.Name used by the
+// recipe registry for the NVIDIA DRA GPU driver. Kept in sync with
+// recipes/registry.yaml. Used only in log/error message text below —
+// for actual component lookups, use resolveDRAComponentRef, which also
+// matches the OCP variant (see draDriverComponentNames).
 const draDriverComponentName = "nvidia-dra-driver-gpu"
+
+// draDriverComponentNames are every registry-level component name that
+// represents the NVIDIA DRA GPU driver, canonical plus OCP variant. This
+// package cannot import pkg/bundler (dependency cycle — see
+// componentOverrideKeys godoc for the same constraint elsewhere in this
+// file), so this list is a local duplicate of pkg/bundler's
+// draComponentNames; keep both in sync.
+var draDriverComponentNames = []string{draDriverComponentName, "nvidia-dra-driver-gpu-ocp"}
+
+// resolveDRAComponentRef looks up the DRA driver's ComponentRef by
+// trying every known name variant in turn. recipeResult.GetComponentRef
+// only matches an EXACT name, so a bare call with the canonical
+// "nvidia-dra-driver-gpu" silently returns nil (skipping Rule 2
+// entirely, with no error) on any recipe using the OCP variant instead.
+func resolveDRAComponentRef(recipeResult *recipe.RecipeResult) *recipe.ComponentRef {
+	for _, name := range draDriverComponentNames {
+		if ref := recipeResult.GetComponentRef(name); ref != nil {
+			return ref
+		}
+	}
+	return nil
+}
 
 // operatorContainerDriverRoot is the host path the GPU Operator's driver
 // container populates when the operator manages the driver
@@ -832,11 +855,11 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 	osCriteria recipe.CriteriaOSType, driverEnabled bool, installDir string, installDirTrusted bool,
 ) ([]string, []error) {
 
-	draRef := recipeResult.GetComponentRef(draDriverComponentName)
+	draRef := resolveDRAComponentRef(recipeResult)
 	if draRef == nil {
 		return nil, nil
 	}
-	draKeys := componentOverrideKeys(draDriverComponentName, provider)
+	draKeys := componentOverrideKeys(draRef.Name, provider)
 	if componentDisabled(draRef, bundlerConfig, draKeys) {
 		return nil, nil
 	}
@@ -844,10 +867,10 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 	// Same install-time-deferral hazard as the gpu-operator ownership
 	// paths in the caller: a dynamic DRA driver root escapes Rule 2 at
 	// bundle time.
-	draDynMsgs := dynamicOwnershipViolations(bundlerConfig, draDriverComponentName, draKeys,
+	draDynMsgs := dynamicOwnershipViolations(bundlerConfig, draRef.Name, draKeys,
 		[]string{"nvidiaDriverRoot"})
 	msgs = append(msgs, draDynMsgs...)
-	draValues, draErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, draDriverComponentName, draKeys)
+	draValues, draErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, draRef.Name, draKeys)
 	if draErr != nil {
 		return msgs, []error{draErr}
 	}
@@ -874,15 +897,15 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 			"%s: the operator-managed driver installs to hostPaths.driverInstallDir=%s "+
 				"but the DRA kubelet plugin reads nvidiaDriverRoot=%s; CDI spec generation "+
 				"will fail and DRA-allocated pods will stall in ContainerCreating. Fix with "+
-				"--set dradriver:nvidiaDriverRoot=%s (or, on a cluster with a "+
+				"--set %s:nvidiaDriverRoot=%s (or, on a cluster with a "+
 				"platform-preinstalled driver, the full preinstalled-driver profile).",
-			componentName, installDir, root, installDir))
+			componentName, installDir, root, draKeys[len(draKeys)-1], installDir))
 	case driverEnabled && !rootDeclared:
 		msgs = append(msgs, fmt.Sprintf(
 			"%s: nvidiaDriverRoot is not declared for %s, so it falls to the DRA chart "+
 				"default (/), which cannot match the operator-managed driver install dir. "+
-				"Set --set dradriver:nvidiaDriverRoot=%s.",
-			componentName, draDriverComponentName, installDir))
+				"Set --set %s:nvidiaDriverRoot=%s.",
+			componentName, draRef.Name, draKeys[len(draKeys)-1], installDir))
 	case !driverEnabled && root == operatorContainerDriverRoot:
 		// The alternative clause is service- AND OS-aware (GKE profiles pin
 		// hostPaths.driverInstallDir to the Google installer path, and COS

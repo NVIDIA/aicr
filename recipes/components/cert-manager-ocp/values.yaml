@@ -1,0 +1,59 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# cert-manager OCP CertManager CR values
+#
+# Resource requests/limits mirror cert-manager/values.yaml for side-by-side
+# comparison. The template maps these flat keys into the
+# operator.openshift.io/v1alpha1 CertManager CR spec.
+#
+# The operator auto-creates a default "cluster" CertManager object if none
+# is applied; we apply one explicitly so the operand resource requests
+# match every other platform instead of silently falling back to the
+# operator's own defaults.
+#
+# NOTE: this CR is cluster-scoped (no metadata.namespace). The operand
+# Deployments it controls (cert-manager, cert-manager-cainjector,
+# cert-manager-webhook) always land in a hardcoded "cert-manager"
+# namespace regardless of where this CR or the Subscription live — see
+# checks/cert-manager-ocp/health-check.yaml.
+
+name: cluster
+
+controllerConfig:
+  overrideResources:
+    requests:
+      memory: "90Mi"
+      cpu: "50m"
+    limits:
+      memory: "90Mi"
+      cpu: "50m"
+
+webhookConfig:
+  overrideResources:
+    requests:
+      memory: "40Mi"
+      cpu: "50m"
+    limits:
+      memory: "40Mi"
+      cpu: "50m"
+
+cainjectorConfig:
+  overrideResources:
+    requests:
+      memory: "320Mi"
+      cpu: "50m"
+    limits:
+      memory: "320Mi"
+      cpu: "50m"

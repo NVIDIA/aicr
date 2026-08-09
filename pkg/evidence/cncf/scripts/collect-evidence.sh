@@ -782,6 +782,14 @@ EOF
 
 # --- Section 2: Gang Scheduling ---
 collect_gang() {
+    # Section start timestamp: the collector kills a section at 5 minutes
+    # (defaults.EvidenceSectionTimeout), so the release-phase waits below
+    # are budgeted from ELAPSED time — fixed per-pod waits could push a
+    # late-success run past the deadline and get it killed before the PASS
+    # verdict is written (a false FAIL on a supported slow path).
+    local gang_section_start
+    local phase0="" phase1=""
+    gang_section_start=$(date +%s)
     EVIDENCE_FILE="${EVIDENCE_DIR}/gang-scheduling.md"
     log_info "Collecting Gang Scheduling evidence → ${EVIDENCE_FILE}"
     write_section_header "Gang Scheduling (KAI Scheduler)"
@@ -803,31 +811,393 @@ EOF
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Gang Scheduling Test
+## Gang Scheduling Test (two-phase)
 
-Deploy a PodGroup with minMember=2 and two GPU pods. KAI scheduler ensures both
-pods are scheduled atomically.
+Deploy a PodGroup with minMember=2 and two GPU pods, both pinned to one GPU
+node. The test runs in two phases so the all-or-nothing barrier is actually
+exercised (a group that schedules into ample free capacity proves nothing —
+any scheduler would place both pods):
+
+1. **Barrier phase** — a blocker pod occupies all but ONE of the node's GPUs,
+   so the two-pod group cannot fully fit. Gang semantics require that
+   **neither** pod schedules; one Running pod here means the barrier is
+   violated (an ordinary scheduler would run one and leave one Pending).
+2. **Release phase** — the blocker is deleted; **both** pods must then be
+   scheduled and run to completion together.
 
 **Test manifest:** `pkg/evidence/cncf/scripts/manifests/gang-scheduling-test.yaml`
+(the `GANG_TEST_NODE` placeholder is substituted with the chosen node)
 EOF
     echo '```yaml' >> "${EVIDENCE_FILE}"
     cat "${SCRIPT_DIR}/manifests/gang-scheduling-test.yaml" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
-    # Clean up any previous run
-    cleanup_ns gang-scheduling-test pre
+    # gang_node_gpu_used <node> — summed EFFECTIVE nvidia.com/gpu usage of
+    # non-terminated pods on <node>, or "error" when the pod list fails
+    # (callers must not treat a failed read as zero). Effective per-pod
+    # usage follows the scheduler's rule: max(sum of app containers,
+    # largest init container) — an init-container-only GPU reservation
+    # must not read as zero, or the idle pick and occupancy gates would
+    # stage a zero-free-GPU barrier that holds under ANY scheduler.
+    # (Accepted limitations: DRA ResourceClaim-held GPUs are not visible to
+    # this helper — device-plugin-mode profiles only — and restartable
+    # (sidecar-pattern) init containers are max-ed here although Kubernetes
+    # SUMS them, so a GPU-requesting sidecar would undercount; no supported
+    # component ships one.)
+    gang_node_gpu_used() {
+        local out
+        if ! out=$(kubectl get pods -A --field-selector "spec.nodeName=$1" -o jsonpath='{range .items[*]}{.status.phase}{" A "}{range .spec.containers[*]}{.resources.limits.nvidia\.com/gpu}{" "}{end}{"I "}{range .spec.initContainers[*]}{.resources.limits.nvidia\.com/gpu}{" "}{end}{"\n"}{end}' 2>/dev/null); then
+            echo "error"
+            return
+        fi
+        printf '%s\n' "${out}" | awk '
+            $1 != "Succeeded" && $1 != "Failed" {
+                app = 0; initmax = 0; mode = ""
+                for (i = 1; i <= NF; i++) {
+                    if ($i == "A") { mode = "a"; continue }
+                    if ($i == "I") { mode = "i"; continue }
+                    if (mode == "a") app += $i
+                    else if (mode == "i" && $i > initmax) initmax = $i
+                }
+                s += (app > initmax) ? app : initmax
+            }
+            END { print s + 0 }'
+    }
 
-    # Deploy test
-    log_info "Deploying gang scheduling test..."
-    capture "Apply test manifest" kubectl apply -f "${SCRIPT_DIR}/manifests/gang-scheduling-test.yaml"
+    # Clean up any previous run and VERIFY it is gone (same helper the DRA
+    # and secure-access sections use), BEFORE the occupancy-based node
+    # scan below: stale gang pods from an interrupted or --no-cleanup run
+    # would otherwise count as node occupancy and make every node look
+    # busy — a FAIL without cleanup ever being attempted. (A Terminating
+    # namespace would also fail the blocker apply and misdiagnose as
+    # "GPUs not free".)
+    if ! ensure_fresh_namespace gang-scheduling-test; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — previous gang-scheduling-test namespace could not be removed; cannot guarantee a fresh test." >> "${EVIDENCE_FILE}"
+        return
+    fi
 
-    # Wait for both pods to complete
-    log_info "Waiting for gang-worker-0 (up to ${POD_TIMEOUT}s)..."
-    phase0=$(wait_for_pod "gang-scheduling-test" "gang-worker-0" "${POD_TIMEOUT}")
+    # Pick an IDLE GPU node with >= 2 allocatable GPUs: the group needs 2
+    # on one node, and the barrier phase needs room for a blocker that
+    # leaves exactly 1 free. Occupancy is checked at PICK time — taking the
+    # first node by allocatable alone would deterministically fail on the
+    # very cluster this test targets (the standing NIM inference pod
+    # occupies one GPU on one of the nodes, and the post-blocker occupancy
+    # gate would then reject that node instead of using an idle sibling).
+    # The listing is rc-checked so a failed query reports itself as a
+    # failed observation, not as "no such node".
+    local gang_nodes_out gang_node="" gang_gpus=0 _node _gpus _used _cordoned _ready
+    local gang_candidates=0 gang_pick_read_err=false
+    if ! gang_nodes_out=$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.allocatable.nvidia\.com/gpu}{" cordoned="}{.spec.unschedulable}{" ready="}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' 2>/dev/null); then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — could not list GPU nodes (API read failure — this is a failed observation, not evidence that no suitable node exists). Re-run against a reachable API server." >> "${EVIDENCE_FILE}"
+        log_error "Gang scheduling: GPU node listing failed."
+        return
+    fi
+    while IFS=' ' read -r _node _gpus _cordoned _ready; do
+        case "${_gpus}" in ''|*[!0-9]*) continue ;; esac
+        [ "${_gpus}" -ge 2 ] || continue
+        # Schedulability filter: a cordoned or NotReady node is ALWAYS idle,
+        # so the idle-first scan would preferentially pick it over a healthy
+        # sibling — and the scheduler unconditionally rejects such nodes,
+        # turning any node maintenance into a deterministic false FAIL.
+        if [ "${_cordoned}" != "cordoned=" ] && [ "${_cordoned}" != "cordoned=false" ]; then
+            log_info "Gang node candidate ${_node}: cordoned — skipping"
+            continue
+        fi
+        if [ "${_ready}" != "ready=True" ]; then
+            log_info "Gang node candidate ${_node}: not Ready — skipping"
+            continue
+        fi
+        gang_candidates=$((gang_candidates + 1))
+        _used=$(gang_node_gpu_used "${_node}")
+        if [ "${_used}" = "error" ]; then
+            gang_pick_read_err=true
+            log_info "Gang node candidate ${_node}: occupancy unverifiable (pod list failed) — skipping"
+            continue
+        fi
+        if [ "${_used}" -eq 0 ]; then
+            gang_node="${_node}"
+            gang_gpus="${_gpus}"
+            break
+        fi
+        log_info "Gang node candidate ${_node}: ${_used} GPU(s) already in use — skipping"
+    done <<< "${gang_nodes_out}"
+    if [ -z "${gang_node}" ]; then
+        # Durable evidence for the rejection: the per-candidate skip
+        # reasons above go to stdout only, and an operator reading the .md
+        # without cluster access needs to see WHY no node qualified.
+        capture "GPU node candidates (name / allocatable / cordoned / ready)" printf '%s\n' "${gang_nodes_out}"
+        capture "GPU pods on all nodes" kubectl get pods -A -o wide --no-headers
+        echo "" >> "${EVIDENCE_FILE}"
+        if [ "${gang_candidates}" -eq 0 ]; then
+            echo "**Result: FAIL** — no Ready, schedulable GPU node with at least 2 allocatable GPUs found (listing succeeded; cordoned/NotReady nodes are excluded — the scheduler rejects them unconditionally); the two-phase gang test needs one healthy node that can (eventually) host both group members." >> "${EVIDENCE_FILE}"
+        elif [ "${gang_pick_read_err}" = "true" ]; then
+            echo "**Result: FAIL** — no IDLE GPU node could be confirmed: at least one candidate's occupancy read failed (a failed observation, not proof of occupancy) and no other candidate was idle. Re-run against a reachable API server." >> "${EVIDENCE_FILE}"
+        else
+            echo "**Result: FAIL** — every GPU node with >= 2 allocatable GPUs already has GPU pods on it; the barrier phase needs one idle node it can hold exclusively (with zero free GPUs the barrier would hold under ANY scheduler and prove nothing). Free a GPU node and re-run." >> "${EVIDENCE_FILE}"
+        fi
+        log_error "Gang scheduling: no idle node with >= 2 allocatable GPUs."
+        return
+    fi
+    log_info "Gang test node: ${gang_node} (${gang_gpus} allocatable GPUs)"
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Test node:** \`${gang_node}\` (${gang_gpus} allocatable GPUs; blocker occupies $((gang_gpus - 1)))" >> "${EVIDENCE_FILE}"
+
+    # Phase 1 (barrier): blocker first, sized to leave exactly ONE free GPU
+    # on the node. It is placed via nodeName (kubelet admission, no
+    # scheduler involvement) so it cannot itself be affected by gang
+    # semantics. The test assumes the node's GPUs are otherwise free — the
+    # same dedicated-conformance-cluster assumption the rest of this script
+    # makes; a Pending blocker fails the test with that diagnosis.
+    log_info "Phase 1: deploying capacity blocker on ${gang_node}..."
+    kubectl create namespace gang-scheduling-test --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    capture "Apply capacity blocker" kubectl apply -f - <<BLOCKER
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gang-capacity-blocker
+  namespace: gang-scheduling-test
+spec:
+  nodeName: ${gang_node}
+  restartPolicy: Never
+  # Immediate kill on delete: the blocker is a sleep with nothing to flush,
+  # and the default 30s grace would burn a sixth of the release-phase
+  # budget inside the collector's 5-minute section timeout.
+  terminationGracePeriodSeconds: 0
+  # Kubelet-enforced upper bound on GPU tenancy, independent of this
+  # script's liveness: the collector's section timeout is an uncatchable
+  # SIGKILL of the bash process (no trap can run), so without this a
+  # timeout between blocker creation and deletion would leave the blocker
+  # holding gang_gpus-1 GPUs until the next run reclaims it.
+  activeDeadlineSeconds: 600
+  securityContext:
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
+  tolerations:
+    - operator: Exists
+  containers:
+    - name: blocker
+      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      command: ["sleep", "infinity"]
+      securityContext:
+        allowPrivilegeEscalation: false
+      resources:
+        limits:
+          nvidia.com/gpu: $((gang_gpus - 1))
+BLOCKER
+    local blocker_phase="" _b
+    for _b in $(seq 1 24); do
+        blocker_phase=$(kubectl get pod gang-capacity-blocker -n gang-scheduling-test -o jsonpath='{.status.phase}' 2>/dev/null)
+        [ "${blocker_phase}" = "Running" ] && break
+        sleep 5
+    done
+    if [ "${blocker_phase}" != "Running" ]; then
+        capture "Blocker pod description" kubectl describe pod gang-capacity-blocker -n gang-scheduling-test
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — the capacity blocker did not reach Running within the wait (phase: ${blocker_phase:-unknown}); the barrier phase cannot be staged. Likely causes: the node's GPUs are not free, or the container image is still pulling cold — see the pod description above. Free the node's GPUs (or pre-pull the image) and re-run." >> "${EVIDENCE_FILE}"
+        cleanup_ns gang-scheduling-test
+        return
+    fi
+
+    # Occupancy gate (race catch): the node was verified IDLE at pick
+    # time, but a foreign pod landing between the pick and here would
+    # break the exactly-one-free-GPU invariant — with zero free, any
+    # scheduler binds neither worker and the barrier "holds" vacuously (a
+    # PASS without gang semantics ever being exercised). Require the
+    # node's entire non-terminated GPU usage to be exactly the blocker's
+    # request.
+    local node_gpu_used
+    node_gpu_used=$(gang_node_gpu_used "${gang_node}")
+    if [ "${node_gpu_used}" = "error" ]; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — could not verify the test node's GPU occupancy (pod list failed — a failed observation, not a conclusion); the barrier is only meaningful when exactly one GPU is free. Re-run against a reachable API server." >> "${EVIDENCE_FILE}"
+        cleanup_ns gang-scheduling-test
+        return
+    fi
+    if [ "${node_gpu_used}" -ne $((gang_gpus - 1)) ]; then
+        capture "Pods on the test node" kubectl get pods -A --field-selector "spec.nodeName=${gang_node}" -o wide
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — the test node's GPU usage is ${node_gpu_used}, expected exactly $((gang_gpus - 1)) (the blocker alone): foreign GPU pod(s) occupy the node, so the barrier phase cannot stage its exactly-one-free-GPU state — with zero free GPUs the barrier would hold under ANY scheduler and prove nothing. Free the node's GPUs and re-run." >> "${EVIDENCE_FILE}"
+        cleanup_ns gang-scheduling-test
+        return
+    fi
+
+    log_info "Deploying gang test (group needs 2 GPUs; 1 free)..."
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Apply test manifest (node-pinned)**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    echo "\$ sed \"s/GANG_TEST_NODE/${gang_node}/\" manifests/gang-scheduling-test.yaml | kubectl apply -f -" >> "${EVIDENCE_FILE}"
+    sed "s/GANG_TEST_NODE/${gang_node}/" "${SCRIPT_DIR}/manifests/gang-scheduling-test.yaml" | kubectl apply -f - >> "${EVIDENCE_FILE}" 2>&1
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Barrier observation window: with only 1 free GPU for a 2-GPU group,
+    # NEITHER pod may be SCHEDULED. The check is node binding
+    # (spec.nodeName), not pod phase: phase Pending includes a pod already
+    # bound to a node but still pulling its image, so a broken scheduler
+    # that binds one worker to the sole free GPU would look "Pending" too
+    # during a cold multi-GB image pull — exactly the false PASS this test
+    # exists to eliminate.
+    log_info "Phase 1: observing barrier for 60s (neither pod may be bound to a node)..."
+    sleep 60
+    # rc-checked reads: a failed read (API timeout, missing worker) returns
+    # the same empty string as a successfully observed UNBOUND pod, so an
+    # ignored exit status would fail open — the barrier must count as
+    # unobservable, not held.
+    local barrier_node0="" barrier_node1="" barrier_ok=false barrier_observed=true
+    barrier_node0=$(kubectl get pod gang-worker-0 -n gang-scheduling-test -o jsonpath='{.spec.nodeName}' 2>/dev/null) || barrier_observed=false
+    barrier_node1=$(kubectl get pod gang-worker-1 -n gang-scheduling-test -o jsonpath='{.spec.nodeName}' 2>/dev/null) || barrier_observed=false
+    # Post-window occupancy re-check: a foreign pod landing DURING the
+    # window can consume the one free GPU, making the barrier vacuous the
+    # same way the pre-blocker case would (any scheduler leaves both
+    # workers unbound at zero free). A failed re-read is unobservable.
+    local barrier_post_used
+    barrier_post_used=$(gang_node_gpu_used "${gang_node}")
+    if [ "${barrier_post_used}" = "error" ]; then
+        barrier_observed=false
+    fi
+    # AFFIRMATIVE scheduler-evaluation signal, selected from the live
+    # regeneration run's artifacts (gb200 conformance cluster, KAI
+    # v0.14.x) and verdict-bearing since that run. TWO parts, both
+    # required:
+    #  1. Both workers show PodScheduled=False/Unschedulable — the
+    #     scheduler attempted and refused them (a down/restarting/
+    #     backlogged scheduler never sets the condition). Alone this is
+    #     NOT gang-specific: KAI sets it for ANY fit error (queue quota,
+    #     transient resource states), so a non-gang refusal that clears at
+    #     release time could still complete both pods.
+    #  2. The NAMED PodGroup's status.schedulingConditions carries KAI's
+    #     gang-specific one-of-two refusal ("Resources were found for 1
+    #     pods while 2 are required for gang scheduling") — the exact
+    #     discriminating decision this test stages (one member fits, the
+    #     group does not), emitted only by KAI's gang allocation path.
+    #     The numbers are stable: minMember=2 and exactly-one-free-GPU are
+    #     both fixed by this test's construction. Both matched strings are
+    #     KAI-version-coupled (validated at v0.14.x); a KAI bump that
+    #     rewords them fails closed (never a false PASS) — update the
+    #     strings here alongside the KAI pin.
+    local barrier_sched0="" barrier_sched1="" barrier_group_refusal="" barrier_evaluated=false
+    barrier_sched0=$(kubectl get pod gang-worker-0 -n gang-scheduling-test -o jsonpath='{range .status.conditions[?(@.type=="PodScheduled")]}{.status}/{.reason}{end}' 2>/dev/null) || barrier_observed=false
+    barrier_sched1=$(kubectl get pod gang-worker-1 -n gang-scheduling-test -o jsonpath='{range .status.conditions[?(@.type=="PodScheduled")]}{.status}/{.reason}{end}' 2>/dev/null) || barrier_observed=false
+    barrier_group_refusal=$(kubectl get podgroup gang-test-group -n gang-scheduling-test -o jsonpath='{range .status.schedulingConditions[*]}{.message}{"\n"}{end}' 2>/dev/null) || barrier_observed=false
+    # One match boolean, shared by the gate and the diagnostic below: the
+    # pods and the PodGroup are read sequentially (no consistent snapshot),
+    # so a gang-attributed group refusal alongside an incomplete worker
+    # condition is a real state — the diagnostic must not relabel it as
+    # "not gang-attributed".
+    local barrier_group_matched=false
+    if printf '%s' "${barrier_group_refusal}" | grep -q "for 1 pods while 2 are required for gang scheduling"; then
+        barrier_group_matched=true
+    fi
+    if [ "${barrier_sched0}" = "False/Unschedulable" ] && [ "${barrier_sched1}" = "False/Unschedulable" ] \
+        && [ "${barrier_group_matched}" = "true" ]; then
+        barrier_evaluated=true
+    fi
+    if [ "${barrier_observed}" = "true" ] && [ "${barrier_evaluated}" = "true" ] \
+        && [ "${barrier_post_used}" = "$((gang_gpus - 1))" ] \
+        && [ -z "${barrier_node0}" ] && [ -z "${barrier_node1}" ]; then
+        barrier_ok=true
+    fi
+    # Raw evidence for the two verdict-bearing evaluation signals above
+    # (worker PodScheduled conditions and the named PodGroup's
+    # gang-attributed scheduling status — both selected from the live
+    # gb200 regeneration run), plus the events for triage.
+    capture "Pod status under constrained capacity" kubectl get pods -n gang-scheduling-test -o wide
+    capture "Worker PodScheduled conditions under constrained capacity" kubectl get pods -n gang-scheduling-test -o jsonpath='{range .items[*]}{.metadata.name}{": "}{range .status.conditions[?(@.type=="PodScheduled")]}{.status}{" reason="}{.reason}{" msg="}{.message}{end}{"\n"}{end}'
+    capture "PodGroup status under constrained capacity" kubectl get podgroups -n gang-scheduling-test -o yaml
+    capture "Scheduling events under constrained capacity" kubectl get events -n gang-scheduling-test --sort-by=.lastTimestamp
+    # Single classification, shared by the barrier-phase line here and the
+    # FINAL verdict below — the verdict must not re-derive (and
+    # mis-describe) the reason: "violated" claims partial scheduling,
+    # which is false for the NOT CREDITED states where both workers stayed
+    # unbound.
+    local barrier_reason="held" group_refusal_state="absent"
+    if [ "${barrier_group_matched}" = "true" ]; then
+        group_refusal_state="gang-attributed and PRESENT (the worker conditions were the incomplete half of the two-part evidence)"
+    elif [ -n "${barrier_group_refusal}" ]; then
+        group_refusal_state="present but not gang-attributed"
+    fi
+    if [ "${barrier_observed}" != "true" ]; then
+        barrier_reason="unobservable"
+    elif [ -n "${barrier_node0}" ] || [ -n "${barrier_node1}" ]; then
+        barrier_reason="violated"
+    elif [ "${barrier_post_used}" != "$((gang_gpus - 1))" ]; then
+        barrier_reason="occupancy-changed"
+    elif [ "${barrier_evaluated}" != "true" ]; then
+        barrier_reason="no-gang-decision"
+    fi
+    echo "" >> "${EVIDENCE_FILE}"
+    case "${barrier_reason}" in
+        unobservable)
+            echo "**Barrier phase:** UNOBSERVABLE — reading the workers' node binding, scheduling conditions, or the node's occupancy failed; an unobserved barrier cannot count as held." >> "${EVIDENCE_FILE}" ;;
+        violated)
+            echo "**Barrier phase:** VIOLATED — a group member was bound under constrained capacity (worker-0: ${barrier_node0:-<none>}, worker-1: ${barrier_node1:-<none>}); a partially scheduled group means gang semantics are not enforced." >> "${EVIDENCE_FILE}" ;;
+        occupancy-changed)
+            echo "**Barrier phase:** NOT CREDITED — the node's GPU occupancy changed during the window (now ${barrier_post_used} used, expected $((gang_gpus - 1)) — the blocker alone): a foreign pod landing mid-window or the blocker terminating early makes unbound workers vacuous under ANY scheduler (see the pod status above)." >> "${EVIDENCE_FILE}" ;;
+        no-gang-decision)
+            if [ "${barrier_group_matched}" = "true" ]; then
+                echo "**Barrier phase:** NOT CREDITED — the required two-part evidence is INCOMPLETE: the named PodGroup's gang-attributed one-of-two refusal MATCHED, but the worker-condition half did not (worker-0 PodScheduled: ${barrier_sched0:-<unset>}, worker-1 PodScheduled: ${barrier_sched1:-<unset>} — both must be False/Unschedulable; the reads are sequential, not a consistent snapshot). Credit requires both halves." >> "${EVIDENCE_FILE}"
+            else
+                echo "**Barrier phase:** NOT CREDITED — the scheduler did not affirmatively make the GANG decision during the window (worker-0 PodScheduled: ${barrier_sched0:-<unset>}, worker-1 PodScheduled: ${barrier_sched1:-<unset>} — both must be False/Unschedulable — AND the named PodGroup must carry KAI's one-of-two gang refusal, which was ${group_refusal_state}): merely-unbound or generically-refused pods (queue quota, transient fit errors, a down scheduler) prove nothing about gang semantics." >> "${EVIDENCE_FILE}"
+            fi ;;
+        *)
+            echo "**Barrier phase:** worker-0 bound to node: ${barrier_node0:-<none>}, worker-1 bound to node: ${barrier_node1:-<none>}; the scheduler AFFIRMATIVELY made the gang decision (both workers PodScheduled=False/Unschedulable AND the named PodGroup reports the one-of-two gang refusal: 'Resources were found for 1 pods while 2 are required for gang scheduling')." >> "${EVIDENCE_FILE}" ;;
+    esac
+
+    # Phase 2 (release): free the capacity; both pods must now run together.
+    # The delete wait is BOUNDED — grace 0 makes it instant normally, but
+    # an unbounded --wait could consume the whole section budget before
+    # the completion waits are even computed.
+    log_info "Phase 2: deleting blocker to free capacity..."
+    kubectl delete pod gang-capacity-blocker -n gang-scheduling-test --ignore-not-found --wait=true --timeout=30s >/dev/null 2>&1
+
+    # Completion budget, shared and elapsed-aware: whatever the blocker
+    # wait and barrier window already consumed, the waits below must end by
+    # section-start + 270s so ~30s remain for the captures and the verdict
+    # line — the collector kills the section at 300s, and a kill before the
+    # verdict is written turns BOTH a slow success (false FAIL) and a
+    # genuine failure (no diagnostics) into a worse outcome. Per-pod waits
+    # are additionally capped at 90s (ample: the blocker pulled the same
+    # image onto the same node, so workers start from a warm cache), and
+    # when worker-0 already failed its wait, worker-1 is read once instead
+    # of waited on — the verdict is FAIL either way.
+    # A remainder of 0 means the deadline is REAL: no wait is manufactured
+    # past it — the pod gets one direct observation instead (wait_for_pod
+    # with timeout 0 would print "Timeout" without ever reading the pod),
+    # and a not-yet-Succeeded phase lands in the FAIL branch with the
+    # captures and verdict still written inside the section budget.
+    gang_budget_remaining() {
+        local now left
+        now=$(date +%s)
+        left=$(( gang_section_start + 270 - now ))
+        [ "${left}" -gt 90 ] && left=90
+        [ "${left}" -lt 0 ] && left=0
+        echo "${left}"
+    }
+    local gang_wait
+    gang_wait=$(gang_budget_remaining)
+    if [ "${gang_wait}" -gt 0 ]; then
+        log_info "Waiting for gang-worker-0 (up to ${gang_wait}s)..."
+        phase0=$(wait_for_pod "gang-scheduling-test" "gang-worker-0" "${gang_wait}")
+    else
+        log_info "Completion budget exhausted — single observation of gang-worker-0"
+        phase0=$(kubectl get pod gang-worker-0 -n gang-scheduling-test -o jsonpath='{.status.phase}' 2>/dev/null)
+    fi
     log_info "gang-worker-0 phase: ${phase0}"
 
-    log_info "Waiting for gang-worker-1 (up to ${POD_TIMEOUT}s)..."
-    phase1=$(wait_for_pod "gang-scheduling-test" "gang-worker-1" "${POD_TIMEOUT}")
+    if [ "${phase0}" = "Succeeded" ]; then
+        gang_wait=$(gang_budget_remaining)
+        if [ "${gang_wait}" -gt 0 ]; then
+            log_info "Waiting for gang-worker-1 (up to ${gang_wait}s)..."
+            phase1=$(wait_for_pod "gang-scheduling-test" "gang-worker-1" "${gang_wait}")
+        else
+            log_info "Completion budget exhausted — single observation of gang-worker-1"
+            phase1=$(kubectl get pod gang-worker-1 -n gang-scheduling-test -o jsonpath='{.status.phase}' 2>/dev/null)
+        fi
+    else
+        phase1=$(kubectl get pod gang-worker-1 -n gang-scheduling-test -o jsonpath='{.status.phase}' 2>/dev/null)
+    fi
     log_info "gang-worker-1 phase: ${phase1}"
 
     capture "PodGroup status" kubectl get podgroups -n gang-scheduling-test -o wide
@@ -835,12 +1205,31 @@ EOF
     capture "gang-worker-0 logs" kubectl logs gang-worker-0 -n gang-scheduling-test
     capture "gang-worker-1 logs" kubectl logs gang-worker-1 -n gang-scheduling-test
 
-    # Verdict
+    # Verdict — BOTH phases must hold: the barrier under constrained
+    # capacity (the actual all-or-nothing proof) and the joint completion
+    # once capacity is freed.
     echo "" >> "${EVIDENCE_FILE}"
-    if [ "${phase0}" = "Succeeded" ] && [ "${phase1}" = "Succeeded" ]; then
-        echo "**Result: PASS** — Both pods scheduled and completed together via gang scheduling." >> "${EVIDENCE_FILE}"
+    if [ "${barrier_ok}" = "true" ] && [ "${phase0}" = "Succeeded" ] && [ "${phase1}" = "Succeeded" ]; then
+        echo "**Result: PASS** — under constrained capacity neither pod was bound to a node (all-or-nothing barrier held); after freeing capacity both pods were scheduled and completed together." >> "${EVIDENCE_FILE}"
+    elif [ "${barrier_ok}" != "true" ]; then
+        case "${barrier_reason}" in
+            violated)
+                echo "**Result: FAIL** — the all-or-nothing barrier was VIOLATED: a group member was bound under constrained capacity (worker-0: ${barrier_node0:-<none>}, worker-1: ${barrier_node1:-<none>}); a partially scheduled group means gang semantics are not enforced." >> "${EVIDENCE_FILE}" ;;
+            unobservable)
+                echo "**Result: FAIL** — the barrier was UNOBSERVABLE (a required read failed); an unobserved barrier cannot count as held (fail closed). See the Barrier phase entry above." >> "${EVIDENCE_FILE}" ;;
+            occupancy-changed)
+                echo "**Result: FAIL** — the barrier was NOT CREDITED: the node's GPU occupancy changed during the window, so the exactly-one-free-GPU state the barrier depends on was not maintained (both workers stayed unbound — this is not a partial-scheduling violation). See the Barrier phase entry above." >> "${EVIDENCE_FILE}" ;;
+            no-gang-decision)
+                if [ "${barrier_group_matched}" = "true" ]; then
+                    echo "**Result: FAIL** — the barrier was NOT CREDITED: the required two-part evidence is incomplete — the PodGroup's gang-attributed refusal matched, but the worker-condition half did not (both workers stayed unbound — this is not a partial-scheduling violation). See the Barrier phase entry above." >> "${EVIDENCE_FILE}"
+                else
+                    echo "**Result: FAIL** — the barrier was NOT CREDITED: the scheduler did not affirmatively make the one-of-two GANG decision during the window (both workers stayed unbound — this is not a partial-scheduling violation; the refusal was generic or absent). See the Barrier phase entry above." >> "${EVIDENCE_FILE}"
+                fi ;;
+            *)
+                echo "**Result: FAIL** — the barrier was not credited (${barrier_reason}); see the Barrier phase entry above." >> "${EVIDENCE_FILE}" ;;
+        esac
     else
-        echo "**Result: FAIL** — worker-0: ${phase0}, worker-1: ${phase1}" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — barrier held, but the group did not complete after capacity was freed (worker-0: ${phase0}, worker-1: ${phase1})." >> "${EVIDENCE_FILE}"
     fi
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
@@ -2144,9 +2533,10 @@ webhooks operational, and custom resources reconciled.
 
 1. **Kubeflow Trainer** — Controller manager running in `kubeflow` namespace
 2. **Custom Resource Definitions** — TrainJob, TrainingRuntime, ClusterTrainingRuntime CRDs registered
-3. **Webhooks Operational** — Validating webhook `validator.trainer.kubeflow.org` configured and active
-4. **Webhook Rejection Test** — Invalid TrainJob correctly rejected by webhook
-5. **Result: PASS**
+3. **Webhooks Operational** — ValidatingWebhookConfiguration `validator.trainer.kubeflow.org` configured and active (its webhook *entry* is named `validator.trainjob.trainer.kubeflow.org` — that entry name is what the rejection verdict below matches)
+4. **Webhook Rejection Test** — a schema-valid but webhook-invalid TrainJob must be rejected with a webhook-attributed message
+
+The result is stated by the verdict line at the end of this section, after the checks run.
 
 ---
 
@@ -2186,14 +2576,19 @@ EOF
 
 ## Webhook Rejection Test
 
-Submit an invalid TrainJob (referencing a non-existent runtime) to verify the
-validating webhook actively rejects malformed resources.
+Submit a TrainJob that is **schema-valid** (passes CRD OpenAPI validation)
+but violates a rule only the validating admission webhook enforces — a
+runtimeRef to a non-existent ClusterTrainingRuntime. A CRD-schema rejection
+would prove nothing about the webhook (the apiserver rejects malformed CRs
+with no webhook installed at all), so the verdict requires the rejection
+message to be webhook-attributed. Submitted with server-side dry-run and
+nothing is persisted.
 EOF
     echo "" >> "${EVIDENCE_FILE}"
-    echo "**Invalid TrainJob rejection**" >> "${EVIDENCE_FILE}"
+    echo "**Webhook-invalid TrainJob rejection**" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
     local webhook_result
-    webhook_result=$(kubectl apply -f - 2>&1 <<INVALID_CR || true
+    webhook_result=$(kubectl apply --dry-run=server -f - 2>&1 <<INVALID_CR || true
 apiVersion: trainer.kubeflow.org/v1alpha1
 kind: TrainJob
 metadata:
@@ -2210,34 +2605,39 @@ INVALID_CR
     echo '```' >> "${EVIDENCE_FILE}"
 
     echo "" >> "${EVIDENCE_FILE}"
-    # Check if the rejection came from the admission webhook (not RBAC or transport errors).
-    # Webhook rejections contain "admission webhook" or "denied the request".
-    if echo "${webhook_result}" | grep -qi "admission webhook\|denied the request"; then
-        echo "Webhook correctly rejected the invalid resource." >> "${EVIDENCE_FILE}"
-    elif echo "${webhook_result}" | grep -qi "cannot create resource\|unauthorized"; then
-        echo "WARNING: Rejection was from RBAC, not the admission webhook." >> "${EVIDENCE_FILE}"
-    elif echo "${webhook_result}" | grep -qi "denied\|forbidden\|invalid"; then
-        echo "Webhook rejected the invalid resource (unconfirmed source)." >> "${EVIDENCE_FILE}"
+    # webhook_ok=1 ONLY for a webhook-attributed denial. A schema-shaped
+    # rejection ("Required value"/"Invalid value") or any other failure
+    # (RBAC, transport) does not demonstrate the webhook.
+    local webhook_ok=0
+    if echo "${webhook_result}" | grep -qE 'admission webhook "validator\.trainjob\.trainer\.kubeflow\.org" denied the request'; then
+        webhook_ok=1
+        echo "The operator's validating admission webhook (validator.trainjob.trainer.kubeflow.org) rejected the resource." >> "${EVIDENCE_FILE}"
+    elif echo "${webhook_result}" | grep -qi "admission webhook" && echo "${webhook_result}" | grep -qi "denied the request"; then
+        echo "WARNING: the rejection came from a DIFFERENT admission webhook (e.g. a cluster policy webhook), not the operator's (validator.trainjob.trainer.kubeflow.org) — this does not demonstrate the operator's webhook." >> "${EVIDENCE_FILE}"
+    elif echo "${webhook_result}" | grep -q "Required value\|Invalid value"; then
+        echo "WARNING: the rejection came from CRD schema validation, NOT the admission webhook — this does not demonstrate the webhook." >> "${EVIDENCE_FILE}"
     else
-        echo "WARNING: Webhook did not reject the invalid resource." >> "${EVIDENCE_FILE}"
-        # Clean up if accidentally created
-        kubectl delete trainjob webhook-test-invalid -n default --ignore-not-found 2>/dev/null
+        echo "WARNING: the resource was not rejected by the admission webhook." >> "${EVIDENCE_FILE}"
     fi
 
-    # Verdict
+    # Verdict — the webhook-attributed rejection is REQUIRED: "webhooks
+    # operational" is this section's claim, so a PASS without the
+    # demonstration would certify an untested capability.
     echo "" >> "${EVIDENCE_FILE}"
     local crd_count
     crd_count=$(kubectl get crds 2>/dev/null | grep -c "trainer\.kubeflow\.org" || true)
-    local controller_ready
-    controller_ready=$(kubectl get deploy -n kubeflow kubeflow-trainer-controller-manager --no-headers 2>/dev/null | awk '{print $2}' | grep -c "1/1" || true)
-    local webhook_ok
-    # Only count confirmed webhook rejections (not RBAC or transport errors)
-    webhook_ok=$(echo "${webhook_result}" | grep -ci "admission webhook\|denied the request" || true)
+    # readyReplicas >= 1, not a literal "1/1" column match: an HA-scaled
+    # controller (2/2) is ready, and misreading it would trip the stricter
+    # webhook-required FAIL path on a healthy cluster.
+    local controller_ready=0 _cr
+    _cr=$(kubectl get deploy -n kubeflow kubeflow-trainer-controller-manager -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+    case "${_cr}" in ''|*[!0-9]*) _cr=0 ;; esac
+    [ "${_cr}" -ge 1 ] && controller_ready=1
 
     if [ "${crd_count}" -gt 0 ] && [ "${controller_ready}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
-        echo "**Result: PASS** — Kubeflow Trainer running, webhooks operational (rejection verified), ${crd_count} CRDs registered." >> "${EVIDENCE_FILE}"
+        echo "**Result: PASS** — Kubeflow Trainer running, webhooks operational (webhook-attributed rejection verified), ${crd_count} CRDs registered." >> "${EVIDENCE_FILE}"
     elif [ "${crd_count}" -gt 0 ] && [ "${controller_ready}" -gt 0 ]; then
-        echo "**Result: PASS** — Kubeflow Trainer running, ${crd_count} CRDs registered." >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — Kubeflow Trainer running and CRDs registered, but a webhook-attributed rejection was not demonstrated (see the webhook test above)." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — Kubeflow Trainer controller not ready or CRDs missing." >> "${EVIDENCE_FILE}"
     fi
@@ -2258,9 +2658,10 @@ webhooks operational, and custom resources reconciled.
 
 1. **NIM Operator** — Controller manager running in `nvidia-nim`
 2. **Custom Resource Definitions** — NIMService, NIMCache, NIMPipeline, NIMBuild CRDs registered
-3. **Admission Controller** — Validating/mutating webhooks configured and active
+3. **Admission Controller** — a schema-valid but webhook-invalid NIMService must be rejected with a webhook-attributed message
 4. **Custom Resource Reconciled** — `NIMService` reconciled into running inference pod(s)
-5. **Result: PASS**
+
+The result is stated by the verdict line at the end of this section, after the checks run.
 
 ---
 
@@ -2320,46 +2721,64 @@ EOF
 
 ## Webhook Rejection Test
 
-Submit an invalid NIMService to verify the admission controller actively
-rejects malformed resources.
+Submit a NIMService that is **schema-valid** (all CRD-required fields
+present, so CRD OpenAPI validation passes) but violates a rule enforced only
+by the validating admission webhook: `spec.metrics.enabled: true` without a
+`spec.metrics.serviceMonitor`. The previous probe used `spec: {}`, which the
+**CRD schema** rejects (`spec.authSecret: Required value`, `spec.image:
+Required value`) even with no webhook installed — proving nothing about the
+webhook. Submitted with server-side dry-run; nothing is persisted.
 EOF
     echo "" >> "${EVIDENCE_FILE}"
-    echo "**Invalid CR rejection**" >> "${EVIDENCE_FILE}"
+    echo "**Webhook-invalid NIMService rejection**" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
     local webhook_result
-    webhook_result=$(kubectl apply -f - 2>&1 <<INVALID_CR || true
+    webhook_result=$(kubectl apply --dry-run=server -f - 2>&1 <<INVALID_CR || true
 apiVersion: apps.nvidia.com/v1alpha1
 kind: NIMService
 metadata:
   name: webhook-test-invalid
   namespace: default
-spec: {}
+spec:
+  authSecret: webhook-test-secret
+  image:
+    repository: nvcr.io/nim/test
+    tag: "1.0.0"
+  metrics:
+    enabled: true
 INVALID_CR
 )
     echo "${webhook_result}" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
     echo "" >> "${EVIDENCE_FILE}"
-    if echo "${webhook_result}" | grep -qi "denied\|forbidden\|invalid\|error"; then
-        echo "Webhook correctly rejected the invalid resource." >> "${EVIDENCE_FILE}"
+    # webhook_ok=1 ONLY for a webhook-attributed denial: the old
+    # `denied|forbidden|invalid|error` grep certified the webhook on ANY
+    # failure output (schema, RBAC, transport).
+    local webhook_ok=0
+    if echo "${webhook_result}" | grep -qE 'admission webhook "vnimservice-v[a-z0-9]+\.kb\.io" denied the request'; then
+        webhook_ok=1
+        echo "The operator's validating admission webhook (vnimservice-v<version>.kb.io) rejected the resource." >> "${EVIDENCE_FILE}"
+    elif echo "${webhook_result}" | grep -qi "admission webhook" && echo "${webhook_result}" | grep -qi "denied the request"; then
+        echo "WARNING: the rejection came from a DIFFERENT admission webhook (e.g. a cluster policy webhook), not the operator's (vnimservice-v<version>.kb.io) — this does not demonstrate the operator's webhook." >> "${EVIDENCE_FILE}"
+    elif echo "${webhook_result}" | grep -q "Required value\|Invalid value"; then
+        echo "WARNING: the rejection came from CRD schema validation, NOT the admission webhook — this does not demonstrate the webhook." >> "${EVIDENCE_FILE}"
     else
-        echo "WARNING: Webhook did not reject the invalid resource." >> "${EVIDENCE_FILE}"
-        kubectl delete nimservice webhook-test-invalid -n default --ignore-not-found 2>/dev/null
+        echo "WARNING: the resource was not rejected by the admission webhook." >> "${EVIDENCE_FILE}"
     fi
 
-    # Verdict
+    # Verdict — the webhook-attributed rejection is REQUIRED (this
+    # section's claim is "webhooks operational").
     echo "" >> "${EVIDENCE_FILE}"
     local crd_count
     crd_count=$(kubectl get crds 2>/dev/null | grep -c "apps\.nvidia\.com" || true)
     local running_pods
     running_pods=$(kubectl get pods -n "${nim_ns}" -l app.kubernetes.io/managed-by=k8s-nim-operator --no-headers 2>/dev/null | grep -c "Running" || true)
-    local webhook_ok
-    webhook_ok=$(echo "${webhook_result}" | grep -ci "denied\|forbidden\|invalid\|error" || true)
 
     if [ "${crd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
-        echo "**Result: PASS** — NIM operator running, webhooks operational (rejection verified), ${crd_count} CRDs registered, NIMService reconciled with ${running_pods} healthy inference pod(s)." >> "${EVIDENCE_FILE}"
+        echo "**Result: PASS** — NIM operator running, webhooks operational (webhook-attributed rejection verified), ${crd_count} CRDs registered, NIMService reconciled with ${running_pods} healthy inference pod(s)." >> "${EVIDENCE_FILE}"
     elif [ "${crd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ]; then
-        echo "**Result: PASS** — NIM operator running, ${crd_count} CRDs registered, NIMService reconciled with ${running_pods} healthy inference pod(s)." >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — NIM operator running and NIMService reconciled, but a webhook-attributed rejection was not demonstrated (see the webhook test above)." >> "${EVIDENCE_FILE}"
     elif [ "${crd_count}" -gt 0 ]; then
         echo "**Result: FAIL** — NIMService found but no healthy inference pods." >> "${EVIDENCE_FILE}"
     else
@@ -2382,10 +2801,11 @@ webhooks operational, and custom resources reconciled.
 
 1. **Dynamo Operator** — Controller manager running in `dynamo-system`
 2. **Custom Resource Definitions** — 6 Dynamo CRDs registered (DynamoGraphDeployment, DynamoComponentDeployment, etc.)
-3. **Webhooks Operational** — Validating webhook configured and active
+3. **Webhooks Operational** — a webhook-invalid DynamoGraphDeployment must be rejected with a webhook-attributed message
 4. **Custom Resource Reconciled** — `DynamoGraphDeployment/vllm-agg` reconciled into running workload pods via PodCliques
 5. **Supporting Services** — NATS running for Dynamo's Kubernetes event plane
-6. **Result: PASS**
+
+The result is stated by the verdict line at the end of this section, after the checks run.
 
 ---
 
@@ -2442,15 +2862,21 @@ EOF
 
 ## Webhook Rejection Test
 
-Submit an invalid DynamoGraphDeployment to verify the validating webhook
-actively rejects malformed resources.
+Submit a DynamoGraphDeployment with an empty spec. Unlike the NIM probe,
+this IS the right shape here: at the pinned dynamo-operator version the
+v1beta1 CRD declares no required spec fields and no CEL rules, so an empty
+spec passes CRD schema validation and reaches admission — only the
+validating webhook rejects it (`spec.services must have at least one
+service`). The verdict still requires the rejection message to be
+webhook-attributed, so a schema change upstream cannot silently turn this
+back into a schema test. Submitted with server-side dry-run; nothing is
+persisted.
 EOF
     echo "" >> "${EVIDENCE_FILE}"
-    echo "**Invalid CR rejection**" >> "${EVIDENCE_FILE}"
+    echo "**Webhook-invalid DynamoGraphDeployment rejection**" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
-    # Submit an invalid DynamoGraphDeployment (empty spec) — webhook should reject it
     local webhook_result
-    webhook_result=$(kubectl apply -f - 2>&1 <<INVALID_CR || true
+    webhook_result=$(kubectl apply --dry-run=server -f - 2>&1 <<INVALID_CR || true
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
 metadata:
@@ -2462,15 +2888,23 @@ INVALID_CR
     echo "${webhook_result}" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
-    # Check if webhook rejected it
     echo "" >> "${EVIDENCE_FILE}"
-    if echo "${webhook_result}" | grep -qi "denied\|forbidden\|invalid\|error"; then
-        echo "Webhook correctly rejected the invalid resource." >> "${EVIDENCE_FILE}"
+    # webhook_ok=1 ONLY for a webhook-attributed denial (see the NIM probe
+    # for why a looser match certifies nothing).
+    local webhook_ok=0
+    if echo "${webhook_result}" | grep -qE 'admission webhook "vdynamographdeployment\.kb\.io" denied the request'; then
+        webhook_ok=1
+        echo "The operator's validating admission webhook (vdynamographdeployment.kb.io) rejected the resource." >> "${EVIDENCE_FILE}"
+    elif echo "${webhook_result}" | grep -qi "admission webhook" && echo "${webhook_result}" | grep -qi "denied the request"; then
+        echo "WARNING: the rejection came from a DIFFERENT admission webhook (e.g. a cluster policy webhook), not the operator's (vdynamographdeployment.kb.io) — this does not demonstrate the operator's webhook." >> "${EVIDENCE_FILE}"
+    elif echo "${webhook_result}" | grep -q "Required value\|Invalid value"; then
+        echo "WARNING: the rejection came from CRD schema validation, NOT the admission webhook — this does not demonstrate the webhook." >> "${EVIDENCE_FILE}"
     else
-        echo "WARNING: Webhook did not reject the invalid resource." >> "${EVIDENCE_FILE}"
+        echo "WARNING: the resource was not rejected by the admission webhook." >> "${EVIDENCE_FILE}"
     fi
 
-    # Verdict — require DGD + healthy workload pods; webhook rejection strengthens but is optional.
+    # Verdict — the webhook-attributed rejection is REQUIRED (this
+    # section's claim is "webhooks operational").
     # Distinguish a failed DGD query (fail closed) from a successful query returning
     # zero rows: an absent inference workload is an absent prerequisite (SKIP), not a
     # failure, because a stock inference recipe deploys the operator but no persistent
@@ -2484,19 +2918,21 @@ INVALID_CR
     fi
     local running_pods
     running_pods=$(kubectl get pods -n dynamo-workload -l nvidia.com/dynamo-graph-deployment-name --no-headers 2>/dev/null | grep -c "Running" || true)
-    local webhook_ok
-    webhook_ok=$(echo "${webhook_result}" | grep -ci "denied\|forbidden\|invalid\|error" || true)
 
     if [ "${dgd_query_ok}" != "true" ]; then
         echo "**Result: FAIL** — DynamoGraphDeployment query failed (fail closed); rerun against a reachable API server." >> "${EVIDENCE_FILE}"
-    elif [ "${dgd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
-        echo "**Result: PASS** — Dynamo operator running, webhooks operational (rejection verified), CRDs registered, DynamoGraphDeployment reconciled with ${running_pods} healthy workload pod(s)." >> "${EVIDENCE_FILE}"
+    elif [ "${webhook_ok}" -eq 0 ]; then
+        # The webhook gate comes BEFORE the workload branches: the probe
+        # needs only the operator, so an absent workload DGD (the normal
+        # state on a stock inference cluster) must not convert an observed
+        # webhook failure into a non-failing SKIP.
+        echo "**Result: FAIL** — a webhook-attributed rejection was not demonstrated (see the webhook test above); operational webhooks are required regardless of whether a workload DynamoGraphDeployment exists." >> "${EVIDENCE_FILE}"
     elif [ "${dgd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ]; then
-        echo "**Result: PASS** — Dynamo operator running, CRDs registered, DynamoGraphDeployment reconciled with ${running_pods} healthy workload pod(s)." >> "${EVIDENCE_FILE}"
+        echo "**Result: PASS** — Dynamo operator running, webhooks operational (webhook-attributed rejection verified), CRDs registered, DynamoGraphDeployment reconciled with ${running_pods} healthy workload pod(s)." >> "${EVIDENCE_FILE}"
     elif [ "${dgd_count}" -gt 0 ]; then
         echo "**Result: FAIL** — DynamoGraphDeployment found but no healthy workload pods." >> "${EVIDENCE_FILE}"
     else
-        echo "**Result: SKIP (prerequisite absent)** — Dynamo operator present but no DynamoGraphDeployment exists; deploy an inference workload (e.g. demos/workloads/inference/vllm-agg.yaml) to exercise operator reconciliation." >> "${EVIDENCE_FILE}"
+        echo "**Result: SKIP (prerequisite absent)** — Dynamo operator present and its webhook demonstrated, but no DynamoGraphDeployment exists; deploy an inference workload (e.g. demos/workloads/inference/vllm-agg.yaml) to exercise operator reconciliation." >> "${EVIDENCE_FILE}"
     fi
 
     log_info "Robust operator evidence collection complete."

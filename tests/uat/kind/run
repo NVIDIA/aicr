@@ -47,4 +47,11 @@ export TRAINJOB_NUM_NODES
 # shellcheck source=../lib/phases.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/phases.sh"
 
+# Readiness census (issue #2096): disabled for the kind lane. This is a fixed
+# SINGLE-NODE nvkind cluster with no cloud actuator and no CLUSTER_CONFIG, so
+# there is no census-growth risk (no pool can scale up mid-validate), and the
+# lone node may not carry the nodeGroup=gpu-worker label the census selector
+# expects. The literal "skip" tells phases.sh to bypass the census check.
+export EXPECTED_GPU_NODES=skip
+
 uat_main "$@"

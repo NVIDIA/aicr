@@ -182,6 +182,10 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 			return lookupErr
 		}
 		// GITHUB_OUTPUT-style key=value lines; every value is single-line.
+		// slug is surfaced so uat-run.yaml's resolve step exposes
+		// needs.resolve.outputs.slug (the daytime cluster name's discovery key,
+		// ADR-017), the same way cloud/accelerator are threaded to the pipelines.
+		fmt.Fprintf(&b, "slug=%s\n", res.Slug)
 		fmt.Fprintf(&b, "cloud=%s\n", res.Cloud)
 		fmt.Fprintf(&b, "reservation-id=%s\n", res.ReservationID)
 		fmt.Fprintf(&b, "accelerator=%s\n", res.Accelerator)

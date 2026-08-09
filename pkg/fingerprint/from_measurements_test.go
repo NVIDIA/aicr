@@ -15,6 +15,8 @@
 package fingerprint
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -470,5 +472,219 @@ func TestFromMeasurements_LabelRecognizedWithUnknownPCI(t *testing.T) {
 	}
 	if got.GPUModel.Value != "a10" {
 		t.Errorf("GPUModel.Value = %q, want a10 (PCI discovery)", got.GPUModel.Value)
+	}
+}
+
+// topologyItemsMeasurement builds a TypeNodeTopology measurement carrying the
+// collector's lossless label encoding. readings maps a label key to the values
+// it carries; each value's node count is taken from counts (default 1), so a
+// truncated reading can be expressed without a node list.
+func topologyItemsMeasurement(nodeCount int, readings map[string][]string, counts map[string]int) *measurement.Measurement {
+	var items []measurement.ItemEntry
+	for key, values := range readings {
+		for _, v := range values {
+			n := 1
+			if c, ok := counts[key+"="+v]; ok {
+				n = c
+			}
+			names := make([]string, 0, n)
+			for i := 0; i < n && i < 3; i++ {
+				names = append(names, fmt.Sprintf("node-%d", i))
+			}
+			// Render the list the way formatNodeList does — marker included —
+			// so the fixture stays consistent with the truncated flag.
+			list := strings.Join(names, ",")
+			if n > len(names) {
+				list += fmt.Sprintf(" (+%d more)", n-len(names))
+			}
+			items = append(items, measurement.ItemEntry{
+				Context: map[string]string{"key": key, "value": v},
+				Data: map[string]measurement.Reading{
+					"node-count": measurement.Int(n),
+					"node-list":  measurement.Str(list),
+					"truncated":  measurement.Bool(n > len(names)),
+				},
+			})
+		}
+	}
+	return measurement.NewMeasurement(measurement.TypeNodeTopology).
+		WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("summary").
+				Set("node-count", measurement.Int(nodeCount)),
+		).
+		WithSubtype(measurement.Subtype{Name: "label", Items: items}).
+		Build()
+}
+
+// TestFromMeasurements_ItemsAccelerator pins the item path for the accelerator
+// dimension, including the false positive the folded encoding cannot avoid:
+// two distinct labels sharing the nvidia.com/gpu.product prefix are counted as
+// two values by hasMultiValueKeys, clearing the accelerator with a spurious
+// multi-gpu note. Accelerator drives overlay selection, so that matters more
+// than any count.
+func TestFromMeasurements_ItemsAccelerator(t *testing.T) {
+	tests := []struct {
+		name      string
+		readings  map[string][]string
+		wantValue string
+		wantNote  string
+	}{
+		{
+			name:      "single recognized SKU",
+			readings:  map[string][]string{labelKeyGPUProduct: {"NVIDIA-H100-80GB-HBM3"}},
+			wantValue: "h100",
+		},
+		{
+			name:     "two SKUs is genuinely multi-gpu",
+			readings: map[string][]string{labelKeyGPUProduct: {"NVIDIA-H100-80GB-HBM3", "NVIDIA-B200"}},
+			wantNote: noteMultiGPU,
+		},
+		{
+			name:     "unrecognized SKU",
+			readings: map[string][]string{labelKeyGPUProduct: {"NVIDIA-SOMETHING-NEW"}},
+			wantNote: noteUnknownSKU,
+		},
+		{
+			// Prefix siblings, not values of gpu.product.
+			name: "distinct labels sharing the prefix are not extra values",
+			readings: map[string][]string{
+				labelKeyGPUProduct:             {"NVIDIA-H100-80GB-HBM3"},
+				labelKeyGPUProduct + ".tier":   {"premium"},
+				labelKeyGPUProduct + ".vendor": {"nvidia"},
+			},
+			wantValue: "h100",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FromMeasurements([]*measurement.Measurement{
+				topologyItemsMeasurement(2, tt.readings, nil),
+			})
+			if got.Accelerator.Value != tt.wantValue {
+				t.Errorf("Accelerator.Value = %q, want %q", got.Accelerator.Value, tt.wantValue)
+			}
+			if got.Accelerator.Note != tt.wantNote {
+				t.Errorf("Accelerator.Note = %q, want %q", got.Accelerator.Note, tt.wantNote)
+			}
+			if got.Accelerator.Source != sourceTopologyGPU {
+				t.Errorf("Accelerator.Source = %q, want %q — source strings are pinned",
+					got.Accelerator.Source, sourceTopologyGPU)
+			}
+		})
+	}
+}
+
+// TestFromMeasurements_ItemsGPUNodeCountUnderTruncation pins the correction:
+// the folded encoding derives the count by splitting the rendered node list on
+// commas, so under --max-nodes-per-entry it reports the cap. node-count is the
+// true pre-truncation total.
+func TestFromMeasurements_ItemsGPUNodeCountUnderTruncation(t *testing.T) {
+	m := topologyItemsMeasurement(40,
+		map[string][]string{labelKeyGPUProduct: {"NVIDIA-H100-80GB-HBM3"}},
+		map[string]int{labelKeyGPUProduct + "=NVIDIA-H100-80GB-HBM3": 40},
+	)
+
+	got := FromMeasurements([]*measurement.Measurement{m})
+	if got.GPUNodeCount.Value != 40 {
+		t.Errorf("GPUNodeCount = %d, want 40 (the true total, not the rendered list length)",
+			got.GPUNodeCount.Value)
+	}
+	if got.GPUNodeCount.Source != sourceTopologyGPU {
+		t.Errorf("GPUNodeCount.Source = %q, want %q", got.GPUNodeCount.Source, sourceTopologyGPU)
+	}
+}
+
+// TestFromMeasurements_ItemsRegion pins the item path for region detection,
+// including the prefix-sibling false positive that today yields multi-region
+// on a single-region cluster.
+func TestFromMeasurements_ItemsRegion(t *testing.T) {
+	tests := []struct {
+		name       string
+		readings   map[string][]string
+		wantRegion string
+		wantNote   string
+	}{
+		{
+			name:       "single region",
+			readings:   map[string][]string{labelKeyRegion: {"us-west-2"}},
+			wantRegion: "us-west-2",
+		},
+		{
+			name:     "two regions",
+			readings: map[string][]string{labelKeyRegion: {"us-west-2", "us-east-1"}},
+			wantNote: noteMultiRegion,
+		},
+		{
+			name: "distinct labels sharing the prefix are not extra regions",
+			readings: map[string][]string{
+				labelKeyRegion:             {"us-west-2"},
+				labelKeyRegion + ".legacy": {"true"},
+				labelKeyRegion + ".zone":   {"a"},
+			},
+			wantRegion: "us-west-2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FromMeasurements([]*measurement.Measurement{
+				topologyItemsMeasurement(2, tt.readings, nil),
+			})
+			if got.Region.Value != tt.wantRegion {
+				t.Errorf("Region.Value = %q, want %q", got.Region.Value, tt.wantRegion)
+			}
+			if got.Region.Note != tt.wantNote {
+				t.Errorf("Region.Note = %q, want %q", got.Region.Note, tt.wantNote)
+			}
+		})
+	}
+}
+
+// malformedItemSubtype returns a label subtype whose single item omits a
+// required field, so the shared accessor rejects the whole subtype.
+func malformedItemSubtype() *measurement.Subtype {
+	return &measurement.Subtype{
+		Name: "label",
+		Items: []measurement.ItemEntry{{
+			Context: map[string]string{"key": labelKeyGPUProduct, "value": "NVIDIA-H100-80GB-HBM3"},
+			Data:    map[string]measurement.Reading{"node-list": measurement.Str("gpu-a")},
+		}},
+	}
+}
+
+// TestItemReadersDegradeOnDecodeError pins that a rejected subtype yields an
+// empty dimension rather than a partial one. Both readers deliberately swallow
+// the error — the fingerprint is advisory — so nothing else would notice if
+// they started returning half-decoded data instead.
+func TestItemReadersDegradeOnDecodeError(t *testing.T) {
+	st := malformedItemSubtype()
+
+	if got := distinctLabelValues(st, labelKeyGPUProduct); got != nil {
+		t.Errorf("distinctLabelValues() = %v, want nil on a rejected subtype", got)
+	}
+	if got := countGPUNodesFromItems(st); got != 0 {
+		t.Errorf("countGPUNodesFromItems() = %d, want 0 on a rejected subtype", got)
+	}
+}
+
+// TestDistinctLabelValuesDedupes pins that two readings sharing a key and a
+// value collapse to one. The collector cannot emit that pair, but a hand-built
+// snapshot can, and counting it twice would read as a heterogeneous cluster.
+func TestDistinctLabelValuesDedupes(t *testing.T) {
+	item := func(nodes string) measurement.ItemEntry {
+		return measurement.ItemEntry{
+			Context: map[string]string{"key": labelKeyGPUProduct, "value": "NVIDIA-H100-80GB-HBM3"},
+			Data: map[string]measurement.Reading{
+				"node-count": measurement.Int(1),
+				"node-list":  measurement.Str(nodes),
+				"truncated":  measurement.Bool(false),
+			},
+		}
+	}
+	st := &measurement.Subtype{Name: "label", Items: []measurement.ItemEntry{item("gpu-a"), item("gpu-b")}}
+
+	if got := distinctLabelValues(st, labelKeyGPUProduct); len(got) != 1 {
+		t.Errorf("distinctLabelValues() = %v, want one distinct value", got)
 	}
 }

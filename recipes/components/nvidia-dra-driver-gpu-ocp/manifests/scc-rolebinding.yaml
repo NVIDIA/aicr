@@ -1,0 +1,48 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The kubelet-plugin DaemonSet needs host device access (/dev/nvidia*,
+# CDI device injection) that OCP's default "restricted-v2" SCC forbids.
+# `system:openshift:scc:privileged` is the ClusterRole OCP auto-generates
+# for every SCC (grants `use` on it).
+#
+# Bound to named ServiceAccounts, not the whole namespace's SA group —
+# an earlier revision bound system:serviceaccounts:nvidia-dra-driver
+# (every SA in the namespace), which CodeRabbit correctly flagged as
+# CWE-732 (overly broad: any future/default SA in this namespace would
+# also get privileged access). Only the kubelet-plugin ServiceAccount is
+# bound — the controller does not run privileged and does not need this
+# SCC (see CodeRabbit CWE-732 finding on PR #2057). Name confirmed via:
+#   helm template nvidia-dra-driver-gpu-ocp \
+#     oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu \
+#     --version 0.4.1 -f values.yaml --namespace nvidia-dra-driver
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nvidia-dra-driver-gpu-scc-privileged
+  namespace: nvidia-dra-driver
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+  - kind: ServiceAccount
+    name: nvidia-dra-driver-gpu-service-account-kubeletplugin
+    namespace: nvidia-dra-driver

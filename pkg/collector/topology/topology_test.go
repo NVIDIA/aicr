@@ -317,6 +317,52 @@ func TestCollect(t *testing.T) {
 				}
 			},
 		},
+		{
+			// Issue #2003: synthesized "zone.us-west" collides with the
+			// literal label of that name; one reading is dropped.
+			name: "label key collides with a disambiguated key",
+			nodes: []*corev1.Node{
+				makeNode("gpu-a", nil,
+					map[string]string{
+						"zone":         "us-west",
+						"zone.us-west": "true",
+					},
+				),
+				makeNode("gpu-b", nil,
+					map[string]string{
+						"zone":         "us-east",
+						"zone.us-west": "true",
+					},
+				),
+			},
+			wantNodeCount:  2,
+			wantTaintCount: 0,
+			// {zone,us-west}, {zone,us-east}, {zone.us-west,true}
+			wantLabelCount: 3,
+		},
+		{
+			// Issue #2003: encodeTaints counts per Key but disambiguates with
+			// Effect, so both entries synthesize "dedicated.NoSchedule".
+			name: "same taint key and effect with different values",
+			nodes: []*corev1.Node{
+				makeNode("node-1",
+					[]corev1.Taint{
+						{Key: "dedicated", Value: "team-a", Effect: corev1.TaintEffectNoSchedule},
+					},
+					nil,
+				),
+				makeNode("node-2",
+					[]corev1.Taint{
+						{Key: "dedicated", Value: "team-b", Effect: corev1.TaintEffectNoSchedule},
+					},
+					nil,
+				),
+			},
+			wantNodeCount: 2,
+			// {dedicated,NoSchedule,team-a}, {dedicated,NoSchedule,team-b}
+			wantTaintCount: 2,
+			wantLabelCount: 0,
+		},
 	}
 
 	for _, tt := range tests {

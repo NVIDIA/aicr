@@ -1,0 +1,168 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Prometheus Adapter OCP values
+#
+# "Adapter only" integration (issue #1818, option 3): reuses the exact
+# same upstream chart as components/prometheus-adapter/values.yaml (no OLM
+# operator exists for prometheus-adapter), pointed at OpenShift's built-in
+# monitoring stack instead of kube-prometheus-stack, which stays disabled
+# on OCP (see overlays/ocp.yaml). No in-cluster Prometheus is deployed by
+# us — the cluster-monitoring-operator already runs one.
+#
+# TODO: add fullnameOverride once upstream PR merges (same blocker as the
+# base component): https://github.com/prometheus-community/helm-charts/pull/6584
+#
+# ── Auth ────────────────────────────────────────────────────────────────
+# Thanos Querier only accepts bearer-token auth from a ServiceAccount
+# bound to the cluster-monitoring-view ClusterRole (manifests/rbac.yaml),
+# over TLS using the service-serving-CA that OpenShift injects into
+# manifests/ca-bundle-configmap.yaml. Both are wired into the adapter via
+# --prometheus-auth-config (a k8s-prometheus-adapter binary flag built for
+# exactly this OCP/Thanos scenario), templated in
+# manifests/auth-config-configmap.yaml and mounted alongside the
+# ServiceAccount's own projected token.
+#
+# VERIFY BEFORE MERGE: extraVolumes / extraVolumeMounts / extraArguments
+# are the value paths this chart *should* expose for mounting the auth
+# config and CA bundle, but confirm the exact keys against the vendored
+# chart version before merging:
+#   helm show values prometheus-community/prometheus-adapter --version 5.3.0
+
+prometheus:
+  url: https://thanos-querier.openshift-monitoring.svc.cluster.local
+  port: 9091
+
+extraArguments:
+  - --prometheus-auth-config=/etc/prometheus-adapter-ocp-auth/config.yaml
+
+extraVolumes:
+  - name: prometheus-auth-config
+    configMap:
+      name: prometheus-adapter-ocp-auth-config
+  - name: prometheus-ca-bundle
+    configMap:
+      name: prometheus-adapter-ocp-ca-bundle
+
+extraVolumeMounts:
+  - name: prometheus-auth-config
+    mountPath: /etc/prometheus-adapter-ocp-auth
+    readOnly: true
+  - name: prometheus-ca-bundle
+    mountPath: /etc/prometheus-adapter-ocp-ca
+    readOnly: true
+# these must be top-level podSecurityContext/securityContext per the
+# chart's deployment.yaml template.)
+podSecurityContext:
+  fsGroup: null
+
+securityContext:
+  runAsUser: null
+
+# Same GPU-based custom metrics rules as the base component — the DCGM
+# exporter series names are unchanged on OCP (gpu-operator-ocp still
+# enables dcgmExporter, see components/gpu-operator-ocp/values.yaml).
+rules:
+  default: false
+  custom:
+    # GPU Utilization - scale based on GPU usage percentage
+    - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL{namespace!="",pod!=""}'
+      metricsQuery: 'last_over_time(<<.Series>>[1m])'
+      name:
+        matches: "DCGM_FI_DEV_GPU_UTIL"
+        as: "gpu_utilization"
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+
+    # GPU Memory Usage - scale based on GPU memory consumption
+    - seriesQuery: 'DCGM_FI_DEV_FB_USED{namespace!="",pod!=""}'
+      metricsQuery: 'last_over_time(<<.Series>>[1m])'
+      name:
+        matches: "DCGM_FI_DEV_FB_USED"
+        as: "gpu_memory_used"
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+
+    # GPU Power Usage - scale based on power consumption
+    - seriesQuery: 'DCGM_FI_DEV_POWER_USAGE{namespace!="",pod!=""}'
+      metricsQuery: 'last_over_time(<<.Series>>[1m])'
+      name:
+        matches: "DCGM_FI_DEV_POWER_USAGE"
+        as: "gpu_power_usage"
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+
+    # Workload-attributed GPU metrics
+    - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL{exported_namespace!="",exported_pod!=""}'
+      metricsQuery: 'last_over_time(<<.Series>>{<<.LabelMatchers>>}[1m])'
+      name:
+        matches: "DCGM_FI_DEV_GPU_UTIL"
+        as: "workload_gpu_utilization"
+      resources:
+        overrides:
+          exported_namespace: {resource: "namespace"}
+          exported_pod: {resource: "pod"}
+
+    - seriesQuery: 'DCGM_FI_DEV_FB_USED{exported_namespace!="",exported_pod!=""}'
+      metricsQuery: 'last_over_time(<<.Series>>{<<.LabelMatchers>>}[1m])'
+      name:
+        matches: "DCGM_FI_DEV_FB_USED"
+        as: "workload_gpu_memory_used"
+      resources:
+        overrides:
+          exported_namespace: {resource: "namespace"}
+          exported_pod: {resource: "pod"}
+
+  external:
+    - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL'
+      metricsQuery: 'avg(avg_over_time(DCGM_FI_DEV_GPU_UTIL[2m]))'
+      name:
+        matches: "DCGM_FI_DEV_GPU_UTIL"
+        as: "dcgm_gpu_utilization"
+      resources:
+        namespaced: false
+
+    - seriesQuery: 'DCGM_FI_DEV_FB_USED'
+      metricsQuery: 'avg(avg_over_time(DCGM_FI_DEV_FB_USED[2m]))'
+      name:
+        matches: "DCGM_FI_DEV_FB_USED"
+        as: "dcgm_gpu_memory_used"
+      resources:
+        namespaced: false
+
+    - seriesQuery: 'DCGM_FI_DEV_POWER_USAGE'
+      metricsQuery: 'avg(avg_over_time(DCGM_FI_DEV_POWER_USAGE[2m]))'
+      name:
+        matches: "DCGM_FI_DEV_POWER_USAGE"
+        as: "dcgm_gpu_power_usage"
+      resources:
+        namespaced: false
+
+metricsRelistInterval: 30s
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+replicas: 1

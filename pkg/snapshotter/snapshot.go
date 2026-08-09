@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
+	"github.com/NVIDIA/aicr/pkg/collector/topology"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/header"
@@ -292,7 +293,7 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 // deliver integers as float64).
 func hasGPUData(snap *Snapshot) bool {
 	for _, m := range snap.Measurements {
-		if m.Type != measurement.TypeGPU {
+		if m == nil || m.Type != measurement.TypeGPU {
 			continue
 		}
 		for i := range m.Subtypes {
@@ -317,17 +318,25 @@ func verifyGPUCollected(snap *Snapshot) error {
 
 // hasGPUNodesInTopology returns true when any topology label key starts with
 // gpuNodeLabelPrefix (covers both gpu.present and gpu.product NFD labels).
+//
+// The test is against the label's true key: the folded encoding synthesizes
+// "nvidia.com/gpu.true" from a multi-valued label named exactly
+// "nvidia.com/gpu", which satisfies the prefix with no NFD label present.
 func hasGPUNodesInTopology(snap *Snapshot) bool {
 	for _, m := range snap.Measurements {
-		if m.Type != measurement.TypeNodeTopology {
+		if m == nil || m.Type != measurement.TypeNodeTopology {
 			continue
 		}
-		labels := m.GetSubtype("label")
-		if labels == nil {
+		readings, err := topology.LabelReadings(m.GetSubtype("label"))
+		if err != nil {
+			// Advisory hint only — degrade quietly rather than fail an
+			// otherwise complete snapshot.
+			slog.Debug("skipping GPU placement detection: topology label readings could not be decoded",
+				slog.String("error", err.Error()))
 			continue
 		}
-		for key := range labels.Data {
-			if strings.HasPrefix(key, gpuNodeLabelPrefix) {
+		for _, r := range readings {
+			if strings.HasPrefix(r.Key, gpuNodeLabelPrefix) {
 				return true
 			}
 		}
