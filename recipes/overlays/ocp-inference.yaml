@@ -26,6 +26,6 @@ spec:
 
   constraints:
     - name: K8s.server.version
-      value: ">= 1.29"
+      value: ">= 1.32"
 
   componentRefs: []

@@ -68,6 +68,10 @@ const (
 	// disable gpu-operator and carry this instead; its values pin
 	// devicePlugin.enabled the same way.
 	ComponentGPUOperatorOCP = "gpu-operator-ocp"
+	// ComponentDRADriverOCP is the OpenShift DRA driver: OCP recipes
+	// disable nvidia-dra-driver-gpu and carry this instead; its values
+	// pin resources.gpus.enabled the same way (same chart, reused).
+	ComponentDRADriverOCP = "nvidia-dra-driver-gpu-ocp"
 
 	// PathDRAGPUsEnabled is the DRA driver's full-GPU allocation switch.
 	PathDRAGPUsEnabled = "resources.gpus.enabled"
@@ -100,6 +104,9 @@ func Descriptor() []Entry {
 		{Component: ComponentGPUOperator, SelectorPaths: []string{PathDevicePluginEnabled}},
 		{Component: ComponentGPUOperatorOCP, SelectorPaths: []string{PathDevicePluginEnabled}},
 		{Component: ComponentDRADriver, SelectorPaths: []string{
+			PathDRAGPUsEnabledOverride, PathDRAGPUsEnabled,
+		}},
+		{Component: ComponentDRADriverOCP, SelectorPaths: []string{
 			PathDRAGPUsEnabledOverride, PathDRAGPUsEnabled,
 		}},
 	}

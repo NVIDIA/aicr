@@ -619,3 +619,71 @@ func TestParseOSEnv(t *testing.T) {
 		})
 	}
 }
+
+// TestDetectGPUPlacementMismatchLosslessEncoding pins the item-encoding path,
+// where the prefix test runs against the label's true key.
+//
+// The last case is the false positive the folded encoding cannot avoid: a
+// label named exactly "nvidia.com/gpu" carrying two values synthesizes the map
+// key "nvidia.com/gpu.true", which satisfies the "nvidia.com/gpu." prefix even
+// though no NFD label is present — so the placement warning fires on a cluster
+// that has no GPU nodes.
+func TestDetectGPUPlacementMismatchLosslessEncoding(t *testing.T) {
+	itemsSnapshot := func(readings map[string][]string) *Snapshot {
+		var items []measurement.ItemEntry
+		for key, values := range readings {
+			for i, v := range values {
+				items = append(items, measurement.ItemEntry{
+					Context: map[string]string{"key": key, "value": v},
+					Data: map[string]measurement.Reading{
+						"node-count": measurement.Int(1),
+						"node-list":  measurement.Str(fmt.Sprintf("node%d", i)),
+						"truncated":  measurement.Bool(false),
+					},
+				})
+			}
+		}
+		return &Snapshot{Measurements: []*measurement.Measurement{
+			{Type: measurement.TypeNodeTopology, Subtypes: []measurement.Subtype{{
+				Name: "label", Items: items,
+			}}},
+		}}
+	}
+
+	tests := []struct {
+		name     string
+		readings map[string][]string
+		want     bool
+	}{
+		{
+			name:     "gpu.present label detected",
+			readings: map[string][]string{"nvidia.com/gpu.present": {"true"}},
+			want:     true,
+		},
+		{
+			name:     "gpu.product label detected",
+			readings: map[string][]string{"nvidia.com/gpu.product": {"NVIDIA-H100-80GB-HBM3"}},
+			want:     true,
+		},
+		{
+			name:     "unrelated labels only",
+			readings: map[string][]string{"kubernetes.io/arch": {"amd64"}},
+			want:     false,
+		},
+		{
+			// Folded encoding would synthesize "nvidia.com/gpu.true" here and
+			// match the prefix; the true key does not.
+			name:     "multi-valued label named exactly nvidia.com/gpu does not match",
+			readings: map[string][]string{"nvidia.com/gpu": {"true", "false"}},
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectGPUPlacementMismatch(itemsSnapshot(tt.readings)); got != tt.want {
+				t.Errorf("detectGPUPlacementMismatch() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

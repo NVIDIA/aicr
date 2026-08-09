@@ -1,0 +1,48 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Binds the "nonroot-v2" SCC (not "privileged" — NIM model-serving
+# containers need a fixed non-root UID, typically 1000, not host device
+# access) to every ServiceAccount in nvidia-nim: both the operator's own
+# controller pod and any NIMService/NIMCache operand pods it creates
+# later, whose ServiceAccount name is not known ahead of time (operator-
+# managed, defaults to "default" unless the CR sets serviceAccountName).
+#
+# ⚠ VERIFY BEFORE MERGE: this assumes NIM containers run as a single
+# fixed non-root UID compatible with nonroot-v2's "run as any non-root
+# UID you request" model. If a specific NIM image needs additional
+# capabilities (e.g. SYS_PTRACE for profiling, hostIPC for multi-GPU
+# NCCL), nonroot-v2 alone won't cover it — check operand pod events
+# for "unable to validate against any security context constraint"
+# during first deploy and escalate to a custom SCC if needed rather than
+# reaching for "privileged".
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-nim-operator-scc-nonroot-v2
+  namespace: nvidia-nim
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:nonroot-v2
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: system:serviceaccounts:nvidia-nim

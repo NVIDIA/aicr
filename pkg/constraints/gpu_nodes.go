@@ -92,7 +92,7 @@ func evaluateGPUNodesLabel(value string, snap *snapshotter.Snapshot) EvalResult 
 			"snapshot carries no NodeTopology label readings — re-capture with a current aicr build and verify the snapshot agent can list nodes")}
 	}
 
-	universeEntries, err := decodeLabelEntries(labels.Data, gpuNodeUniverseLabel)
+	universeEntries, err := decodeLabelEntries(labels, gpuNodeUniverseLabel)
 	if err != nil {
 		return EvalResult{Error: err}
 	}
@@ -111,7 +111,7 @@ func evaluateGPUNodesLabel(value string, snap *snapshotter.Snapshot) EvalResult 
 			map[string]any{ctxConstraint: GPUNodesLabelConstraintName})}
 	}
 
-	targetEntries, err := decodeLabelEntries(labels.Data, key)
+	targetEntries, err := decodeLabelEntries(labels, key)
 	if err != nil {
 		return EvalResult{Error: err}
 	}
@@ -184,11 +184,88 @@ func findLabelSubtype(snap *snapshotter.Snapshot) *measurement.Subtype {
 	return nil
 }
 
-// decodeLabelEntries collects the decoded entries for one label key from the
-// topology collector's encoding ("<value>|<node1,node2,...>"). It handles
-// both encoded shapes: the plain key, and the "<key>.<value>" disambiguation
-// encodeLabels applies when the key carries multiple distinct values across
-// the cluster.
+// decodeLabelEntries collects the decoded entries for one label key. The item
+// encoding keeps key and value apart, so the impostor and collision reasoning
+// in decodeLabelEntriesFromData cannot arise there; older Data-only snapshots
+// still need it in full.
+//
+// Both paths reject truncated node lists and non-canonical node names
+// (#1755) — the item encoding removes ambiguity in the key, not the
+// possibility of a corrupted list.
+func decodeLabelEntries(labels *measurement.Subtype, key string) ([]labelNodeSet, error) {
+	if topology.HasLosslessReadings(labels) {
+		return decodeLabelEntriesFromItems(labels, key)
+	}
+	return decodeLabelEntriesFromData(labels.Data, key)
+}
+
+// decodeLabelEntriesFromItems matches the key exactly — nothing to
+// disambiguate, no impostor to reject.
+func decodeLabelEntriesFromItems(labels *measurement.Subtype, key string) ([]labelNodeSet, error) {
+	readings, err := topology.LabelReadings(labels)
+	if err != nil {
+		return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"failed to decode NodeTopology label readings", err,
+			map[string]any{ctxConstraint: GPUNodesLabelConstraintName, keyKey: key})
+	}
+
+	var entries []labelNodeSet
+	for _, r := range readings {
+		if r.Key != key {
+			continue
+		}
+		// Rejected outright rather than validated: a partial node list cannot
+		// support a node-set predicate, and its "(+N more)" tail is not a node
+		// name anyway.
+		if r.Truncated {
+			return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("label reading %q is truncated — node-set constraints cannot be evaluated on a partial "+
+					"node list; regenerate the snapshot without --max-nodes-per-entry", r.RawKey),
+				map[string]any{ctxConstraint: GPUNodesLabelConstraintName, ctxReading: r.RawKey})
+		}
+		if !validNodeNames(r.Nodes) {
+			return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("label reading %q is malformed (nodes %v) — expected canonical node names; "+
+					"regenerate the snapshot with a current aicr build", r.RawKey, r.Nodes),
+				map[string]any{ctxConstraint: GPUNodesLabelConstraintName, ctxReading: r.RawKey})
+		}
+		entries = append(entries, labelNodeSet{
+			value:     r.Value,
+			nodes:     r.Nodes,
+			raw:       r.RawKey,
+			truncated: false,
+		})
+	}
+
+	// A node carries exactly one value of a given label key, so the entries
+	// must partition their nodes. Overlap means the snapshot records no real
+	// cluster, and accepting it lets one node satisfy key=a and key=b at once
+	// because evaluateEveryGPUNodeHasValue skips the non-matching entry.
+	// Mirrors the folded encoding's guard in decodeLabelEntriesFromData.
+	//
+	// Compared on value, not mere reappearance: a node repeated under the same
+	// value is redundant rather than contradictory, and the Data path accepts
+	// that shape.
+	seen := make(map[string]string, len(entries))
+	for _, e := range entries {
+		for _, n := range e.nodes {
+			if prev, dup := seen[n]; dup && prev != e.value {
+				return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("label readings for %q are inconsistent: node %q appears under both value %q and "+
+						"value %q, but a node carries exactly one value per label key — the snapshot is corrupt "+
+						"or hand-edited; regenerate it with a current aicr build", key, n, prev, e.value),
+					map[string]any{ctxConstraint: GPUNodesLabelConstraintName, keyKey: key, "node": n})
+			}
+			seen[n] = e.value
+		}
+	}
+	return entries, nil
+}
+
+// decodeLabelEntriesFromData decodes the legacy folded encoding
+// ("<value>|<node1,node2,...>"). It handles both encoded shapes: the plain
+// key, and the "<key>.<value>" disambiguation encodeLabels applies when the
+// key carries multiple distinct values across the cluster.
 //
 // The encoding is lossy: a *different* label key literally named
 // "<key>.<v>" whose value is "<v>" produces the same map entry as a genuine
@@ -229,7 +306,7 @@ func findLabelSubtype(snap *snapshotter.Snapshot) *measurement.Subtype {
 // universe member, letting the negated predicate pass vacuously. Truncated
 // readings skip token validation — their "(+N more)" tail is not a node
 // name by design — and keep their distinct truncation diagnostic.
-func decodeLabelEntries(data map[string]measurement.Reading, key string) ([]labelNodeSet, error) {
+func decodeLabelEntriesFromData(data map[string]measurement.Reading, key string) ([]labelNodeSet, error) {
 	prefix := key + "."
 	var plain, prefixed []labelNodeSet
 	for k, reading := range data {
@@ -310,12 +387,24 @@ func splitNodes(nodesRaw string) ([]string, bool) {
 		return nil, false
 	}
 	nodes := strings.Split(nodesRaw, ",")
-	for _, n := range nodes {
-		if len(validation.IsDNS1123Subdomain(n)) > 0 {
-			return nil, false
-		}
+	if !validNodeNames(nodes) {
+		return nil, false
 	}
 	return nodes, true
+}
+
+// validNodeNames reports whether every token is a canonical Kubernetes node
+// name. Shared by both decode paths so the fail-closed rule cannot drift.
+func validNodeNames(nodes []string) bool {
+	if len(nodes) == 0 {
+		return false
+	}
+	for _, n := range nodes {
+		if len(validation.IsDNS1123Subdomain(n)) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // cutLabelEncoding splits the topology collector's "<value>|<nodes>"

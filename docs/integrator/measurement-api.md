@@ -300,6 +300,101 @@ The constraint path is `K8s.aks-gpu-pools.gpu-driver` in profile value
 constraints; `K8s.aks-gpu-pools.gpu-pool-count` and
 `K8s.aks-gpu-pools.gpu-pools` use the same non-item path form.
 
+## NodeTopology shape
+
+`TypeNodeTopology` is a cluster-wide aggregate: one reading per distinct taint
+and per distinct label across all nodes, plus a `summary` of the counts. The
+`taint` and `label` subtypes carry every reading twice — as `items` (lossless)
+and as the legacy folded `data` map.
+
+```yaml
+type: NodeTopology
+subtypes:
+  - subtype: summary
+    data: {node-count: 8, taint-count: 1, label-count: 3}
+  - subtype: label
+    items:
+      # The folded key is this reading's alone, so the names are not repeated.
+      - context:
+          key: nvidia.com/gpu.product
+          value: NVIDIA-H100-80GB-HBM3
+        data:
+          node-count: 4
+          node-list-ref: nvidia.com/gpu.product
+          truncated: true
+      # Two readings fold onto "zone.us-west" — the label "zone" with value
+      # "us-west", and a label literally named "zone.us-west" — so neither can
+      # reference it and both carry their own names.
+      - context: {key: zone, value: us-west}
+        data: {node-count: 1, node-list: gpu-node-01, truncated: false}
+      - context: {key: zone.us-west, value: "true"}
+        data: {node-count: 2, node-list: "gpu-node-01,gpu-node-02", truncated: false}
+    data:
+      nvidia.com/gpu.product: NVIDIA-H100-80GB-HBM3|gpu-node-01,gpu-node-02 (+2 more)
+      zone.us-west: true|gpu-node-01,gpu-node-02
+```
+
+| Field | Where | Required | Meaning |
+|---|---|---|---|
+| `key` | context | yes | taint or label key, verbatim |
+| `value` | context | no | taint or label value; may be empty |
+| `effect` | context | taints only | `NoSchedule`, `PreferNoSchedule`, `NoExecute` |
+| `node-count` | data | yes | nodes carrying the reading, counted **before** truncation |
+| `node-list` | data | one of these | node names, sorted and comma-joined, capped by `--max-nodes-per-entry` |
+| `node-list-ref` | data | one of these | the `data` key holding this reading's names |
+| `truncated` | data | yes | whether the cap dropped names from the node list |
+
+An item that omits a required field is rejected.
+
+**Membership has exactly one source.** An item carries `node-list` or
+`node-list-ref`, never both and never neither — node lists dominate snapshot
+size, so a reading whose folded key describes it alone points at that entry
+rather than repeating the names. A reference is honored only when it names the
+key this reading folds onto *and* no other reading folds onto that key;
+anything else would resolve to a different reading's nodes. Where two readings
+collide on one key, both carry their own names, because the shared entry can
+describe only one of them and which one is not predictable.
+
+The count and the list must agree:
+
+- `truncated` is `true` exactly when the node list ends with `(+N more)`
+- `node-count` equals the names in the list plus `N` (with `N` zero when complete)
+
+A count that disagrees is rejected in both directions: too low understates the
+cluster, too high lets a consumer read a partial list as a complete one. A
+marker whose `N` is unusable is rejected rather than read as absent.
+
+`effect` is not checked against the three values listed above, so a snapshot
+from a newer Kubernetes stays readable.
+
+Consumers do not implement any of this: `topology.LabelReadings` and
+`TaintReadings` resolve references and validate them, and return readings whose
+`Nodes` are populated either way.
+
+`key`, `effect`, and `value` identify a reading, so they live in `context`;
+node membership is counted, so it lives in `data`. Items are sorted by
+(`key`, `value`) for labels and (`key`, `effect`, `value`) for taints, because
+`pkg/diff` compares items positionally. `summary.taint-count` and
+`summary.label-count` count items, not `data` keys.
+
+`data` is retained byte-identical to earlier releases and stays lossy: a label
+key carrying multiple values is folded to `<key>.<value>`, which collides with
+a label literally named that and drops one reading. Consumers read `items` and
+fall back to `data` only for older snapshots — `topology.LabelReadings` /
+`TaintReadings` do exactly that, and `HasLosslessReadings` reports which form a
+subtype carries. Adding `items` beside `data` is additive-only, so the snapshot
+`apiVersion` is unchanged ([ADR-011](../design/011-artifact-apiversion-policy.md) §2).
+
+`data` cannot be slimmed within `v1alpha2`: binaries predating `items` read it
+directly, and ADR-011 requires its encoding and semantics to stay as published.
+That is why membership is cross-referenced rather than dropped. The next
+snapshot `apiVersion` removes `data`, at which point items become
+self-contained and `node-list-ref` is no longer emitted — the decoder keeps
+reading it for as long as `v1alpha2` snapshots are accepted.
+
+Minimal evidence keeps `NodeTopology.summary` and drops `taint` and `label`;
+redaction never carries `items` across the publication boundary.
+
 ## NetworkTopology shape
 
 `TypeNetworkTopology` describes one hardware group's network layout (PFs,

@@ -64,9 +64,10 @@ const (
 // these are aliases, not a second copy, so a descriptor expansion cannot
 // silently diverge from what resolution reads (ADR-015 GKE amendment).
 const (
-	draDriverGPUComponentName   = allocpolicy.ComponentDRADriver
-	gpuOperatorComponentName    = allocpolicy.ComponentGPUOperator
-	gpuOperatorOCPComponentName = allocpolicy.ComponentGPUOperatorOCP
+	draDriverGPUComponentName    = allocpolicy.ComponentDRADriver
+	draDriverGPUOCPComponentName = allocpolicy.ComponentDRADriverOCP
+	gpuOperatorComponentName     = allocpolicy.ComponentGPUOperator
+	gpuOperatorOCPComponentName  = allocpolicy.ComponentGPUOperatorOCP
 
 	valuePathGPUsEnabled         = allocpolicy.PathDRAGPUsEnabled
 	valuePathGPUsEnabledOverride = allocpolicy.PathDRAGPUsEnabledOverride
@@ -154,6 +155,14 @@ func ResolveGPUAllocationPolicy(parent context.Context, r *recipe.RecipeResult) 
 	gpusEnabled := false
 	overrideWaiver := false
 	draRef := enabledComponentRef(r, draDriverGPUComponentName)
+	if ocpRef := enabledComponentRef(r, draDriverGPUOCPComponentName); ocpRef != nil {
+		if draRef != nil {
+			slog.Warn("both nvidia-dra-driver-gpu and nvidia-dra-driver-gpu-ocp are enabled in the recipe; resolving resources.gpus.enabled from nvidia-dra-driver-gpu",
+				"preferred", draDriverGPUComponentName, "ignored", draDriverGPUOCPComponentName)
+		} else {
+			draRef = ocpRef
+		}
+	}
 	if draRef != nil {
 		values, err := r.GetValuesForComponentWithContext(ctx, draRef.Name)
 		if err != nil {
