@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // maxScanFileBytes bounds how much of a signal file we read; runner scripts and
@@ -37,22 +39,50 @@ type scanTarget struct {
 }
 
 // scanTargets is the execution surface the matrix sources from:
-//   - tests/chainsaw (whole tree)        — per-PR CI
-//   - the scheduled UAT runner scripts   — real nightly H100 (wired only)
-//   - demos (whole tree)                 — documented, not executed
+//   - tests/chainsaw (whole tree)     — per-PR CI
+//   - the enrolled UAT runner scripts — real nightly H100 (wired only)
+//   - tests/uat/lib (shared phase lib) — same, via the runners that source it
+//   - demos (whole tree)              — documented, not executed
 //
-// Critically, the UAT targets are the *wired runner scripts* — not the whole
-// tests/uat tree — so present-but-unwired assets (Azure stubs, cuj2-inference
-// dirs no scheduled run invokes) are not mistaken for executed coverage.
-func scanTargets(repoRoot string) []scanTarget {
-	runners := scanWiredUAT(repoRoot).runners
-	targets := make([]scanTarget, 0, len(runners)+2)
+// Critically, the UAT targets are the *enrolled lanes* — not the whole tests/uat
+// tree — so present-but-unwired assets (a `nightly-intents: []` cloud, the
+// cuj2-inference dirs no scheduled run invokes) are not mistaken for executed
+// coverage.
+//
+// Every UAT target must exist: the registry says the nightly batch runs it, so a
+// missing runner or phase library is a broken lane, not an absent signal.
+// walkSignalFiles skips what it cannot stat, which would quietly shed exactly the
+// coverage this generator is meant to report (#1977), so they are checked here.
+func scanTargets(repoRoot string, wired wiredUAT) ([]scanTarget, error) {
+	runners := wired.runners()
+	targets := make([]scanTarget, 0, len(runners)+3)
 	targets = append(targets, scanTarget{path: filepath.Join(repoRoot, "tests", "chainsaw"), harness: HarnessChainsaw})
 	for _, runner := range runners {
 		targets = append(targets, scanTarget{path: filepath.Join(repoRoot, runner), harness: HarnessUAT})
 	}
+	// The per-cloud runners are thin shims that `source ../lib/phases.sh`; every
+	// real `aicr` invocation lives in that shared library, so it carries the same
+	// nightly signal as the runners sourcing it. Scanning only the shims made the
+	// UAT lanes invisible after the phase bodies moved there (#1977).
+	//
+	// Gated on at least one enrolled runner: the library stays on disk even when
+	// every reservation opts out of the batch, and an inert library must not read
+	// as live coverage.
+	if len(runners) > 0 {
+		targets = append(targets, scanTarget{path: filepath.Join(repoRoot, "tests", "uat", "lib"), harness: HarnessUAT})
+	}
 	targets = append(targets, scanTarget{path: filepath.Join(repoRoot, "demos"), harness: HarnessDemo})
-	return targets
+
+	for _, t := range targets {
+		if t.harness != HarnessUAT {
+			continue
+		}
+		if _, err := os.Stat(t.path); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeNotFound,
+				"nightly-enrolled UAT signal path is missing", err)
+		}
+	}
+	return targets, nil
 }
 
 // binInvocation matches the start of an `aicr` invocation in the forms the test,
@@ -85,7 +115,12 @@ func verbRegex(verbPath string) *regexp.Regexp {
 
 // scanVerbs walks every scan target and reports which harnesses invoke each
 // verb path.
-func scanVerbs(repoRoot string, verbs []string) map[string]map[Harness]bool {
+func scanVerbs(repoRoot string, verbs []string, wired wiredUAT) (map[string]map[Harness]bool, error) {
+	targets, err := scanTargets(repoRoot, wired)
+	if err != nil {
+		return nil, err
+	}
+
 	res := make(map[string]map[Harness]bool, len(verbs))
 	matchers := make(map[string]*regexp.Regexp, len(verbs))
 	for _, v := range verbs {
@@ -93,7 +128,7 @@ func scanVerbs(repoRoot string, verbs []string) map[string]map[Harness]bool {
 		matchers[v] = verbRegex(v)
 	}
 
-	for _, t := range scanTargets(repoRoot) {
+	for _, t := range targets {
 		walkSignalFiles(t.path, func(content string) {
 			for _, v := range verbs {
 				if matchers[v].MatchString(content) {
@@ -102,7 +137,7 @@ func scanVerbs(repoRoot string, verbs []string) map[string]map[Harness]bool {
 			}
 		})
 	}
-	return res
+	return res, nil
 }
 
 // walkSignalFiles invokes fn with the text content of path (a single file) or of
