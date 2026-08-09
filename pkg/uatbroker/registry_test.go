@@ -28,6 +28,7 @@ import (
 const validRegistryYAML = `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-0cbe491320188dfa6
     accelerator: h100
@@ -35,6 +36,7 @@ reservations:
     cluster-config-path: tests/uat/aws/cluster-config.yaml
     test-config-dir: tests/uat/aws/tests
   - name: gcp-h100
+    slug: gh1
     cloud: gcp
     reservation-id: projects/p/reservations/r
     accelerator: h100
@@ -79,6 +81,7 @@ func TestParseRegistry(t *testing.T) {
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -119,6 +122,7 @@ reservations:
 			yaml: `
 reservations:
   - name: foo-h100
+    slug: fh1
     cloud: foo
     reservation-id: cr-x
     accelerator: h100
@@ -135,6 +139,7 @@ reservations:
 			yaml: `
 reservations:
   - name: azure-h100
+    slug: zh1
     cloud: azure
     accelerator: h100
     gpu-count: 8
@@ -150,6 +155,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     accelerator: h100
     gpu-count: 8
@@ -163,6 +169,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -177,6 +184,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -192,6 +200,7 @@ reservations:
 			yaml: `
 reservations:
   - name: dup
+    slug: d1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -199,6 +208,7 @@ reservations:
     cluster-config-path: c.yaml
     test-config-dir: t
   - name: dup
+    slug: d2
     cloud: gcp
     reservation-id: cr-y
     accelerator: h100
@@ -210,12 +220,213 @@ reservations:
 			code:    errors.ErrCodeInvalidRequest,
 		},
 		{
+			// A name carrying an ERE metacharacter would corrupt the daytime
+			// guard/teardown `grep -E` legacy-prefix scan (ADR-017), so it must be
+			// rejected at the data source rather than silently read as "no match".
+			name: "name with ERE metacharacter",
+			yaml: `
+reservations:
+  - name: aws-h100(x)
+    slug: ah1
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// A '.' is an ERE metacharacter too (matches any char) — reject it.
+			name: "name with dot",
+			yaml: `
+reservations:
+  - name: aws.h100
+    slug: ah1
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// Uppercase is not a valid cluster-name segment — reject it.
+			name: "name with uppercase",
+			yaml: `
+reservations:
+  - name: AWS-h100
+    slug: ah1
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// A trailing hyphen would double the separator in the derived prefix
+			// and is not a valid name ending — reject it.
+			name: "name with trailing hyphen",
+			yaml: `
+reservations:
+  - name: aws-h100-
+    slug: ah1
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// slug is required (ADR-017): it is the daytime cluster's discovery
+			// key, so a missing one must fail closed rather than derive an empty
+			// prefix.
+			name: "empty slug",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// A duplicate slug would collide two reservations' guard/teardown
+			// prefix scans — reject it.
+			name: "duplicate slug",
+			yaml: `
+reservations:
+  - name: aws-h100
+    slug: ah1
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+  - name: gcp-h100
+    slug: ah1
+    cloud: gcp
+    reservation-id: projects/p/reservations/r
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c2.yaml
+    test-config-dir: t2
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// A slug outside ^[a-z][a-z0-9]{1,3}$ (here: starts with a digit and
+			// is too long) is not a safe cluster-name segment — reject it.
+			name: "bad-charset slug",
+			yaml: `
+reservations:
+  - name: aws-h100
+    slug: 1abcd
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// A single-character slug is below the 2-char floor (the pattern
+			// requires at least one trailing alnum after the leading letter).
+			name: "too-short slug",
+			yaml: `
+reservations:
+  - name: aws-h100
+    slug: a
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// A five-character slug exceeds the 4-char ceiling — locked
+			// independently of the charset so a length regression can't slip past
+			// on a value that would also fail for a bad leading character.
+			name: "too-long slug",
+			yaml: `
+reservations:
+  - name: aws-h100
+    slug: abcde
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// The minimum accepted length (2 chars): letter + one alnum.
+			name: "min-length slug ok",
+			yaml: `
+reservations:
+  - name: aws-h100
+    slug: a1
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+		},
+		{
+			// The maximum accepted length (4 chars).
+			name: "max-length slug ok",
+			yaml: `
+reservations:
+  - name: aws-h100
+    slug: abcd
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+		},
+		{
 			// Empty/absent daytime-intent is valid — the reservation is simply
 			// not in the daytime rotation.
 			name: "empty daytime-intent ok",
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -229,6 +440,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -243,6 +455,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -260,6 +473,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -273,6 +487,7 @@ reservations:
 			yaml: `
 reservations:
   - name: gcp-h100
+    slug: gh1
     cloud: gcp
     reservation-id: cr-x
     accelerator: h100
@@ -287,6 +502,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -304,6 +520,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -322,6 +539,7 @@ reservations:
 			yaml: `
 reservations:
   - name: azure-h100
+    slug: zh1
     cloud: azure
     accelerator: h100
     gpu-count: 8
@@ -339,6 +557,7 @@ reservations:
 			yaml: `
 reservations:
   - name: azure-h100
+    slug: zh1
     cloud: azure
     accelerator: h100
     gpu-count: 8
@@ -356,6 +575,7 @@ reservations:
 			yaml: `
 reservations:
   - name: azure-h100
+    slug: zh1
     cloud: azure
     accelerator: h100
     gpu-count: 8
@@ -374,6 +594,7 @@ reservations:
 			yaml: `
 reservations:
   - name: azure-h100
+    slug: zh1
     cloud: azure
     accelerator: h100
     gpu-count: 8
@@ -392,6 +613,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -400,6 +622,7 @@ reservations:
     test-config-dir: t
     daytime-intent: training
   - name: aws-b200
+    slug: ab2
     cloud: aws
     reservation-id: cr-y
     accelerator: b200
@@ -418,6 +641,7 @@ reservations:
 			yaml: `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -426,6 +650,7 @@ reservations:
     test-config-dir: t
     daytime-intent: training
   - name: gcp-h100
+    slug: gh1
     cloud: gcp
     reservation-id: projects/p/reservations/r
     accelerator: h100
@@ -526,6 +751,7 @@ func TestDaytimeAssignments(t *testing.T) {
 	const yaml = `
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-x
     accelerator: h100
@@ -534,6 +760,7 @@ reservations:
     test-config-dir: t
     daytime-intent: training
   - name: gcp-h100
+    slug: gh1
     cloud: gcp
     reservation-id: projects/p/reservations/r
     accelerator: h100
@@ -542,6 +769,7 @@ reservations:
     test-config-dir: t2
     daytime-intent: inference
   - name: aws-b200
+    slug: ab2
     cloud: aws
     reservation-id: cr-y
     accelerator: b200
@@ -598,6 +826,28 @@ func TestCommittedRegistryValid(t *testing.T) {
 		}
 		if res.Cloud != cloud {
 			t.Errorf("%q cloud = %q, want %q", name, res.Cloud, cloud)
+		}
+	}
+
+	// The committed daytime-name discovery slugs (ADR-017). Locked here so a
+	// future edit cannot silently rename or collide a slug — the daytime
+	// cluster name (aicr-uat-day-<slug>-<slot>-<run_id>) and its guard/teardown
+	// scans key off these exact values.
+	wantSlug := map[string]string{
+		"aws-h100":   "ah1",
+		"gcp-h100":   "gh1",
+		"azure-h100": "zh1",
+		"aws-gb200":  "ag2",
+		"kind-h100":  "kh1",
+	}
+	for name, slug := range wantSlug {
+		res, lookupErr := reg.Lookup(name)
+		if lookupErr != nil {
+			t.Errorf("committed registry missing %q: %v", name, lookupErr)
+			continue
+		}
+		if res.Slug != slug {
+			t.Errorf("committed registry slug[%q] = %q, want %q", name, res.Slug, slug)
 		}
 	}
 
@@ -700,6 +950,7 @@ func TestParseRegistryBareNullNightlyIntents(t *testing.T) {
 	const doc = `
 reservations:
   - name: azure-h100
+    slug: zh1
     cloud: azure
     accelerator: h100
     gpu-count: 8

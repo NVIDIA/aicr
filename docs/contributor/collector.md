@@ -46,7 +46,7 @@ Each subdirectory is one collector; one collector emits one
 | Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image inventory, GPU Operator ClusterPolicy, node-local info, secret-safe Slinky resource topology, and official MariaDB Operator API conflict evidence. Uses the singleton `pkg/k8s/client`. |
 | OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `sysctl`. |
 | SystemD | `pkg/collector/systemd` | `TypeSystemD` | D-Bus probe of configured services. Routes to Talos via factory when `os: talos`. |
-| Topology | `pkg/collector/topology` | `TypeNodeTopology` | Cluster-wide taints and labels across all nodes — see [Cross-cutting topology collector](#cross-cutting-topology-collector). |
+| Topology | `pkg/collector/topology` | `TypeNodeTopology` | Cluster-wide taints and labels across all nodes, in two encodings — lossless `Items` plus the legacy folded `Data` map — see [Cross-cutting topology collector](#cross-cutting-topology-collector). |
 | Network | `pkg/collector/network` | `TypeNetworkTopology` | Ingests an l8k cluster-config (from disk via `ClusterConfigPath`, or live via `DiscoverNetwork`). **Inactive by default** — emits no measurement unless one option is set. `DiscoverNetwork` mutates cluster state (see exception note above). |
 | Talos | `pkg/collector/talos` | `TypeSystemD`, `TypeOS` | OS-specific override pair: a single shared config so one Node API fetch serves both collectors. |
 | File (helper) | `pkg/collector/file` | — | Not a registered collector. A reusable parser for delimited key=value config files (used by the OS subcollectors). |
@@ -208,7 +208,9 @@ type Subtype struct {
 (each `ItemEntry` carries its own `Data` scalars and `Context` strings) for
 subtypes that need a list of homogeneous entries — for example the network
 collector's `pfs` subtype, where each physical-function record is one
-`ItemEntry`. `ItemEntry` does not nest further `Items`.
+`ItemEntry`, or the topology collector's `label` and `taint` subtypes, where
+each aggregated reading is one. A subtype may populate both. `ItemEntry` does
+not nest further `Items`.
 
 `Reading` is a typed-scalar interface implemented by
 `Scalar[T]` (`Int`, `Int64`, `Uint`, `Uint64`, `Float64`, `Bool`,
@@ -295,6 +297,26 @@ them as a single `TypeNodeTopology` measurement. Bound by
 the factory (caps the per-entry node list to keep snapshot size
 sane).
 
+The `label` and `taint` subtypes carry **both** encodings. `Data` is the
+original folded map, kept byte-identical so older readers and snapshots keep
+working. `Items` is the lossless form — one `ItemEntry` per aggregated reading,
+shape documented in
+[NodeTopology shape](../integrator/measurement-api.md#nodetopology-shape).
+
+`Items` exists because a `Data` map key is not an identity. `encodeLabels`
+folds a multi-valued label's value into the key as `<key>.<value>`, colliding
+with a label literally named that and dropping one reading
+([#2003](https://github.com/NVIDIA/aicr/issues/2003)); `encodeTaints` counts
+entries per key but disambiguates with effect, so two taints sharing both
+collapse into one. Separate `Context` fields make either impossible.
+`summary`'s counts derive from `Items` for the same reason. Items are sorted
+because `pkg/diff` compares them positionally.
+
+Consumers read this through `topology.LabelReadings` / `TaintReadings`, never
+off `Data` directly — they prefer `Items` and fall back to decoding `Data`, so
+one call site serves both snapshot vintages. A new consumer that ranges over
+`Subtype.Data` re-introduces the collision.
+
 Treat it as the template for any future cluster-scoped collector —
 not for per-node ones.
 
@@ -380,6 +402,7 @@ Never write a test that hits a live cluster. CI runs without one.
 | Bare `return err` | Loses code on wrap chain | `errors.Wrap(errors.ErrCodeUnavailable, "<msg>", err)` |
 | New `measurement.Type` not added to `Types` slice | `ParseType` rejects it; recipe constraints can't reference it | Append both the constant and the `Types` entry |
 | `http.DefaultClient` for remote fetches | Unbounded timeout, snapshot can hang | `&http.Client{Timeout: defaults.HTTPClientTimeout}` |
+| Ranging over `NodeTopology` `Subtype.Data` directly | Colliding label keys drop a reading; truncated lists read as complete | `topology.LabelReadings` / `TaintReadings` — Items-preferred, `Data` fallback |
 
 ## See Also
 

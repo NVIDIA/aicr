@@ -1,0 +1,63 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# cert-manager OCP OLM readiness gate.
+#
+# The in-process gate engine (cmd/gate) only allows assert/error
+# operations — it rejects `script:` as a side-effecting op — so this
+# cannot bind the Subscription's installedCSV value into a later step
+# the way upstream chainsaw's output-binding would. Two plain asserts
+# instead:
+#   1. status.installedCSV is non-empty on the named Subscription
+#      (confirms OLM has resolved and started installing SOME CSV).
+#   2. Some ClusterServiceVersion in the operator namespace has reached
+#      phase Succeeded (confirms install completion).
+#
+# KNOWN LIMITATION: step 2 is not scoped to the exact CSV named by step
+# 1's installedCSV — it accepts any Succeeded CSV in the namespace. A
+# stale/unrelated CSV left behind from a prior install could in theory
+# satisfy this gate. Tightening this requires either upstream chainsaw
+# (not available here) or a name lookup performed outside the gate
+# engine. Acceptable for now since the OperatorGroup scopes the
+# namespace to a single subscribed operator in practice.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cert-manager-ocp-olm-readiness
+spec:
+  timeouts:
+    assert: 30s
+  steps:
+    - name: assert-subscription-installed-csv
+      try:
+        - assert:
+            resource:
+              apiVersion: operators.coreos.com/v1alpha1
+              kind: Subscription
+              metadata:
+                name: openshift-cert-manager-operator
+                namespace: cert-manager-operator
+              status:
+                (installedCSV != ''): true
+
+    - name: assert-csv-succeeded
+      try:
+        - assert:
+            resource:
+              apiVersion: operators.coreos.com/v1alpha1
+              kind: ClusterServiceVersion
+              metadata:
+                namespace: cert-manager-operator
+              status:
+                phase: Succeeded

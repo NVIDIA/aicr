@@ -72,8 +72,12 @@ on:
         type: choice
         options: [nightly, daytime-up, daytime-down]
         default: nightly
+      slot:
+        description: 'Daytime cluster slot (ADR-017) — the <slot> in aicr-uat-day-<slug>-<slot>-. Only slot 0 is provisioned today.'
+        type: string
+        default: '0'
       skip_delete:
-        description: 'Skip cluster teardown (manual debugging only; ignored for daytime lifecycles).'
+        description: 'Skip cluster teardown (manual debugging only; ignored for daytime lifecycles). A retained cluster becomes eligible for janitor reclamation ~24h after the run finishes.'
         type: boolean
         default: false
       skip_tests:
@@ -97,6 +101,9 @@ on:
       lifecycle:
         type: string
         default: nightly
+      slot:
+        type: string
+        default: '0'
       skip_delete:
         type: boolean
         default: false
@@ -136,6 +143,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       cloud: ${{ steps.row.outputs.cloud }}
+      # Daytime cluster-name discovery slug (ADR-017); forwarded to the cloud
+      # pipelines that derive aicr-uat-day-<slug>-<slot>-<run_id>.
+      slug: ${{ steps.row.outputs.slug }}
       cluster_config_path: ${{ steps.row.outputs['cluster-config-path'] }}
       test_config_dir: ${{ steps.row.outputs['test-config-dir'] }}
       # Accelerator selects the per-accelerator test-config filename
@@ -166,8 +176,17 @@ jobs:
           # Pass via env (not inline interpolation) to avoid expression
           # injection through the dispatch input.
           RESERVATION: ${{ inputs.reservation }}
+          SLOT: ${{ inputs.slot }}
         run: |
           set -euo pipefail
+          # Only slot 0 is provisioned today (ADR-017). Reject any other value at
+          # this single dispatch surface — before it is forwarded to a cloud
+          # pipeline — so a daytime-up with slot=1 cannot stand up a second daytime
+          # cluster (and an unbounded value cannot blow the GKE name budget) until
+          # multi-slot capacity and scheduling land.
+          if [[ "${SLOT}" != "0" ]]; then
+            echo "::error::unsupported slot '${SLOT}' (only slot 0 is enabled today)"; exit 1
+          fi
           go build -o ./bin/uat-broker ./tools/uat-broker
           ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
 
@@ -194,6 +213,11 @@ jobs:
       aicr_version: ${{ inputs.aicr_version }}
       intent: ${{ inputs.intent }}
       lifecycle: ${{ inputs.lifecycle }}
+      # Daytime cluster-name axes (ADR-017): slug from the resolved registry row,
+      # slot from the dispatch input. Together with github.run_id they form
+      # aicr-uat-day-<slug>-<slot>-<run_id>.
+      slug: ${{ needs.resolve.outputs.slug }}
+      slot: ${{ inputs.slot }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       accelerator: ${{ needs.resolve.outputs.accelerator }}
@@ -216,6 +240,11 @@ jobs:
       aicr_version: ${{ inputs.aicr_version }}
       intent: ${{ inputs.intent }}
       lifecycle: ${{ inputs.lifecycle }}
+      # Daytime cluster-name axes (ADR-017): slug from the resolved registry row,
+      # slot from the dispatch input. Together with github.run_id they form
+      # aicr-uat-day-<slug>-<slot>-<run_id>.
+      slug: ${{ needs.resolve.outputs.slug }}
+      slot: ${{ inputs.slot }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}
@@ -237,6 +266,11 @@ jobs:
       aicr_version: ${{ inputs.aicr_version }}
       intent: ${{ inputs.intent }}
       lifecycle: ${{ inputs.lifecycle }}
+      # Daytime cluster-name axes (ADR-017): slug from the resolved registry row,
+      # slot from the dispatch input. Together with github.run_id they form
+      # aicr-uat-day-<slug>-<slot>-<run_id>.
+      slug: ${{ needs.resolve.outputs.slug }}
+      slot: ${{ inputs.slot }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}

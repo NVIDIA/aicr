@@ -1354,7 +1354,7 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 // rejection) turns into late, opaque scheduling failures on driverless
 // GPU nodes. Warn at the point of exclusion instead.
 func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.RecipeResult, componentName, how string) {
-	if componentName != gpuOperatorComponentName {
+	if !isGPUOperatorComponent(componentName) {
 		return
 	}
 	if recipeResult.Metadata.GPUDriverState != recipe.GPUDriverStateAbsent {
@@ -2612,9 +2612,32 @@ const draChartVersionAnnotation = header.Domain + "/gpu-operator-chart-version"
 // enabled in the filtered resolved recipe before the annotation is
 // written; recipes that disable either remain untouched.
 const (
-	draComponentName         = "nvidia-dra-driver-gpu"
 	gpuOperatorComponentName = "gpu-operator"
+	draComponentName         = "nvidia-dra-driver-gpu"
 )
+
+var (
+	gpuOperatorComponentNames = []string{gpuOperatorComponentName, "gpu-operator-ocp"}
+	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
+)
+
+func isDRAComponent(name string) bool {
+	for _, n := range draComponentNames {
+		if name == n {
+			return true
+		}
+	}
+	return false
+}
+
+func isGPUOperatorComponent(name string) bool {
+	for _, n := range gpuOperatorComponentNames {
+		if name == n {
+			return true
+		}
+	}
+	return false
+}
 
 // injectDRAChartVersionAnnotation writes the resolved gpu-operator
 // chart version into the nvidia-dra-driver-gpu controller and
@@ -2667,13 +2690,16 @@ func (b *DefaultBundler) injectDRAChartVersionAnnotation(
 
 	var gpuOperatorEnabled, draEnabled bool
 	var gpuOperatorVersion string
+	var gpuOperatorComponentName, draComponentName string
 	for _, ref := range recipeResult.ComponentRefs {
-		switch ref.Name {
-		case gpuOperatorComponentName:
+		switch {
+		case isGPUOperatorComponent(ref.Name):
 			gpuOperatorEnabled = true
 			gpuOperatorVersion = ref.Version
-		case draComponentName:
+			gpuOperatorComponentName = ref.Name
+		case isDRAComponent(ref.Name):
 			draEnabled = true
+			draComponentName = ref.Name
 		}
 	}
 	if !draEnabled || !gpuOperatorEnabled {

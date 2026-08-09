@@ -495,6 +495,16 @@ func buildGangTestPod(run *gangTestRun, index int, tolerations []corev1.Tolerati
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.pods[index],
 			Namespace: gangTestNamespace,
+			// pod-group-name is the LOAD-BEARING association: KAI's
+			// pod-grouper skips a bare pod carrying this annotation and the
+			// scheduler joins it to the pre-created PodGroup. The labels
+			// below do NOT associate — the pod-grouper ignores them and
+			// auto-creates per-pod groups, silently degrading the test to
+			// individual scheduling (proven live on the GB200 conformance
+			// cluster, 2026-08-08; KAI v0.14.1 PodGroupAnnotationForPod).
+			Annotations: map[string]string{
+				"pod-group-name": run.groupName,
+			},
 			Labels: map[string]string{
 				"pod-group.scheduling.run.ai/name":     run.groupName,
 				"pod-group.scheduling.run.ai/group-id": run.groupName,

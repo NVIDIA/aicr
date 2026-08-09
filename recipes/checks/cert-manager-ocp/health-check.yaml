@@ -1,0 +1,140 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# cert-manager OCP CR Health Check
+#
+# The CertManager CR (operator.openshift.io/v1alpha1) does not expose an
+# aggregate ready/state condition the way ClusterPolicy or
+# NodeFeatureDiscovery do, so this check asserts the operand Deployments
+# directly instead — same three Deployments and same "cert-manager"
+# namespace as the upstream Helm chart (checks/cert-manager/health-check.yaml),
+# since the OCP operator hardcodes that namespace and those names too.
+#
+# Mirrors checks/cert-manager/health-check.yaml's validate-all-pods-healthy
+# step (CRD-established + per-Deployment availableReplicas was not enough
+# on its own — CodeRabbit review on PR for issue #1818 correctly flagged
+# that a stalled rollout with one available Pod plus a Pending/Failed/
+# Unknown Pod would still pass availableReplicas > 0).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cert-manager-ocp-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-crds-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: certificates.cert-manager.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: issuers.cert-manager.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clusterissuers.cert-manager.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+    - name: validate-controller-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cert-manager
+                namespace: cert-manager
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-cainjector-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cert-manager-cainjector
+                namespace: cert-manager
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-webhook-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cert-manager-webhook
+                namespace: cert-manager
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-all-pods-healthy
+      try:
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: cert-manager
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: cert-manager
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: cert-manager
+              status:
+                phase: Unknown
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: cert-manager
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: cert-manager
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

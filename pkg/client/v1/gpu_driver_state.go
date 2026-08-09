@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/collector/topology"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -350,16 +351,34 @@ func hasHeterogeneousGPUPool(snap *snapshotter.Snapshot) bool {
 		if labels == nil {
 			continue
 		}
-		for k := range labels.Data {
-			if !isDisambiguatedLabelKey(k) {
-				continue
+		if !topology.HasLosslessReadings(labels) {
+			// Folded keys: divergence can only be inferred from key shape.
+			for k := range labels.Data {
+				if !isDisambiguatedLabelKey(k) {
+					continue
+				}
+				switch {
+				case strings.HasPrefix(k, "nvidia.com/gpu."):
+					return true
+				case strings.HasPrefix(k, "node.kubernetes.io/instance-type."):
+					return true
+				}
 			}
-			switch {
-			case strings.HasPrefix(k, "nvidia.com/gpu."):
-				return true
-			case strings.HasPrefix(k, "node.kubernetes.io/instance-type."):
-				return true
-			}
+			continue
+		}
+		readings, err := topology.LabelReadings(labels)
+		if err != nil {
+			// Advisory only — degrade quietly rather than block on a damaged
+			// snapshot.
+			slog.Debug("skipping heterogeneous-pool detection: topology label readings could not be decoded",
+				slog.String("error", err.Error()))
+			continue
+		}
+		// nvidia.com/gpu is a label family; instance-type is a complete key.
+		mixedGPU := hasMultipleValues(readings, gpuLabelBase, true)
+		mixedInstance := hasMultipleValues(readings, instanceTypeLabel, false)
+		if mixedGPU || mixedInstance {
+			return true
 		}
 	}
 	return false
@@ -373,6 +392,8 @@ func hasHeterogeneousGPUPool(snap *snapshotter.Snapshot) bool {
 // the encoder appended — is non-empty. For instance-type, whose
 // single-value form ends at the "instance-type" segment, presence of
 // any non-empty tail after the trailing dot is enough.
+//
+// Only reachable for legacy Data-only snapshots.
 func isDisambiguatedLabelKey(k string) bool {
 	if suffix, ok := strings.CutPrefix(k, "nvidia.com/gpu."); ok {
 		// The single-value label key ends here (e.g. "product",
@@ -384,6 +405,34 @@ func isDisambiguatedLabelKey(k string) bool {
 	}
 	if suffix, ok := strings.CutPrefix(k, "node.kubernetes.io/instance-type."); ok {
 		return len(suffix) > 0
+	}
+	return false
+}
+
+// Label keys whose divergence indicates a non-uniform GPU pool.
+const (
+	gpuLabelBase      = "nvidia.com/gpu"
+	instanceTypeLabel = "node.kubernetes.io/instance-type"
+)
+
+// hasMultipleValues reports whether match carries more than one distinct value
+// across the cluster. includeChildren also counts keys under match+".", each on
+// its own; use it only when match names a family rather than a label.
+func hasMultipleValues(readings []topology.LabelReading, match string, includeChildren bool) bool {
+	values := make(map[string]map[string]struct{})
+	for _, r := range readings {
+		matched := r.Key == match ||
+			(includeChildren && strings.HasPrefix(r.Key, match+"."))
+		if !matched {
+			continue
+		}
+		if values[r.Key] == nil {
+			values[r.Key] = make(map[string]struct{})
+		}
+		values[r.Key][r.Value] = struct{}{}
+		if len(values[r.Key]) > 1 {
+			return true
+		}
 	}
 	return false
 }
