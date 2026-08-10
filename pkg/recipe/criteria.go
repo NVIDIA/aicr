@@ -439,17 +439,10 @@ func (c *Criteria) Matches(other *Criteria) bool {
 		return false
 	}
 
-	// Nodes: 0 means any - apply same asymmetric logic
-	// Query 0 (any) → only match if recipe is also 0 (generic)
-	// Recipe 0 (any) → match any query value
-	if other.Nodes == 0 && c.Nodes != 0 {
-		// Query is generic but recipe is specific - no match
-		return false
-	}
-	if other.Nodes != 0 && c.Nodes != 0 && c.Nodes != other.Nodes {
-		// Both specific but different values - no match
-		return false
-	}
+	// Nodes is metadata-only: no overlay in the embedded catalog (or any
+	// supported external catalog) gates on nodes, so it does not participate
+	// in overlay selection. A --nodes query matches any overlay regardless of
+	// its nodes value. See issue #1781 (design 4.3 follow-up to #1542).
 
 	return true
 }
@@ -557,9 +550,7 @@ func (c *Criteria) Specificity() int {
 	if c.Platform != CriteriaPlatformAny && c.Platform != "" {
 		score++
 	}
-	if c.Nodes != 0 {
-		score++
-	}
+	// Nodes is metadata-only and does not contribute to specificity; see #1781.
 	return score
 }
 

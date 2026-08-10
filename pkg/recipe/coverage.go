@@ -26,9 +26,9 @@ import (
 // coverageDimension names one criteria dimension subject to the coverage
 // post-condition and knows how to read its value from a Criteria.
 //
-// nodes is deliberately absent: no overlay gates on nodes, so covering it
-// would reject every --nodes query. It remains a matching dimension but
-// carries no coverage guarantee (issue #1542, design 4.3).
+// nodes is deliberately absent: no overlay gates on nodes so it is
+// metadata-only — it does not participate in overlay selection or coverage.
+// See issue #1781 (design 4.3 follow-up to #1542).
 type coverageDimension struct {
 	name  string
 	value func(*Criteria) string
