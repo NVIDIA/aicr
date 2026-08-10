@@ -222,7 +222,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Authenticate to Azure
-        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
         with:
           client-id: "047f0427-5dcf-4e7c-97c3-9c71d92c5abb"
           tenant-id: "43083d15-7273-40c1-b7db-39efd9ccc17a"
