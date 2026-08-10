@@ -504,11 +504,19 @@ the pre-push gate is local.
 
 ## Docs MDX Gate
 
-Fern renders `docs/user/`, `docs/integrator/`, and `docs/contributor/` through
-an MDX parser, so a construct that is valid CommonMark can still abort
-`fern generate --docs` at publish time. A bare `<=` in prose is the classic
-case — MDX reads the `<` as the start of a JSX tag and fails with
-`Unexpected character = (U+003D) before name`.
+Fern renders published docs through an MDX parser, so a construct that is valid
+CommonMark can still abort `fern generate --docs` at publish time. A bare `<=`
+in prose is the classic case — MDX reads the `<` as the start of a JSX tag and
+fails with `Unexpected character = (U+003D) before name`.
+
+**Which files are checked.** Both checks derive their file list from
+`docs/index.yml` via `tools/docs-published-files` — Fern's navigation manifest
+is the authoritative statement of what gets parsed. Globbing
+`docs/user`/`docs/integrator`/`docs/contributor` instead was a denylist in
+disguise: it missed `docs/README.md`, the published landing page, so a hazard
+there passed both gates and still broke the publish. Add a page to
+`docs/index.yml` and it is gated that day; a file that is not published is not
+gated at all.
 
 Two checks cover this, both run by `make lint`:
 
@@ -525,13 +533,19 @@ when a name-ish character follows `<` immediately) while `<= 2,000` and `<30 s`
 are not.
 
 Hazards only the parser sees: a stray closing tag (`</div>`), an unclosed
-fragment (`<>`), unbalanced expression braces spanning lines, and any
-acorn-level syntax error.
+fragment (`<>`), a placeholder sharing a line with well-formed JSX, unbalanced
+expression braces spanning lines, and any acorn-level syntax error.
+
+Well-formed JSX is fine in both — `<Component />` and `<span>text</span>` parse,
+and the Fern component set is authored that way. So is YAML frontmatter: Fern
+strips it before MDX, so a `title: gate <= 2,000` is valid, and both checks skip
+it by line number so later diagnostics still cite the true line.
 
 `check-docs-mdx-parse` needs Node 20+. Without it the script prints a warning
 and exits 0 locally, but **hard-fails under CI** — the `docs-mdx` job in
 `merge-gate.yaml` blocks on it, and the merge gate is the only required status
-check.
+check. This is the one place where a green local `make qualify` does not
+guarantee a green CI: if you have no Node, the MDX gate did not actually run.
 
 Fixing a violation is usually one of:
 

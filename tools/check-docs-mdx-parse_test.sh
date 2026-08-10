@@ -134,6 +134,47 @@ run "${DIR_SAFE}"
 check_rc_zero "safe-exits-zero"
 check_absent  "safe-no-violation" "MDX-PARSE:"
 
+# --- Fixture 4: YAML frontmatter is stripped before parsing. ---
+# Fern removes frontmatter before MDX sees it, so a title containing '<=' is
+# valid. Without remark-frontmatter the delimiters parse as a thematic break and
+# the body as prose, and this file was rejected while Fern published it — a
+# false positive on content that ships.
+DIR_FM="${TMPDIR_TEST}/frontmatter"
+mkdir -p "${DIR_FM}"
+cat >"${DIR_FM}/with-frontmatter.md" <<'MD'
+---
+title: Latency gate <= 2,000 ms
+description: TTFT p99 under <= 2,000 ms at 256 concurrency
+---
+
+# Page with frontmatter
+
+Body text with a wrapped `<= 2,000` gate.
+MD
+
+run "${DIR_FM}"
+check_rc_zero "frontmatter-exits-zero"
+check_absent  "frontmatter-no-violation" "MDX-PARSE:"
+
+# --- Fixture 5: a hazard AFTER frontmatter is still caught, at the true line. ---
+# Stripping must not shift reported line numbers, or every diagnostic in a
+# frontmatter file points at the wrong place.
+DIR_FMH="${TMPDIR_TEST}/frontmatter-hazard"
+mkdir -p "${DIR_FMH}"
+cat >"${DIR_FMH}/fm-hazard.md" <<'MD'
+---
+title: Safe here <= 1
+---
+
+# Page
+
+Body hazard gate <= 5 sits on line 7.
+MD
+
+run "${DIR_FMH}"
+check_rc_nonzero "frontmatter-hazard-exits-nonzero"
+check_contains   "frontmatter-hazard-true-line" "fm-hazard.md:7:"
+
 if (( fails > 0 )); then
     echo "${fails} test(s) failed"
     exit 1

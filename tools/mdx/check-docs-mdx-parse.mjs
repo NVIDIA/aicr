@@ -32,6 +32,7 @@
 
 import { readFileSync } from 'node:fs'
 import { compile } from '@mdx-js/mdx'
+import remarkFrontmatter from 'remark-frontmatter'
 import remarkGfm from 'remark-gfm'
 
 const files = process.argv.slice(2)
@@ -45,11 +46,22 @@ if (files.length === 0) {
 // and expression parsing entirely, which would silently accept every hazard
 // this gate exists to catch. Fern parses .md as MDX, so we must too.
 //
-// remark-gfm matches Fern's GFM rendering (tables, autolink literals,
-// strikethrough). GFM changes tokenization, so a '<' inside a table cell or
-// adjacent to an autolink can parse differently with and without it — running
-// the same plugin set keeps this gate from drifting from the publish step.
-const options = { format: 'mdx', remarkPlugins: [remarkGfm] }
+// The plugin set must mirror what Fern renders with, or the gate drifts from
+// the publish step in one direction or the other:
+//
+//   remark-gfm         — tables, autolink literals, strikethrough. GFM changes
+//                        tokenization, so a '<' inside a table cell or next to
+//                        an autolink can parse differently with and without it.
+//   remark-frontmatter — Fern strips YAML frontmatter before MDX sees it.
+//                        Without this plugin the delimiters parse as a thematic
+//                        break and the frontmatter body as prose, so a title
+//                        like `gate <= 2,000` was rejected here while Fern
+//                        published it happily. That is the false-positive
+//                        direction this gate must never take.
+const options = {
+  format: 'mdx',
+  remarkPlugins: [remarkFrontmatter, remarkGfm],
+}
 
 let failed = 0
 

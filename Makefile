@@ -147,11 +147,11 @@ check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, b
 # check-docs-mdx above is a fast, dependency-free approximation kept as a
 # strict subset of it.
 #
-# Part of `make lint` (and therefore `make qualify`) so the "if qualify passes
-# locally, CI will pass" contract still holds. It needs Node 20+ and one
-# `npm ci` of the locked tree in tools/mdx; without Node it warns and skips
-# locally, but HARD-FAILS under CI, where the merge-gate `docs-mdx` job blocks
-# on it.
+# Part of `make lint` (and therefore `make qualify`). It needs Node 20+ and one
+# `npm ci` of the locked tree in tools/mdx. With Node installed, a local
+# `make qualify` predicts CI as usual; WITHOUT it this check warns and skips, so
+# a local pass no longer implies a CI pass and invalid MDX can still be rejected
+# by the merge-gate `docs-mdx` job, where a missing Node is a HARD FAILURE.
 .PHONY: check-docs-mdx-parse
 check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node; CI-blocking)
 	@./tools/check-docs-mdx-parse

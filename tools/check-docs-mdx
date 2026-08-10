@@ -62,11 +62,13 @@
 set -euo pipefail
 
 ERRORS=0
-SEARCH_DIRS=("docs/user/" "docs/integrator/" "docs/contributor/")
-# Docs excluded from the MDX scan: container-images.md carries auto-generated
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Docs excluded from a directory scan: container-images.md carries auto-generated
 # HTML-comment splice markers that VitePress still needs and is not published
 # to Fern. (recipe-health.md is intentionally NOT excluded — it is Fern-
-# published and uses MDX-safe {/* ... */} markers.)
+# published and uses MDX-safe {/* ... */} markers.) The nav-derived list below
+# needs no exclusions: a file Fern does not publish is simply not in it.
 EXCLUDE_NAMES=("container-images.md")
 EXCLUDE_ARGS=()
 for name in "${EXCLUDE_NAMES[@]}"; do
@@ -74,21 +76,56 @@ for name in "${EXCLUDE_NAMES[@]}"; do
 done
 
 # Allow overriding the search path (e.g., for frozen version content)
+SEARCH_DIRS=()
 if [[ $# -gt 0 ]]; then
   SEARCH_DIRS=("$@")
 fi
 
+# Build the file list once; both check passes below iterate it.
+FILES=()
+if [[ ${#SEARCH_DIRS[@]} -eq 0 ]]; then
+  while IFS= read -r f; do
+    [[ -z "${f}" ]] && continue
+    FILES+=("${f}")
+  done < <("${REPO_ROOT}/tools/docs-published-files")
+else
+  for dir in "${SEARCH_DIRS[@]}"; do
+    while IFS= read -r f; do
+      [[ -z "${f}" ]] && continue
+      FILES+=("${f}")
+    done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null | sort)
+  done
+fi
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "ERROR: no doc files found (scan roots: ${SEARCH_DIRS[*]:-docs/index.yml})" >&2
+  exit 1
+fi
+
+# frontmatter_end <file>: last line number of a leading YAML frontmatter block,
+# or 0 when there is none. Fern strips frontmatter before MDX parsing, so its
+# contents must not be scanned — a title like `gate <= 2,000` is valid there.
+# Reported line numbers stay correct because the awk passes skip by NR rather
+# than rewriting the file.
+frontmatter_end() {
+  local file="$1"
+  [[ "$(head -1 "${file}" 2>/dev/null)" == "---" ]] || { echo 0; return; }
+  local end
+  end="$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "${file}")"
+  echo "${end:-0}"
+}
+
 # --- Check 1: non-self-closing void HTML elements (outside fenced code blocks) ---
 # These must use <tag /> in MDX, not <tag> or <tag attr>.
 VOID_ELEMENTS='img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr'
-for dir in "${SEARCH_DIRS[@]}"; do
-  while IFS= read -r file; do
-    [[ -z "${file}" ]] && continue
+for file in "${FILES[@]}"; do
+    FM_END="$(frontmatter_end "${file}")"
     while IFS= read -r match; do
       [[ -z "${match}" ]] && continue
       echo "MDX: non-self-closing void element: ${file}:${match}"
       ERRORS=$((ERRORS + 1))
-    done < <(awk '
+    done < <(awk -v fm_end="${FM_END}" '
+      NR <= fm_end { next }
       match($0, /^(`{3,}|~{3,})/) {
         m = substr($0, RSTART, RLENGTH); ch = substr(m, 1, 1); len = length(m)
         if (!in_fence) { in_fence = 1; fch = ch; flen = len; next }
@@ -99,20 +136,19 @@ for dir in "${SEARCH_DIRS[@]}"; do
       in_fence { next }
       { print NR": "$0 }
     ' "$file" | grep -E "<(${VOID_ELEMENTS})([[:space:]][^>]*)?" | grep -Ev "<(${VOID_ELEMENTS})([[:space:]][^>]*)?[[:space:]]*/>" || true)
-  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null)
 done
 
 # --- Checks 2, 3, 4, 5, 6: bare braces, HTML comments, autolinks, bare tags,
 #     and bare '<' not starting a valid tag ---
 # All evaluated outside fenced code blocks; inline code spans are stripped
 # before the line is scanned so legitimate uses inside backticks don't trip.
-for dir in "${SEARCH_DIRS[@]}"; do
-  while IFS= read -r file; do
-    [[ -z "${file}" ]] && continue
+for file in "${FILES[@]}"; do
+    FM_END="$(frontmatter_end "${file}")"
     # awk exits 1 when it finds a hazard; keep it inside the `if` condition so
     # `set -e` does not abort the whole scan at the first offending file
     # (otherwise violations in later files are silently skipped).
-    if ! awk '
+    if ! awk -v fm_end="${FM_END}" '
+      NR <= fm_end { next }
       match($0, /^(`{3,}|~{3,})/) {
         m = substr($0, RSTART, RLENGTH); ch = substr(m, 1, 1); len = length(m)
         if (!in_fence) { in_fence = 1; fch = ch; flen = len; next }
@@ -246,7 +282,6 @@ for dir in "${SEARCH_DIRS[@]}"; do
     ' "$file" 2>/dev/null; then
       ERRORS=$((ERRORS + 1))
     fi
-  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null)
 done
 
 if [[ ${ERRORS} -gt 0 ]]; then

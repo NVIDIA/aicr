@@ -171,6 +171,37 @@ run "${DIR_PLACEHOLDER}"
 check_rc_nonzero "placeholder-exits-nonzero"
 check_contains   "placeholder-reported" "MDX: bare <word> tag outside code fence"
 
+# --- Fixture 2f: YAML frontmatter is not scanned; content after it still is. ---
+# Fern strips frontmatter before MDX, so '<=' in a title is valid. Skipping it
+# by line number (rather than rewriting the file) keeps later diagnostics
+# pointing at the true line.
+DIR_FM="${TMPDIR_TEST}/frontmatter"
+mkdir -p "${DIR_FM}"
+cat >"${DIR_FM}/fm-safe.md" <<'MD'
+---
+title: Latency gate <= 2,000 ms
+description: TTFT p99 under <= 2,000 ms
+---
+
+# Page
+
+Body text with a wrapped `<= 2,000` gate.
+MD
+cat >"${DIR_FM}/fm-hazard.md" <<'MD'
+---
+title: Safe here <= 1
+---
+
+# Page
+
+Body hazard gate <= 5 sits on line 7.
+MD
+
+run "${DIR_FM}"
+check_rc_nonzero "frontmatter-hazard-exits-nonzero"
+check_absent     "frontmatter-title-not-flagged" "fm-safe.md"
+check_contains   "frontmatter-hazard-true-line"  "fm-hazard.md:7:"
+
 # --- Fixture 2c: '<30' must produce exactly ONE diagnostic, not two. ---
 # Check 5 owns letter-prefixed names and check 6 owns everything that cannot
 # start a name, so a digit-prefixed sequence belongs to check 6 alone. When

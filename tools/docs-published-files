@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Emits the repo-relative path of every page Fern publishes, one per line,
+# derived from docs/index.yml — Fern's navigation manifest and therefore the
+# authoritative list of what `fern generate --docs` will parse.
+#
+# Both MDX checkers consume this instead of globbing docs/user, docs/integrator
+# and docs/contributor. That glob was a denylist in disguise: it missed
+# docs/README.md, the published Introduction page, so a bare `<=` there passed
+# both gates and still broke the publish. Deriving from the nav closes the class
+# — a page added to index.yml is gated the day it is added, and a file that is
+# not published is not gated at all.
+#
+# Requires yq, which the Makefile already depends on at parse time.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NAV="${REPO_ROOT}/docs/index.yml"
+
+if [[ ! -f "${NAV}" ]]; then
+  echo "ERROR: ${NAV} not found — cannot determine which docs Fern publishes" >&2
+  exit 1
+fi
+
+if ! command -v yq >/dev/null 2>&1; then
+  echo "ERROR: yq is required to read ${NAV} (run: make tools-setup)" >&2
+  exit 1
+fi
+
+# Recursive: pages nest under `section:` entries (e.g. Components), so a
+# top-level query would silently drop them.
+PATHS="$(yq eval '.. | select(has("path")) | .path' "${NAV}")"
+
+if [[ -z "${PATHS}" ]]; then
+  echo "ERROR: no page paths found in ${NAV}" >&2
+  exit 1
+fi
+
+# Collect into an array rather than piping the loop straight into `sort`: a
+# piped loop runs in a subshell, so the `missing` counter would be discarded
+# and the exit below could never fire.
+files=()
+missing=0
+while IFS= read -r rel; do
+  [[ -z "${rel}" || "${rel}" == "null" ]] && continue
+  # A nav entry pointing at a file that does not exist breaks the publish just
+  # as surely as a parse error, so surface it here rather than at release time.
+  if [[ ! -f "${REPO_ROOT}/docs/${rel}" ]]; then
+    echo "ERROR: docs/index.yml references docs/${rel}, which does not exist" >&2
+    missing=$((missing + 1))
+    continue
+  fi
+  files+=("docs/${rel}")
+done <<<"${PATHS}"
+
+if [[ ${missing} -gt 0 ]]; then
+  exit 1
+fi
+
+printf '%s\n' "${files[@]}" | sort -u

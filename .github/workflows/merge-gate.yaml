@@ -150,16 +150,22 @@ jobs:
               # construct that parses as CommonMark but aborts
               # `fern generate --docs`.
               #
+              # docs/index.yml is Fern's navigation manifest AND the source the
+              # checkers derive their file list from, so it is both an input and
+              # a trigger: adding a page there must run the gate over it.
+              # docs/README.md is the published landing page — the earlier
+              # per-subdirectory globs missed it entirely.
+              #
               # Everything the gate is MADE of is listed too, so a change to the
-              # gate cannot skip its own verification: the two checkers, the
-              # locked parser toolchain, this workflow, and the Makefile — whose
-              # `check-docs-mdx-parse` target is what the job actually invokes,
-              # matching why the `renovate` and `notices` filters watch it.
-              - 'docs/user/**'
-              - 'docs/integrator/**'
-              - 'docs/contributor/**'
+              # gate cannot skip its own verification: the two checkers, the page
+              # enumerator, the locked parser toolchain, this workflow, and the
+              # Makefile — whose `check-docs-mdx-parse` target is what the job
+              # actually invokes, matching why the `renovate` and `notices`
+              # filters watch it.
+              - 'docs/**'
               - 'tools/check-docs-mdx'
               - 'tools/check-docs-mdx-parse'
+              - 'tools/docs-published-files'
               - 'tools/mdx/**'
               - 'Makefile'
               - '.github/workflows/merge-gate.yaml'

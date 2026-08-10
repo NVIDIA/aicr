@@ -38,7 +38,11 @@ PARSER="${MDX_DIR}/check-docs-mdx-parse.mjs"
 LOCKFILE="${MDX_DIR}/package-lock.json"
 STAMP="${MDX_DIR}/node_modules/.aicr-lock-digest"
 
-SEARCH_DIRS=("docs/user/" "docs/integrator/" "docs/contributor/")
+# With no arguments the file list comes from docs/index.yml via
+# tools/docs-published-files — Fern's nav is the authoritative statement of what
+# gets parsed at publish time. Positional args switch to a directory scan, which
+# the tests and frozen version content use.
+SEARCH_DIRS=()
 EXCLUDE_NAMES=("container-images.md")
 
 if [[ $# -gt 0 ]]; then
@@ -92,23 +96,29 @@ if [[ ! -f "${STAMP}" ]] || [[ "$(cat "${STAMP}")" != "${LOCK_DIGEST}" ]]; then
   echo "${LOCK_DIGEST}" >"${STAMP}"
 fi
 
-# Collect files. Paths are reported exactly as `find` yields them, so the
-# default (relative) scan roots produce repo-relative, copy-pasteable
-# file:line:column output matching tools/check-docs-mdx.
+# Collect files. Paths are repo-relative in both modes, so the file:line:column
+# output stays copy-pasteable and matches tools/check-docs-mdx.
 FILES=()
-for dir in "${SEARCH_DIRS[@]}"; do
-  exclude_args=()
-  for name in "${EXCLUDE_NAMES[@]}"; do
-    exclude_args+=(! -name "${name}")
-  done
+if [[ ${#SEARCH_DIRS[@]} -eq 0 ]]; then
   while IFS= read -r file; do
     [[ -z "${file}" ]] && continue
     FILES+=("${file}")
-  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${exclude_args[@]}" 2>/dev/null | sort)
-done
+  done < <("${REPO_ROOT}/tools/docs-published-files")
+else
+  for dir in "${SEARCH_DIRS[@]}"; do
+    exclude_args=()
+    for name in "${EXCLUDE_NAMES[@]}"; do
+      exclude_args+=(! -name "${name}")
+    done
+    while IFS= read -r file; do
+      [[ -z "${file}" ]] && continue
+      FILES+=("${file}")
+    done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${exclude_args[@]}" 2>/dev/null | sort)
+  done
+fi
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
-  echo "ERROR: no doc files found under: ${SEARCH_DIRS[*]}" >&2
+  echo "ERROR: no doc files found (scan roots: ${SEARCH_DIRS[*]:-docs/index.yml})" >&2
   exit 1
 fi
 
