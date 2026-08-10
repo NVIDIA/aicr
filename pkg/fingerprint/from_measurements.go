@@ -15,17 +15,19 @@
 package fingerprint
 
 import (
+	"log/slog"
 	"slices"
+	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/collector/topology"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 )
 
-// Subtype names referenced from collector outputs. Kept as local
-// constants because the collector packages keep them unexported and we
-// don't want to import them just for the names.
+// Subtype names referenced from collector outputs, kept as local constants
+// because the collector packages keep them unexported.
 const (
 	serviceOKE              = "oke"
 	serviceLKE              = "lke"
@@ -162,6 +164,11 @@ func reconcileAccelerator(fp *Fingerprint, topo *measurement.Measurement) {
 		return
 	}
 
+	if topology.HasLosslessReadings(st) {
+		reconcileAcceleratorFromItems(fp, st)
+		return
+	}
+
 	if hasMultiValueKeys(st, labelKeyGPUProduct) {
 		fp.Accelerator = Dimension{Source: sourceTopologyGPU, Note: noteMultiGPU}
 		return
@@ -183,6 +190,54 @@ func reconcileAccelerator(fp *Fingerprint, topo *measurement.Measurement) {
 	if fp.Accelerator.Note == "" {
 		fp.Accelerator = Dimension{Source: sourceTopologyGPU, Note: noteUnknownSKU}
 	}
+}
+
+// reconcileAcceleratorFromItems is the lossless-encoding path. It matches the
+// label key exactly, so a distinct label whose name merely shares the
+// nvidia.com/gpu.product prefix can no longer be counted as a second value and
+// clear the accelerator with a spurious multi-gpu note.
+func reconcileAcceleratorFromItems(fp *Fingerprint, st *measurement.Subtype) {
+	values := distinctLabelValues(st, labelKeyGPUProduct)
+	if len(values) > 1 {
+		fp.Accelerator = Dimension{Source: sourceTopologyGPU, Note: noteMultiGPU}
+		return
+	}
+	if fp.Accelerator.Value != "" || len(values) == 0 {
+		return
+	}
+	if sku := ParseGPUSKU(values[0]); sku != "" {
+		fp.Accelerator = Dimension{Value: sku, Source: sourceTopologyGPU}
+		return
+	}
+	if fp.Accelerator.Note == "" {
+		fp.Accelerator = Dimension{Source: sourceTopologyGPU, Note: noteUnknownSKU}
+	}
+}
+
+// distinctLabelValues returns the sorted distinct values of one label key.
+// Decode failures degrade to no values: the fingerprint is advisory and must
+// never fail a caller that has no way to handle an error.
+func distinctLabelValues(st *measurement.Subtype, key string) []string {
+	readings, err := topology.LabelReadings(st)
+	if err != nil {
+		slog.Debug("topology label readings could not be decoded; fingerprint dimension left empty",
+			slog.String("label", key), slog.String("error", err.Error()))
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var values []string
+	for _, r := range readings {
+		if r.Key != key {
+			continue
+		}
+		if _, dup := seen[r.Value]; dup {
+			continue
+		}
+		seen[r.Value] = struct{}{}
+		values = append(values, r.Value)
+	}
+	sort.Strings(values)
+	return values
 }
 
 // parseLabelEncoding splits the topology collector's label value
@@ -279,6 +334,9 @@ func populateFromTopology(fp *Fingerprint, m *measurement.Measurement) {
 // label value is encoded as "<value>|<node1,node2,...>" so the node
 // list is parsed out and unioned across all matching keys.
 func countGPUNodes(st *measurement.Subtype) int {
+	if topology.HasLosslessReadings(st) {
+		return countGPUNodesFromItems(st)
+	}
 	nodes := make(map[string]struct{})
 	prefix := labelKeyGPUProduct + "."
 	for k, v := range st.Data {
@@ -299,6 +357,27 @@ func countGPUNodes(st *measurement.Subtype) int {
 	return len(nodes)
 }
 
+// countGPUNodesFromItems sums the per-reading node counts. A node carries one
+// value of a given label, so the values partition the nodes and the sum is the
+// true total — including nodes withheld from the rendered list by
+// --max-nodes-per-entry, which the Data path cannot see and therefore
+// under-reports as the cap.
+func countGPUNodesFromItems(st *measurement.Subtype) int {
+	readings, err := topology.LabelReadings(st)
+	if err != nil {
+		slog.Debug("topology label readings could not be decoded; GPU node count left at zero",
+			slog.String("error", err.Error()))
+		return 0
+	}
+	total := 0
+	for _, r := range readings {
+		if r.Key == labelKeyGPUProduct {
+			total += r.NodeCount
+		}
+	}
+	return total
+}
+
 // extractRegion reads the topology.kubernetes.io/region label value
 // from the topology measurement's "label" subtype. The topology
 // collector encodes single-valued labels under the plain key with
@@ -310,6 +389,17 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 	st := m.GetSubtype(subtypeTopologyLabel)
 	if st == nil {
 		return "", false
+	}
+	if topology.HasLosslessReadings(st) {
+		values := distinctLabelValues(st, labelKeyRegion)
+		switch len(values) {
+		case 0:
+			return "", false
+		case 1:
+			return values[0], false
+		default:
+			return "", true
+		}
 	}
 	if hasMultiValueKeys(st, labelKeyRegion) {
 		return "", true

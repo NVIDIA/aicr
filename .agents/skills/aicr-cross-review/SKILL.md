@@ -16,7 +16,7 @@ user-invocable: true
 # automatic path that removing the explicit nested call did not.
 disallowed-tools: Skill
 argument-hint: "<PR-number-or-URL>"
-version: 0.3.20
+version: 0.3.21
 ---
 
 # AICR Cross-Review: Multi-Agent PR Review with Consensus
@@ -455,10 +455,40 @@ the consensus mechanics):
   re-dispatch. Proven live on PR 2097: a
   ~53-minute job outlasted the then-three-wait budget, and the resumed run recovered it
   with zero re-dispatched work.
+- **A dead job from broker teardown needs a private-broker resume, not a plain one.**
+  When a Codex lane reports the job killed by concurrent-session broker teardown
+  (`statusNote` names infra-kill-by-concurrent-session-teardown — the confirmed
+  `sessionRuntime` fingerprint, which W2 and W4 both run; a late `failed` with a
+  reaper/null error is a symptom, not the gate, and an UNCONFIRMED cause gets an
+  ordinary re-run under the shared broker instead), the job is terminal — there is
+  nothing to poll and `codexResumeJobId` does not apply. A plain `resumeFromRunId`
+  does not help either: the lane *completed* with its unavailable result, so the
+  cache replays the failure verbatim. And a re-dispatch under the same shared broker
+  (keyed to the repo path) faces the same teardown risk while the concurrent sessions
+  that caused it are still running. The remedy: copy `scripts/workflow.mjs` to a
+  scratch path (never edit the checked-in file), add a one-line nonce to the affected
+  lane's prompt, and in the scratch copy replace `${repoPath}` with the
+  session-private worktree path in that lane's `--cwd` interpolations — every
+  companion command: dispatch, status, result. Edit the interpolation itself, not an
+  appended prompt override: the generated prompt's literal commands pin
+  `--cwd "${repoPath}"` and insist on it for every call, so an override that
+  contradicts them may lose, and any call that keeps the shared path lands the
+  recovered job back under the broker being torn down. Then
+  `Workflow({scriptPath: "<scratch copy>", resumeFromRunId:
+  "<wf_...>", args: prevArgs})`. Every other lane replays from cache; only the edited
+  lane re-runs, and its job lives under a private workspace broker that no concurrent
+  session's SessionEnd hook will tear down. The task prompt's pinned `git -C` reads
+  still name the original repo path, so the review context is unchanged. Proven live
+  2026-08-08 on PR 2097: two evaluation jobs died to teardown under the shared broker;
+  the third, dispatched under a private broker, completed and the run reached
+  consensus with zero re-reviewed lanes.
 - **Execute the CodeRabbit lane's STEP blocks verbatim** — same commands and paths, no
   substitutions; in particular never swap the `find … -delete` cleanup for `rm` (an
   invented `rm -rf` cleanup once blocked a run for hours on a managed-policy
-  confirmation prompt).
+  confirmation prompt). The no-`rm` rule covers **every** command composed in the lane,
+  ad-hoc diagnostics included — a self-written `.git/worktrees` writability probe with
+  `rm -f` cleanup once blocked a round the same way. `rmdir` for empty dirs,
+  `find <path> -maxdepth 0 -delete` for files, always.
 - CodeRabbit slow runs: check the newest file in `~/.coderabbit/logs/` (429/queue lines
   mean cloud-side queueing) and confirm `which -a coderabbit` resolves to the
   brew-managed binary — a stale `~/.local/bin` copy shadows it.
@@ -663,10 +693,27 @@ findings; omit the section if empty>
 **Default: do NOT post.** Present the full report in chat and stop. Do not ask
 whether to post.
 
-**Only when explicitly asked to post:** write the filtered summary to a file with the
-Write tool, then post it with `--body-file`. Never interpolate the report into a
-double-quoted shell argument — findings quote PR content, and backticks or `$(...)` in
-a finding would be executed by the shell before `gh` ever runs:
+**Only when explicitly asked to post**, publish two layers — one **brief** summary
+comment first, then one inline comment per finding that anchors to a changed line.
+The detail lives inline; the summary is an index, not a second copy.
+
+**Classify anchors before posting anything.** A finding is anchorable when its
+`path` is among the PR's changed files and its `line` falls inside the head commit's
+diff hunks (check against the pinned diff from Phase 1, not the mutable working
+copy). This classification decides where each finding's full text goes: anchorable →
+its inline comment; unanchorable → the summary, which is the only place it will
+appear.
+
+**1. Summary comment (first, brief).** The overview a reader sees before the diff:
+which commit was reviewed, a short overall assessment, and how many findings follow
+as inline comments — **do not list or index the individual findings here**; the
+inline comments are the findings. The only finding text that belongs in the summary
+is the **full text of an unanchorable finding** (and any open questions, which have
+no code anchor), since the summary is the only place those will appear.
+Write it to a file with the Write tool, then post with `--body-file`. Never
+interpolate the report into a double-quoted shell argument — findings quote PR
+content, and backticks or `$(...)` in a finding would be executed by the shell
+before `gh` ever runs:
 
 ```bash
 gh pr comment <n> --repo NVIDIA/aicr --body-file "<report-file>"
@@ -675,11 +722,44 @@ gh pr comment <n> --repo NVIDIA/aicr --body-file "<report-file>"
 `<report-file>` is the exact path you passed to Write — a Write-tool call cannot export
 a shell variable, so substitute the literal path here.
 
+**2. Inline comments — one per anchorable finding, full detail.** Each carries
+exactly one finding: the defect statement, the failure scenario, and the evidence
+`path:line`. Post each one as its own call — per-finding, so one rejected anchor
+cannot take down the rest. The whole payload goes through a file for quoting safety:
+`path` names a changed file in the PR under review and `line` comes from reviewer
+output, so both are PR-controlled — a path containing `$(...)` or backticks would
+execute if interpolated into shell source. Write the payload as JSON with the Write
+tool (require `line` to be a plain integer — reject anything else) and pass it with
+`--input`, so no finding-controlled value ever appears in the command line:
+
+```json
+{"body": "<finding text>", "commit_id": "<HEAD_SHA>",
+ "path": "<path>", "line": <line>, "side": "RIGHT"}
+```
+
+```bash
+gh api repos/NVIDIA/aicr/pulls/<n>/comments --input "<payload-file>"
+```
+
+If a call is rejected despite the pre-classification (the head moved between
+classification and post, a renamed path), do NOT re-anchor to a nearby line — a
+comment on the wrong line reads as a claim about that line. That finding's summary
+entry is now its only trace, so append the full finding text to the summary comment
+(`gh api --method PATCH repos/NVIDIA/aicr/issues/comments/<summary-comment-id>
+--input <payload-file>` with the updated body; capture the summary comment's id when
+posting it) so no finding is left as a bare one-liner.
+
+**Content rules for everything posted (summary and inline):**
+
 - Post **issues only**: Confirmed Issues (without the "Confirmed By" column),
   confirmed Integration Findings, Contested Issues, Unresolved, Open Questions.
-- **No reviewer-agent attribution and no severity-label prefixes** in posted
-  content. State each finding and its evidence plainly.
-- Never post Dismissed Findings or Positive Observations.
+  Never post Dismissed Findings or Positive Observations.
+- **The multi-agent machinery must be invisible in posted text.** Write as one
+  reviewer's plain findings: never use the words "cross-review", "review agent",
+  "reviewer", "consensus", "lane", "adversarial", "verification round", or any
+  agent name (Claude, Codex, CodeRabbit), and no severity-label prefixes or
+  vote/attribution columns. State each finding and its evidence plainly. The
+  machinery vocabulary belongs to the chat report only.
 
 ## Rules
 

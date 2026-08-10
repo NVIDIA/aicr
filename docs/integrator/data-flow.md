@@ -91,7 +91,10 @@ Each stage transforms input data into a different format:
 │   │                                                     │
 │   ├─ NodeTopology                                       │
 │   │   └─ subtypes: [summary, taint, label]              │
-│   │       └─ data: map[string]Reading                   │
+│   │       ├─ data: map[string]Reading                   │
+│   │       └─ taint/label.items: []ItemEntry             │
+│   │             (context: key/value, taint adds effect; │
+│   │              data: node-count, node-list, truncated)│
 │   │                                                     │
 │   └─ NetworkTopology (only with --cluster-config /      │
 │       │                --discover-network)              │

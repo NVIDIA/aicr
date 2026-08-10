@@ -1,0 +1,89 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: ocp-inference-nim
+
+spec:
+  # Mirrors h100-eks-ubuntu-inference-nim.yaml, but layered on ocp-inference
+  # and pointed at the OCP-native dependencies (cert-manager-ocp,
+  # gpu-operator-ocp) instead of the base Helm componentRefs those don't
+  # exist as on OCP (both are force-disabled in overlays/ocp.yaml).
+  base: ocp-inference
+
+  criteria:
+    service: ocp
+    intent: inference
+    platform: nim
+
+  # DRA requires Kubernetes 1.34+ (GA) — same floor as
+  # h100-eks-ubuntu-inference-nim.yaml. VERIFY BEFORE MERGE: confirm the
+  # target OCP minor version actually ships a kubelet/API-server at 1.34+
+  # (OCP's bundled Kubernetes version trails upstream by roughly one
+  # minor release per OCP release) before relying on this constraint to
+  # gate correctly.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    - name: k8s-nim-operator-ocp
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia
+      valuesFile: components/k8s-nim-operator-ocp/values.yaml
+      manifestFiles:
+        - components/k8s-nim-operator-ocp/manifests/scc-rolebinding.yaml
+      dependencyRefs:
+        - cert-manager-ocp
+        - gpu-operator-ocp
+      expectedResources:
+        - kind: Deployment
+          namespace: nvidia-nim
+          name: k8s-nim-operator
+
+    # Stub refs so TestAllDependencyReferencesExist can see these
+    # dependencies exist — the full definitions (chart, values, manifests)
+    # are inherited unchanged from overlays/ocp.yaml via the base chain
+    # (base: ocp-inference -> base: ocp). mergeComponentRef only
+    # overrides fields set here, so an empty stub is a no-op at merge
+    # time; it exists purely to satisfy this file-local dependency check,
+    # which does not walk multi-hop base inheritance.
+    - name: cert-manager-ocp
+      type: Helm
+    - name: gpu-operator-ocp
+      type: Helm
+
+  validation:
+    # No gpu-operator-version check/constraint: same reason as
+    # overlays/ocp.yaml — OLM exposes image digests, not semver tags.
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - check-nvidia-smi
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - inference-gateway
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

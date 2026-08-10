@@ -41,6 +41,15 @@ func draDriverRef(gpusEnabled, override bool) recipe.ComponentRef {
 	}
 }
 
+// draDriverOCPRef builds a nvidia-dra-driver-gpu-ocp componentRef with the
+// same switch/waiver shape as draDriverRef — the OCP alias reuses the
+// upstream chart, so the values paths are identical.
+func draDriverOCPRef(gpusEnabled, override bool) recipe.ComponentRef {
+	ref := draDriverRef(gpusEnabled, override)
+	ref.Name = "nvidia-dra-driver-gpu-ocp"
+	return ref
+}
+
 // gpuOperatorRef builds a gpu-operator componentRef pinning
 // devicePlugin.enabled.
 func gpuOperatorRef(devicePluginEnabled bool) recipe.ComponentRef {
@@ -244,6 +253,50 @@ func TestResolveGPUAllocationPolicy(t *testing.T) {
 						"devicePlugin": map[string]any{"enabled": false},
 					},
 				},
+			}},
+			want: GPUAllocationPolicyDevicePluginExtendedResource,
+		},
+		{
+			// OCP recipes carry the DRA driver under its -ocp alias; the
+			// opt-in must resolve through the alias fallback, not silently
+			// fall back to device-plugin (which would skip every DRA gate).
+			name: "OCP DRA opt-in via nvidia-dra-driver-gpu-ocp: dra-resource-claim",
+			recipe: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+				draDriverOCPRef(true, true),
+				{
+					Name: "gpu-operator-ocp",
+					Overrides: map[string]any{
+						"devicePlugin": map[string]any{"enabled": false},
+					},
+				},
+			}},
+			want: GPUAllocationPolicyDRAResourceClaim,
+		},
+		{
+			// The dual-advertisement rejection must fire through the alias
+			// too — this is the gate an OCP opt-in previously bypassed.
+			name: "OCP DRA opt-in with device plugin on: invalid (dual advertisement)",
+			recipe: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+				draDriverOCPRef(true, true),
+				{
+					Name: "gpu-operator-ocp",
+					Overrides: map[string]any{
+						"devicePlugin": map[string]any{"enabled": true},
+					},
+				},
+			}},
+			wantErr: true,
+			wantMsg: "dual advertisement",
+		},
+		{
+			// Both DRA components enabled: the canonical component wins
+			// (warn) — if the -ocp values were read instead, this shape
+			// would reject as dual advertisement.
+			name: "both nvidia-dra-driver-gpu and -ocp enabled: canonical resolves the policy",
+			recipe: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+				draDriverRef(false, false),
+				draDriverOCPRef(true, true),
+				gpuOperatorRef(true),
 			}},
 			want: GPUAllocationPolicyDevicePluginExtendedResource,
 		},

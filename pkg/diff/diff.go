@@ -194,6 +194,8 @@ func indexMeasurements(measurements []*measurement.Measurement) map[string]*meas
 func compareMeasurements(base, target *measurement.Measurement) []Change {
 	var changes []Change
 
+	base, target = alignTopologyEncoding(base, target)
+
 	baseByName := indexSubtypes(base.Subtypes)
 	targetByName := indexSubtypes(target.Subtypes)
 

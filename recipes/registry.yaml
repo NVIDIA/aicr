@@ -871,8 +871,17 @@ components:
 
   # ── OCP (OpenShift Container Platform) components ──────────────────────
   #
-  # OLM installer and CR charts for OCP operators.
-  # All use defaultRepository: "" (manifest-only, in-tree templates).
+  # Two integration patterns, per issue #1818:
+  #   1. OLM installer + CR pattern (gpu-operator, network-operator, nfd,
+  #      cert-manager): defaultRepository: "" (manifest-only, in-tree
+  #      templates) — used when a matching certified/Red Hat operator
+  #      exists on OperatorHub.
+  #   2. Helm-reuse pattern (prometheus-adapter, nvidia-dra-driver-gpu,
+  #      k8s-nim-operator): reuses the exact same external chart/repo/
+  #      version as the non-OCP component, with only OCP-specific extra
+  #      manifests (SCC RoleBindings, etc.) layered on top — used when no
+  #      OCP operator exists and the base image/RBAC already work under
+  #      an OCP SCC with minor additions.
   # Ordering is enforced via dependencyRefs in overlays.
 
   - name: gpu-operator-ocp-olm
@@ -894,7 +903,16 @@ components:
     helm:
       defaultRepository: ""
       defaultNamespace: gpu-operator
-
+    validations:
+      # Driver-ownership coherence, ported to the OCP ClusterPolicy CR.
+      # See the gpu-operator entry above for the full Rule 1/Rule 2
+      # rationale — same checks, now resolvable against this component
+      # via resolveDRAComponentRef's OCP name matching
+      # (pkg/bundler/validations/checks.go). driver.enabled/toolkit.enabled
+      # confirmed flat paths in components/gpu-operator-ocp/manifests/
+      # clusterpolicy.yaml (same shape as the upstream chart).
+      - function: CheckDriverOwnershipCoherence
+        severity: error
   - name: network-operator-ocp-olm
     displayName: Network Operator OCP (OLM)
     valueOverrideKeys:
@@ -934,3 +952,96 @@ components:
     helm:
       defaultRepository: ""
       defaultNamespace: openshift-nfd
+
+  - name: cert-manager-ocp-olm
+    displayName: cert-manager OCP (OLM)
+    valueOverrideKeys:
+      - certmanagerocpolm
+    healthCheck:
+      assertFile: checks/cert-manager-ocp-olm/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: cert-manager-operator
+
+  - name: cert-manager-ocp
+    displayName: cert-manager OCP (CR)
+    valueOverrideKeys:
+      - certmanagerocp
+    healthCheck:
+      assertFile: checks/cert-manager-ocp/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: cert-manager-operator
+
+  # ── OCP Helm-reuse components ───────────────────────────────────────
+  #
+  # Same chart/repo/version as the corresponding non-OCP component (see
+  # comment at top of this section). No CSV/Subscription readiness gate
+  # applies, so these behave like any other Helm componentRef.
+
+  - name: prometheus-adapter-ocp
+    displayName: Prometheus Adapter OCP
+    valueOverrideKeys:
+      - prometheusadapterocp
+    healthCheck:
+      assertFile: checks/prometheus-adapter-ocp/health-check.yaml
+    helm:
+      defaultRepository: https://prometheus-community.github.io/helm-charts
+      defaultChart: prometheus-community/prometheus-adapter
+      defaultVersion: 5.3.0
+      defaultNamespace: monitoring
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
+  - name: nvidia-dra-driver-gpu-ocp
+    displayName: nvidia-dra-driver-gpu OCP
+    valueOverrideKeys:
+      - dradriverocp
+    healthCheck:
+      # Intentionally reuses the base component's health check: OCP
+      # values.yaml pins nameOverride/fullnameOverride to the same
+      # strings as base, so rendered resource names are identical — see
+      # components/nvidia-dra-driver-gpu-ocp/values.yaml for why.
+      assertFile: checks/nvidia-dra-driver-gpu/health-check.yaml
+    helm:
+      defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
+      defaultChart: dra-driver-nvidia-gpu
+      defaultVersion: "0.4.1"
+      defaultNamespace: nvidia-dra-driver
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controller.nodeSelector
+        tolerationPaths:
+          - controller.tolerations
+      accelerated:
+        nodeSelectorPaths:
+          - kubeletPlugin.nodeSelector
+        tolerationPaths:
+          - kubeletPlugin.tolerations
+
+  - name: k8s-nim-operator-ocp
+    displayName: k8s-nim-operator OCP
+    valueOverrideKeys:
+      - nimoperatorocp
+      - nimocp
+    healthCheck:
+      # Intentionally reuses the base component's health check — see
+      # components/k8s-nim-operator-ocp/values.yaml for the
+      # nameOverride/fullnameOverride pin that makes this safe.
+      assertFile: checks/k8s-nim-operator/health-check.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia
+      defaultChart: k8s-nim-operator
+      defaultVersion: "3.1.0"
+      defaultNamespace: nvidia-nim
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - operator.nodeSelector
+        tolerationPaths:
+          - operator.tolerations

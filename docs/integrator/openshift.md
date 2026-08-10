@@ -10,6 +10,17 @@ The **OpenShift deployment** models each OCP operator as two in-tree local Helm 
 
 Every OCP-managed operator follows this same two-phase pattern. As additional operators are added to the OCP overlay, each one is modeled as an `*-ocp-olm` / `*-ocp` pair — no new deployment mechanisms are introduced.
 
+### Kubernetes Version Compatibility
+
+OCP recipes constrain `K8s.server.version` to `>= 1.32`, driven by the `nvidia-dra-driver-gpu-ocp` chart's `kubeVersion: '>=1.32.0-0'` requirement. Since OpenShift ships Kubernetes roughly one minor behind upstream per release:
+
+| OCP version | Kubernetes version | Supported |
+|---|---|---|
+| 4.16 - 4.18 | 1.29 - 1.31 | No |
+| 4.19+ | 1.32+ | Yes |
+
+**OCP recipes require OpenShift 4.19 or later.** Earlier versions fail recipe constraint validation before `helm install` is attempted. See [issue #1818](https://github.com/NVIDIA/aicr/issues/1818).
+
 ### Why Helm?
 
 AICR's entire generation pipeline — recipe resolution, value overrides, bundle rendering, and deployer integration — is built on Helm as its universal packaging format. Rather than introducing a separate OLM-specific code path, the OpenShift support models OLM resources (Subscriptions, OperatorGroups) and operator Custom Resources as standard in-tree Helm chart templates. This means OCP components benefit from the same overlay system, `--set` value overrides, readiness hooks, and deployer support that every other AICR-managed component uses — without any OLM-specific adapter or deployment logic.
