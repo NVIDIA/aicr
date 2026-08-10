@@ -62,7 +62,7 @@ jobs:
           persist-credentials: false
 
       # Detect targeted path categories (default: any match = true)
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: changes
         with:
           filters: |
@@ -157,7 +157,7 @@ jobs:
       # always true — docs-only PRs ran full qualification. '**' matches
       # dotfiles too (dorny sets picomatch dot:true), so '.golangci.yaml',
       # '.settings.yaml', etc. still count as code.
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: code
         with:
           predicate-quantifier: 'every'
