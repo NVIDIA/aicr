@@ -515,7 +515,7 @@ Two checks cover this, both run by `make lint`:
 | Check | What it is | Speed |
 |-------|-----------|-------|
 | `make check-docs-mdx` | Pattern-based bash approximation. Names the specific hazard, needs no dependencies. | Instant |
-| `make check-docs-mdx-parse` | The real MDX parser (`@mdx-js/mdx`, pinned in `.settings.yaml`). Authoritative. | ~2 s + one npm install |
+| `make check-docs-mdx-parse` | The real MDX parser (`@mdx-js/mdx`, locked in `tools/mdx/package-lock.json`). Authoritative. | ~2 s + one `npm ci` |
 
 The parser is the source of truth. The bash rules are deliberately kept as a
 strict **subset** of what it rejects: a miss is caught by the parse gate, but a

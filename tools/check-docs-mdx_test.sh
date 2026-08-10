@@ -57,6 +57,17 @@ check_absent() { # <name> <needle>
     if [[ "${OUT}" != *"$2"* ]]; then pass "$1"; else fail "$1" "expected NOT to contain: $2"; fi
 }
 
+# --- Fixture 0: the script must parse. ---
+# The awk programs live inside single-quoted bash strings, so one apostrophe in
+# a comment ("Fern's") silently terminates the quote and turns the rest of the
+# program into shell tokens. `bash -n` catches that before any behavioral
+# assertion has to.
+if bash -n "${CHECK}" 2>/dev/null; then
+    pass "script-parses"
+else
+    fail "script-parses" "bash -n reported a syntax error (an apostrophe inside the awk block?)"
+fi
+
 # --- Fixture 1: the #2050 regression — a bare '<= ' outside any code span. ---
 # The checker MUST fail closed here. If check 6 is removed, this token is not
 # a void element (check 1), autolink (check 4), or <name-start> tag (check 5),
@@ -118,6 +129,47 @@ run "${DIR_WS}"
 check_rc_zero "lt-space-exits-zero"
 check_absent  "lt-space-no-violation" "bare < not starting a valid tag"
 check_absent  "lt-space-no-word-tag"  "bare <word> tag"
+
+# --- Fixture 2d: well-formed JSX must NOT be reported. ---
+# MDX accepts self-closing components and balanced elements, and Fern's own
+# component set (Cards, Tabs, Accordions) is authored that way. Check 5 used to
+# flag every '<' followed by a letter, so it rejected all of these. A line
+# showing evidence of well-formed JSX ('/>' or '</') is now left to the parse
+# gate, which can actually tell whether the tags balance.
+DIR_JSX="${TMPDIR_TEST}/jsx"
+mkdir -p "${DIR_JSX}"
+cat >"${DIR_JSX}/valid-jsx.md" <<'MD'
+# Well-formed JSX is valid MDX
+
+A <span>styled</span> word renders fine.
+
+A self-closing <Component /> renders fine.
+
+So does <Foo bar="baz" /> with attributes.
+
+And a void element like <br /> stays clean.
+MD
+
+run "${DIR_JSX}"
+check_rc_zero "valid-jsx-exits-zero"
+check_absent  "valid-jsx-no-word-tag"  "bare <word> tag"
+check_absent  "valid-jsx-no-void"      "non-self-closing void element"
+check_absent  "valid-jsx-no-bare-lt"   "bare < not starting a valid tag"
+
+# --- Fixture 2e: an unbalanced placeholder is still caught. ---
+# Narrowing check 5 must not blind it to the case it exists for: a bare
+# '<word>' placeholder on a line with no JSX evidence.
+DIR_PLACEHOLDER="${TMPDIR_TEST}/placeholder"
+mkdir -p "${DIR_PLACEHOLDER}"
+cat >"${DIR_PLACEHOLDER}/placeholder.md" <<'MD'
+# Bare placeholder
+
+Pass <name> to select the component you want to bundle.
+MD
+
+run "${DIR_PLACEHOLDER}"
+check_rc_nonzero "placeholder-exits-nonzero"
+check_contains   "placeholder-reported" "MDX: bare <word> tag outside code fence"
 
 # --- Fixture 2c: '<30' must produce exactly ONE diagnostic, not two. ---
 # Check 5 owns letter-prefixed names and check 6 owns everything that cannot

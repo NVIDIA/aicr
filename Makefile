@@ -8,7 +8,7 @@ ifeq ($(IMAGE_REGISTRY),)
 IMAGE_REGISTRY     := ghcr.io/nvidia
 endif
 IMAGE_TAG          ?= latest
-YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundle/*" ! -path "./bundles/*" ! -path "*/testdata/*")
+YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundle/*" ! -path "./bundles/*" ! -path "*/testdata/*" ! -path "*/node_modules/*")
 COMMIT             := $(shell git rev-parse HEAD)
 BRANCH             := $(shell git rev-parse --abbrev-ref HEAD)
 GO_VERSION         := $(shell cat .go-version 2>/dev/null)
@@ -148,8 +148,8 @@ check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, b
 # strict subset of it.
 #
 # Part of `make lint` (and therefore `make qualify`) so the "if qualify passes
-# locally, CI will pass" contract still holds. It needs Node 20+ and one npm
-# install of the pins in .settings.yaml; without Node it warns and skips
+# locally, CI will pass" contract still holds. It needs Node 20+ and one
+# `npm ci` of the locked tree in tools/mdx; without Node it warns and skips
 # locally, but HARD-FAILS under CI, where the merge-gate `docs-mdx` job blocks
 # on it.
 .PHONY: check-docs-mdx-parse
@@ -195,7 +195,7 @@ LICENSE_IGNORES = \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore 'validators/performance/licenses/**' \
 	-ignore '.licenses-cache/**' \
-	-ignore '.mdx-cache/**'
+	-ignore 'tools/mdx/node_modules/**'
 
 # The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
 # generated, header-less pointer shapes MarshalPointer emits — the transient

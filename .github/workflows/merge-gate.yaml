@@ -148,16 +148,20 @@ jobs:
               # Inputs to the parser-level MDX gate. Only the Fern-published
               # trees matter — a change anywhere under them can introduce a
               # construct that parses as CommonMark but aborts
-              # `fern generate --docs`. The checker, its parser, and the
-              # .settings.yaml pin are included so a change to the gate itself
-              # cannot skip its own verification.
+              # `fern generate --docs`.
+              #
+              # Everything the gate is MADE of is listed too, so a change to the
+              # gate cannot skip its own verification: the two checkers, the
+              # locked parser toolchain, this workflow, and the Makefile — whose
+              # `check-docs-mdx-parse` target is what the job actually invokes,
+              # matching why the `renovate` and `notices` filters watch it.
               - 'docs/user/**'
               - 'docs/integrator/**'
               - 'docs/contributor/**'
               - 'tools/check-docs-mdx'
               - 'tools/check-docs-mdx-parse'
-              - 'tools/check-docs-mdx-parse.mjs'
-              - '.settings.yaml'
+              - 'tools/mdx/**'
+              - 'Makefile'
               - '.github/workflows/merge-gate.yaml'
 
       # code = true iff at least one changed file is NOT docs/markdown/LICENSE.

@@ -180,6 +180,6 @@ aicr-e2e.xml
 # so this only guards an accidental local build; the source stays tracked.
 /tlsproxy
 
-# MDX parser toolchain cache for tools/check-docs-mdx-parse (pinned via
-# .settings.yaml, reinstalled on pin change). Never committed.
-.mdx-cache/
+# Resolved MDX toolchain for tools/check-docs-mdx-parse. The manifest and
+# lockfile in tools/mdx/ ARE committed; only the installed tree is not.
+tools/mdx/node_modules/

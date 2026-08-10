@@ -123,6 +123,8 @@ Guards fire before any cluster mutation, so skips are cheap (typically < 10 s).
 
 The wrapped form `<= 2,000` and a self-closed <br /> are both fine.
 
+So is a <span>styled</span> word and a <Component /> with <Foo bar="baz" />.
+
 | Gate | Bound |
 | ---- | ----- |
 | TTFT | `<= 2,000` ms |

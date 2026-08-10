@@ -16,13 +16,13 @@
 //
 // Fern renders our markdown through MDX, so a construct that is valid
 // CommonMark can still abort `fern generate --docs` at publish time. This
-// script runs the SAME parser Fern does (@mdx-js/mdx, pinned in
-// .settings.yaml) over every published doc and reports the first parse error
-// per file with file:line:column and the parser's own message.
+// script runs the SAME parser Fern does (@mdx-js/mdx, locked in
+// ./package-lock.json) over every published doc and reports the first parse
+// error per file with file:line:column and the parser's own message.
 //
-// Do not invoke directly — `tools/check-docs-mdx-parse` resolves the pinned
-// dependencies and sets NODE_PATH before calling this. It expects the files to
-// check as argv, already filtered by the driver.
+// It lives beside package.json so Node's ESM resolver finds ./node_modules by
+// walking up from this file. Do not invoke directly — `tools/check-docs-mdx-parse`
+// installs the locked tree first and passes the files to check as argv.
 //
 // Relationship to tools/check-docs-mdx: that script is a fast, dependency-free
 // bash approximation kept for the `make lint` fast path. THIS script is the

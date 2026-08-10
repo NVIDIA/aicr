@@ -42,7 +42,7 @@
 #
 # NOTE: this checker is a fast, dependency-free APPROXIMATION of the MDX
 # parser, not a reimplementation of it. tools/check-docs-mdx-parse runs the
-# real parser (@mdx-js/mdx, pinned in .settings.yaml) and is the authoritative
+# real parser (@mdx-js/mdx, locked in tools/mdx/) and is the authoritative
 # gate — it is what the merge-gate 'docs-mdx' job blocks on. A green run HERE
 # is not parser-level validation; it means no known hazard pattern matched.
 #
@@ -50,8 +50,9 @@
 # Erring toward under-reporting is the correct direction: a miss is caught by
 # the blocking parse gate, whereas a false positive would force contributors to
 # mangle prose the publish step would have accepted. Known misses left to the
-# parser: a stray closing tag ('</div>'), an unclosed fragment ('<>'), unbalanced
-# expression braces spanning lines, and acorn-level syntax errors.
+# parser: a stray closing tag ('</div>'), an unclosed fragment ('<>'), a
+# placeholder sharing a line with well-formed JSX, unbalanced expression braces
+# spanning lines, and acorn-level syntax errors.
 #
 # Known code-handling limits (tracked in #2144): a fence opener indented by up
 # to three spaces is not recognized as a fence, and a code span is matched
@@ -208,7 +209,17 @@ for dir in "${SEARCH_DIRS[@]}"; do
       # Letters only. Digit-prefixed sequences (`<30 s`) are owned by check 6 —
       # matching them here too made one source token emit two diagnostics and
       # increment the error count twice.
-      line ~ /<[a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
+      #
+      # Lines showing evidence of well-formed JSX — a self-closing `/>` or a
+      # closing `</` — are left to the parse gate. MDX accepts `<Component />`
+      # and `<span>text</span>`, and the Fern component set (Cards, Tabs,
+      # Accordions) is written that way, so flagging them here would reject
+      # valid content. Deciding whether tags actually balance needs parser
+      # state, which this script does not have; the trade is that a placeholder
+      # sharing a line with real JSX is caught by tools/check-docs-mdx-parse
+      # instead of here. That is the safe direction — see the strict-subset
+      # note in the header.
+      line ~ /<[a-zA-Z]/ && line !~ /\/>/ && line !~ /<\// && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
         printf "MDX: bare <word> tag outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
