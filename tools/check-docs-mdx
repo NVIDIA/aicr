@@ -24,14 +24,15 @@
 #   5. Bare angle-bracket placeholders (<word>) outside fenced and inline code
 #      — MDX interprets them as JSX component tags and fails on unexpected
 #      content that follows.
-#   6. Bare '<' NOT followed by a valid JSX name-start (fail-closed allowlist)
-#      — a '<' before anything other than a letter, '/', '!', or '>' (e.g.
-#      '<=', '< 5', '<3', '<-', or a trailing '<') is a parse error. Unlike
-#      checks 4 and 5, which match a '<' that IS followed by a name-start,
-#      this rule fails closed on every other '<'-follow, so future hazards in
-#      that family are caught by default rather than needing a new pattern.
+#   6. Bare '<' immediately followed by a character that cannot start a JSX
+#      name — '<=', '<3', '<-', or a trailing '<' at end of line. MDX reports
+#      "Unexpected character X before name" for these.
+#      NOT flagged: '<' followed by whitespace ('< 500', '< 10 s'). MDX accepts
+#      those as literal text, verified against @mdx-js/mdx; flagging them made
+#      this script reject content the publish step is happy with.
 #
-# Code handling (applies to all checks): fenced code blocks in BOTH backtick
+# Code handling (applies to checks 2-6; check 1 greps the fence-stripped line
+# WITHOUT inline-span stripping): fenced code blocks in BOTH backtick
 # (```) and tilde (~~~) styles are skipped, following CommonMark fence rules —
 # a fence opens on a run of >= 3 of either character and closes only on a later
 # line whose leading run is the SAME character and at least as long. Inline
@@ -39,12 +40,23 @@
 # and closes at the next run of exactly N backticks, so spans of any
 # backtick-run length are honored (not just single-backtick spans).
 #
-# NOTE: this checker remains an APPROXIMATION of the MDX parser, not a
-# reimplementation of it. It can still drift on hazard classes outside the
-# '<'-follow family covered above (e.g. malformed JSX attributes, unbalanced
-# expression braces spanning lines, or acorn-level syntax errors). A green run
-# is NOT parser-level validation — it means none of the known hazard patterns
-# matched, not that Fern's MDX parser will accept the file.
+# NOTE: this checker is a fast, dependency-free APPROXIMATION of the MDX
+# parser, not a reimplementation of it. tools/check-docs-mdx-parse runs the
+# real parser (@mdx-js/mdx, pinned in .settings.yaml) and is the authoritative
+# gate — it is what the merge-gate 'docs-mdx' job blocks on. A green run HERE
+# is not parser-level validation; it means no known hazard pattern matched.
+#
+# The rules above are deliberately a strict SUBSET of what the parser rejects.
+# Erring toward under-reporting is the correct direction: a miss is caught by
+# the blocking parse gate, whereas a false positive would force contributors to
+# mangle prose the publish step would have accepted. Known misses left to the
+# parser: a stray closing tag ('</div>'), an unclosed fragment ('<>'), unbalanced
+# expression braces spanning lines, and acorn-level syntax errors.
+#
+# Known code-handling limits (tracked in #2144): a fence opener indented by up
+# to three spaces is not recognized as a fence, and a code span is matched
+# within one line even though CommonMark lets spans cross lines. Both can
+# surface as a false positive here; the parse gate is the arbiter.
 
 set -euo pipefail
 
@@ -188,25 +200,34 @@ for dir in "${SEARCH_DIRS[@]}"; do
         printf "MDX: autolink outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
-      # Bare angle-bracket placeholders: <word> or <digit> (e.g. <30 s,
-      # <13%) that are not void HTML elements (check 1) or autolinks
-      # (check 4). MDX interprets a `<` followed by a name-start character
-      # as a JSX tag and chokes on what follows.
-      line ~ /<[0-9a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
+      # Bare angle-bracket placeholders: <word> (e.g. <name>, <path>) that are
+      # not void HTML elements (check 1) or autolinks (check 4). MDX interprets
+      # a `<` followed by a name-start character as a JSX tag and chokes on
+      # what follows.
+      #
+      # Letters only. Digit-prefixed sequences (`<30 s`) are owned by check 6 —
+      # matching them here too made one source token emit two diagnostics and
+      # increment the error count twice.
+      line ~ /<[a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
         printf "MDX: bare <word> tag outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
-      # Check 6 (fail-closed allowlist): a bare `<` that is NOT followed by a
-      # valid JSX name-start. MDX only accepts `<` before a letter (element),
-      # `/` (closing tag), `!` (declaration/comment, caught by check 3), or `>`
-      # (fragment); anything else — `<=`, `< 5`, `<3`, `<-`, or a trailing `<`
-      # at end of line — is a parse error (e.g. `(gate <= 2,000)` yields
-      # "Unexpected character = (U+003D) before name"). This complements
-      # checks 4 and 5 rather than replacing them: they cover the cases where
-      # `<` IS followed by a name-start (autolinks, placeholders), while this
-      # covers the cases where it is not. Inverting to an allowlist means any
-      # future `<`-follow hazard fails closed by default.
-      line ~ /<([^A-Za-z!\/>]|$)/ {
+      # Check 6: a bare `<` IMMEDIATELY followed by a character that cannot
+      # start a JSX name — `<=`, `<3`, `<-`, or a trailing `<` at end of line.
+      # MDX reports "Unexpected character X (U+00XX) before name" for these;
+      # `(gate <= 2,000)` is the case that broke the docs publish in #2050.
+      #
+      # Whitespace after `<` is EXCLUDED. `< 500`, `< 1.15`, and `< 10 s` all
+      # parse cleanly through @mdx-js/mdx — micromark only enters JSX-tag mode
+      # when a name-ish character follows immediately, so `<` + space stays
+      # literal text. Flagging them forced contributors to backtick prose the
+      # publish step accepts, which is the false-positive direction this script
+      # must avoid (see the strict-subset note in the header).
+      #
+      # `</div>` and `<>` are NOT covered here: both are real MDX errors, but
+      # deciding whether a tag is balanced needs parser state. They are caught
+      # by tools/check-docs-mdx-parse, the blocking gate.
+      line ~ /<([^A-Za-z!\/>[:space:]]|$)/ {
         printf "MDX: bare < not starting a valid tag: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }

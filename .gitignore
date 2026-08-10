@@ -179,3 +179,7 @@ aicr-e2e.xml
 # the repo root. The private-Sigstore e2e's run.sh builds the proxy to $TMPDIR,
 # so this only guards an accidental local build; the source stays tracked.
 /tlsproxy
+
+# MDX parser toolchain cache for tools/check-docs-mdx-parse (pinned via
+# .settings.yaml, reinstalled on pin change). Never committed.
+.mdx-cache/

@@ -479,7 +479,8 @@ half of the pipeline and skips deploy-side assertions.
 `make qualify` is the canonical pre-push command. It runs:
 
 - `test-coverage` — `go test -race ./...` plus the 80% coverage floor.
-- `lint` — golangci-lint with `.golangci.yaml` plus yamllint.
+- `lint` — golangci-lint with `.golangci.yaml`, yamllint, and the docs checks
+  (filenames, MDX patterns, MDX parse — see [Docs MDX Gate](#docs-mdx-gate)).
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
@@ -500,6 +501,52 @@ golangci-lint run -c .golangci.yaml ./...           # full sweep
 This applies even to PRs labeled `documentation` when they include
 incidental Go changes. Do not rely on CI to surface lint failures —
 the pre-push gate is local.
+
+## Docs MDX Gate
+
+Fern renders `docs/user/`, `docs/integrator/`, and `docs/contributor/` through
+an MDX parser, so a construct that is valid CommonMark can still abort
+`fern generate --docs` at publish time. A bare `<=` in prose is the classic
+case — MDX reads the `<` as the start of a JSX tag and fails with
+`Unexpected character = (U+003D) before name`.
+
+Two checks cover this, both run by `make lint`:
+
+| Check | What it is | Speed |
+|-------|-----------|-------|
+| `make check-docs-mdx` | Pattern-based bash approximation. Names the specific hazard, needs no dependencies. | Instant |
+| `make check-docs-mdx-parse` | The real MDX parser (`@mdx-js/mdx`, pinned in `.settings.yaml`). Authoritative. | ~2 s + one npm install |
+
+The parser is the source of truth. The bash rules are deliberately kept as a
+strict **subset** of what it rejects: a miss is caught by the parse gate, but a
+false positive would force you to mangle prose the publish step would have
+accepted. That is why `< 500` and `< 10 s` are fine (MDX only enters tag mode
+when a name-ish character follows `<` immediately) while `<= 2,000` and `<30 s`
+are not.
+
+Hazards only the parser sees: a stray closing tag (`</div>`), an unclosed
+fragment (`<>`), unbalanced expression braces spanning lines, and any
+acorn-level syntax error.
+
+`check-docs-mdx-parse` needs Node 20+. Without it the script prints a warning
+and exits 0 locally, but **hard-fails under CI** — the `docs-mdx` job in
+`merge-gate.yaml` blocks on it, and the merge gate is the only required status
+check.
+
+Fixing a violation is usually one of:
+
+```markdown
+gate <= 2,000   →  gate `<= 2,000`
+<30 s           →  `<30 s`        or  &lt;30 s
+<br>            →  <br />
+{template}      →  \{template\}
+```
+
+Note that `fern check` (the Fern Docs CI job) does **not** parse MDX, and the
+job that does — `fern generate --docs --preview` — runs as a `workflow_run`
+companion whose status never lands on the PR head SHA, so it cannot be a
+required check. `make check-docs-mdx-parse` exists to close that gap without a
+token or a dependency on Fern's service at merge time.
 
 ## Common Gotchas
 

@@ -89,12 +89,58 @@ The TTFT p99 stays low (gate `<= 2,000`) under the calibrated inference gate.
 inference-perf TTFT p99 gate <= 2,000 ms
 ```
 
-A valid element like <br /> and a closing </div> must also stay clean.
+A valid element like <br /> stays clean.
 MD
 
 run "${DIR_SAFE}"
 check_rc_zero  "wrapped-lt-exits-zero"
 check_absent   "wrapped-lt-no-violation" "bare < not starting a valid tag"
+
+# --- Fixture 2b: '<' followed by WHITESPACE. Must NOT be reported. ---
+# Verified against @mdx-js/mdx: micromark only enters JSX-tag mode when a
+# name-ish character follows '<' immediately, so '< 500' and friends stay
+# literal text and parse cleanly. This checker is a strict subset of the real
+# parser, so reporting them here would be a false positive — it would force
+# contributors to backtick prose that `fern generate --docs` accepts.
+DIR_WS="${TMPDIR_TEST}/whitespace"
+mkdir -p "${DIR_WS}"
+cat >"${DIR_WS}/lt-space.md" <<'MD'
+# Less-than followed by whitespace is literal text
+
+Embed the cause only when status < 500, since 4xx carries client feedback.
+
+Recipes targeting Kubernetes < 1.15 must enable the feature gate explicitly.
+
+Guards fire before any cluster mutation, so skips are cheap (typically < 10 s).
+MD
+
+run "${DIR_WS}"
+check_rc_zero "lt-space-exits-zero"
+check_absent  "lt-space-no-violation" "bare < not starting a valid tag"
+check_absent  "lt-space-no-word-tag"  "bare <word> tag"
+
+# --- Fixture 2c: '<30' must produce exactly ONE diagnostic, not two. ---
+# Check 5 owns letter-prefixed names and check 6 owns everything that cannot
+# start a name, so a digit-prefixed sequence belongs to check 6 alone. When
+# check 5 also matched digits, one source token emitted two lines and
+# double-incremented the error count.
+DIR_DIGIT="${TMPDIR_TEST}/digit"
+mkdir -p "${DIR_DIGIT}"
+cat >"${DIR_DIGIT}/digit-tag.md" <<'MD'
+# Digit-prefixed angle bracket
+
+Cold start completes in <30 s on a warm cache.
+MD
+
+run "${DIR_DIGIT}"
+check_rc_nonzero "digit-tag-exits-nonzero"
+check_contains   "digit-tag-reported" "MDX: bare < not starting a valid tag"
+check_absent     "digit-tag-not-double-reported" "MDX: bare <word> tag"
+if [[ "$(grep -c 'digit-tag.md:3:' <<<"${OUT}")" == "1" ]]; then
+    pass "digit-tag-single-diagnostic"
+else
+    fail "digit-tag-single-diagnostic" "want exactly 1 diagnostic for line 3, got $(grep -c 'digit-tag.md:3:' <<<"${OUT}")"
+fi
 
 # --- Fixture 3: '<= ' inside a tilde (~~~) fenced code block. No false pos. ---
 # CommonMark honors ~~~ fences as code; the checker must skip their contents

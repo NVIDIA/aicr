@@ -105,7 +105,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 # Standalone target — NOT part of `make lint` because it requires Docker
@@ -140,6 +140,21 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
+
+# Parser-level docs gate — runs the SAME MDX parser Fern does over every
+# published doc, so a construct that would abort `fern generate --docs` at
+# publish time fails here instead. This is the authoritative check;
+# check-docs-mdx above is a fast, dependency-free approximation kept as a
+# strict subset of it.
+#
+# Part of `make lint` (and therefore `make qualify`) so the "if qualify passes
+# locally, CI will pass" contract still holds. It needs Node 20+ and one npm
+# install of the pins in .settings.yaml; without Node it warns and skips
+# locally, but HARD-FAILS under CI, where the merge-gate `docs-mdx` job blocks
+# on it.
+.PHONY: check-docs-mdx-parse
+check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node; CI-blocking)
+	@./tools/check-docs-mdx-parse
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -179,7 +194,8 @@ LICENSE_IGNORES = \
 	-ignore 'recipes/evidence/*/*/*.yaml' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore 'validators/performance/licenses/**' \
-	-ignore '.licenses-cache/**'
+	-ignore '.licenses-cache/**' \
+	-ignore '.mdx-cache/**'
 
 # The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
 # generated, header-less pointer shapes MarshalPointer emits — the transient

@@ -13,6 +13,12 @@
 # limitations under the License.
 
 # Validates Fern docs configuration on pull requests that touch docs or fern/.
+#
+# NOTE: `fern check` validates docs.yml/nav configuration — it does NOT parse
+# MDX, so it cannot catch a construct that aborts `fern generate --docs` at
+# publish time. Parser-level MDX validation is the `docs-mdx` job in
+# merge-gate.yaml, which is the blocking check (see docs/contributor/tests.md
+# "Docs MDX Gate"). This workflow is advisory nav/link validation.
 
 name: Fern Docs CI
 

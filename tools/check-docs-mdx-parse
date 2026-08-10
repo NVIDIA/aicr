@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Parser-level MDX validation for docs/ — resolves the pinned MDX toolchain and
+# runs tools/check-docs-mdx-parse.mjs over every published doc.
+#
+# Why this exists: `fern check` (the Fern Docs CI job) does NOT parse MDX, and
+# `fern generate --docs --preview` (which does) runs in a workflow_run companion
+# whose status never lands on the PR's head SHA — so it can never be a required
+# check. That gap let a bare `<=` in docs/integrator/aks-gpu-setup.md merge green
+# and then fail every publish, including a release tag (issue #2050). This script
+# closes it with a hermetic, token-free parse that CI can block on.
+#
+# Scope mirrors tools/check-docs-mdx: docs/user/, docs/integrator/, and
+# docs/contributor/ (everything published to Fern). container-images.md carries
+# auto-generated HTML comment splice markers, is not published to Fern, and is
+# excluded. Override the scan roots with positional args (used by the tests and
+# for frozen version content).
+#
+# Node availability:
+#   - In CI (CI or GITHUB_ACTIONS set): missing node/npm, or a failed dependency
+#     install, is a HARD FAILURE. The gate must never silently pass.
+#   - Locally: the same conditions print a loud warning and exit 0, so a Go-only
+#     development environment can still run `make lint`. CI is authoritative.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PARSER="${REPO_ROOT}/tools/check-docs-mdx-parse.mjs"
+CACHE_DIR="${REPO_ROOT}/.mdx-cache"
+
+SEARCH_DIRS=("docs/user/" "docs/integrator/" "docs/contributor/")
+EXCLUDE_NAMES=("container-images.md")
+
+if [[ $# -gt 0 ]]; then
+  SEARCH_DIRS=("$@")
+fi
+
+if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+  IN_CI=1
+else
+  IN_CI=0
+fi
+
+# unavailable <reason>: hard-fail under CI, warn-and-skip locally.
+unavailable() {
+  if [[ "${IN_CI}" == "1" ]]; then
+    echo "::error::MDX parse gate cannot run: $1"
+    exit 1
+  fi
+  echo "WARN: skipping MDX parse check — $1"
+  echo "WARN: this check is enforced in CI (merge-gate 'docs-mdx'); install Node 20+ to run it locally."
+  exit 0
+}
+
+command -v node >/dev/null 2>&1 || unavailable "node not found in PATH"
+command -v npm >/dev/null 2>&1 || unavailable "npm not found in PATH"
+
+# Versions come from .settings.yaml so local and CI resolve the same parser —
+# a drifting MDX version would make this gate disagree with the publish step.
+SETTINGS="${REPO_ROOT}/.settings.yaml"
+if command -v yq >/dev/null 2>&1; then
+  MDX_VERSION="$(yq eval '.linting.mdx' "${SETTINGS}")"
+  GFM_VERSION="$(yq eval '.linting.remark_gfm' "${SETTINGS}")"
+else
+  # yq is a documented prerequisite (make tools-setup), but fall back to a
+  # narrow grep so a missing yq degrades to a warning rather than a wrong pin.
+  MDX_VERSION="$(awk '/^  mdx:/ {gsub(/['"'"' ]/, "", $2); print $2}' "${SETTINGS}")"
+  GFM_VERSION="$(awk '/^  remark_gfm:/ {gsub(/['"'"' ]/, "", $2); print $2}' "${SETTINGS}")"
+fi
+
+if [[ -z "${MDX_VERSION}" || "${MDX_VERSION}" == "null" ]]; then
+  echo "ERROR: .linting.mdx is not set in ${SETTINGS}" >&2
+  exit 1
+fi
+if [[ -z "${GFM_VERSION}" || "${GFM_VERSION}" == "null" ]]; then
+  echo "ERROR: .linting.remark_gfm is not set in ${SETTINGS}" >&2
+  exit 1
+fi
+
+# The parser is copied into CACHE_DIR before running. Node's ESM resolver walks
+# up from the IMPORTING MODULE's directory (NODE_PATH is ignored for ESM), so
+# running the copy from CACHE_DIR is what lets it resolve CACHE_DIR/node_modules
+# without installing into the repo root.
+STAMP="${CACHE_DIR}/.installed"
+WANT="mdx=${MDX_VERSION} gfm=${GFM_VERSION}"
+
+if [[ ! -f "${STAMP}" ]] || [[ "$(cat "${STAMP}")" != "${WANT}" ]]; then
+  mkdir -p "${CACHE_DIR}"
+  echo "Installing pinned MDX toolchain (${WANT})..."
+  # --ignore-scripts: this tree is a lint dependency, not a build artifact, and
+  # nothing in it needs a native build step. Declining lifecycle scripts removes
+  # the arbitrary-code-execution path that an unlocked transitive npm tree would
+  # otherwise open on every CI run.
+  if ! npm install \
+    --prefix "${CACHE_DIR}" \
+    --no-save --no-audit --no-fund --no-package-lock --ignore-scripts \
+    "@mdx-js/mdx@${MDX_VERSION}" "remark-gfm@${GFM_VERSION}" >/dev/null 2>&1; then
+    unavailable "npm install of @mdx-js/mdx@${MDX_VERSION} failed (offline?)"
+  fi
+  echo "${WANT}" >"${STAMP}"
+fi
+
+cp "${PARSER}" "${CACHE_DIR}/check-docs-mdx-parse.mjs"
+
+# Collect files. Paths are reported exactly as `find` yields them, so the
+# default (relative) scan roots produce repo-relative, copy-pasteable
+# file:line:column output matching tools/check-docs-mdx.
+FILES=()
+for dir in "${SEARCH_DIRS[@]}"; do
+  exclude_args=()
+  for name in "${EXCLUDE_NAMES[@]}"; do
+    exclude_args+=(! -name "${name}")
+  done
+  while IFS= read -r file; do
+    [[ -z "${file}" ]] && continue
+    FILES+=("${file}")
+  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${exclude_args[@]}" 2>/dev/null | sort)
+done
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "ERROR: no doc files found under: ${SEARCH_DIRS[*]}" >&2
+  exit 1
+fi
+
+node "${CACHE_DIR}/check-docs-mdx-parse.mjs" "${FILES[@]}"

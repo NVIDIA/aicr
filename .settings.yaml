@@ -39,6 +39,13 @@ linting:
   addlicense: 'v1.2.0'
   # renovate: datasource=github-releases depName=google/go-licenses depType=linting
   go_licenses: 'v2.0.1'
+  # MDX toolchain for tools/check-docs-mdx-parse — the parser-level docs gate.
+  # Must track what Fern's publish pipeline uses: this pin IS the contract that
+  # keeps the merge gate from disagreeing with `fern generate --docs`.
+  # renovate: datasource=npm depName=@mdx-js/mdx depType=linting
+  mdx: '3.1.1'
+  # renovate: datasource=npm depName=remark-gfm depType=linting
+  remark_gfm: '4.0.1'
 
 # Security Tools
 security_tools:
