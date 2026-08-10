@@ -1,0 +1,13 @@
+{
+  "name": "@aicr/docs-mdx-gate",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned MDX toolchain for tools/check-docs-mdx-parse \u2014 the blocking docs gate. Plugin set mirrors what Fern renders with (GFM, YAML frontmatter) so the gate agrees with `fern generate --docs`. package-lock.json freezes the FULL transitive tree so the gate's verdict is reproducible: an upstream patch release must not be able to change which docs pass without a repository change.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "dependencies": {
+    "@mdx-js/mdx": "3.1.1",
+    "remark-frontmatter": "5.0.0",
+    "remark-gfm": "4.0.1"
+  }
+}

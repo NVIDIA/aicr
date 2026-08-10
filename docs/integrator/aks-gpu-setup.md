@@ -308,8 +308,8 @@ check-nvidia-smi) for training and inference, and the training performance
 phase passes the calibrated NCCL all-reduce gate at 157.29 GB/s (16 GiB
 message size across 2 nodes, gate >= 150). The Dynamo inference counterpart
 (`h100-aks-ubuntu-inference-dynamo`) passes `inference-perf` at
-148,004 tok/s throughput (gate >= 50,000) with 579.70 ms TTFT p99
-(gate <= 2,000) — Qwen/Qwen3-8B at 256 concurrency per GPU via
+148,004 tok/s throughput (gate `>= 50,000`) with 579.70 ms TTFT p99
+(gate `<= 2,000`) — Qwen/Qwen3-8B at 256 concurrency per GPU via
 dynamo-router on a single ND96isr node. Other SKUs and node images have
 not been exercised — run `aicr validate` after deployment and report gaps.
 

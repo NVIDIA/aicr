@@ -48,7 +48,21 @@ var validIntents = map[string]bool{IntentTraining: true, IntentInference: true}
 // "uat-<Name>" — to the cloud-specific identifiers and the on-disk
 // cluster/test configuration a UAT run consumes.
 type Reservation struct {
-	Name  string `yaml:"name"`
+	// Name is the lease key (concurrency group uat-<name>). It is also
+	// interpolated into the daytime guard/teardown `grep -E` scans as the legacy
+	// discovery prefix during the ADR-017 migration, so Validate constrains it to
+	// an ERE-safe, cluster-name-safe charset (^[a-z]([a-z0-9-]*[a-z0-9])?$).
+	Name string `yaml:"name"`
+	// Slug is the short (2-4 char), registry-unique discovery key the daytime
+	// cluster name embeds: aicr-uat-day-<slug>-<slot>-<run_id> (ADR-017). The
+	// pre-batch guard and evening teardown scan the (slug, slot) prefix to find
+	// a held daytime cluster across runs. It is the account-stable, slot-ready
+	// key the reservation Name is too long and only cloud-unique to be, and it
+	// keeps the daytime name inside GKE's 40-char cluster-name cap. Validate
+	// enforces non-emptiness, registry-wide uniqueness, and the
+	// ^[a-z][a-z0-9]{1,3}$ charset. The kind row carries one for field
+	// uniformity even though the nvkind lane provisions no cloud cluster.
+	Slug  string `yaml:"slug"`
 	Cloud string `yaml:"cloud"`
 	// ReservationID is the cloud capacity-reservation identifier (GCP uses the
 	// fully-qualified resource path). OPTIONAL: quota-backed reservations

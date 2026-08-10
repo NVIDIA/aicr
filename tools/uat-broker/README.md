@@ -21,6 +21,7 @@ Resolve one reservation row to `GITHUB_OUTPUT`-style `key=value` lines:
 
 ```sh
 uat-broker reservations --name aws-h100 >> "$GITHUB_OUTPUT"
+# slug=ah1
 # cloud=aws
 # reservation-id=cr-0cbe491320188dfa6
 # accelerator=h100
@@ -30,6 +31,10 @@ uat-broker reservations --name aws-h100 >> "$GITHUB_OUTPUT"
 # nightly-intents=training,inference
 # daytime-intent=training
 ```
+
+`slug` is the short (2-4 char) registry-unique discovery key the daytime cluster
+name embeds — `aicr-uat-day-<slug>-<slot>-<run_id>` (ADR-017); `uat-run.yaml`
+forwards it to the cloud pipelines as `needs.resolve.outputs.slug`.
 
 `nightly-intents` is the comma-separated list of intents the nightly batch runs
 on this reservation (#1276, DC3); it is emitted **resolved** (an un-annotated

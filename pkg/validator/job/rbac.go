@@ -110,8 +110,14 @@ func EnsureRBAC(ctx context.Context, clientset kubernetes.Interface, namespace, 
 	return nil
 }
 
-// CleanupRBAC removes the per-run ServiceAccount and ClusterRoleBinding.
+// CleanupRBAC removes the per-run ClusterRoleBinding and ServiceAccount.
 // Ignores NotFound errors (idempotent). Call once at end of validation run.
+//
+// The ClusterRoleBinding is deleted BEFORE the ServiceAccount: revoking the
+// binding immediately closes the cluster-admin escalation window, whereas an
+// orphaned ServiceAccount with no binding carries no privileges. If the binding
+// delete fails, the ServiceAccount delete still runs so we do not leave both
+// behind.
 //
 // When both deletes fail, the returned StructuredError wraps the joined
 // underlying errors via stderrors.Join so callers can inspect individual
@@ -122,15 +128,15 @@ func CleanupRBAC(ctx context.Context, clientset kubernetes.Interface, namespace,
 
 	var errs []error
 
-	if err := clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, saName, metav1.DeleteOptions{}); err != nil {
-		if !apierrors.IsNotFound(err) {
-			errs = append(errs, errors.Wrap(errors.ErrCodeInternal, "failed to delete ServiceAccount", err))
-		}
-	}
-
 	if err := clientset.RbacV1().ClusterRoleBindings().Delete(ctx, crbName, metav1.DeleteOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
 			errs = append(errs, errors.Wrap(errors.ErrCodeInternal, "failed to delete ClusterRoleBinding", err))
+		}
+	}
+
+	if err := clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, saName, metav1.DeleteOptions{}); err != nil {
+		if !apierrors.IsNotFound(err) {
+			errs = append(errs, errors.Wrap(errors.ErrCodeInternal, "failed to delete ServiceAccount", err))
 		}
 	}
 

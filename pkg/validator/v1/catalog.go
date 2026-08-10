@@ -262,3 +262,34 @@ func (c *ValidatorCatalog) UnmatchedChecks(phase Phase, validationInput *Validat
 
 	return unmatched
 }
+
+// DuplicateChecks returns each check name declared more than once in phase's
+// checks list, in order of first appearance and reported once regardless of
+// how many times it repeats. UnmatchedChecks dedups declared names before
+// comparing against the catalog, so it cannot see duplicates; the preflight
+// needs this complement to reject a checks list that names the same gate twice
+// (a copy-paste error that inflates the apparent test count without adding
+// coverage). Pure function — no catalog is consulted. Returns nil when every
+// declared name for the phase is unique.
+func DuplicateChecks(phase Phase, validationInput *ValidationInput) []string {
+	phaseChecks := checksForPhase(phase, validationInput)
+	if len(phaseChecks) == 0 {
+		return nil
+	}
+
+	counts := make(map[string]int, len(phaseChecks))
+	for _, name := range phaseChecks {
+		counts[name]++
+	}
+
+	var dupes []string
+	reported := make(map[string]bool)
+	for _, name := range phaseChecks {
+		if counts[name] > 1 && !reported[name] {
+			reported[name] = true
+			dupes = append(dupes, name)
+		}
+	}
+
+	return dupes
+}

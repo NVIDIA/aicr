@@ -31,10 +31,17 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"github.com/NVIDIA/aicr/pkg/validator/job"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/recipes"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestNewDefaults(t *testing.T) {
@@ -301,6 +308,181 @@ func TestValidatePhaseNoCluster(t *testing.T) {
 	}
 	if pr.Phase != PhaseDeployment {
 		t.Errorf("phase = %q, want %q", pr.Phase, PhaseDeployment)
+	}
+}
+
+// validationWithChecks builds a ValidationInput declaring the given check
+// names per phase. Used by the preflight tests to exercise unmatched,
+// cross-phase, and duplicate declarations.
+func validationWithChecks(checksByPhase map[Phase][]string) *v1.ValidationInput {
+	vi := &v1.ValidationInput{}
+	for phase, checks := range checksByPhase {
+		vp := &v1.ValidationPhase{Checks: checks}
+		switch phase {
+		case PhaseDeployment:
+			vi.Config.Deployment = vp
+		case PhasePerformance:
+			vi.Config.Performance = vp
+		case PhaseConformance:
+			vi.Config.Conformance = vp
+		}
+	}
+	return vi
+}
+
+func TestPreflightDeclaredChecks(t *testing.T) {
+	cat := &catalog.ValidatorCatalog{
+		Validators: []catalog.ValidatorEntry{
+			{Name: "operator-health", Phase: "deployment"},
+			{Name: "expected-resources", Phase: "deployment"},
+			{Name: "nccl-all-reduce", Phase: "performance"},
+		},
+	}
+	v := New(WithVersion("1.0.0"))
+
+	tests := []struct {
+		name        string
+		phases      []Phase
+		checks      map[Phase][]string
+		wantErr     bool
+		wantSubstrs []string
+		notSubstrs  []string
+	}{
+		{
+			name:   "all matched",
+			phases: []Phase{PhaseDeployment},
+			checks: map[Phase][]string{PhaseDeployment: {"operator-health", "expected-resources"}},
+		},
+		{
+			name:        "typo unmatched anywhere",
+			phases:      []Phase{PhaseDeployment},
+			checks:      map[Phase][]string{PhaseDeployment: {"operator-health", "expected-resoures"}},
+			wantErr:     true,
+			wantSubstrs: []string{"expected-resoures", "matches no validator in the catalog"},
+		},
+		{
+			name:        "declared under wrong phase names the other phase",
+			phases:      []Phase{PhaseDeployment},
+			checks:      map[Phase][]string{PhaseDeployment: {"nccl-all-reduce"}},
+			wantErr:     true,
+			wantSubstrs: []string{"nccl-all-reduce", "found under phase: performance"},
+		},
+		{
+			name:        "mixed valid and invalid surfaces only the invalid",
+			phases:      []Phase{PhaseDeployment},
+			checks:      map[Phase][]string{PhaseDeployment: {"operator-health", "bogus-check"}},
+			wantErr:     true,
+			wantSubstrs: []string{"bogus-check"},
+			// The valid check must not be reported as a problem.
+			notSubstrs: []string{"operator-health"},
+		},
+		{
+			name:        "duplicate declaration",
+			phases:      []Phase{PhaseDeployment},
+			checks:      map[Phase][]string{PhaseDeployment: {"operator-health", "operator-health"}},
+			wantErr:     true,
+			wantSubstrs: []string{"operator-health", "more than once"},
+		},
+		{
+			name:   "aggregates offenders across all requested phases",
+			phases: []Phase{PhaseDeployment, PhasePerformance},
+			checks: map[Phase][]string{
+				PhaseDeployment:  {"typo-a"},
+				PhasePerformance: {"typo-b"},
+			},
+			wantErr:     true,
+			wantSubstrs: []string{"typo-a", "typo-b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vi := validationWithChecks(tt.checks)
+			err := v.preflightDeclaredChecks(cat, tt.phases, vi)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("preflightDeclaredChecks() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+			}
+			for _, sub := range tt.wantSubstrs {
+				if !strings.Contains(err.Error(), sub) {
+					t.Errorf("error %q missing expected substring %q", err.Error(), sub)
+				}
+			}
+			for _, sub := range tt.notSubstrs {
+				if strings.Contains(err.Error(), sub) {
+					t.Errorf("error %q unexpectedly contains %q", err.Error(), sub)
+				}
+			}
+		})
+	}
+}
+
+// TestPreflightDeclaredChecks_ExternalCatalogMissingCheck models an incomplete
+// external (--data) catalog: a recipe declares a check that the loaded catalog
+// does not supply. The preflight must fail closed rather than let the phase
+// filter down to zero tests and pass spuriously.
+func TestPreflightDeclaredChecks_ExternalCatalogMissingCheck(t *testing.T) {
+	externalCatalog := &catalog.ValidatorCatalog{
+		Validators: []catalog.ValidatorEntry{
+			{Name: "operator-health", Phase: "deployment"},
+			// A required gate the external catalog forgot to include.
+		},
+	}
+	v := New(WithVersion("1.0.0"))
+
+	vi := validationWithChecks(map[Phase][]string{
+		PhaseDeployment: {"operator-health", "expected-resources"},
+	})
+
+	err := v.preflightDeclaredChecks(externalCatalog, []Phase{PhaseDeployment}, vi)
+	if err == nil {
+		t.Fatal("preflightDeclaredChecks() = nil error, want fail-closed on missing external-catalog check")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+	if !strings.Contains(err.Error(), "expected-resources") {
+		t.Errorf("error %q missing the unmatched check name", err.Error())
+	}
+}
+
+// TestValidatePhaseNoClusterRejectsUnmatchedCheck proves the fail-closed gate
+// runs in --no-cluster mode through the real entry point: an unmatched check
+// must error, not report a spuriously passing skipped phase (issue #2121).
+func TestValidatePhaseNoClusterRejectsUnmatchedCheck(t *testing.T) {
+	v := New(WithVersion("1.0.0"), WithNoCluster(true))
+	vi := validationWithChecks(map[Phase][]string{
+		PhaseDeployment: {"this-check-does-not-exist"},
+	})
+
+	pr, err := v.ValidatePhase(context.Background(), PhaseDeployment, vi, nil)
+	if err == nil {
+		t.Fatalf("ValidatePhase(--no-cluster) = %+v, nil error; want fail-closed on unmatched check", pr)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+}
+
+// TestValidatePhasesNoClusterRejectsUnmatchedCheck is the plural-path twin: the
+// default client validate route (ValidatePhases) must also fail closed offline.
+func TestValidatePhasesNoClusterRejectsUnmatchedCheck(t *testing.T) {
+	v := New(WithVersion("1.0.0"), WithNoCluster(true))
+	vi := validationWithChecks(map[Phase][]string{
+		PhaseDeployment: {"this-check-does-not-exist"},
+	})
+
+	results, err := v.ValidatePhases(context.Background(), []Phase{PhaseDeployment}, vi, nil)
+	if err == nil {
+		t.Fatalf("ValidatePhases(--no-cluster) = %+v, nil error; want fail-closed on unmatched check", results)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
 
@@ -827,5 +1009,205 @@ func TestRunPhases_FailFast_PassedPhaseDoesNotGate(t *testing.T) {
 	}
 	if results[2].Status != ctrf.StatusSkipped {
 		t.Errorf("results[2].Status = %q, want skipped", results[2].Status)
+	}
+}
+
+// newFakeClusterClient returns a fake clientset whose server-side-apply calls
+// materialize the applied object in the tracker. The upstream fake client does
+// not implement SSA (an Apply returns NotFound without creating anything), so
+// this reactor lets ensureNamespace and job.EnsureRBAC create the per-run
+// Namespace, ServiceAccount, and ClusterRoleBinding the RBAC-rollback tests
+// depend on. Extra reactors may be prepended by the caller afterward.
+func newFakeClusterClient() *k8sfake.Clientset {
+	cs := k8sfake.NewSimpleClientset()
+	cs.PrependReactor("patch", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa, ok := action.(clienttesting.PatchAction)
+		if !ok || pa.GetPatchType() != types.ApplyPatchType {
+			return false, nil, nil // not an apply — let the default handler run
+		}
+		gvr := pa.GetResource()
+		name := pa.GetName()
+		ns := pa.GetNamespace()
+		var obj runtime.Object
+		switch gvr.Resource {
+		case "serviceaccounts":
+			obj = &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+		case "clusterrolebindings":
+			obj = &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		case "namespaces":
+			obj = &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		default:
+			return false, nil, nil
+		}
+		// Ignore AlreadyExists: EnsureRBAC applies each object exactly once per run.
+		_ = cs.Tracker().Create(gvr, obj, ns)
+		return true, obj, nil
+	})
+	return cs
+}
+
+// TestPrepareClusterRollsBackRBACOnConfigMapFailure guards issue #2119: when a
+// preparation step AFTER job.EnsureRBAC fails (here, data-ConfigMap creation),
+// prepareCluster must revoke the per-run cluster-admin ClusterRoleBinding and
+// ServiceAccount before returning, rather than leaking a privileged identity.
+// Reverting the in-prepareCluster rollback leaves both resources behind and
+// fails this test.
+func TestPrepareClusterRollsBackRBACOnConfigMapFailure(t *testing.T) {
+	cs := newFakeClusterClient()
+
+	// Fail every data-ConfigMap create so ensureDataConfigMaps errors out AFTER
+	// EnsureRBAC has already created the privileged RBAC.
+	cs.PrependReactor("create", "configmaps", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("configmap backend unavailable")
+	})
+
+	v := New(WithRunID("rollback-run"), WithKubeconfig("in-memory"))
+	v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+	_, err := v.prepareCluster(context.Background(), nil, nil)
+	if err == nil {
+		t.Fatal("prepareCluster() error = nil, want ConfigMap failure")
+	}
+
+	// No active cluster-admin subject must remain after the failed run.
+	crbName := job.ClusterRoleBindingName(v.RunID)
+	if _, getErr := cs.RbacV1().ClusterRoleBindings().Get(context.Background(), crbName, metav1.GetOptions{}); getErr == nil {
+		t.Errorf("ClusterRoleBinding %q survived the failed run; cluster-admin leaked", crbName)
+	}
+	saName := job.ServiceAccountName(v.RunID)
+	if _, getErr := cs.CoreV1().ServiceAccounts(v.Namespace).Get(context.Background(), saName, metav1.GetOptions{}); getErr == nil {
+		t.Errorf("ServiceAccount %q survived the failed run", saName)
+	}
+}
+
+// TestValidatePhasesPromotesRBACCleanupFailure proves the success path fails
+// closed on privileged cleanup: when every phase passes but revoking the
+// per-run ClusterRoleBinding fails, ValidatePhases must promote that failure
+// into its returned error rather than reporting a clean success. Reverting the
+// named-return promotion makes ValidatePhases return nil and fails this test.
+func TestValidatePhasesPromotesRBACCleanupFailure(t *testing.T) {
+	cs := newFakeClusterClient()
+	cs.PrependReactor("delete", "clusterrolebindings", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("apiserver unavailable")
+	})
+
+	v := New(WithRunID("promote-phases"), WithKubeconfig("in-memory"))
+	v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+	// nil validationInput selects no checks, so the phases run to a clean pass
+	// without deploying any Jobs — isolating the cleanup-failure promotion.
+	results, err := v.ValidatePhases(context.Background(), []Phase{PhaseDeployment}, nil, nil)
+	if err == nil {
+		t.Fatal("ValidatePhases() error = nil, want promoted RBAC cleanup failure")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Errorf("ValidatePhases() error = %v, want ErrCodeInternal", err)
+	}
+	if len(results) == 0 {
+		t.Error("ValidatePhases() returned no results; phases should still have run")
+	}
+}
+
+// TestValidatePhasePromotesRBACCleanupFailure is the single-phase analog of
+// TestValidatePhasesPromotesRBACCleanupFailure.
+func TestValidatePhasePromotesRBACCleanupFailure(t *testing.T) {
+	cs := newFakeClusterClient()
+	cs.PrependReactor("delete", "clusterrolebindings", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("apiserver unavailable")
+	})
+
+	v := New(WithRunID("promote-phase"), WithKubeconfig("in-memory"))
+	v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+	result, err := v.ValidatePhase(context.Background(), PhaseDeployment, nil, nil)
+	if err == nil {
+		t.Fatal("ValidatePhase() error = nil, want promoted RBAC cleanup failure")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Errorf("ValidatePhase() error = %v, want ErrCodeInternal", err)
+	}
+	if result == nil {
+		t.Error("ValidatePhase() result = nil; the phase should still have produced a result")
+	}
+}
+
+// TestPrepareClusterSurfacesRollbackFailure guards the issue #2119 hardening:
+// when a preparation step fails AFTER EnsureRBAC and the rollback's
+// ClusterRoleBinding delete ALSO fails, prepareCluster must fold the rollback
+// failure into its returned error — surfacing that cluster-admin may be
+// orphaned rather than swallowing it. Reverting the fold in the rollback defer
+// leaves the returned error carrying only the prep cause and fails the
+// injected-rollback-cause assertion.
+func TestPrepareClusterSurfacesRollbackFailure(t *testing.T) {
+	cs := newFakeClusterClient()
+
+	// Fail data-ConfigMap creation so prepareCluster errors after EnsureRBAC.
+	cs.PrependReactor("create", "configmaps", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("configmap backend unavailable")
+	})
+
+	// Fail the rollback's ClusterRoleBinding delete and record that it ran.
+	rollbackDeleteCause := stderrors.New("apiserver unavailable during rollback")
+	var crbDeleteAttempted bool
+	cs.PrependReactor("delete", "clusterrolebindings", func(clienttesting.Action) (bool, runtime.Object, error) {
+		crbDeleteAttempted = true
+		return true, nil, rollbackDeleteCause
+	})
+
+	v := New(WithRunID("rollback-fail"), WithKubeconfig("in-memory"))
+	v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+	_, err := v.prepareCluster(context.Background(), nil, nil)
+	if err == nil {
+		t.Fatal("prepareCluster() error = nil, want prep + rollback failure")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Errorf("prepareCluster() error = %v, want ErrCodeInternal", err)
+	}
+	if !stderrors.Is(err, rollbackDeleteCause) {
+		t.Errorf("prepareCluster() error = %v, want the rollback delete cause surfaced, not swallowed", err)
+	}
+	if !crbDeleteAttempted {
+		t.Error("prepareCluster() did not attempt to delete the ClusterRoleBinding during rollback")
+	}
+}
+
+// TestPrepareClusterNoRollbackWhenCleanupDisabled locks in the intentional
+// --cleanup=false behavior (issue #2119 is explicitly distinct from #306, which
+// owns that contract): when cleanup is disabled and preparation fails after
+// EnsureRBAC, prepareCluster must NOT attempt any rollback delete, leaving the
+// per-run RBAC in place for a caller debugging a failed setup. Making rollback
+// unconditional would delete the binding and fail both assertions below.
+func TestPrepareClusterNoRollbackWhenCleanupDisabled(t *testing.T) {
+	cs := newFakeClusterClient()
+
+	cs.PrependReactor("create", "configmaps", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("configmap backend unavailable")
+	})
+
+	var deleted []string
+	cs.PrependReactor("delete", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		deleted = append(deleted, action.GetResource().Resource)
+		return false, nil, nil // record only; fall through to the default tracker
+	})
+
+	v := New(WithRunID("no-rollback"), WithKubeconfig("in-memory"), WithCleanup(false))
+	v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+	_, err := v.prepareCluster(context.Background(), nil, nil)
+	if err == nil {
+		t.Fatal("prepareCluster() error = nil, want ConfigMap failure")
+	}
+
+	for _, r := range deleted {
+		if r == "clusterrolebindings" || r == "serviceaccounts" {
+			t.Errorf("prepareCluster() attempted RBAC delete %q with cleanup disabled; want none", r)
+		}
+	}
+
+	// The per-run cluster-admin binding must remain for manual inspection.
+	crbName := job.ClusterRoleBindingName(v.RunID)
+	if _, getErr := cs.RbacV1().ClusterRoleBindings().Get(context.Background(), crbName, metav1.GetOptions{}); getErr != nil {
+		t.Errorf("ClusterRoleBinding %q was removed despite cleanup=false: %v", crbName, getErr)
 	}
 }

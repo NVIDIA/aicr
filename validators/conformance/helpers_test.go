@@ -526,6 +526,13 @@ func TestBuildGangTestPodUsesCPUOnlyWorkload(t *testing.T) {
 	if got := pod.Labels["pod-group.scheduling.run.ai/name"]; got != run.groupName {
 		t.Errorf("pod group label = %q, want %q", got, run.groupName)
 	}
+	// The annotation is the LOAD-BEARING PodGroup association at KAI
+	// v0.14.x — without it the pod-grouper creates per-pod groups and the
+	// test silently degrades to individual scheduling (the #1529 defect).
+	// A revert to labels-only must not pass green.
+	if got := pod.Annotations["pod-group-name"]; got != run.groupName {
+		t.Errorf("pod-group-name annotation = %q, want %q (the load-bearing KAI association)", got, run.groupName)
+	}
 	if len(pod.Spec.ResourceClaims) != 0 {
 		t.Fatalf("ResourceClaims length = %d, want 0", len(pod.Spec.ResourceClaims))
 	}

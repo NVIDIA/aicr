@@ -133,13 +133,12 @@ func (v *Validator) prepareCluster(
 	ctx context.Context,
 	validationInput *v1.ValidationInput,
 	snap *snapshotter.Snapshot,
-) (*clusterState, error) {
+) (cs *clusterState, err error) {
 
 	// Use PropagateOrWrap so a coded inner error (e.g. an invalid kubeconfig
 	// classified as a deterministic config error) survives instead of being
 	// blanket-relabeled ErrCodeInternal, which would mask it as retryable.
 	var clientset kubernetes.Interface
-	var err error
 	kubeconfig := strings.TrimSpace(v.Kubeconfig)
 	switch {
 	case kubeconfig == "":
@@ -166,6 +165,32 @@ func (v *Validator) prepareCluster(
 		return nil, errors.PropagateOrWrap(rbacErr, errors.ErrCodeInternal, "failed to ensure RBAC")
 	}
 
+	// Privileged RBAC (the per-run cluster-admin ClusterRoleBinding) now exists.
+	// Register an immediate rollback so any later failure in prepareCluster
+	// revokes it before returning, instead of leaking a privileged identity
+	// until manual cleanup. On the success path err is nil and the binding is
+	// retained — the caller's deferClusterCleanup owns success-path teardown, so
+	// this defer must not double-clean.
+	//
+	//nolint:contextcheck // rollbackRBAC uses a fresh context: parent may be canceled
+	defer func() {
+		if err != nil {
+			if rollbackErr := v.rollbackRBAC(clientset); rollbackErr != nil {
+				// The privileged binding could not be revoked after a
+				// preparation failure. Fold the rollback failure into the
+				// returned error so the operator sees BOTH the original cause
+				// and the leaked cluster-admin binding — the prep error alone
+				// would hide that manual cleanup is now required. Keep it a
+				// coded StructuredError wrapping the joined causes so callers
+				// can still match ErrCodeInternal and inspect either error.
+				err = errors.WrapWithContext(errors.ErrCodeInternal,
+					"preparation failed and RBAC rollback failed; cluster-admin binding may be orphaned",
+					stderrors.Join(err, rollbackErr),
+					map[string]any{"runID": v.RunID, "namespace": v.Namespace})
+			}
+		}
+	}()
+
 	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, validationInput); cmErr != nil {
 		return nil, errors.PropagateOrWrap(cmErr, errors.ErrCodeInternal, "failed to create data ConfigMaps")
 	}
@@ -183,27 +208,62 @@ func (v *Validator) prepareCluster(
 	}, nil
 }
 
-// deferClusterCleanup registers deferred cleanup for RBAC and data ConfigMaps.
-// Both cleanup steps share a single deadline so a stalled apiserver cannot
-// extend total post-run blocking time to 2 * K8sCleanupTimeout. Cleanup
-// failures are surfaced at structured-log level so operators see when
-// resources may have been orphaned in the validator namespace.
-func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
+// deferClusterCleanup performs success-path teardown of RBAC and data
+// ConfigMaps. Both cleanup steps share a single deadline so a stalled apiserver
+// cannot extend total post-run blocking time to 2 * K8sCleanupTimeout.
+//
+// RBAC is privileged (a per-run cluster-admin ClusterRoleBinding), so a failure
+// to revoke it is returned to the caller and promoted into the run's error —
+// fail closed, never leak cluster-admin silently. ConfigMap cleanup is not
+// privileged, so its failure stays warning-only and does not fail the run.
+func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) error {
 	if !v.Cleanup {
-		return
+		return nil
 	}
 	//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 	defer cancel()
 
+	var rbacErr error
 	if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace, v.RunID); cleanupErr != nil {
-		slog.Warn("failed to cleanup RBAC; resources may be orphaned",
+		slog.Error("failed to cleanup RBAC; cluster-admin binding may be orphaned",
 			"runID", v.RunID, "namespace", v.Namespace, "error", cleanupErr)
+		rbacErr = errors.PropagateOrWrap(cleanupErr, errors.ErrCodeInternal, "failed to revoke privileged RBAC")
 	}
 	if cmErr := v.cleanupDataConfigMaps(cleanupCtx, clientset); cmErr != nil {
 		slog.Warn("failed to cleanup ConfigMaps; resources may be orphaned",
 			"runID", v.RunID, "namespace", v.Namespace, "error", cmErr)
 	}
+	return rbacErr
+}
+
+// rollbackRBAC revokes the per-run RBAC created earlier in prepareCluster when a
+// later preparation step fails. It uses a fresh bounded context because the
+// caller's ctx may already be canceled — the very condition that can trigger the
+// failure. Revoking the cluster-admin ClusterRoleBinding closes the privilege
+// escalation window immediately; the surrounding prepareCluster call still
+// returns its error, so the run fails closed regardless of this rollback's
+// outcome. Respects v.Cleanup for parity with the success-path teardown: a
+// caller that disabled cleanup has opted into managing teardown manually, so a
+// disabled-cleanup run performs no rollback and returns nil.
+//
+// Returns the CleanupRBAC error (still logged) so the caller can fold a failed
+// revocation into the run's error and surface that cluster-admin may be
+// orphaned; returns nil when cleanup is disabled or the revocation succeeds.
+func (v *Validator) rollbackRBAC(clientset kubernetes.Interface) error {
+	if !v.Cleanup {
+		return nil
+	}
+	//nolint:contextcheck // Fresh context: parent may be canceled during rollback
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+	defer cancel()
+
+	if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace, v.RunID); cleanupErr != nil {
+		slog.Error("failed to roll back RBAC after preparation failure; cluster-admin binding may be orphaned",
+			"runID", v.RunID, "namespace", v.Namespace, "error", cleanupErr)
+		return cleanupErr
+	}
+	return nil
 }
 
 // ValidatePhases runs the specified phases sequentially and returns one
@@ -215,7 +275,7 @@ func (v *Validator) ValidatePhases(
 	phases []Phase,
 	validationInput *v1.ValidationInput,
 	snap *snapshotter.Snapshot,
-) ([]*PhaseResult, error) {
+) (results []*PhaseResult, err error) {
 
 	if len(phases) == 0 {
 		phases = PhaseOrder
@@ -226,20 +286,28 @@ func (v *Validator) ValidatePhases(
 	// Lower any nccl-benchmark-runtime-ref into its inline carrier by reading the
 	// referenced template from the --data tree. Fails fast on a bad ref before
 	// deploying any Jobs.
-	if err := v.resolveBenchmarkRuntimeRef(ctx, validationInput); err != nil {
-		return nil, err
+	if refErr := v.resolveBenchmarkRuntimeRef(ctx, validationInput); refErr != nil {
+		return nil, refErr
 	}
 
 	// Pre-flight: evaluate the top-level and readiness-phase constraints
 	// against the snapshot. Fails fast before deploying any Jobs if
 	// prerequisites aren't met.
-	if err := checkReadiness(validationInput, snap); err != nil {
-		return nil, err
+	if readyErr := checkReadiness(validationInput, snap); readyErr != nil {
+		return nil, readyErr
 	}
 
 	cat, err := catalog.LoadWithDataProvider(ctx, v.dataProvider, v.Version, v.Commit)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
+	}
+
+	// Fail closed on unmatched, cross-phase, or duplicate declared checks
+	// before preparing the cluster or running any Job. Runs for the normalized
+	// phase set and in --no-cluster mode too, so an unresolved required gate
+	// cannot masquerade as a skipped (spuriously passing) phase (issue #2121).
+	if err = v.preflightDeclaredChecks(cat, phases, validationInput); err != nil {
+		return nil, err
 	}
 
 	// --no-cluster: report all as skipped, no K8s calls
@@ -252,9 +320,18 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 	defer close(cs.stopCh)
-	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
+	// Promote a privileged (RBAC) cleanup failure into the run's error, but only
+	// when there is no prior real error — a genuine phase failure takes
+	// precedence over a cleanup problem.
+	//
+	//nolint:contextcheck // deferClusterCleanup uses a fresh context: parent may be canceled
+	defer func() {
+		if cleanupErr := v.deferClusterCleanup(cs.clientset); cleanupErr != nil && err == nil {
+			err = cleanupErr
+		}
+	}()
 
-	results, err := v.runPhases(ctx, func(phase Phase) (*PhaseResult, error) {
+	results, err = v.runPhases(ctx, func(phase Phase) (*PhaseResult, error) {
 		return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
 	}, cat, phases)
 	if err != nil {
@@ -316,19 +393,19 @@ func (v *Validator) ValidatePhase(
 	phase Phase,
 	validationInput *v1.ValidationInput,
 	snap *snapshotter.Snapshot,
-) (*PhaseResult, error) {
+) (result *PhaseResult, err error) {
 
 	// Lower any nccl-benchmark-runtime-ref into its inline carrier before the
 	// phase runs (or is skipped), so a bad ref fails fast even offline.
-	if err := v.resolveBenchmarkRuntimeRef(ctx, validationInput); err != nil {
-		return nil, err
+	if refErr := v.resolveBenchmarkRuntimeRef(ctx, validationInput); refErr != nil {
+		return nil, refErr
 	}
 
 	// Readiness pre-flight — before the no-cluster short-circuit, matching
 	// ValidatePhases: constraints are evaluated inline against the snapshot
 	// even in test mode.
-	if err := checkReadiness(validationInput, snap); err != nil {
-		return nil, err
+	if readyErr := checkReadiness(validationInput, snap); readyErr != nil {
+		return nil, readyErr
 	}
 
 	cat, err := catalog.LoadWithDataProvider(ctx, v.dataProvider, v.Version, v.Commit)
@@ -336,10 +413,15 @@ func (v *Validator) ValidatePhase(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
 	}
 
+	// Fail closed on unmatched, cross-phase, or duplicate declared checks
+	// before the no-cluster short-circuit and before any cluster preparation,
+	// matching ValidatePhases: a per-phase caller must not be able to skip an
+	// unresolved required gate into a spuriously passing run (issue #2121).
+	if err = v.preflightDeclaredChecks(cat, []Phase{phase}, validationInput); err != nil {
+		return nil, err
+	}
+
 	if v.NoCluster {
-		// Warn on unmatched check names even in no-cluster mode so typos are
-		// caught during offline recipe validation, not just live runs.
-		warnUnmatchedChecks(cat, phase, validationInput)
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
 	}
 
@@ -348,26 +430,70 @@ func (v *Validator) ValidatePhase(
 		return nil, err
 	}
 	defer close(cs.stopCh)
-	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
+	// Promote a privileged (RBAC) cleanup failure into the run's error, but only
+	// when there is no prior real error — a genuine phase failure takes
+	// precedence over a cleanup problem.
+	//
+	//nolint:contextcheck // deferClusterCleanup uses a fresh context: parent may be canceled
+	defer func() {
+		if cleanupErr := v.deferClusterCleanup(cs.clientset); cleanupErr != nil && err == nil {
+			err = cleanupErr
+		}
+	}()
 
 	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
 }
 
-// warnUnmatchedChecks emits a structured warning for every declared check name
-// that matched no catalog entry in its phase. A name that exists under a
-// different phase is called out as a likely misplacement; anything else is a
-// probable typo or a check missing from the loaded (possibly --data) catalog.
-// Advisory only — it never fails the run.
-func warnUnmatchedChecks(cat *catalog.ValidatorCatalog, phase Phase, validationInput *v1.ValidationInput) {
-	for _, u := range cat.UnmatchedChecks(phase, validationInput) {
-		if u.OtherPhase != "" {
-			slog.Warn("declared check matches no validator in this phase; it exists under a different phase",
-				"check", u.Name, "phase", u.Phase, "foundInPhase", u.OtherPhase)
-			continue
+// preflightDeclaredChecks fails closed when any declared check name does not
+// resolve to exactly one catalog entry in its declared phase. It aggregates
+// three defects across every requested phase into a single error so mixed
+// valid/invalid lists surface every problem in one pass:
+//
+//   - unmatched: a name matching no validator in the catalog at all (typo, a
+//     check missing from an incomplete external --data catalog, or a missing
+//     embedded validator);
+//   - cross-phase: a name that exists but under a different phase (a
+//     misplacement, e.g. a performance check declared under deployment);
+//   - duplicate: a name declared more than once in one phase's checks list.
+//
+// This runs BEFORE the cluster is prepared or any Job is deployed, in both
+// live and --no-cluster modes. Without it an all-unmatched phase silently
+// filters down to zero tests → StatusSkipped → nonblocking, so
+// `aicr validate --fail-on-error` exits 0 on a recipe that names a required
+// gate the catalog cannot supply (issue #2121). Returns nil when every
+// declared check for every requested phase resolves exactly once.
+func (v *Validator) preflightDeclaredChecks(
+	cat *catalog.ValidatorCatalog,
+	phases []Phase,
+	validationInput *v1.ValidationInput,
+) error {
+
+	var problems []string
+	for _, phase := range phases {
+		for _, u := range cat.UnmatchedChecks(phase, validationInput) {
+			if u.OtherPhase != "" {
+				problems = append(problems, fmt.Sprintf(
+					"declared check %q in phase %s matches no validator in that phase (found under phase: %s)",
+					u.Name, u.Phase, u.OtherPhase))
+				continue
+			}
+			problems = append(problems, fmt.Sprintf(
+				"declared check %q in phase %s matches no validator in the catalog",
+				u.Name, u.Phase))
 		}
-		slog.Warn("declared check matches no validator in the catalog; it will not run",
-			"check", u.Name, "phase", u.Phase)
+		for _, name := range v1.DuplicateChecks(phase, validationInput) {
+			problems = append(problems, fmt.Sprintf(
+				"declared check %q is declared more than once in phase %s", name, phase))
+		}
 	}
+
+	if len(problems) == 0 {
+		return nil
+	}
+
+	return errors.New(errors.ErrCodeInvalidRequest,
+		"validation declares checks that do not match the validator catalog:\n  - "+
+			strings.Join(problems, "\n  - "))
 }
 
 // runPhase executes all validators for a single phase sequentially.
@@ -391,11 +517,10 @@ func (v *Validator) runPhase(
 	slog.Info("running validation phase", "phase", phase,
 		"catalog", len(allEntries), "selected", len(entries))
 
-	// Surface declared check names that matched no catalog entry for this
-	// phase. Silently dropping them lets a typo'd or misplaced check name
-	// (e.g. a performance check declared under deployment) produce an empty,
-	// spuriously-passing phase — the fail-open direction for a gate.
-	warnUnmatchedChecks(cat, phase, validationInput)
+	// Note: unmatched, cross-phase, and duplicate declared checks are rejected
+	// up front by preflightDeclaredChecks (in ValidatePhase/ValidatePhases)
+	// before this phase ever runs, so by here every declared check for the
+	// phase resolves to exactly one catalog entry.
 
 	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
 

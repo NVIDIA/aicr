@@ -34,8 +34,8 @@ func TestDescriptorIsDeterministicAndCoversKnownVocabulary(t *testing.T) {
 	t.Parallel()
 
 	entries := Descriptor()
-	if len(entries) != 3 {
-		t.Fatalf("Descriptor() returned %d entries, want 3", len(entries))
+	if len(entries) != 4 {
+		t.Fatalf("Descriptor() returned %d entries, want 4", len(entries))
 	}
 	if !sort.SliceIsSorted(entries, func(i, j int) bool {
 		return entries[i].Component < entries[j].Component
@@ -47,9 +47,10 @@ func TestDescriptorIsDeterministicAndCoversKnownVocabulary(t *testing.T) {
 		ComponentGPUOperator:    {PathDevicePluginEnabled},
 		ComponentGPUOperatorOCP: {PathDevicePluginEnabled},
 		ComponentDRADriver:      {PathDRAGPUsEnabledOverride, PathDRAGPUsEnabled},
+		ComponentDRADriverOCP:   {PathDRAGPUsEnabledOverride, PathDRAGPUsEnabled},
 	}
 	// Consume want keys as entries match so a duplicated component (which
-	// keeps len(entries)==3 while silently dropping another pinned entry)
+	// keeps len(entries)==4 while silently dropping another pinned entry)
 	// fails the test instead of slipping past the map lookup.
 	unconsumed := make(map[string]struct{}, len(want))
 	for k := range want {
@@ -235,7 +236,7 @@ func TestIdentityIsStable(t *testing.T) {
 	if len(first) != 64 {
 		t.Fatalf("Identity() = %q, want a sha256 hex digest", first)
 	}
-	const pinned = "0b957b8e3d5ba71421dbbeb32c31c68694181d2ee0c15106ddf769d888ef9f56"
+	const pinned = "cafd61f00de1871f6a23c8ea9205ed52dce03304fe179bca733a9f976bf3e247"
 	if first != pinned {
 		t.Fatalf("Identity() = %q, want pinned %q — descriptor contents changed; "+
 			"if this is a deliberate append-only expansion, update the pin and treat it "+

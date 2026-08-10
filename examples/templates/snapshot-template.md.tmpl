@@ -1,3 +1,14 @@
+{{- /* An item carries its node names inline only when its folded key is
+       shared; otherwise it references the data entry holding them. The node
+       list is the final field of every folded encoding. */}}
+{{- define "nodeList" }}
+{{-   $item := index . 0 }}{{ $folded := index . 1 }}
+{{-   if index $item.Data "node-list" }}{{ (index $item.Data "node-list").String }}
+{{-   else if index $item.Data "node-list-ref" }}
+{{-     $entry := index $folded (index $item.Data "node-list-ref").String }}
+{{-     if $entry }}{{ last (splitList "|" $entry.String) }}{{ end }}
+{{-   end }}
+{{- end }}
 # Cluster Snapshot Report
 
 {{- /* Extract data from measurements */ -}}
@@ -103,15 +114,21 @@
 {{- end }}
 
 ## Node Topology
+{{- /* Prefer the lossless Items encoding; fall back to the folded Data map
+       for snapshots captured before it existed. Data cannot represent a label
+       whose name collides with a synthesized "<key>.<value>", so the two
+       renderings can differ in row count on such a cluster. */}}
 {{- $topoSummary := dict }}
+{{- $topoTaintItems := list }}
+{{- $topoLabelItems := list }}
 {{- $topoTaints := dict }}
 {{- $topoLabels := dict }}
 {{- range .Measurements }}
   {{- if eq .Type.String "NodeTopology" }}
     {{- range .Subtypes }}
       {{- if eq .Name "summary" }}{{ $topoSummary = .Data }}{{ end }}
-      {{- if eq .Name "taint" }}{{ $topoTaints = .Data }}{{ end }}
-      {{- if eq .Name "label" }}{{ $topoLabels = .Data }}{{ end }}
+      {{- if eq .Name "taint" }}{{ $topoTaints = .Data }}{{ $topoTaintItems = .Items }}{{ end }}
+      {{- if eq .Name "label" }}{{ $topoLabels = .Data }}{{ $topoLabelItems = .Items }}{{ end }}
     {{- end }}
   {{- end }}
 {{- end }}
@@ -126,18 +143,37 @@
 
 | Taint Key | Effect | Value | Nodes |
 |-----------|--------|-------|-------|
+{{- if $topoTaintItems }}
+{{- range $topoTaintItems }}
+| {{ index .Context "key" }} | {{ index .Context "effect" }} | {{ index .Context "value" }} | {{ template "nodeList" (list . $topoTaints) }} |
+{{- end }}
+{{- else }}
 {{- range $key, $reading := $topoTaints }}
 {{- $parts := splitList "|" $reading.String }}
+{{- if eq (len $parts) 3 }}
 | {{ $key }} | {{ index $parts 0 }} | {{ index $parts 1 }} | {{ index $parts 2 }} |
+{{- else }}
+{{- /* Two fields means encodeTaints moved the effect into the key to keep two
+       effects of one key apart, so the last dotted segment is the effect. */}}
+{{- $segments := splitList "." $key }}
+| {{ join "." (initial $segments) }} | {{ last $segments }} | {{ index $parts 0 }} | {{ index $parts 1 }} |
+{{- end }}
+{{- end }}
 {{- end }}
 
 ### Labels
 
 | Label Key | Value | Nodes |
 |-----------|-------|-------|
+{{- if $topoLabelItems }}
+{{- range $topoLabelItems }}
+| {{ index .Context "key" }} | {{ index .Context "value" }} | {{ template "nodeList" (list . $topoLabels) }} |
+{{- end }}
+{{- else }}
 {{- range $key, $reading := $topoLabels }}
 {{- $parts := splitList "|" $reading.String }}
 | {{ $key }} | {{ index $parts 0 }} | {{ index $parts 1 }} |
+{{- end }}
 {{- end }}
 
 ---

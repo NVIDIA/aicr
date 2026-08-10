@@ -8,7 +8,7 @@ ifeq ($(IMAGE_REGISTRY),)
 IMAGE_REGISTRY     := ghcr.io/nvidia
 endif
 IMAGE_TAG          ?= latest
-YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundle/*" ! -path "./bundles/*" ! -path "*/testdata/*")
+YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundle/*" ! -path "./bundles/*" ! -path "*/testdata/*" ! -path "*/node_modules/*")
 COMMIT             := $(shell git rev-parse HEAD)
 BRANCH             := $(shell git rev-parse --abbrev-ref HEAD)
 GO_VERSION         := $(shell cat .go-version 2>/dev/null)
@@ -105,7 +105,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 # Standalone target — NOT part of `make lint` because it requires Docker
@@ -140,6 +140,21 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
+
+# Parser-level docs gate — runs the SAME MDX parser Fern does over every
+# published doc, so a construct that would abort `fern generate --docs` at
+# publish time fails here instead. This is the authoritative check;
+# check-docs-mdx above is a fast, dependency-free approximation kept as a
+# strict subset of it.
+#
+# Part of `make lint` (and therefore `make qualify`). It needs Node 20+ and one
+# `npm ci` of the locked tree in tools/mdx. With Node installed, a local
+# `make qualify` predicts CI as usual; WITHOUT it this check warns and skips, so
+# a local pass no longer implies a CI pass and invalid MDX can still be rejected
+# by the merge-gate `docs-mdx` job, where a missing Node is a HARD FAILURE.
+.PHONY: check-docs-mdx-parse
+check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node; CI-blocking)
+	@./tools/check-docs-mdx-parse
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -179,7 +194,8 @@ LICENSE_IGNORES = \
 	-ignore 'recipes/evidence/*/*/*.yaml' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore 'validators/performance/licenses/**' \
-	-ignore '.licenses-cache/**'
+	-ignore '.licenses-cache/**' \
+	-ignore 'tools/mdx/node_modules/**'
 
 # The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
 # generated, header-less pointer shapes MarshalPointer emits — the transient

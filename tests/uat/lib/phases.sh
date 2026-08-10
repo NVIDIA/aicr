@@ -87,13 +87,55 @@ HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
 READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-3600}" # 60 min
 # The gate requires the deployment phase to pass this many times CONSECUTIVELY
 # before declaring readiness. A single pass proves "converged at instant T", not
-# "will stay converged": nodewright (skyhook) tuning reboots the GPU node more
-# than once (the tuning packages carry interrupt: reboot) and re-opens
-# status=in_progress after each reboot and for each newly-joined GPU node, so a
-# pass can land in a lull between reboot cycles. Requiring N consecutive passes,
-# spaced by the retry sleep, ensures the reboots have settled before the
-# conformance phase (`--phase all`) runs -- any regression resets the counter.
+# "will stay converged". TWO DIFFERENT threats motivate the streak:
+#
+# Reason 1 -- TEMPORAL FLAPPING of nodes that ALREADY EXIST: nodewright (skyhook)
+# tuning reboots the GPU node more than once (the tuning packages carry
+# interrupt: reboot) and re-opens status=in_progress after each reboot, so a pass
+# can land in a lull between reboot cycles. Requiring N consecutive passes, spaced
+# by the retry sleep, ensures the reboots have settled before the conformance
+# phase (`--phase all`) runs -- any validate regression resets the counter.
+#
+# Reason 2 -- CENSUS GROWTH (issue #2096): the consecutive-pass streak defends
+# ONLY against nodes that already exist. A not-yet-joined GPU node cannot fail a
+# gate attempt, so the streak is structurally blind to it. When a late GPU node
+# joins (observed 84s after a gate pass), Skyhook cordons+tunes it (taint
+# skyhook.nvidia.com=runtime-required:NoSchedule + spec.unschedulable), re-opening
+# convergence WHILE the later `--phase all` validate runs. So each streak-
+# advancing attempt ALSO folds in a GPU-node census verdict (gpu_census_verdict):
+# an attempt counts toward the streak only if validate passes AND the census is
+# settled at that instant; a grown/cordoned census is treated as a regression and
+# resets the streak, riding census growth out on the SAME READINESS_TIMEOUT_SECONDS
+# budget as a reboot flap. (phase_conformance adds a second, adjacency-close census
+# gate right before validate; see CENSUS_STABILITY_TIMEOUT_SECONDS below.)
 READINESS_CONSECUTIVE_PASSES="${READINESS_CONSECUTIVE_PASSES:-2}"
+
+# --- GPU-node census guard (issue #2096) --------------------------------------
+# Defends the readiness gate (and the pre-conformance adjacency window) against
+# GPU-node census GROWTH -- see the READINESS_CONSECUTIVE_PASSES note above,
+# Reason 2. Env-var contract (the per-cloud runners wire the producer side):
+#   EXPECTED_GPU_NODES   authoritative GPU-node count (integer). May be empty
+#                        (degrade mode) or the literal `skip` (single-node nvkind
+#                        lane opt-out). Computed from each cloud's cluster-config.
+#   GPU_CENSUS_SELECTOR  kubectl label selector for the GPU pool; default
+#                        `nodeGroup=gpu-worker` (common to all three clouds).
+#
+# Bounded budget for the pre-conformance census-stability gate (assert_gpu_census
+# in phase_conformance). Closes the adjacency window between the readiness gate
+# passing and `validate --phase all`: an authoritative GPU-node census can still
+# GROW here (a late node joins ~84s after gate pass, Skyhook cordons+tunes it,
+# re-opening convergence). This budget lets a just-joined node finish tuning and
+# the census settle; fails closed if exceeded -- a growing/non-settling census
+# fails the cell EARLY with a self-explanatory message instead of letting validate
+# fail on a legitimately non-converged cluster. Separate from
+# READINESS_TIMEOUT_SECONDS, which budgets the install-phase gate.
+CENSUS_STABILITY_TIMEOUT_SECONDS="${CENSUS_STABILITY_TIMEOUT_SECONDS:-300}" # 5 min
+# kubectl label selector for the authoritative GPU pool (all three clouds label
+# their GPU pool the same way).
+GPU_CENSUS_SELECTOR="${GPU_CENSUS_SELECTOR:-nodeGroup=gpu-worker}"
+# Per-poll sleep and per-kubectl wall-clock bound for the live census wrappers.
+GPU_CENSUS_SETTLE_SECONDS="${GPU_CENSUS_SETTLE_SECONDS:-10}"
+GPU_CENSUS_KUBECTL_TIMEOUT="${GPU_CENSUS_KUBECTL_TIMEOUT:-30}"
 
 # Inference-serve knobs (phase_serve; overridable for local reproduction). The
 # defaults mirror the served DynamoGraphDeployment in demos/cuj2-inference.md
@@ -127,6 +169,152 @@ cloud_refresh_credentials() { :; }
 # How often the readiness gate calls cloud_refresh_credentials. Effectively-never
 # by default (AWS/GCP need no mid-gate refresh); Azure's runner lowers it.
 CLOUD_REFRESH_INTERVAL_SECONDS="${CLOUD_REFRESH_INTERVAL_SECONDS:-999999999}"
+
+# gpu_census_verdict: PURE, unit-testable census decision (issue #2096). Reads the
+# JSON of `kubectl get nodes -l <selector> -o json` on STDIN; $1 is the
+# authoritative expected GPU-node count (may be empty or non-integer). Prints a
+# one-line reason (or `ok (...)`) to STDOUT and returns 0 (settled) / 1 (not
+# settled). It NEVER calls kubectl, so a Go test can exec it with JSON fixtures:
+#   echo "$json" | gpu_census_verdict 2
+#
+# Logic (order matters):
+#   - expected is a non-empty integer and present != expected -> return 1
+#     (the census-GROWTH / census-shrink catch a not-yet-joined node evades)
+#   - expected empty/non-integer -> require present >= 1 (degrade mode; stability
+#     across polls is the caller's job in assert_gpu_census)
+#   - every present node must be Ready, else `node <name> not Ready`, return 1
+#   - no present node may be cordoned: spec.unschedulable==true OR a NoSchedule
+#     taint whose key starts with `skyhook.nvidia.com` (the exact incident state:
+#     present but cordoned+driverless) -> `node <name> cordoned ...`, return 1
+#   - otherwise print `ok (<present> gpu-worker nodes ready)`, return 0
+# Robust to missing fields (jq `// empty` / `// false`); unparseable JSON -> 1.
+gpu_census_verdict() {
+  local expected="${1:-}"
+  local out ok reason
+  if ! out="$(jq -r --arg expected "${expected}" '
+      (.items // []) as $items
+      | ($items | length) as $present
+      | ( $expected
+          | if . == "" then null
+            elif test("^[0-9]+$") then tonumber
+            else null end ) as $exp
+      | ( if $exp != null and $present != $exp then
+            { ok: false, reason: "census \($present)/\($exp) gpu-worker nodes present" }
+          elif $exp == null and $present < 1 then
+            { ok: false, reason: "census 0/>=1 gpu-worker nodes present" }
+          else
+            ( [ $items[]
+                | select( ( [ .status.conditions[]? | select(.type == "Ready") | .status ]
+                            | first // "Unknown" ) != "True" )
+                | .metadata.name ] | first ) as $notready
+            | if $notready != null then
+                { ok: false, reason: "node \($notready) not Ready" }
+              else
+                ( [ $items[]
+                    | select( (.spec.unschedulable // false) == true
+                              or ( [ .spec.taints[]?
+                                     | select(.effect == "NoSchedule"
+                                              and ((.key // "") | startswith("skyhook.nvidia.com"))) ]
+                                   | length > 0 ) )
+                    | .metadata.name ] | first ) as $cordoned
+                | if $cordoned != null then
+                    { ok: false, reason: "node \($cordoned) cordoned by skyhook (tuning in progress)" }
+                  else
+                    { ok: true, reason: "ok (\($present) gpu-worker nodes ready)" }
+                  end
+              end
+          end )
+      | [ (.ok | tostring), .reason ] | @tsv
+    ' 2>/dev/null)"; then
+    echo "census check failed: node JSON was unparseable"
+    return 1
+  fi
+  IFS=$'\t' read -r ok reason <<<"${out}"
+  echo "${reason}"
+  [[ "${ok}" == "true" ]]
+}
+
+# gpu_census_check_once: a SINGLE bounded census observation, printing the verdict
+# reason and returning its status. Used by the readiness-gate streak, which
+# already owns the retry loop and timeout budget -- so this must NOT poll. $1 is
+# the expected count (passed through to gpu_census_verdict). The one kubectl call
+# is wrapped in `timeout` so it can never hang the gate.
+gpu_census_check_once() {
+  local expected="${1:-}"
+  local selector="${GPU_CENSUS_SELECTOR:-nodeGroup=gpu-worker}"
+  local json
+  json="$(timeout "${GPU_CENSUS_KUBECTL_TIMEOUT}" kubectl get nodes -l "${selector}" -o json 2>/dev/null || echo '{}')"
+  printf '%s' "${json}" | gpu_census_verdict "${expected}"
+}
+
+# assert_gpu_census <timeout_seconds>: bounded LIVE wrapper around
+# gpu_census_verdict (issue #2096). Polls `kubectl get nodes -l <selector>` (each
+# call bounded by `timeout`) until the census settles or the budget elapses; fails
+# closed on timeout -- it never hangs forever waiting for the Nth node.
+#   - EXPECTED_GPU_NODES=skip     -> log + return 0 immediately (single-node lane).
+#   - EXPECTED set (integer)      -> succeed as soon as the verdict is ok.
+#   - EXPECTED empty/non-integer  -> DEGRADE mode: warn the exact count is unknown,
+#                                    then require the verdict ok AND the present
+#                                    count STABLE across two observations spaced by
+#                                    the settle interval before returning 0.
+assert_gpu_census() {
+  local timeout_seconds="${1:?assert_gpu_census requires a timeout in seconds}"
+  local selector="${GPU_CENSUS_SELECTOR:-nodeGroup=gpu-worker}"
+  local expected="${EXPECTED_GPU_NODES:-}"
+
+  if [[ "${expected}" == "skip" ]]; then
+    echo "gpu census check skipped (EXPECTED_GPU_NODES=skip)"
+    return 0
+  fi
+
+  # DEGRADE mode when the expected count is absent or not an integer: we cannot
+  # assert an exact census, so fall back to "present and settled" and warn that
+  # the strong (exact-count) census-growth guard is disabled.
+  local degrade=false
+  if [[ -z "${expected}" ]]; then
+    degrade=true
+  elif ! [[ "${expected}" =~ ^[0-9]+$ ]]; then
+    echo "::warning::EXPECTED_GPU_NODES='${expected}' is not an integer; treating the expected count as unknown"
+    expected=""
+    degrade=true
+  fi
+  if [[ "${degrade}" == true ]]; then
+    echo "::warning::EXPECTED_GPU_NODES is unknown; gpu census runs in degrade mode (require >=1 ready, uncordoned gpu-worker node, stable across two polls) -- exact census-growth detection is disabled"
+  fi
+
+  local deadline=$(( SECONDS + timeout_seconds ))
+  local json cur_count rc
+  local reason="(no census observation)"
+  local prev_count=""
+  while (( SECONDS < deadline )); do
+    json="$(timeout "${GPU_CENSUS_KUBECTL_TIMEOUT}" kubectl get nodes -l "${selector}" -o json 2>/dev/null || echo '{}')"
+    rc=0
+    reason="$(printf '%s' "${json}" | gpu_census_verdict "${expected}")" || rc=$?
+    if (( rc == 0 )); then
+      if [[ "${degrade}" != true ]]; then
+        echo "gpu census ${reason}"
+        return 0
+      fi
+      # Degrade mode: require the present count to be STABLE across two ok
+      # observations (a still-growing census would otherwise pass on one lucky
+      # poll, right before Skyhook cordons the just-joined node).
+      cur_count="$(printf '%s' "${json}" | jq '(.items // []) | length' 2>/dev/null || echo "")"
+      if [[ -n "${prev_count}" && "${cur_count}" == "${prev_count}" ]]; then
+        echo "gpu census ${reason} (stable at ${cur_count} across two polls)"
+        return 0
+      fi
+      prev_count="${cur_count}"
+      echo "gpu census ${reason}; confirming stability (count=${cur_count}), re-checking in ${GPU_CENSUS_SETTLE_SECONDS}s"
+    else
+      # Not settled -- reset the degrade-mode stability window too.
+      prev_count=""
+      echo "gpu census not settled: ${reason}; re-checking in ${GPU_CENSUS_SETTLE_SECONDS}s"
+    fi
+    sleep "${GPU_CENSUS_SETTLE_SECONDS}"
+  done
+  echo "::error::gpu census did not settle within ${timeout_seconds}s (last: ${reason})" >&2
+  return 1
+}
 
 inject_push_target() {
   local current repo expected
@@ -318,8 +506,17 @@ phase_install() {
   # in a lull. Requiring consecutive passes (each spaced by the retry sleep, and
   # each riding through a transient in_progress via expected-resources' own poll)
   # ensures the reboots have settled before conformance runs. Any failure resets
-  # the streak. Fail-closed: the install fails if the streak is never reached
-  # within the budget.
+  # the streak.
+  #
+  # TWO distinct threats reset the streak (see READINESS_CONSECUTIVE_PASSES):
+  # (1) temporal flapping of an EXISTING node -- a validate failure below; and
+  # (2) census GROWTH (#2096) -- a late GPU node joins and Skyhook cordons+tunes
+  # it. The streak alone is blind to (2): a not-yet-joined node cannot fail a
+  # validate attempt. So each passing attempt ALSO folds in gpu_census_verdict --
+  # a validate pass whose census is not settled (grown/cordoned) is treated as a
+  # regression and resets the streak, riding census growth out on this same
+  # budget. Fail-closed: the install fails if the streak is never reached within
+  # the budget.
   #
   # Run against a copy of the config with spec.validate.evidence stripped so the
   # gate never emits/pushes an evidence bundle -- that is the conformance phase's
@@ -339,6 +536,14 @@ phase_install() {
   local attempt=1 streak=0 ready=false remaining attempt_result
   # Baseline for the periodic cloud-credential refresh (see cloud_refresh_credentials).
   local last_cred_refresh=${SECONDS}
+  # GPU-node census fold-in (#2096): each streak-advancing attempt must ALSO see a
+  # settled census. Opt out on the single-node lane (EXPECTED_GPU_NODES=skip).
+  local census_expected="${EXPECTED_GPU_NODES:-}"
+  local census_enabled=true
+  if [[ "${census_expected}" == "skip" ]]; then
+    census_enabled=false
+    echo "gpu census streak fold-in disabled (EXPECTED_GPU_NODES=skip)"
+  fi
   echo "::group::Readiness gate: validate --phase deployment x${READINESS_CONSECUTIVE_PASSES} consecutive (timeout ${READINESS_TIMEOUT_SECONDS}s)"
   # Check the deadline BEFORE each attempt so no validation run is launched once
   # the budget is spent (a single run can itself take minutes). The last
@@ -366,11 +571,26 @@ phase_install() {
     remaining=$(( ready_deadline - SECONDS ))
     (( remaining < 1 )) && remaining=1
     if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null > "${gate_log}" 2>&1; then
-      attempt_result=pass
-      streak=$(( streak + 1 ))
-      echo "deployment phase passed (attempt ${attempt}, streak ${streak}/${READINESS_CONSECUTIVE_PASSES})"
-      if (( streak >= READINESS_CONSECUTIVE_PASSES )); then
-        ready=true
+      # Validate passed -> the CURRENTLY PRESENT nodes converged. Fold in the
+      # GPU-node census (#2096): a late-joining GPU node that Skyhook just
+      # cordoned+tuned re-opens convergence WITHOUT failing this attempt (it was
+      # not present when the check ran), so a bare validate pass is not enough.
+      local census_reason="" census_rc=0
+      if [[ "${census_enabled}" == true ]]; then
+        census_reason="$(gpu_census_check_once "${census_expected}")" || census_rc=$?
+      fi
+      if (( census_rc != 0 )); then
+        # Census not settled (grown/cordoned) -> treat like a reboot regression.
+        attempt_result="census-regress"
+        echo "gpu census not settled (${census_reason}); resetting streak"
+        streak=0
+      else
+        attempt_result=pass
+        streak=$(( streak + 1 ))
+        echo "deployment phase passed (attempt ${attempt}, streak ${streak}/${READINESS_CONSECUTIVE_PASSES})"
+        if (( streak >= READINESS_CONSECUTIVE_PASSES )); then
+          ready=true
+        fi
       fi
     else
       # A regression (e.g. nodewright flipped back to in_progress on a reboot)
@@ -453,6 +673,24 @@ phase_conformance() {
     exit 1
   else
     echo "platform=${platform}: workload CRD ${crd} present"
+  fi
+  echo "::endgroup::"
+
+  # #2096 adjacency close. The install-phase readiness gate can pass with N GPU
+  # nodes present; in the ~84s window before `validate --phase all` launches, a
+  # late-joining GPU node can join and Skyhook cordons+tunes it (taint
+  # skyhook.nvidia.com=...:NoSchedule + spec.unschedulable), re-opening convergence
+  # WHILE validate runs -- so validate correctly fails on a genuinely non-converged
+  # cluster (a false-red cell, no product defect). Re-assert a settled GPU-node
+  # census right here, immediately before validate, so a growing/cordoned census
+  # fails the cell EARLY with a self-explanatory message rather than surfacing as
+  # an opaque validate failure. Bounded by CENSUS_STABILITY_TIMEOUT_SECONDS and
+  # fails closed.
+  echo "::group::GPU-node census stability gate (#2096)"
+  if ! assert_gpu_census "${CENSUS_STABILITY_TIMEOUT_SECONDS}"; then
+    echo "::error::GPU-node census did not stabilize before conformance (#2096 census guard: a late-joining GPU node likely re-opened Skyhook convergence). Failing the cell early instead of letting 'validate --phase all' fail on a non-converged cluster." >&2
+    echo "::endgroup::"
+    exit 1
   fi
   echo "::endgroup::"
 

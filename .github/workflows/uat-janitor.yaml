@@ -1,0 +1,233 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT Janitor
+
+# Backstop teardown for orphaned UAT clusters + resource groups across all three
+# clouds. The in-run "Destroy Cluster" step (uat-{gcp,aws,azure}.yaml) is the
+# first line; it cannot cover every case (a runner hard-killed mid-cancel, a
+# daytime held cluster whose evening daytime-down never fired, an abandoned
+# skip_delete run). This reaps whatever the in-run teardown missed, reconciling
+# each aicr-uat-<run_id> deployment against its owning GitHub run. See
+# .github/scripts/uat-janitor.sh for the full safety model.
+#
+# ROLLOUT: dry-run-first. The scheduled run always reports only (DRY_RUN=true) —
+# it never deletes. To actually reap, dispatch this workflow with enforce=true
+# (a deliberate human action). Once the scheduled dry-run logs have been trusted
+# over a few cycles, flip the schedule to enforce by changing the DRY_RUN env
+# expression below to default false for the schedule event.
+#
+# PREREQUISITE (verify before enforce): each cloud's OIDC/WIF trust must permit
+# this workflow. The federated identities are subject-pinned to NVIDIA/aicr refs
+# (main + test/uat). Every job is additionally gated on
+# github.ref == 'refs/heads/main', so a workflow_dispatch that selects another
+# branch (the GCP/Azure trusts also admit test/uat) cannot run that branch's copy
+# of the janitor with delete authority — scheduled + dispatch runs only ever
+# execute main's version. A ref-scoped trust already covers this; if any trust is
+# workflow-file-scoped, add uat-janitor.yaml. The first scheduled dry-run surfaces
+# any auth gap harmlessly.
+
+on:
+  schedule:
+    - cron: '17 * * * *' # hourly, offset from top-of-hour job contention
+  workflow_dispatch:
+    inputs:
+      cloud:
+        description: 'Which cloud(s) to reconcile.'
+        type: choice
+        options: [all, gcp, aws, azure]
+        default: all
+      enforce:
+        description: 'Actually delete orphans (default: dry-run report only).'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never let two janitor runs reconcile the same cloud state concurrently; let an
+# in-flight reap finish rather than cancelling it mid-destroy.
+#
+# Deliberately NOT the per-reservation `uat-<reservation>` group that uat-run.yaml
+# leases. That would be a cross-workflow mutex, and the exclusion it buys is
+# already provided by the design:
+#   * Janitor candidates are RUN-SCOPED unique deployment ids. A live lifecycle
+#     run reports `queued`/`in_progress` on the GitHub API, so classify() skips
+#     it outright — its cluster is never a candidate in the first place.
+#   * A lifecycle run touches only its OWN run-scoped name and Terraform state
+#     prefix, so it shares no resource with whatever older orphan the janitor is
+#     targeting. There is no collision to serialize.
+#   * Actuator destroys are idempotent, and GCP/Azure additionally serialize on
+#     the Terraform state lock.
+#   * Daytime last-mile: a daytime name encodes the daytime-UP run id, so the
+#     run-status liveness gate cannot see an active daytime-DOWN teardown of the
+#     same cluster (a different run). The teardown always executes as a
+#     uat-run.yaml run — the evening scheduler dispatches uat-run.yaml as its own
+#     top-level run, and a direct `gh workflow run uat-run.yaml -f
+#     lifecycle=daytime-down` is a uat-run.yaml run too — so classify() calls
+#     uat_lifecycle_active() and, if ANY uat-run run is in flight, defers
+#     (SKIP:lifecycle-active) to the next hourly cycle. This is a liveness PROBE,
+#     not a mutex: it collapses the common race (a down already running) to near
+#     zero but leaves a residual TOCTOU window — a down that STARTS in the ~1h
+#     between the check and the reap. The daytime>=24h floor and the DRY_RUN
+#     default backstop that window (break_state_lock is best-effort and idempotent;
+#     an AWS destroy has no lock but the actuator destroy is itself idempotent).
+# For a hard "never races" guarantee a shared cross-workflow lease would be
+# required; that is the tracked follow-up (#2132) to revisit before scheduled
+# enforcement is enabled. With DRY_RUN defaulting true, the liveness probe, and the
+# age floors, the residual window does not justify that coupling for this backstop
+# today.
+concurrency:
+  group: uat-janitor
+  cancel-in-progress: false
+
+env:
+  # Scheduled runs are always dry-run; only an explicit enforce=true dispatch
+  # deletes. inputs.enforce is null for the schedule event, so this is 'true' there.
+  DRY_RUN: ${{ inputs.enforce == true && 'false' || 'true' }}
+
+jobs:
+  gcp:
+    if: >-
+      github.repository == 'nvidia/aicr' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'gcp')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    env:
+      GCP_PROJECT_ID: "eidosx"
+      JANITOR_CONFIG: "tests/uat/gcp/cluster-config.yaml"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.17@sha256:8bfffd412d98276ee1000a6c083514e6b28928416cc37602ec637ed3a2167c99"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: "projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider"
+          service_account: "github-actions@eidosx.iam.gserviceaccount.com"
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Reconcile GCP orphans
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOOGLE_GHA_CREDS_PATH: ${{ steps.auth.outputs.credentials_file_path }}
+        run: ./.github/scripts/uat-janitor.sh gcp
+
+  aws:
+    if: >-
+      github.repository == 'nvidia/aicr' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'aws')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    env:
+      AWS_REGION: "us-east-1"
+      JANITOR_CONFIG: "tests/uat/aws/cluster-config.yaml"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: "arn:aws:iam::615299774277:role/github-actions-role-aicr"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-Janitor
+      - name: Reconcile AWS orphans
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/scripts/uat-janitor.sh aws
+
+  # GB200 lives in a SEPARATE AWS account — the cross-account Capacity Block in
+  # tenancy 897722687756 (tests/uat/aws/cluster-config-gb200.yaml), not the
+  # standard 615299774277 the `aws` job above covers — so it needs its own role
+  # assumption + config, or aws-gb200 orphans are never discovered or reaped.
+  # PREREQUISITE: infra/uat-aws-account applied in 897722687756 (GitHub OIDC
+  # provider + github-actions-role-aicr whose trust permits this workflow's ref).
+  # Until then the auth step fails harmlessly and the first dry-run surfaces the gap.
+  aws-gb200:
+    if: >-
+      github.repository == 'nvidia/aicr' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'aws')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    env:
+      AWS_REGION: "us-east-1"
+      JANITOR_CONFIG: "tests/uat/aws/cluster-config-gb200.yaml"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Authenticate to AWS (GB200 account)
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: "arn:aws:iam::897722687756:role/github-actions-role-aicr"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-Janitor
+      - name: Reconcile GB200 orphans
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/scripts/uat-janitor.sh aws
+
+  azure:
+    if: >-
+      github.repository == 'nvidia/aicr' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'azure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    env:
+      AZURE_SUBSCRIPTION_ID: "e88faa01-b4fd-49d3-b934-0ad9f9fca307"
+      JANITOR_CONFIG: "tests/uat/azure/cluster-config.yaml"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:70f049e45cd0025e0d2172503f9d0569baeabff27080919e2fa04f3339b9f9ee"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Authenticate to Azure
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
+        with:
+          client-id: "047f0427-5dcf-4e7c-97c3-9c71d92c5abb"
+          tenant-id: "43083d15-7273-40c1-b7db-39efd9ccc17a"
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Reconcile Azure orphans
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/scripts/uat-janitor.sh azure

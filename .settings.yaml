@@ -23,7 +23,7 @@ build_tools:
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
-  crane: 'v0.21.7'
+  crane: 'v0.21.8'
   # renovate: datasource=github-releases depName=orhun/git-cliff depType=build_tools
   git_cliff: '2.13.1'
 
@@ -39,6 +39,12 @@ linting:
   addlicense: 'v1.2.0'
   # renovate: datasource=github-releases depName=google/go-licenses depType=linting
   go_licenses: 'v2.0.1'
+  # MDX toolchain for tools/check-docs-mdx-parse (the parser-level docs gate) is
+  # owned by tools/mdx/package.json + package-lock.json, not listed here. The
+  # lockfile freezes the full transitive tree, which a version string cannot;
+  # this gate decides which docs merge, so its verdict must be reproducible.
+  # Renovate updates it natively via the npm manager. Same single-source-of-truth
+  # split as the Go toolchain living in .go-version.
 
 # Security Tools
 security_tools:
@@ -79,14 +85,14 @@ testing_tools:
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
   helm_diff: 'v3.15.11'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.7.2'
+  helmfile: 'v1.7.3'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: '7f09def5bfc6ebd33cbfded74c19f4e58757b0f44887902663d5dc67ac640ff5'
-    linux_arm64: '7a6b9e5d0fe45849029b165e005d9f46da09cec825fde141af52254aaa1e2585'
-    darwin_amd64: 'ebd1298dd3a281387a8998660679fd0887f64da6d3f7367d1a1849daf370dc9d'
-    darwin_arm64: '261dd252976b9edc8eac4a9a351869c1e9699ab5c8815f31cb0c6c1354920306'
+    linux_amd64: '23d7df593f704ab1709b3020c8c8083b1517c9e780b5010e756a7d36bd901552'
+    linux_arm64: '4a2346df40362f49f395e47d5d6a16a29322b5c6968720c1bde60d101ae97e3b'
+    darwin_amd64: 'b1be552f6ff68c7c10f064dec657e4297bc581eecf1ed66ff433964e17d9eb36'
+    darwin_arm64: 'b69933ab364b010c320d1c858265d1845735784d8b317211e046cf74e22c6e80'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
@@ -102,14 +108,14 @@ testing_tools:
   yq: 'v4.53.3'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
-  awscli: '1.45.63'
+  awscli: '1.46.0'
   # MiniStack: MIT-licensed, token-free AWS emulator (https://ministack.org) used
   # by the KMS e2e in place of LocalStack, whose latest/stable images now refuse
   # to boot without a paid license token. Pinned (never :latest) for reproducibility.
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.4.10'
+  ministack_image: 'ministackorg/ministack:1.4.13'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault

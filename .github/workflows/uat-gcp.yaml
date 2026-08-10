@@ -40,6 +40,14 @@ on:
         description: 'nightly (provision→CUJ→teardown) | daytime-up (provision+deploy+HOLD) | daytime-down (tear down the held daytime cluster).'
         type: string
         default: nightly
+      slug:
+        description: 'Daytime cluster-name discovery slug (ADR-017; from the reservation row) — the <slug> in aicr-uat-day-<slug>-<slot>-<run_id>.'
+        type: string
+        default: ''
+      slot:
+        description: 'Daytime cluster slot (ADR-017) — the <slot> in aicr-uat-day-<slug>-<slot>-<run_id>. Only slot 0 is provisioned today.'
+        type: string
+        default: '0'
       cluster_config_path:
         description: 'Cluster-config the GKE actuator provisions from (from infra/uat/reservations.yaml).'
         type: string
@@ -134,19 +142,21 @@ jobs:
       # cluster-config `id: aicr-uat`), so UAT cluster names are consistent per
       # platform. The nightly per-run lifecycle uses a run-scoped name
       # (aicr-uat-<run_id>) for per-run isolation. daytime-up uses an EPHEMERAL,
-      # reservation-scoped name — the stable prefix aicr-uat-day-<reservation>- with
-      # the up-run's id appended — so a re-provision never reuses a name the previous
-      # teardown just deleted (which collides with cloud deletion tombstones and
-      # stale terraform-state locks). Discovery is name-free: the pre-batch guard and
-      # daytime-down both scan the stable prefix (the actuator derives the name AND
-      # its TF-state key from .deployment.id). daytime-down has no static name here —
-      # it resolves the concrete cluster at runtime (see "Resolve daytime cluster to
-      # tear down") and overrides DEPLOYMENT_ID. Reservation names are lowercase
-      # alnum+hyphen; the longest daytime name (aicr-uat-day-<reservation>-<run_id>)
-      # stays within GKE's 40-char cap for the registry's reservation names.
+      # (slug, slot)-scoped name (ADR-017) — the stable prefix
+      # aicr-uat-day-<slug>-<slot>- with the up-run's id appended — so a re-provision
+      # never reuses a name the previous teardown just deleted (which collides with
+      # cloud deletion tombstones and stale terraform-state locks). Discovery is
+      # name-free: the pre-batch guard and daytime-down both scan the stable prefix
+      # (the actuator derives the name AND its TF-state key from .deployment.id).
+      # daytime-down has no static name here — it resolves the concrete cluster at
+      # runtime (see "Resolve daytime cluster to tear down") and overrides
+      # DEPLOYMENT_ID. The slug is a short lowercase-alnum registry key and slot a
+      # small integer, so the worst-case daytime name
+      # (aicr-uat-day-<slug>-<slot>-<run_id>) stays within GKE's 40-char cap with
+      # ≥6 chars of headroom (see ADR-017's length budget).
       DEPLOYMENT_ID: >-
         ${{ inputs.lifecycle == 'daytime-up'
-        && format('aicr-uat-day-{0}-{1}', inputs.reservation, github.run_id)
+        && format('aicr-uat-day-{0}-{1}-{2}', inputs.slug, inputs.slot, github.run_id)
         || format('aicr-uat-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
       # DC2 selects the AICRConfig by intent; both intents drive the same
@@ -185,6 +195,8 @@ jobs:
         env:
           INTENT: ${{ inputs.intent }}
           LIFECYCLE: ${{ inputs.lifecycle }}
+          SLUG: ${{ inputs.slug }}
+          SLOT: ${{ inputs.slot }}
         run: |
           set -euo pipefail
           case "${INTENT}" in
@@ -195,6 +207,21 @@ jobs:
             nightly|daytime-up|daytime-down) ;;
             *) echo "::error::unknown lifecycle '${LIFECYCLE}' (want nightly|daytime-up|daytime-down)"; exit 1 ;;
           esac
+          # Fail closed on a malformed slug/slot (ADR-017): both become cluster-name
+          # components AND grep -E prefixes in the guard/teardown scans, so a blank
+          # slug misses the held cluster and a slot carrying ERE metacharacters makes
+          # the pattern invalid (grep ... || true then reads it as "no match" — the
+          # guard would provision anyway, or daytime-down skip teardown). slug matches
+          # the registry charset; slot is numeric and length-bounded (the ADR models
+          # 1-2 digit slots; uat-run additionally pins today's policy to slot 0).
+          SLUG_RE='^[a-z][a-z0-9]{1,3}$'
+          SLOT_RE='^[0-9]{1,2}$'
+          if [[ ! "${SLUG}" =~ $SLUG_RE ]]; then
+            echo "::error::invalid slug '${SLUG}' (want ${SLUG_RE})"; exit 1
+          fi
+          if [[ ! "${SLOT}" =~ $SLOT_RE ]]; then
+            echo "::error::invalid slot '${SLOT}' (want 1-2 digits)"; exit 1
+          fi
           if [[ ! -f "${TEST_CONFIG}" ]]; then
             echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
           fi
@@ -329,24 +356,34 @@ jobs:
       # evening teardown must surface as a BLOCKED run, not as silent contention
       # (or a second, stacked daytime cluster).
       #
-      # daytime clusters are now EPHEMERALLY named (aicr-uat-day-<reservation>-<id>), so
-      # this detects them by the stable, reservation-scoped PREFIX rather than a
-      # reconstructed exact name — a prefix scan is the only name-free way to find a
-      # held cluster this run cannot name. Both the nightly batch AND daytime-up
-      # guard: daytime-up must refuse if a prior day's cluster leaked (the
-      # reservation cannot host two, and unique names would otherwise let them
-      # stack). daytime-up's OWN cluster does not exist yet, so only a leaked prior
-      # cluster matches. We already hold the reservation lease (uat-run.yaml) and
-      # are authenticated, so this runs before Bringup and fails fast.
+      # daytime clusters are EPHEMERALLY named (aicr-uat-day-<slug>-<slot>-<id>,
+      # ADR-017), so this detects them by the stable, (slug, slot)-scoped PREFIX
+      # rather than a reconstructed exact name — a prefix scan is the only
+      # name-free way to find a held cluster this run cannot name. DUAL-PREFIX
+      # MIGRATION SHIM: it also matches the LEGACY reservation-name prefix
+      # (aicr-uat-day-<reservation>-) so an old-named daytime cluster still blocks
+      # the batch; drop the legacy leg once no old-named clusters remain. Both the
+      # nightly batch AND daytime-up guard: daytime-up must refuse if a prior day's
+      # cluster leaked (the reservation cannot host two, and unique names would
+      # otherwise let them stack). daytime-up's OWN cluster does not exist yet, so
+      # only a leaked prior cluster matches. We already hold the reservation lease
+      # (uat-run.yaml) and are authenticated, so this runs before Bringup and fails
+      # fast.
       - name: Pre-batch guard — refuse if a daytime cluster still holds the reservation
         id: guard
         if: inputs.lifecycle == 'nightly' || inputs.lifecycle == 'daytime-up'
         env:
           RESERVATION: ${{ inputs.reservation }}
+          SLUG: ${{ inputs.slug }}
+          SLOT: ${{ inputs.slot }}
           LIFECYCLE: ${{ inputs.lifecycle }}
         run: |
           set -euo pipefail
-          PREFIX="aicr-uat-day-${RESERVATION}-"
+          # New (slug, slot)-scoped prefix (ADR-017) plus the LEGACY reservation
+          # prefix — a transitional shim so an old-named daytime cluster still
+          # blocks the batch; drop the legacy leg once none remain.
+          PREFIX="aicr-uat-day-${SLUG}-${SLOT}-"
+          LEGACY_PREFIX="aicr-uat-day-${RESERVATION}-"
           set +e
           OUT=$(gcloud container clusters list --project "${GCP_PROJECT_ID}" \
             --format="value(name)" 2>&1)
@@ -358,7 +395,8 @@ jobs:
             echo "::error::could not list clusters to determine daytime-cluster state for reservation ${RESERVATION}: ${OUT}"
             exit 1
           fi
-          HELD=$(printf '%s\n' "${OUT}" | grep "^${PREFIX}[0-9]" || true)
+          # Broad matcher (anything prefix-ish blocks a batch), both prefixes.
+          HELD=$(printf '%s\n' "${OUT}" | grep -E "^(${PREFIX}|${LEGACY_PREFIX})[0-9]" || true)
           if [[ -n "${HELD}" ]]; then
             echo "::error::a daytime cluster still holds reservation ${RESERVATION}; refusing (lifecycle=${LIFECYCLE})."
             echo "::error::tear it down first: gh workflow run uat-run.yaml -f reservation=${RESERVATION} -f lifecycle=daytime-down"
@@ -371,10 +409,12 @@ jobs:
           echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
 
       # Resolve the ephemeral daytime cluster this daytime-down run must tear down.
-      # daytime-up names it aicr-uat-day-<reservation>-<up-run-id>, so this evening run
-      # (a different run id) cannot reconstruct the name — it discovers it by the
-      # stable, reservation-scoped prefix (name-free, exactly like the guard). The
-      # resolved name is exported to DEPLOYMENT_ID so the unconditional Update Config
+      # daytime-up names it aicr-uat-day-<slug>-<slot>-<up-run-id> (ADR-017), so this
+      # evening run (a different run id) cannot reconstruct the name — it discovers
+      # it by the stable, (slug, slot)-scoped prefix (name-free, exactly like the
+      # guard), plus the LEGACY reservation-name prefix as a transitional shim so an
+      # old-named held cluster is still torn down (drop the legacy leg once none
+      # remain). The resolved name is exported to DEPLOYMENT_ID so the unconditional Update Config
       # step writes it into the cluster-config and the always()-run Destroy targets
       # it — the actuator derives both the cluster name and its TF-state key from
       # .deployment.id. Runs before Update Config.
@@ -386,9 +426,14 @@ jobs:
         if: inputs.lifecycle == 'daytime-down'
         env:
           RESERVATION: ${{ inputs.reservation }}
+          SLUG: ${{ inputs.slug }}
+          SLOT: ${{ inputs.slot }}
         run: |
           set -euo pipefail
-          PREFIX="aicr-uat-day-${RESERVATION}-"
+          # New (slug, slot)-scoped prefix (ADR-017) plus the LEGACY reservation
+          # prefix (transitional shim; drop once no old-named clusters remain).
+          PREFIX="aicr-uat-day-${SLUG}-${SLOT}-"
+          LEGACY_PREFIX="aicr-uat-day-${RESERVATION}-"
           # Bounded retry. Every teardown gate below keys off DAYTIME_FOUND, so a
           # single throttled/transient list call ending this step early would skip
           # teardown entirely and leak the cluster (and the reservation) until a
@@ -417,9 +462,10 @@ jobs:
           # End-anchored: only an exact <prefix><run-id> name is a teardown
           # target. The guard's matcher is deliberately broader — anything
           # prefix-ish should BLOCK a batch, but must not be destroyed here.
-          mapfile -t held < <(printf '%s\n' "${OUT}" | grep -E "^${PREFIX}[0-9]+$" || true)
+          # Matches the new (slug, slot) prefix OR the legacy reservation prefix.
+          mapfile -t held < <(printf '%s\n' "${OUT}" | grep -E "^(${PREFIX}|${LEGACY_PREFIX})[0-9]+$" || true)
           if [[ "${#held[@]}" -eq 0 ]]; then
-            echo "no ${PREFIX}* cluster found; nothing to tear down (already gone or never provisioned)."
+            echo "no ${PREFIX}* or legacy ${LEGACY_PREFIX}* cluster found; nothing to tear down (already gone or never provisioned)."
             echo "DAYTIME_FOUND=false" >> "$GITHUB_ENV"
             exit 0
           fi

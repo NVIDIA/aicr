@@ -31,6 +31,16 @@
 #
 # Fields:
 #   name                human-facing reservation / lease key (must be unique)
+#   slug                short 2-4 char discovery key (^[a-z][a-z0-9]{1,3}$),
+#                       UNIQUE across rows. It is the account-stable, slot-ready
+#                       key the daytime cluster name embeds
+#                       (aicr-uat-day-<slug>-<slot>-<run_id>, ADR-017); the guard
+#                       and evening teardown scan the (slug, slot) prefix to find
+#                       a held daytime cluster. Shorter and account-unique where
+#                       the reservation name is long and only cloud-unique, and it
+#                       keeps the daytime name inside GKE's 40-char cluster-name
+#                       cap. Even the kind row (no cloud cluster, no daytime name)
+#                       carries one for field uniformity.
 #   cloud               aws | gcp | azure | kind. "kind" is not a cloud but the
 #                       self-hosted GPU-runner lane (nvkind on real silicon,
 #                       DC5 #1278): it rides the same reservation → uat-run →
@@ -82,6 +92,7 @@
 #                       cluster and the nightly batch at once.
 reservations:
   - name: aws-h100
+    slug: ah1
     cloud: aws
     reservation-id: cr-0e16ad417f9a5bf69
     accelerator: h100
@@ -91,6 +102,7 @@ reservations:
     nightly-intents: [training, inference]
     daytime-intent: training
   - name: gcp-h100
+    slug: gh1
     cloud: gcp
     reservation-id: projects/nv-dgxcloudprod-20240108/reservations/h100-a3-mega-phase-1-general-pool-384-us-c1-reservation
     accelerator: h100
@@ -100,6 +112,7 @@ reservations:
     nightly-intents: [training, inference]
     daytime-intent: inference
   - name: azure-h100
+    slug: zh1
     cloud: azure
     # No reservation-id: capacity is Azure subscription QUOTA (westus
     # NDSH100v5), not a capacity reservation. The name is still the lease
@@ -135,6 +148,7 @@ reservations:
       inference: v0.18.0
       training: v0.18.0
   - name: aws-gb200
+    slug: ag2
     cloud: aws
     # CROSS-ACCOUNT: the GB200 Capacity Block lives in a SEPARATE tenancy
     # (dgx-cloud-runai-prod-22, account 897722687756), not the standard UAT
@@ -179,6 +193,7 @@ reservations:
       training: v0.18.0
       inference: v0.18.0
   - name: kind-h100
+    slug: kh1
     cloud: kind
     # No reservation-id: capacity is the self-hosted GPU runner
     # (linux-amd64-gpu-h100-latest-1), not a cloud capacity reservation. The

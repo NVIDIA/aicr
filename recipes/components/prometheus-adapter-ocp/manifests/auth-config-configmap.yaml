@@ -1,0 +1,53 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Config file for the adapter's --prometheus-auth-config flag. This must
+# be a valid kubeconfig — the adapter loads it with client-go's
+# clientcmd.ClientConfig(), which requires apiVersion, kind: Config,
+# clusters, users, contexts, and current-context. (The original version
+# of this file used an ad-hoc tlsConfig/authConfig shape that is not a
+# kubeconfig and fails adapter startup — caught in CodeRabbit review on
+# PR for issue #1818.) certificate-authority points at the CA bundle
+# injected by ca-bundle-configmap.yaml; tokenFile points at the adapter
+# pod's own projected ServiceAccount token, which rbac.yaml has bound to
+# cluster-monitoring-view so Thanos Querier accepts it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-adapter-ocp-auth-config
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  config.yaml: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+      - name: thanos-querier
+        cluster:
+          certificate-authority: /etc/prometheus-adapter-ocp-ca/service-ca.crt
+          server: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
+    users:
+      - name: prometheus-adapter-ocp
+        user:
+          tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    contexts:
+      - name: prometheus-adapter-ocp-context
+        context:
+          cluster: thanos-querier
+          user: prometheus-adapter-ocp
+    current-context: prometheus-adapter-ocp-context

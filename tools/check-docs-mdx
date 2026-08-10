@@ -24,15 +24,51 @@
 #   5. Bare angle-bracket placeholders (<word>) outside fenced and inline code
 #      — MDX interprets them as JSX component tags and fails on unexpected
 #      content that follows.
+#   6. Bare '<' immediately followed by a character that cannot start a JSX
+#      name — '<=', '<3', '<-', or a trailing '<' at end of line. MDX reports
+#      "Unexpected character X before name" for these.
+#      NOT flagged: '<' followed by whitespace ('< 500', '< 10 s'). MDX accepts
+#      those as literal text, verified against @mdx-js/mdx; flagging them made
+#      this script reject content the publish step is happy with.
+#
+# Code handling (applies to checks 2-6; check 1 greps the fence-stripped line
+# WITHOUT inline-span stripping): fenced code blocks in BOTH backtick
+# (```) and tilde (~~~) styles are skipped, following CommonMark fence rules —
+# a fence opens on a run of >= 3 of either character and closes only on a later
+# line whose leading run is the SAME character and at least as long. Inline
+# code spans are stripped before scanning; a span opens on a run of N backticks
+# and closes at the next run of exactly N backticks, so spans of any
+# backtick-run length are honored (not just single-backtick spans).
+#
+# NOTE: this checker is a fast, dependency-free APPROXIMATION of the MDX
+# parser, not a reimplementation of it. tools/check-docs-mdx-parse runs the
+# real parser (@mdx-js/mdx, locked in tools/mdx/) and is the authoritative
+# gate — it is what the merge-gate 'docs-mdx' job blocks on. A green run HERE
+# is not parser-level validation; it means no known hazard pattern matched.
+#
+# The rules above are deliberately a strict SUBSET of what the parser rejects.
+# Erring toward under-reporting is the correct direction: a miss is caught by
+# the blocking parse gate, whereas a false positive would force contributors to
+# mangle prose the publish step would have accepted. Known misses left to the
+# parser: a stray closing tag ('</div>'), an unclosed fragment ('<>'), a
+# placeholder sharing a line with well-formed JSX, unbalanced expression braces
+# spanning lines, and acorn-level syntax errors.
+#
+# Known code-handling limits (tracked in #2144): a fence opener indented by up
+# to three spaces is not recognized as a fence, and a code span is matched
+# within one line even though CommonMark lets spans cross lines. Both can
+# surface as a false positive here; the parse gate is the arbiter.
 
 set -euo pipefail
 
 ERRORS=0
-SEARCH_DIRS=("docs/user/" "docs/integrator/" "docs/contributor/")
-# Docs excluded from the MDX scan: container-images.md carries auto-generated
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Docs excluded from a directory scan: container-images.md carries auto-generated
 # HTML-comment splice markers that VitePress still needs and is not published
 # to Fern. (recipe-health.md is intentionally NOT excluded — it is Fern-
-# published and uses MDX-safe {/* ... */} markers.)
+# published and uses MDX-safe {/* ... */} markers.) The nav-derived list below
+# needs no exclusions: a file Fern does not publish is simply not in it.
 EXCLUDE_NAMES=("container-images.md")
 EXCLUDE_ARGS=()
 for name in "${EXCLUDE_NAMES[@]}"; do
@@ -40,39 +76,86 @@ for name in "${EXCLUDE_NAMES[@]}"; do
 done
 
 # Allow overriding the search path (e.g., for frozen version content)
+SEARCH_DIRS=()
 if [[ $# -gt 0 ]]; then
   SEARCH_DIRS=("$@")
 fi
 
+# Build the file list once; both check passes below iterate it.
+FILES=()
+if [[ ${#SEARCH_DIRS[@]} -eq 0 ]]; then
+  while IFS= read -r f; do
+    [[ -z "${f}" ]] && continue
+    FILES+=("${f}")
+  done < <("${REPO_ROOT}/tools/docs-published-files")
+else
+  for dir in "${SEARCH_DIRS[@]}"; do
+    while IFS= read -r f; do
+      [[ -z "${f}" ]] && continue
+      FILES+=("${f}")
+    done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null | sort)
+  done
+fi
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "ERROR: no doc files found (scan roots: ${SEARCH_DIRS[*]:-docs/index.yml})" >&2
+  exit 1
+fi
+
+# frontmatter_end <file>: last line number of a leading YAML frontmatter block,
+# or 0 when there is none. Fern strips frontmatter before MDX parsing, so its
+# contents must not be scanned — a title like `gate <= 2,000` is valid there.
+# Reported line numbers stay correct because the awk passes skip by NR rather
+# than rewriting the file.
+frontmatter_end() {
+  local file="$1"
+  [[ "$(head -1 "${file}" 2>/dev/null)" == "---" ]] || { echo 0; return; }
+  local end
+  end="$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "${file}")"
+  echo "${end:-0}"
+}
+
 # --- Check 1: non-self-closing void HTML elements (outside fenced code blocks) ---
 # These must use <tag /> in MDX, not <tag> or <tag attr>.
 VOID_ELEMENTS='img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr'
-for dir in "${SEARCH_DIRS[@]}"; do
-  while IFS= read -r file; do
-    [[ -z "${file}" ]] && continue
+for file in "${FILES[@]}"; do
+    FM_END="$(frontmatter_end "${file}")"
     while IFS= read -r match; do
       [[ -z "${match}" ]] && continue
       echo "MDX: non-self-closing void element: ${file}:${match}"
       ERRORS=$((ERRORS + 1))
-    done < <(awk '
-      /^```/ { in_fence = !in_fence; next }
+    done < <(awk -v fm_end="${FM_END}" '
+      NR <= fm_end { next }
+      match($0, /^(`{3,}|~{3,})/) {
+        m = substr($0, RSTART, RLENGTH); ch = substr(m, 1, 1); len = length(m)
+        if (!in_fence) { in_fence = 1; fch = ch; flen = len; next }
+        else if (ch == fch && len >= flen) { in_fence = 0; next }
+        # else: fence-like line inside a fence of a different char/shorter run
+        # is content -> fall through to the in_fence guard below.
+      }
       in_fence { next }
       { print NR": "$0 }
     ' "$file" | grep -E "<(${VOID_ELEMENTS})([[:space:]][^>]*)?" | grep -Ev "<(${VOID_ELEMENTS})([[:space:]][^>]*)?[[:space:]]*/>" || true)
-  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null)
 done
 
-# --- Checks 2, 3, 4, 5: bare braces, HTML comments, autolinks, bare tags ---
+# --- Checks 2, 3, 4, 5, 6: bare braces, HTML comments, autolinks, bare tags,
+#     and bare '<' not starting a valid tag ---
 # All evaluated outside fenced code blocks; inline code spans are stripped
 # before the line is scanned so legitimate uses inside backticks don't trip.
-for dir in "${SEARCH_DIRS[@]}"; do
-  while IFS= read -r file; do
-    [[ -z "${file}" ]] && continue
+for file in "${FILES[@]}"; do
+    FM_END="$(frontmatter_end "${file}")"
     # awk exits 1 when it finds a hazard; keep it inside the `if` condition so
     # `set -e` does not abort the whole scan at the first offending file
     # (otherwise violations in later files are silently skipped).
-    if ! awk '
-      /^```/ { in_fence = !in_fence; next }
+    if ! awk -v fm_end="${FM_END}" '
+      NR <= fm_end { next }
+      match($0, /^(`{3,}|~{3,})/) {
+        m = substr($0, RSTART, RLENGTH); ch = substr(m, 1, 1); len = length(m)
+        if (!in_fence) { in_fence = 1; fch = ch; flen = len; next }
+        else if (ch == fch && len >= flen) { in_fence = 0; next }
+        # else: fence-like line inside a fence of a different char/shorter run
+        # is content -> fall through to the in_fence guard below.
+      }
       in_fence { next }
       {
         line = $0
@@ -81,7 +164,37 @@ for dir in "${SEARCH_DIRS[@]}"; do
         # below (or any later check). Doing this before the comment scan
         # prevents a backticked, unterminated `{/*` from opening a bogus
         # multi-line region that swallows real hazards on following lines.
-        gsub(/`[^`]*`/, "", line)
+        #
+        # CommonMark inline code spans open with a run of N backticks and close
+        # at the next run of EXACTLY N backticks; the text between (shorter runs
+        # included) is code. Strip each such span for ANY N — this subsumes the
+        # single-backtick (N=1) case. A run with no matching closing run of
+        # equal length is left as literal text (not stripped).
+        stripped = ""
+        tail = line
+        while (match(tail, /`+/)) {
+          n = RLENGTH
+          stripped = stripped substr(tail, 1, RSTART - 1)
+          openrun = substr(tail, RSTART, RLENGTH)
+          after = substr(tail, RSTART + RLENGTH)
+          pos = 1
+          closed = 0
+          while (match(substr(after, pos), /`+/)) {
+            abspos = pos + RSTART - 1
+            if (RLENGTH == n) {
+              tail = substr(after, abspos + RLENGTH)
+              closed = 1
+              break
+            }
+            pos = abspos + RLENGTH
+          }
+          if (!closed) {
+            stripped = stripped openrun after
+            tail = ""
+            break
+          }
+        }
+        line = stripped tail
         # MDX comments {/* ... */} are valid (and used for license headers
         # and the auto-generated splice markers in recipe-health.md). Treat
         # them like code: continue an open multi-line comment, strip
@@ -124,19 +237,51 @@ for dir in "${SEARCH_DIRS[@]}"; do
         printf "MDX: autolink outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
-      # Bare angle-bracket placeholders: <word> or <digit> (e.g. <30 s,
-      # <13%) that are not void HTML elements (check 1) or autolinks
-      # (check 4). MDX interprets a `<` followed by a name-start character
-      # as a JSX tag and chokes on what follows.
-      line ~ /<[0-9a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
+      # Bare angle-bracket placeholders: <word> (e.g. <name>, <path>) that are
+      # not void HTML elements (check 1) or autolinks (check 4). MDX interprets
+      # a `<` followed by a name-start character as a JSX tag and chokes on
+      # what follows.
+      #
+      # Letters only. Digit-prefixed sequences (`<30 s`) are owned by check 6 —
+      # matching them here too made one source token emit two diagnostics and
+      # increment the error count twice.
+      #
+      # Lines showing evidence of well-formed JSX — a self-closing `/>` or a
+      # closing `</` — are left to the parse gate. MDX accepts `<Component />`
+      # and `<span>text</span>`, and the Fern component set (Cards, Tabs,
+      # Accordions) is written that way, so flagging them here would reject
+      # valid content. Deciding whether tags actually balance needs parser
+      # state, which this script does not have; the trade is that a placeholder
+      # sharing a line with real JSX is caught by tools/check-docs-mdx-parse
+      # instead of here. That is the safe direction — see the strict-subset
+      # note in the header.
+      line ~ /<[a-zA-Z]/ && line !~ /\/>/ && line !~ /<\// && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
         printf "MDX: bare <word> tag outside code fence: %s:%d: %s\n", FILENAME, NR, $0
+        errors++
+      }
+      # Check 6: a bare `<` IMMEDIATELY followed by a character that cannot
+      # start a JSX name — `<=`, `<3`, `<-`, or a trailing `<` at end of line.
+      # MDX reports "Unexpected character X (U+00XX) before name" for these;
+      # `(gate <= 2,000)` is the case that broke the docs publish in #2050.
+      #
+      # Whitespace after `<` is EXCLUDED. `< 500`, `< 1.15`, and `< 10 s` all
+      # parse cleanly through @mdx-js/mdx — micromark only enters JSX-tag mode
+      # when a name-ish character follows immediately, so `<` + space stays
+      # literal text. Flagging them forced contributors to backtick prose the
+      # publish step accepts, which is the false-positive direction this script
+      # must avoid (see the strict-subset note in the header).
+      #
+      # `</div>` and `<>` are NOT covered here: both are real MDX errors, but
+      # deciding whether a tag is balanced needs parser state. They are caught
+      # by tools/check-docs-mdx-parse, the blocking gate.
+      line ~ /<([^A-Za-z!\/>[:space:]]|$)/ {
+        printf "MDX: bare < not starting a valid tag: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
       END { exit (errors > 0) ? 1 : 0 }
     ' "$file" 2>/dev/null; then
       ERRORS=$((ERRORS + 1))
     fi
-  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null)
 done
 
 if [[ ${ERRORS} -gt 0 ]]; then

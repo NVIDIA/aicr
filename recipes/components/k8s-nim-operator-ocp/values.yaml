@@ -1,0 +1,59 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA NIM Operator OCP values (v3.1.0)
+#
+# "Inherit the generic helm repo" integration (issue #1818, option 2): no
+# certified OLM operator exists for k8s-nim-operator, so this pulls the
+# same upstream chart/version as components/k8s-nim-operator/values.yaml.
+#
+# Requires: cert-manager-ocp (for admission webhooks), gpu-operator-ocp
+# (for GPU scheduling) — wired via componentRefs[].dependencyRefs in
+# overlays/ocp-inference-nim.yaml, NOT here. cert-manager's admission-
+# webhook TLS issuance is identical regardless of whether cert-manager
+# was installed via the upstream chart or the Red Hat OLM operator (both
+# are the same upstream cert-manager CRDs/API), so no operator{} config
+# change is needed for the dependency itself — only the ordering/refs.
+#
+# fullnameOverride/nameOverride are added here (absent from the base
+# component, which relies on the release name equalling the chart name).
+# Since AICR's release name is the registry componentRef name, without
+# this pin a component named "k8s-nim-operator-ocp" would render
+# different resource names than base's "k8s-nim-operator", breaking
+# the CRD/Deployment names checks/k8s-nim-operator/health-check.yaml
+# hardcodes. Pinning them keeps both variants byte-identical downstream
+# of installation, so registry.yaml points the ocp entry's
+# healthCheck.assertFile at the *existing* checks/k8s-nim-operator/
+# health-check.yaml instead of a duplicate.
+nameOverride: k8s-nim-operator
+fullnameOverride: k8s-nim-operator
+
+operator:
+  # Enable admission controller with cert-manager for TLS
+  admissionController:
+    enabled: true
+    tls:
+      mode: cert-manager
+      certManager:
+        issuerType: selfsigned
+
+# Unlike the EKS base values, do NOT clear the chart's default affinity
+# (operator.affinity): OCP clusters have real control-plane/master nodes
+# with node-role.kubernetes.io/master taints, and the chart's built-in
+# affinity already anti-affines away from them — the same convention OCP
+# itself uses. Clearing it (as base does for EKS, which has no such
+# taint) risks the operator landing on a control-plane node.
+
+dynamo:
+  enabled: false
