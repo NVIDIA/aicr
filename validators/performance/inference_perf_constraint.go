@@ -287,14 +287,19 @@ const (
 	mainContainerName = "main"
 )
 
-// inferenceSkip* are the result.status strings returned when the inference
-// performance check cannot run. The "skipped " prefix is contractual:
-// inference_perf.go dispatches on it via strings.HasPrefix(result.status,
-// "skipped") to emit CTRF Skip status.
-const (
-	inferenceSkipMsgNoDynamoPlatform = "skipped - dynamo-platform not in recipe components"
-	inferenceSkipMsgCRDNotInstalled  = "skipped - DynamoGraphDeployment CRD not installed on cluster (dynamo-platform component declared but operator not deployed yet)"
-)
+// inferenceSkipMsgNoDynamoPlatform is the result.status string returned when
+// the inference performance check is genuinely inapplicable. The "skipped "
+// prefix is contractual: inference_perf.go dispatches on it via
+// strings.HasPrefix(result.status, "skipped") to emit CTRF Skip status.
+const inferenceSkipMsgNoDynamoPlatform = "skipped - dynamo-platform not in recipe components"
+
+// inferenceFailMsgCRDNotInstalled is the fail-closed message (#2122) for guard
+// C: the recipe DECLARES dynamo-platform but the DynamoGraphDeployment CRD is
+// not installed. This is a blocking failure, not a skip. It is emitted only on a
+// clean NotFound (the CRD is genuinely absent); Forbidden/auth failures take the
+// classified crdErr path in dynamoCRDInstalled, so no RBAC guidance belongs here
+// — apply the bundle (Dynamo operator).
+const inferenceFailMsgCRDNotInstalled = "recipe declares dynamo-platform but the DynamoGraphDeployment CRD is not installed on the cluster — apply the bundle (Dynamo operator)"
 
 type inferenceRoutingMode string
 
@@ -448,22 +453,23 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	}
 
 	// Guard C: the Dynamo operator CRD must actually be installed on the
-	// cluster. The recipe can list dynamo-platform before the operator has
-	// been deployed (e.g., mid-bootstrap, or a staged rollout where the
-	// component is declared but `aicr bundle` hasn't run yet). Without this
-	// check the validator would fail later with a less-actionable
-	// "no matches for kind DynamoGraphDeployment" from the dynamic client.
+	// cluster. Guard B has already confirmed the recipe DECLARES dynamo-platform,
+	// so a missing CRD is a broken/incomplete deployment — not an inapplicable
+	// check. Fail closed (#2122): a declared dependency whose prerequisite is
+	// absent must BLOCK the gate, never masquerade as a benign skip. Without
+	// this the validator would fail later with a less-actionable "no matches for
+	// kind DynamoGraphDeployment" from the dynamic client.
 	//
-	// Only IsNotFound is treated as "not installed" → skip. Any other error
-	// (Forbidden, auth failure, apiserver timeout, transient connection) is
-	// a real problem with the check and must surface as a failure rather
-	// than masquerading as a benign skip.
+	// Any non-NotFound error (Forbidden, auth failure, apiserver timeout,
+	// transient connection) is surfaced by dynamoCRDInstalled as crdErr, already
+	// carrying the right code — propagate as-is. A clean NotFound returns
+	// (false, nil): since dynamo-platform is declared, that too fails closed.
 	installed, crdErr := dynamoCRDInstalled(ctx)
 	if crdErr != nil {
 		return nil, crdErr
 	}
 	if !installed {
-		return &inferenceResult{status: inferenceSkipMsgCRDNotInstalled}, nil
+		return nil, errors.New(errors.ErrCodeNotFound, inferenceFailMsgCRDNotInstalled)
 	}
 
 	// Build workload configuration from cluster state. Callees already
@@ -599,16 +605,16 @@ func hasDynamoPlatform(ctx *validators.Context) bool {
 }
 
 // dynamoCRDInstalled reports whether the DynamoGraphDeployment CRD is
-// registered on the cluster. This is a pre-flight check so the validator
-// produces an explicit "CRD not installed" skip instead of later failing
-// deep in the deploy path with an opaque "no matches for kind" error when
-// the recipe declares dynamo-platform but the operator has not been
-// deployed yet.
+// registered on the cluster. This is a pre-flight check so guard C produces an
+// explicit, actionable "CRD not installed" fail-closed error (#2122) instead
+// of later failing deep in the deploy path with an opaque "no matches for
+// kind" error when the recipe declares dynamo-platform but the operator has
+// not been deployed yet.
 //
 // Mirrors the signature of isTrainerInstalled: only IsNotFound returns
 // (false, nil) — any other error (Forbidden, auth failure, apiserver
 // timeout, transient connection) surfaces as a real validator failure
-// rather than being collapsed into a benign "not installed" skip.
+// rather than being collapsed into a benign "not installed" result.
 func dynamoCRDInstalled(ctx *validators.Context) (bool, error) {
 	crdGVR := schema.GroupVersionResource{
 		Group:    apiGroupAPIExtensions,

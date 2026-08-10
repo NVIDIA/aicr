@@ -72,12 +72,28 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
-	// 0. Check if DCGM exporter is running (needed for GPU-aware HPA).
+	// 0. Applicability gate (#2122). prometheus-adapter is the discriminating
+	// component for GPU-aware HPA — the monitoring-hpa overlay injects it, and
+	// without it there is no custom/external GPU metrics API for the HPA to read.
+	// The DCGM exporter is the live prerequisite. Crucially, a LIST ERROR
+	// (Forbidden/timeout/transport) must fail closed — it is NOT evidence that
+	// GPU metrics are unavailable — so it is passed as probeErr rather than being
+	// conflated with the empty-result case. An empty result (no error, zero
+	// dcgm-exporter pods) skips only when the recipe does not declare
+	// prometheus-adapter; when it does, the missing exporter is a real failure.
 	dcgmPods, dcgmErr := ctx.Clientset.CoreV1().Pods("").List(ctx.Ctx, metav1.ListOptions{
 		LabelSelector: "app=nvidia-dcgm-exporter",
 	})
-	if dcgmErr != nil || len(dcgmPods.Items) == 0 {
-		return validators.Skip("DCGM exporter not found — GPU metrics not available for HPA")
+	present := dcgmErr == nil && len(dcgmPods.Items) > 0
+	if err := (validators.Capability{
+		Component: "prometheus-adapter",
+		Subject:   "nvidia-dcgm-exporter pods (app=nvidia-dcgm-exporter)",
+		AbsentMsg: "recipe declares prometheus-adapter (GPU HPA) but no nvidia-dcgm-exporter pods are running — " +
+			"apply the bundle or check RBAC; GPU metrics cannot reach the HPA without them",
+		InapplicableMsg: "DCGM exporter not found and prometheus-adapter not declared in recipe — " +
+			"GPU metrics not available for HPA",
+	}).Require(ctx, dcgmErr, present); err != nil {
+		return err
 	}
 
 	// 1. Custom metrics API available

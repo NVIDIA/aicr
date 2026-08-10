@@ -292,12 +292,24 @@ func runSlinkySlurmHealthCommands(
 }
 
 func discoverSlinkySetAPIs(ctx *validators.Context) error {
+	// This runs only AFTER CheckSlinkySlurmHealth's L105 recipe-presence gate,
+	// so slinky-slurm IS declared here. Under the #2122 contract a declared
+	// dependency whose API is absent must FAIL — not Skip: a
+	// missing/unauthorized Slinky API is a broken deployment, not an
+	// inapplicable check. The applicability helper preserves NotFound vs other
+	// (Forbidden/timeout/transport) codes.
+	slinkyAPI := validators.Capability{
+		Component: slinkySlurmComponent,
+		Subject:   "Slinky Slurm API group slinky.slurm.net/v1beta1",
+		AbsentMsg: "recipe declares slinky-slurm but the slinky.slurm.net/v1beta1 API is not served — " +
+			"apply the bundle (Slinky operator/CRDs) or check RBAC",
+	}
 	resources, err := ctx.Clientset.Discovery().ServerResourcesForGroupVersion("slinky.slurm.net/v1beta1")
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return validators.Skip("Slinky Slurm API not available")
-		}
-		return errors.Wrap(errors.ErrCodeInternal, "failed to discover Slinky Slurm API", err)
+		// probeErr != nil: a NotFound (group-version not served) fails closed as
+		// NotFound because slinky-slurm is declared; any other discovery error
+		// is classified as an infra failure and also blocks.
+		return slinkyAPI.Require(ctx, err, false)
 	}
 
 	found := map[string]bool{}
@@ -308,10 +320,15 @@ func discoverSlinkySetAPIs(ctx *validators.Context) error {
 			found[resource.Name] = true
 		}
 	}
-	if !found[slinkyLoginSetGVR.Resource] || !found[slinkyNodeSetGVR.Resource] {
-		return validators.Skip("Slinky Slurm LoginSet/NodeSet API not available")
-	}
-	return nil
+	// API group is served but the LoginSet/NodeSet resources are missing: a
+	// clean empty result on a declared dependency → fail closed (NotFound).
+	setsPresent := found[slinkyLoginSetGVR.Resource] && found[slinkyNodeSetGVR.Resource]
+	return validators.Capability{
+		Component: slinkySlurmComponent,
+		Subject:   "Slinky LoginSet/NodeSet API resources (slinky.slurm.net/v1beta1)",
+		AbsentMsg: "recipe declares slinky-slurm but the LoginSet/NodeSet API resources are not registered — " +
+			"apply the bundle (Slinky operator/CRDs) or check RBAC",
+	}.Require(ctx, nil, setsPresent)
 }
 
 func runnableSlinkyNodeSetPods(ctx *validators.Context, namespace string) ([]corev1.Pod, error) {
