@@ -44,9 +44,11 @@
 # tool (--known-tags-file), so an entry under the release identity that a real
 # release produced is not flagged. Run history is used rather than the repo's
 # current tags/releases because those are deleted for ephemeral release candidates
-# (NVIDIA/aicr#1902) while run history persists. Note: a workflow that fails to
-# *start* (startup_failure) cannot alert on itself, so an external liveness check
-# (dead-man's-switch) is tracked as a follow-up.
+# (NVIDIA/aicr#1902) while run history persists, and runs count in ANY lifecycle
+# state so a release that is still signing is not briefly invisible to the scan
+# (NVIDIA/aicr#2153). Note: a workflow that fails to *start* (startup_failure)
+# cannot alert on itself, so an external liveness check (dead-man's-switch) is
+# tracked as a follow-up.
 #
 # Why our own tool, not upstream sigstore/rekor-monitor (NVIDIA/aicr#1623).
 # Identity monitoring is a linear scan of every entry added since the last
@@ -207,20 +209,32 @@ jobs:
           # PERSISTS after a tag/release is deleted, so an ephemeral release
           # candidate (e.g. vX.Y.Z-rc1, whose tag+release are cleaned up once the
           # final ships) is still recognised and does not trip the identity alarm
-          # (NVIDIA/aicr#1902). head_branch is the tag for a tag-push run. We
-          # require status=completed (an in-progress run may not have reached the
-          # sign step yet) but take any *conclusion*: signing happens mid-run, so a
-          # real release whose later step flakes concludes "failure" while still
-          # having produced a legitimate entry (e.g. v0.18.0 itself). Gating on
-          # conclusion=success would therefore re-create the #1902 false positive
-          # on genuine releases. Per-signing-step correlation would be tighter but
-          # needs per-run job inspection; see the maintaining.md residual note.
+          # (NVIDIA/aicr#1902). head_branch is the tag for a tag-push run.
+          #
+          # Runs count in ANY lifecycle state and with any conclusion; the query is
+          # deliberately unfiltered on `status`. GitHub mints the SAN only while a
+          # run of this workflow is executing at refs/tags/<tag>, so the run's
+          # existence at that ref IS the proof; its lifecycle state is not part of
+          # the identity. Filtering on status=completed hid a release for the ~32
+          # minutes it takes to run while its signing jobs were already writing
+          # entries ~20 minutes in, which is exactly where the hourly scan lands
+          # (NVIDIA/aicr#2153). It also let a re-run of a job that signs nothing
+          # (a flaky post-publish deploy) revoke a tag's allowlist entry by
+          # flipping the run back to in_progress. Gating on conclusion=success is
+          # likewise not viable: signing happens mid-run, so a real release whose
+          # later step flakes concludes "failure" while still having produced a
+          # legitimate entry (e.g. v0.18.0 itself), and gating would re-create the
+          # #1902 false positive. Widening to in-flight runs does not weaken the
+          # control: under the old gate, anyone able to push a tag could already
+          # allowlist it by waiting for the run to finish. Per-signing-step
+          # correlation would be tighter but needs per-run job inspection; see the
+          # maintaining.md residual note.
           # De-duplicate. The reusable retry is already factored into the shared
           # gh-api-retry.sh; this fetch+jq is specific to this monitor's
           # correlation, so it stays inline (a composite action for one call site
           # would add indirection without reuse).
           .github/scripts/gh-api-retry.sh runs.json --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/${RELEASE_WORKFLOW_FILE}/runs?event=push&status=completed&per_page=100"
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${RELEASE_WORKFLOW_FILE}/runs?event=push&per_page=100"
           jq -rs '[.[].workflow_runs[] | select(.head_branch != null) | .head_branch] | unique | .[]' \
             runs.json > known-tags.txt
           echo "Fetched $(wc -l < known-tags.txt) signed release tags from ${RELEASE_WORKFLOW_FILE} run history."
