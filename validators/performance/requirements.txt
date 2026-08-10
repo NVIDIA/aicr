@@ -8,4 +8,4 @@
 # Bumping anything here requires re-running 'make python-licenses' and
 # 'make notices'; the notices generator fails closed if this file changes
 # without a corresponding license refresh.
-aiperf==0.11.0
+aiperf==0.12.0
