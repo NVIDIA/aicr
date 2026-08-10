@@ -7,7 +7,8 @@ state can import AICR directly. This page is for those consumers.
 ## Which package to import
 
 **Import the `github.com/NVIDIA/aicr/pkg/client/v1` package.** This is the
-stable facade.
+compatibility-reviewed facade and the surface AICR intends to stabilize at
+v1.0.
 
 ```go
 import aicr "github.com/NVIDIA/aicr/pkg/client/v1"
@@ -485,15 +486,18 @@ Passing a `nil` `context.Context` returns `ErrCodeInvalidRequest`. Use
 
 ## Compatibility
 
-The facade's exported API follows [Semantic Versioning][semver]:
+Today AICR is pre-1.0. Under Go module versioning, a v0 minor release may
+contain breaking API changes. The project mechanically detects and explicitly
+records incompatible changes to the facade, but consumers must **pin a patch
+version** in `go.mod` and audit upgrades.
+
+Starting with v1.0, the facade's exported API follows [Semantic
+Versioning][semver]:
 
 - **Major** bumps may rename, remove, or change the shape of exported
   types and function signatures.
 - **Minor** bumps may add new exported types, fields, or methods.
-- **Patch** bumps are bug-fix-only.
-
-Today AICR is pre-1.0. **Pin a patch version** in your `go.mod` and
-audit diffs on upgrade.
+- **Patch** bumps contain compatible bug fixes.
 
 ## See also
 

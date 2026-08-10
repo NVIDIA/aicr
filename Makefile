@@ -305,7 +305,7 @@ scan: ## Scans for vulnerabilities with grype
 	grype dir:. --config .grype.yaml --fail-on high --quiet
 
 .PHONY: api-diff
-api-diff: ## Checks pkg/client/v1 compatibility against the latest stable release
+api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility against the latest stable release
 	@bash tools/api-diff
 
 .PHONY: qualify

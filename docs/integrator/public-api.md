@@ -9,7 +9,7 @@ in the [Go library integration guide](./go-library.md).
 
 | Tier | Meaning |
 |------|---------|
-| **Public (stable)** | Covered by semver; breaking changes only in major bumps. |
+| **Public (stable)** | Compatibility-reviewed facade. During v0, breaks are detected and explicitly recorded; starting with v1.0, breaking changes require a major bump. |
 | **Public (evolving)** | Exported today but may change in minor bumps. Pin and audit on upgrade. |
 | **Internal** | Treated as implementation detail. May change without notice. |
 
@@ -56,12 +56,11 @@ The `github.com/NVIDIA/aicr/pkg/client/v1` package is Public (stable). Types
 reachable from this surface are either facade-owned structs or transparent
 aliases — the table below documents which.
 
-Transparent aliases extend that stable contract to their target types. The
-automated API-diff gate matches an external named target by package path and
-type name, but does not recursively compare the target's definition. Until
-[#2019](https://github.com/NVIDIA/aicr/issues/2019) resolves this limitation,
-changes to those definitions require manual compatibility review because they
-can affect facade consumers without failing the gate.
+Transparent aliases extend that contract to their target types. They are kept
+where identity and direct interoperability with an existing builder, interface,
+result, or provider-scoped state are more valuable than a duplicative facade
+wrapper. The API-diff gate scopes additional checks to the aliased definitions;
+unrelated exports in their evolving packages remain free to change.
 
 | Facade symbol | Translates to/from | Notes |
 |---|---|---|
@@ -74,6 +73,10 @@ can affect facade consumers without failing the gate.
 | `aicr.RecipeResult` | `pkg/recipe.RecipeResult` | **Facade-owned struct** exposing `Name`, `Version`, `TranslatedAt`, `SelectedProfile` (the recorded ADR-015 selection, nil for unprofiled recipes), and `Components` (enabled/deployable components only — disabled refs remain visible via `Resolved().ComponentRefs`). Call `Resolved()` for the full upstream `*pkg/recipe.RecipeResult` (constraints, deployment order, validation config, metadata). The previous `aicr.Recipe` alias was removed in #1115; `ResolveRecipeFromCriteria` and `ResolveRecipeFromSnapshot` now return `*RecipeResult`. |
 | `aicr.AllowLists` | `pkg/recipe.AllowLists` | **Facade-owned struct** with `[]string` fields (Accelerators / Services / Intents / OSTypes). Use `aicr.WrapAllowLists` to lift a `*pkg/recipe.AllowLists`. |
 | `aicr.Criteria` | `pkg/recipe.Criteria` | **Facade-owned struct** whose enum-typed fields (Service / Accelerator / Intent / OS / Platform) project to plain strings; Nodes stays an `int` per the facade's string/int contract. Use `aicr.WrapCriteria` to lift a `*pkg/recipe.Criteria`. |
+| `aicr.BundleConfig` | `pkg/bundler/config.Config` | Deliberate transparent alias. It keeps the facade compatible with `config.NewConfig` and its functional options instead of duplicating the bundler's configuration builder. |
+| `aicr.BundleAttester` | `pkg/bundler/attestation.Attester` | Deliberate transparent alias. Existing attester implementations pass directly into `BundleOptions` without an adapter. |
+| `aicr.BundleArtifact` | `*pkg/bundler/result.Output` | Deliberate transparent alias. Callers receive the complete bundler result, including `HasErrors`, without a lossy projection. |
+| `aicr.OIDCResolveOptions` | `pkg/bundler/attestation.ResolveOptions` | Deliberate transparent alias. CLI and server callers can pass the same late-bound signing inputs used by the attestation resolver. |
 | `aicr.CriteriaRegistry` | `pkg/recipe.CriteriaRegistry` | Documented transparent alias. Kept as an alias intentionally because the registry is behavior-rich (`ParseService`, `SetStrict`, `Values`, ...) and carries mutable per-`DataProvider` state — wrapping would either break the per-Client identity coupling (copy) or add no isolation win over the alias (pointer). |
 
 ## Recommended consumption pattern
