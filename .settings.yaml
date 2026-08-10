@@ -39,6 +39,12 @@ linting:
   addlicense: 'v1.2.0'
   # renovate: datasource=github-releases depName=google/go-licenses depType=linting
   go_licenses: 'v2.0.1'
+  # MDX toolchain for tools/check-docs-mdx-parse (the parser-level docs gate) is
+  # owned by tools/mdx/package.json + package-lock.json, not listed here. The
+  # lockfile freezes the full transitive tree, which a version string cannot;
+  # this gate decides which docs merge, so its verdict must be reproducible.
+  # Renovate updates it natively via the npm manager. Same single-source-of-truth
+  # split as the Go toolchain living in .go-version.
 
 # Security Tools
 security_tools:

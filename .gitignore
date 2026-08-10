@@ -179,3 +179,7 @@ aicr-e2e.xml
 # the repo root. The private-Sigstore e2e's run.sh builds the proxy to $TMPDIR,
 # so this only guards an accidental local build; the source stays tracked.
 /tlsproxy
+
+# Resolved MDX toolchain for tools/check-docs-mdx-parse. The manifest and
+# lockfile in tools/mdx/ ARE committed; only the installed tree is not.
+tools/mdx/node_modules/

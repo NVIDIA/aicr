@@ -222,7 +222,15 @@ make lint
 make lint-go      # Go linting only
 make lint-yaml    # YAML linting only
 make license      # License header check
+
+# Docs published to Fern are parsed as MDX; both checks gate the merge
+make check-docs-mdx        # fast pattern approximation (no dependencies)
+make check-docs-mdx-parse  # real MDX parser, authoritative (needs Node 20+)
 ```
+
+`check-docs-mdx-parse` warns and skips when Node is unavailable locally, but
+hard-fails in CI. See
+[Docs MDX Gate](docs/contributor/tests.md#docs-mdx-gate).
 
 ### 5. Run E2E Tests
 
