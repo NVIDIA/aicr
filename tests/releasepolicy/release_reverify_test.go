@@ -248,6 +248,7 @@ func TestReleaseReverifyWorkflowShape(t *testing.T) {
 // network trouble must be operational and must never look like a missing entry.
 // Every case here is one side of that line.
 func TestReleaseReverifyClassification(t *testing.T) {
+	t.Parallel()
 	script := reverifyClassifierScript(t)
 
 	// Every fixture derives from the floor constant. Hardcoding a version here
@@ -668,6 +669,7 @@ func TestReleaseReverifyClassification(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, code, output := runReverifyClassifier(t, script, tc.opts)
 			if got != tc.want || code != tc.code {
 				t.Fatalf("classification = %q (exit %d), want %q (exit %d)\n%s", got, code, tc.want, tc.code, output)
@@ -693,6 +695,7 @@ func TestReleaseReverifyClassification(t *testing.T) {
 // misclassifies as a security finding — which is the failure mode this workflow
 // exists to prevent, so the tests must not pass without the guards.
 func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
+	t.Parallel()
 	script := reverifyClassifierScript(t)
 
 	tests := []struct {
@@ -827,6 +830,7 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			opts := tc.opts
 			opts.tag = reverifySBOMFloor
 			if !opts.missingAssetsFile {
@@ -881,6 +885,7 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 // set unambiguous, and the assertions name the exact subjects rather than
 // counting them.
 func TestReleaseReverifySBOMLoopIsolatesChildStdin(t *testing.T) {
+	t.Parallel()
 	script := reverifyClassifierScript(t)
 
 	// Pin the redirect count so a change in form (a different redirection, or a
@@ -926,6 +931,7 @@ func TestReleaseReverifySBOMLoopIsolatesChildStdin(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			opts := reverifyOptions{
 				tag:                  "v" + version,
 				assets:               assets,
@@ -990,6 +996,7 @@ func verifiedSBOMs(output string) []string {
 // did so deliberately. A release that is genuinely missing an SBOM bundle would
 // come back clean.
 func TestReleaseReverifySBOMFloorOrderingIsGuarded(t *testing.T) {
+	t.Parallel()
 	script := reverifyClassifierScript(t)
 
 	const from = `newest=""
@@ -1059,6 +1066,7 @@ if [ "${TAG}" = "${SBOM_SIGNING_FLOOR}" ] || [ "${newest}" != "${TAG}" ]; then`
 // same derive-from-the-artifact-under-test flaw that shipped the allowlist bug
 // in NVIDIA/aicr#1982.
 func TestReleaseReverifyMandatorySBOMSetIsDerivedFromTheTag(t *testing.T) {
+	t.Parallel()
 	script := reverifyClassifierScript(t)
 
 	derivation := "  read -r -a sbom_binaries <<< \"${EXPECTED_SBOM_BINARIES}\"\n" +
@@ -1133,6 +1141,7 @@ func TestReleaseReverifyMandatorySBOMSetIsDerivedFromTheTag(t *testing.T) {
 // is the deliberate divergence from rekor-monitor, whose alert tracks the
 // release-agnostic log and so genuinely clears on any clean run.
 func TestReleaseReverifyAlertCloseIsTagScoped(t *testing.T) {
+	t.Parallel()
 	doc := loadYAML(t, reverifyWorkflow)
 	env := mapValue(t, doc, "env")
 	alertTitle := fmt.Sprint(env["ALERT_TITLE"])
@@ -1184,6 +1193,7 @@ func TestReleaseReverifyAlertCloseIsTagScoped(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			closed, output, err := runReverifyCloseStep(t, script, tc.tag, tc.issues)
 			if err != nil {
 				t.Fatalf("close step failed: %v\n%s", err, output)
@@ -1195,6 +1205,7 @@ func TestReleaseReverifyAlertCloseIsTagScoped(t *testing.T) {
 	}
 
 	t.Run("an unscoped close reopens the bug", func(t *testing.T) {
+		t.Parallel()
 		// The pre-fix shape: one global alert title, closed by any clean run.
 		// Staged with the unscoped title on both sides, which is what the
 		// workflow used to create.

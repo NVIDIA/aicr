@@ -277,6 +277,7 @@ func TestReleaseCosignAttestationsAreBounded(t *testing.T) {
 // a release that lost an architecture, or a resolution that yielded the index
 // digest, must stop the job rather than ship two SBOMs on one subject.
 func TestReleasePlatformDigestResolution(t *testing.T) {
+	t.Parallel()
 	doc := loadYAML(t, ".github/actions/attest-image-from-tag/action.yml")
 	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
 
@@ -325,6 +326,7 @@ func TestReleasePlatformDigestResolution(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "bin")
 			if err := os.Mkdir(bin, 0o700); err != nil {
@@ -370,6 +372,7 @@ func TestReleasePlatformDigestResolution(t *testing.T) {
 // through as a platform digest has to be rejected here rather than silently
 // attaching a per-platform SBOM to the multi-platform index.
 func TestReleaseSbomAttestInputValidation(t *testing.T) {
+	t.Parallel()
 	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
 	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
 	index := stepIndex(steps, "Validate inputs")
@@ -400,6 +403,7 @@ func TestReleaseSbomAttestInputValidation(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			output := filepath.Join(t.TempDir(), "outputs")
 			command := exec.Command("bash", "-c", script)
 			command.Env = append(os.Environ(),
@@ -448,6 +452,7 @@ const openVEXContext = "https://openvex.dev/ns/v0.2.0"
 // `{}` statement, a `not_affected` statement with no reason) are exactly the
 // ones that look healthy until a downstream consumer tries to use them.
 func TestReleaseOpenVEXValidation(t *testing.T) {
+	t.Parallel()
 	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
 	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
 	index := stepIndex(steps, "Verify OpenVEX document")
@@ -547,6 +552,7 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			workspace := t.TempDir()
 			vex := filepath.Join(workspace, ".openvex.json")
 			if err := os.WriteFile(vex, []byte(tc.document), 0o600); err != nil {
@@ -571,6 +577,7 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 	// The shipped document has to survive the guard it is published through.
 	// A release cannot be the first place this is discovered.
 	t.Run("the committed .openvex.json is valid", func(t *testing.T) {
+		t.Parallel()
 		workspace := t.TempDir()
 		committed := readFile(t, ".openvex.json")
 		if err := os.WriteFile(filepath.Join(workspace, ".openvex.json"), committed, 0o600); err != nil {
@@ -641,6 +648,7 @@ exec "$@"
 `
 
 func TestReleaseAttestationInputValidationEmitsCanonicalDigestMap(t *testing.T) {
+	t.Parallel()
 	doc := loadYAML(t, ".github/workflows/attest-images.yaml")
 	job := mapValue(t, mapValue(t, doc, "jobs"), "validate-inputs")
 	steps := sliceValue(t, job, "steps")
@@ -669,6 +677,7 @@ func TestReleaseAttestationInputValidationEmitsCanonicalDigestMap(t *testing.T) 
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			output := filepath.Join(t.TempDir(), "outputs")
 			command := exec.Command("bash", "-c", script)
 			command.Env = append(os.Environ(),
@@ -727,6 +736,7 @@ func TestReleaseCompositeValidationUsesSharedLibrary(t *testing.T) {
 }
 
 func TestReleaseInputValidationLibrary(t *testing.T) {
+	t.Parallel()
 	helper := filepath.Join(repositoryRoot(t), ".github/actions/release-input-validation.sh")
 	type validationTest struct {
 		name    string
@@ -747,6 +757,7 @@ func TestReleaseInputValidationLibrary(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			args := make([]string, 0, 4+len(tc.args))
 			args = append(args, "-c", `source "$1"; shift; "$@"`, "release-input-validation", helper)
 			args = append(args, tc.args...)
@@ -958,6 +969,7 @@ func TestReleaseBuildCompositeInputs(t *testing.T) {
 }
 
 func TestReleaseCompositeValidationRejectsUnsafeInputsBeforeIO(t *testing.T) {
+	t.Parallel()
 	goBuildValid := map[string]string{
 		"INPUT_REGISTRY":            "ghcr.io",
 		"INPUT_KO_VERSION":          "v0.19.1",
@@ -996,6 +1008,7 @@ func TestReleaseCompositeValidationRejectsUnsafeInputsBeforeIO(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			doc := loadYAML(t, tc.path)
 			steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
 			validation := steps[0].(map[string]any)
@@ -1067,6 +1080,7 @@ func TestReleasePackagingConfig(t *testing.T) {
 }
 
 func TestReleaseArtifactNamesAreRerunSafe(t *testing.T) {
+	t.Parallel()
 	doc := loadYAML(t, ".github/workflows/on-tag.yaml")
 	jobs := mapValue(t, doc, "jobs")
 	build := mapValue(t, jobs, "build-ko")
