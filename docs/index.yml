@@ -22,8 +22,12 @@ navigation:
     contents:
       - page: Installation
         path: user/installation.md
+      - page: End-to-End Tutorial
+        path: user/tutorial.md
       - page: CLI Reference
         path: user/cli-reference.md
+      - page: Generating Bundles
+        path: user/bundling.md
       - page: CLI Configuration File
         path: user/cli-config.md
       - page: Artifact Verification
@@ -122,5 +126,7 @@ navigation:
         path: contributor/rekor-v2-signing.md
       - page: Publishing Recipe Evidence
         path: contributor/evidence-publishing.md
+      - page: Publishing the Evidence Dashboard
+        path: contributor/evidence-dashboard-publish.md
       - page: UAT Day/Night Cycle
         path: contributor/uat.md

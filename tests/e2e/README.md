@@ -26,7 +26,6 @@ make e2e-tilt
 | `cli/bundle/*` | Bundle generation (helm, argocd, node selectors) |
 | `cli/external-data/*` | External data directory (`--data` flag) |
 | `cli/format/*` | Output format variations (`--format json/table`) |
-| `cli/deploy-agent/*` | Snapshot `--deploy-agent` flag |
 | `api/recipe/*`, `api/bundle/*` | REST endpoints |
 | `snapshot/*` | Snapshot with deploy-agent (requires fake GPU) |
 | `recipe/from-snapshot` | Recipe from ConfigMap snapshot (`cm://...`) |

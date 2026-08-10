@@ -69,10 +69,10 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 #### `load-versions/`
 **Purpose**: Load tool versions from `.settings.yaml` as workflow outputs
 **When to use**: When you need version values in workflow steps
-**Outputs**:
-- `go`, `goreleaser`, `ko`, `crane`, `golangci_lint`, `yamllint`, `addlicense`
-- `grype`, `kubectl`, `kind`, `nvkind`, `ctlptl`, `tilt`, `helm`
-- `kind_node_image`, `h100_kind_node_image`
+**Outputs**: the Go version (from `.go-version`), plus one output per exposed
+`.settings.yaml` pin (tool versions, chart versions, image references, and
+quality thresholds; not every settings key is exposed) — see
+[`load-versions/action.yml`](load-versions/action.yml) for the authoritative set.
 
 **Example**:
 ```yaml
@@ -92,7 +92,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 - `install_ko` (optional): Install ko (default: "false")
 - `install_syft` (optional): Install syft (default: "false")
 - `install_crane` (optional): Install crane (default: "false")
-- `crane_version` (optional): crane version (default: "v0.20.6")
+- `crane_version` (optional): crane version (default: "v0.21.0")
 - `install_goreleaser` (optional): Install goreleaser (default: "false")
 - `goreleaser_version` (required when `install_goreleaser: "true"`): GoReleaser version from `load-versions`
 
@@ -102,7 +102,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
   with:
     install_ko: 'true'
     install_crane: 'true'
-    crane_version: 'v0.20.6'
+    crane_version: 'v0.21.0'
 ```
 
 #### `go-build-release/`
@@ -215,7 +215,7 @@ are explained in the action's header comment.
 - `go_version` (required): Go version to install
 - `goreleaser_version` (required): GoReleaser version from `load-versions`
 - `kind_version` (optional): Kind version (default: "0.31.0")
-- `helm_version` (optional): Helm version (default: "v4.1.0")
+- `helm_version` (optional): Helm version (default: "v4.1.1")
 - `kwok_version` (optional): KWOK version (default: "v0.7.0")
 - `kubectl_version` (optional): kubectl version (default: "v1.35.0")
 
@@ -454,7 +454,7 @@ To use these actions in other repositories:
 - uses: NVIDIA/aicr/.github/actions/go-test@main
   with:
     go_version: '1.26'
-    helm_version: 'v4.2.2'
+    helm_version: 'v4.2.3'
     coverage_report: 'true'
 ```
 

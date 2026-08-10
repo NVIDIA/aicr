@@ -117,7 +117,7 @@ aicr snapshot \
 # Full customization
 aicr snapshot \
   --namespace gpu-operator \
-  --image ghcr.io/nvidia/aicr:v0.8.0 \
+  --image ghcr.io/nvidia/aicr:v0.19.0 \
   --node-selector accelerator=nvidia-h100 \
   --toleration nvidia.com/gpu:NoSchedule \
   --timeout 10m \
@@ -127,7 +127,7 @@ aicr snapshot \
 **Available flags:**
 - `--kubeconfig`: Custom kubeconfig path (default: `~/.kube/config` or `$KUBECONFIG`)
 - `--namespace`: Deployment namespace (default: `default`)
-- `--image`: Container image (default: matches the CLI version, e.g. `ghcr.io/nvidia/aicr:v0.8.0`; dev and snapshot builds use `:latest`)
+- `--image`: Container image (default: matches the CLI version, e.g. `ghcr.io/nvidia/aicr:v0.19.0`; dev and snapshot builds use `:latest`)
 - `--image-pull-secret`: Secret name for pulling the agent image from a private registry (repeatable)
 - `--job-name`: Job name (default: `aicr`)
 - `--service-account-name`: ServiceAccount name (default: `aicr`)
@@ -138,7 +138,7 @@ aicr snapshot \
 - `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
 - `--require-gpu`: Fail the snapshot if no GPU is found. In agent mode also requests an `nvidia.com/gpu` resource for the pod (required in CDI environments).
 - `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
-- `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`). Selects the per-OS pod configuration and service collector backend.
+- `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`). Selects the per-OS pod configuration and service collector backend.
 - `--requests` / `--limits`: Override agent container resource requests/limits (comma-separated `name=quantity` pairs).
 - `--cluster-config`: Path to a pre-existing k8s-launch-kit cluster-config.yaml to ingest network topology (local agent mode only).
 - `--aks-gpu-pools`: Path to an `az aks nodepool list -o json` dump, projected into the `K8s.aks-gpu-pools.gpu-driver` reading. Controller-side: works in agent Job mode too — the file never enters the pod; the CLI merges the projection into the returned snapshot.
@@ -195,7 +195,7 @@ By default, the agent Job tolerates **all taints** using the universal toleratio
 Pin to a specific version:
 
 ```shell
-aicr snapshot --image ghcr.io/nvidia/aicr:v0.8.0
+aicr snapshot --image ghcr.io/nvidia/aicr:v0.19.0
 ```
 
 **Finding versions:**

@@ -41,6 +41,7 @@ aicr snapshot \
     --namespace aicr-validation \
     --node-selector nodeGroup=gpu-worker \
     --toleration dedicated=gpu-workload:NoSchedule \
+    --toleration nvidia.com/gpu=present:NoSchedule \
     --output snapshot.yaml
 ```
 
@@ -116,6 +117,7 @@ aicr bundle \
   --recipe recipe.yaml \
   --accelerated-node-selector nodeGroup=gpu-worker \
   --accelerated-node-toleration dedicated=gpu-workload:NoSchedule \
+  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   --system-node-selector nodeGroup=system-worker \
   --storage-class <storage-class> \
   --output bundle
@@ -128,6 +130,8 @@ aicr bundle \
 ```shell
 cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 ```
+
+> **GKE only:** If nodewright-operator is already installed on the cluster, generate the bundle without the nodewright components — add `--set nodewright:enabled=false --set nodewrightcustomizations:enabled=false` to the `aicr bundle` command — to avoid upgrade conflicts. Don't hand-edit the generated `deploy.sh`: it deploys the numbered component directories generically, and edits break `aicr verify` because `deploy.sh` is covered by the bundle's `checksums.txt` (whose digest the attestation signs).
 
 ## Validate Cluster
 
@@ -148,6 +152,7 @@ aicr validate \
 aicr validate \
     --recipe recipe.yaml \
     --toleration dedicated=gpu-workload:NoSchedule \
+    --toleration nvidia.com/gpu=present:NoSchedule \
     --phase conformance \
     --output report.json
 ```

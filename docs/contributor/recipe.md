@@ -156,8 +156,8 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 
 | Field | Type | Wildcard | Static OSS values |
 |---|---|---|---|
-| `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm` |
-| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000` |
+| `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3` |
+| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
 | `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos` |
 | `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |

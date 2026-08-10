@@ -38,7 +38,7 @@ NVIDIA AI Cluster Runtime (AICR) generates validated GPU-accelerated Kubernetes 
 unset GITLAB_TOKEN
 
 # Development workflow
-make qualify      # Full check: test + lint + e2e + scan (run before PR)
+make qualify      # Full check: test-coverage + lint + tuning-check + e2e + scan + license-check + api-diff (run before PR)
 make test         # Unit tests with -race
 make lint         # golangci-lint + yamllint
 make scan         # Grype vulnerability scan
@@ -558,7 +558,7 @@ Process and unique findings below; the rule sections above (Error Wrapping, Cont
 
 ## Pull Request Requirements
 
-**Pre-push checklist:** Always run `make qualify` before pushing. This is the CI-equivalent gate that covers tests, linting (golangci-lint + yamllint), e2e, vulnerability scan, and repo-specific checks (docs sidebar, agents sync). Do not substitute a subset of commands — if `make qualify` passes locally, CI will pass.
+**Pre-push checklist:** Always run `make qualify` before pushing. This is the CI-equivalent gate that covers coverage-gated tests, linting (golangci-lint + yamllint + license headers, agents sync, docs filename/MDX gates, chart-version pins), tuning-check, e2e, vulnerability scan, license allowlist check, and API compatibility (api-diff). Do not substitute a subset of commands — `make qualify` is the closest local equivalent of the CI gate. A few checks run only in CI (e.g. the lychee docs link check on `docs/**` PRs, CodeQL, and the GPU test lanes), so a green local `qualify` does not guarantee every CI job passes.
 
 **Mandatory lint gate for Go changes:** If your PR changes any `.go` files, you MUST run `golangci-lint run -c .golangci.yaml` on each affected package path (e.g., `./pkg/recipe/...`, `./cmd/aicr/...`, `./tests/chainsaw/...`) and confirm zero issues before creating or pushing the PR. For a full module scan, use `./...`. Do not rely on CI to catch lint failures — fix them locally first. This applies even to PRs labeled as "documentation only" if they include Go code changes.
 

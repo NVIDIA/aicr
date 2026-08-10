@@ -243,7 +243,7 @@ duplicated here.
 | `AICR_ALLOWED_INTENTS` | (unset = all) | Comma-separated allowlist of intent types (e.g. `training,inference`) |
 | `AICR_ALLOWED_OS` | (unset = all) | Comma-separated allowlist of OS types (e.g. `ubuntu,rhel`) |
 
-**Note:** These are the only environment variables the API server reads. The four `AICR_ALLOWED_*` allowlists are parsed once at startup to restrict which criteria values the server will accept. Rate-limit, request-timeout, and body-size settings are compiled-in constants from `pkg/defaults`, not environment-tunable. The server uses structured JSON logging to stderr. The CLI supports three logging modes (CLI/Text/JSON), but the API server always uses JSON for consistent log aggregation.
+**Note:** These are the only environment variables the API server reads for criteria filtering and transport; server-side bundle signing (`POST /v1/bundle?attest=true`) reads an additional set documented in [API Reference › Server-Side Signing](../user/api-reference.md#server-side-signing). The four `AICR_ALLOWED_*` allowlists are parsed once at startup to restrict which criteria values the server will accept. Rate-limit, request-timeout, and body-size settings are compiled-in constants from `pkg/defaults`, not environment-tunable. The server uses structured JSON logging to stderr. The CLI supports three logging modes (CLI/Text/JSON), but the API server always uses JSON for consistent log aggregation.
 
 ### ConfigMap for Custom Recipe Data (Advanced)
 

@@ -84,9 +84,9 @@ See the full [Component Catalog](docs/user/component-catalog.md) for every compo
 
 | Dimension | Values |
 |-----------|--------|
-| **Services** | AKS, BCM, EKS, GKE, Kind, LKE, OCP, OKE |
-| **Accelerators** | A100, B200, GB200, H100, H200, L40, RTX PRO 6000 |
-| **Operating systems** | Amazon Linux, COS, RHEL, Talos, Ubuntu |
+| **Services** | AKS, BCM, EKS, GKE, Kind, LKE, Metal3, OCP, OKE |
+| **Accelerators** | A100, B200, GB200, GB300, H100, H200, L40, L40S, RTX PRO 6000 |
+| **Operating systems** | Amazon Linux, COS, Oracle Linux, RHEL, Talos, Ubuntu |
 | **Workload intents** | Inference, Training |
 | **Platforms** | Dynamo, Kubeflow, NIM, Run:ai, Slurm (Slinky) |
 

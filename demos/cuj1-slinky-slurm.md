@@ -93,7 +93,7 @@ AICR injects placement from bundle flags using each component's registry paths:
 
 **Operator note:** slurm-operator chart v1.2.0 honors `nodeSelector`, `tolerations`, and `affinity` for both the operator and webhook. AICR's `--system-node-selector` and `--system-node-toleration` flags fan out to both deployments. Set affinity through `--set-json slurmoperator:operator.affinity=...` and `--set-json slurmoperator:webhook.affinity=...`. On EKS, include **both** `NoSchedule` and `NoExecute` for each taint key — nodes often carry both effects.
 
-**Override aliases:** `slinkyslurm`, `slurmcluster` (cluster chart); `slurm`, `slurmoperator` (operator chart). See `valueOverrideKeys` in `recipes/registry.yaml`.
+**Override aliases:** `slinkyslurm`, `slurmcluster` (cluster chart); `slurm`, `slurmoperator`, `slinkyslurmoperator` (operator chart). See `valueOverrideKeys` in `recipes/registry.yaml`.
 
 **Scalar vs structured overrides:**
 
@@ -202,7 +202,7 @@ kubectl wait --for=jsonpath='{.status.conditions[?(@.type=="Available")].status}
   -n slurm deploy/slinky-slurm-login-slinky --timeout=10m
 ```
 
-If nodewright is already installed, skip those sections in `deploy.sh` to avoid upgrade conflicts.
+If nodewright is already installed, generate the bundle without the nodewright components (`--set nodewright:enabled=false --set nodewrightcustomizations:enabled=false`) to avoid upgrade conflicts.
 
 ## Validate Cluster
 

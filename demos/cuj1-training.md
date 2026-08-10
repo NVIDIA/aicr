@@ -137,7 +137,7 @@ aicr bundle \
 cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 ```
 
-> **GKE only:** If nodewright-operator is already installed on the cluster, comment out or skip the nodewright-operator and nodewright-customizations sections in deploy.sh to avoid upgrade conflicts.
+> **GKE only:** If nodewright-operator is already installed on the cluster, generate the bundle without the nodewright components — add `--set nodewright:enabled=false --set nodewrightcustomizations:enabled=false` to the `aicr bundle` command — to avoid upgrade conflicts. Don't hand-edit the generated `deploy.sh`: it deploys the numbered component directories generically, and edits break `aicr verify` because `deploy.sh` is covered by the bundle's `checksums.txt` (whose digest the attestation signs).
 
 ## Validate Cluster
 
@@ -399,7 +399,8 @@ aicr validate --config aicr-config.yaml \
 Because `spec.validate.evidence.attestation.out` is set in the config, this run
 also writes a recipe-evidence bundle to `./evidence/` and pushes it (signed via
 cosign keyless OIDC — opens a browser, or uses ambient GitHub Actions OIDC if
-present) to `ghcr.io/<owner>/aicr-evidence`.
+present) to `ghcr.io/nvidia/aicr-evidence-cuj1-gke-demo` (the
+`spec.validate.evidence.attestation.push` value above).
 
 ```text
 ./evidence

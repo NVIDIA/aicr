@@ -15,14 +15,14 @@ Caption: "Config complexity: manual errors, drift, version mismatches"
 
 **Step 1 - RECIPE**  
 Icon: Mixing bowl with ingredients
-Command: `aicr recipe -a h100 -i training -p kubeflow -o recipe.yaml`
+Command: `aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --platform kubeflow -o recipe.yaml`
 Visual: Cluster Snapshot + Intent toggle (Training/Inference) → glowing recipe.yaml
 Callouts: Driver 580.82.07, Device Plugin v0.17.4, CDI Enabled
 Caption: "Generate hardware-specific optimizations for workload intent"
 
 **Step 2 - BUNDLE**
 Icon: Shipping box with GitOps logo
-Command: `aicr bundle -f recipe.yaml -d argocd -o ./bundles`
+Command: `aicr bundle -r recipe.yaml -d argocd -o ./bundles --attest`
 Visual: Recipe transforms into deployment-ready artifacts:
 
 ```shell
@@ -45,7 +45,7 @@ Caption: "Use existing OSS tooling to deploy to your cluster"
 
 **Step 4 - VALIDATE**
 Icon: Inspection magnifying glass with Checkmark shield
-Command: `aicr validate -r recipe.yaml -p deployment -p conformance -p performance`
+Command: `aicr validate -r recipe.yaml --phase deployment --phase conformance --phase performance`
 Visual: Recipe compared against snapshot with green checkmarks
 Caption: "Verify recipe was correctly reconciled in your cluster"
 

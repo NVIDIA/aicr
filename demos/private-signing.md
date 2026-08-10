@@ -42,13 +42,13 @@ Running it end to end is exactly what validates the private-signing surface — 
 
 Prerequisites: `kind`, `kubectl`, `helm`, `mkcert`, `chainsaw`, `cosign`, `go`, `yq`, `docker`, and `gh` (to download the release binary).
 
-From the repo root, this is the whole thing — download the attested release binary, then run the store-up + sign + verify flow (substitute the release or RC tag for `v0.16.0`):
+From the repo root, this is the whole thing — download the attested release binary, then run the store-up + sign + verify flow (substitute the release or RC tag for `v0.19.0`):
 
 ```shell
 # 1. Download the attested release binary (it ships its aicr-attestation.sigstore.json sidecar)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m); case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
-gh release download v0.16.0 -R NVIDIA/aicr -p "aicr_*_${OS}_${ARCH}.tar.gz"
+gh release download v0.19.0 -R NVIDIA/aicr -p "aicr_*_${OS}_${ARCH}.tar.gz"
 tar xzf aicr_*_${OS}_${ARCH}.tar.gz          # -> ./aicr + aicr-attestation.sigstore.json
 ./aicr trust update                          # cache the public Sigstore root (needed by the binary-attestation gate)
 
@@ -112,7 +112,7 @@ Run the numbered commands with the **attested release binary** you downloaded ab
 
 ```shell
 export PATH="$PWD:$PATH"          # the ./aicr you extracted (beside aicr-attestation.sigstore.json)
-aicr version                      # expect 0.16.x, not an older system build
+aicr --version                    # expect 0.19.x, not an older system build
 ls "$(command -v aicr)"-attestation.sigstore.json
 # present -> --attest will run; absent -> use a release-archive binary
 ```
@@ -212,7 +212,7 @@ export AWS_CA_BUNDLE="$(mkcert -CAROOT)/rootCA.pem"
 
 docker run -d --rm --name aicr-kms -p 4566:4566 -e USE_SSL=1 \
   -e MINISTACK_SSL_CERT=/certs/cert.pem -e MINISTACK_SSL_KEY=/certs/key.pem \
-  -v "$CERT:/certs:ro" ministackorg/ministack:1.3.61
+  -v "$CERT:/certs:ro" ministackorg/ministack:1.4.13
 until aws kms list-keys --endpoint-url https://localhost:4566 >/dev/null 2>&1; do sleep 2; done   # wait for KMS
 
 ARN=$(aws kms create-key --endpoint-url https://localhost:4566 \

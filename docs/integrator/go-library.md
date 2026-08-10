@@ -31,7 +31,7 @@ go get github.com/NVIDIA/aicr@latest
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v0.11.1
+go get github.com/NVIDIA/aicr@v0.19.0
 ```
 
 ## Quick start

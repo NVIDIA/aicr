@@ -114,6 +114,10 @@ spec:
       platform: kubeflow
       nodes: 2
     profile: ""                      # optional name=value; empty uses the declared default
+    # configuration:                 # typed desired-state inputs (not matched on)
+    #   slurm:                       # only valid when the resolved recipe platform is slurm
+    #     accounting:
+    #       mode: disabled           # disabled | customer-managed | aicr-provided
     # input:
     #   snapshot: snapshot.yaml      # derive criteria from a snapshot instead
     output:
@@ -230,6 +234,7 @@ exclusive** — query by criteria or derive from a snapshot, not both.
 | `criteria.service` / `.accelerator` / `.intent` / `.os` / `.platform` | string | Same names and values as the CLI flags |
 | `criteria.nodes` | int | Target GPU node count |
 | `profile` | string | Optional configuration profile selection in `name=value` form. Empty applies the resolved declaration's default. |
+| `configuration.slurm.accounting.mode` | string | Slurm accounting ownership: `disabled` (default) \| `customer-managed` \| `aicr-provided`; mirrors `--slurm-accounting-mode`. Only valid when the resolved recipe platform is `slurm` (whether from `criteria.platform`, a snapshot, or `--platform`) — an explicit mode (even `disabled`) on any other platform is rejected with `INVALID_REQUEST` |
 | `input.snapshot` | string | Snapshot path to derive the recipe from |
 | `output.path` | string | Recipe output path |
 | `output.format` | string | `yaml` \| `json` \| `table` |

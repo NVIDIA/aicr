@@ -23,7 +23,7 @@ Resolve one reservation row to `GITHUB_OUTPUT`-style `key=value` lines:
 uat-broker reservations --name aws-h100 >> "$GITHUB_OUTPUT"
 # slug=ah1
 # cloud=aws
-# reservation-id=cr-0cbe491320188dfa6
+# reservation-id=cr-0e16ad417f9a5bf69
 # accelerator=h100
 # gpu-count=8
 # cluster-config-path=tests/uat/aws/cluster-config.yaml
@@ -39,9 +39,11 @@ forwards it to the cloud pipelines as `needs.resolve.outputs.slug`.
 `nightly-intents` is the comma-separated list of intents the nightly batch runs
 on this reservation (#1276, DC3); it is emitted **resolved** (an un-annotated
 reservation reports the `training` default rather than an empty value). The
-launch set is `training,inference` on both reservations, so both CUJs run
-nightly on both clouds — the controller splits on comma and dispatches one
-serialized cell per intent per version.
+launch set is `training,inference` on every reservation, so both CUJs run
+nightly on all reservations. The emitted CSV is the leg-level enrollment
+summary and opt-out gate (an explicit empty list skips the leg); the actual
+per-cell intents come from the broker's `schedule` output, further gated per
+version by `nightly-intent-min-versions`.
 
 List every reservation name (one per line):
 

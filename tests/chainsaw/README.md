@@ -21,8 +21,8 @@ make e2e
 Or manually:
 
 ```bash
-make build
-AICR_BIN=$(pwd)/dist/aicr_darwin_arm64_v8.0/aicr \
+go build -o dist/e2e/aicr ./cmd/aicr
+AICR_BIN=$(pwd)/dist/e2e/aicr \
   chainsaw test --no-cluster \
     --config tests/chainsaw/chainsaw-config.yaml \
     --test-dir tests/chainsaw/cli/
@@ -31,7 +31,7 @@ AICR_BIN=$(pwd)/dist/aicr_darwin_arm64_v8.0/aicr \
 Single test:
 
 ```bash
-AICR_BIN=$(pwd)/dist/aicr_darwin_arm64_v8.0/aicr \
+AICR_BIN=$(pwd)/dist/e2e/aicr \
   chainsaw test --no-cluster --test-dir tests/chainsaw/cli/recipe-generation
 ```
 
