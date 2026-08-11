@@ -162,6 +162,17 @@ func (c *Client) adoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 	cp := rec.DeepCopy()
 	cp.BindDataProvider(dp)
 
+	// Canonicalize the artifact kind before anything serializes the copy. The
+	// decoded body may carry an absent, empty, or legacy "Recipe" kind (all
+	// accepted by the /v1/bundle contract), and Kind has no omitempty, so
+	// without this the legacy value is echoed verbatim into the generated
+	// bundle's recipe.yaml — an artifact the CLI file loader then rejects,
+	// making the bundle non-reloadable via "aicr bundle -r" / "aicr validate
+	// -r". Accept liberally, emit canonically. See issue #1953.
+	if err := cp.NormalizeKind(); err != nil {
+		return nil, err
+	}
+
 	// An adopted RecipeResult is decoded from an external source (e.g. the
 	// POST /v1/bundle body) and never passes through the resolver, so
 	// canonicalize its component types and validate coherence here — otherwise
