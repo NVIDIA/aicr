@@ -172,7 +172,7 @@ spec:
 {{- if .ImagePullSecrets }}
       imagePullSecrets:
 {{- range .ImagePullSecrets }}
-        - name: {{ . }}
+        - name: "{{ . }}"
 {{- end }}
 {{- end }}
       containers:

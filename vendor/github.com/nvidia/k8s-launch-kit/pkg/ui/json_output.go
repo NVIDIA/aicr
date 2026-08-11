@@ -32,6 +32,14 @@ type LogEntry struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// CleanupResult is the machine-readable summary produced by l8k clean.
+type CleanupResult struct {
+	Namespace              string `json:"namespace"`
+	CustomResourcesDeleted int    `json:"customResourcesDeleted"`
+	HelmReleaseRemoved     bool   `json:"helmReleaseRemoved"`
+	KeepHelmChart          bool   `json:"keepHelmChart"`
+}
+
 // JSONResult is the structured output emitted to stdout in JSON mode.
 type JSONResult struct {
 	Success        bool              `json:"success"`
@@ -40,6 +48,7 @@ type JSONResult struct {
 	GeneratedFiles []string          `json:"generatedFiles,omitempty"`
 	Deployed       bool              `json:"deployed"`
 	DryRun         bool              `json:"dryRun,omitempty"`
+	Cleanup        *CleanupResult    `json:"cleanup,omitempty"`
 	Error          json.RawMessage   `json:"error,omitempty"`
 	Messages       []LogEntry        `json:"messages"`
 }

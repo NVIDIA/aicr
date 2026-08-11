@@ -50,6 +50,7 @@ jobs:
         id: filter
         with:
           base: main
+          predicate-quantifier: 'some-with-excludes'
           filters: |
             matched:
               - '.github/workflows/gpu-h100-inference-test.yaml'
@@ -110,6 +111,10 @@ jobs:
               - 'pkg/collector/**'
               - 'pkg/snapshotter/**'
               - '.github/actions/gpu-snapshot-validate/**'
+              # Markdown/MDX under the runtime globs is documentation — never a
+              # reason to launch a GPU job (#2149). Requires some-with-excludes.
+              - '!**/*.[mM][dD]'
+              - '!**/*.[mM][dD][xX]'
 
   # NVIDIA self-hosted GPU runners reject pull_request event jobs before
   # checkout. PR GPU coverage runs through the pull-request/<number> push

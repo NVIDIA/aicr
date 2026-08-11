@@ -356,6 +356,27 @@ func DiscoverClusterConfig(ctx context.Context, c client.Client, restConfig *res
 	// the group's Identifier + NodeSelector are aligned with that value.
 	applyMachineLabelToGroups(ctx, c, cfg.ClusterConfig)
 
+	// Persist the automatic GPUDirect decision in the generated config. The
+	// test is enabled only when the configured extended GPU resource can
+	// satisfy the topology-derived request on every worker represented by every
+	// discovered group.
+	// Discovery does not persist per-group GPU quantities; the boolean is the
+	// complete discovery output for this feature and remains user-editable.
+	cfg.Validation = config.NormalizeValidationConfig(cfg.Validation)
+	nodeList := &corev1.NodeList{}
+	if err := c.List(ctx, nodeList); err != nil {
+		cfg.Validation.GPUDirect.Enabled = false
+		uiOutput.Warning("Could not inspect GPU resources on cluster nodes; GPUDirect DMA-BUF validation disabled: %v", err)
+	} else {
+		resourceType := cfg.Validation.GPUDirect.GPUResourceType
+		cfg.Validation.GPUDirect.Enabled = gpuDirectAvailableOnAllGroupNodes(cfg.ClusterConfig, nodeList.Items, resourceType)
+		if cfg.Validation.GPUDirect.Enabled {
+			uiOutput.Info("Enabled GPUDirect DMA-BUF validation: every discovered worker can satisfy its topology-derived %s request", resourceType)
+		} else {
+			uiOutput.Info("GPUDirect DMA-BUF validation disabled: %s cannot satisfy the topology-derived request on every discovered worker", resourceType)
+		}
+	}
+
 	// Phase summary — counts surfaced at info level so the default UX shows
 	// progress without requiring --log-level=debug.
 	totalEW, totalNS, presetMatches, deviationGroups, labelled := 0, 0, 0, 0, 0
@@ -389,6 +410,68 @@ func DiscoverClusterConfig(ctx context.Context, c client.Client, restConfig *res
 	return nil
 }
 
+func gpuDirectAvailableOnAllGroupNodes(groups []config.ClusterConfig, nodes []corev1.Node, resourceType string) bool {
+	if len(groups) == 0 || resourceType == "" {
+		return false
+	}
+	nodeByName := make(map[string]*corev1.Node, len(nodes))
+	for i := range nodes {
+		nodeByName[nodes[i].Name] = &nodes[i]
+	}
+	requiredByGroup := gpuDirectResourceCountsByGroup(groups)
+	foundWorker := false
+	for i := range groups {
+		if len(groups[i].WorkerNodes) == 0 {
+			return false
+		}
+		for _, nodeName := range groups[i].WorkerNodes {
+			foundWorker = true
+			node := nodeByName[nodeName]
+			if node == nil {
+				return false
+			}
+			quantity, ok := node.Status.Allocatable[corev1.ResourceName(resourceType)]
+			if !ok || quantity.CmpInt64(int64(requiredByGroup[i])) < 0 {
+				return false
+			}
+		}
+	}
+	return foundWorker
+}
+
+type gpuDirectRenderBucket struct {
+	gpuType     string
+	eastWestPFs int
+	unique      int
+}
+
+// gpuDirectResourceCountsByGroup mirrors the renderer's merge key
+// (gpuType, east-west PF count). Every node selected by one merged DaemonSet
+// must satisfy that bucket's largest topology-derived GPU prefix.
+func gpuDirectResourceCountsByGroup(groups []config.ClusterConfig) []int {
+	keys := make([]gpuDirectRenderBucket, len(groups))
+	maxByBucket := make(map[gpuDirectRenderBucket]int, len(groups))
+	for i := range groups {
+		key := gpuDirectRenderBucket{
+			gpuType:     groups[i].GPUType,
+			eastWestPFs: len(pfutil.FilterEastWestPFs(groups[i].PFs)),
+		}
+		if key.gpuType == "" {
+			key.unique = i + 1
+		}
+		keys[i] = key
+		count := pfutil.GPUResourceCountForPFs(groups[i].PFs)
+		if count > maxByBucket[key] {
+			maxByBucket[key] = count
+		}
+	}
+	required := make([]int, len(groups))
+	for i := range groups {
+		required[i] = maxByBucket[keys[i]]
+	}
+	return required
+}
+
 func resolvePresetCatalog(opts Options) (*presets.Catalog, error) {
 	if opts.PresetCatalog != nil {
 		return opts.PresetCatalog, nil
@@ -408,11 +491,12 @@ func resolvePresetCatalog(opts Options) (*presets.Catalog, error) {
 //     Used as the merged-group NodeSelector when source groups span
 //     machineTypes but share a GPU type.
 //
-// Both label values bypass the Kubernetes 63-char limit by skipping the
-// label entirely when the value would overflow (logged at debug). Group
-// `Identifier` follows the resource-name convention (lowercase via
-// `sanitizeIdentifier`); the label values keep their original case to
-// match `nvidia.com/gpu.product`-style values.
+// Long label values are shortened with a deterministic hash. Machine labels
+// and generated group identifiers are bounded to 40 bytes so identifiers can
+// be safely appended to other generated values; GPU labels use Kubernetes'
+// 63-byte limit. Group `Identifier` follows the resource-name convention
+// (lowercase via `SanitizeIdentifier`); label values keep their original case
+// to match `nvidia.com/gpu.product`-style values.
 //
 // Groups whose machine label can't be computed (one input missing) keep
 // their fallback identifier ("group-N") and an empty NodeSelector. The
@@ -425,7 +509,7 @@ func applyMachineLabelToGroups(ctx context.Context, c client.Client, groups []co
 		gpuLabel := config.GPULabelValue(g.GPUType)
 
 		if machineLabel == "" {
-			log.Log.V(1).Info("Skipping machine label: machineType/gpuType unresolved or value > 63 chars",
+			log.Log.V(1).Info("Skipping machine label: machineType/gpuType unresolved",
 				"group", g.Identifier,
 				"machineType", g.MachineType,
 				"gpuType", g.GPUType)

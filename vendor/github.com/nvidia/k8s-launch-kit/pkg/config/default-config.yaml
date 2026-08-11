@@ -4,7 +4,7 @@ networkOperator:
   # version/componentVersion/repository/operatorRepository/helmRepoURL (below)
   # and docaDriver.version are populated from the embedded catalog;
   # explicit values here are overridden.
-  # Supported: 25.10, 26.1, 26.4, 26.7. Leave empty to use the explicit values
+  # Supported: 26.1, 26.4, 26.7. Leave empty to use the explicit values
   # below as-is.
   # selectedRelease: "26.4"
   version: v26.4.0
@@ -25,6 +25,11 @@ networkOperator:
   # `helm.ngc.nvidia.com/nvidia`; staging under `helm.ngc.nvidia.com/nvstaging/mellanox`.
   helmRepoURL: https://helm.ngc.nvidia.com/nvidia
   namespace: nvidia-network-operator
+  # imagePullSecrets are rendered into every enabled Network Operator
+  # component. During `l8k deploy`, a matching docker-registry Secret that
+  # already exists in this namespace is also used to authenticate the Helm
+  # chart download. For NGC, nvcr.io credentials are valid for
+  # helm.ngc.nvidia.com. Secret data is read in memory and is never logged.
   # imagePullSecrets:
   #   - my-registry-secret
 
@@ -34,6 +39,11 @@ networkNamespaces: [default]
 #   manifest: /path/to/my-deployment.yaml  # Custom workload manifest (replaces default example DaemonSet)
 
 validation:
+  gpuDirect:
+    # Discovery sets enabled=true only when every discovered worker node can
+    # satisfy the topology-derived request for gpuResourceType.
+    enabled: false
+    gpuResourceType: nvidia.com/gpu
   # connectivity gates the data-plane validation stage. Static manifest,
   # Helm release, component-version, and preflight checks always run.
   connectivity: true
@@ -136,10 +146,18 @@ nicConfigurationOperator:
   netdevPrefix: "eth_r%rail_id%"
 
 spectrumX:
-  nicType: "1023" # "1023" for ConnectX-8, "a2dc" for BlueField-3 SuperNIC
+  # NicConfigurationTemplate nicSelector.nicType is derived from the
+  # deviceID shared by all selected east-west PFs.
   overlay: "none"
-  rdmaPrefix: "roce_p%plane_id%_r%rail_id%"
-  netdevPrefix: "eth_p%plane_id%_r%rail_id%"
+  singlePlane: # Used by multiplaneMode none
+    netdevPrefix: "eth_r%rail_id%"
+    rdmaPrefix: "roce_r%rail_id%"
+  hwplb:
+    netdevPrefix: "eth_r%rail_id%_p%plane_id%"
+    rdmaPrefix: "roce_r%rail_id%"
+  swplb:
+    netdevPrefix: "eth_r%rail_id%_p%plane_id%"
+    rdmaPrefix: "roce_r%rail_id%_p%plane_id%"
 
 # This reference profile is used as-is when the file is passed explicitly via
 # --user-config. A fresh `l8k discover` ignores these example values, derives
@@ -153,8 +171,16 @@ profile:
   spectrumX: # Spectrum-X configuration (set enable: true or use --spectrum-x CLI flag)
     enable: false # CLI parameter (overrides this value): --spectrum-x
     # spcxVersion: "RA2.3" # CLI parameter (overrides this value): --spectrum-x
-    # multiplaneMode: swplb # CLI parameter (overrides this value): --multiplane-mode (swplb, hwplb, uniplane)
-    # numberOfPlanes: 4 # CLI parameter (overrides this value): --number-of-planes, also used as pfsPerNic
+    # CLI override: --multiplane-mode. When absent, H100/H200/B200/GB200 use
+    # none; B300/GB300 use the GA swplb default. Select hwplb explicitly.
+    # multiplaneMode: swplb
+    # CLI override: --number-of-planes, also used as pfsPerNic. Single-plane
+    # platforms use 1; B300/GB300 use 2. Set 4 explicitly for quad-plane B300.
+    # numberOfPlanes: 2
+    # topologyType: 2-tier # CLI parameter (overrides this value): --topology-scheme (2-tier, 3-tier)
+    # ipVersion: ipv4 # CLI parameter (overrides this value): --ip-version (ipv4 /31 or ipv6 /64 CIDRPool allocation)
+    # hostFirstOctet: 172 # Config-only IPv4 first octet override; defaults to 172 for 2-tier, 10 for 3-tier
+    # topologyFile: ./topology.json # CLI parameter (overrides this value): --topology-file; spcx-gen/reference-generator or contract-compliant NVIDIA AIR JSON
     # configMapName: "site-ra23-profile" # Required for RA2.3 when profile is raw data.profile YAML; CLI: --spectrum-x-configmap-name
     # profile: | # Required for RA2.3; accepts raw data.profile YAML or a full ConfigMap YAML. CLI: --spectrum-x-config
     #   useSoftwareCCAlgorithm: true

@@ -26,9 +26,11 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/go-logr/logr"
 	"gopkg.in/yaml.v2"
+	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 )
 
 // defaultConfigYAML is the canonical baseline l8k configuration baked into the
@@ -38,6 +40,12 @@ import (
 //
 //go:embed default-config.yaml
 var defaultConfigYAML []byte
+
+var (
+	spectrumXPrefixDefaultsOnce sync.Once
+	spectrumXPrefixDefaults     *SpectrumXConfig
+	spectrumXPrefixDefaultsErr  error
+)
 
 // DefaultConfigYAML returns a copy of the embedded default configuration
 // source. Discovery uses it to preserve field comments when no filesystem
@@ -88,22 +96,34 @@ const MachineLabelKey = "nvidia.kubernetes-launch-kit.machine"
 // machineTypes but share a GPU type.
 const GPULabelKey = "nvidia.kubernetes-launch-kit.gpu"
 
-// MaxLabelValueLength is the Kubernetes hard limit for label values.
-const MaxLabelValueLength = 63
+const (
+	// MaxLabelValueLength is the Kubernetes hard limit for label values.
+	MaxLabelValueLength = 63
+	// MaxGeneratedIdentifierLength leaves room for prefixes added to generated
+	// resource names and label values while retaining a collision-resistant hash.
+	MaxGeneratedIdentifierLength = 40
+)
 
 const (
 	RoutingDestinationBased = "destination-based"
 	RoutingSourceBased      = "source-based"
 )
 
+const (
+	SpectrumXTopology2Tier = "2-tier"
+	SpectrumXTopology3Tier = "3-tier"
+	SpectrumXIPVersionIPv4 = "ipv4"
+	SpectrumXIPVersionIPv6 = "ipv6"
+)
+
 // MachineLabelValue returns the per-source-group machine label value:
-// `<machineType>-<gpuType>` literal when it fits Kubernetes' 63-char
-// label-value limit, or a deterministic shortened form for long names
+// `<machineType>-<gpuType>` literal when it fits the 40-byte generated-group
+// identity limit, or a deterministic shortened form for long names
 // (truncated prefix + 8-hex FNV-32a suffix). Returns the empty string
 // only when either input is empty.
 //
 // The shortened form looks like
-// `HPE-ProLiant-Compute-DL380a-Gen12-NVIDIA-RTX-PRO-6000-B-7c4d8e91`
+// `HPE-ProLiant-Compute-DL380-Gen1-0885f134`
 // and is reproducible: identical inputs always produce the same
 // value, so the label discover writes onto nodes always matches what
 // `MachineLabelValue` returns at filter time.
@@ -112,16 +132,7 @@ func MachineLabelValue(machineType, gpuType string) string {
 		return ""
 	}
 	raw := machineType + "-" + gpuType
-	if len(raw) <= MaxLabelValueLength {
-		return raw
-	}
-	// 63-char budget = prefix + "-" + 8-hex hash. 8 hex digits + dash = 9.
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(raw))
-	suffix := fmt.Sprintf("-%08x", h.Sum32())
-	prefixBudget := MaxLabelValueLength - len(suffix)
-	prefix := strings.TrimRight(raw[:prefixBudget], "-_.")
-	return prefix + suffix
+	return truncateWithHash(raw, MaxGeneratedIdentifierLength)
 }
 
 // GPULabelValue returns the gpu label value, applying the same
@@ -131,28 +142,36 @@ func GPULabelValue(gpuType string) string {
 	if gpuType == "" {
 		return ""
 	}
-	if len(gpuType) <= MaxLabelValueLength {
-		return gpuType
+	return truncateWithHash(gpuType, MaxLabelValueLength)
+}
+
+// truncateWithHash returns s unchanged when it fits maxLen bytes. Longer
+// values retain a readable prefix and an 8-hex FNV-32a hash of the full input.
+func truncateWithHash(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
 	}
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(gpuType))
+	_, _ = h.Write([]byte(s))
 	suffix := fmt.Sprintf("-%08x", h.Sum32())
-	prefixBudget := MaxLabelValueLength - len(suffix)
-	prefix := strings.TrimRight(gpuType[:prefixBudget], "-_.")
+	prefixBudget := maxLen - len(suffix)
+	prefix := strings.TrimRight(s[:prefixBudget], "-_.")
 	return prefix + suffix
 }
 
 // SanitizeIdentifier converts a product-type or label-value string into a
 // valid K8s name component: lowercases the input and replaces spaces with
-// hyphens. Used by discovery to derive `ClusterConfig.Identifier` from the
-// machine label, and by the renderer when an identifier needs to land in a
-// resource name. Both call sites must agree on the rule so a config produced
-// by discovery renders the same names downstream — single function here
-// guarantees that.
+// hyphens, then deterministically bounds the result to 40 bytes. The shorter
+// limit leaves room for prefixes wherever the identifier is appended to a
+// generated resource name or label value. Used by discovery to derive
+// `ClusterConfig.Identifier` from the machine label, and by the renderer when
+// an identifier needs to land in a resource name. Both call sites must agree
+// on the rule so a config produced by discovery renders the same names
+// downstream — single function here guarantees that.
 func SanitizeIdentifier(s string) string {
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, " ", "-")
-	return s
+	return truncateWithHash(s, MaxGeneratedIdentifierLength)
 }
 
 // LaunchKitConfig represents the l8k-config.yaml structure
@@ -178,11 +197,16 @@ type LaunchKitConfig struct {
 	// CurrentNetworkNamespace is transient render state. The renderer sets it
 	// to one NetworkNamespaces entry while producing that namespace's copy;
 	// it is never part of the persisted configuration schema.
-	CurrentNetworkNamespace string            `yaml:"-"`
-	Workload                *WorkloadConfig   `yaml:"workload,omitempty"`
-	Validation              *ValidationConfig `yaml:"validation,omitempty"`
-	Profile                 *Profile          `yaml:"profile,omitempty"`
-	ClusterConfig           []ClusterConfig   `yaml:"clusterConfig,omitempty"`
+	CurrentNetworkNamespace string `yaml:"-"`
+	// ValidationGPUResourceCount is transient render state. The renderer
+	// computes the largest GPU prefix required across every source group in a
+	// DaemonSet render bucket so endpoint-specific CUDA indices remain visible
+	// after compatible groups are merged. It is never persisted in user config.
+	ValidationGPUResourceCount int               `yaml:"-"`
+	Workload                   *WorkloadConfig   `yaml:"workload,omitempty"`
+	Validation                 *ValidationConfig `yaml:"validation,omitempty"`
+	Profile                    *Profile          `yaml:"profile,omitempty"`
+	ClusterConfig              []ClusterConfig   `yaml:"clusterConfig,omitempty"`
 }
 
 type NetworkOperatorConfig struct {
@@ -270,10 +294,87 @@ type SriovConfig struct {
 }
 
 type SpectrumXConfig struct {
-	NicType      string `yaml:"nicType"`      // "1023" for ConnectX-8, "1025" for ConnectX-9, "a2dc" for BlueField-3 SuperNIC
-	Overlay      string `yaml:"overlay"`      // "none"
-	RdmaPrefix   string `yaml:"rdmaPrefix"`   // e.g., "roce_p%plane_id%_r%rail_id%"
-	NetdevPrefix string `yaml:"netdevPrefix"` // e.g., "eth_p%plane_id%_r%rail_id%"
+	Overlay     string                              `yaml:"overlay"` // "none"
+	SinglePlane *SpectrumXInterfaceNamePrefixConfig `yaml:"singlePlane,omitempty"`
+	HWPLB       *SpectrumXInterfaceNamePrefixConfig `yaml:"hwplb,omitempty"`
+	SWPLB       *SpectrumXInterfaceNamePrefixConfig `yaml:"swplb,omitempty"`
+}
+
+// SpectrumXInterfaceNamePrefixConfig contains the device-name templates for
+// one Spectrum-X multiplane mode family.
+type SpectrumXInterfaceNamePrefixConfig struct {
+	NetdevPrefix string `yaml:"netdevPrefix"`
+	RdmaPrefix   string `yaml:"rdmaPrefix"`
+}
+
+// SpectrumXInterfaceNamePrefixes returns the RDMA and network-device naming
+// templates from the Spectrum-X block selected by the multiplane mode.
+// Missing blocks or fields inherit from the matching block in the embedded
+// default-config.yaml, so file-backed and programmatic configs follow the same
+// defaults while explicit per-mode values remain authoritative.
+//
+// Hardware PLB exposes one RDMA bond per rail while retaining one network
+// device per rail-plane. Software PLB exposes both device types per rail-plane.
+// The none mode exposes one device of each type per rail.
+func SpectrumXInterfaceNamePrefixes(settings *SpectrumXConfig, multiplaneMode string) (string, string) {
+	defaults, err := defaultSpectrumXInterfaceNamePrefixes()
+	if err != nil {
+		return "", ""
+	}
+
+	var selected, selectedDefaults *SpectrumXInterfaceNamePrefixConfig
+
+	switch multiplaneMode {
+	case "hwplb":
+		selectedDefaults = defaults.HWPLB
+		if settings != nil {
+			selected = settings.HWPLB
+		}
+	case "swplb":
+		selectedDefaults = defaults.SWPLB
+		if settings != nil {
+			selected = settings.SWPLB
+		}
+	default:
+		selectedDefaults = defaults.SinglePlane
+		if settings != nil {
+			selected = settings.SinglePlane
+		}
+	}
+
+	if selectedDefaults == nil {
+		return "", ""
+	}
+
+	rdmaPrefix := selectedDefaults.RdmaPrefix
+	netdevPrefix := selectedDefaults.NetdevPrefix
+	if selected != nil {
+		if selected.RdmaPrefix != "" {
+			rdmaPrefix = selected.RdmaPrefix
+		}
+		if selected.NetdevPrefix != "" {
+			netdevPrefix = selected.NetdevPrefix
+		}
+	}
+	return rdmaPrefix, netdevPrefix
+}
+
+func defaultSpectrumXInterfaceNamePrefixes() (*SpectrumXConfig, error) {
+	spectrumXPrefixDefaultsOnce.Do(func() {
+		var defaults struct {
+			SpectrumX *SpectrumXConfig `yaml:"spectrumX"`
+		}
+		if err := yaml.Unmarshal(defaultConfigYAML, &defaults); err != nil {
+			spectrumXPrefixDefaultsErr = fmt.Errorf("failed to parse embedded Spectrum-X prefix defaults: %w", err)
+			return
+		}
+		if defaults.SpectrumX == nil {
+			spectrumXPrefixDefaultsErr = fmt.Errorf("embedded default config is missing spectrumX")
+			return
+		}
+		spectrumXPrefixDefaults = defaults.SpectrumX
+	})
+	return spectrumXPrefixDefaults, spectrumXPrefixDefaultsErr
 }
 
 type NicConfigurationOperatorConfig struct {
@@ -322,16 +423,28 @@ const (
 	DefaultValidationRPingIterations = 5
 	DefaultValidationIBWriteSize     = 65536
 	DefaultValidationIBWriteMinGbps  = 100
+	DefaultGPUResourceType           = "nvidia.com/gpu"
 )
 
 // ValidationConfig controls `l8k validate` data-plane checks. Static manifest
-// and version checks always run; Connectivity gates the example-DaemonSet RDMA
-// matrix. Checks selects which RDMA families to run.
+// and version checks always run; Connectivity gates the example-DaemonSet data
+// plane matrix. Checks selects the base families, while GPUDirect enables the
+// DMA-BUF variant of ib_write_bw.
 type ValidationConfig struct {
-	Connectivity *bool                 `yaml:"connectivity,omitempty"`
-	Mode         string                `yaml:"mode,omitempty"`
-	Checks       []string              `yaml:"checks,omitempty"`
-	RDMA         *ValidationRDMAConfig `yaml:"rdma,omitempty"`
+	Connectivity *bool                     `yaml:"connectivity,omitempty"`
+	Mode         string                    `yaml:"mode,omitempty"`
+	Checks       []string                  `yaml:"checks,omitempty"`
+	RDMA         *ValidationRDMAConfig     `yaml:"rdma,omitempty"`
+	GPUDirect    ValidationGPUDirectConfig `yaml:"gpuDirect"`
+}
+
+// ValidationGPUDirectConfig controls the CUDA DMA-BUF variant of the
+// ib_write_bw matrix. Enabled is deliberately non-optional: discovery writes
+// its decision to the generated config and users may override that value
+// before generation or validation.
+type ValidationGPUDirectConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	GPUResourceType string `yaml:"gpuResourceType"`
 }
 
 type ValidationRDMAConfig struct {
@@ -357,6 +470,10 @@ func DefaultValidationConfig() *ValidationConfig {
 			RPingIterations:         DefaultValidationRPingIterations,
 			IBWriteSize:             DefaultValidationIBWriteSize,
 			IBWriteMinBandwidthGbps: defaultFloat64(DefaultValidationIBWriteMinGbps),
+		},
+		GPUDirect: ValidationGPUDirectConfig{
+			Enabled:         false,
+			GPUResourceType: DefaultGPUResourceType,
 		},
 	}
 }
@@ -388,6 +505,10 @@ func NormalizeValidationConfig(v *ValidationConfig) *ValidationConfig {
 	}
 	if v.RDMA.IBWriteMinBandwidthGbps == nil {
 		v.RDMA.IBWriteMinBandwidthGbps = defaultFloat64(DefaultValidationIBWriteMinGbps)
+	}
+	v.GPUDirect.GPUResourceType = strings.TrimSpace(v.GPUDirect.GPUResourceType)
+	if v.GPUDirect.GPUResourceType == "" {
+		v.GPUDirect.GPUResourceType = DefaultGPUResourceType
 	}
 	return v
 }
@@ -421,6 +542,13 @@ func ValidateValidationConfig(v *ValidationConfig) error {
 	}
 	if v.RDMA != nil && v.RDMA.IBWriteMinBandwidthGbps != nil && *v.RDMA.IBWriteMinBandwidthGbps < 0 {
 		return fmt.Errorf("validation.rdma.ibWriteMinBandwidthGbps must be greater than or equal to 0")
+	}
+	resourceType := v.GPUDirect.GPUResourceType
+	if !strings.Contains(resourceType, "/") {
+		return fmt.Errorf("validation.gpuDirect.gpuResourceType must be a qualified extended resource name, got %q", resourceType)
+	}
+	if errs := k8svalidation.IsQualifiedName(resourceType); len(errs) > 0 {
+		return fmt.Errorf("validation.gpuDirect.gpuResourceType %q is invalid: %s", resourceType, strings.Join(errs, "; "))
 	}
 	for _, check := range v.Checks {
 		switch check {
@@ -513,13 +641,18 @@ func (p Profile) MarshalYAML() (interface{}, error) {
 }
 
 type ProfileSpectrumX struct {
-	Enable         bool   `yaml:"enable"`         // must be true for Spectrum-X profiles to match
-	SPCXVersion    string `yaml:"spcxVersion"`    // e.g., "RA2.2"
-	MultiplaneMode string `yaml:"multiplaneMode"` // swplb, hwplb, uniplane
-	NumberOfPlanes int    `yaml:"numberOfPlanes"` // 2 or 4
-	UseDRA         bool   `yaml:"useDRA"`         // enable DRA ResourceClaimTemplate-based workload allocation
-	ConfigMapName  string `yaml:"configMapName,omitempty"`
-	Profile        string `yaml:"profile,omitempty"`
+	Enable               bool   `yaml:"enable"`         // must be true for Spectrum-X profiles to match
+	SPCXVersion          string `yaml:"spcxVersion"`    // e.g., "RA2.2"
+	MultiplaneMode       string `yaml:"multiplaneMode"` // none, swplb, hwplb
+	NumberOfPlanes       int    `yaml:"numberOfPlanes"` // 2 or 4
+	TopologyType         string `yaml:"topologyType,omitempty"`
+	IPVersion            string `yaml:"ipVersion,omitempty"`
+	HostFirstOctet       int    `yaml:"hostFirstOctet,omitempty"`
+	TopologyFile         string `yaml:"topologyFile,omitempty"`
+	ResolvedTopologyFile string `yaml:"-"`
+	UseDRA               bool   `yaml:"useDRA"` // enable DRA ResourceClaimTemplate-based workload allocation
+	ConfigMapName        string `yaml:"configMapName,omitempty"`
+	Profile              string `yaml:"profile,omitempty"`
 }
 
 type ClusterConfig struct {
@@ -788,12 +921,16 @@ func ValidateClusterConfig(config *LaunchKitConfig, profile string) error {
 var SupportedSPCXVersions = []string{"RA2.1", "RA2.2", "RA2.3"}
 
 // SupportedMultiplaneModes lists the Spectrum-X multiplane modes the CLI
-// accepts. `none` and `uniplane` collapse to one plane; `swplb` and `hwplb`
-// require numberOfPlanes > 1.
-var SupportedMultiplaneModes = []string{"none", "swplb", "hwplb", "uniplane"}
+// accepts. `none` collapses to one plane; `swplb` and `hwplb` require
+// numberOfPlanes > 1.
+var SupportedMultiplaneModes = []string{"none", "swplb", "hwplb"}
 
 // SupportedNumberOfPlanes lists the values numberOfPlanes can take.
 var SupportedNumberOfPlanes = []int{1, 2, 4}
+
+var SupportedSpectrumXTopologyTypes = []string{SpectrumXTopology2Tier, SpectrumXTopology3Tier}
+
+var SupportedSpectrumXIPVersions = []string{SpectrumXIPVersionIPv4, SpectrumXIPVersionIPv6}
 
 // SPCXVersionAllowedReleases is the authoritative mapping from SPC-X RA
 // version to the Network Operator releases that ship that version's CRD
@@ -824,12 +961,26 @@ func DefaultSPCXReleaseFor(ra string) string {
 
 // validateSpectrumXTemplates validates that Spectrum-X templates have required placeholders
 func validateSpectrumXTemplates(config *LaunchKitConfig) error {
-	netdevPrefix := config.SpectrumX.NetdevPrefix
-	rdmaPrefix := config.SpectrumX.RdmaPrefix
+	mode := config.Profile.SpectrumX.MultiplaneMode
+	rdmaPrefix, netdevPrefix := SpectrumXInterfaceNamePrefixes(config.SpectrumX, mode)
+	prefixSection := "singlePlane"
+	switch mode {
+	case "hwplb":
+		prefixSection = "hwplb"
+	case "swplb":
+		prefixSection = "swplb"
+	}
 
-	// Non-`none` multiplane modes (swplb, hwplb, uniplane) require a supported
+	if netdevPrefix == "" {
+		return fmt.Errorf("spectrumX.%s.netdevPrefix must not be empty", prefixSection)
+	}
+	if rdmaPrefix == "" {
+		return fmt.Errorf("spectrumX.%s.rdmaPrefix must not be empty", prefixSection)
+	}
+
+	// Non-`none` multiplane modes (swplb, hwplb) require a supported
 	// RA version.
-	if config.Profile.SpectrumX.MultiplaneMode != "none" && config.Profile.SpectrumX.MultiplaneMode != "" {
+	if mode != "none" && mode != "" {
 		got := config.Profile.SpectrumX.SPCXVersion
 		supported := false
 		for _, v := range SupportedSPCXVersions {
@@ -840,7 +991,7 @@ func validateSpectrumXTemplates(config *LaunchKitConfig) error {
 		}
 		if !supported {
 			return fmt.Errorf("multiplane mode %s requires spcxVersion in %v, got %q",
-				config.Profile.SpectrumX.MultiplaneMode, SupportedSPCXVersions, got)
+				mode, SupportedSPCXVersions, got)
 		}
 	}
 
@@ -852,23 +1003,25 @@ func validateSpectrumXTemplates(config *LaunchKitConfig) error {
 	hasRailInNetdev := containsPlaceholder(netdevPrefix, "%rail%") || containsPlaceholder(netdevPrefix, "%rail_id%")
 
 	if isMultiplane && !hasPlaneInNetdev {
-		return fmt.Errorf("spectrumX.netdevPrefix must contain %%plane_id%% placeholder when numberOfPlanes > 1 (multiplane mode)")
+		return fmt.Errorf("spectrumX.%s.netdevPrefix must contain %%plane_id%% placeholder when numberOfPlanes > 1 (multiplane mode)", prefixSection)
 	}
 
 	if isMultirail && !hasRailInNetdev {
-		return fmt.Errorf("spectrumX.netdevPrefix must contain %%rail_id%% placeholder when multirail is enabled")
+		return fmt.Errorf("spectrumX.%s.netdevPrefix must contain %%rail_id%% placeholder when multirail is enabled", prefixSection)
 	}
 
-	// Check rdmaPrefix (same rules)
+	// SWPLB exposes one RDMA device per plane. HWPLB exposes a single RDMA
+	// bond per rail, so its correct prefix intentionally has no plane
+	// placeholder even when numberOfPlanes > 1.
 	hasPlaneInRdma := containsPlaceholder(rdmaPrefix, "%plane%") || containsPlaceholder(rdmaPrefix, "%plane_id%")
 	hasRailInRdma := containsPlaceholder(rdmaPrefix, "%rail%") || containsPlaceholder(rdmaPrefix, "%rail_id%")
 
-	if isMultiplane && !hasPlaneInRdma {
-		return fmt.Errorf("spectrumX.rdmaPrefix must contain %%plane_id%% placeholder when numberOfPlanes > 1 (multiplane mode)")
+	if isMultiplane && mode == "swplb" && !hasPlaneInRdma {
+		return fmt.Errorf("spectrumX.%s.rdmaPrefix must contain %%plane_id%% placeholder when multiplaneMode is swplb", prefixSection)
 	}
 
 	if isMultirail && !hasRailInRdma {
-		return fmt.Errorf("spectrumX.rdmaPrefix must contain %%rail_id%% placeholder when multirail is enabled")
+		return fmt.Errorf("spectrumX.%s.rdmaPrefix must contain %%rail_id%% placeholder when multirail is enabled", prefixSection)
 	}
 
 	return nil

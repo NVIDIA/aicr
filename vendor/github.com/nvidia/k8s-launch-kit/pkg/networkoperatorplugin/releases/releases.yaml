@@ -12,40 +12,46 @@
 #                          the operator at `nvcr.io/nvidia/cloud-native`
 #                          while components live at `nvcr.io/nvidia/mellanox`;
 #                          staging lumps both under `nvcr.io/nvstaging/mellanox`.
+#   - xPlane             — repository and version for the xPlane service,
+#                          which follows its own release cadence and registry
+#                          path instead of the generic component coordinates.
 releases:
-  "25.10":
-    networkOperator:
-      version: v25.10.0
-      componentVersion: network-operator-v25.10.0
-      repository: nvcr.io/nvidia/mellanox
-      operatorRepository: nvcr.io/nvidia/cloud-native
-      helmRepoURL: https://helm.ngc.nvidia.com/nvidia
-    docaDriver:
-      version: doca3.2.2-25.10-2.4.1.0-4
   "26.1":
     networkOperator:
-      version: v26.1.1
-      componentVersion: network-operator-v26.1.1
+      version: v26.1.2
+      componentVersion: network-operator-v26.1.2
       repository: nvcr.io/nvidia/mellanox
       operatorRepository: nvcr.io/nvidia/cloud-native
       helmRepoURL: https://helm.ngc.nvidia.com/nvidia
     docaDriver:
-      version: doca3.3.0-26.01-1.0.0.0-0
+      version: doca3.3.0-26.01-1.0.0.0-6
+    validation:
+      image: nvcr.io/nvidia/doca/doca:full-rt-cuda13.0.0-3.2.3-runtime-host
   "26.4":
     networkOperator:
-      version: v26.4.0
-      componentVersion: network-operator-v26.4.0
+      version: v26.4.1
+      componentVersion: network-operator-v26.4.1
       repository: nvcr.io/nvidia/mellanox
       operatorRepository: nvcr.io/nvidia/cloud-native
       helmRepoURL: https://helm.ngc.nvidia.com/nvidia
     docaDriver:
-      version: doca3.4.0-26.04-0.8.6.0-0
+      version: doca3.4.1-26.04-1.1.0.0-1
+    xPlane:
+      repository: nvcr.io/nvidia/doca
+      version: doca-3.4.0
+    validation:
+      image: nvcr.io/nvidia/doca/doca:full-rt-cuda13.0.0-3.4.0-runtime-host
   "26.7":
     networkOperator:
-      version: v26.7.0-beta.2
-      componentVersion: network-operator-v26.7.0-beta.2
+      version: v26.7.0-rc.1
+      componentVersion: network-operator-v26.7.0-rc.1
       repository: nvcr.io/nvstaging/mellanox
       operatorRepository: nvcr.io/nvstaging/mellanox
       helmRepoURL: https://helm.ngc.nvidia.com/nvstaging/mellanox
     docaDriver:
-      version: doca3.5.0-26.07-0.3.4.0-0
+      version: doca3.5.0-26.07-0.5.6.0-0
+    xPlane:
+      repository: nvcr.io/nvstaging/doca
+      version: 3.5.0032
+    validation:
+      image: nvcr.io/nvstaging/doca/doca:full-rt-cuda13.0.0-3.5.0-runtime-host-dev
