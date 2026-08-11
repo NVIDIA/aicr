@@ -23,7 +23,7 @@ CLI reference.
 ```
 
 1. **Generate recipe** — direct criteria or snapshot-derived infrastructure criteria plus `--platform slurm` resolve a Slurm leaf overlay to `recipe.yaml`.
-2. **Generate bundle** — apply `--system-*` / `--accelerated-*` scheduling and optional `--set` / `--set-json` on `slinkyslurm`.
+2. **Generate bundle** — apply `--system-*` / `--accelerated-*` scheduling and optional `--set` / `--set-json` / `--set-file` on `slinkyslurm`.
 3. **Install** — run `deploy.sh`; cert-manager and Slinky operator come up, then the cluster chart in `slurm`.
 4. **Validate** — run `deployment` (Chainsaw component health) and `conformance` (`slinky-slurm-health` from the login pod, including a conditional `sacct` probe when accounting is enabled). **Performance validation is not supported yet** on slurm leaves.
 5. **Smoke job** — `kubectl exec` into the login pod and run `srun` to confirm scheduling.
@@ -99,6 +99,81 @@ AICR injects placement from bundle flags using each component's registry paths:
 
 - `--set slinkyslurm:nodesets.slinky.replicas=2` — replicas, simple scalars.
 - `--set-json slinkyslurm:controller.podSpec=…` — full `nodeSelector` / `tolerations` objects (required when overriding system-injected scheduling on control-plane paths).
+
+### Prolog and epilog scripts
+
+Slinky represents each hook collection as a map from the script filename to its
+contents. Create YAML files containing those maps; do not pass a raw `.sh` file
+directly because `--set-file` parses the file as one JSON or YAML value. Every
+script must include a shebang.
+
+```yaml
+# prolog-scripts.yaml
+00-site-prolog.sh: |
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Site-specific setup commands go here.
+  exit 0
+```
+
+```yaml
+# epilog-scripts.yaml
+00-site-epilog.sh: |
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Site-specific cleanup commands go here.
+  exit 0
+```
+
+Set one or both NodeSet hooks while generating the bundle:
+
+```shell
+aicr bundle \
+  --recipe recipe.yaml \
+  --set-file slinkyslurm:prologScripts=./prolog-scripts.yaml \
+  --set-file slinkyslurm:epilogScripts=./epilog-scripts.yaml \
+  --output bundle
+```
+
+`prologScripts` and `epilogScripts` run on the NodeSets. To run hooks on
+`slurmctld` instead, use the same file format with
+`slinkyslurm:prologSlurmctldScripts` and
+`slinkyslurm:epilogSlurmctldScripts`. The map key becomes the script filename,
+so add more entries to a file when a hook needs multiple scripts. See
+[Slurm Prolog and Epilog](https://slurm.schedmd.com/prolog_epilog.html) for hook
+ordering, environment, timeouts, and failure behavior.
+
+### Enroot configuration
+
+AICR supplies cluster-wide Enroot configuration to the Slinky login and compute
+containers. It sets `NCCL_DEBUG=WARN` by default. To override that environment
+default for one job, export the value and name it with Pyxis's
+`--container-env` option:
+
+```shell
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=INIT,NET
+
+srun --container-image=docker://alpine:latest \
+  --container-env=NCCL_DEBUG,NCCL_DEBUG_SUBSYS \
+  env | grep '^NCCL_DEBUG'
+```
+
+For a persistent cluster-wide change, override the component value while
+generating the bundle:
+
+```shell
+aicr bundle \
+  --recipe recipe.yaml \
+  --set slinkyslurm:enroot.env.NCCL_DEBUG=INFO \
+  --set slinkyslurm:enroot.env.NCCL_DEBUG_SUBSYS=INIT,NET \
+  --output bundle
+```
+
+For the complete `enroot.config` and `enroot.env` interface, environment
+precedence, verification, and the required drain-and-replace procedure for an
+existing cluster, see
+[Slinky Slurm Enroot Configuration](../docs/user/slinky-slurm-enroot.md).
 
 ### EKS (dual taints: `system-workload` / `worker-workload`)
 

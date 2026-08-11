@@ -19,8 +19,8 @@ metadata:
   name: cli-bundle-slinky-storage
 spec:
   description: |
-    Validates default-off and enabled Slinky shared-storage bundle output.
-    No cluster is required.
+    Validates default-off and enabled Slinky shared-storage bundle output while
+    preserving the always-on Enroot pre-manifest. No cluster is required.
   timeouts:
     exec: 60s
   steps:
@@ -49,7 +49,39 @@ spec:
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/disabled"
-              ! ls -d "${WORK}"/disabled/[0-9][0-9][0-9]-slinky-slurm-pre >/dev/null 2>&1
+              PRE=$(ls -d "${WORK}"/disabled/[0-9][0-9][0-9]-slinky-slurm-pre)
+              test -f "${PRE}/templates/enroot-config.yaml"
+              test ! -e "${PRE}/templates/shared-storage-pvcs.yaml"
+              yq -e '
+                .apiVersion == "v1" and
+                .kind == "ConfigMap" and
+                .metadata.name == "slinky-slurm-enroot-config" and
+                (.data."enroot.conf" | contains("ENROOT_MOUNT_HOME=yes")) and
+                (.data."enroot.conf" | contains("ENROOT_REMAP_ROOT=yes")) and
+                (.data."enroot.conf" | contains("ENROOT_RUNTIME_PATH=") | not) and
+                (.data."99-aicr-defaults.env" | contains("NCCL_DEBUG=WARN"))
+              ' "${PRE}/templates/enroot-config.yaml" >/dev/null
+            check:
+              ($error == null): true
+
+    - name: bundle-time-enroot-overrides
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-slinky-storage"
+              set -e
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --set slinkyslurm:enroot.config.ENROOT_CACHE_PATH=/custom/cache \
+                --set slinkyslurm:enroot.env.NCCL_DEBUG=INFO \
+                --output "${WORK}/enroot-override"
+              PRE=$(ls -d "${WORK}"/enroot-override/[0-9][0-9][0-9]-slinky-slurm-pre)
+              test -f "${PRE}/templates/enroot-config.yaml"
+              yq -e '
+                (.data."enroot.conf" | contains("ENROOT_CACHE_PATH=/custom/cache")) and
+                (.data."99-aicr-defaults.env" | contains("NCCL_DEBUG=INFO"))
+              ' "${PRE}/templates/enroot-config.yaml" >/dev/null
             check:
               ($error == null): true
 
@@ -92,7 +124,10 @@ spec:
             content: |
               set -e
               WORK="/tmp/chainsaw-bundle-slinky-storage"
-              PVC_MANIFEST=$(ls "${WORK}"/enabled/[0-9][0-9][0-9]-slinky-slurm-pre/templates/shared-storage-pvcs.yaml)
+              PRE=$(ls -d "${WORK}"/enabled/[0-9][0-9][0-9]-slinky-slurm-pre)
+              test -f "${PRE}/templates/enroot-config.yaml"
+              PVC_MANIFEST="${PRE}/templates/shared-storage-pvcs.yaml"
+              test -f "${PVC_MANIFEST}"
               awk -v work="${WORK}" '
                 BEGIN { document = 0; has_content = 0 }
                 /^---$/ {
