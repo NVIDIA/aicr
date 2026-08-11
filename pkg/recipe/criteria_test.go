@@ -292,6 +292,44 @@ func TestCriteriaMatches(t *testing.T) {
 			},
 			want: true,
 		},
+		// Nodes is metadata-only (#1781): it does not participate in overlay
+		// selection, so differing Nodes values must never prevent a match.
+		{
+			name: "nodes ignored: query nodes=8 matches recipe with nodes=0",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				// Nodes unset (0 = any)
+			},
+			other: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   8,
+			},
+			want: true, // nodes is metadata-only; unset recipe still matches nodes query
+		},
+		{
+			name: "nodes ignored: query nodes=0 matches recipe with nodes=8",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   8,
+			},
+			other: &Criteria{
+				Service: CriteriaServiceEKS,
+				// Nodes unset (0 = any)
+			},
+			want: true, // nodes is metadata-only; nodes-set recipe still matches generic query
+		},
+		{
+			name: "nodes ignored: differing nodes values still match",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   4,
+			},
+			other: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   8,
+			},
+			want: true, // nodes is metadata-only; differing values do not prevent a match
+		},
 	}
 
 	for _, tt := range tests {

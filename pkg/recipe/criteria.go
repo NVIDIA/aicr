@@ -439,10 +439,13 @@ func (c *Criteria) Matches(other *Criteria) bool {
 		return false
 	}
 
-	// Nodes is metadata-only: no overlay in the embedded catalog (or any
-	// supported external catalog) gates on nodes, so it does not participate
-	// in overlay selection. A --nodes query matches any overlay regardless of
-	// its nodes value. See issue #1781 (design 4.3 follow-up to #1542).
+	// Nodes is metadata-only: no overlay in the embedded catalog gates on
+	// nodes, so it does not participate in overlay selection. A --nodes query
+	// matches any overlay regardless of its nodes value. External --data
+	// catalogs may contain criteria.nodes values, but those values are also
+	// ignored for matching, specificity, and coverage — operators using
+	// external catalogs should audit for nodes-gated overlays before upgrading.
+	// See issue #1781 (design 4.3 follow-up to #1542).
 
 	return true
 }

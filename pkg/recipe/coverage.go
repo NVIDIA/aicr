@@ -26,8 +26,11 @@ import (
 // coverageDimension names one criteria dimension subject to the coverage
 // post-condition and knows how to read its value from a Criteria.
 //
-// nodes is deliberately absent: no overlay gates on nodes so it is
-// metadata-only — it does not participate in overlay selection or coverage.
+// nodes is deliberately absent: no overlay in the embedded catalog gates on
+// nodes, so it is metadata-only — it does not participate in overlay
+// selection, specificity, or coverage. External --data catalogs may contain
+// criteria.nodes values, but those values are also ignored. Operators using
+// external catalogs should audit for nodes-gated overlays before upgrading.
 // See issue #1781 (design 4.3 follow-up to #1542).
 type coverageDimension struct {
 	name  string
