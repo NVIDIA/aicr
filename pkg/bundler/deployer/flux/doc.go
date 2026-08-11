@@ -24,7 +24,9 @@ using the Flux toolkit.
 The package generates:
   - HelmRelease CRs for all components (helm.toolkit.fluxcd.io/v2)
   - HelmRepository source CRs for upstream chart repositories (source.toolkit.fluxcd.io/v1)
-  - GitRepository source CRs for local Helm chart sources (source.toolkit.fluxcd.io/v1)
+  - GitRepository source CRs for local Helm chart sources (source.toolkit.fluxcd.io/v1),
+    omitted under an OCI output reference, where local charts are consumed via
+    ArtifactGenerator + ExternalArtifact instead
   - Local Helm charts (Chart.yaml + templates/) for manifest-only components
   - A root kustomization.yaml (plain Kustomize) that orchestrates all resources
   - README with deployment instructions
@@ -107,7 +109,7 @@ components produce an ErrCodeInvalidRequest error at generation time.
 	├── kustomization.yaml              # Root Kustomize orchestration
 	├── README.md                       # Deployment instructions
 	├── checksums.txt                   # SHA256 checksums (optional)
-	├── sources/
+	├── sources/                        # Present only when a source CR is written
 	│   ├── gitrepo-<name>.yaml         # GitRepository (for local Helm charts)
 	│   ├── helmrepo-charts-jetstack-io.yaml
 	│   └── helmrepo-helm-ngc-nvidia-com-nvidia.yaml

@@ -2263,11 +2263,14 @@ func TestGenerate_OCISourceName_SkipsGitSource(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// No gitrepo source files should exist.
+	// No gitrepo source files should exist. This component contributes no
+	// HelmRepository source either, so sources/ is not created at all —
+	// asserting its absence subsumes the gitrepo-file count. See issue #1947.
 	sourcesDir := filepath.Join(outputDir, "sources")
-	gitRepoFiles := listFilesWithPrefix(t, sourcesDir, "gitrepo-")
-	if len(gitRepoFiles) != 0 {
-		t.Errorf("expected 0 gitrepo source files when OCISourceName is set, got %d", len(gitRepoFiles))
+	if _, statErr := os.Stat(sourcesDir); !os.IsNotExist(statErr) {
+		gitRepoFiles := listFilesWithPrefix(t, sourcesDir, "gitrepo-")
+		t.Errorf("expected sources/ to be absent when no source CR is written, got stat err = %v, %d gitrepo files",
+			statErr, len(gitRepoFiles))
 	}
 }
 
@@ -2469,6 +2472,313 @@ func TestGenerate_OCISourceName_VendoredChart(t *testing.T) {
 	}
 	if strings.Contains(hrContent, "kind: GitRepository") {
 		t.Error("vendored HelmRelease should NOT reference GitRepository in OCI mode")
+	}
+}
+
+// TestGenerate_SourcesDirCreatedOnlyWhenPopulated verifies that sources/ is
+// emitted only when at least one source CR is written.
+//
+// A component contributes a HelmRepository source only when it resolves to a
+// remote Helm chart (non-empty Source), and --vendor-charts removes even
+// those, since collectHelmSources skips every vendorable ref. GitRepository
+// sources are suppressed entirely under an OCI output reference, where local
+// charts are consumed via ArtifactGenerator + ExternalArtifact. When both
+// filters apply, nothing is contributed and an unconditionally created
+// sources/ would remain empty. The bundle inventory validator walks the
+// finished tree and rejects any directory contributing no files, which failed
+// generation outright. See issue #1947.
+//
+// The cases below model the empty state with source-less components, which is
+// the same state --vendor-charts produces without needing a chart puller.
+//
+// IncludeChecksums is set so the assertion runs through
+// checksum.WriteChecksums → validateExactTree, the check that actually
+// rejected the empty directory, rather than only the proxy that sources/ is
+// absent.
+func TestGenerate_SourcesDirCreatedOnlyWhenPopulated(t *testing.T) {
+	t.Parallel()
+	localManifests := map[string]map[string][]byte{
+		"nfd-ocp": {
+			"nfd.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: nfd-ocp\n"),
+		},
+	}
+	localOnlyRefs := []recipe.ComponentRef{
+		{Name: "nfd-ocp", Namespace: "nfd", Type: recipe.ComponentTypeHelm},
+	}
+	remoteChartRefs := []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+	}
+
+	tests := []struct {
+		name string
+		refs []recipe.ComponentRef
+		// manifests supplies local chart content; nil for remote-chart refs.
+		manifests map[string]map[string][]byte
+		// ociSourceName empty selects the local-directory (GitRepository) path.
+		ociSourceName string
+		// preCreateStale plants an empty sources/ before generation, as a
+		// pre-fix run would have left behind.
+		preCreateStale bool
+		wantSourcesDir bool
+	}{
+		{
+			name:           "OCI output, all-local components: no sources dir",
+			refs:           localOnlyRefs,
+			manifests:      localManifests,
+			ociSourceName:  "aicr-bundle",
+			wantSourcesDir: false,
+		},
+		{
+			name:           "OCI output, all-local components, stale empty sources dir removed",
+			refs:           localOnlyRefs,
+			manifests:      localManifests,
+			ociSourceName:  "aicr-bundle",
+			preCreateStale: true,
+			wantSourcesDir: false,
+		},
+		{
+			name:           "control: OCI output with a remote chart keeps sources dir",
+			refs:           remoteChartRefs,
+			ociSourceName:  "aicr-bundle",
+			wantSourcesDir: true,
+		},
+		{
+			name:           "control: local output writes a GitRepository source",
+			refs:           localOnlyRefs,
+			manifests:      localManifests,
+			wantSourcesDir: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			outputDir := t.TempDir()
+			sourcesDir := filepath.Join(outputDir, "sources")
+
+			if tt.preCreateStale {
+				if err := os.MkdirAll(sourcesDir, 0750); err != nil {
+					t.Fatalf("failed to plant stale sources dir: %v", err)
+				}
+			}
+
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = tt.refs
+
+			g := &Generator{
+				RecipeResult:       recipeResult,
+				ComponentManifests: tt.manifests,
+				Version:            testVersion,
+				OCISourceName:      tt.ociSourceName,
+				IncludeChecksums:   true,
+			}
+
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			info, statErr := os.Stat(sourcesDir)
+			switch {
+			case tt.wantSourcesDir:
+				if statErr != nil {
+					t.Fatalf("expected sources/ to exist, stat error = %v", statErr)
+				}
+				if !info.IsDir() {
+					t.Fatalf("expected sources/ to be a directory, got mode %v", info.Mode())
+				}
+				entries, readErr := os.ReadDir(sourcesDir)
+				if readErr != nil {
+					t.Fatalf("failed to read sources/: %v", readErr)
+				}
+				if len(entries) == 0 {
+					t.Error("expected sources/ to contain at least one source CR")
+				}
+			default:
+				if !os.IsNotExist(statErr) {
+					t.Errorf("expected sources/ to be absent, stat error = %v", statErr)
+				}
+			}
+		})
+	}
+}
+
+// TestGenerate_StaleSourcesPathIsNotDestroyed covers the guard shared by the
+// create and remove routes to the sources path. os.Remove unlinks regular
+// files as readily as it removes empty directories, so removal must not run
+// blind — and both routes must reject the same user error with the same code
+// rather than having the outcome decided by recipe shape.
+func TestGenerate_StaleSourcesPathIsNotDestroyed(t *testing.T) {
+	t.Parallel()
+	localManifests := map[string]map[string][]byte{
+		"nfd-ocp": {
+			"nfd.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: nfd-ocp\n"),
+		},
+	}
+	localOnlyRefs := []recipe.ComponentRef{
+		{Name: "nfd-ocp", Namespace: "nfd", Type: recipe.ComponentTypeHelm},
+	}
+	remoteChartRefs := []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+	}
+
+	const fileContents = "not a directory\n"
+
+	tests := []struct {
+		name string
+		refs []recipe.ComponentRef
+		// plant places something at the sources path before generation.
+		plant     func(t *testing.T, sourcesDir string)
+		manifests map[string]map[string][]byte
+		wantErr   bool
+		// verify asserts the planted object survived generation intact.
+		verify func(t *testing.T, sourcesDir string)
+	}{
+		{
+			name:      "regular file rejected on the remove route",
+			refs:      localOnlyRefs,
+			manifests: localManifests,
+			plant: func(t *testing.T, sourcesDir string) {
+				t.Helper()
+				if err := os.WriteFile(sourcesDir, []byte(fileContents), 0600); err != nil {
+					t.Fatalf("failed to plant file: %v", err)
+				}
+			},
+			wantErr: true,
+			verify: func(t *testing.T, sourcesDir string) {
+				t.Helper()
+				got, err := os.ReadFile(sourcesDir) //nolint:gosec // test-controlled path
+				if err != nil {
+					t.Fatalf("planted file was destroyed: %v", err)
+				}
+				if string(got) != fileContents {
+					t.Errorf("planted file contents = %q, want %q", got, fileContents)
+				}
+			},
+		},
+		{
+			name: "regular file rejected on the create route",
+			refs: remoteChartRefs,
+			plant: func(t *testing.T, sourcesDir string) {
+				t.Helper()
+				if err := os.WriteFile(sourcesDir, []byte(fileContents), 0600); err != nil {
+					t.Fatalf("failed to plant file: %v", err)
+				}
+			},
+			wantErr: true,
+			verify: func(t *testing.T, sourcesDir string) {
+				t.Helper()
+				got, err := os.ReadFile(sourcesDir) //nolint:gosec // test-controlled path
+				if err != nil {
+					t.Fatalf("planted file was destroyed: %v", err)
+				}
+				if string(got) != fileContents {
+					t.Errorf("planted file contents = %q, want %q", got, fileContents)
+				}
+			},
+		},
+		{
+			name:      "symlink rejected and left in place",
+			refs:      localOnlyRefs,
+			manifests: localManifests,
+			plant: func(t *testing.T, sourcesDir string) {
+				t.Helper()
+				target := filepath.Join(t.TempDir(), "elsewhere")
+				if err := os.MkdirAll(target, 0750); err != nil {
+					t.Fatalf("failed to create symlink target: %v", err)
+				}
+				if err := os.Symlink(target, sourcesDir); err != nil {
+					t.Fatalf("failed to plant symlink: %v", err)
+				}
+			},
+			wantErr: true,
+			verify: func(t *testing.T, sourcesDir string) {
+				t.Helper()
+				info, err := os.Lstat(sourcesDir)
+				if err != nil {
+					t.Fatalf("planted symlink was destroyed: %v", err)
+				}
+				if info.Mode()&os.ModeSymlink == 0 {
+					t.Errorf("planted symlink replaced, mode = %v", info.Mode())
+				}
+			},
+		},
+		{
+			name:      "populated stale directory preserved",
+			refs:      localOnlyRefs,
+			manifests: localManifests,
+			plant: func(t *testing.T, sourcesDir string) {
+				t.Helper()
+				if err := os.MkdirAll(sourcesDir, 0750); err != nil {
+					t.Fatalf("failed to plant directory: %v", err)
+				}
+				stale := filepath.Join(sourcesDir, "gitrepo-stale.yaml")
+				if err := os.WriteFile(stale, []byte("stale\n"), 0600); err != nil {
+					t.Fatalf("failed to plant stale source CR: %v", err)
+				}
+			},
+			// Generation itself succeeds; the stale file is surfaced by the
+			// inventory validator, which runs only under IncludeChecksums.
+			wantErr: false,
+			verify: func(t *testing.T, sourcesDir string) {
+				t.Helper()
+				stale := filepath.Join(sourcesDir, "gitrepo-stale.yaml")
+				if _, err := os.Stat(stale); err != nil {
+					t.Fatalf("populated stale directory was destroyed: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			outputDir := t.TempDir()
+			sourcesDir := filepath.Join(outputDir, "sources")
+			tt.plant(t, sourcesDir)
+
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = tt.refs
+
+			g := &Generator{
+				RecipeResult:       recipeResult,
+				ComponentManifests: tt.manifests,
+				Version:            testVersion,
+				OCISourceName:      "aicr-bundle",
+			}
+
+			_, err := g.Generate(context.Background(), outputDir)
+			switch {
+			case tt.wantErr && err == nil:
+				t.Fatal("expected Generate() to fail, got nil error")
+			case tt.wantErr:
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
+				}
+				if !strings.Contains(err.Error(), sourcesDir) {
+					t.Errorf("expected error to name %q, got: %v", sourcesDir, err)
+				}
+			case err != nil:
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			tt.verify(t, sourcesDir)
+		})
 	}
 }
 
