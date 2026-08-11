@@ -35,11 +35,14 @@ package recipe
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
@@ -2470,5 +2473,57 @@ func TestDeepMergeMap_NoSliceAliasing(t *testing.T) {
 	}
 	if got := src["env"].([]any)[0]; got != srcOriginalEnv {
 		t.Errorf("src env corrupted via dst alias: got %v want %v", got, srcOriginalEnv)
+	}
+}
+
+// TestRecipeResultNormalizeKind pins the ingest-boundary kind contract: the
+// legacy shapes this API accepted through v0.18.0 are rewritten to the
+// canonical kind so the emitted artifact reloads, the canonical value is a
+// no-op, and any other kind is rejected the way the file loader and the
+// strict v2 decode path already reject it. See issue #1953.
+func TestRecipeResultNormalizeKind(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		kind     string
+		wantKind string
+		wantErr  bool
+	}{
+		{name: "canonical kind is unchanged", kind: RecipeResultKind, wantKind: RecipeResultKind},
+		{name: "absent kind is stamped", kind: "", wantKind: RecipeResultKind},
+		{name: "legacy Recipe kind is normalized", kind: "Recipe", wantKind: RecipeResultKind},
+		{name: "unrelated artifact kind is rejected", kind: RecipeMetadataKind, wantKind: RecipeMetadataKind, wantErr: true},
+		{name: "unknown kind is rejected", kind: "Widget", wantKind: "Widget", wantErr: true},
+		{name: "wrong-case kind is rejected", kind: "reciperesult", wantKind: "reciperesult", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &RecipeResult{Kind: tt.kind}
+			err := r.NormalizeKind()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("NormalizeKind() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if r.Kind != tt.wantKind {
+				t.Errorf("Kind = %q, want %q", r.Kind, tt.wantKind)
+			}
+			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %v", err, errors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}
+
+// TestRecipeResultNormalizeKindNilReceiver keeps the helper safe on the nil
+// receiver the surrounding validation helpers all tolerate.
+func TestRecipeResultNormalizeKindNilReceiver(t *testing.T) {
+	t.Parallel()
+
+	var r *RecipeResult
+	if err := r.NormalizeKind(); err != nil {
+		t.Errorf("NormalizeKind() on nil receiver = %v, want nil", err)
 	}
 }

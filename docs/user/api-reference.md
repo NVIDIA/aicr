@@ -569,8 +569,21 @@ For backward compatibility, the endpoint also accepts:
   strings after a decode/remarshal round trip.
 - The `kind: Recipe` value this contract published through v0.18.0.
 
-The handler does not validate `kind`, so all three shapes reach the bundler
-identically. `apiVersion` is the exception, validated as described next.
+All three shapes reach the bundler identically: the endpoint normalizes `kind`
+on ingest, stamping `kind: RecipeResult` when the request carries an absent,
+empty, or legacy `Recipe` kind. The generated bundle's `recipe.yaml`
+therefore always carries the canonical `kind` and reloads through
+`aicr bundle -r`, `aicr validate -r`, and the tooling that reads a bundle's
+`recipe.yaml` (TestGrid publication, evidence synthesis). Only `kind` is
+rewritten — a request that omits `apiVersion` still produces an artifact with
+an empty `apiVersion`, which every reader accepts as the legacy shape.
+
+Any other `kind` is rejected with a 400, so the endpoint never emits an artifact
+it would refuse to read back. This matches the `/v2/bundle` decode path, and the
+CLI file loader for the same values — `aicr bundle -r` accepts a
+`RecipeMetadata` file as an *overlay* to hydrate, but as a hydrated
+`RecipeResult` artifact it too accepts only `RecipeResult` or an absent kind.
+`apiVersion` is validated separately, as described next.
 
 `apiVersion` has no equivalent legacy window on purpose. An artifact
 group/version bump is a hard break with no transition period, so a recipe
@@ -581,18 +594,6 @@ This one is enforced. The shared artifact gate rejects any `apiVersion` outside
 as on the CLI file-load path, so a prior group/version fails rather than being
 silently accepted. An absent or empty `apiVersion` is still admitted as the
 legacy shape.
-
-**Round-trip caveat for `kind: Recipe`.** The header is copied into the
-generated bundle's `recipe.yaml` rather than normalized. The CLI file loader
-tolerates an absent or empty `kind` but rejects `Recipe`, so a bundle generated
-from a `kind: Recipe` body cannot be fed back through `aicr bundle -r` or
-`aicr validate -r`. Send `kind: RecipeResult` if you need the emitted artifact
-to remain reloadable.
-
-The same limit reaches the tooling that reads a bundle's `recipe.yaml`, so
-TestGrid publication and evidence synthesis also reject such a bundle. Only
-bundles generated from a `kind: Recipe` HTTP body are affected; the CLI always
-writes `RecipeResult`.
 
 #### Components
 
