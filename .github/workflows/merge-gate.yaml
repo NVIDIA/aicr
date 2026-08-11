@@ -71,10 +71,37 @@ jobs:
               - '.github/workflows/**'
               - '.github/actions/**'
             deps:
+              # Inputs to the verify-licenses gate, which runs `make
+              # license-check` over the vendored dependency graph. Watch the
+              # dependency manifests and the vendor tree, plus every input that
+              # defines the check itself, so a change to the gate cannot skip
+              # its own gate: the Makefile recipe is the check's contract, the
+              # install-go-licenses action supplies the binary it runs (that
+              # action clears GOFLAGS, without which -trimpath strips GOROOT and
+              # the check passes while inspecting zero packages), and this
+              # workflow defines the job. The entry replaced here named
+              # '.github/workflows/verify-licenses.yaml', which was deleted in
+              # 3c9f6ec5 when the job moved into this workflow, so the filter
+              # had stopped watching anything the job actually consumes.
+              #
+              # The toolchain pins are watched too, because the job resolves
+              # them through load-versions before running the check: .go-version
+              # supplies the Go toolchain (which determines the `go list std`
+              # ignore set) and .settings.yaml supplies linting.go_licenses (the
+              # go-licenses build that classifies packages). Both reach the gate
+              # only via that action, so all three paths must be watched or a
+              # version bump silently skips the gate it changes — #814 bumped
+              # go-licenses touching only .settings.yaml, and #1204 bumped Go
+              # touching only .go-version.
               - 'go.mod'
               - 'go.sum'
               - 'vendor/**'
-              - '.github/workflows/verify-licenses.yaml'
+              - 'Makefile'
+              - '.go-version'
+              - '.settings.yaml'
+              - '.github/actions/install-go-licenses/**'
+              - '.github/actions/load-versions/**'
+              - '.github/workflows/merge-gate.yaml'
             renovate:
               # Watch every input the verify-renovate job consumes — including
               # the Makefile target that runs the validator — so changes to the
