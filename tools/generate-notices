@@ -163,6 +163,21 @@ export GOFLAGS="-mod=vendor"
 # here lets go-licenses cross-list each target platform without a C toolchain.
 export CGO_ENABLED=0
 
+# go-licenses decides whether a package is standard library by testing its
+# source path against go/build's GOROOT, and a Go binary only carries a baked-in
+# GOROOT when it was linked WITHOUT -trimpath. An exported GOFLAGS=-trimpath (a
+# common local default) therefore yields a go-licenses whose GOROOT is empty, so
+# the stdlib prefix collapses to "/" and EVERY absolute source path matches: the
+# tool classifies the whole dependency graph as stdlib, writes nothing, and
+# exits 0. Pass the active GOROOT explicitly so the output never depends on how
+# the binary happened to be built.
+GOROOT="$(go env GOROOT)"
+if [[ -z "${GOROOT}" || ! -d "${GOROOT}" ]]; then
+    echo "ERROR: could not resolve a usable GOROOT via 'go env GOROOT' (got '${GOROOT}')." >&2
+    exit 1
+fi
+export GOROOT
+
 # The released binaries ship for multiple OS/arch targets (see .goreleaser.yaml:
 # aicr → darwin+linux × amd64+arm64, aicrd → linux × amd64+arm64). go-licenses
 # resolves the dependency graph for the HOST platform by default, so a macOS
@@ -241,6 +256,20 @@ for platform in "${PLATFORMS[@]}"; do
         --save_path="${platform_save}" \
         --force \
         --ignore="${ignore}"
+
+    # Fail closed on an empty save. 'go-licenses save' exits 0 when it finds no
+    # third-party packages at all (see the GOROOT note above), leaving save_path
+    # missing entirely — which surfaced only as a bare ENOENT from the 'cp'
+    # below. Report the actual cause, and never let a silently-empty collection
+    # reach the notices file.
+    if [[ ! -d "${platform_save}" ]] || [[ -z "$(ls -A "${platform_save}" 2>/dev/null)" ]]; then
+        echo "ERROR: 'go-licenses save' collected no licenses for ${goos}/${goarch}." >&2
+        echo "The tool exits 0 in this state, so this is almost always go-licenses" >&2
+        echo "failing to locate GOROOT and treating every package as standard library." >&2
+        echo "Reinstall it without -trimpath:" >&2
+        echo "  GOFLAGS= go install github.com/google/go-licenses/v2@\$(yq -r .linting.go_licenses .settings.yaml)" >&2
+        exit 1
+    fi
 
     # Merge into the shared tree. A module's license text is identical across
     # platforms, so overwriting is a no-op; modules present on only one platform

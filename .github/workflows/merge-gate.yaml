@@ -363,8 +363,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             vendor/modules.txt
-      - name: Install go-licenses
-        run: go install github.com/google/go-licenses/v2@${{ steps.versions.outputs.go_licenses }}
+      - uses: ./.github/actions/install-go-licenses
+        with:
+          version: ${{ steps.versions.outputs.go_licenses }}
       - name: Report licenses
         env:
           GOFLAGS: -mod=vendor
@@ -563,8 +564,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             vendor/modules.txt
-      - name: Install go-licenses
-        run: go install github.com/google/go-licenses/v2@${{ steps.versions.outputs.go_licenses }}
+      - uses: ./.github/actions/install-go-licenses
+        with:
+          version: ${{ steps.versions.outputs.go_licenses }}
       - name: Verify committed THIRD_PARTY_NOTICES.md is up to date
         env:
           GOFLAGS: -mod=vendor

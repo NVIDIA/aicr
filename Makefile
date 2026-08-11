@@ -216,9 +216,23 @@ license: ## Add/verify license headers in source files
 #### so unrelated MPL-2.0 deps still fail closed for review. The go-cleanhttp /
 #### go-retryablehttp pair, and the HashiCorp Vault client subtree (#1577, the
 #### hashivault:// KMS signing provider), are the approved exceptions.
+####
+#### go-licenses identifies standard library packages by matching their source
+#### path against go/build's GOROOT, which is empty in a binary linked with
+#### -trimpath. With an empty GOROOT the prefix collapses to "/", EVERY package
+#### looks like stdlib, and this gate inspects nothing yet still exits 0 — a
+#### silent false PASS. Resolve GOROOT explicitly below so the check cannot pass
+#### vacuously regardless of how go-licenses was installed.
 license-check: ## Check license is approved
 	@echo "Checking license headers..."
-	@STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
+	@set -e; \
+	GOROOT="$$(go env GOROOT)"; \
+	if [ -z "$$GOROOT" ] || [ ! -d "$$GOROOT" ]; then \
+	    echo "ERROR: could not resolve a usable GOROOT via 'go env GOROOT'." >&2; \
+	    exit 1; \
+	fi; \
+	export GOROOT; \
+	STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
 	go-licenses check ./... \
         --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,Zlib \
         --ignore=github.com/hashicorp/go-cleanhttp \
