@@ -32,6 +32,16 @@ import (
 
 const reverifyWorkflow = ".github/workflows/release-reverify.yaml"
 
+// reverifyStepTimeout bounds the bash subprocess each single reverify-step
+// test spawns against staged fixtures — no network, so anything near this
+// bound means a wedged shell rather than a slow machine.
+const reverifyStepTimeout = 30 * time.Second
+
+// reverifyScenarioTimeout bounds the multi-step scenario runs, which stage and
+// verify a full release archive and so legitimately need more headroom than a
+// single step.
+const reverifyScenarioTimeout = 60 * time.Second
+
 // reverifySBOMFloor mirrors the workflow's SBOM_SIGNING_FLOOR env value and is
 // asserted against it, so raising the floor has to move this constant and with
 // it the below/above-floor cases below.
@@ -1264,7 +1274,7 @@ func runReverifyCloseStep(t *testing.T, script, tag string, issues []closableIss
 	}
 	closedFile := filepath.Join(root, "closed.txt")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), reverifyStepTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "bash", reverifyStepShell(t, root, script)...)
 	command.Dir = root
@@ -1494,7 +1504,7 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 	outputs := filepath.Join(root, "outputs")
 	summary := filepath.Join(root, "summary.md")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), reverifyScenarioTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "bash", reverifyStepShell(t, root, script)...)
 	command.Dir = root

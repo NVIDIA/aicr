@@ -25,6 +25,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 )
 
+// vendorFetchTimeout bounds the vendor path's kustomize subprocess when the
+// source is an unresolvable .invalid host: NXDOMAIN comes back in
+// milliseconds, so reaching this bound means an internal retry loop wedged.
+const vendorFetchTimeout = 5 * time.Second
+
 // fakePuller is a black-box ChartPuller that returns canned bytes per
 // component. Used by vendor-path Write tests so we never depend on a
 // real `helm` binary.
@@ -352,7 +357,7 @@ func TestWrite_VendorCharts_KustomizeFallthrough(t *testing.T) {
 	// reason this would approach the budget is a misbehaving
 	// kustomize/git-library internal retry loop.
 	t.Setenv("GIT_TERMINAL_PROMPT", "0")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), vendorFetchTimeout)
 	defer cancel()
 
 	outDir := t.TempDir()

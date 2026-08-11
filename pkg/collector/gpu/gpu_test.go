@@ -24,6 +24,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
 
+// expiredCtxTimeout is short enough that the context is guaranteed already
+// expired by the time Collect is called — the tests using it assert the
+// deadline-exceeded path, so any non-trivial value would defeat the point.
+const expiredCtxTimeout = 1 * time.Nanosecond
+
 func TestHardwareSubtype(t *testing.T) {
 	t.Run("with resolved SKU emits model", func(t *testing.T) {
 		st := hardwareSubtype(&HardwareInfo{
@@ -138,7 +143,7 @@ func TestCollector_ContextTimeout(t *testing.T) {
 		info: &HardwareInfo{GPUPresent: true, GPUCount: 1, DetectionSource: "nfd"},
 	}))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	ctx, cancel := context.WithTimeout(context.Background(), expiredCtxTimeout)
 	defer cancel()
 	time.Sleep(10 * time.Millisecond)
 

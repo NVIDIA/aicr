@@ -52,6 +52,16 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+// endpointReadySuccessTimeout bounds the success-path readiness probe so a
+// regression that breaks the accept condition fails in milliseconds rather
+// than blocking up to defaults.InferenceHealthTimeout.
+const endpointReadySuccessTimeout = 250 * time.Millisecond
+
+// endpointReadyFailureTimeout is the deliberately tiny deadline for the
+// never-ready case: the expiry is the behavior under test, so it must stay far
+// below defaults.InferenceHealthTimeout.
+const endpointReadyFailureTimeout = 50 * time.Millisecond
+
 func TestHasDynamoPlatform(t *testing.T) {
 	tests := []struct {
 		name string
@@ -3057,7 +3067,7 @@ func TestWaitForEndpointReady_AcceptsOnFirstRealCompletion(t *testing.T) {
 	// InferenceHealthTimeout (5 m). 250 ms is comfortable headroom over the
 	// 3-call/1 ms expected critical path while still tight enough to surface
 	// a stuck loop.
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), endpointReadySuccessTimeout)
 	defer cancel()
 	if err := waitForEndpointReadyWithInterval(ctx, srv.URL, "test-model", time.Millisecond, defaults.InferenceHealthTimeout); err != nil {
 		t.Fatalf("waitForEndpointReady returned error: %v", err)
@@ -3079,7 +3089,7 @@ func TestWaitForEndpointReady_TimesOutWhenAlwaysEmpty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), endpointReadyFailureTimeout)
 	defer cancel()
 
 	err := waitForEndpointReadyWithInterval(ctx, srv.URL, "test-model", time.Millisecond, defaults.InferenceHealthTimeout)

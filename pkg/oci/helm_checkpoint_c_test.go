@@ -44,6 +44,11 @@ import (
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// pushServerTimeout bounds the push exercised against the local httptest
+// registry — a loopback round trip is sub-millisecond, so approaching this
+// bound means the handshake wedged rather than that the test is slow.
+const pushServerTimeout = 5 * time.Second
+
 var checkpointCHelmFiles = []string{
 	"Chart.yaml",
 	"templates/_helpers.tpl",
@@ -889,7 +894,7 @@ func TestPushFrozenDescriptorCancelsAcceptedUploadAndClosesSource(t *testing.T) 
 	accepted := make(chan struct{})
 	putStarted := make(chan struct{})
 	putDone := make(chan error, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), pushServerTimeout)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.Method == http.MethodHead:

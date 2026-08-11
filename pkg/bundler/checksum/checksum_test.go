@@ -30,6 +30,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// fifoCancelTimeout is the deadline the FIFO test relies on to fire while the
+// open would otherwise block forever — the expiry is the behavior under test,
+// so the value must stay short enough to keep the suite fast.
+const fifoCancelTimeout = 100 * time.Millisecond
+
 func TestGenerateChecksums(t *testing.T) {
 	t.Parallel()
 
@@ -591,7 +596,7 @@ func TestSHA256RawContext(t *testing.T) {
 		if err := unix.Mkfifo(fifo, 0600); err != nil {
 			t.Skipf("FIFO unsupported: %v", err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), fifoCancelTimeout)
 		defer cancel()
 		result := make(chan error, 1)
 		go func() {

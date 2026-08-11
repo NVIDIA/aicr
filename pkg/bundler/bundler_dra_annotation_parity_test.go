@@ -28,6 +28,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
+// draBundleMakeTimeout bounds each Make call this file's parity tests issue —
+// generous for a local render into a temp dir, short enough that a wedged
+// bundler fails the test instead of stalling the suite.
+const draBundleMakeTimeout = 30 * time.Second
+
 // TestMake_DRAChartVersionAnnotation_GeneratedArtifactParity is the
 // generated-artifact acceptance test the issue calls out. It bundles
 // the same recipe through two deployer code paths — the default Helm
@@ -114,7 +119,7 @@ func TestMake_DRAChartVersionAnnotation_GeneratedArtifactParity(t *testing.T) {
 			}
 
 			tmpDir := t.TempDir()
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
 			defer cancel()
 			if _, err := b.Make(ctx, rr, tmpDir); err != nil {
 				t.Fatalf("Make() error = %v", err)
@@ -215,7 +220,7 @@ func TestMake_DRAChartVersionAnnotation_AllDeployersCarryAnnotation(t *testing.T
 			}
 
 			tmpDir := t.TempDir()
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
 			defer cancel()
 			if _, err := b.Make(ctx, rr, tmpDir); err != nil {
 				t.Fatalf("Make() error = %v", err)
@@ -301,7 +306,7 @@ func TestMake_DRAChartVersionAnnotation_DisabledRecipeUnaffected(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
 	defer cancel()
 	if _, err := b.Make(ctx, rr, tmpDir); err != nil {
 		t.Fatalf("Make() error = %v", err)
