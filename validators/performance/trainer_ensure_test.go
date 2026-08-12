@@ -42,6 +42,67 @@ func TestEnsureTrainerInstalled_CompleteInstallIsLeftAlone(t *testing.T) {
 	}
 }
 
+// TestEnsureTrainerInstalled_WaitsOnDiscoveredControllerName pins the discovered
+// controller name to the readiness wait. The probe locates the Deployment by label
+// because the Helm chart derives its name from the release, so a chart install
+// under a non-default release name is found under a name the self-install overlay
+// never uses. Waiting on the fixed overlay name instead would poll a Deployment
+// that does not exist, and waitForDeploymentReady treats NotFound as
+// not-ready-yet: a healthy controller would be reported as never ready after the
+// full timeout.
+func TestEnsureTrainerInstalled_WaitsOnDiscoveredControllerName(t *testing.T) {
+	const releaseDerivedName = "kft-custom-release-controller-manager"
+
+	// A complete chart-style install in kubeflow whose controller carries a
+	// release-derived name rather than the overlay's fixed one.
+	objs := append(
+		withoutObject(trainerInstallIn("kubeflow"), func(o runtime.Object) bool {
+			u, ok := o.(*unstructured.Unstructured)
+			return ok && u.GetKind() == "Deployment"
+		}),
+		readyTrainerDeploymentNamed("kubeflow", releaseDerivedName),
+	)
+	client := newTrainerFakeClient(objs...)
+
+	// Fail fast instead of polling out the readiness timeout: a Get for any other
+	// name means the discovered name never reached the wait.
+	var polled []string
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.PrependReactor("get", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		get, ok := action.(k8stesting.GetActionImpl)
+		if !ok {
+			return false, nil, nil
+		}
+		polled = append(polled, get.GetName())
+		if get.GetName() != releaseDerivedName {
+			cancel()
+		}
+		return false, nil, nil
+	})
+
+	refs, err := ensureTrainerInstalled(ctx, client, nil)
+	if err != nil {
+		t.Fatalf("unexpected error waiting on the discovered controller %q (polled %v): %v",
+			releaseDerivedName, polled, err)
+	}
+	if len(refs) != 0 {
+		t.Errorf("refs = %d, want 0", len(refs))
+	}
+	// Without this the name assertion below is a range over an empty slice: if the
+	// readiness wait ever stops issuing Deployment Gets (a switch to the watch
+	// pattern used elsewhere in this file), the loop body would never run and this
+	// guard would pass green while verifying nothing.
+	if len(polled) == 0 {
+		t.Fatal("readiness wait issued no Deployment Get; the name assertion below would be vacuous")
+	}
+	for _, name := range polled {
+		if name != releaseDerivedName {
+			t.Errorf("readiness wait polled %q, want the discovered name %q", name, releaseDerivedName)
+		}
+	}
+}
+
 // TestEnsureTrainerInstalled_WaitsForPreexistingController covers the
 // already-installed branch: the probe checks presence, not readiness, so a
 // still-rolling controller must be waited out and reported distinctly rather

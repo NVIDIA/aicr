@@ -60,16 +60,7 @@ func webhookConfigIn(kind, name, webhookName, namespace string) *unstructured.Un
 // trainerInstallIn returns a complete Trainer installation laid out in the given
 // namespace, as either supported deployment path produces.
 func trainerInstallIn(namespace string) []runtime.Object {
-	deploy := newTestObject("apps/v1", "Deployment", namespace, trainerControllerDeployment)
-	// Both deployment paths label the controller this way; the probe locates it by
-	// label because the Helm name is release-derived.
-	deploy.SetLabels(map[string]string{
-		trainerComponentLabel: trainerComponentValue,
-		trainerPartOfLabel:    trainerPartOfValue,
-	})
-	if err := unstructured.SetNestedField(deploy.Object, int64(1), "status", "readyReplicas"); err != nil {
-		panic(err)
-	}
+	deploy := readyTrainerDeploymentNamed(namespace, trainerControllerDeployment)
 	return []runtime.Object{
 		establishedCRD(trainerCRDTrainJobs),
 		establishedCRD(trainerCRDTrainingRuntimes),

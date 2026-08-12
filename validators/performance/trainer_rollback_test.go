@@ -98,12 +98,25 @@ func readyTrainerDeployment() *unstructured.Unstructured {
 // notReadyTrainerDeployment builds the Trainer controller-manager Deployment with
 // no ready replica, as during a rollout or an ImagePullBackOff.
 func notReadyTrainerDeployment() *unstructured.Unstructured {
-	obj := newTestObject("apps/v1", "Deployment", trainerNamespace, trainerControllerDeployment)
+	return trainerDeploymentNamed(trainerNamespace, trainerControllerDeployment, 0)
+}
+
+// readyTrainerDeploymentNamed builds a controller Deployment reporting one ready
+// replica under an arbitrary name, covering the Helm path where the name is
+// derived from the release rather than fixed by the overlay.
+func readyTrainerDeploymentNamed(namespace, name string) *unstructured.Unstructured {
+	return trainerDeploymentNamed(namespace, name, 1)
+}
+
+// trainerDeploymentNamed builds a controller Deployment carrying the labels both
+// deployment paths set, which is how the probe locates it.
+func trainerDeploymentNamed(namespace, name string, readyReplicas int64) *unstructured.Unstructured {
+	obj := newTestObject("apps/v1", "Deployment", namespace, name)
 	obj.SetLabels(map[string]string{
 		trainerComponentLabel: trainerComponentValue,
 		trainerPartOfLabel:    trainerPartOfValue,
 	})
-	if err := unstructured.SetNestedField(obj.Object, int64(0), "status", "readyReplicas"); err != nil {
+	if err := unstructured.SetNestedField(obj.Object, readyReplicas, "status", "readyReplicas"); err != nil {
 		panic(err)
 	}
 	return obj

@@ -462,8 +462,8 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 	// The probe confirms every object exists; the controller may still be rolling.
 	// Wait for it here rather than reinstalling over a healthy Trainer we do not own.
 	slog.Info("Kubeflow Trainer already installed, waiting for controller readiness",
-		"namespace", install.Namespace)
-	if readyErr := waitForTrainerReady(ctx, dynamicClient, install.Namespace); readyErr != nil {
+		"namespace", install.Namespace, "deployment", install.Deployment)
+	if readyErr := waitForTrainerReady(ctx, dynamicClient, install.Namespace, install.Deployment); readyErr != nil {
 		return nil, aicrErrors.PropagateOrWrap(readyErr, aicrErrors.ErrCodeTimeout,
 			"pre-existing Kubeflow Trainer controller is not ready")
 	}
@@ -564,7 +564,9 @@ func installTrainerResources(ctx context.Context, dynamicClient dynamic.Interfac
 
 	created, err := applyTrainerResources(ctx, dynamicClient, mapper, objs)
 	if err == nil {
-		err = waitForTrainerReady(ctx, dynamicClient, trainerNamespace)
+		// No discovered name here: these objects were just applied from the overlay,
+		// so the controller carries its fixed self-install name.
+		err = waitForTrainerReady(ctx, dynamicClient, trainerNamespace, "")
 	}
 	if err != nil {
 		// contextcheck: rollback deliberately runs on a fresh context. ctx is
@@ -579,11 +581,17 @@ func installTrainerResources(ctx context.Context, dynamicClient dynamic.Interfac
 // waitForTrainerReady blocks until a freshly applied Trainer is usable: the CRDs
 // the NCCL test needs are Established, and the controller-manager has a ready
 // replica so its admission webhooks have endpoints.
-func waitForTrainerReady(ctx context.Context, dynamicClient dynamic.Interface, namespace string) error {
+//
+// deployment is the controller-manager's live name. The probe discovers it by
+// label because the Helm chart derives the name from the release, so a caller
+// that already located the installation must pass what it found rather than let
+// this fall back to the fixed self-install name. Empty means "not discovered"
+// (the post-install path, which applied the overlay's own fixed name).
+func waitForTrainerReady(ctx context.Context, dynamicClient dynamic.Interface, namespace, deployment string) error {
 	if err := waitForTrainerCRDsEstablished(ctx, dynamicClient); err != nil {
 		return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeTimeout, "Trainer CRDs not ready after install")
 	}
-	if err := waitForTrainerControllerReady(ctx, dynamicClient, namespace); err != nil {
+	if err := waitForTrainerControllerReady(ctx, dynamicClient, namespace, deployment); err != nil {
 		return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeTimeout, "Trainer controller not ready after install")
 	}
 	// TrainJobs run as JobSets. A stale install still carrying the garbage-collected
@@ -1085,9 +1093,21 @@ func waitForTrainerCRDsEstablished(ctx context.Context, dynamicClient dynamic.In
 // waitForTrainerControllerReady polls the controller-manager Deployment until at
 // least one replica is ready, ensuring the ValidatingWebhookConfiguration can
 // serve admission requests before the caller creates Trainer custom resources.
-func waitForTrainerControllerReady(ctx context.Context, dynamicClient dynamic.Interface, namespace string) error {
+//
+// An empty deployment falls back to the self-install overlay's fixed name, which
+// is correct only for an installation this validator just applied. Waiting on that
+// name against a chart installation under a non-default release name would poll a
+// Deployment that does not exist: waitForDeploymentReady treats NotFound as
+// not-ready-yet, so it would burn the full timeout and report a healthy controller
+// as never ready.
+func waitForTrainerControllerReady(ctx context.Context, dynamicClient dynamic.Interface,
+	namespace, deployment string) error {
+
+	if deployment == "" {
+		deployment = trainerControllerDeployment
+	}
 	return waitForDeploymentReady(ctx, dynamicClient, namespace,
-		trainerControllerDeployment, defaults.TrainerControllerReadyTimeout)
+		deployment, defaults.TrainerControllerReadyTimeout)
 }
 
 // waitForDeploymentReady polls a Deployment until at least one replica is ready.
