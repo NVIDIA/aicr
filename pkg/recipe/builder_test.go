@@ -27,6 +27,16 @@ import (
 	errs "github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// adequateBuildTimeout is the "plenty of headroom" deadline for the
+// cancellation table's non-canceled case — it must not be the reason a build
+// fails, so the case proves cancellation and nothing else.
+const adequateBuildTimeout = 5 * time.Second
+
+// handlerBudgetTimeout mirrors the 30s HTTP-handler deadline the builder's
+// internal 25s budget must fit inside; the budget test asserts the builder
+// returns before this outer bound fires.
+const handlerBudgetTimeout = 30 * time.Second
+
 // TestBuilder_BuildFromCriteria_ContextCancellation tests context cancellation
 // during recipe building to ensure proper timeout handling and error propagation.
 func TestBuilder_BuildFromCriteria_ContextCancellation(t *testing.T) {
@@ -48,7 +58,7 @@ func TestBuilder_BuildFromCriteria_ContextCancellation(t *testing.T) {
 			name: "normal operation with adequate timeout",
 			setupCtx: func() (context.Context, context.CancelFunc) {
 				// Provide adequate timeout for normal operation
-				return context.WithTimeout(context.Background(), 5*time.Second)
+				return context.WithTimeout(context.Background(), adequateBuildTimeout)
 			},
 			wantTimeout: false,
 		},
@@ -100,7 +110,7 @@ func TestBuilder_BuildFromCriteria_ContextCancellation(t *testing.T) {
 // respects the 25-second timeout budget for recipe building.
 func TestBuilder_BuildFromCriteria_TimeoutBudget(t *testing.T) {
 	// Create context with 30s timeout (handler-level)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), handlerBudgetTimeout)
 	defer cancel()
 
 	builder := NewBuilder()

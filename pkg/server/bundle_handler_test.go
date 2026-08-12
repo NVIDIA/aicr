@@ -22,9 +22,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
@@ -764,10 +768,115 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 			h.HandleBundles(w, req)
 
 			if w.Code != http.StatusOK {
-				t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+				t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+			}
+
+			// Round-trip: the emitted artifact must carry the canonical kind
+			// and load back through the CLI file loader, whatever legacy
+			// header shape the body used. Before #1953 a legacy "Recipe" kind
+			// was echoed into recipe.yaml, which the loader rejects.
+			emitted := bundleRecipeYAML(t, w.Body.Bytes())
+			var emittedHeader struct {
+				Kind string `yaml:"kind"`
+			}
+			if err := yaml.Unmarshal(emitted, &emittedHeader); err != nil {
+				t.Fatalf("unmarshal emitted recipe.yaml header: %v", err)
+			}
+			if emittedHeader.Kind != recipe.RecipeResultKind {
+				t.Errorf("emitted recipe.yaml kind = %q, want %q", emittedHeader.Kind, recipe.RecipeResultKind)
+			}
+
+			// Named recipePath, not path: the file-level `path` import is used
+			// by bundleRecipeYAML below.
+			recipePath := filepath.Join(t.TempDir(), "recipe.yaml")
+			if err := os.WriteFile(recipePath, emitted, 0o600); err != nil {
+				t.Fatalf("write emitted recipe: %v", err)
+			}
+			if _, err := recipe.LoadFromFileWithProvider(
+				t.Context(), recipePath, "", "v-test", nil,
+			); err != nil {
+				t.Errorf("emitted recipe.yaml is not reloadable: %v", err)
 			}
 		})
 	}
+}
+
+// TestBundleHandler_UnsupportedRecipeKind pins the other half of the ingest
+// kind contract: only the shapes BundleRecipeRequest advertises ("",
+// RecipeResult, and the legacy Recipe) are accepted. An off-contract kind is
+// rejected rather than echoed into an artifact the CLI file loader would then
+// refuse to read back — matching the file loader and the strict /v2/bundle
+// decode path. See issue #1953.
+func TestBundleHandler_UnsupportedRecipeKind(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{"RecipeMetadata", "Snapshot", "reciperesult"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+
+			var body map[string]any
+			if err := json.Unmarshal(resolveEmbeddedBundleBody(t), &body); err != nil {
+				t.Fatalf("unmarshal fixture: %v", err)
+			}
+			body["kind"] = kind
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal body: %v", err)
+			}
+
+			h := newTestBundleHandler(t)
+			req := httptest.NewRequest(http.MethodPost, "/v1/bundle", bytes.NewReader(encoded))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.HandleBundles(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+			// Assert the reason, not just the status: a 400 from an unrelated
+			// decode change would otherwise keep this green for the wrong reason.
+			var resp struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal error response: %v (body: %s)", err, w.Body.String())
+			}
+			if resp.Code != string(aicrerrors.ErrCodeInvalidRequest) {
+				t.Errorf("error code = %q, want %q", resp.Code, aicrerrors.ErrCodeInvalidRequest)
+			}
+			if !strings.Contains(resp.Message, kind) {
+				t.Errorf("error message %q does not name the rejected kind %q", resp.Message, kind)
+			}
+		})
+	}
+}
+
+// bundleRecipeYAML returns the bundle's recipe.yaml from an in-memory bundle
+// zip response, failing the test when the archive does not contain one.
+func bundleRecipeYAML(t *testing.T, archive []byte) []byte {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatalf("open bundle zip: %v", err)
+	}
+	for _, f := range zr.File {
+		if path.Base(f.Name) != "recipe.yaml" {
+			continue
+		}
+		rc, openErr := f.Open()
+		if openErr != nil {
+			t.Fatalf("open %s in zip: %v", f.Name, openErr)
+		}
+		data, readErr := io.ReadAll(rc)
+		_ = rc.Close()
+		if readErr != nil {
+			t.Fatalf("read %s in zip: %v", f.Name, readErr)
+		}
+		return data
+	}
+	t.Fatal("bundle zip contains no recipe.yaml")
+	return nil
 }
 
 func TestBundleHandler_StreamZipFailureBeforeCommit(t *testing.T) {

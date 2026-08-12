@@ -23,6 +23,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
+// unreachablePullTimeout bounds the materialize calls that dial an
+// intentionally unreachable registry, so flaky DNS or a slow stack cannot pay
+// the production two-minute pull timeout.
+const unreachablePullTimeout = 250 * time.Millisecond
+
 func i64ptr(v int64) *int64 { return &v }
 
 func TestCrossCheckPointerSigner(t *testing.T) {
@@ -156,7 +161,7 @@ func TestMaterializeBundle_TagOnlyWithAllowFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DetectInputForm: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), unreachablePullTimeout)
 	defer cancel()
 	_, err = MaterializeBundle(ctx,
 		VerifyOptions{Input: unreachable, AllowUnpinnedTag: true},

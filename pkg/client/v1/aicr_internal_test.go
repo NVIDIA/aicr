@@ -1467,6 +1467,78 @@ func TestAdoptRecipe_RejectsIncoherentRef(t *testing.T) {
 	}
 }
 
+// TestAdoptRecipe_NormalizesKind pins issue #1953 at the adopt boundary: a
+// decoded body may carry an absent, empty, or legacy "Recipe" kind (all three
+// accepted by the /v1/bundle contract), and the adopted copy must be stamped
+// with the canonical kind so the emitted bundle recipe.yaml reloads through
+// the CLI file loader. An off-contract kind is rejected instead of echoed.
+func TestAdoptRecipe_NormalizesKind(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	tests := []struct {
+		name    string
+		kind    string
+		wantErr bool
+	}{
+		{name: "canonical kind (control)", kind: recipe.RecipeResultKind},
+		{name: "empty kind", kind: ""},
+		{name: "legacy Recipe kind", kind: "Recipe"},
+		{name: "off-contract kind", kind: "RecipeMetadata", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			input := &recipe.RecipeResult{
+				Kind:       tt.kind,
+				APIVersion: recipe.RecipeAPIVersion,
+				Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+				ComponentRefs: []recipe.ComponentRef{
+					{
+						Name:    "gpu-operator",
+						Type:    recipe.ComponentTypeHelm,
+						Source:  "https://charts.example.com",
+						Chart:   "gpu-operator",
+						Version: "v1",
+					},
+				},
+			}
+
+			res, adoptErr := client.adoptRecipe(t.Context(), input)
+			if tt.wantErr {
+				if adoptErr == nil {
+					t.Fatalf("adoptRecipe accepted kind %q; want ErrCodeInvalidRequest", tt.kind)
+				}
+				var se *aicrerrors.StructuredError
+				if !stderrors.As(adoptErr, &se) {
+					t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", adoptErr, adoptErr)
+				}
+				if se.Code != aicrerrors.ErrCodeInvalidRequest {
+					t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+				}
+				return
+			}
+			if adoptErr != nil {
+				t.Fatalf("adoptRecipe(kind=%q): %v", tt.kind, adoptErr)
+			}
+			if got := res.internal.Kind; got != recipe.RecipeResultKind {
+				t.Errorf("adopted kind = %q, want %q", got, recipe.RecipeResultKind)
+			}
+			// The caller-supplied recipe is never mutated (adoption deep-copies).
+			if input.Kind != tt.kind {
+				t.Errorf("input kind mutated to %q, want %q", input.Kind, tt.kind)
+			}
+		})
+	}
+}
+
 // blockingReadFileProvider parks ReadFile of a target file (e.g. registry.yaml)
 // on a signal, so a test can deterministically pin adoptRecipe inside its
 // registry-backed type back-fill while a second goroutine calls Close.

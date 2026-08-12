@@ -27,6 +27,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// sigstoreFetchTimeout bounds the network-backed integration tests that pull
+// from the public Sigstore TUF CDN — generous for a healthy CDN, short enough
+// that a hung fetch fails the test rather than the whole suite's deadline.
+const sigstoreFetchTimeout = 30 * time.Second
+
 func TestGetTrustedMaterial(t *testing.T) {
 	t.Parallel()
 
@@ -62,7 +67,7 @@ func TestUpdate_Success(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), sigstoreFetchTimeout)
 	defer cancel()
 
 	material, err := Update(ctx)
@@ -108,7 +113,7 @@ func TestResolveSigningConfig(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), sigstoreFetchTimeout)
 	defer cancel()
 
 	sc, err := ResolveSigningConfig(ctx)

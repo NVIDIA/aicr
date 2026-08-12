@@ -14,11 +14,4 @@
 
 # Intentional API compatibility breaks. Each entry is tied to the active release
 # baseline and must be removed when that baseline advances; stale entries fail the gate.
-acknowledgements:
-  - baseline: v0.18.0
-    issue: '#1891, #2095'
-    summary: BundleOptions and Snapshot gained []byte fields, making both structs non-comparable.
-    rationale: BinaryAttestation enables verified in-image provenance; Raw preserves agent-emitted snapshots without dropping fields unknown to the client.
-    incompatible_changes:
-      - 'BundleOptions: old is comparable, new is not'
-      - 'Snapshot: old is comparable, new is not'
+acknowledgements: []

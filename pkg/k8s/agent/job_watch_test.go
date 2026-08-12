@@ -29,6 +29,11 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
+// jobWatchTimeout bounds waits driven by fake-clientset watch events — ample
+// for an in-memory watcher, short enough that a wait which never observes its
+// event fails the test instead of stalling the suite.
+const jobWatchTimeout = 5 * time.Second
+
 // TestWaitForJobDeletion_AlreadyDeleted exercises the fast-path Get returning
 // NotFound (no Job exists in the clientset).
 func TestWaitForJobDeletion_AlreadyDeleted(t *testing.T) {
@@ -174,7 +179,7 @@ func TestFindOrWatchPodName_WatchAddedEvent(t *testing.T) {
 		JobName:   "test-job",
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), jobWatchTimeout)
 	defer cancel()
 
 	name, err := d.findOrWatchPodName(ctx)

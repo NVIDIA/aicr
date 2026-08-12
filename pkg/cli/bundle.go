@@ -648,7 +648,8 @@ Argo CD:
 
 Flux:
   - kustomization.yaml: Root Kustomize orchestration
-  - sources/: HelmRepository and GitRepository source CRs
+  - sources/: HelmRepository and GitRepository source CRs (omitted when no
+    component contributes a source, as with --vendor-charts and an OCI output)
   - <component>/helmrelease.yaml: Flux HelmRelease with inline values
   - README.md: Deployment instructions
   - checksums.txt: SHA256 checksums of generated files

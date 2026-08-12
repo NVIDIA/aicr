@@ -24,6 +24,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// wedgedReadTimeout is the deadline the wedged-read tests rely on to fire
+// while fn is still blocked — the expiry is the behavior under test, so it
+// stays tiny to keep the suite fast.
+const wedgedReadTimeout = 10 * time.Millisecond
+
 func isCode(err error, code errors.ErrorCode) bool {
 	return stderrors.Is(err, errors.New(code, ""))
 }
@@ -47,7 +52,7 @@ func TestDo_DeadlineSurfacesTimeout(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 
-	err := doWithTimeout(context.Background(), 10*time.Millisecond, "wedged read", func() error {
+	err := doWithTimeout(context.Background(), wedgedReadTimeout, "wedged read", func() error {
 		<-release
 		return nil
 	})
@@ -126,7 +131,7 @@ func TestDo_CallerUnblocksWhileWorkerRuns(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- doWithTimeout(context.Background(), 10*time.Millisecond, "wedged read", func() error {
+		errCh <- doWithTimeout(context.Background(), wedgedReadTimeout, "wedged read", func() error {
 			close(started)
 			<-release
 			close(finished)

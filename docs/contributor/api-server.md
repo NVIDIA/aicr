@@ -293,8 +293,10 @@ contains two contract gates:
 
   Runtime acceptance of the legacy header shapes is pinned separately by
   `TestBundleHandler_LegacyRecipeHeaders`, which posts absent, empty, and
-  `kind: Recipe` bodies to the handler and asserts 200. The spec gate alone
-  would only be checking the spec against itself.
+  `kind: Recipe` bodies to the handler, asserts 200, and round-trips the
+  emitted `recipe.yaml` back through the file loader to prove the ingest
+  normalization holds. The spec gate alone would only be checking the spec
+  against itself.
 
 Drift is a contract bug: clients conforming to the spec will reject
 inputs the server actually accepts, or generate types that reject

@@ -436,6 +436,13 @@ is queryable only: it carries no owning `Client`, so `MakeBundle`,
 `BundleComponents`, and `ValidateState` reject it. Use `Client.AdoptRecipe`
 when you need a bundle-able result.
 
+`AdoptRecipe` canonicalizes the artifact `Kind` on the copy it returns: an
+absent, empty, or legacy `Recipe` kind is stamped as `RecipeResult`, and any
+other kind is rejected with `ErrCodeInvalidRequest`. This keeps a bundle
+generated from an externally-decoded recipe reloadable by the file loader. The
+caller's own `RecipeResult` is never mutated, and `APIVersion` is validated but
+never rewritten.
+
 ## Errors
 
 All errors returned by the facade are `*pkg/errors.StructuredError`

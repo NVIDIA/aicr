@@ -66,6 +66,27 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 - Skips Go (handled by `actions/setup-go`) and Docker (pre-installed on runners)
 - Uses the same installation logic as local development
 
+#### `install-go-licenses/`
+**Purpose**: Install the pinned `go-licenses` with `GOFLAGS` cleared
+**When to use**: Any job running `make license-check`, `make notices`, or `make notices-check`
+**Inputs**:
+- `version` (required): go-licenses version from `load-versions` (`.settings.yaml` `linting.go_licenses`)
+
+`go-licenses` publishes no binary release, so it cannot come from
+`setup-build-tools` (which installs from binary releases) and must be
+`go install`ed. Clearing `GOFLAGS` is a correctness requirement rather than a
+preference: `-trimpath` strips the binary's baked-in `GOROOT`, which makes
+`go-licenses` classify every package as standard library and report an empty
+dependency graph while still exiting `0`. The install is centralized here so no
+caller can silently drop that contract.
+
+**Example**:
+```yaml
+- uses: ./.github/actions/install-go-licenses
+  with:
+    version: ${{ steps.versions.outputs.go_licenses }}
+```
+
 #### `load-versions/`
 **Purpose**: Load tool versions from `.settings.yaml` as workflow outputs
 **When to use**: When you need version values in workflow steps

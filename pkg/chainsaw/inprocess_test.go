@@ -29,6 +29,17 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// shortCircuitCtxTimeout bounds runs whose asserts are expected to fail, so
+// the retry loop short-circuits on context.Canceled instead of waiting out the
+// assert timeout handed to runChainsawTestInProcess — the YAML-declared value
+// (typically 5m) for the registry corpus, 1s for the table-driven cases.
+const shortCircuitCtxTimeout = 200 * time.Millisecond
+
+// inProcessRunTimeout bounds runs expected to complete normally against the
+// in-memory fetcher — generous for a fixture with no I/O, short enough that a
+// wedged retry loop fails the test rather than stalling the suite.
+const inProcessRunTimeout = 2 * time.Second
+
 // fakeFetcher is a minimal ResourceFetcher backed by an in-memory map.
 // Keyed by "<apiVersion>/<kind>/<namespace>/<name>" for Get, and by
 // "<apiVersion>/<kind>/<namespace>" for List (returns slice of items).
@@ -300,7 +311,7 @@ spec:
 // executor's unmarshaler and that the executor walks every step
 // without choking on a known structural pattern. Each check has its
 // own spec.timeouts.assert (typically 5m) — to keep the test fast we
-// wrap each invocation in a 200ms ctx so the retry loop short-
+// wrap each invocation in a shortCircuitCtxTimeout ctx so the retry loop short-
 // circuits via context.Canceled rather than waiting out the YAML-
 // declared timeout. Parity for assertion behavior (a healthy cluster
 // fixture produces Passed=true) is the load-bearing live-cluster
@@ -310,7 +321,7 @@ func TestRunChainsawTestInProcess_RegistryCorpusParses(t *testing.T) {
 		// Short ctx so retry loops short-circuit. The empty fake
 		// fetcher makes every assert fail (NotFound), which would
 		// otherwise wait out the YAML's 5m assert timeout.
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), shortCircuitCtxTimeout)
 		r := runChainsawTestInProcess(ctx, c.component, c.content, 5*time.Minute, newFakeFetcher())
 		cancel()
 		// We don't assert r.Passed; we assert no parse / schema
@@ -699,7 +710,7 @@ spec:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), shortCircuitCtxTimeout)
 			defer cancel()
 			r := runChainsawTestInProcess(ctx, "c", tt.yaml, time.Second, newFakeFetcher())
 
@@ -807,7 +818,7 @@ spec:
 			for _, name := range tt.present {
 				f.addGet("v1", "Pod", "ns", name, pod(name, "Running", nil))
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), inProcessRunTimeout)
 			defer cancel()
 
 			r := runChainsawTestInProcess(ctx, "c", tt.stream, time.Second, f)

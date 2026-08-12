@@ -3147,15 +3147,18 @@ components:
         and aicr.run/v1alpha3 artifacts, plus legacy artifacts with absent or
         empty header fields, are
         accepted. The kind value Recipe is also accepted: it was the value this
-        contract published through v0.18.0, and the handler performs no kind
-        validation, so clients written against that spec must keep working.
-        apiVersion is the one validated header field — see below.
+        contract published through v0.18.0, so clients written against that
+        spec must keep working.
 
-        A legacy kind is echoed into the generated bundle's recipe.yaml rather
-        than normalized, and the CLI file loader accepts an absent or empty kind
-        but rejects Recipe. A bundle generated from a kind Recipe body is
-        therefore not reloadable via aicr bundle -r or aicr validate -r. Send
-        kind RecipeResult to keep the emitted artifact round-trippable.
+        A legacy kind is normalized on ingest rather than echoed: an absent,
+        empty, or Recipe kind is stamped as RecipeResult, so the generated
+        bundle's recipe.yaml always carries the canonical kind and reloads via
+        aicr bundle -r and aicr validate -r. Only kind is rewritten; a request
+        that omits apiVersion still yields an artifact with an empty
+        apiVersion, which every reader accepts as the legacy shape. Any kind
+        outside this enum is rejected with a 400, matching the /v2/bundle
+        decode path and the kind values the CLI file loader accepts for a
+        hydrated RecipeResult.
 
         apiVersion deliberately has no equivalent legacy window. The artifact
         group/version bump is a hard break with no transition period (see
@@ -3197,7 +3200,8 @@ components:
               type: string
               description: >
                 RecipeResult, the legacy Recipe value published through
-                v0.18.0, or empty for a legacy artifact
+                v0.18.0, or empty for a legacy artifact. The legacy values are
+                normalized to RecipeResult in the generated bundle.
               enum: ["", Recipe, RecipeResult]
             metadata:
               type: object

@@ -554,6 +554,48 @@ func (r *RecipeResult) backfillComponentTypes() error {
 	return nil
 }
 
+// NormalizeKind canonicalizes the artifact kind of an externally-supplied
+// RecipeResult so the artifact this build emits is always stamped with the
+// canonical kind, whatever legacy shape the caller sent. It is applied at the
+// ingest boundary that adopts a decoded RecipeResult (client adoptRecipe,
+// reached by POST /v1/bundle, POST /v2/bundle, and Client.AdoptRecipe) —
+// never on the resolve path, which stamps the header itself.
+//
+// Accept liberally, emit canonically:
+//   - an absent or empty kind (legacy artifacts predating the discriminator)
+//     and the legacy "Recipe" value this API contract published from v0.14.0
+//     through v0.18.0 are rewritten to RecipeResultKind;
+//   - RecipeResultKind passes through unchanged;
+//   - any other value is rejected with ErrCodeInvalidRequest.
+//
+// Without the rewrite a legacy kind survived into the generated bundle's
+// recipe.yaml (Kind has no omitempty), and LoadFromFileWithProvider rejects
+// "Recipe" — so a bundle generated from such a body could not be fed back
+// through "aicr bundle -r" or "aicr validate -r". Rejecting an unknown kind
+// matches DecodeRecipeResult (the strict v2 decode path) and the kind values
+// LoadFromFileWithProvider accepts for a hydrated artifact, so no boundary
+// silently emits an artifact it would not read back. (The file loader also
+// accepts RecipeMetadata, but as an overlay to hydrate rather than as a
+// RecipeResult; that input shape has no analog on this boundary.) Only Kind is
+// normalized: APIVersion is validated, never rewritten, because an artifact
+// group/version bump is a hard break with no transition window — see
+// docs/design/011-artifact-apiversion-policy.md. See issue #1953.
+func (r *RecipeResult) NormalizeKind() error {
+	if r == nil {
+		return nil
+	}
+	legacyKind := header.KindRecipe.String()
+	switch r.Kind {
+	case "", RecipeResultKind, legacyKind:
+		r.Kind = RecipeResultKind
+		return nil
+	default:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe has kind %q, but %q is required; an absent kind and the legacy %q value are accepted and normalized",
+				r.Kind, RecipeResultKind, legacyKind))
+	}
+}
+
 // PrepareAndValidate normalizes a RecipeResult's component refs and rejects
 // incoherent ones, in the required order: validate the profile contract;
 // reject refs named with the reserved deployer override key (all refs, enabled
