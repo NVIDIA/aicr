@@ -553,7 +553,14 @@ func (c *Criteria) Specificity() int {
 	if c.Platform != CriteriaPlatformAny && c.Platform != "" {
 		score++
 	}
-	// Nodes is metadata-only and does not contribute to specificity; see #1781.
+	// Nodes participates in Specificity so that a nodes-only query (e.g.
+	// `aicr recipe --nodes 8`) passes the CLI guard that requires
+	// Specificity() > 0.  No overlay in the embedded catalog gates on nodes,
+	// so this score point never influences overlay tiebreaking in practice.
+	// Nodes does NOT participate in Matches(); see #1781.
+	if c.Nodes != 0 {
+		score++
+	}
 	return score
 }
 

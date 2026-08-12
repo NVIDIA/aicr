@@ -384,9 +384,16 @@ func TestCriteriaSpecificity(t *testing.T) {
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
 				Platform:    CriteriaPlatformKubeflow,
-				Nodes:       100, // metadata-only; does not contribute to specificity (#1781)
+				Nodes:       100,
 			},
-			want: 5,
+			want: 6,
+		},
+		{
+			// Nodes participates in Specificity so that --nodes-only queries
+			// pass the CLI minimum-specificity guard (#1781).
+			name:     "nodes only - scores 1 so CLI guard passes",
+			criteria: &Criteria{Nodes: 8},
+			want:     1,
 		},
 		// Regression tests: YAML-parsed criteria have empty strings for omitted
 		// fields, not "any". Specificity must treat "" as equivalent to "any".

@@ -695,6 +695,23 @@ func TestRecipeCmd_NoCriteriaValidation(t *testing.T) {
 	}
 }
 
+// TestRecipeCmd_NodesCriteriaPassesGuard is a regression test for issue #1781.
+// Removing nodes from Criteria.Matches() must not also remove it from
+// Specificity() — a nodes-only query (aicr recipe --nodes N) must pass the
+// minimum-specificity guard and proceed to recipe resolution, not be rejected
+// with "no criteria provided". Resolution will fail (no matching overlay for
+// nodes-only) but the guard must not fire.
+func TestRecipeCmd_NodesCriteriaPassesGuard(t *testing.T) {
+	err := recipeCmd().Run(context.Background(), []string{"recipe", "--nodes", "8"})
+	if err == nil {
+		return // guard passed and resolution attempted — acceptable
+	}
+	noCriteriaMsg := "no criteria provided"
+	if strings.Contains(err.Error(), noCriteriaMsg) {
+		t.Errorf("--nodes 8 should pass the minimum-specificity guard but got: %v", err)
+	}
+}
+
 // TestRecipeCmd_UnusableSnapshotRejected covers issue #1888: a snapshot that
 // passes the loader's structural gate but whose measurements identify no
 // criteria dimension must fail closed with INVALID_REQUEST, not silently emit

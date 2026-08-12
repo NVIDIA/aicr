@@ -173,7 +173,10 @@ fast-path `switch` in `Parse<X>`. Adding a new value to a Go enum
 the count of non-`any`, non-empty fields. The current `Specificity()`
 in `criteria.go` counts six fields: `service`, `accelerator`,
 `intent`, `os`, `platform`, `nodes`. Overlays are sorted by
-specificity ascending, so less-specific overlays merge first.
+specificity ascending, so less-specific overlays merge first. Note:
+`nodes` is included in `Specificity()` to allow nodes-only CLI queries
+to pass the guard, but it does **not** participate in `Matches()` — no
+overlay gates on node count (see #1781).
 
 **Matching is asymmetric.** Recipe-side `any` is a wildcard (matches
 anything in the query); query-side `any` is *not* a wildcard (matches
@@ -461,8 +464,11 @@ The error's `uncovered` context entries (`dimension`, `requestedValue`,
 the requested value without conflicting with any other stated dimension —
 see `completionTuplesFor` / `minimalTuples`. `nodes` is deliberately excluded
 from `coverageDimensions`: no overlay gates on node count, so covering it
-would reject every `--nodes` query. It remains a matching dimension (present
-in `Criteria.Matches`) but carries no coverage guarantee — it is advisory.
+would reject every `--nodes` query. It does not participate in
+`Criteria.Matches()` (removed in #1781 — no overlay gates on it), but it
+is retained in `Criteria.Specificity()` so that nodes-only CLI queries
+pass the minimum-specificity guard. It carries no coverage guarantee —
+it is advisory metadata.
 
 **Composition with the OS guard.** `requireOSIfNeeded` (the joint
 service+accelerator OS gate) is a separate, pre-existing check and runs
