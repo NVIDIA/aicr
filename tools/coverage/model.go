@@ -86,9 +86,10 @@ type Row struct {
 // is a link into TestGrid, never a cell here.
 type VersionAxis struct {
 	// PreviousReleases is how many stable releases below main each enrolled
-	// reservation runs nightly — uat-nightly-batch.yaml's previous_n input
-	// default, which the cron path takes because it passes no inputs. Zero
-	// means the batch runs main only.
+	// reservation runs nightly — uat-nightly-batch.yaml's
+	// `inputs.previous_n || 'N'` schedule fallback, which the cron path uses
+	// because a schedule event has an empty inputs context (workflow_dispatch
+	// defaults are not applied). Zero means the batch runs main only.
 	PreviousReleases int
 }
 

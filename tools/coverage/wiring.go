@@ -185,8 +185,12 @@ type cloudPipeline struct {
 // scanLanePhases reports the runner phases the cloud's UAT pipeline actually
 // executes. Fails closed when the pipeline for an enrolled cloud is missing.
 func scanLanePhases(repoRoot, cloud string) (map[string]bool, error) {
-	rel := filepath.ToSlash(filepath.Join(".github", "workflows", "uat-"+cloud+".yaml"))
-	data, err := readBoundedFile(filepath.Join(repoRoot, filepath.FromSlash(rel)), rel)
+	relPath := filepath.Join(".github", "workflows", "uat-"+cloud+".yaml")
+	if !filepath.IsLocal(relPath) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "invalid UAT cloud path: "+strconv.Quote(cloud))
+	}
+	rel := filepath.ToSlash(relPath)
+	data, err := readBoundedFile(filepath.Join(repoRoot, relPath), rel)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +244,9 @@ func stripShellComment(line string) string {
 	for i := 0; i < len(line); i++ {
 		c := line[i]
 		switch {
-		case c == '\\' && i+1 < len(line) && (inSingle || inDouble):
+		// Backslash escapes the next byte outside quotes and inside double
+		// quotes; inside single quotes it is literal.
+		case c == '\\' && i+1 < len(line) && !inSingle:
 			i++
 		case c == '\'' && !inDouble:
 			inSingle = !inSingle

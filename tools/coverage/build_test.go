@@ -358,6 +358,35 @@ func TestShellCommentedPhaseIsNotExecuted(t *testing.T) {
 	}
 }
 
+func TestStripShellComment(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{`./tests/uat/aws/run train`, `./tests/uat/aws/run train`},
+		{`echo done # ./tests/uat/aws/run serve`, `echo done `},
+		{`echo 'a\#b' # tail`, `echo 'a\#b' `}, // single-quoted \ is literal; real comment still cuts
+		{`echo \#notacomment`, `echo \#notacomment`}, // unquoted \# is a literal #
+		{`echo "x\#y" # tail`, `echo "x\#y" `},
+	}
+	for _, tt := range tests {
+		if got := stripShellComment(tt.in); got != tt.want {
+			t.Errorf("stripShellComment(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestScanLanePhasesRejectsNonLocalCloud(t *testing.T) {
+	// Enough .. segments that Clean climbs out of .github/workflows and leaves
+	// a non-local relative path — the case filepath.IsLocal is meant to catch.
+	_, err := scanLanePhases(t.TempDir(), "../../../../../../../etc/passwd")
+	if err == nil {
+		t.Fatal("expected invalid cloud path error")
+	}
+	if !strings.Contains(err.Error(), "invalid UAT cloud path") {
+		t.Errorf("error = %q, want invalid UAT cloud path", err)
+	}
+}
+
 // TestPhaseTokenIsWholeArgument pins the capture to the whole phase argument.
 // A letters-only class would clip `serve-v2` to `serve` and credit cuj2 with a
 // journey the pipeline never ran.

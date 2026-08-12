@@ -186,8 +186,9 @@ jobs:
               #     actually enabled steps (a commented-out phase is not coverage)
               #   - uat-nightly-batch.yaml: the previous_n version axis
               #   - tests/uat, tests/chainsaw, demos: the scanned signal trees
-              #   - Makefile: the generate/check contract itself, so a change to
-              #     the targets cannot skip their own gate
+              #   - Makefile + this workflow: the generate/check contract and the
+              #     coverage-freshness job itself, so a change to either cannot
+              #     skip its own gate
               - 'docs/user/coverage-matrix.md'
               - 'tools/coverage/**'
               - 'pkg/cli/**'
@@ -198,6 +199,7 @@ jobs:
               - 'tests/chainsaw/**'
               - 'demos/**'
               - 'Makefile'
+              - '.github/workflows/merge-gate.yaml'
             docs:
               # Inputs to the parser-level MDX gate. Only the Fern-published
               # trees matter — a change anywhere under them can introduce a
