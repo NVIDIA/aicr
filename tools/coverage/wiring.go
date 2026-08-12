@@ -59,6 +59,12 @@ const (
 	previousNInput = "previous_n"
 )
 
+// previousNScheduleFallback matches the cron path's literal fallback in
+// uat-nightly-batch.yaml: PREVIOUS_N: ${{ inputs.previous_n || 'N' }}. On a
+// schedule event the inputs context is empty, so workflow_dispatch defaults are
+// NOT applied — this || 'N' is the value the cron actually uses.
+var previousNScheduleFallback = regexp.MustCompile(`inputs\.previous_n\s*\|\|\s*'([^']*)'`)
+
 // uatLane is one nightly-enrolled cloud lane: the per-cloud runner the batch
 // invokes, the recipe intents its reservations are enrolled for, and the runner
 // phases its pipeline actually executes.
@@ -198,25 +204,53 @@ func scanLanePhases(repoRoot, cloud string) (map[string]bool, error) {
 	phases := map[string]bool{}
 	for _, job := range wf.Jobs {
 		for _, step := range job.Steps {
-			// Line by line, skipping shell comments. Decoding the YAML drops a
-			// commented-out *step*, but a `run:` block is an opaque scalar, so a
-			// commented line inside one survives into step.Run and would otherwise
-			// read as an executed phase.
+			// Line by line, cutting shell comments before matching. Decoding the
+			// YAML drops a commented-out *step*, but a `run:` block is an opaque
+			// scalar, so a full-line `# ...` or a trailing `... # runner ref`
+			// inside one survives into step.Run and would otherwise read as an
+			// executed phase.
 			for _, line := range strings.Split(step.Run, "\n") {
-				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				code := stripShellComment(line)
+				if strings.TrimSpace(code) == "" {
 					continue
 				}
-				if m := phaseRef.FindStringSubmatch(line); m != nil {
+				if m := phaseRef.FindStringSubmatch(code); m != nil {
 					phases[m[1]] = true
 				}
 			}
 		}
 	}
 	if len(phases) == 0 {
+		// coverage-check runs unconditionally from `make qualify`, so this error
+		// blocks every local qualify until the enrollment and pipeline agree.
+		// Opt the cloud out of the nightly batch with `nightly-intents: []` on
+		// its reservation(s) in infra/uat/reservations.yaml.
 		return nil, errors.New(errors.ErrCodeNotFound,
-			rel+" declares no enabled UAT runner step, but its cloud is enrolled in the nightly batch")
+			rel+" declares no enabled UAT runner step, but its cloud is enrolled in the nightly batch; "+
+				"opt the cloud out with nightly-intents: [] on its reservation(s) in "+registryRelPath)
 	}
 	return phases, nil
+}
+
+// stripShellComment returns the executable portion of a shell line, cutting at
+// the first `#` that is not inside single or double quotes. Trailing comments
+// like `echo done # ./tests/uat/aws/run serve ...` must not count as phases.
+func stripShellComment(line string) string {
+	inSingle, inDouble := false, false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case c == '\\' && i+1 < len(line) && (inSingle || inDouble):
+			i++
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+		case c == '#' && !inSingle && !inDouble:
+			return line[:i]
+		}
+	}
+	return line
 }
 
 // nightlyBatchWorkflow is the minimal shape of uat-nightly-batch.yaml the
@@ -235,11 +269,17 @@ type nightlyBatchWorkflow struct {
 
 // scanVersionAxis derives the AICR-version axis the nightly batch exercises.
 // Every enrolled reservation runs tip-of-main plus the `previous_n` stable
-// releases below it, one full provision/CUJ/teardown cell per version. The cron
-// path passes no inputs, so the declared input default is the scheduled value.
+// releases below it, one full provision/CUJ/teardown cell per version.
 //
-// Fails closed for the same reason as scanWiredUAT: a renamed input or a moved
-// workflow must surface as an error, not as a silent collapse to "main only".
+// On a schedule event the inputs context is empty and workflow_dispatch
+// defaults are NOT applied — the cron uses the literal `|| 'N'` fallback on
+// PREVIOUS_N. The dispatch input default is what a manual run gets when the
+// operator leaves the field blank. Both literals must agree; either alone is
+// not the scheduled axis.
+//
+// Fails closed for the same reason as scanWiredUAT: a renamed input, a moved
+// workflow, or drifted literals must surface as an error, not as a silent
+// collapse to "main only".
 func scanVersionAxis(repoRoot string) (VersionAxis, error) {
 	data, err := readBoundedFile(filepath.Join(repoRoot, filepath.FromSlash(nightlyBatchRelPath)), nightlyBatchRelPath)
 	if err != nil {
@@ -255,10 +295,21 @@ func scanVersionAxis(repoRoot string) (VersionAxis, error) {
 		return VersionAxis{}, errors.New(errors.ErrCodeNotFound,
 			nightlyBatchRelPath+" declares no "+previousNInput+" input; the version axis cannot be derived")
 	}
-	n, err := strconv.Atoi(input.Default)
+	m := previousNScheduleFallback.FindSubmatch(data)
+	if m == nil {
+		return VersionAxis{}, errors.New(errors.ErrCodeNotFound,
+			nightlyBatchRelPath+" declares no inputs."+previousNInput+" || 'N' schedule fallback; the version axis cannot be derived")
+	}
+	fallback := string(m[1])
+	if input.Default != fallback {
+		return VersionAxis{}, errors.New(errors.ErrCodeInvalidRequest,
+			nightlyBatchRelPath+" "+previousNInput+" default "+strconv.Quote(input.Default)+
+				" disagrees with the schedule fallback "+strconv.Quote(fallback))
+	}
+	n, err := strconv.Atoi(fallback)
 	if err != nil || n < 0 {
 		return VersionAxis{}, errors.New(errors.ErrCodeInvalidRequest,
-			nightlyBatchRelPath+" has a non-integer or negative "+previousNInput+" default: "+strconv.Quote(input.Default))
+			nightlyBatchRelPath+" has a non-integer or negative "+previousNInput+" schedule fallback: "+strconv.Quote(fallback))
 	}
 	return VersionAxis{PreviousReleases: n}, nil
 }

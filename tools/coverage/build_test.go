@@ -73,7 +73,8 @@ func reservationRow(name, slug, cloud, nightlyIntents string) string {
 }
 
 // nightlyBatchFixture renders a uat-nightly-batch.yaml carrying the previous_n
-// input the version axis is derived from.
+// input default and the matching schedule || 'N' fallback the version axis
+// requires to agree.
 func nightlyBatchFixture(previousN string) string {
 	return "name: UAT Nightly Batch\n" +
 		"on:\n" +
@@ -84,7 +85,12 @@ func nightlyBatchFixture(previousN string) string {
 		"      previous_n:\n" +
 		"        type: string\n" +
 		"        default: '" + previousN + "'\n" +
-		"jobs: {}\n"
+		"jobs:\n" +
+		"  drive:\n" +
+		"    steps:\n" +
+		"      - env:\n" +
+		"          PREVIOUS_N: ${{ inputs.previous_n || '" + previousN + "' }}\n" +
+		"        run: echo ok\n"
 }
 
 // cloudPipelineFixture renders a per-cloud uat-<cloud>.yaml running the given
@@ -314,19 +320,22 @@ func TestJourneyStepDisabledIsNotCovered(t *testing.T) {
 
 // TestShellCommentedPhaseIsNotExecuted covers the gap YAML decoding alone leaves:
 // a commented-out *step* vanishes from the parsed document, but a `run:` block is
-// an opaque scalar, so a commented line inside one survives into step.Run.
+// an opaque scalar, so a full-line or trailing shell comment inside one survives
+// into step.Run and must not count as an executed phase.
 func TestShellCommentedPhaseIsNotExecuted(t *testing.T) {
 	root := t.TempDir()
 	wiredTrainingFixture(t, root)
 	writeFixture(t, root, map[string]string{
 		"infra/uat/reservations.yaml": "reservations:\n" +
 			reservationRow("aws-h100", "ah1", "aws", "[training, inference]"),
-		// One live step, and a second whose runner call is shell-commented out.
+		// One live step, one full-line-commented runner call, and one trailing
+		// inline comment that only mentions the serve runner.
 		".github/workflows/uat-aws.yaml": "on:\n  workflow_call: {}\njobs:\n  uat:\n    steps:\n" +
 			"      - run: ./tests/uat/aws/run train \"${TEST_CONFIG}\"\n" +
 			"      - run: |\n" +
 			"          echo skipping\n" +
-			"          # ./tests/uat/aws/run serve \"${TEST_CONFIG}\"\n",
+			"          # ./tests/uat/aws/run serve \"${TEST_CONFIG}\"\n" +
+			"      - run: echo done # ./tests/uat/aws/run serve \"${TEST_CONFIG}\"\n",
 	})
 
 	phases, err := scanLanePhases(root, "aws")
@@ -426,7 +435,7 @@ func TestBuildMatrixFailsClosed(t *testing.T) {
 			mutate: func(t *testing.T, root string) {
 				write(t, root, ".github/workflows/uat-aws.yaml", cloudPipelineFixture("aws", nil, "train", "serve"))
 			},
-			wantErr: "no enabled UAT runner step",
+			wantErr: "nightly-intents: []",
 		},
 		{
 			name:    "missing nightly batch workflow",
@@ -441,7 +450,28 @@ func TestBuildMatrixFailsClosed(t *testing.T) {
 			wantErr: previousNInput,
 		},
 		{
-			name:    "non-integer previous_n default",
+			name: "nightly batch without schedule previous_n fallback",
+			mutate: func(t *testing.T, root string) {
+				write(t, root, nightlyBatchRelPath, "on:\n  workflow_dispatch:\n    inputs:\n"+
+					"      previous_n:\n        type: string\n        default: '1'\njobs: {}\n")
+			},
+			wantErr: "schedule fallback",
+		},
+		{
+			name: "previous_n default disagrees with schedule fallback",
+			mutate: func(t *testing.T, root string) {
+				write(t, root, nightlyBatchRelPath, "name: UAT Nightly Batch\n"+
+					"on:\n  workflow_dispatch:\n    inputs:\n"+
+					"      previous_n:\n        type: string\n        default: '1'\n"+
+					"jobs:\n  drive:\n    steps:\n"+
+					"      - env:\n"+
+					"          PREVIOUS_N: ${{ inputs.previous_n || '2' }}\n"+
+					"        run: echo ok\n")
+			},
+			wantErr: "disagrees",
+		},
+		{
+			name:    "non-integer previous_n literals",
 			mutate:  func(t *testing.T, root string) { write(t, root, nightlyBatchRelPath, nightlyBatchFixture("many")) },
 			wantErr: previousNInput,
 		},
