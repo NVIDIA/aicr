@@ -150,17 +150,53 @@ aicr bundle --recipe recipe.yaml --vendor-charts --output ./bundles
 > may still require network access. For full air-gapped operation, also mirror
 > images; see [Air-Gap Mirror](air-gap-mirror.md).
 
-> Second trade-off: recipe-side manifests of mixed components (AICR-authored
-> manifests shipped alongside a vendored upstream chart — for example the
-> network-operator NicClusterPolicy or the AKS `nvidia-peermem-reloader`
-> DaemonSet) are injected into the vendored chart as `helm.sh/hook:
-> post-install` resources. Helm does not manage hook resources as part of the
-> release: they are not re-applied on `helm upgrade` (unless the manifest
-> declares a `post-upgrade` hook itself) and are left behind by
-> `helm uninstall`. Remove them manually after uninstalling a vendored bundle
-> (`kubectl delete -f <bundle>/<NNN>-<component>/templates/`). The default
-> (non-vendored) path wraps the same manifests in a normal `<component>-post`
-> Helm release with full upgrade and uninstall lifecycle.
+Recipe-side manifests of mixed components (AICR-authored manifests shipped
+alongside a vendored upstream chart — for example the network-operator
+`NicClusterPolicy` or the AKS `nvidia-peermem-reloader` DaemonSet) get the same
+lifecycle under `--vendor-charts` as they do without it. The vendored primary
+folder wraps only the upstream chart, and the manifests are emitted as a
+separate `<component>-post` Helm release installed immediately after it:
+
+```text
+002-network-operator/          # wrapper chart + charts/<chart>-<ver>.tgz
+003-network-operator-post/     # recipe-side manifests, tracked release
+```
+
+Because they are ordinary members of that release rather than Helm hook
+resources, they are patched in place by `helm upgrade` (three-way merge),
+removed by `helm uninstall`, and applied normally by Argo CD under
+`syncPolicy.automated`. Bundle-layer `NNN-` folder ordering sequences the two
+releases, so any `helm.sh/hook` annotation a recipe manifest declares is
+stripped when the `-post` chart is written — the same treatment the
+non-vendored path has always applied.
+
+> Earlier releases injected these manifests into the vendored wrapper chart as
+> `helm.sh/hook: post-install` resources, which Helm never re-applied on
+> upgrade, left behind on uninstall, and Argo CD silently skipped as a PostSync
+> hook. Those live objects are **not** members of the new `<component>-post`
+> release, so a redeploy of a rebundled layout fails with Helm ownership
+> conflicts (`exists and cannot be imported into the current release`) until
+> each resource is adopted or removed.
+
+Adoption is the default path — it is non-destructive and required before
+`helm upgrade --install` of the `-post` chart. For each previously
+hook-injected resource (name and kind from the new
+`<NNN>-<component>-post/templates/` files, or from the old primary
+`templates/` if you still have that bundle):
+
+```bash
+kubectl label <kind>/<name> app.kubernetes.io/managed-by=Helm --overwrite
+kubectl annotate <kind>/<name> \
+  meta.helm.sh/release-name=<component>-post \
+  meta.helm.sh/release-namespace=<ns> --overwrite
+```
+
+Prefer `kubectl delete` only for kinds where cascade is acceptable (for example
+a ConfigMap or ClusterRole with no dependents). **Do not** `kubectl delete -f`
+CRD or Namespace manifests from a migration cleanup — deleting a CRD
+garbage-collects every CR of that type cluster-wide (Gateway API / Inference
+Extension CRDs under `agentgateway-crds` are the concrete risk), and deleting a
+Namespace removes everything inside it.
 
 ## Gate on component readiness
 
