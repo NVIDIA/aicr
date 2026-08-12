@@ -550,23 +550,32 @@ The `nvidia-dra-driver-gpu` value `resources.gpus.enabled` is the switch:
 absent or disabled — resolves `device-plugin-extended-resource`. On an
 **enabled** DRA component the switch must be explicitly set: the upstream
 chart's declared default is `true`, so an absent value would diverge from
-what Helm deploys. Three configurations are rejected at resolution time with
-an invalid-request error: an enabled `nvidia-dra-driver-gpu` component with
+what Helm deploys. These configurations are rejected at resolution time with
+an invalid-request error:
+
+* an enabled `nvidia-dra-driver-gpu` component with
 `resources.gpus.enabled` absent (pin it explicitly in the recipe; stock
-recipes always do), `gpus.enabled=true` without
-`gpuResourcesEnabledOverride=true` (the upstream chart install guard refuses
-it), and no whole-GPU advertiser remaining — `gpus.enabled` off with the GPU
-operator component (`gpu-operator`, or `gpu-operator-ocp` on OpenShift
-recipes) absent, disabled, or carrying `devicePlugin.enabled=false`. Two
-further states are likewise rejected (they warned during the transition to
-the device-plugin production default and are errors since the flip): dual
-advertisement (both mechanisms enabled — exactly one whole-GPU advertiser is
-required) and an inert `gpuResourcesEnabledOverride=true` with
-`gpus.enabled=false` (the waiver would disarm the upstream chart's
-install-guard tripwire). Stock recipes ship the production default:
-`gpus.enabled=false`, `gpuResourcesEnabledOverride=false`, and
-`devicePlugin.enabled=true`; the experimental DRA opt-in flips all three
-together in a recipe overlay.
+recipes always do).
+* `gpus.enabled=true` without `gpuResourcesEnabledOverride=true` (the upstream
+chart install guard refuses it), and no whole-GPU advertiser remaining.
+* `gpus.enabled` off with the GPU operator component (`gpu-operator`, or
+`gpu-operator-ocp` on OpenShift recipes) absent, disabled, or carrying
+`devicePlugin.enabled=false`.
+* A recipe enabling both `gpu-operator` and `gpu-operator-ocp`; two GPU
+operators collide at the operand level; enable exactly one (OpenShift recipes
+disable gpu-operator and carry gpu-operator-ocp).
+
+Two further states are likewise rejected (they warned during the transition to
+the device-plugin production default and are errors since the flip):
+
+* dual advertisement (both mechanisms enabled — exactly one whole-GPU advertiser
+is required)
+* an inert `gpuResourcesEnabledOverride=true` with `gpus.enabled=false` (the
+waiver would disarm the upstream chart's install-guard tripwire).
+
+Stock recipes ship the production default: `gpus.enabled=false`,
+`gpuResourcesEnabledOverride=false`, and `devicePlugin.enabled=true`; the
+experimental DRA opt-in flips all three together in a recipe overlay.
 
 **Upgrading a cluster from the dual-advertised (pre-flip) configuration:**
 applying the flipped bundle does not drain existing workloads — a running

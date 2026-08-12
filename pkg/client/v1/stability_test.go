@@ -14,9 +14,10 @@
 
 // stability_test pins the public surface of pkg/client/v1 by exercising
 // every exported type and function the way an out-of-tree library consumer
-// would. The package follows semver: any change that breaks these
-// assertions (renaming, removing, or changing the signature of an
-// exported identifier) is a breaking change that requires a major bump.
+// would. Any change that breaks these assertions (renaming, removing, or
+// changing the signature of an exported identifier) is incompatible. During
+// v0 it requires explicit compatibility review and acknowledgement; starting
+// with v1.0 it requires a major bump.
 // Every new export must add a compile-time assertion here in the same PR.
 //
 // The tests do not execute network or filesystem I/O; they exist to make
@@ -226,8 +227,8 @@ func TestStability_TypesAndAliases(t *testing.T) {
 	)
 
 	// Type-alias surface — these are explicitly documented as alias passthroughs
-	// (#1078) and are exercised here so a future drop or retype is a compile
-	// error.
+	// and are exercised here so a future drop or retype is a compile error. The
+	// API-diff gate separately scopes checks to each target definition.
 	//nolint:staticcheck // QF1011: explicit types pin the aliases' target types.
 	var (
 		_ *recipe.CriteriaRegistry    = (*aicr.CriteriaRegistry)(nil)

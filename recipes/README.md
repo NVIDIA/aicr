@@ -52,7 +52,7 @@ go test -v ./pkg/recipe/... -run TestAllMetadataFilesConformToSchema
 go test -v ./pkg/recipe/... -run TestNoDuplicateCriteriaAcrossOverlays
 ```
 
-For details, see [Automated Validation](../docs/contributor/recipe.md#automated-validation).
+For details, see [Automated Tests](../docs/integrator/recipe-development.md#automated-tests).
 
 ## See Also
 

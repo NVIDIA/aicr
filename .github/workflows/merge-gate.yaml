@@ -57,6 +57,7 @@ jobs:
       tuning: ${{ steps.changes.outputs.tuning }}
       notices: ${{ steps.changes.outputs.notices }}
       coverage: ${{ steps.changes.outputs.coverage }}
+      docs: ${{ steps.changes.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -71,10 +72,37 @@ jobs:
               - '.github/workflows/**'
               - '.github/actions/**'
             deps:
+              # Inputs to the verify-licenses gate, which runs `make
+              # license-check` over the vendored dependency graph. Watch the
+              # dependency manifests and the vendor tree, plus every input that
+              # defines the check itself, so a change to the gate cannot skip
+              # its own gate: the Makefile recipe is the check's contract, the
+              # install-go-licenses action supplies the binary it runs (that
+              # action clears GOFLAGS, without which -trimpath strips GOROOT and
+              # the check passes while inspecting zero packages), and this
+              # workflow defines the job. The entry replaced here named
+              # '.github/workflows/verify-licenses.yaml', which was deleted in
+              # 3c9f6ec5 when the job moved into this workflow, so the filter
+              # had stopped watching anything the job actually consumes.
+              #
+              # The toolchain pins are watched too, because the job resolves
+              # them through load-versions before running the check: .go-version
+              # supplies the Go toolchain (which determines the `go list std`
+              # ignore set) and .settings.yaml supplies linting.go_licenses (the
+              # go-licenses build that classifies packages). Both reach the gate
+              # only via that action, so all three paths must be watched or a
+              # version bump silently skips the gate it changes — #814 bumped
+              # go-licenses touching only .settings.yaml, and #1204 bumped Go
+              # touching only .go-version.
               - 'go.mod'
               - 'go.sum'
               - 'vendor/**'
-              - '.github/workflows/verify-licenses.yaml'
+              - 'Makefile'
+              - '.go-version'
+              - '.settings.yaml'
+              - '.github/actions/install-go-licenses/**'
+              - '.github/actions/load-versions/**'
+              - '.github/workflows/merge-gate.yaml'
             renovate:
               # Watch every input the verify-renovate job consumes — including
               # the Makefile target that runs the validator — so changes to the
@@ -170,6 +198,31 @@ jobs:
               - 'tests/chainsaw/**'
               - 'demos/**'
               - 'Makefile'
+            docs:
+              # Inputs to the parser-level MDX gate. Only the Fern-published
+              # trees matter — a change anywhere under them can introduce a
+              # construct that parses as CommonMark but aborts
+              # `fern generate --docs`.
+              #
+              # docs/index.yml is Fern's navigation manifest AND the source the
+              # checkers derive their file list from, so it is both an input and
+              # a trigger: adding a page there must run the gate over it.
+              # docs/README.md is the published landing page — the earlier
+              # per-subdirectory globs missed it entirely.
+              #
+              # Everything the gate is MADE of is listed too, so a change to the
+              # gate cannot skip its own verification: the two checkers, the page
+              # enumerator, the locked parser toolchain, this workflow, and the
+              # Makefile — whose `check-docs-mdx-parse` target is what the job
+              # actually invokes, matching why the `renovate` and `notices`
+              # filters watch it.
+              - 'docs/**'
+              - 'tools/check-docs-mdx'
+              - 'tools/check-docs-mdx-parse'
+              - 'tools/docs-published-files'
+              - 'tools/mdx/**'
+              - 'Makefile'
+              - '.github/workflows/merge-gate.yaml'
 
       # code = true iff at least one changed file is NOT docs/markdown/LICENSE.
       #
@@ -364,8 +417,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             vendor/modules.txt
-      - name: Install go-licenses
-        run: go install github.com/google/go-licenses/v2@${{ steps.versions.outputs.go_licenses }}
+      - uses: ./.github/actions/install-go-licenses
+        with:
+          version: ${{ steps.versions.outputs.go_licenses }}
       - name: Report licenses
         env:
           GOFLAGS: -mod=vendor
@@ -411,6 +465,47 @@ jobs:
     timeout-minutes: 1
     steps:
       - run: echo "No Renovate config changes — validation not required"
+
+  # ---------------------------------------------------------------------------
+  # MDX docs gate — parses every Fern-published doc with the real MDX parser.
+  #
+  # `fern check` (Fern Docs CI) does not parse MDX, and the job that does
+  # (`fern generate --docs --preview`) runs in a workflow_run companion whose
+  # status never lands on the PR head SHA, so it can never be required. That
+  # gap let a bare `<=` merge green and then fail every docs publish, including
+  # a release tag (#2050). This job is the blocking replacement: hermetic, no
+  # DOCS_FERN_TOKEN, no dependency on Fern's SaaS being up at merge time.
+  # ---------------------------------------------------------------------------
+
+  docs-mdx:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '20'
+      # The bash approximation runs first: it is instant and its messages name
+      # the specific hazard, so the common cases fail fast with better output.
+      # The parser then decides — it is the authoritative check, and GITHUB_ACTIONS
+      # makes a missing Node or a failed dependency install a hard error rather
+      # than the local warn-and-skip.
+      - name: Check MDX safety (pattern approximation)
+        run: make check-docs-mdx
+      - name: Validate docs with the real MDX parser
+        run: make check-docs-mdx-parse
+
+  docs-mdx-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.docs != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No published-docs changes — MDX parse gate not required"
 
   # ---------------------------------------------------------------------------
   # BOM version freshness — ensures the committed container-images.md matches
@@ -523,8 +618,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             vendor/modules.txt
-      - name: Install go-licenses
-        run: go install github.com/google/go-licenses/v2@${{ steps.versions.outputs.go_licenses }}
+      - uses: ./.github/actions/install-go-licenses
+        with:
+          version: ${{ steps.versions.outputs.go_licenses }}
       - name: Verify committed THIRD_PARTY_NOTICES.md is up to date
         env:
           GOFLAGS: -mod=vendor
@@ -602,6 +698,8 @@ jobs:
       - verify-licenses-skip
       - verify-renovate
       - verify-renovate-skip
+      - docs-mdx
+      - docs-mdx-skip
       - bom-freshness
       - bom-freshness-skip
       - tuning-freshness

@@ -67,6 +67,7 @@ func TestReleaseScriptsStructure(t *testing.T) {
 // mutated registry aliases. Deriving the expected names from the stanza's own
 // `signature:` template keeps the two from drifting apart.
 func TestReleaseSbomSignaturesAreAllowlisted(t *testing.T) {
+	t.Parallel()
 	config := loadYAML(t, ".goreleaser.yaml")
 
 	sboms, ok := config["sboms"].([]any)
@@ -201,6 +202,7 @@ func shellReleaseAssetNames(t *testing.T, tag string) []string {
 // path as a release artifact whether or not the script writes it, so every
 // path that cannot produce a bundle has to exit non-zero.
 func TestReleaseSignSbomBehavior(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		failures     int
@@ -225,6 +227,7 @@ func TestReleaseSignSbomBehavior(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "bin")
 			if err := os.Mkdir(bin, 0o700); err != nil {
@@ -349,6 +352,7 @@ func TestReleaseHomebrewScriptIsMutationLimited(t *testing.T) {
 }
 
 func TestReleaseResolverBehavior(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		badLabelRef string
@@ -362,6 +366,7 @@ func TestReleaseResolverBehavior(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fixture := newReleaseFixture(t)
 			output := filepath.Join(fixture.dir, "digests.json")
 			env := fixture.environment()
@@ -390,6 +395,7 @@ func TestReleaseResolverBehavior(t *testing.T) {
 }
 
 func TestReleaseRejectsNonCanonicalReleaseTags(t *testing.T) {
+	t.Parallel()
 	for _, tag := range []string{
 		"v01.2.3",
 		"v1.02.3",
@@ -400,6 +406,7 @@ func TestReleaseRejectsNonCanonicalReleaseTags(t *testing.T) {
 		"v1.2.3+build.1",
 	} {
 		t.Run(tag, func(t *testing.T) {
+			t.Parallel()
 			fixture := newReleaseFixture(t)
 			environment := append(fixture.environment(), "RELEASE_TAG="+tag)
 			result := runScript(t, environment, ".github/scripts/release-images.sh", "verify-source")
@@ -411,6 +418,7 @@ func TestReleaseRejectsNonCanonicalReleaseTags(t *testing.T) {
 }
 
 func TestReleaseTargetRerunPolicy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		releases   [][]map[string]any
@@ -541,6 +549,7 @@ func TestReleaseTargetRerunPolicy(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fixture := newReleaseFixture(t)
 			writeJSON(t, fixture.releases, tc.releases)
 			if tc.assets != nil {
@@ -561,6 +570,7 @@ func TestReleaseTargetRerunPolicy(t *testing.T) {
 }
 
 func TestReleasePublishRequiresExactDraftAssetsAndID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		modifyRelease func(map[string]any)
@@ -635,6 +645,7 @@ func TestReleasePublishRequiresExactDraftAssetsAndID(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fixture := newReleaseFixture(t)
 			release := map[string]any{
 				"id":         42,
@@ -684,6 +695,7 @@ func TestReleasePublishRequiresExactDraftAssetsAndID(t *testing.T) {
 }
 
 func TestReleasePreflightRejectsConflictingVersionWithoutMutation(t *testing.T) {
+	t.Parallel()
 	fixture := newReleaseFixture(t)
 	mapPath := filepath.Join(fixture.dir, "digests.json")
 	writeDigestMap(t, mapPath, fixture.digests)
@@ -702,6 +714,7 @@ func TestReleasePreflightRejectsConflictingVersionWithoutMutation(t *testing.T) 
 }
 
 func TestReleasePreflightRejectsDuplicateDigestKeysWithoutMutation(t *testing.T) {
+	t.Parallel()
 	fixture := newReleaseFixture(t)
 	encoded, err := json.Marshal(fixture.digests)
 	if err != nil {
@@ -727,6 +740,7 @@ func TestReleasePreflightRejectsDuplicateDigestKeysWithoutMutation(t *testing.T)
 }
 
 func TestReleasePreflightRejectsReleaseKindMismatchWithoutMutation(t *testing.T) {
+	t.Parallel()
 	fixture := newStableReleaseFixture(t)
 	mapPath := filepath.Join(fixture.dir, "digests.json")
 	writeDigestMap(t, mapPath, fixture.digests)
@@ -742,6 +756,7 @@ func TestReleasePreflightRejectsReleaseKindMismatchWithoutMutation(t *testing.T)
 }
 
 func TestReleasePreflightFailureModesHaveNoMutations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		setup func(*testing.T, releaseFixture, map[string]string) []string
@@ -810,6 +825,7 @@ func TestReleasePreflightFailureModesHaveNoMutations(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fixture := newReleaseFixture(t)
 			digests := make(map[string]string, len(fixture.digests))
 			for key, digest := range fixture.digests {
@@ -835,6 +851,7 @@ func TestReleasePreflightFailureModesHaveNoMutations(t *testing.T) {
 }
 
 func TestReleaseStablePreflightFailureModesHaveNoMutations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		setup func(*testing.T, releaseFixture)
@@ -922,6 +939,7 @@ func TestReleaseStablePreflightFailureModesHaveNoMutations(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fixture := newStableReleaseFixture(t)
 			tc.setup(t, fixture)
 			mapPath := filepath.Join(fixture.dir, "digests.json")
@@ -942,6 +960,7 @@ func TestReleaseStablePreflightFailureModesHaveNoMutations(t *testing.T) {
 }
 
 func TestReleasePriorSelectionIgnoresNonStableNames(t *testing.T) {
+	t.Parallel()
 	fixture := newStableReleaseFixture(t)
 	writeJSON(t, fixture.releases, [][]map[string]any{{
 		{"tag_name": "v1.2.2", "draft": false, "prerelease": false},
@@ -958,6 +977,7 @@ func TestReleasePriorSelectionIgnoresNonStableNames(t *testing.T) {
 }
 
 func TestReleasePreflightRejectsMovedCurrentTag(t *testing.T) {
+	t.Parallel()
 	fixture := newReleaseFixture(t)
 	mapPath := filepath.Join(fixture.dir, "digests.json")
 	writeDigestMap(t, mapPath, fixture.digests)
@@ -973,6 +993,7 @@ func TestReleasePreflightRejectsMovedCurrentTag(t *testing.T) {
 }
 
 func TestReleasePromotionRejectsPostPreflightAliasMutationWithoutWrites(t *testing.T) {
+	t.Parallel()
 	fixture := newStableReleaseFixture(t)
 	mapPath := filepath.Join(fixture.dir, "digests.json")
 	writeDigestMap(t, mapPath, fixture.digests)
@@ -993,6 +1014,7 @@ func TestReleasePromotionRejectsPostPreflightAliasMutationWithoutWrites(t *testi
 }
 
 func TestReleasePreflightPaginatesAndPeelsAnnotatedTags(t *testing.T) {
+	t.Parallel()
 	fixture := newStableReleaseFixture(t)
 	mapPath := filepath.Join(fixture.dir, "digests.json")
 	writeDigestMap(t, mapPath, fixture.digests)
@@ -1008,7 +1030,9 @@ func TestReleasePreflightPaginatesAndPeelsAnnotatedTags(t *testing.T) {
 }
 
 func TestReleaseV0170UnlabeledBootstrapIsExact(t *testing.T) {
+	t.Parallel()
 	t.Run("pinned core digests accepted", func(t *testing.T) {
+		t.Parallel()
 		fixture := newV0170BootstrapFixture(t)
 		mapPath := filepath.Join(fixture.dir, "digests.json")
 		writeDigestMap(t, mapPath, fixture.digests)
@@ -1020,6 +1044,7 @@ func TestReleaseV0170UnlabeledBootstrapIsExact(t *testing.T) {
 	})
 
 	t.Run("other unlabeled core digest rejected", func(t *testing.T) {
+		t.Parallel()
 		fixture := newV0170BootstrapFixture(t)
 		wrong := "sha256:" + strings.Repeat("f", 64)
 		appendFile(t, fixture.digestState, releaseImages["aicr"]+":v0.17.0\t"+wrong+"\n")
@@ -1038,6 +1063,7 @@ func TestReleaseV0170UnlabeledBootstrapIsExact(t *testing.T) {
 }
 
 func TestReleaseStablePromotionConvergesAndRerunsWithoutMutation(t *testing.T) {
+	t.Parallel()
 	fixture := newStableReleaseFixture(t)
 	mapPath := filepath.Join(fixture.dir, "digests.json")
 	writeDigestMap(t, mapPath, fixture.digests)
@@ -1070,6 +1096,7 @@ func TestReleaseStablePromotionConvergesAndRerunsWithoutMutation(t *testing.T) {
 }
 
 func TestReleasePromotionDefersLatestUntilEveryVersionIsVerified(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		extraEnv func(releaseFixture) string
@@ -1090,6 +1117,7 @@ func TestReleasePromotionDefersLatestUntilEveryVersionIsVerified(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fixture := newStableReleaseFixture(t)
 			mapPath := filepath.Join(fixture.dir, "digests.json")
 			writeDigestMap(t, mapPath, fixture.digests)
@@ -1123,6 +1151,7 @@ func TestReleasePromotionHasExplicitVersionThenLatestPhases(t *testing.T) {
 }
 
 func TestReleaseStablePromotionConvergesMixedAliasStates(t *testing.T) {
+	t.Parallel()
 	fixture := newStableReleaseFixture(t)
 	keys := make([]string, 0, len(releaseImages))
 	for key := range releaseImages {
@@ -1163,6 +1192,7 @@ func TestReleaseStablePromotionConvergesMixedAliasStates(t *testing.T) {
 }
 
 func TestReleasePromotionRejectsTagMovementAfterPreflightWithoutWrites(t *testing.T) {
+	t.Parallel()
 	fixture := newStableReleaseFixture(t)
 	mapPath := filepath.Join(fixture.dir, "digests.json")
 	writeDigestMap(t, mapPath, fixture.digests)
@@ -1182,6 +1212,7 @@ func TestReleasePromotionRejectsTagMovementAfterPreflightWithoutWrites(t *testin
 }
 
 func TestReleasePromotionPrereleaseWritesOnlyVersionAliases(t *testing.T) {
+	t.Parallel()
 	fixture := newReleaseFixture(t)
 	validated := map[string]any{
 		"candidate_tag": fixture.candidateTag,
@@ -1224,6 +1255,7 @@ func TestReleasePromotionPrereleaseWritesOnlyVersionAliases(t *testing.T) {
 }
 
 func TestReleaseHomebrewBehavior(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		existingTag     string
@@ -1271,6 +1303,7 @@ func TestReleaseHomebrewBehavior(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "bin")
 			tap := filepath.Join(dir, "tap")
@@ -1334,7 +1367,9 @@ func TestReleaseHomebrewBehavior(t *testing.T) {
 }
 
 func TestReleaseNetworkBoundsTerminateBlockedCommands(t *testing.T) {
+	t.Parallel()
 	t.Run("candidate resolver", func(t *testing.T) {
+		t.Parallel()
 		fixture := newReleaseFixture(t)
 		writeExecutable(t, filepath.Join(fixture.bin, "timeout"), fakeTimeout)
 		writeExecutable(t, filepath.Join(fixture.bin, "crane"), blockingCommand)
@@ -1357,6 +1392,7 @@ func TestReleaseNetworkBoundsTerminateBlockedCommands(t *testing.T) {
 	})
 
 	t.Run("Homebrew checksum fetch", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		bin := filepath.Join(dir, "bin")
 		formulaDir := filepath.Join(dir, "tap", "Formula")

@@ -8,7 +8,7 @@ ifeq ($(IMAGE_REGISTRY),)
 IMAGE_REGISTRY     := ghcr.io/nvidia
 endif
 IMAGE_TAG          ?= latest
-YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundle/*" ! -path "./bundles/*" ! -path "*/testdata/*")
+YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundle/*" ! -path "./bundles/*" ! -path "*/testdata/*" ! -path "*/node_modules/*")
 COMMIT             := $(shell git rev-parse HEAD)
 BRANCH             := $(shell git rev-parse --abbrev-ref HEAD)
 GO_VERSION         := $(shell cat .go-version 2>/dev/null)
@@ -105,7 +105,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 # Standalone target — NOT part of `make lint` because it requires Docker
@@ -140,6 +140,21 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
+
+# Parser-level docs gate — runs the SAME MDX parser Fern does over every
+# published doc, so a construct that would abort `fern generate --docs` at
+# publish time fails here instead. This is the authoritative check;
+# check-docs-mdx above is a fast, dependency-free approximation kept as a
+# strict subset of it.
+#
+# Part of `make lint` (and therefore `make qualify`). It needs Node 20+ and one
+# `npm ci` of the locked tree in tools/mdx. With Node installed, a local
+# `make qualify` predicts CI as usual; WITHOUT it this check warns and skips, so
+# a local pass no longer implies a CI pass and invalid MDX can still be rejected
+# by the merge-gate `docs-mdx` job, where a missing Node is a HARD FAILURE.
+.PHONY: check-docs-mdx-parse
+check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node; CI-blocking)
+	@./tools/check-docs-mdx-parse
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -179,7 +194,8 @@ LICENSE_IGNORES = \
 	-ignore 'recipes/evidence/*/*/*.yaml' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore 'validators/performance/licenses/**' \
-	-ignore '.licenses-cache/**'
+	-ignore '.licenses-cache/**' \
+	-ignore 'tools/mdx/node_modules/**'
 
 # The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
 # generated, header-less pointer shapes MarshalPointer emits — the transient
@@ -200,9 +216,23 @@ license: ## Add/verify license headers in source files
 #### so unrelated MPL-2.0 deps still fail closed for review. The go-cleanhttp /
 #### go-retryablehttp pair, and the HashiCorp Vault client subtree (#1577, the
 #### hashivault:// KMS signing provider), are the approved exceptions.
+####
+#### go-licenses identifies standard library packages by matching their source
+#### path against go/build's GOROOT, which is empty in a binary linked with
+#### -trimpath. With an empty GOROOT the prefix collapses to "/", EVERY package
+#### looks like stdlib, and this gate inspects nothing yet still exits 0 — a
+#### silent false PASS. Resolve GOROOT explicitly below so the check cannot pass
+#### vacuously regardless of how go-licenses was installed.
 license-check: ## Check license is approved
 	@echo "Checking license headers..."
-	@STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
+	@set -e; \
+	GOROOT="$$(go env GOROOT)"; \
+	if [ -z "$$GOROOT" ] || [ ! -d "$$GOROOT" ]; then \
+	    echo "ERROR: could not resolve a usable GOROOT via 'go env GOROOT'." >&2; \
+	    exit 1; \
+	fi; \
+	export GOROOT; \
+	STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
 	go-licenses check ./... \
         --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,Zlib \
         --ignore=github.com/hashicorp/go-cleanhttp \
@@ -289,11 +319,11 @@ scan: ## Scans for vulnerabilities with grype
 	grype dir:. --config .grype.yaml --fail-on high --quiet
 
 .PHONY: api-diff
-api-diff: ## Checks pkg/client/v1 compatibility against the latest stable release
+api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility against the latest stable release
 	@bash tools/api-diff
 
 .PHONY: qualify
-qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, API compatibility)
+qualify: test-coverage lint tuning-check e2e scan license-check api-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, e2e, scan, API compatibility)
 	@echo "Codebase qualification completed"
 
 .PHONY: bom
@@ -356,11 +386,6 @@ bom-check: ## Verifies $(BOM_DOC_PATH) is up to date with the live registry (opt
 # Path of the committed CUJ/CLI coverage matrix. Fully regenerated by
 # `make coverage-docs`, checked-fresh by `make coverage-check`, and refreshed
 # weekly by the coverage-matrix-refresh GitHub Action.
-#
-# The generator reads only in-repo signals (no network, no cluster), so the
-# freshness check is cheap enough to gate directly — unlike `bom-check`, which
-# re-renders every Helm chart. It runs in `make qualify` and, on PRs touching its
-# inputs, in the merge gate's coverage-freshness job.
 COVERAGE_DOC_PATH := docs/user/coverage-matrix.md
 
 .PHONY: coverage-docs
@@ -374,7 +399,7 @@ coverage-docs: ## Regenerates $(COVERAGE_DOC_PATH) from the CLI registry and in-
 	echo "Updated $(COVERAGE_DOC_PATH)"
 
 .PHONY: coverage-check
-coverage-check: ## Verifies $(COVERAGE_DOC_PATH) is up to date (run by qualify and the merge gate)
+coverage-check: ## Verifies $(COVERAGE_DOC_PATH) is up to date (opt-in; not wired into qualify/lint/merge gate)
 	@set -e; \
 	$(MAKE) coverage-docs; \
 	if ! git diff --quiet -- $(COVERAGE_DOC_PATH); then \

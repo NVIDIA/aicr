@@ -132,9 +132,12 @@ validation:
 Every check to run must be listed explicitly. If you omit the `checks` list (or
 set it to `[]`, which clears any inherited checks), the phase runs **zero**
 validators and is skipped — an empty phase reports as passing, so a missing entry
-is easy to overlook. A declared name that matches no catalog entry for the phase
-is likewise dropped (it logs a warning but does not fail the run), so keep names
-in sync with the `name` fields in `validators/catalog.yaml`.
+is easy to overlook. A declared name that matches no catalog entry for the phase —
+or that resolves under a different phase, or is declared twice — **fails the run
+closed**: the `aicr validate` process exits 2 (`INVALID_REQUEST` — the CLI exit
+code, distinct from the validator-container contract above where exit 2 means
+"check skipped") before any Job is deployed, reporting every offender at once,
+so keep names in sync with the `name` fields in `validators/catalog.yaml`.
 
 ### Step 5: Run Validation
 

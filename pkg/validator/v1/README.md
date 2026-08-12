@@ -17,7 +17,7 @@ deploy AICR validator Jobs.
 
 ## Package surface
 
-The package is intentionally narrow and exports three concerns:
+The package is intentionally narrow and exports four concerns:
 
 1. **`ValidationInput`** (`validation_input.go`) — the wire format consumed
    by a recipe's `spec.validation` block. Carries phases, checks,

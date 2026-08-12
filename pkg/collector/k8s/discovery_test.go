@@ -36,6 +36,11 @@ import (
 
 const testDiscoveryGroupVersion = "example.test/v1"
 
+// discoveryCancelTimeout is the deadline the cancellation test relies on to
+// fire while discovery requests are still in flight — the expiry is the
+// behavior under test, not a safety net.
+const discoveryCancelTimeout = 100 * time.Millisecond
+
 func TestCollectorDiscovery_CancelsAllDiscoveryRequests(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -386,7 +391,7 @@ func TestKubernetesCollector_BlockedDiscoveryHonorsDeadline(t *testing.T) {
 		RestConfig: config,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), discoveryCancelTimeout)
 	defer cancel()
 	type result struct {
 		err error

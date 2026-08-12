@@ -30,6 +30,11 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
+// admissionRetryGiveUpTimeout bounds the parent context so the admission retry
+// loop gives up quickly instead of waiting out
+// defaults.TrainJobAdmissionRetryTimeout — the expiry is the behavior asserted.
+const admissionRetryGiveUpTimeout = 50 * time.Millisecond
+
 // webhookDenialRaw builds the Kubeflow Trainer validating webhook's raw
 // rejection of a TrainJob whose referenced TrainingRuntime is not yet visible to
 // the webhook's informer cache — the StatusError the API server returns from
@@ -162,7 +167,7 @@ func TestApplyTrainJobWithRetry_TimesOutWhenWebhookNeverCatchesUp(t *testing.T) 
 
 	// Bound the parent context tightly so the retry loop gives up quickly
 	// rather than waiting out TrainJobAdmissionRetryTimeout.
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), admissionRetryGiveUpTimeout)
 	defer cancel()
 
 	err := applyTrainJobWithRetry(ctx, client, "aicr-validation",

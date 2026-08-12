@@ -7,7 +7,8 @@ state can import AICR directly. This page is for those consumers.
 ## Which package to import
 
 **Import the `github.com/NVIDIA/aicr/pkg/client/v1` package.** This is the
-stable facade.
+compatibility-reviewed facade and the surface AICR intends to stabilize at
+v1.0.
 
 ```go
 import aicr "github.com/NVIDIA/aicr/pkg/client/v1"
@@ -30,7 +31,7 @@ go get github.com/NVIDIA/aicr@latest
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v0.11.1
+go get github.com/NVIDIA/aicr@v0.19.0
 ```
 
 ## Quick start
@@ -435,6 +436,13 @@ is queryable only: it carries no owning `Client`, so `MakeBundle`,
 `BundleComponents`, and `ValidateState` reject it. Use `Client.AdoptRecipe`
 when you need a bundle-able result.
 
+`AdoptRecipe` canonicalizes the artifact `Kind` on the copy it returns: an
+absent, empty, or legacy `Recipe` kind is stamped as `RecipeResult`, and any
+other kind is rejected with `ErrCodeInvalidRequest`. This keeps a bundle
+generated from an externally-decoded recipe reloadable by the file loader. The
+caller's own `RecipeResult` is never mutated, and `APIVersion` is validated but
+never rewritten.
+
 ## Errors
 
 All errors returned by the facade are `*pkg/errors.StructuredError`
@@ -485,15 +493,18 @@ Passing a `nil` `context.Context` returns `ErrCodeInvalidRequest`. Use
 
 ## Compatibility
 
-The facade's exported API follows [Semantic Versioning][semver]:
+Today AICR is pre-1.0. Under Go module versioning, a v0 minor release may
+contain breaking API changes. The project mechanically detects and explicitly
+records incompatible changes to the facade, but consumers must **pin a patch
+version** in `go.mod` and audit upgrades.
+
+Starting with v1.0, the facade's exported API follows [Semantic
+Versioning][semver]:
 
 - **Major** bumps may rename, remove, or change the shape of exported
   types and function signatures.
 - **Minor** bumps may add new exported types, fields, or methods.
-- **Patch** bumps are bug-fix-only.
-
-Today AICR is pre-1.0. **Pin a patch version** in your `go.mod` and
-audit diffs on upgrade.
+- **Patch** bumps contain compatible bug fixes.
 
 ## See also
 

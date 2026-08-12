@@ -29,14 +29,13 @@ import (
 
 // BundleConfig is the bundler configuration — deployer mode, value
 // overrides, node selectors, tolerations, vendoring, app/chart names,
-// etc. Transparent alias of pkg/bundler/config.Config (the alias is
-// tracked by #1078). Construct one with
-// config.NewConfig(config.WithDeployer(...), ...) — the same builder the
+// etc. Deliberate transparent alias of pkg/bundler/config.Config. Construct one
+// with config.NewConfig(config.WithDeployer(...), ...) — the same builder the
 // CLI bundle command and the REST /v1/bundle handler use, so MakeBundle
 // reproduces their exact output byte-for-byte.
 type BundleConfig = config.Config
 
-// BundleAttester signs bundle content. Transparent alias of
+// BundleAttester signs bundle content. Deliberate transparent alias of
 // pkg/bundler/attestation.Attester. The zero value of BundleOptions
 // leaves this nil, in which case MakeBundle uses the bundler's
 // no-op attester (the same default bundler.New applies when --attest
@@ -45,8 +44,8 @@ type BundleAttester = attestation.Attester
 
 // BundleArtifact summarizes a completed bundle generation: file count,
 // total size, duration, per-bundler results, and the output directory
-// the files were written to. Transparent alias of
-// pkg/bundler/result.Output (#1078 wraps it). Inspect HasErrors() for
+// the files were written to. Deliberate transparent alias of
+// pkg/bundler/result.Output. Inspect HasErrors() for
 // non-fatal per-bundler failures; the bundle files themselves are on
 // disk under OutputDir.
 type BundleArtifact = *result.Output
@@ -162,6 +161,17 @@ func (c *Client) adoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 	// is untouched.
 	cp := rec.DeepCopy()
 	cp.BindDataProvider(dp)
+
+	// Canonicalize the artifact kind before anything serializes the copy. The
+	// decoded body may carry an absent, empty, or legacy "Recipe" kind (all
+	// accepted by the /v1/bundle contract), and Kind has no omitempty, so
+	// without this the legacy value is echoed verbatim into the generated
+	// bundle's recipe.yaml — an artifact the CLI file loader then rejects,
+	// making the bundle non-reloadable via "aicr bundle -r" / "aicr validate
+	// -r". Accept liberally, emit canonically. See issue #1953.
+	if err := cp.NormalizeKind(); err != nil {
+		return nil, err
+	}
 
 	// An adopted RecipeResult is decoded from an external source (e.g. the
 	// POST /v1/bundle body) and never passes through the resolver, so

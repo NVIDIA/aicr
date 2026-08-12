@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Parser-level MDX validation for docs/ — resolves the pinned MDX toolchain and
+# runs tools/mdx/check-docs-mdx-parse.mjs over every published doc.
+#
+# Why this exists: `fern check` (the Fern Docs CI job) does NOT parse MDX, and
+# `fern generate --docs --preview` (which does) runs in a workflow_run companion
+# whose status never lands on the PR's head SHA — so it can never be a required
+# check. That gap let a bare `<=` in docs/integrator/aks-gpu-setup.md merge green
+# and then fail every publish, including a release tag (issue #2050). This script
+# closes it with a hermetic, token-free parse that CI can block on.
+#
+# Reproducibility: the toolchain is installed with `npm ci` from the committed
+# tools/mdx/package-lock.json, which freezes the FULL transitive tree — not just
+# the two direct dependencies. That matters because this gate decides which docs
+# merge: a floating transitive dependency could change the verdict between two
+# runs of the same commit, with no repository change to point at.
+#
+# Scope mirrors tools/check-docs-mdx: docs/user/, docs/integrator/, and
+# docs/contributor/ (everything published to Fern). container-images.md carries
+# auto-generated HTML comment splice markers, is not published to Fern, and is
+# excluded. Override the scan roots with positional args (used by the tests and
+# for frozen version content).
+#
+# Node availability:
+#   - In CI (CI or GITHUB_ACTIONS set): missing node/npm, or a failed install,
+#     is a HARD FAILURE. The gate must never silently pass.
+#   - Locally: the same conditions print a loud warning and exit 0, so a Go-only
+#     development environment can still run `make lint`. CI is authoritative.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MDX_DIR="${REPO_ROOT}/tools/mdx"
+PARSER="${MDX_DIR}/check-docs-mdx-parse.mjs"
+LOCKFILE="${MDX_DIR}/package-lock.json"
+STAMP="${MDX_DIR}/node_modules/.aicr-lock-digest"
+
+# With no arguments the file list comes from docs/index.yml via
+# tools/docs-published-files — Fern's nav is the authoritative statement of what
+# gets parsed at publish time. Positional args switch to a directory scan, which
+# the tests and frozen version content use.
+SEARCH_DIRS=()
+EXCLUDE_NAMES=("container-images.md")
+
+if [[ $# -gt 0 ]]; then
+  SEARCH_DIRS=("$@")
+fi
+
+if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+  IN_CI=1
+else
+  IN_CI=0
+fi
+
+# unavailable <reason>: hard-fail under CI, warn-and-skip locally.
+unavailable() {
+  if [[ "${IN_CI}" == "1" ]]; then
+    echo "::error::MDX parse gate cannot run: $1"
+    exit 1
+  fi
+  echo "WARN: skipping MDX parse check — $1"
+  echo "WARN: this check is enforced in CI (merge-gate 'docs-mdx'); install Node 20+ to run it locally."
+  exit 0
+}
+
+command -v node >/dev/null 2>&1 || unavailable "node not found in PATH"
+command -v npm >/dev/null 2>&1 || unavailable "npm not found in PATH"
+
+if [[ ! -f "${LOCKFILE}" ]]; then
+  echo "ERROR: ${LOCKFILE} is missing — the pinned MDX toolchain cannot be resolved" >&2
+  exit 1
+fi
+
+# Reinstall only when the lockfile changes. Digesting the lockfile (rather than
+# trusting node_modules to exist) means a Renovate bump, a rebase, or a branch
+# switch all re-resolve, while repeat runs on an unchanged tree cost nothing.
+if command -v shasum >/dev/null 2>&1; then
+  LOCK_DIGEST="$(shasum -a 256 "${LOCKFILE}" | awk '{print $1}')"
+else
+  LOCK_DIGEST="$(sha256sum "${LOCKFILE}" | awk '{print $1}')"
+fi
+
+if [[ ! -f "${STAMP}" ]] || [[ "$(cat "${STAMP}")" != "${LOCK_DIGEST}" ]]; then
+  echo "Installing pinned MDX toolchain from tools/mdx/package-lock.json..."
+  # --ignore-scripts: this tree is a lint dependency, not a build artifact, and
+  # nothing in it needs a native build step. Declining lifecycle scripts removes
+  # the arbitrary-code-execution path an npm tree would otherwise open on every
+  # CI run. `npm ci` installs the locked tree exactly and fails if package.json
+  # and the lockfile have drifted apart.
+  if ! (cd "${MDX_DIR}" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1); then
+    unavailable "npm ci in tools/mdx failed (offline, or package.json and package-lock.json have drifted)"
+  fi
+  echo "${LOCK_DIGEST}" >"${STAMP}"
+fi
+
+# Collect files. Paths are repo-relative in both modes, so the file:line:column
+# output stays copy-pasteable and matches tools/check-docs-mdx.
+FILES=()
+if [[ ${#SEARCH_DIRS[@]} -eq 0 ]]; then
+  while IFS= read -r file; do
+    [[ -z "${file}" ]] && continue
+    FILES+=("${file}")
+  done < <("${REPO_ROOT}/tools/docs-published-files")
+else
+  for dir in "${SEARCH_DIRS[@]}"; do
+    exclude_args=()
+    for name in "${EXCLUDE_NAMES[@]}"; do
+      exclude_args+=(! -name "${name}")
+    done
+    while IFS= read -r file; do
+      [[ -z "${file}" ]] && continue
+      FILES+=("${file}")
+    done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${exclude_args[@]}" 2>/dev/null | sort)
+  done
+fi
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "ERROR: no doc files found (scan roots: ${SEARCH_DIRS[*]:-docs/index.yml})" >&2
+  exit 1
+fi
+
+# The parser lives in tools/mdx/ so Node's ESM resolver — which walks up from
+# the IMPORTING MODULE's directory and ignores NODE_PATH — finds
+# tools/mdx/node_modules without any copying or path juggling.
+node "${PARSER}" "${FILES[@]}"

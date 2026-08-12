@@ -41,6 +41,11 @@ const (
 	gangPodPrefix     = "gang-worker-"
 	gangGroupPrefix   = "gang-group-"
 	gangMinMembers    = 2
+
+	// kaiSchedulerName is the KAI scheduler's canonical identifier — it is
+	// simultaneously the install namespace, the schedulerName the test pods
+	// request, and the recipe componentRef name that declares the capability.
+	kaiSchedulerName = "kai-scheduler"
 )
 
 // kaiSchedulerDeployments are the required KAI scheduler components.
@@ -102,11 +107,21 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
-	// 0. Check if KAI scheduler is installed (skip gracefully if not).
-	_, kaiCheckErr := ctx.Clientset.AppsV1().Deployments("kai-scheduler").Get(
+	// 0. Applicability gate (#2122). KAI scheduler supplies gang scheduling;
+	// base recipes declare kai-scheduler. When the recipe declares it, a missing
+	// Deployment (or an RBAC/timeout/transport error reading it) is a real
+	// failure — not an inapplicable Skip. Only a clean NotFound on a recipe that
+	// does NOT declare kai-scheduler skips (the cluster uses another scheduler).
+	_, kaiCheckErr := ctx.Clientset.AppsV1().Deployments(kaiSchedulerName).Get(
 		ctx.Ctx, "kai-scheduler-default", metav1.GetOptions{})
-	if kaiCheckErr != nil {
-		return validators.Skip("KAI scheduler not found — cluster may use a different scheduler")
+	if err := (validators.Capability{
+		Component: kaiSchedulerName,
+		Subject:   "KAI scheduler Deployment kai-scheduler/kai-scheduler-default",
+		AbsentMsg: "recipe declares kai-scheduler but its Deployment kai-scheduler/kai-scheduler-default is absent — apply the bundle or check RBAC",
+		InapplicableMsg: "KAI scheduler not found and kai-scheduler not declared in recipe — " +
+			"cluster may use a different scheduler",
+	}).Require(ctx, kaiCheckErr, kaiCheckErr == nil); err != nil {
+		return err
 	}
 
 	// 1. All KAI scheduler deployments available. Wait (bounded) for each to
@@ -116,7 +131,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 	// phase. A genuinely-down deployment still fails after the bound.
 	var deploymentsSummary strings.Builder
 	for _, name := range kaiSchedulerDeployments {
-		deploy, err := waitForDeploymentAvailable(ctx, "kai-scheduler", name, defaults.K8sPodReadyTimeout)
+		deploy, err := waitForDeploymentAvailable(ctx, kaiSchedulerName, name, defaults.K8sPodReadyTimeout)
 		if err != nil {
 			// Preserve the helper's code (NotFound for missing, Internal for
 			// not-available/API failure, Timeout for cancellation) instead of
@@ -136,7 +151,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		"kubectl get deploy -n kai-scheduler", deploymentsSummary.String())
 
 	// KAI scheduler pods.
-	kaiPods, err := ctx.Clientset.CoreV1().Pods("kai-scheduler").List(ctx.Ctx, metav1.ListOptions{})
+	kaiPods, err := ctx.Clientset.CoreV1().Pods(kaiSchedulerName).List(ctx.Ctx, metav1.ListOptions{})
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to list KAI scheduler pods", err)
 	}
@@ -363,7 +378,7 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*
 		}
 
 		// Pod must use kai-scheduler.
-		if pod.Spec.SchedulerName != "kai-scheduler" {
+		if pod.Spec.SchedulerName != kaiSchedulerName {
 			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("gang test pod %s schedulerName=%s (want kai-scheduler)",
 					run.pods[i], pod.Spec.SchedulerName))
@@ -511,7 +526,7 @@ func buildGangTestPod(run *gangTestRun, index int, tolerations []corev1.Tolerati
 			},
 		},
 		Spec: corev1.PodSpec{
-			SchedulerName: "kai-scheduler",
+			SchedulerName: kaiSchedulerName,
 			RestartPolicy: corev1.RestartPolicyNever,
 			Tolerations:   tolerations,
 			Containers: []corev1.Container{

@@ -890,6 +890,15 @@ any check runs. This ADR therefore **amends the #1327 model**:
   `devicePlugin.enabled=false`, preserving #1327's fail-closed posture for
   recipes without the declaration (the non-goal narrows from "externally
   managed advertisers" to "*inferring* externally managed advertisers").
+- The device-plugin advertiser selection itself was tightened (#1685): a
+  recipe with both `gpu-operator` and `gpu-operator-ocp` enabled is
+  rejected (`ErrCodeInvalidRequest`) at resolution — profile or not,
+  where the resolver previously warned and preferred `gpu-operator`. Two
+  GPU operators collide at the operand level, and failing closed beats
+  silently preferring one (a divergent `devicePlugin.enabled` across the
+  two would otherwise slip through). The external-advertiser branch's
+  OR-aggregation across both operator components therefore sees at most
+  one enabled operator — the reject above narrows it.
 - Resolution counts a declared external advertiser as **the** advertiser
   in the exactly-one invariant. The dual-advertisement gates extend
   accordingly, fail closed: `advertiser: external` +

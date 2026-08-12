@@ -4,7 +4,7 @@ We welcome contributions from developers of all backgrounds and experience level
 
 ## Code of Conduct
 
-This project follows NVIDIA's commitment to fostering an open and welcoming environment. Please be respectful and professional in all interactions. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for details.
+This project adopts the Contributor Covenant v2.1. Please be respectful and professional in all interactions. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for details.
 
 ## Getting Started
 
@@ -138,7 +138,7 @@ More specific recipes are never matched unless explicitly requested. Generic int
 
 Trust is established through evidence, not assertions. Every released artifact carries verifiable proof of origin and build process.
 
-**What:** All releases include SLSA build provenance (build level under review, #1536), SBOM attestations, and Sigstore signatures. Users can verify exactly which commit, workflow, and build produced any artifact.
+**What:** Releases include SLSA Build Level 3 provenance for container images (via the reusable attestation workflow, since v0.17.0) and SLSA Build Provenance v1 for CLI binaries, plus SBOM attestations and Sigstore signatures. Users can verify exactly which commit, workflow, and build produced any artifact.
 
 **Why:** This underpins supply-chain security, compliance, and confidence. "Trust us" is not a security model.
 
@@ -170,7 +170,7 @@ Trust is established through evidence, not assertions. Every released artifact c
 
 ### Review Process
 
-1. **Automated Checks** run via GitHub Actions — the same gate `make qualify` runs locally (tests with race detector, golangci-lint, YAML linting, security scan, coverage, E2E). See [Full Qualification](DEVELOPMENT.md#7-full-qualification) in the development guide.
+1. **Automated Checks** run via GitHub Actions — the same gate `make qualify` runs locally. See [Full Qualification](DEVELOPMENT.md#7-full-qualification) and the [Make Targets Reference](DEVELOPMENT.md#make-targets-reference) in the development guide.
 
 2. **Maintainer Review** covers:
    - Correctness and functionality

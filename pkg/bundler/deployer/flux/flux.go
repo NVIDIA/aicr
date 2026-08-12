@@ -259,13 +259,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 
-	// Create sources directory.
+	// Resolve the sources directory path. Creation is deferred to
+	// writeSources, which creates it only when a source CR is written.
 	sourcesDir, err := deployer.SafeJoin(outputDir, "sources")
 	if err != nil {
 		return nil, err
-	}
-	if err := os.MkdirAll(sourcesDir, 0750); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create sources directory", err)
 	}
 
 	// Resolve the chart puller for vendored bundles.
@@ -556,14 +554,42 @@ func isVendorable(ref recipe.ComponentRef) bool {
 	})
 }
 
-// writeSources writes HelmRepository and GitRepository source CRs to the sources directory.
+// writeSources writes HelmRepository and GitRepository source CRs to the
+// sources directory, creating that directory only when at least one CR is
+// written and removing a stale empty one from an earlier run otherwise.
 func (g *Generator) writeSources(helmSources map[string]*HelmRepoSourceData,
 	gitSources map[string]*GitRepoSourceData, sourcesDir string, output *deployer.Output) error {
+
+	// sources/ is created lazily, immediately before the first source CR is
+	// written. Both maps can be empty at once: an OCI --output suppresses
+	// GitRepository sources in favor of ArtifactGenerator + ExternalArtifact,
+	// and every remaining HelmRepository source disappears when no component
+	// carries an upstream Source or — the reachable case today — when
+	// --vendor-charts is set, since collectHelmSources skips every vendorable
+	// ref. An unconditional MkdirAll would then leave an empty directory that
+	// the bundle inventory validator rejects as unexpected. See issue #1947.
+	sourcesDirReady := false
+	ensureSourcesDir := func() error {
+		if sourcesDirReady {
+			return nil
+		}
+		if err := checkSourcesPath(sourcesDir); err != nil {
+			return err
+		}
+		if mkdirErr := os.MkdirAll(sourcesDir, 0750); mkdirErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to create sources directory", mkdirErr)
+		}
+		sourcesDirReady = true
+		return nil
+	}
 
 	// Write Helm sources in sorted order.
 	for _, key := range slices.Sorted(maps.Keys(helmSources)) {
 		src := helmSources[key]
 		filename := fmt.Sprintf("helmrepo-%s.yaml", src.Name)
+		if err := ensureSourcesDir(); err != nil {
+			return err
+		}
 		if err := writeTemplate(output, helmRepoSourceTemplate, src, sourcesDir, filename,
 			fmt.Sprintf("failed to write HelmRepository source %s", src.Name)); err != nil {
 			return err
@@ -574,12 +600,109 @@ func (g *Generator) writeSources(helmSources map[string]*HelmRepoSourceData,
 	for _, key := range slices.Sorted(maps.Keys(gitSources)) {
 		src := gitSources[key]
 		filename := fmt.Sprintf("gitrepo-%s.yaml", src.Name)
+		if err := ensureSourcesDir(); err != nil {
+			return err
+		}
 		if err := writeTemplate(output, gitRepoSourceTemplate, src, sourcesDir, filename,
 			fmt.Sprintf("failed to write GitRepository source %s", src.Name)); err != nil {
 			return err
 		}
 	}
 
+	// Generation writes directly into --output and the directory is not
+	// cleared between runs, so a failed pre-fix run leaves its empty sources/
+	// behind. Without this, retrying into that same directory reproduces the
+	// original failure even though nothing new is created.
+	if !sourcesDirReady {
+		return removeStaleSourcesDir(sourcesDir)
+	}
+
+	return nil
+}
+
+// checkSourcesPath rejects anything occupying the sources path that is not a
+// plain directory. Both the create and the remove path call it, so a
+// pre-existing file or symlink produces the same ErrCodeInvalidRequest
+// regardless of whether the recipe happens to contribute source CRs —
+// otherwise the identical user error would surface as INVALID_REQUEST for an
+// all-local OCI bundle and INTERNAL (from MkdirAll's ENOTDIR) for any bundle
+// carrying a source.
+//
+// The check matters most before removal, since os.Remove unlinks regular files
+// as readily as it removes empty directories. A pre-existing regular file at
+// this path reaches generation on every route: checksum.ValidateOutputRoot
+// runs first on the DefaultBundler path but permits regular files, rejecting
+// only symlinks and special objects.
+//
+// Lstat rather than Stat additionally rejects a symlink here. On the
+// DefaultBundler path that is redundant, since ValidateOutputRoot already
+// rejects a symlink anywhere under the output root before any deployer runs;
+// it still holds for a caller that constructs this Generator directly and
+// bypasses that check.
+//
+// The guarantee stops there. This is a check-then-act on a path, so a symlink
+// planted between this call and the MkdirAll or Remove that follows is not
+// caught. Closing that would require openat-based operations throughout, and
+// it buys nothing in a supported configuration: it takes a local process with
+// write access to --output, and anything with that access can already rewrite
+// the finished bundle and its checksums.
+func checkSourcesPath(sourcesDir string) error {
+	info, statErr := os.Lstat(sourcesDir)
+	switch {
+	case os.IsNotExist(statErr):
+		return nil
+	case statErr != nil:
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect sources directory", statErr)
+	case info.Mode()&os.ModeSymlink != 0:
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %q is a symbolic link", sourcesDir))
+	case !info.IsDir():
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %q exists and is not a directory", sourcesDir))
+	}
+	return nil
+}
+
+// removeStaleSourcesDir clears a sources/ left behind by an earlier run when
+// the current generation contributed no source CRs to it.
+//
+// Emptiness is checked explicitly rather than inferred from an os.Remove
+// errno, which keeps the intent readable and avoids platform-specific error
+// values. A populated sources/ is kept: its contents are reported by
+// validateExactTree as unexpected output, though only when checksums are
+// enabled, since that validator runs inside the IncludeChecksums path. With
+// checksums off a stale sources/ survives into the bundle, which is unchanged
+// from before this fix — a reused --output was never cleared, so stale files
+// of any kind already persisted.
+//
+// Anything that blocks removal of an empty directory fails generation rather
+// than being logged and ignored: leaving it behind either trips that same
+// validator or, when checksums are disabled, ships the bundle this fix exists
+// to prevent.
+func removeStaleSourcesDir(sourcesDir string) error {
+	if err := checkSourcesPath(sourcesDir); err != nil {
+		return err
+	}
+
+	entries, readErr := os.ReadDir(sourcesDir)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return nil
+		}
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to inspect sources directory", readErr)
+	}
+	if len(entries) > 0 {
+		slog.Warn("keeping populated sources directory from an earlier run",
+			"path", sourcesDir, "entries", len(entries))
+		return nil
+	}
+
+	if rmErr := os.Remove(sourcesDir); rmErr != nil && !os.IsNotExist(rmErr) {
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to remove empty sources directory %q", sourcesDir), rmErr)
+	}
 	return nil
 }
 

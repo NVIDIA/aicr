@@ -174,6 +174,7 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/`):
 |-------|------|-------------|
 | `aicr` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Pure-Go CLI/agent (driver-free GPU discovery) |
 | `aicrd` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Minimal API server |
+| `aicr-gate` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Bundle readiness-gate Job image (emitted by `aicr bundle --readiness-hooks`) |
 
 Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
 
@@ -229,6 +230,7 @@ export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | 
 # GitHub CLI (core images)
 gh attestation verify oci://ghcr.io/nvidia/aicr:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 gh attestation verify oci://ghcr.io/nvidia/aicrd:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://ghcr.io/nvidia/aicr-gate:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
 # GitHub CLI (validator images)
 gh attestation verify oci://ghcr.io/nvidia/aicr-validators/deployment:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"

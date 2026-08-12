@@ -24,7 +24,7 @@ make lint           # Run linters
 make build          # Build binaries
 
 # 3. Before submitting PR
-make qualify        # Full check: test + lint + e2e + scan
+make qualify        # Full check: test-coverage + lint + tuning-check + e2e + scan + license-check + api-diff
 ```
 
 ## Prerequisites
@@ -54,6 +54,11 @@ make qualify        # Full check: test + lint + e2e + scan
 | ctlptl | Local cluster + registry management (for Tilt) |
 | tilt | Local Kubernetes dev environment with hot reload |
 | kubectl | Kubernetes CLI |
+| chainsaw | Declarative Kubernetes e2e testing |
+| cosign | Artifact signing and attestation |
+| helmfile | Declarative Helm release management |
+
+This table is a summary — run `make tools-check` for the full pinned set from `.settings.yaml`.
 
 ### Linux-Specific Setup
 
@@ -104,16 +109,13 @@ Example `make tools-check` output:
 
 Tool                 Expected        Installed       Status
 ----                 --------        ---------       ------
-go                   1.26            1.26            ✓
-golangci-lint        v2.11.3         2.11.3          ✓
-grype                v0.107.0        0.107.0         ✓
-ko                   v0.18.0         0.18.0          ✓
-goreleaser           v2              2.13.3          ✓
-helm                 v4.1.1          v4.1.1          ✓
-kind                 0.31.0          0.31.0          ✓
-yamllint             1.38.0          1.38.0          ✓
-kubectl              v1.35.0         v1.35.0         ✓
-docker               -               24.0.7          ✓
+go                   <pinned>        <installed>     ✓
+golangci-lint        <pinned>        <installed>     ✓
+grype                <pinned>        <installed>     ✓
+ko                   <pinned>        <installed>     ✓
+...
+
+(Expected versions come from `.settings.yaml` — the single source of truth.)
 
 Legend: ✓ = installed, ⚠ = version mismatch, ✗ = missing
 ```
@@ -133,7 +135,7 @@ Edit `.settings.yaml` to update versions; changes propagate everywhere automatic
 After installing tools:
 
 ```bash
-# Download Go module dependencies
+# Format, tidy, and vendor dependencies; regenerate THIRD_PARTY_NOTICES.md
 make tidy
 
 # Run full qualification to ensure setup is correct
@@ -215,14 +217,22 @@ make test-coverage
 ### 4. Lint Your Code
 
 ```bash
-# Run all linters (Go, YAML, license headers)
+# Run all linters (Go, YAML, license headers, agents sync, docs filename/MDX gates, chart-version pins)
 make lint
 
-# Or run individually
+# Or run individually for a faster loop (all of these already run as part of `make lint`)
 make lint-go      # Go linting only
 make lint-yaml    # YAML linting only
-make license      # License header check
+make license      # Add/verify license headers (may modify files)
+
+# Docs published to Fern are parsed as MDX; both checks gate the merge
+make check-docs-mdx        # fast pattern approximation (no dependencies)
+make check-docs-mdx-parse  # real MDX parser, authoritative (needs Node 20+)
 ```
+
+`check-docs-mdx-parse` warns and skips when Node is unavailable locally, but
+hard-fails in CI. See
+[Docs MDX Gate](docs/contributor/tests.md#docs-mdx-gate).
 
 ### 5. Run E2E Tests
 
@@ -252,7 +262,7 @@ Before submitting a PR, run everything:
 make qualify
 ```
 
-This runs: `test` → `lint` → `e2e` → `scan`
+This runs: `test-coverage` → `lint` → `tuning-check` → `e2e` → `scan` → `license-check` → `api-diff`
 
 ## Local Kubernetes Development
 
@@ -405,11 +415,11 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks"
 │       │         ┌─────────────────────────┘             │
 │       ▼         ▼                                       │
 │  ┌─────────────────────────────────────────────────┐    │
-│  │              Kind Cluster (kind-aicr)          │    │
+│  │              Kind Cluster (kind-aicr)           │    │
 │  │  ┌─────────────────────────────────────────┐    │    │
-│  │  │           Namespace: aicr              │    │    │
+│  │  │           Namespace: aicr               │    │    │
 │  │  │  ┌─────────────┐  ┌─────────────────┐   │    │    │
-│  │  │  │   aicrd    │  │    Service      │   │    │    │
+│  │  │  │   aicrd     │  │    Service      │   │    │    │
 │  │  │  │ Deployment  │◀─│  (ClusterIP)    │   │    │    │
 │  │  │  └─────────────┘  └─────────────────┘   │    │    │
 │  │  └─────────────────────────────────────────┘    │    │
@@ -433,19 +443,21 @@ make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
 
 Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates scheduling (node selectors, tolerations, resource requests) but not runtime behavior (no container execution or GPU functionality).
 
-For the deployer matrix (argocd / argocd-helm OCI lanes), see [Deployer Matrix Testing](docs/contributor/tests.md).
+For the deployer matrix (argocd / argocd-helm OCI lanes), see [Deployer Coverage Matrix](docs/contributor/tests.md#deployer-coverage-matrix).
 
 | Command | Description |
 |---------|-------------|
 | `make kwok-test-all` | Test all recipes in shared cluster (serial) |
 | `make kwok-e2e RECIPE=<name>` | Full e2e: cluster, nodes, validate |
 | `make kwok-test-deployer RECIPE=<name> DEPLOYER=<name>` | Validate single recipe under a specific deployer (`helm`, `argocd-oci`, `argocd-helm-oci`) |
+| `make kwok-test RECIPE=<name>` | Validate bundle scheduling on an existing KWOK cluster |
 | `make kwok-cluster` | Create Kind cluster with KWOK |
+| `make kwok-nodes RECIPE=<name>` | Create KWOK nodes from a recipe overlay |
+| `make kwok-nodes-delete` | Delete all KWOK-simulated nodes |
 | `make kwok-status` | Show cluster and node status |
 | `make kwok-cluster-delete` | Delete cluster |
 
 See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troubleshooting.
-
 
 ## Make Targets Reference
 
@@ -453,10 +465,10 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 
 | Target | Description |
 |--------|-------------|
-| `make qualify` | Full qualification (test + lint + e2e + scan) |
+| `make qualify` | Full qualification (test-coverage, lint, tuning-check, e2e, scan, license-check, api-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go, YAML, and verify license headers |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs filename/MDX gates, and chart-version pins |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
@@ -480,6 +492,8 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make bump-major` | Bump major version (1.2.3 → 2.0.0) |
 | `make bump-minor` | Bump minor version (1.2.3 → 1.3.0) |
 | `make bump-patch` | Bump patch version (1.2.3 → 1.2.4) |
+| `make bump-rc` | Tag RC pre-release (v1.2.3 → v1.3.0-rc1 → v1.3.0-rc2) |
+| `make bump-promote TAG=<rc-tag>` | Promote a pre-release to stable on the same SHA |
 
 ### Binary Attestation
 
@@ -520,11 +534,12 @@ Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
 
 | Target | Description |
 |--------|-------------|
-| `make tidy` | Format code and update dependencies |
+| `make tidy` | Format, tidy, and vendor dependencies; regenerate THIRD_PARTY_NOTICES.md |
 | `make fmt-check` | Check code formatting (CI-friendly) |
 | `make upgrade` | Upgrade all dependencies |
 | `make generate` | Run go generate |
 | `make license` | Add/verify license headers |
+| `make license-check` | Verify license allowlist compliance (verify-only, CI-friendly) |
 
 ### Tools
 

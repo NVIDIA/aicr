@@ -25,7 +25,7 @@ aicr recipe \
   --output recipe.yaml
 ```
 
-Overlay chain: `base` → `monitoring-hpa` → `eks` → `eks-inference` → `h100-eks-inference` → `h100-eks-ubuntu-inference` → `h100-eks-ubuntu-inference-dynamo`
+Applied overlays (inheritance chain plus criteria-wildcard overlays `monitoring-hpa` and `h100-any`): `base` → `monitoring-hpa` → `h100-any` → `eks` → `eks-inference` → `h100-eks-inference` → `h100-eks-ubuntu-inference` → `h100-eks-ubuntu-inference-dynamo`
 
 Bundle generated with:
 
@@ -43,11 +43,12 @@ The Kind GPU workflows use these leaf recipes instead:
 - `h100-kind-inference-dynamo`
 - `h100-kind-training-kubeflow`
 
-## Cluster Inference Components (17)
+## Cluster Inference Components (18)
 
 | Component | Namespace | Type | What is Validated |
 |-----------|-----------|------|-------------------|
 | cert-manager | cert-manager | Helm | 3 Deployments (controller, webhook, cainjector) |
+| nfd | node-feature-discovery | Helm | In the bundle; no dedicated assertion in this suite |
 | gpu-operator | gpu-operator | Helm | Operator Deployment, ClusterPolicy ready, 6 DaemonSets (driver, device-plugin, dcgm-exporter, toolkit, gfd, validator) |
 | nvsentinel | nvsentinel | Helm | Controller Deployment, platform-connector DaemonSet |
 | nodewright-operator | skyhook | Helm | Controller-manager Deployment |

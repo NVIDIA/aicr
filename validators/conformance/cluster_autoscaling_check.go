@@ -461,28 +461,51 @@ func findKarpenterDeployment(ctx *validators.Context) (*appsv1.Deployment, strin
 	return deploy, deploy.Namespace, nil
 }
 
-// detectPlatform returns "eks", "gke", or "" based on the first node's providerID.
-func detectPlatform(ctx *validators.Context) string {
+// detectPlatform returns "eks", "gke", or "" based on the first node's
+// providerID. A genuinely empty node list (Kind CI, KWOK) or an unrecognized
+// providerID yields ("", nil): the caller treats that as a legitimately
+// inapplicable Skip.
+//
+// A Nodes().List ERROR (RBAC denial, apiserver timeout, transport failure) is
+// NOT evidence that the platform is unrecognized (#2122). Flattening it to ""
+// would reach checkPlatformAutoscaling's default branch and masquerade as an
+// inapplicable Skip — the exact #2122 false-PASS. Instead it must fail closed
+// with a classified pkg/errors code. Classification is delegated to the shared
+// capability classifier via Capability.RequireList, which — unlike Require —
+// never treats a List error as Skip-eligible: even the (rare) NotFound shape on
+// a collection endpoint is an apiserver/aggregation anomaly, so every List error
+// blocks (Forbidden→Unauthorized, deadline→Timeout, transport→Unavailable, else
+// Internal) and never a Skip. Only a genuinely empty result (below) is
+// inapplicable.
+func detectPlatform(ctx *validators.Context) (string, error) {
 	nodes, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{
 		Limit: 1,
 	})
-	if err != nil || len(nodes.Items) == 0 {
-		return ""
+	if err != nil {
+		return "", validators.Capability{Subject: "cluster nodes"}.RequireList(err)
+	}
+	if len(nodes.Items) == 0 {
+		return "", nil
 	}
 	pid := nodes.Items[0].Spec.ProviderID
 	if strings.HasPrefix(pid, "aws://") {
-		return "eks"
+		return "eks", nil
 	}
 	if strings.HasPrefix(pid, "gce://") {
-		return "gke"
+		return "gke", nil
 	}
-	return ""
+	return "", nil
 }
 
 // checkPlatformAutoscaling validates cluster autoscaling when Karpenter is absent.
 // Falls back to EKS node group or GKE cluster autoscaler validation.
 func checkPlatformAutoscaling(ctx *validators.Context) error {
-	platform := detectPlatform(ctx)
+	platform, err := detectPlatform(ctx)
+	if err != nil {
+		// A node-list infrastructure error (RBAC/timeout/transport) must block
+		// the gate rather than fall through to the unrecognized-platform Skip.
+		return err
+	}
 	slog.Info("Karpenter not found, falling back to platform autoscaling", "platform", platform)
 
 	switch platform {

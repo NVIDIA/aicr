@@ -1,0 +1,60 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Install go-licenses'
+description: 'Install the pinned go-licenses with GOFLAGS cleared so the binary keeps a usable GOROOT'
+
+# go-licenses has no binary release, so it must be `go install`ed rather than
+# fetched like the tools in setup-build-tools. The install is centralized here
+# because clearing GOFLAGS is a correctness requirement, not a preference, and a
+# caller that forgets it fails silently:
+#
+#   * -trimpath strips the binary's baked-in GOROOT. go-licenses decides whether
+#     a package is standard library by matching its source path against
+#     go/build's GOROOT, so an empty GOROOT collapses the prefix to "/", every
+#     absolute path matches, and the ENTIRE dependency graph is reported as
+#     stdlib — the tool then writes nothing and exits 0. `make license-check`
+#     passes while inspecting zero packages; `make notices` emits nothing.
+#   * -mod=vendor makes the install resolve against this repo's vendor tree,
+#     which does not contain go-licenses.
+#
+# Mirrors the `GOFLAGS= go install` convention in tools/setup-tools, which
+# tools/setup-tools_test.sh asserts for every versioned Go tool install.
+
+inputs:
+  version:
+    description: 'go-licenses version pinned in .settings.yaml (linting.go_licenses, via load-versions)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate go-licenses version input
+      shell: bash
+      env:
+        GO_LICENSES_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${GO_LICENSES_VERSION}" ]]; then
+          echo "::error::version is required (expected .settings.yaml linting.go_licenses via load-versions)"
+          exit 1
+        fi
+
+    - name: Install go-licenses
+      shell: bash
+      env:
+        GO_LICENSES_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        GOFLAGS= go install "github.com/google/go-licenses/v2@${GO_LICENSES_VERSION}"

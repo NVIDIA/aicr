@@ -26,6 +26,7 @@ package pfutil
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/nvidia/k8s-launch-kit/pkg/config"
@@ -43,6 +44,32 @@ func FilterEastWestPFs(pfs []config.PFConfig) []config.PFConfig {
 		}
 	}
 	return filtered
+}
+
+var connectedGPUIndexRE = regexp.MustCompile(`^GPU([0-9]+)$`)
+
+// GPUResourceCountForPFs returns the number of GPU devices a validation Pod
+// must request to keep every topology-derived CUDA ordinal addressable. The
+// device plugin exposes requested devices as a zero-based CUDA prefix, so a PF
+// connected to GPU7 requires eight devices. Missing topology falls back to one
+// device; validation then reports the unresolved endpoint instead of assuming
+// GPU0.
+func GPUResourceCountForPFs(pfs []config.PFConfig) int {
+	maxIndex := -1
+	for _, pf := range FilterEastWestPFs(pfs) {
+		match := connectedGPUIndexRE.FindStringSubmatch(strings.TrimSpace(pf.ConnectedGPU))
+		if len(match) != 2 {
+			continue
+		}
+		index, err := strconv.Atoi(match[1])
+		if err == nil && index > maxIndex {
+			maxIndex = index
+		}
+	}
+	if maxIndex < 0 {
+		return 1
+	}
+	return maxIndex + 1
 }
 
 // PciBusDevicePrefix returns the "domain:bus:device" portion of a PCI

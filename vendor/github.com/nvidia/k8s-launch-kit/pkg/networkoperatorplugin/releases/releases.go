@@ -26,8 +26,8 @@
 //   - pkg/cmd (flag validation and help text).
 //
 // The catalog is the single source of truth for what "26.4" / "26.1" /
-// "25.10" actually resolve to. Bump entries here when a patch release
-// ships; add a new key for a new minor.
+// "26.7" actually resolve to. Entries are synchronized nightly from the
+// matching Network Operator release branches.
 package releases
 
 import (
@@ -43,11 +43,15 @@ import (
 var releasesYAML []byte
 
 // Release describes a single Network Operator minor release: image tags for
-// the operator and DOCA driver. Keyed by MAJOR.MINOR (e.g. "26.4") in the
-// embedded catalog — patch bumps update the values in place.
+// the operator, DOCA driver, validation workload, and independently versioned
+// xPlane service.
+// Keyed by MAJOR.MINOR (e.g. "26.4") in the embedded catalog — patch bumps
+// update the values in place.
 type Release struct {
 	NetworkOperator ReleaseNetworkOperator `yaml:"networkOperator"`
 	DOCADriver      ReleaseDOCADriver      `yaml:"docaDriver"`
+	XPlane          ReleaseXPlane          `yaml:"xPlane"`
+	Validation      ReleaseValidation      `yaml:"validation"`
 }
 
 type ReleaseNetworkOperator struct {
@@ -71,6 +75,15 @@ type ReleaseNetworkOperator struct {
 
 type ReleaseDOCADriver struct {
 	Version string `yaml:"version"`
+}
+
+type ReleaseXPlane struct {
+	Repository string `yaml:"repository"`
+	Version    string `yaml:"version"`
+}
+
+type ReleaseValidation struct {
+	Image string `yaml:"image"`
 }
 
 type releasesFile struct {

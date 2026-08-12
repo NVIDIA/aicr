@@ -118,7 +118,12 @@ func TestCheckSlinkySlurmHealthRequiresContext(t *testing.T) {
 	}
 }
 
-func TestCheckSlinkySlurmHealthSkipsWhenSlinkyAPIUnavailable(t *testing.T) {
+// TestCheckSlinkySlurmHealthFailsWhenSlinkyAPIUnavailable pins the #2122
+// fail-closed contract: the recipe DECLARES slinky-slurm, so a missing Slinky
+// API is a broken deployment and must BLOCK the gate — not masquerade as an
+// inapplicable Skip. (Before the fix this returned validators.Skip("Slinky
+// Slurm API not available"), a false-PASS.)
+func TestCheckSlinkySlurmHealthFailsWhenSlinkyAPIUnavailable(t *testing.T) {
 	ctx := &validators.Context{
 		Ctx:        context.Background(),
 		Clientset:  k8sfake.NewSimpleClientset(),
@@ -129,8 +134,17 @@ func TestCheckSlinkySlurmHealthSkipsWhenSlinkyAPIUnavailable(t *testing.T) {
 	}
 
 	err := CheckSlinkySlurmHealth(ctx)
-	if !isSkipLike(err, "Slinky Slurm API") {
-		t.Fatalf("error = %v, want skip mentioning Slinky Slurm API", err)
+	if err == nil {
+		t.Fatal("error = nil, want a blocking failure (declared slinky-slurm, API absent)")
+	}
+	if validators.IsSkip(err) {
+		t.Fatalf("error = %v, want a blocking failure but got a Skip — a declared dependency must not skip (#2122)", err)
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Errorf("error code = %v, want ErrCodeNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "recipe declares slinky-slurm") {
+		t.Errorf("error = %v, want actionable message naming the declared component", err)
 	}
 }
 

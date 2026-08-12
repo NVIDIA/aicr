@@ -44,7 +44,26 @@ func SpectrumXProfileConfigRequired(ra string) bool {
 // metadata.name; rendered manifests always supply the canonical namespace and
 // label themselves.
 func NormalizeSpectrumXProfileConfig(spcx *ProfileSpectrumX) error {
-	if spcx == nil || strings.TrimSpace(spcx.Profile) == "" {
+	if spcx == nil {
+		return nil
+	}
+
+	if topologyType := strings.TrimSpace(spcx.TopologyType); topologyType != "" {
+		normalized, err := NormalizeSpectrumXTopologyType(topologyType)
+		if err != nil {
+			return err
+		}
+		spcx.TopologyType = normalized
+	}
+	if ipVersion := strings.TrimSpace(spcx.IPVersion); ipVersion != "" {
+		normalized, err := NormalizeSpectrumXIPVersion(ipVersion)
+		if err != nil {
+			return err
+		}
+		spcx.IPVersion = normalized
+	}
+
+	if strings.TrimSpace(spcx.Profile) == "" {
 		return nil
 	}
 
@@ -71,6 +90,37 @@ func NormalizeSpectrumXProfileConfig(spcx *ProfileSpectrumX) error {
 	spcx.ConfigMapName = cm.Metadata.Name
 	spcx.Profile = cm.Data[SpectrumXProfileConfigMapDataKey]
 	return nil
+}
+
+func NormalizeSpectrumXTopologyType(topologyType string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(topologyType)) {
+	case SpectrumXTopology2Tier, "2-tier-poc":
+		return SpectrumXTopology2Tier, nil
+	case SpectrumXTopology3Tier:
+		return SpectrumXTopology3Tier, nil
+	default:
+		return "", fmt.Errorf("topologyType must be one of: %s, %s",
+			SpectrumXTopology2Tier, SpectrumXTopology3Tier)
+	}
+}
+
+func NormalizeSpectrumXIPVersion(ipVersion string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(ipVersion)) {
+	case SpectrumXIPVersionIPv4:
+		return SpectrumXIPVersionIPv4, nil
+	case SpectrumXIPVersionIPv6:
+		return SpectrumXIPVersionIPv6, nil
+	default:
+		return "", fmt.Errorf("ipVersion must be one of: %s, %s",
+			SpectrumXIPVersionIPv4, SpectrumXIPVersionIPv6)
+	}
+}
+
+func SpectrumXDefaultHostFirstOctet(topologyType string) int {
+	if topologyType == SpectrumXTopology3Tier {
+		return 10
+	}
+	return 172
 }
 
 type spectrumXProfileConfigMap struct {

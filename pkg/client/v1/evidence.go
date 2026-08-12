@@ -25,7 +25,7 @@ import (
 )
 
 // OIDCResolveOptions configures keyless-signing OIDC token resolution for a
-// pushed evidence bundle. Transparent alias of
+// pushed evidence bundle. Deliberate transparent alias of
 // pkg/bundler/attestation.ResolveOptions, mirroring how BundleOptions exposes
 // BundleAttester: the caller (CLI/server) builds the resolution inputs and the
 // facade threads them through to attestation.Emit, which resolves the token

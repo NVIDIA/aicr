@@ -26,6 +26,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// expiredCtxTimeout is short enough that the context is guaranteed already
+// expired by the time Collect is called — the test using it asserts the
+// deadline-exceeded path, so any non-trivial value would defeat the point.
+const expiredCtxTimeout = 1 * time.Nanosecond
+
 func TestKubernetesCollector_Collect(t *testing.T) {
 	t.Setenv("NODE_NAME", "test-node")
 
@@ -115,7 +120,7 @@ func TestKubernetesCollector_CollectWithCanceledContext(t *testing.T) {
 
 func TestKubernetesCollector_CollectWithTimeout(t *testing.T) {
 	// Create a context with very short timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	ctx, cancel := context.WithTimeout(context.Background(), expiredCtxTimeout)
 	defer cancel()
 
 	// Wait for context to timeout

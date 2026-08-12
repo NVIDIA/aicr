@@ -314,15 +314,17 @@ func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 }
 
 // TestCoherenceGateRejectsDriverInstallerIncoherentTuples pins the
-// empty-advertiser (driver-installer) side of the gate/resolver symmetry:
-// the artifact gate applies the full #1327 tuple verdicts for EVERY
-// closure-triggering profile, not only a declared external advertiser. A
-// forged driver-installer artifact whose overrides enable DRA whole-GPU
-// advertisement next to the operator's device plugin (dual advertisement),
-// or leave an inert chart-guard waiver, must fail
-// PrepareAndValidateWithContext — the same recipes
+// empty-advertiser (driver-installer) side of the gate/resolver symmetry
+// over the shared #1327 tuple rows: the artifact gate applies the full
+// tuple verdicts for EVERY closure-triggering profile, not only a declared
+// external advertiser. A forged driver-installer artifact whose overrides
+// enable DRA whole-GPU advertisement next to the operator's device plugin
+// (dual advertisement), or leave an inert chart-guard waiver, must fail
+// PrepareAndValidateWithContext — the same tuple rows
 // ResolveGPUAllocationPolicy rejects at validation time must never reach an
 // output writer, because validation is not guaranteed to run before deploy.
+// (The #1685 dual-operator rejection is resolver-side only and not mirrored
+// here; it is outside the tuple rows this test covers.)
 func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 	t.Parallel()
 

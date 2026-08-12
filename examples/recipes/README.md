@@ -26,11 +26,11 @@ aicr bundle \
   --set gpuoperator:driver.version=580.105.08 \
   --output ./bundles
 
-# Validate against snapshot (default phase: readiness)
+# Validate against snapshot (readiness constraints run first, then all phases)
 aicr snapshot --output snapshot.yaml
 aicr validate --recipe eks-gb200-ubuntu-training-with-validation.yaml --snapshot snapshot.yaml
 
-# All phases (readiness, deployment, performance, conformance)
+# All phases (deployment, conformance, performance)
 aicr validate --recipe eks-gb200-ubuntu-training-with-validation.yaml --snapshot snapshot.yaml --phase all
 ```
 
