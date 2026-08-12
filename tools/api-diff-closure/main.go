@@ -64,6 +64,36 @@ type listedPackage struct {
 	}
 }
 
+// moduleMembership records the actual module identity that go list reported for
+// every loaded package. Import-path prefixes are insufficient because a
+// dependency may itself be a nested module whose path extends the root module
+// path.
+type moduleMembership struct {
+	modulePath         string
+	packageModulePaths map[string]string
+}
+
+func newModuleMembership(modulePath string, packageModulePaths map[string]string) moduleMembership {
+	membership := moduleMembership{
+		modulePath:         modulePath,
+		packageModulePaths: make(map[string]string, len(packageModulePaths)),
+	}
+	for packagePath, packageModulePath := range packageModulePaths {
+		membership.packageModulePaths[packagePath] = packageModulePath
+	}
+	return membership
+}
+
+func (m moduleMembership) contains(packagePath string) bool {
+	packageModulePath, ok := m.packageModulePaths[packagePath]
+	return ok && packageModulePath == m.modulePath
+}
+
+func (m moduleMembership) moduleForPackage(packagePath string) (string, bool) {
+	modulePath, ok := m.packageModulePaths[packagePath]
+	return modulePath, ok
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "api-diff-closure: %v\n", err)
@@ -108,13 +138,13 @@ func run(args []string, stdout io.Writer) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), goListTimeout)
 	defer cancel()
-	packages, modulePath, err := loadPackages(ctx, *workingDir, packagePaths)
+	packages, membership, err := loadPackages(ctx, *workingDir, packagePaths)
 	if err != nil {
 		return err
 	}
 
 	if *aliasPackage != "" {
-		aliases, mappingErr := transparentAliasMappings(packages[*aliasPackage], modulePath)
+		aliases, mappingErr := transparentAliasMappings(packages[*aliasPackage], membership)
 		if mappingErr != nil {
 			return mappingErr
 		}
@@ -126,7 +156,7 @@ func run(args []string, stdout io.Writer) error {
 		return nil
 	}
 
-	closure, err := reachableTypes(packages, modulePath, roots)
+	closure, err := reachableTypes(packages, membership, roots)
 	if err != nil {
 		return err
 	}
@@ -171,7 +201,16 @@ func parseRoots(rawRoots []string) ([]rootSpec, error) {
 	return roots, nil
 }
 
-func loadPackages(ctx context.Context, workingDir string, packagePaths []string) (map[string]*types.Package, string, error) {
+func loadPackages(
+	ctx context.Context,
+	workingDir string,
+	packagePaths []string,
+) (
+	map[string]*types.Package,
+	moduleMembership,
+	error,
+) {
+
 	rootPackages := make([]string, 0, len(packagePaths))
 	seen := make(map[string]struct{})
 	for _, packagePath := range packagePaths {
@@ -189,13 +228,13 @@ func loadPackages(ctx context.Context, workingDir string, packagePaths []string)
 	output, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, "", fmt.Errorf("load packages: %w", ctx.Err())
+			return nil, moduleMembership{}, fmt.Errorf("load packages: %w", ctx.Err())
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return nil, "", fmt.Errorf("go list failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+			return nil, moduleMembership{}, fmt.Errorf("go list failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
 		}
-		return nil, "", fmt.Errorf("run go list: %w", err)
+		return nil, moduleMembership{}, fmt.Errorf("run go list: %w", err)
 	}
 
 	listed := make(map[string]listedPackage)
@@ -206,7 +245,7 @@ func loadPackages(ctx context.Context, workingDir string, packagePaths []string)
 			if err == io.EOF {
 				break
 			}
-			return nil, "", fmt.Errorf("decode go list output: %w", err)
+			return nil, moduleMembership{}, fmt.Errorf("decode go list output: %w", err)
 		}
 		listed[pkg.ImportPath] = pkg
 	}
@@ -215,17 +254,24 @@ func loadPackages(ctx context.Context, workingDir string, packagePaths []string)
 	for _, packagePath := range rootPackages {
 		pkg, ok := listed[packagePath]
 		if !ok {
-			return nil, "", fmt.Errorf("go list omitted root package %s", packagePath)
+			return nil, moduleMembership{}, fmt.Errorf("go list omitted root package %s", packagePath)
 		}
 		if pkg.Module == nil || pkg.Module.Path == "" {
-			return nil, "", fmt.Errorf("root package %s is not in a Go module", packagePath)
+			return nil, moduleMembership{}, fmt.Errorf("root package %s is not in a Go module", packagePath)
 		}
 		if modulePath == "" {
 			modulePath = pkg.Module.Path
 		} else if modulePath != pkg.Module.Path {
-			return nil, "", fmt.Errorf("root packages span modules %s and %s", modulePath, pkg.Module.Path)
+			return nil, moduleMembership{}, fmt.Errorf("root packages span modules %s and %s", modulePath, pkg.Module.Path)
 		}
 	}
+	packageModulePaths := make(map[string]string, len(listed))
+	for packagePath, pkg := range listed {
+		if pkg.Module != nil && pkg.Module.Path != "" {
+			packageModulePaths[packagePath] = pkg.Module.Path
+		}
+	}
+	membership := newModuleMembership(modulePath, packageModulePaths)
 
 	lookup := func(path string) (io.ReadCloser, error) {
 		pkg, ok := listed[path]
@@ -246,11 +292,11 @@ func loadPackages(ctx context.Context, workingDir string, packagePaths []string)
 	for _, packagePath := range rootPackages {
 		pkg, err := packageImporter.Import(packagePath)
 		if err != nil {
-			return nil, "", fmt.Errorf("import %s: %w", packagePath, err)
+			return nil, moduleMembership{}, fmt.Errorf("import %s: %w", packagePath, err)
 		}
 		loaded[packagePath] = pkg
 	}
-	return loaded, modulePath, nil
+	return loaded, membership, nil
 }
 
 type aliasMapping struct {
@@ -259,7 +305,7 @@ type aliasMapping struct {
 	typeName    string
 }
 
-func transparentAliasMappings(pkg *types.Package, modulePath string) ([]aliasMapping, error) {
+func transparentAliasMappings(pkg *types.Package, membership moduleMembership) ([]aliasMapping, error) {
 	if pkg == nil {
 		return nil, fmt.Errorf("alias package was not loaded")
 	}
@@ -275,14 +321,27 @@ func transparentAliasMappings(pkg *types.Package, modulePath string) ([]aliasMap
 		if err != nil {
 			return nil, fmt.Errorf("normalize exported alias %s.%s: %w", pkg.Path(), name, err)
 		}
+		if target.TypeArgs().Len() != 0 {
+			alias, ok := object.Type().(*types.Alias)
+			if !ok {
+				return nil, fmt.Errorf("exported alias %s.%s has unexpected type %T", pkg.Path(), name, object.Type())
+			}
+			if err := validateGenericAliasScope(alias, target); err != nil {
+				return nil, fmt.Errorf("inspect exported alias %s.%s: %w", pkg.Path(), name, err)
+			}
+		}
 		targetObject := target.Obj()
 		if targetObject.Pkg() == nil {
 			return nil, fmt.Errorf("exported alias %s.%s targets non-package type %s", pkg.Path(), name, targetObject.Name())
 		}
-		if !isWithinModule(targetObject.Pkg().Path(), modulePath) {
+		if !membership.contains(targetObject.Pkg().Path()) {
+			targetModulePath := "<no module>"
+			if listedModulePath, ok := membership.moduleForPackage(targetObject.Pkg().Path()); ok {
+				targetModulePath = listedModulePath
+			}
 			return nil, fmt.Errorf(
-				"exported alias %s.%s targets type %s.%s outside module %s",
-				pkg.Path(), name, targetObject.Pkg().Path(), targetObject.Name(), modulePath,
+				"exported alias %s.%s targets type %s.%s from module %s, not root module %s",
+				pkg.Path(), name, targetObject.Pkg().Path(), targetObject.Name(), targetModulePath, membership.modulePath,
 			)
 		}
 		mappings = append(mappings, aliasMapping{
@@ -304,6 +363,39 @@ func transparentAliasMappings(pkg *types.Package, modulePath string) ([]aliasMap
 	return mappings, nil
 }
 
+// validateGenericAliasScope rejects generic target specializations that the
+// package-level apidiff report cannot distinguish from the generic origin. A
+// direct, constraint-identical forwarding alias exposes the complete origin and
+// can safely use that report; concrete, transformed, or narrowed aliases expose
+// only a subset and require an instantiation-specific comparison surface.
+func validateGenericAliasScope(alias *types.Alias, target *types.Named) error {
+	targetArguments := target.TypeArgs()
+	if targetArguments.Len() == 0 {
+		return nil
+	}
+
+	aliasParameters := alias.TypeParams()
+	targetParameters := target.Origin().TypeParams()
+	if aliasParameters.Len() != targetArguments.Len() || targetParameters.Len() != targetArguments.Len() {
+		return unsupportedGenericAliasError(target)
+	}
+	for i := range targetArguments.Len() {
+		argumentMatches := types.Identical(targetArguments.At(i), aliasParameters.At(i))
+		constraintMatches := types.Identical(aliasParameters.At(i).Constraint(), targetParameters.At(i).Constraint())
+		if !argumentMatches || !constraintMatches {
+			return unsupportedGenericAliasError(target)
+		}
+	}
+	return nil
+}
+
+func unsupportedGenericAliasError(target *types.Named) error {
+	return fmt.Errorf(
+		"generic target alias instantiated as %s cannot be scoped safely; generic target aliases must forward every type parameter unchanged with identical constraints (concrete, transformed, and narrowed instantiations are unsupported)",
+		target,
+	)
+}
+
 func normalizedAliasTarget(typ types.Type) (*types.Named, error) {
 	switch typ := typ.(type) {
 	case *types.Alias:
@@ -322,9 +414,17 @@ type closureEntry struct {
 	typeName    string
 }
 
-func reachableTypes(packages map[string]*types.Package, modulePath string, roots []rootSpec) ([]closureEntry, error) {
+func reachableTypes(
+	packages map[string]*types.Package,
+	membership moduleMembership,
+	roots []rootSpec,
+) (
+	[]closureEntry,
+	error,
+) {
+
 	collector := typeCollector{
-		modulePath: modulePath,
+		membership: membership,
 		seenTypes:  make(map[types.Type]struct{}),
 		entries:    make(map[closureEntry]struct{}),
 	}
@@ -357,7 +457,7 @@ func reachableTypes(packages map[string]*types.Package, modulePath string, roots
 }
 
 type typeCollector struct {
-	modulePath string
+	membership moduleMembership
 	seenTypes  map[types.Type]struct{}
 	entries    map[closureEntry]struct{}
 }
@@ -432,7 +532,7 @@ func (c *typeCollector) visit(typ types.Type) {
 }
 
 func (c *typeCollector) addTypeName(object *types.TypeName) bool {
-	if object == nil || object.Pkg() == nil || !isWithinModule(object.Pkg().Path(), c.modulePath) {
+	if object == nil || object.Pkg() == nil || !c.membership.contains(object.Pkg().Path()) {
 		return false
 	}
 	c.entries[closureEntry{packagePath: object.Pkg().Path(), typeName: object.Name()}] = struct{}{}
@@ -458,8 +558,4 @@ func (c *typeCollector) visitTuple(tuple *types.Tuple) {
 	for i := range tuple.Len() {
 		c.visit(tuple.At(i).Type())
 	}
-}
-
-func isWithinModule(packagePath, modulePath string) bool {
-	return packagePath == modulePath || strings.HasPrefix(packagePath, modulePath+"/")
 }

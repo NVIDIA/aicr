@@ -39,12 +39,16 @@ has_tools apidiff git yq
 cd "${REPO_ROOT}"
 
 readonly PACKAGE='github.com/NVIDIA/aicr/pkg/client/v1'
+readonly MODULE_PATH="${PACKAGE%/pkg/client/v1}"
 # apidiff treats an alias to an external named type as only the target package
 # path plus type name; it does not recursively compare the target definition.
 # These are the facade-to-target mappings. tools/api-diff-closure starts its
-# traversal at each facade alias declaration so instantiated type arguments are
-# retained, then derives every repository-local named type reachable through
-# the complete target and its public fields and method signatures. This covers
+# traversal at each facade alias declaration so type arguments embedded in the
+# reachable API remain available, then derives every repository-local named type
+# reachable through the complete target and its public fields and method
+# signatures. Generic aliases must forward their parameters unchanged; concrete
+# and otherwise specialized generic aliases fail closed because apidiff's
+# package-level report cannot scope changes to one instantiation. This covers
 # nested contract types without freezing unrelated exports. Format: facade
 # alias|target package|root type. Each mapping is kept explicit so the
 # syntax-aware exhaustiveness check can detect alias retargeting.
@@ -94,7 +98,9 @@ fi
 # T[P].X for a generic receiver), pointer methods as (*T).X (or (*T[P]).X),
 # and promoted methods with a "method set of T" suffix. Package
 # additions/removals and changes to unrelated declarations are intentionally
-# excluded.
+# excluded. A baseline-only target package that is absent from the current tree
+# is handled separately as a package removal because there is no current package
+# for apidiff to load or filter.
 filter_alias_target_report() {
     local target_types=$1
 
@@ -174,6 +180,42 @@ filter_alias_target_report() {
             }
         }
     '
+}
+
+# Report the one package-level incompatibility that apidiff cannot produce in
+# package mode: a baseline package that has been removed from the current tree.
+# The baseline export has already succeeded, and alias_scope proves that at
+# least one type in this package was reachable through the released facade.
+removed_alias_target_package_report() {
+    local target_package=$1
+
+    printf 'Incompatible changes:\n- package %s: removed\n' "${target_package}"
+}
+
+alias_closure_contains_package() {
+    local closure=$1
+    local target_package=$2
+
+    awk -F '|' -v target_package="${target_package}" '
+        $1 == target_package { found = 1 }
+        END { exit(found ? 0 : 1) }
+    ' <<< "${closure}"
+}
+
+# A removed Go package can leave documentation or testdata behind in its old
+# directory. In that case there is still no current package for apidiff to load.
+# Conversely, any Go source must go through apidiff so malformed or transient
+# package-load failures remain fatal instead of being mislabeled as removal.
+current_package_has_go_source() {
+    local target_directory=$1
+    local source
+
+    for source in "${target_directory}"/*.go; do
+        if [[ -f "${source}" || -L "${source}" ]]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Return the baseline-reachable closure types, retaining baseline/current
@@ -306,7 +348,7 @@ alias_scope="$(build_alias_scope "${baseline_alias_closure}" "${current_alias_cl
         if [[ -z "${target_package}" ]]; then
             continue
         fi
-        apidiff -w "${release_export}.alias-${alias_index}" "${target_package}"
+        apidiff -allow-internal -w "${release_export}.alias-${alias_index}" "${target_package}"
         alias_index=$((alias_index + 1))
     done <<< "${alias_scope}"
 )
@@ -321,8 +363,19 @@ while IFS='|' read -r target_package target_types; do
     if [[ -z "${target_package}" ]]; then
         continue
     fi
-    target_report="$(apidiff "${release_export}.alias-${alias_index}" "${target_package}")"
-    scoped_report="$(printf '%s\n' "${target_report}" | filter_alias_target_report "${target_types}")"
+    if [[ "${target_package}" != "${MODULE_PATH}/"* ]]; then
+        api_diff_err "${EXIT_ALIAS_CONTRACT_MISMATCH}" "Transparent-alias closure package ${target_package} is outside current module ${MODULE_PATH}."
+    fi
+    target_relative_path="${target_package#"${MODULE_PATH}/"}"
+    target_directory="${REPO_ROOT}/${target_relative_path}"
+    if alias_closure_contains_package "${current_alias_closure}" "${target_package}" || current_package_has_go_source "${target_directory}"; then
+        target_report="$(apidiff -allow-internal "${release_export}.alias-${alias_index}" "${target_package}")"
+        scoped_report="$(printf '%s\n' "${target_report}" | filter_alias_target_report "${target_types}")"
+    elif [[ -d "${target_directory}" || ( ! -e "${target_directory}" && ! -L "${target_directory}" ) ]]; then
+        scoped_report="$(removed_alias_target_package_report "${target_package}")"
+    else
+        api_diff_err "${EXIT_ALIAS_CONTRACT_MISMATCH}" "Transparent-alias closure package path ${target_directory} exists but is not a directory."
+    fi
     if [[ -n "${scoped_report}" ]]; then
         msg "Transparent alias reachable-type changes: ${target_package} (${target_types})"
         if [[ -n "${report}" ]]; then

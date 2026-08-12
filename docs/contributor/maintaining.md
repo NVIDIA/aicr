@@ -48,7 +48,11 @@ the gate derives the repository-local named-type closure exposed by
 compares only that baseline/current closure, including nested fields and method
 signatures; unrelated exports in the evolving target packages remain filtered
 out. Closure derivation and an out-of-sync transparent-alias root list both fail
-the gate closed.
+the gate closed. Generic target aliases are supported only when they forward
+every type parameter unchanged with identical constraints. Concrete,
+transformed, and narrowed instantiations fail before `apidiff` because its
+package-level report cannot distinguish one instantiation from the generic
+origin.
 
 To acknowledge an intentional break, first run `make api-diff`. Add a
 baseline-scoped entry to `pkg/client/v1/api-diff-exceptions.yaml` containing the
