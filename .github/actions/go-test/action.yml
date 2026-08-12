@@ -71,10 +71,6 @@ runs:
         go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
         setup-envtest use --print path >/dev/null 2>&1
 
-    - name: Run Tests with Coverage
-      shell: bash
-      run: make test
-
     - name: Install API-diff tool
       if: inputs.apidiff_version != ''
       shell: bash
@@ -83,6 +79,10 @@ runs:
       run: |
         set -euo pipefail
         GOFLAGS= go install "golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION}"
+
+    - name: Run Tests with Coverage
+      shell: bash
+      run: make test
 
     - name: Coverage Report
       if: inputs.coverage_report == 'true'
