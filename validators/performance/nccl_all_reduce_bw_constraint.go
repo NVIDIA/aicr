@@ -473,27 +473,21 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 // pod to complete, and returns the benchmark logs.
 func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
-	customRuntime string) (string, error) {
+	customRuntime string) (logs string, err error) {
 
 	dynamicClient := ctx.DynamicClient
 
-	// Ensure Kubeflow Trainer is installed. If it is already present we leave it
-	// alone; if we install it we clean it up after the test completes.
-	trainerInstalled, err := isTrainerInstalled(ctx.Ctx, dynamicClient)
+	// Ensure a usable Kubeflow Trainer. A complete installation already on the
+	// cluster is left alone and reports no resources; anything we install is ours
+	// to clean up after the test completes.
+	installedResources, err := ensureTrainerInstalled(ctx.Ctx, dynamicClient, ctx.Clientset.Discovery())
 	if err != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check Kubeflow Trainer installation", err)
+		return "", err
 	}
-	if !trainerInstalled {
-		slog.Info("Kubeflow Trainer not found, installing...")
-		var installedResources []trainerResourceRef
-		installedResources, err = installTrainer(ctx.Ctx, dynamicClient, ctx.Clientset.Discovery())
-		if err != nil {
-			return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to install Kubeflow Trainer", err)
-		}
-		defer deleteTrainer(dynamicClient, installedResources)
-		slog.Info("Kubeflow Trainer installed", "resources", len(installedResources))
-	} else {
-		slog.Info("Kubeflow Trainer already installed, proceeding")
+	if len(installedResources) > 0 {
+		defer func() {
+			err = foldCleanupError(err, deleteTrainer(dynamicClient, installedResources))
+		}()
 	}
 
 	// Clean up NCCL resources on every exit path. Registered after the trainer
@@ -520,7 +514,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	}
 
 	// Wait for launcher pod and get logs.
-	logs, err := waitForLauncherPodAndGetLogs(ctx, podHelper)
+	logs, err = waitForLauncherPodAndGetLogs(ctx, podHelper)
 	if err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get launcher logs", err)
 	}
