@@ -185,8 +185,10 @@ hook-injected resource (name and kind from the new
 `templates/` if you still have that bundle):
 
 ```bash
-kubectl label <kind>/<name> app.kubernetes.io/managed-by=Helm --overwrite
-kubectl annotate <kind>/<name> \
+# Include -n <ns> for namespaced kinds (same <ns> as release-namespace below).
+# Omit -n for cluster-scoped kinds (CRD, ClusterRole, NicClusterPolicy, …).
+kubectl label -n <ns> <kind>/<name> app.kubernetes.io/managed-by=Helm --overwrite
+kubectl annotate -n <ns> <kind>/<name> \
   meta.helm.sh/release-name=<component>-post \
   meta.helm.sh/release-namespace=<ns> --overwrite
 ```
