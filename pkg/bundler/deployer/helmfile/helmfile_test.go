@@ -593,19 +593,20 @@ func TestBuildHelmfile_DisableValidationPostManifests(t *testing.T) {
 }
 
 // TestBuildHelmfile_DisableValidationVendoredMixed pins the vendored
-// layout: under --vendor-charts a mixed component collapses into ONE
-// folder (Name == Parent, no -post split) whose templates/ embed the
-// post-phase manifests as post-install hooks, so a release-name-suffix
-// check would silently skip the bypass there. The marker travels with
-// the manifests instead: the collapsed folder gets disableValidation
-// when the flag is set, and a vendored pure-Helm sibling (no post
-// manifests, no marker) keeps the mapper check.
+// layout after #1835: a mixed component under --vendor-charts emits a
+// local-helm primary (the wrapper around the vendored tarball) plus an
+// injected "<name>-post" release, so the CarriesPostManifests marker —
+// not a release-name-suffix check — is what routes disableValidation to
+// the manifest-bearing release. The vendored primary and a vendored
+// pure-Helm sibling both keep the mapper check.
 func TestBuildHelmfile_DisableValidationVendoredMixed(t *testing.T) {
 	folders := []localformat.Folder{
 		{Index: 1, Dir: "001-network-operator", Kind: localformat.KindLocalHelm,
-			Name: "network-operator", Parent: "network-operator",
+			Name: "network-operator", Parent: "network-operator"},
+		{Index: 2, Dir: "002-network-operator-post", Kind: localformat.KindLocalHelm,
+			Name: "network-operator-post", Parent: "network-operator",
 			CarriesPostManifests: true},
-		{Index: 2, Dir: "002-nfd", Kind: localformat.KindLocalHelm,
+		{Index: 3, Dir: "003-nfd", Kind: localformat.KindLocalHelm,
 			Name: "nfd", Parent: "nfd"},
 	}
 	ns := map[string]string{"network-operator": "nvidia-network-operator", "nfd": "node-feature-discovery"}
@@ -614,15 +615,19 @@ func TestBuildHelmfile_DisableValidationVendoredMixed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
-	if len(doc.Releases) != 2 {
-		t.Fatalf("expected 2 releases, got %d", len(doc.Releases))
+	if len(doc.Releases) != 3 {
+		t.Fatalf("expected 3 releases, got %d", len(doc.Releases))
 	}
-	if !doc.Releases[0].DisableValidation {
-		t.Error("release[0] (vendored mixed network-operator) DisableValidation = false, want true — " +
-			"the collapsed vendored folder carries the CRD-dependent post manifests as hook templates")
+	if doc.Releases[0].DisableValidation {
+		t.Error("release[0] (vendored network-operator primary) DisableValidation = true, want false — " +
+			"the primary wraps the upstream chart and carries no recipe-side manifests")
 	}
-	if doc.Releases[1].DisableValidation {
-		t.Error("release[1] (vendored pure-Helm nfd) DisableValidation = true, want false — " +
+	if !doc.Releases[1].DisableValidation {
+		t.Error("release[1] (network-operator-post) DisableValidation = false, want true — " +
+			"the injected -post release carries the CRD-dependent manifests")
+	}
+	if doc.Releases[2].DisableValidation {
+		t.Error("release[2] (vendored pure-Helm nfd) DisableValidation = true, want false — " +
 			"no post manifests, the mapper check must stay on")
 	}
 }

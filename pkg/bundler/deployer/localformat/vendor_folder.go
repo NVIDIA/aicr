@@ -22,8 +22,12 @@
 //	  values.yaml                         # values nested under the subchart name
 //	  cluster-values.yaml                 # dynamic values, also nested
 //	  charts/<chart>-<version>.tgz        # vendored upstream tarball
-//	  templates/*.yaml                    # raw manifests with post-install hooks (mixed only)
 //	  install.sh                          # same install-local-helm.sh.tmpl as #662 wrappers
+//
+// Mixed components (#1835) do not embed recipe-side manifests here.
+// Write emits a separate NNN-<name>-post/ local-helm folder after this
+// primary (same shape as the non-vendored path), so manifests are
+// tracked Helm release members rather than fire-and-forget hooks.
 //
 // Helm at install time finds the dependencies: entry in Chart.yaml,
 // resolves it from charts/ (empty repository: signals "use the adjacent
@@ -35,34 +39,29 @@ package localformat
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/manifest"
 )
 
 // writeVendoredHelmFolder pulls the upstream chart bytes via puller and
-// emits a single wrapped local-helm folder. Returns the Folder manifest
-// (Files relative to outputDir) and the VendorRecord for the audit log.
+// emits a single wrapped local-helm folder for the primary chart.
+// Returns the Folder manifest (Files relative to outputDir) and the
+// VendorRecord for the audit log.
+//
+// Recipe-side post manifests are NOT written here — the caller
+// (Write) injects them via injectAuxiliaryFolder(phasePost) so they
+// become a tracked <name>-post release (#1835).
 //
 // idx is the NNN- prefix index. ctx threads through the puller call;
 // puller is REQUIRED to be non-nil — caller picks the implementation.
-//
-// For mixed components (recipe-side raw manifests present), each
-// manifest doc is rendered via manifest.Render (so chart-aware
-// templating still resolves) and then mutated by injectPostInstallHooks
-// so it deploys after the vendored subchart's resources.
 func writeVendoredHelmFolder(
 	ctx context.Context,
 	outputDir, dir string,
 	idx int,
 	c Component,
-	manifests map[string][]byte,
 	puller ChartPuller,
 ) (Folder, VendorRecord, error) {
 
@@ -137,15 +136,7 @@ func writeVendoredHelmFolder(
 		return Folder{}, VendorRecord{}, err
 	}
 
-	// 5. Mixed components: emit recipe-side raw manifests as templates/
-	//    with post-install hook annotations. Pure Helm (no manifests)
-	//    skips the templates/ directory entirely.
-	templateRelPaths, err := writeMixedManifests(ctx, folderDir, dir, c, manifests)
-	if err != nil {
-		return Folder{}, VendorRecord{}, err
-	}
-
-	// 6. install.sh — reuse the same template as #662's local-helm wrappers.
+	// 5. install.sh — reuse the same template as #662's local-helm wrappers.
 	// Vendored Helm folders are always primary (pre-injection still flows
 	// through writeLocalHelmFolder) and the upstream chart's own templates
 	// do not declare a Namespace by recipe convention, so --create-namespace
@@ -160,15 +151,13 @@ func writeVendoredHelmFolder(
 	}
 
 	// File list — deterministic order matching writeLocalHelmFolder.
-	files := make([]string, 0, 5+len(templateRelPaths))
-	files = append(files,
+	files := []string{
 		filepath.Join(dir, "Chart.yaml"),
 		filepath.Join(dir, "charts", tarball),
 		filepath.Join(dir, "values.yaml"),
 		filepath.Join(dir, "cluster-values.yaml"),
-	)
-	files = append(files, templateRelPaths...)
-	files = append(files, filepath.Join(dir, "install.sh"))
+		filepath.Join(dir, "install.sh"),
+	}
 
 	// VendorRecord carries the audit fields plus context (folder name).
 	// Force-canonicalize TarballName to the value we actually wrote
@@ -190,11 +179,9 @@ func writeVendoredHelmFolder(
 		// render; the chart-owns-Namespace detection does not apply
 		// here. Default to true to match the upstream-helm path.
 		CreateNamespace: true,
-		// Mixed components collapse into this single folder under
-		// VendorCharts, so the post-phase manifests live in its
-		// templates/ as post-install hooks (see writeMixedManifests
-		// above) — the marker travels with them.
-		CarriesPostManifests: len(manifests) > 0,
+		// Post manifests live in the injected <name>-post folder
+		// (#1835), not in this primary wrapper.
+		CarriesPostManifests: false,
 	}, rec, nil
 }
 
@@ -220,109 +207,4 @@ func writeNestedValueFiles(folderDir string, c Component, subchart string) error
 			fmt.Sprintf("write cluster-values.yaml for %s", c.Name), err)
 	}
 	return nil
-}
-
-// writeMixedManifests renders recipe-side raw manifests through the
-// usual manifest.Render pipeline and then injects post-install hook
-// annotations so they deploy after the vendored subchart. Returns the
-// list of written file paths relative to outputDir, suitable for
-// inclusion in the Folder.Files slice.
-//
-// Returns an empty slice if there are no manifests (pure-Helm vendored
-// component).
-//
-// ctx is checked at the top of each per-manifest iteration so a
-// caller-initiated cancel aborts promptly even for large manifest sets.
-func writeMixedManifests(ctx context.Context, folderDir, dir string, c Component, manifests map[string][]byte) ([]string, error) {
-	if len(manifests) == 0 {
-		return nil, nil
-	}
-
-	// templates/ is created lazily (see the same rationale in local_helm.go):
-	// a mixed component whose recipe-side manifests all render empty must not
-	// leave an empty templates/ directory that the inventory verifier rejects.
-	templatesDir, err := deployer.SafeJoin(folderDir, "templates")
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"templates dir path unsafe", err)
-	}
-	templatesDirCreated := false
-
-	renderInput := renderInputForVendored(c)
-
-	sortedPaths := make([]string, 0, len(manifests))
-	for p := range manifests {
-		sortedPaths = append(sortedPaths, p)
-	}
-	sort.Strings(sortedPaths)
-
-	seen := make(map[string]string, len(sortedPaths))
-	out := make([]string, 0, len(sortedPaths))
-	for _, p := range sortedPaths {
-		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout,
-				"context cancelled during manifest write", err)
-		}
-		baseName := filepath.Base(p)
-		if prev, ok := seen[baseName]; ok {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("manifest basename collision in component %q: %q and %q both resolve to %q",
-					c.Name, prev, p, baseName))
-		}
-		seen[baseName] = p
-
-		rendered, rerr := manifest.Render(manifests[p], renderInput)
-		if rerr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("render manifest %s for %s", p, c.Name), rerr)
-		}
-		if !hasYAMLObjects(rendered) {
-			slog.Debug("skipping empty manifest after render",
-				"component", c.Name, "manifest", baseName)
-			continue
-		}
-
-		hooked, herr := injectPostInstallHooks(rendered)
-		if herr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("inject post-install hook for %s in %s", baseName, c.Name), herr)
-		}
-
-		outPath, jerr := deployer.SafeJoin(templatesDir, baseName)
-		if jerr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("template file path unsafe: %s", baseName), jerr)
-		}
-		if !templatesDirCreated {
-			if mkErr := os.MkdirAll(templatesDir, 0o755); mkErr != nil {
-				return nil, errors.Wrap(errors.ErrCodeInternal,
-					fmt.Sprintf("create templates dir for %s", dir), mkErr)
-			}
-			templatesDirCreated = true
-		}
-		if werr := writeFile(outPath, hooked, 0o644); werr != nil {
-			return nil, werr
-		}
-		out = append(out, filepath.Join(dir, "templates", baseName))
-	}
-	return out, nil
-}
-
-// renderInputForVendored is the same shape as renderInputFor but uses
-// the upstream chart name (post-vendoring) so manifest.Render's
-// .Chart.Name reference points at the vendored subchart, not the
-// wrapper. Callers in the non-vendored path should keep using
-// renderInputFor.
-func renderInputForVendored(c Component) manifest.RenderInput {
-	chart := c.ChartName
-	if chart == "" {
-		chart = c.Name
-	}
-	return manifest.RenderInput{
-		ComponentName: c.Name,
-		Namespace:     c.Namespace,
-		ChartName:     chart,
-		ChartVersion:  deployer.NormalizeVersionWithDefault(c.Version),
-		Values:        component.DeepCopyMap(c.Values),
-	}
 }
