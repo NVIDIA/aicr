@@ -51,7 +51,7 @@ security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
   grype: 'v0.116.1'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
-  cosign: 'v3.1.2'
+  cosign: 'v3.1.3'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
   syft: 'v1.50.0'
   # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
