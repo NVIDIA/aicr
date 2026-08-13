@@ -26,9 +26,12 @@
 # time:
 #   aicr recipe --service aks ... --profile gpuStack=operator-managed
 # The gpuStack profile declaration on the aks overlay owns these paths
-# (plus nvidia-dra-driver-gpu's nvidiaDriverRoot), so flipping them via
-# per-path --set overrides diverging from the selected value is rejected
-# at bundle time.
+# (plus nvidia-dra-driver-gpu's nvidiaDriverRoot and nvsentinel's
+# metadata-collector.runtimeClassName), so flipping them via per-path
+# --set overrides diverging from the selected value is rejected at
+# bundle time. Naming nvsentinel in the declaration also makes its
+# presence profile-owned, so it cannot be disabled or filtered out of
+# a profiled AKS bundle (see #2181).
 # See docs/integrator/aks-gpu-setup.md and
 # https://learn.microsoft.com/en-us/azure/aks/nvidia-gpu-operator
 #

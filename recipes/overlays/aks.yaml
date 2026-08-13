@@ -43,9 +43,17 @@ spec:
   # gpuoperator:toolkit.enabled=true --set gpuoperator:operator.runtimeClass=
   # nvidia --set dradriver:nvidiaDriverRoot=/run/nvidia/driver): the mode is
   # selected once at recipe generation (--profile gpuStack=...), recorded in
-  # metadata.selectedProfile, and the four paths below become profile-owned —
+  # metadata.selectedProfile, and the paths below become profile-owned —
   # a bundle-time --set diverging from the selected value is rejected instead
   # of silently producing the unqualified hybrid (#1757).
+  #
+  # nvsentinel's metadata-collector requests the NVIDIA runtime class by name,
+  # so it is owned here too. The GPU Operator's ClusterPolicy controller names
+  # the primary RuntimeClass after operator.runtimeClass, and under
+  # azure-managed that is nvidia-container-runtime, not the chart default
+  # nvidia. Left unset, the API server rejects every metadata-collector pod at
+  # admission with `RuntimeClass "nvidia" not found` (#2176). The two values
+  # must stay in lockstep with gpu-operator's operator.runtimeClass below.
   #
   # Each value carries the ADR-required distinguishing constraint over the
   # K8s.aks-gpu-pools.gpu-driver snapshot reading — the projection of every
@@ -72,6 +80,9 @@ spec:
           - name: nvidia-dra-driver-gpu
             overrides:
               nvidiaDriverRoot: /
+          - name: nvsentinel
+            overrides:
+              metadata-collector: {runtimeClassName: nvidia-container-runtime}
         constraints:
           - name: K8s.aks-gpu-pools.gpu-driver
             value: Install
@@ -88,6 +99,9 @@ spec:
           - name: nvidia-dra-driver-gpu
             overrides:
               nvidiaDriverRoot: /run/nvidia/driver
+          - name: nvsentinel
+            overrides:
+              metadata-collector: {runtimeClassName: nvidia}
         constraints:
           - name: K8s.aks-gpu-pools.gpu-driver
             value: None

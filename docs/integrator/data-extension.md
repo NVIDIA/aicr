@@ -262,13 +262,26 @@ mechanics:
 - **Static assignments to now-owned paths are superseded.** Descendant or
   external overlays that statically assign profile-owned paths (for the AKS
   declaration: `gpu-operator` `driver.enabled`, `operator.runtimeClass`,
-  `toolkit.enabled`; `nvidia-dra-driver-gpu` `nvidiaDriverRoot`) are
+  `toolkit.enabled`; `nvidia-dra-driver-gpu` `nvidiaDriverRoot`; `nvsentinel`
+  `metadata-collector.runtimeClassName`) are
   overwritten by the selected value's fragment at resolution. The `enabled`
   entries in `ownedPaths` are different: they are the SYNTHETIC
   component-presence locks — fragments are forbidden from assigning
   `enabled`, and the lock instead rejects removing (or bundle-subsetting
   away) an owned component. Review those overlays when converting a family — a
   static assignment that used to take effect no longer does.
+
+  Note the reach of that presence lock: owning a path on a component owns the
+  component. Because the AKS declaration assigns
+  `metadata-collector.runtimeClassName` (so the collector requests the same
+  RuntimeClass the profile has the GPU Operator create), `nvsentinel` joins
+  `gpu-operator` and `nvidia-dra-driver-gpu` as mandatory on AKS — `--set
+  nv-sentinel:enabled=false` (on `aicr bundle` and `aicr mirror list` alike —
+  mirror discovery runs the same lock), an API `bundlers=` list omitting it, and
+  deleting the componentRef from the recipe are all rejected. For the GPU
+  stack components that lock is the point; for an observability add-on like
+  nvsentinel it is a side effect of needing to track `operator.runtimeClass`,
+  since a declaration cannot own a path without owning presence.
 - **Owned paths lock per surface.** The enforcement matrix:
   1. *`aicr bundle` static overrides* (ANY static source — `--set`,
      `--set-json`, `--set-file`, or a config-file override) on an

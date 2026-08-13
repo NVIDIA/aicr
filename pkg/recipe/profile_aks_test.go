@@ -18,7 +18,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -45,6 +47,7 @@ func TestAKSGPUStackProfile(t *testing.T) {
 			"driver.enabled", "enabled", "operator.runtimeClass", "toolkit.enabled",
 		},
 		"nvidia-dra-driver-gpu": {"enabled", "nvidiaDriverRoot"},
+		"nvsentinel":            {"enabled", "metadata-collector.runtimeClassName"},
 	}
 
 	tests := []struct {
@@ -70,7 +73,7 @@ func TestAKSGPUStackProfile(t *testing.T) {
 			wantConstraint: "Install",
 		},
 		{
-			name:           "operator value flips the four paths together",
+			name:           "operator value flips the owned paths together",
 			selection:      "gpuStack=operator-managed",
 			wantValue:      "operator-managed",
 			wantDriver:     true,
@@ -130,6 +133,25 @@ func TestAKSGPUStackProfile(t *testing.T) {
 			}
 			if root, _ := dra.Overrides["nvidiaDriverRoot"].(string); root != tt.wantDriverRoot {
 				t.Fatalf("nvidiaDriverRoot = %v, want %q", dra.Overrides["nvidiaDriverRoot"], tt.wantDriverRoot)
+			}
+
+			// nvsentinel's metadata-collector requests the NVIDIA RuntimeClass
+			// by name, and the ClusterPolicy controller names that object
+			// after operator.runtimeClass. The two must agree or the API
+			// server rejects every metadata-collector pod at admission with
+			// `RuntimeClass "nvidia" not found` (#2176).
+			sentinel := result.GetComponentRef("nvsentinel")
+			if sentinel == nil {
+				t.Fatal("nvsentinel componentRef missing")
+			}
+			collector, ok := sentinel.Overrides["metadata-collector"].(map[string]any)
+			if !ok {
+				t.Fatalf("nvsentinel overrides[metadata-collector] = %#v, want map",
+					sentinel.Overrides["metadata-collector"])
+			}
+			if rc, _ := collector["runtimeClassName"].(string); rc != tt.wantRuntime {
+				t.Fatalf("metadata-collector.runtimeClassName = %v, want %q (must match operator.runtimeClass)",
+					collector["runtimeClassName"], tt.wantRuntime)
 			}
 
 			// The selected value's distinguishing constraint is recorded in
@@ -237,6 +259,13 @@ func TestAKSDefaultKeepsPreProfileEffectiveValues(t *testing.T) {
 
 	// Byte-identical effective values for every component — the profile
 	// fragment must be value-identical to what the family always shipped.
+	//
+	// nvsentinel is the one deliberate exception: the pre-profile catalog
+	// left metadata-collector on the chart default runtimeClassName "nvidia",
+	// which does not exist under azure-managed, so every metadata-collector
+	// pod was rejected at admission (#2176). The profile now supplies the
+	// selected runtime class. The delta is asserted exactly rather than
+	// waived, so any further drift still fails.
 	for _, name := range profiledNames {
 		got, err := profiled.GetValuesForComponentWithContext(ctx, name)
 		if err != nil {
@@ -245,6 +274,24 @@ func TestAKSDefaultKeepsPreProfileEffectiveValues(t *testing.T) {
 		want, err := legacy.GetValuesForComponentWithContext(ctx, name)
 		if err != nil {
 			t.Fatalf("legacy values for %s: %v", name, err)
+		}
+		if name == "nvsentinel" {
+			collector, ok := got["metadata-collector"].(map[string]any)
+			if !ok {
+				t.Fatalf("nvsentinel metadata-collector = %#v, want a map", got["metadata-collector"])
+			}
+			// Compare the whole subtree, not just runtimeClassName: deleting
+			// the map below would otherwise let a future fragment smuggle
+			// sibling keys past the DeepEqual that follows.
+			wantCollector := map[string]any{"runtimeClassName": "nvidia-container-runtime"}
+			if !reflect.DeepEqual(collector, wantCollector) {
+				t.Fatalf("nvsentinel metadata-collector = %#v, want exactly %#v", collector, wantCollector)
+			}
+			if _, preexisting := want["metadata-collector"]; preexisting {
+				t.Fatal("pre-profile catalog already sets nvsentinel metadata-collector; " +
+					"fold the value back into the component values file instead of the profile")
+			}
+			delete(got, "metadata-collector")
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("effective values for %s diverged from the pre-profile catalog", name)
@@ -386,4 +433,79 @@ func TestAKSLegacyExternalShadowStaysUnprofiled(t *testing.T) {
 			t.Fatalf("unexpected pool constraint on unprofiled resolution: %s=%s", c.Name, c.Value)
 		}
 	}
+}
+
+// TestAKSProfileMakesNVSentinelMandatory pins the presence half of the
+// gpuStack ownership contract for nvsentinel.
+//
+// Owning a componentRef under a profile value locks more than the leaf paths
+// it assigns: the declaration-wide synthetic "enabled" marker is added for
+// every referenced component, and ValidateProfileLock then rejects any output
+// where that component is absent or disabled. Adding
+// metadata-collector.runtimeClassName to the profile therefore also makes
+// nvsentinel mandatory on AKS — `--set nv-sentinel:enabled=false` and an API
+// `bundlers=` list that omits it both fail closed, where before this pin they
+// succeeded.
+//
+// That is an accepted cost of tracking operator.runtimeClass from the profile
+// (ADR-015 has no per-componentRef opt-out), not an accident. The test exists
+// so the contract is visible and any future relaxation is a deliberate edit.
+func TestAKSProfileMakesNVSentinelMandatory(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	result, err := NewBuilder().BuildFromCriteriaWithProfile(ctx, aksCriteria(), "")
+	if err != nil {
+		t.Fatalf("BuildFromCriteriaWithProfile() error = %v", err)
+	}
+
+	owned, ok := result.Metadata.SelectedProfile.OwnedPaths["nvsentinel"]
+	if !ok {
+		t.Fatal("gpuStack does not own nvsentinel")
+	}
+	if !slices.Contains(owned, "enabled") {
+		t.Fatalf("nvsentinel ownedPaths = %v, want the synthetic presence marker %q", owned, "enabled")
+	}
+
+	hydrate := func(t *testing.T) map[string]map[string]any {
+		t.Helper()
+		candidate := make(map[string]map[string]any)
+		for component := range result.Metadata.SelectedProfile.OwnedPaths {
+			values, hErr := result.GetValuesForComponentWithContext(ctx, component)
+			if hErr != nil {
+				t.Fatalf("hydrate %s: %v", component, hErr)
+			}
+			candidate[component] = values
+		}
+		return candidate
+	}
+
+	t.Run("unmodified output passes", func(t *testing.T) {
+		t.Parallel()
+		lockErr := result.ValidateProfileLock(ctx, result.ComponentRefs, hydrate(t), nil)
+		if lockErr != nil {
+			t.Fatalf("ValidateProfileLock() rejected a recipe-identical candidate: %v", lockErr)
+		}
+	})
+
+	t.Run("dropping nvsentinel from the output fails closed", func(t *testing.T) {
+		t.Parallel()
+		// Mirrors what `--set nv-sentinel:enabled=false` and an API
+		// bundlers= list omitting nvsentinel produce: the component is
+		// filtered out of the candidate refs before the lock runs.
+		kept := make([]ComponentRef, 0, len(result.ComponentRefs))
+		for _, ref := range result.ComponentRefs {
+			if ref.Name == "nvsentinel" {
+				continue
+			}
+			kept = append(kept, ref)
+		}
+		if len(kept) == len(result.ComponentRefs) {
+			t.Fatal("nvsentinel is not present in the resolved componentRefs")
+		}
+		lockErr := result.ValidateProfileLock(ctx, kept, hydrate(t), nil)
+		if lockErr == nil || !strings.Contains(lockErr.Error(), "absent or disabled") {
+			t.Fatalf("ValidateProfileLock() error = %v, want nvsentinel absent-or-disabled rejection", lockErr)
+		}
+	})
 }

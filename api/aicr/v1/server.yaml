@@ -2037,7 +2037,11 @@ components:
       name: bundlers
       in: query
       required: false
-      description: Comma-delimited enabled component names to include.
+      description: >
+        Comma-delimited enabled component names to include. On a recipe
+        carrying metadata.selectedProfile (ADR-015), a list that omits a
+        profile-owned component is rejected with HTTP 400 (profile-owned
+        component "<name>" is absent or disabled in the output).
       schema:
         type: string
     BundleSet:

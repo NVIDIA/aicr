@@ -134,8 +134,8 @@ advertise zero `nvidia.com/gpu`.
 
 | Mode | Nodepool | GPU Operator values |
 |------|----------|---------------------|
-| AKS azure-managed (default) | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` (recipe defaults) |
-| GPU Operator-managed | `--gpu-driver none` (AKS "None/BYO" install profile) | `driver.enabled=true`, `toolkit.enabled=true`, `operator.runtimeClass=nvidia`, plus `dradriver:nvidiaDriverRoot=/run/nvidia/driver` (all together) |
+| AKS azure-managed (default) | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime`, plus `nv-sentinel:metadata-collector.runtimeClassName=nvidia-container-runtime` (recipe defaults) |
+| GPU Operator-managed | `--gpu-driver none` (AKS "None/BYO" install profile) | `driver.enabled=true`, `toolkit.enabled=true`, `operator.runtimeClass=nvidia`, plus `dradriver:nvidiaDriverRoot=/run/nvidia/driver` and `nv-sentinel:metadata-collector.runtimeClassName=nvidia` (all together) |
 
 AICR's default follows the CSP default: an `az aks nodepool add` without GPU
 driver flags preinstalls the NVIDIA driver and container toolkit from the AKS
@@ -254,6 +254,29 @@ AICR recipe's pins. `operator.runtimeClass` must match the runtime handler
 preconfigured on the AKS node image; NVIDIA's AKS example uses
 `nvidia-container-runtime` (see
 [GPU Operator on Microsoft AKS](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/microsoft-aks.html)).
+
+The ClusterPolicy controller names the primary NVIDIA RuntimeClass object after
+`operator.runtimeClass`, so any component that requests that class by name must
+use the same value. NVSentinel's `metadata-collector` is one: its chart defaults
+to `nvidia`, which does not exist under `azure-managed`, and the API server then
+rejects every pod at admission with `RuntimeClass "nvidia" not found`. The
+`gpuStack` profile therefore also owns
+`nv-sentinel:metadata-collector.runtimeClassName` and keeps it in lockstep with
+`operator.runtimeClass`.
+
+**nvsentinel is mandatory on AKS as a result.** Profile ownership locks a
+component's presence, not just the paths it assigns, so an AKS bundle can no
+longer drop nvsentinel: `--set nv-sentinel:enabled=false` (on `aicr bundle`
+and `aicr mirror list` alike) and an API `bundlers=` list that omits it are
+rejected with `profile-owned component "nvsentinel" is absent or disabled in
+the output`. This is a deliberate
+consequence of tracking `operator.runtimeClass` from the profile — ADR-015 has
+no per-componentRef opt-out — and it is a change from earlier releases, where
+disabling nvsentinel on AKS succeeded. There is no bundle-time opt-out:
+deleting the componentRef from a copy of the recipe is rejected too
+(`profile-owned component "nvsentinel" is missing or disabled`). If you need an
+AKS bundle without nvsentinel, open an issue so the requirement can be weighed
+against the RuntimeClass coupling.
 
 `driver.rdma.useHostMofed` remains `false` in this mode — it is inert while
 `driver.enabled=false`, but keeping it correct prevents a later ownership-mode
@@ -502,13 +525,14 @@ aicr bundle -r recipe.yaml -o ./bundles
 ```
 
 The `operator-managed` value sets `driver.enabled=true`, `toolkit.enabled=true`,
-`operator.runtimeClass=nvidia`, and retargets `nvidia-dra-driver-gpu`'s
-`nvidiaDriverRoot` from the AKS default (`/`, the host-installed driver
-location) to the GPU Operator driver container's install root
-(`/run/nvidia/driver`) — nothing installs a driver at the host root in this
+`operator.runtimeClass=nvidia`,
+`nv-sentinel:metadata-collector.runtimeClassName=nvidia`, and retargets
+`nvidia-dra-driver-gpu`'s `nvidiaDriverRoot` from the AKS default (`/`, the
+host-installed driver location) to the GPU Operator driver container's install
+root (`/run/nvidia/driver`) — nothing installs a driver at the host root in this
 mode. A partial configuration is impossible by construction: the profile
-owns all four paths, so per-path `--set` overrides that diverge from the
-selected value are rejected at bundle time (identical values are accepted;
+owns all profile-owned paths, so per-path `--set` overrides that diverge from
+the selected value are rejected at bundle time (identical values are accepted;
 legacy pre-profile recipes without `metadata.selectedProfile` still take
 the old four-flag `--set` tuple).
 

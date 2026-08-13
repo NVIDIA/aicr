@@ -119,6 +119,17 @@ The recipe author disables a component because the target platform already
 provides it, so re-enabling would install a conflicting second copy. To deploy
 a component the recipe disables, edit the recipe/overlay instead.
 
+Components a configuration profile owns cannot be disabled at all. A recipe
+carrying `metadata.selectedProfile` (ADR-015 — the AKS and GKE `gpuStack`
+families) locks the **presence** of every component the profile names, not just
+the values it assigns, so `--set <component>:enabled=false` is rejected with
+`profile-owned component "<name>" is absent or disabled in the output`. On AKS
+that covers `gpu-operator`, `nvidia-dra-driver-gpu`, and `nvsentinel`; see
+[AKS GPU setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile)
+for why. Reselecting a `gpuStack` value does not drop them either — removing a
+profile-owned component is a catalog/composition change; if you need an AKS
+bundle without nvsentinel, open an issue as that page describes.
+
 ## Pin node scheduling
 
 Steer system components and GPU workloads onto the right nodes with selector and
