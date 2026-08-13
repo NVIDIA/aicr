@@ -372,10 +372,15 @@ of the following gates.
   health contract.
 - A separate, named Kind integration test opts in a fixture namespace, creates
   a lightweight digest-pinned workload, and proves AIBOM generation,
-  reconciliation after a relevant workload change, hash consistency,
-  CycloneDX 1.6 validity, and owner-reference cleanup. The implementation PR
-  must add and document this test command because the generic component harness
-  stops after the read-only health check.
+  reconciliation after a relevant workload change, CycloneDX 1.6 validity, and
+  owner-reference cleanup. Its hash assertions are that
+  `status.bomDocument.sha256` matches the canonical BOM bytes, and that a
+  reconcile of an unchanged workload preserves `status.inputHash`. It must not
+  assert that `status.bomHash` is stable: that field covers the output bytes,
+  which carry the BOM's generation timestamp, so it changes on every
+  regeneration by design. The implementation PR must add and document this test
+  command because the generic component harness stops after the read-only
+  health check.
 - Stock recipe resolution and bytes remain unchanged.
 - `make bom-docs`, focused component/bundler/mirror tests, applicable render
   tests, documentation link validation, and `make qualify` pass.
