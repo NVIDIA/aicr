@@ -119,6 +119,44 @@ The recipe author disables a component because the target platform already
 provides it, so re-enabling would install a conflicting second copy. To deploy
 a component the recipe disables, edit the recipe/overlay instead.
 
+### Overrides that cannot take effect are rejected
+
+An override whose component will not appear in the generated bundle is
+rejected with an error rather than silently discarded. This covers a
+component that is absent because the recipe disabled it, because
+`--set <component>:enabled=false` removed it, because the `bundlers=`
+filter excluded it, or because the component name is neither one the recipe declares nor a
+registered `valueOverrideKeys` alias of one (usually a typo — registered
+aliases such as `gpuoperator` for `gpu-operator` remain valid):
+
+```bash
+# Rejected: the second --set can never take effect
+aicr bundle --recipe recipe.yaml \
+  --set nv-sentinel:enabled=false \
+  --set nv-sentinel:labeler.assumeDriverInstalled=true \
+  --output ./bundles
+```
+
+The two flags ask for contradictory things — remove the component, and
+configure it — so the command fails instead of shipping a bundle with
+one request quietly dropped. Only a scalar `--set <component>:enabled=false`
+is exempt on a declared component: it is the supported way to remove
+one, and it is also accepted on a component the recipe already disables.
+`enabled=true` on a component the `bundlers=` filter excludes is
+rejected like any other ineffective override, and the `enabled` key is
+never honored from `--set-json`/`--set-file` (present or absent — the
+typed path would write a literal `enabled:` chart value instead of
+toggling the component).
+
+The same rule applies to `--set-json`, `--set-file`, `--dynamic`, and
+the REST API's equivalent parameters. For `--dynamic` no path is exempt,
+`enabled` included: a dynamic path on an absent component exports
+nothing (there is no `cluster-values.yaml` to defer it to), and a
+dynamic path is never a removal idiom. Unknown component names were
+already rejected by the `bundlers=` filter and by `--dynamic`
+registry validation; this extends the same fail-closed rule to every
+override source.
+
 ## Pin node scheduling
 
 Steer system components and GPU workloads onto the right nodes with selector and

@@ -126,9 +126,15 @@ aicr bundle \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   --system-node-selector nodeGroup=system-worker \
   --storage-class <storage-class> \
+  --set nv-sentinel:labeler.assumeDriverInstalled=true \
   --output bundle
 ```
 
+> The `nv-sentinel` flag is required on GKE COS (`gke-default`): no driver
+> pod is observable by the NVSentinel labeler there, and bundling without
+> the flag is a blocking error. See
+> [NVSentinel on provider-installed-driver platforms](../docs/user/component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
+>
 > **GKE only:** system nodes should not have custom taints (breaks konnectivity-agent and other GKE managed pods). Only `--system-node-selector` is needed, no `--system-node-toleration`.
 
 ## Install Bundle into the Cluster
@@ -295,6 +301,11 @@ spec:
       target: ./bundle
     deployment:
       deployer: helmfile
+      # Required on GKE COS (gke-default): no driver pod is observable by
+      # the NVSentinel labeler, so bundling without the flag is a
+      # blocking error (issue #2175).
+      set:
+        - nv-sentinel:labeler.assumeDriverInstalled=true
     scheduling:
       acceleratedNodeSelector:
         nodeGroup: gpu-worker

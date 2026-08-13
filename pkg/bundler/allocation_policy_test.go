@@ -217,6 +217,19 @@ func TestMake_DynamicAllocationPolicyKeyRejected(t *testing.T) {
 				Source:    "https://helm.ngc.nvidia.com/nvidia",
 				Chart:     "gpu-operator",
 			},
+			{
+				// The DRA driver must be DECLARED for the policy-key
+				// rejection to stay the gate under test: a --dynamic on
+				// an undeclared component is now rejected earlier (and
+				// with a different message) by
+				// rejectOverridesForAbsentComponents.
+				Name:      "nvidia-dra-driver-gpu",
+				Namespace: "nvidia-dra-driver",
+				Version:   "0.4.1",
+				Type:      "helm",
+				Source:    "oci://registry.k8s.io/dra-driver-nvidia/charts",
+				Chart:     "dra-driver-nvidia-gpu",
+			},
 		},
 	}
 
