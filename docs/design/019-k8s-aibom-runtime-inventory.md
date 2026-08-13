@@ -48,11 +48,12 @@ observe workloads after deployment or prove that later live state still matches
 the validated recipe.
 
 AICR components are declarative metadata. A normal Helm component consists of a
-registry entry, minimal AICR values, a pinned chart version, a read-only health
-check, and explicit recipe references. Existing deployers project that
-definition into Helm, Helmfile, Argo CD, Argo CD Helm, Flux, and local-format
-outputs. Components do not add custom installation or controller logic to the
-bundler.
+registry entry, minimal AICR values, a pinned chart version, and a read-only
+health check. Recipes reference it explicitly through `componentRefs`; the
+registry entry itself carries no back-reference to any recipe. Existing
+deployers project that definition into Helm, Helmfile, Argo CD, Argo CD Helm,
+Flux, and local-format outputs. Components do not add custom installation or
+controller logic to the bundler.
 
 Relevant contracts:
 
@@ -89,8 +90,8 @@ At that commit:
 - Google publishes no controller image or Helm repository for the project;
 - the chart accepts an image repository and tag, but not a first-class digest;
 - chart, app, and binary-reported versions are inconsistent;
-- the chart renders a namespace on the cluster-scoped default configuration and
-  creates it as a `pre-install` hook; and
+- the chart sets a `metadata.namespace` on the cluster-scoped default
+  configuration and creates it via a `pre-install` hook; and
 - rendered RBAC contains duplicate rules and broader write permissions than the
   minimum intended ownership boundary.
 
@@ -148,8 +149,17 @@ documentation without adding `k8s-aibom` to `recipes/overlays/base.yaml`, a leaf
 overlay, or a mixin used by stock recipes.
 
 Registry presence does not enable a component. A custom or external recipe must
-declare a `ComponentRef` explicitly. Once declared and hydrated, the component's
-health assertions are part of the recipe's deployment-validation contract:
+declare a `ComponentRef` explicitly.
+
+Opt-in scope follows the declaring overlay's `criteria`, not a single recipe.
+AICR resolution is criteria-match across every overlay, so a broad-criteria
+overlay attaches its components — and their health checks — to every matching
+recipe; `recipes/overlays/monitoring-hpa.yaml` (`criteria: intent: any`) is the
+in-tree example. An adopter declaring `k8s-aibom` must scope the declaring
+overlay narrowly and avoid `intent: any` unless universal injection is intended.
+
+Once declared and hydrated, the component's health assertions are part of the
+recipe's deployment-validation contract:
 
 - absence of the CRD, controller, or required configuration is a failed
   deployment check;
@@ -201,7 +211,7 @@ Before implementation, upstream must provide one coherent release containing:
 5. an image reference selectable by digest without patching the chart;
 6. a machine-readable SBOM bound to that image digest;
 7. machine-verifiable build provenance bound to the same digest and source
-   commit; and
+   commit, and attributable to the expected upstream builder identity; and
 8. documented compatibility for the chart, image, CRDs, and supported
    Kubernetes versions.
 
@@ -251,6 +261,11 @@ release must prove:
   controller namespace and minimum verbs when enabled;
 - no privileged pod, host mount, host namespace, node-agent, workload exec, or
   Secret-value discovery permission exists;
+- no ClusterRole `aggregationRule` or aggregation label pulls the ServiceAccount
+  into `admin`, `edit`, or `view`, and no `impersonate`, `escalate`, or `bind`
+  verb and no wildcard (`*`) apiGroup, resource, or verb grant appears. The
+  cluster-wide reads the controller does require stay bounded by the positive
+  limits above, which are the governing allowlist;
 - the cluster-scoped default configuration has no namespace;
 - configuration is managed as a normal release resource unless a hook is
   demonstrably necessary and its lifecycle is tested; and
@@ -310,9 +325,20 @@ of the following gates.
 - Tagged source, published chart, multi-architecture image, digest, SBOM, and
   provenance form one coherent release.
 - Provenance and SBOM subjects bind the selected image digest.
+- Provenance verifies against the expected upstream builder identity — OIDC
+  issuer, source repository, and workflow ref — and meets a stated minimum SLSA
+  build level. Subject-digest binding alone is insufficient: it detects a
+  provenance/image mismatch, not a well-formed attacker-issued attestation whose
+  subject correctly names a malicious digest. This requirement is specific to
+  ADR-019 and deliberately exceeds ADR-006, which defers signature verification
+  to admission time.
 - No floating tag, branch, `latest`, or locally built artifact appears in the
   component definition.
-- The chart renders only expected images and supports digest selection.
+- The chart renders only expected images, and every rendered image — including
+  any sidecar or init container the qualified release introduces — is selectable
+  by digest through public values. A chart-default sub-image left tag-only would
+  fall into ADR-006 Layer 3, outside this ADR's pinning guarantee. At the
+  reviewed commit the chart renders a single `manager` container.
 
 ### Helm and Kubernetes lifecycle
 
@@ -327,8 +353,15 @@ of the following gates.
 ### Security and privacy
 
 - Rendered RBAC and pod security satisfy Decision 5 and Decision 6.
-- No AIBOM is produced for a namespace without an explicit selector match;
-  underlying informer visibility remains documented as cluster-wide.
+- No AIBOM is produced for a namespace without an explicit selector match. The
+  controller's informer cache stays cluster-wide regardless of opt-in, so pod
+  and workload specs from every namespace — including inline environment values,
+  args, and image references — are read into controller memory even for
+  namespaces never opted in. No data leaves the cluster by default because no
+  sink is configured, so this is in-memory read scope rather than egress. It is
+  an accepted residual of this decision, not an oversight, and must be
+  documented so adopters price it in. A namespace- or label-scoped informer is a
+  qualification preference, not a gate.
 - No external delivery or credential dependency exists by default.
 - AIBOM content, readers, size bounds, truncation, retention, and deletion are
   documented.
@@ -363,7 +396,10 @@ of the following gates.
 ### AICR qualification
 
 - The component renders consistently through `helm`, `helmfile`, `argocd`,
-  `argocd-helm`, `flux`, and `localformat`.
+  `argocd-helm`, `flux`, and `localformat`. Only the first five are
+  `--deployer` values; `localformat` is the shared writer those paths build on,
+  so exercise it at the writer and vendored-chart level rather than by passing
+  `--deployer localformat`, which fails to parse.
 - Vendored-chart output is tested wherever the deployer supports it.
 - Scheduling values land on the controller Deployment.
 - `aicr mirror list` discovers the exact image and mirror/copy qualification
