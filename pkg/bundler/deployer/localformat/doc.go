@@ -63,6 +63,16 @@
 // applied raw manifests before the chart and retried on "CRD not found"
 // errors) structurally unnecessary.
 //
+// VendorCharts uses the same split (#1835): the vendored primary wraps only
+// the upstream tarball, and the -post folder carries the manifests. Embedding
+// them in the wrapper chart as helm.sh/hook resources instead — the shape
+// shipped before #1835 — made them fire-and-forget: skipped by helm upgrade,
+// left behind by helm uninstall, and mapped by Argo CD to a PostSync hook that
+// never fires under syncPolicy.automated. Adding post-upgrade to those hooks
+// is not a fix; combined with helm.sh/hook-delete-policy: before-hook-creation
+// it deletes and recreates the resource on every upgrade, which cascades to
+// CRs of a deleted CRD and objects in a deleted Namespace.
+//
 // # Base-format invariants
 //
 // These are load-bearing contracts. Callers and contributors should not

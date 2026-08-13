@@ -1874,7 +1874,7 @@ The `--vendor-charts` flag pulls upstream Helm chart bytes into the bundle at bu
 
 **Bundle-time costs.** Vendoring adds bundle-time network egress (the chart pull), bundle-time auth surface (private registries need credentials at the bundle host), and bundle size (typically 0.5–5 MB unpacked per chart). Users who don't need air-gap shouldn't set `--vendor-charts` and shouldn't pay these costs.
 
-**Bundle layout with `--vendor-charts`** — every Helm component emits a single wrapper folder (mixed components no longer split into a primary + `-post` pair):
+**Bundle layout with `--vendor-charts`** — every Helm component emits a wrapper folder holding the vendored tarball. Mixed components keep the primary + `-post` split they have on the non-vendored path, so recipe-side manifests stay tracked members of their own Helm release:
 
 ```text
 my-bundle/
@@ -1887,8 +1887,13 @@ my-bundle/
   002-alloy/
     Chart.yaml
     charts/alloy-1.2.3.tgz
-    templates/                     # for mixed components: raw manifests
-      clusterrole.yaml             #   with helm.sh/hook: post-install
+    values.yaml
+    cluster-values.yaml
+    install.sh
+  003-alloy-post/                  # mixed component: recipe-side manifests
+    Chart.yaml                     #   plain local chart, no vendored tarball
+    templates/
+      clusterrole.yaml             #   ordinary template, no helm.sh/hook
     values.yaml
     cluster-values.yaml
     install.sh
