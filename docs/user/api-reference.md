@@ -133,16 +133,16 @@ Generate an optimized configuration recipe based on environment parameters.
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `any` |
 | `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `runai`, `slurm`, `any` |
-| `nodes` | integer | 0 | GPU node count (0 = any) |
+| `nodes` | integer | 0 | GPU node count hint (0 = unspecified). Advisory metadata — does not select or filter overlays. |
 
 **Examples:**
 
 ```shell
-# Minimal request
-curl "http://localhost:8080/v1/recipe"
-
-# Specify accelerator
+# Minimal request — at least one criteria dimension is required
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
+
+# Specify accelerator with service
+curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100"
 
 # Full specification
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8"
@@ -226,8 +226,9 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 ```
 
 **Error Responses:**
+- `400 Bad Request` - No criteria provided: at least one of `service`, `accelerator`, `intent`, `os`, `platform`, or `nodes` must be non-zero. An empty request returns `"no criteria provided: specify at least one of service, accelerator, intent, os, platform, nodes"`. This guard applies to `GET /v1/recipe`, `POST /v1/recipe`, `GET /v1/query`, and `POST /v1/query`.
 - `400 Bad Request` - Invalid criteria format, missing required fields, or invalid enum values
-- `400 Bad Request` - A stated criteria dimension is not honored by any applicable recipe overlay (uncovered dimension). This applies to both `GET /v1/recipe` and `POST /v1/recipe`: every dimension you state (`service`, `accelerator`, `intent`, `os`, `platform`) must be matched by at least one applied overlay, or the request fails instead of silently returning a recipe that ignores it. `nodes` is exempt — it is advisory and never required to be covered. The response's `details.uncovered` array names the offending dimension(s), the requested value, and any `validCompletions` (additional criteria that would make the request coverable). Snapshot-driven resolution (CLI `--snapshot` / Go SDK) may additionally attach `excludedOverlays` and `constraintWarnings` to the error; the HTTP API resolves from criteria only and never emits those two fields.
+- `400 Bad Request` - A stated criteria dimension is not honored by any applicable recipe overlay (uncovered dimension). This applies to `GET /v1/recipe`, `POST /v1/recipe`, `GET /v1/query`, and `POST /v1/query`: every dimension you state (`service`, `accelerator`, `intent`, `os`, `platform`) must be matched by at least one applied overlay, or the request fails instead of silently returning a recipe that ignores it. `nodes` is exempt — it is advisory and never required to be covered. The response's `details.uncovered` array names the offending dimension(s), the requested value, and any `validCompletions` (additional criteria that would make the request coverable). Snapshot-driven resolution (CLI `--snapshot` / Go SDK) may additionally attach `excludedOverlays` and `constraintWarnings` to the error; the HTTP API resolves from criteria only and never emits those two fields.
 - `405 Method Not Allowed` - Only GET and POST are supported
 
 **Uncovered-Dimension Error Example:**
@@ -348,9 +349,9 @@ All GET /v1/recipe parameters are supported, plus:
 
 **Error Responses:**
 
-Omitting `selector` returns `400 Bad Request` with code `INVALID_REQUEST`. An explicitly empty `selector=` remains valid and returns the entire hydrated recipe.
-
-`GET /v1/query` and `POST /v1/query` resolve a recipe through the same engine as `/v1/recipe`, so a stated criteria dimension not honored by any applicable overlay fails the same way: `400 Bad Request` with the `details.uncovered` array described in the [POST /v1/recipe error responses](#post-v1recipe) above.
+- `400 Bad Request` - No criteria provided: at least one criteria dimension (`service`, `accelerator`, `intent`, `os`, `platform`, or `nodes`) must be non-zero. Returns `"no criteria provided: specify at least one of service, accelerator, intent, os, platform, nodes"`. See the [POST /v1/recipe error responses](#post-v1recipe) entry for full details.
+- `400 Bad Request` - Omitting `selector` returns `INVALID_REQUEST`. An explicitly empty `selector=` remains valid and returns the entire hydrated recipe.
+- `400 Bad Request` - A stated criteria dimension not honored by any applicable overlay (uncovered dimension) — same `details.uncovered` shape as described in the [POST /v1/recipe error responses](#post-v1recipe) above.
 
 **Examples:**
 
@@ -397,6 +398,10 @@ curl -X POST "http://localhost:8080/v1/query" \
 ```
 
 The response format matches `GET /v1/query`: scalar values are returned as plain JSON values; maps and lists are returned as JSON objects/arrays.
+
+**Error Responses:**
+
+Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query) section above. The no-criteria and uncovered-dimension 400 cases apply. Note: unlike `GET /v1/query`, omitting `selector` from the POST body returns the entire hydrated recipe rather than a 400 (use `/v2/query` if you need the selector to be required).
 
 ---
 

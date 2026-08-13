@@ -442,10 +442,11 @@ func (c *Criteria) Matches(other *Criteria) bool {
 	// Nodes is metadata-only: no overlay in the embedded catalog gates on
 	// nodes, so it does not participate in overlay selection. A --nodes query
 	// matches any overlay regardless of its nodes value. External --data
-	// catalogs may contain criteria.nodes values, but those values are also
-	// ignored for matching, specificity, and coverage — operators using
-	// external catalogs should audit for nodes-gated overlays before upgrading.
-	// See issue #1781 (design 4.3 follow-up to #1542).
+	// catalogs with criteria.nodes set on any overlay are rejected at load time
+	// (ErrCodeInvalidRequest) before Matches() is ever called on them, so the
+	// value never influences overlay selection in practice. Nodes does still
+	// contribute to Specificity() so that nodes-only CLI queries pass the
+	// minimum-specificity guard. See issue #1781 (design 4.3 follow-up #1542).
 
 	return true
 }

@@ -1060,6 +1060,54 @@ func TestHandleQuery_SelectorPresence(t *testing.T) {
 
 // TestHandleQuery_MethodNotAllowed verifies non GET/POST returns 405 with an
 // Allow header.
+// TestHandleQuery_EmptyCriteriaRejected is a regression test that verifies
+// /v1/query applies the same minimum-specificity guard as /v1/recipe and the
+// CLI. A request with no criteria dimensions (Specificity()==0) must return
+// 400 rather than silently resolving and returning the base recipe's value.
+func TestHandleQuery_EmptyCriteriaRejected(t *testing.T) {
+	h := newTestHandler(t, nil)
+
+	tests := []struct {
+		name   string
+		method string
+		target string
+		body   string
+	}{
+		{
+			name:   "GET with only selector — no criteria",
+			method: http.MethodGet,
+			target: "/v1/query?selector=components.gpu-operator.values.driver.version",
+		},
+		{
+			name:   "POST with empty criteria object",
+			method: http.MethodPost,
+			target: "/v1/query",
+			body:   `{"criteria":{},"selector":"components.gpu-operator.values.driver.version"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req *http.Request
+			if tt.body != "" {
+				req = httptest.NewRequest(tt.method, tt.target, strings.NewReader(tt.body))
+				req.Header.Set("Content-Type", "application/json")
+			} else {
+				req = httptest.NewRequest(tt.method, tt.target, nil)
+			}
+			w := httptest.NewRecorder()
+			h.HandleQuery(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "no criteria provided") {
+				t.Errorf("body = %q, want it to contain %q", w.Body.String(), "no criteria provided")
+			}
+		})
+	}
+}
+
 func TestHandleQuery_MethodNotAllowed(t *testing.T) {
 	h := newTestHandler(t, nil)
 

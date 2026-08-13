@@ -210,9 +210,7 @@ func (h *recipeHandler) handleRecipes(w http.ResponseWriter, r *http.Request, v2
 		return
 	}
 
-	if criteria == nil {
-		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
-			"Recipe criteria cannot be empty", false, nil)
+	if !criteriaValid(w, r, criteria) {
 		return
 	}
 	resolveOpts, err := recipeResolveOptions(r, profile, v2)
@@ -448,9 +446,7 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request, v2 b
 		return
 	}
 
-	if criteria == nil {
-		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
-			"Query criteria cannot be empty", false, nil)
+	if !criteriaValid(w, r, criteria) {
 		return
 	}
 	resolveOpts, err := recipeResolveOptions(r, profile, v2)
@@ -698,6 +694,24 @@ func bodyHasTopLevelProfile(data []byte, format serializer.Format) (bool, error)
 			aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported profile field format %q", format))
 	}
+}
+
+// criteriaValid rejects nil criteria or requests with no effective criteria,
+// matching the CLI guard in pkg/cli/query.go. Applied to both /recipe and
+// /query so that empty-criteria resolution is consistently rejected. Returns
+// true when the request may proceed.
+func criteriaValid(w http.ResponseWriter, r *http.Request, criteria *recipe.Criteria) bool {
+	if criteria == nil {
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+			"Recipe criteria cannot be empty", false, nil)
+		return false
+	}
+	if criteria.Specificity() == 0 {
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+			"no criteria provided: specify at least one of service, accelerator, intent, os, platform, nodes", false, nil)
+		return false
+	}
+	return true
 }
 
 func recipeResolveOptions(r *http.Request, profile string, v2 bool) ([]aicr.RecipeResolveOption, error) {
