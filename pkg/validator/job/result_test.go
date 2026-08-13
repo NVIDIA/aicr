@@ -27,8 +27,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 // createPodForJob creates a pod that matches the Job's label selector.
@@ -279,6 +284,309 @@ func TestExtractResultPodNotFound(t *testing.T) {
 	}
 	if result.TerminationMsg == "" {
 		t.Error("TerminationMsg should contain pod not found message")
+	}
+	if !strings.Contains(result.TerminationMsg, "pod not found for Job") {
+		t.Errorf("TerminationMsg = %q, want the original pod-not-found wording when the Job carries no Failed condition", result.TerminationMsg)
+	}
+}
+
+// setJobFailedCondition stamps a terminal Failed condition on the deployed Job,
+// standing in for the Job controller (envtest runs no controller-manager).
+func setJobFailedCondition(t *testing.T, ns, jobName, reason, message string) {
+	t.Helper()
+	job, err := testClientset.BatchV1().Jobs(ns).Get(context.Background(), jobName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get Job %s: %v", jobName, err)
+	}
+	// The apiserver rejects Failed=True without a preceding FailureTarget=True
+	// and without startTime, mirroring the real controller's two-step
+	// termination.
+	now := metav1.Now()
+	job.Status.StartTime = &now
+	job.Status.Conditions = append(job.Status.Conditions,
+		batchv1.JobCondition{
+			Type:    batchv1.JobFailureTarget,
+			Status:  corev1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		},
+		batchv1.JobCondition{
+			Type:    batchv1.JobFailed,
+			Status:  corev1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		},
+	)
+	if _, err := testClientset.BatchV1().Jobs(ns).UpdateStatus(context.Background(), job, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("failed to update Job status: %v", err)
+	}
+}
+
+// TestExtractResultPodNotFoundDeadlineExceeded covers issue #2186: a validator
+// Job killed on activeDeadlineSeconds has its pod deleted by the Job
+// controller, so the pod lookup finds nothing. Every case must be reported as a
+// failed check naming the deadline, not an inconclusive "pod not found".
+//
+// Each subtest creates its own namespace and Job rather than sharing a fixture:
+// the catalog timeout is a per-case input baked into the deployed Job, and the
+// condition is stamped on that specific Job's status.
+func TestExtractResultPodNotFoundDeadlineExceeded(t *testing.T) {
+	tests := []struct {
+		name            string
+		timeout         time.Duration // 0 exercises the runPhase default fallback
+		condMessage     string
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name:        "names the deadline, reason and controller message",
+			timeout:     2 * time.Minute,
+			condMessage: "Job was active longer than specified deadline",
+			wantContains: []string{
+				"Job condition Failed/DeadlineExceeded: Job was active longer than specified deadline",
+				// Pins the neutral phrasing: ErrCodeNotFound does not establish
+				// WHY the pod is gone, so the message must not name a cause.
+				"no pod remains for it",
+			},
+			wantNotContains: []string{"pod not found for Job", "the Job controller deleted the pod"},
+		},
+		{
+			name:         "unpinned catalog timeout reports the default, not 0s",
+			timeout:      0,
+			condMessage:  "Job was active longer than specified deadline",
+			wantContains: []string{"Job condition Failed/DeadlineExceeded: Job was active longer than specified deadline"},
+		},
+		{
+			// The reason substitutes for an empty message, so the rendered
+			// detail repeats it. Asserting the full "reason: reason" phrase is
+			// what makes this case meaningful — a bare "DeadlineExceeded" is
+			// already present in the Failed/<reason> prefix, so the fallback
+			// could be deleted without failing the test.
+			name:         "empty controller message falls back to the reason",
+			timeout:      2 * time.Minute,
+			condMessage:  "",
+			wantContains: []string{"Job condition Failed/DeadlineExceeded: DeadlineExceeded)"},
+		},
+		{
+			// Whitespace-only is what makes the TrimSpace load-bearing: a bare
+			// `cond.Message == ""` check would render "Failed/DeadlineExceeded:
+			// (   )" here instead of falling back to the reason.
+			name:         "whitespace-only controller message falls back to the reason",
+			timeout:      2 * time.Minute,
+			condMessage:  "   ",
+			wantContains: []string{"Job condition Failed/DeadlineExceeded: DeadlineExceeded)"},
+		},
+		{
+			// BuildJobPlan truncates the catalog timeout with
+			// int64(timeout.Seconds()), so the Job's activeDeadlineSeconds is
+			// 90s here. Reporting the raw 1m30.5s would name a deadline
+			// Kubernetes never enforced.
+			name:            "sub-second precision reports the truncated deadline the Job enforced",
+			timeout:         90500 * time.Millisecond,
+			condMessage:     "Job was active longer than specified deadline",
+			wantContains:    []string{"1m30s"},
+			wantNotContains: []string{"1m30.5s"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := createUniqueNamespace(t)
+			entry := testEntry()
+			entry.Timeout = tt.timeout
+			d := deployTestJob(t, ns, entry)
+			// No pod created — the Job controller deleted it on deadline expiry.
+			setJobFailedCondition(t, ns, d.JobName(), batchv1.JobReasonDeadlineExceeded, tt.condMessage)
+
+			result := d.ExtractResult(context.Background())
+
+			if result.ExitCode != 1 {
+				t.Errorf("ExitCode = %d, want 1", result.ExitCode)
+			}
+			if result.CTRFStatus() != ctrf.StatusFailed {
+				t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusFailed)
+			}
+			// Asserted for every case, including the unpinned one, which must
+			// render the same default runPhase applies rather than a bare "0s".
+			// The deadline the Job actually enforced: BuildJobPlan truncates
+			// to whole seconds before setting activeDeadlineSeconds.
+			want := tt.timeout
+			if want == 0 {
+				want = defaults.ValidatorDefaultTimeout
+			}
+			wantTimeout := (time.Duration(int64(want.Seconds())) * time.Second).String()
+			if !strings.Contains(result.TerminationMsg, wantTimeout) {
+				t.Errorf("TerminationMsg = %q, want it to name the deadline %s", result.TerminationMsg, wantTimeout)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(result.TerminationMsg, want) {
+					t.Errorf("TerminationMsg = %q, want it to contain %q", result.TerminationMsg, want)
+				}
+			}
+			for _, notWant := range tt.wantNotContains {
+				if strings.Contains(result.TerminationMsg, notWant) {
+					t.Errorf("TerminationMsg = %q, should not contain %q", result.TerminationMsg, notWant)
+				}
+			}
+		})
+	}
+}
+
+// TestExtractResultPodNotFoundJobFailedConditionFalse pins the
+// Status == ConditionTrue guard in jobFailedCondition. A JobFailed condition
+// stamped False is not a terminal failure, so it must not license a
+// DeadlineExceeded verdict — the original inconclusive pod-not-found wording
+// stands. Without the status check this presence-only match would flip an
+// exit -1 / other into a product exit 1 / failed.
+func TestExtractResultPodNotFoundJobFailedConditionFalse(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	d := deployTestJob(t, ns, testEntry())
+	// No pod created, and the Job carries a non-terminal Failed=False condition.
+	job, err := testClientset.BatchV1().Jobs(ns).Get(context.Background(), d.JobName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get Job %s: %v", d.JobName(), err)
+	}
+	now := metav1.Now()
+	job.Status.StartTime = &now
+	job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
+		Type:    batchv1.JobFailed,
+		Status:  corev1.ConditionFalse,
+		Reason:  batchv1.JobReasonDeadlineExceeded,
+		Message: "Job was active longer than specified deadline",
+	})
+	if _, err := testClientset.BatchV1().Jobs(ns).UpdateStatus(context.Background(), job, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("failed to update Job status: %v", err)
+	}
+
+	result := d.ExtractResult(context.Background())
+
+	if result.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+	}
+	if result.CTRFStatus() != ctrf.StatusOther {
+		t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusOther)
+	}
+	if !strings.Contains(result.TerminationMsg, "pod not found for Job") {
+		t.Errorf("TerminationMsg = %q, want the original pod-not-found wording for a Failed=False condition", result.TerminationMsg)
+	}
+}
+
+// TestExtractResultPodNotFoundJobAlreadyReaped proves diagnosis is never
+// blocked on the extra Job Get succeeding: with the Job itself gone, the
+// original pod-not-found wording and StatusOther are preserved.
+func TestExtractResultPodNotFoundJobAlreadyReaped(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	d := deployTestJob(t, ns, testEntry())
+	d.jobName = "no-such-job"
+
+	result := d.ExtractResult(context.Background())
+
+	if result.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+	}
+	if result.CTRFStatus() != ctrf.StatusOther {
+		t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusOther)
+	}
+	if !strings.Contains(result.TerminationMsg, "pod not found for Job no-such-job") {
+		t.Errorf("TerminationMsg = %q, want the original pod-not-found wording", result.TerminationMsg)
+	}
+}
+
+// TestExtractResultPodNotFoundBoundsConditionText proves an oversized Job
+// condition message cannot bypass ValidatorMaxTerminationMsgBytes on its way
+// into the CTRF result and the ConfigMap that carries it — the pod-status
+// branch already bounds its own message, and this path must not be the gap.
+func TestExtractResultPodNotFoundBoundsConditionText(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	d := deployTestJob(t, ns, testEntry())
+	huge := strings.Repeat("x", defaults.ValidatorMaxTerminationMsgBytes*2)
+	setJobFailedCondition(t, ns, d.JobName(), batchv1.JobReasonDeadlineExceeded, huge)
+
+	result := d.ExtractResult(context.Background())
+
+	if len(result.TerminationMsg) > defaults.ValidatorMaxTerminationMsgBytes+truncationSuffixSlack {
+		t.Errorf("TerminationMsg is %d bytes, want it bounded near %d",
+			len(result.TerminationMsg), defaults.ValidatorMaxTerminationMsgBytes)
+	}
+	if !strings.Contains(result.TerminationMsg, "truncated") {
+		// Bounded preview: this branch runs precisely when the message is not
+		// what was expected, so it must not assume a minimum length — an
+		// unguarded slice would panic on a short message and hide the very
+		// regression the assertion exists to report.
+		preview := result.TerminationMsg
+		if len(preview) > 80 {
+			preview = preview[:80]
+		}
+		t.Errorf("TerminationMsg = %q..., want a truncation suffix", preview)
+	}
+}
+
+// truncationSuffixSlack allows for the "... [truncated N bytes]" suffix
+// boundTerminationMsg appends past the cap, matching how the pod-status branch
+// behaves.
+const truncationSuffixSlack = 64
+
+// TestExtractResultPodListFailsStaysInconclusive is the control for the
+// fail-closed lookup rule: when the pod List itself fails, absence was never
+// established, so even a terminal Failed/DeadlineExceeded Job must NOT be
+// promoted to a definitive verdict. An apiserver hiccup stays StatusOther.
+func TestExtractResultPodListFailsStaysInconclusive(t *testing.T) {
+	deadlineJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "j", Namespace: "default"},
+		Status: batchv1.JobStatus{
+			Conditions: []batchv1.JobCondition{{
+				Type:    batchv1.JobFailed,
+				Status:  corev1.ConditionTrue,
+				Reason:  batchv1.JobReasonDeadlineExceeded,
+				Message: "Job was active longer than specified deadline",
+			}},
+		},
+	}
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	client := fake.NewSimpleClientset(deadlineJob)
+	client.PrependReactor("list", "pods", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInternalError(stderrors.New("apiserver hiccup"))
+	})
+
+	d := NewDeployer(Config{Clientset: client, Namespace: "default", Entry: testEntry()})
+	d.jobName = "j"
+
+	result := d.ExtractResult(context.Background())
+
+	if result.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1 — a failed List establishes no absence", result.ExitCode)
+	}
+	if result.CTRFStatus() != ctrf.StatusOther {
+		t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusOther)
+	}
+	// Anchored on the Job-condition diagnosis itself, not on any one phrase
+	// inside it: the message wording is free to change, but a failed List must
+	// never reach the deadline verdict at all.
+	if strings.Contains(result.TerminationMsg, "Job condition Failed/") {
+		t.Errorf("TerminationMsg = %q, must not render the deadline verdict for a pod whose absence was never confirmed", result.TerminationMsg)
+	}
+}
+
+// TestExtractResultPodNotFoundOtherJobFailure proves a non-deadline Job
+// failure surfaces its reason for diagnosis while staying StatusOther — with
+// the pod gone, the container's own verdict is genuinely unknown.
+func TestExtractResultPodNotFoundOtherJobFailure(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	d := deployTestJob(t, ns, testEntry())
+	setJobFailedCondition(t, ns, d.JobName(), batchv1.JobReasonBackoffLimitExceeded, "Job has reached the specified backoff limit")
+
+	result := d.ExtractResult(context.Background())
+
+	if result.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+	}
+	if result.CTRFStatus() != ctrf.StatusOther {
+		t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusOther)
+	}
+	for _, want := range []string{"BackoffLimitExceeded", "Job has reached the specified backoff limit"} {
+		if !strings.Contains(result.TerminationMsg, want) {
+			t.Errorf("TerminationMsg = %q, want it to contain %q", result.TerminationMsg, want)
+		}
 	}
 }
 

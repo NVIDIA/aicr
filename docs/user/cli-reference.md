@@ -1297,15 +1297,15 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 | `passed` | Check or constraint passed |
 | `failed` | Check or constraint failed |
 | `skipped` | Check could not be evaluated (missing data, no-cluster mode) |
-| `other` | Unexpected outcome (crash, OOM, timeout) |
+| `other` | Indeterminate outcome — the check produced no usable verdict (crash, OOM, or a validator Job that failed for a non-deadline reason with no inspectable pod) |
 
 **Exit Codes:**
 | Code | Description |
 |------|-------------|
 | `0` | All phases passed or were skipped (also returned under `--fail-on-error=false` even when phases report `failed`/`other`) |
 | `2` | Invalid input (bad flags, missing recipe), a readiness pre-flight constraint not met, or a declared check that does not resolve to exactly one catalog validator in its phase (unmatched, cross-phase, or duplicate) — these pre-flight gates always fail closed here regardless of `--fail-on-error` |
-| `5` | Timeout (validator section or context deadline exceeded) |
-| `8` | One or more phase checks reported `failed` or `other` (crash/OOM/deadline) — when `--fail-on-error` is set |
+| `5` | A structured timeout reached the top-level CLI (recipe/snapshot load, snapshot-agent wait, evidence signing). A per-validator wait deadline becomes a check result instead and exits `8` — see [validation: CI/CD integration](validation.md#cicd-integration) |
+| `8` | One or more phase checks reported `failed` (including a validator Job killed on its `activeDeadlineSeconds`) or `other` (crash/OOM) — when `--fail-on-error` is set |
 
 ---
 
