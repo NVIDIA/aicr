@@ -96,9 +96,9 @@ spec:
           value: "true"
         - name: NVIDIA_SETUP_KERNEL_ALLOW_NEWER
           value: "false"
-      {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */ }}
-      {{- /* as such or deployers like Argo that continuously sync the resources will result in a */ }}
-      {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */ }}
+      {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */}}
+      {{- /* as such or deployers like Argo that continuously sync the resources will result in a */}}
+      {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */}}
       resources:
         cpuLimit: 4
         cpuRequest: 2
@@ -148,9 +148,9 @@ spec:
       containerSHA: sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad
       interrupt:
         type: reboot
-      {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */ }}
-      {{- /* as such or deployers like Argo that continuously sync the resources will result in a */ }}
-      {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */ }}
+      {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */}}
+      {{- /* as such or deployers like Argo that continuously sync the resources will result in a */}}
+      {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */}}
       resources:
         # Elevated from 4 CPU / 8Gi for the EFA DKMS build. efa_installer.sh's
         # "Inspecting kernel" autoconf is a highly parallel kernel-module build;
