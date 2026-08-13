@@ -367,6 +367,20 @@ func TestCriteriaMatches(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			// Nodes difference must not mask a real mismatch on another dimension.
+			// Service differs (EKS vs GKE) so the match must still fail.
+			name: "nodes ignored: service mismatch still rejects despite same nodes",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   4,
+			},
+			other: &Criteria{
+				Service: CriteriaServiceGKE,
+				Nodes:   8,
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
