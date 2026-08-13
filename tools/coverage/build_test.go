@@ -364,7 +364,7 @@ func TestStripShellComment(t *testing.T) {
 	}{
 		{`./tests/uat/aws/run train`, `./tests/uat/aws/run train`},
 		{`echo done # ./tests/uat/aws/run serve`, `echo done `},
-		{`echo 'a\#b' # tail`, `echo 'a\#b' `}, // single-quoted \ is literal; real comment still cuts
+		{`echo 'a\#b' # tail`, `echo 'a\#b' `},       // single-quoted \ is literal; real comment still cuts
 		{`echo \#notacomment`, `echo \#notacomment`}, // unquoted \# is a literal #
 		{`echo "x\#y" # tail`, `echo "x\#y" `},
 	}
