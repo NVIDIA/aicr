@@ -118,6 +118,15 @@ spec:
       dependencyRefs:
         - network-operator
 
+    # The AKS default (gpuStack=azure-managed) preinstalls the driver in the
+    # node image, so the NVSentinel labeler has no driver pod to detect and
+    # never applies nvsentinel.dgxc.nvidia.com/driver.installed. Temporary
+    # workaround for NVIDIA/NVSentinel#1583 — see the values file header,
+    # including why this is set on the overlay rather than per gpuStack value.
+    - name: nvsentinel
+      type: Helm
+      valuesFile: components/nvsentinel/values-preinstalled-driver.yaml
+
     # NVIDIA Network Operator for InfiniBand RDMA on AKS ND-series.
     # Manifests deliver the full RDMA stack that the Helm chart does not template:
     #   - NicClusterPolicy: MOFED driver, RDMA shared device plugin, DOCA telemetry

@@ -137,6 +137,17 @@ advertise zero `nvidia.com/gpu`.
 | AKS azure-managed (default) | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` (recipe defaults) |
 | GPU Operator-managed | `--gpu-driver none` (AKS "None/BYO" install profile) | `driver.enabled=true`, `toolkit.enabled=true`, `operator.runtimeClass=nvidia`, plus `dradriver:nvidiaDriverRoot=/run/nvidia/driver` (all together) |
 
+**NVSentinel driver labeling.** AKS recipes also set
+`nv-sentinel:labeler.assumeDriverInstalled=true`. Under the azure-managed
+default the NVSentinel labeler has no GPU Operator driver pod to observe, so
+`nvsentinel.dgxc.nvidia.com/driver.installed` is never applied and
+`metadata-collector` plus both `syslog-health-monitor` DaemonSets sit at 0
+desired pods with no error or event. The value is set for the AKS family rather
+than per `gpuStack` value — naming a component in a profile fragment also makes
+its presence profile-owned, which would make NVSentinel mandatory and reject
+`--set nv-sentinel:enabled=false`. Temporary workaround for
+[NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583).
+
 AICR's default follows the CSP default: an `az aks nodepool add` without GPU
 driver flags preinstalls the NVIDIA driver and container toolkit from the AKS
 node image, and the AKS recipes ship the matching GPU Operator values.

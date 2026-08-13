@@ -149,6 +149,17 @@ spec:
       type: Helm
       valuesFile: components/gpu-operator/values-gke-cos.yaml
 
+    # Under the GKE default (gpuStack=gke-default) the bundled driver install
+    # is finalized by an init container of the kube-system device-plugin
+    # DaemonSet, which the NVSentinel labeler does not recognize as a driver
+    # pod, so nvsentinel.dgxc.nvidia.com/driver.installed is never applied.
+    # Temporary workaround for NVIDIA/NVSentinel#1583 — see the values file
+    # header, including why this is set on the overlay rather than per
+    # gpuStack value.
+    - name: nvsentinel
+      type: Helm
+      valuesFile: components/nvsentinel/values-preinstalled-driver.yaml
+
     # Enable Prometheus persistent storage for GKE (GKE PD CSI is built-in)
     - name: kube-prometheus-stack
       type: Helm

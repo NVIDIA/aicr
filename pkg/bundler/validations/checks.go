@@ -361,7 +361,8 @@ const operatorContainerDriverRoot = "/run/nvidia/driver"
 const gpuOperatorManagedOverrideSet = "--set gpuoperator:driver.enabled=true " +
 	"--set gpuoperator:toolkit.enabled=true " +
 	"--set gpuoperator:operator.runtimeClass=nvidia " +
-	"--set dradriver:nvidiaDriverRoot=/run/nvidia/driver"
+	"--set dradriver:nvidiaDriverRoot=/run/nvidia/driver " +
+	"--set nv-sentinel:labeler.assumeDriverInstalled=false"
 
 // gkeGPUOperatorManagedOverrideSet extends the override tuple for GKE
 // remedies. GKE preinstalled-driver profiles (Google driver installer,

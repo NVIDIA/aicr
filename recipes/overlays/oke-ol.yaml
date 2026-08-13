@@ -40,6 +40,13 @@ spec:
       type: Helm
       valuesFile: components/gpu-operator/values-oke.yaml
 
+    # OKE preinstalls the driver, so the GPU Operator installs no driver pod
+    # for the NVSentinel labeler to observe. Temporary workaround for
+    # NVIDIA/NVSentinel#1583 — see the values file header.
+    - name: nvsentinel
+      type: Helm
+      valuesFile: components/nvsentinel/values-preinstalled-driver.yaml
+
     # Prometheus persistent storage (provide --storage-class at bundle time, e.g. oci-bv)
     - name: kube-prometheus-stack
       type: Helm

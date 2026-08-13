@@ -1,0 +1,90 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVSentinel values for cluster shapes where NO pod source installs the NVIDIA
+# driver — it ships in the node image or is preloaded at node-pool creation.
+#
+# SUPPORTED CONFIGURATION, not a workaround. NVSentinel design 018
+# (docs/designs/018-syslog-monitor-preinstalled-driver-support.md) lists this
+# deployment shape under "Scenarios requiring manual labeling" and gives a
+# Manual Labeling Procedure for it; labeler.assumeDriverInstalled is the
+# chart-level automation of that documented remedy. It may become redundant
+# if NVIDIA/NVSentinel#1583 is answered with automatic detection — one of
+# four possible outcomes there — which #2178 tracks.
+#
+# The NVSentinel labeler infers driver presence by watching for a driver pod.
+# Where no such pod exists, nvsentinel.dgxc.nvidia.com/driver.installed is
+# never applied to GPU nodes and every DaemonSet selecting on it reports 0
+# desired pods — silently, with no error and no event:
+#
+#   metadata-collector             0/0
+#   syslog-health-monitor-regular  0/0
+#   syslog-health-monitor-kata     0/0
+#
+# gpu-health-monitor stays healthy (it selects on the DCGM label), so the
+# failure is partial and easy to miss.
+#
+# Upstream design 018 (NVIDIA/NVSentinel, docs/designs/
+# 018-syslog-monitor-preinstalled-driver-support.md, "Syslog Health Monitor
+# Support for Pre-installed Drivers") documents this exact deployment shape as
+# one its two-tier pod detection does NOT cover: it lists "custom machine
+# images with pre-baked drivers (no installer pods)" and "GPU Operator with all
+# components disabled" under "Scenarios requiring manual labeling", names the
+# gap in its own Cons, and gives a "Manual Labeling Procedure" instructing
+# admins to kubectl-label the nodes. assumeDriverInstalled is the chart-level
+# automation of that documented remedy, so setting it here is using the
+# upstream-provided mechanism rather than working around one. (Design 018
+# predates the flag and does not mention it.)
+#
+# SCOPE — the three families whose DEFAULT cluster shape has no driver pod for
+# the labeler to observe:
+#
+#   - AKS (gpuStack=azure-managed, the default): the node image preinstalls
+#     the driver.
+#   - GKE-COS (gpuStack=gke-default, the default): GKE's bundled driver
+#     install is finalized by an init container of the kube-system
+#     device-plugin DaemonSet, which the labeler does not recognize as a
+#     driver pod.
+#   - OKE: the node image preinstalls the driver and container toolkit.
+#
+# WHY THE OVERLAY AND NOT THE gpuStack PROFILE. The non-default values of both
+# profiles do have a driver pod (AKS operator-managed: the GPU Operator's own;
+# GKE-COS driver-installer: Google's standalone nvidia-driver-installer
+# DaemonSet, which the labeler already detects), so gating the value per
+# profile value would be the tighter fit. It is deliberately NOT done that
+# way: naming a component in a profile fragment also makes its PRESENCE
+# profile-owned, which turns NVSentinel into a mandatory component and rejects
+# the supported "aicr bundle --set nv-sentinel:enabled=false" path outright.
+# Trading a working user-facing override on three platforms for a tighter
+# scope is the wrong deal on its own terms, independently of how long this
+# configuration lives. The cost is
+# that the two non-default profile values also skip driver-pod detection,
+# which can label a GPU node while its driver is still loading; those values
+# are opt-in and the label only gates NVSentinel's own monitors, never GPU
+# scheduling, device-plugin advertisement, or workload placement. Design 018
+# also keys the label on driver INSTALLATION rather than driver FUNCTIONALITY
+# on purpose, wanting the syslog monitor to run "even if drivers are broken,
+# to capture error logs", so labeling early on those values is closer to that
+# monitor's intent than harmful.
+#
+# Once the labeler falls back to the GFD-published driver evidence
+# (nvidia.com/cuda.driver-version.full, present regardless of who installed the
+# driver — see NVIDIA/NVSentinel#1583), this file and its valuesFile references
+# in the aks / gke-cos / oke-ol overlays can be deleted.
+#
+# Tracking: https://github.com/NVIDIA/aicr/issues/2175
+# Removal:  https://github.com/NVIDIA/aicr/issues/2178
+# Upstream: https://github.com/NVIDIA/NVSentinel/issues/1583
+labeler:
+  assumeDriverInstalled: true

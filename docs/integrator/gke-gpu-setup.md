@@ -76,6 +76,19 @@ A wrong selection can never silently produce a mismatched recipe — the error
 names the observed label state, and fixing it means changing the selection or
 the pools, never overriding the values by hand.
 
+**NVSentinel driver labeling.** GKE-COS recipes also set
+`nv-sentinel:labeler.assumeDriverInstalled=true`. Under the `gke-default`
+value GKE's bundled driver install is finalized by an init container of the
+kube-system device-plugin DaemonSet, which NVSentinel's labeler does not
+recognize as a driver pod, so `nvsentinel.dgxc.nvidia.com/driver.installed` is
+never applied and `metadata-collector` plus both `syslog-health-monitor`
+DaemonSets sit at 0 desired pods with no error or event. The value is set for
+the GKE-COS family rather than per `gpuStack` value — naming a component in a
+profile fragment also makes its presence profile-owned, which would make
+NVSentinel mandatory and reject `--set nv-sentinel:enabled=false`. Temporary
+workaround for
+[NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583).
+
 **Selection and verification are independent axes.** `--profile` (or its
 absence) decides the selection; `--snapshot` (or its absence) decides whether
 the selection is verified now or later. The selection is NEVER derived from
