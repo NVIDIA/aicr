@@ -183,8 +183,3 @@ aicr-e2e.xml
 # Resolved MDX toolchain for tools/check-docs-mdx-parse. The manifest and
 # lockfile in tools/mdx/ ARE committed; only the installed tree is not.
 tools/mdx/node_modules/
-
-# Local agent definitions and workflows (personal dev tooling, not checked in)
-.agents/agents/
-.agents/workflows/
-.claude/agents
