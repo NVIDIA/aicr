@@ -49,8 +49,9 @@ if ! grep -Eq "^[[:space:]]*GOFLAGS= go install[[:space:]]+['\"]?github\.com/goo
 fi
 # The assertion above proves at least one correct install exists, not that every
 # install is correct. A second install line appended to this action without
-# GOFLAGS= would leave it green, and the workflow scan below deliberately does
-# not cover .github/actions/, so nothing else would catch it.
+# GOFLAGS= would leave it green. The .github/ scan below excludes this
+# canonical action directory, so the per-line check here is what catches a
+# second unguarded install inside install-go-licenses itself.
 #
 # Every go-licenses install line must therefore MATCH IN FULL: a GOFLAGS-cleared
 # install and nothing else, bar a trailing comment. Excluding lines that merely
@@ -78,13 +79,64 @@ fi
 # leading pattern skips commented-out lines. The quote is optional and accepts
 # either form because every install site in this repo quotes the module path: a
 # pattern requiring bare whitespace matched only a form nobody writes, and one
-# accepting just `"` still let a single-quoted install through. Only workflows
-# are scanned - the action itself is where the real `GOFLAGS= go install` lives,
-# so widening this root would flag the canonical install as a violation of itself.
-if grep -rEn "^[[:space:]]*[^#]*go install[[:space:]]+['\"]?github\.com/google/go-licenses" \
-    "${REPO_ROOT}/.github/workflows/"; then
-    echo "FAIL: a workflow installs go-licenses inline;" >&2
+# accepting just `"` still let a single-quoted install through.
+#
+# Scan all of .github/ except the canonical install-go-licenses action itself —
+# that is where the real `GOFLAGS= go install` lives, so including it would flag
+# the install this guard exists to steer people toward. Every other .github/
+# consumer (workflows and composite actions) must use the shared action.
+#
+# Exclusion is path-aware (exact canonical directory), not --exclude-dir by
+# basename: a same-named directory elsewhere under .github/ must still fail.
+CANONICAL_INSTALL_DIR="${REPO_ROOT}/.github/actions/install-go-licenses"
+found_inline=0
+while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    path="${match%%:*}"
+    case "${path}" in
+        "${CANONICAL_INSTALL_DIR}/"*) continue ;;
+    esac
+    echo "${match}" >&2
+    found_inline=1
+done < <(grep -rEn "^[[:space:]]*[^#]*go install[[:space:]]+['\"]?github\.com/google/go-licenses" \
+    "${REPO_ROOT}/.github/" || true)
+if [[ ${found_inline} -ne 0 ]]; then
+    echo "FAIL: a .github/ workflow or action installs go-licenses inline;" >&2
     echo "use the ./.github/actions/install-go-licenses composite action instead." >&2
+    exit 1
+fi
+
+# Regression for the basename --exclude-dir trap: a same-named directory under
+# .github/ that is NOT the canonical action must still be flagged.
+EXCLUDE_REGRESSION_TMP="$(mktemp -d "${TMPDIR:-/tmp}/aicr-notices-exclude.XXXXXX")"
+mkdir -p \
+    "${EXCLUDE_REGRESSION_TMP}/.github/actions/install-go-licenses" \
+    "${EXCLUDE_REGRESSION_TMP}/.github/workflows/install-go-licenses"
+printf '%s\n' "GOFLAGS= go install 'github.com/google/go-licenses/v2@v0.0.0'" \
+    > "${EXCLUDE_REGRESSION_TMP}/.github/actions/install-go-licenses/action.yml"
+expected_sneaky="${EXCLUDE_REGRESSION_TMP}/.github/workflows/install-go-licenses/sneaky.yml"
+printf '%s\n' "GOFLAGS= go install 'github.com/google/go-licenses/v2@v0.0.0'" \
+    > "${expected_sneaky}"
+regression_hits=0
+regression_match_path=""
+while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    path="${match%%:*}"
+    case "${path}" in
+        "${EXCLUDE_REGRESSION_TMP}/.github/actions/install-go-licenses/"*) continue ;;
+    esac
+    regression_match_path="${path}"
+    regression_hits=$((regression_hits + 1))
+done < <(grep -rEn "^[[:space:]]*[^#]*go install[[:space:]]+['\"]?github\.com/google/go-licenses" \
+    "${EXCLUDE_REGRESSION_TMP}/.github/" || true)
+rm -rf "${EXCLUDE_REGRESSION_TMP}"
+# hits==1 alone is ambiguous: a filter that drops sneaky.yml and keeps the
+# canonical action.yml also yields one hit. Require the surviving path.
+if [[ ${regression_hits} -ne 1 ||
+      "${regression_match_path}" != "${expected_sneaky}" ]]; then
+    echo "FAIL: path-aware install-go-licenses exclusion missed a same-named" >&2
+    echo "directory under .github/ (hits=${regression_hits}, want 1;" >&2
+    echo "path=${regression_match_path}, want ${expected_sneaky})." >&2
     exit 1
 fi
 
