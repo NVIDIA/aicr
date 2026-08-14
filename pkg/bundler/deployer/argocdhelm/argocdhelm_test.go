@@ -958,6 +958,43 @@ func TestGenerate_DataFiles(t *testing.T) {
 	}
 }
 
+// TestGenerate_DynamicRejectedForLocalChart verifies --dynamic fails closed
+// when the named component is a local chart (Helm with empty Source). Before
+// #1949 the request was silently dropped: Generate exited 0 and the root
+// values.yaml carried no stub, so install-time overrides had nowhere to land.
+func TestGenerate_DynamicRejectedForLocalChart(t *testing.T) {
+	localManifest := map[string][]byte{
+		"nfd.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: nfd\n"),
+	}
+	gen := &Generator{
+		RecipeResult: newRecipeResult("v1.0.0", []recipe.ComponentRef{
+			{Name: "nfd-ocp", Namespace: "nfd", Type: recipe.ComponentTypeHelm, Source: ""},
+		}),
+		ComponentValues: map[string]map[string]any{
+			"nfd-ocp": {"image": map[string]any{"tag": "v1"}},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"nfd-ocp": localManifest,
+		},
+		Version: "test",
+		RepoURL: "https://github.com/example/repo.git",
+		DynamicValues: map[string][]string{
+			"nfd-ocp": {"image.tag"},
+		},
+	}
+
+	_, err := gen.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("Generate() error = nil, want ErrCodeInvalidRequest for --dynamic on local chart")
+	}
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "nfd-ocp") || !strings.Contains(err.Error(), "--dynamic") {
+		t.Fatalf("Generate() error = %v, want mention of --dynamic and component name", err)
+	}
+}
+
 // TestGenerate_StaticDirCreatedOnlyWhenPopulated verifies that static/ is
 // emitted only when at least one component contributes a values file.
 //
