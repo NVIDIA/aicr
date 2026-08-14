@@ -323,6 +323,38 @@ components:
           - global.systemNodeSelector
         tolerationPaths:
           - global.systemNodeTolerations
+    validations:
+      # Blocking: the NVSentinel labeler decides
+      # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
+      # driver pod. Where the driver ships in the node image and no driver
+      # pod exists (AKS gpuStack=azure-managed, GKE COS
+      # gpuStack=gke-default, OKE), the label is never applied and
+      # metadata-collector plus both syslog-health-monitor DaemonSets sit
+      # at 0 desired pods — with no error and no event, while
+      # gpu-health-monitor stays healthy on the DCGM label. The chart
+      # automates the remedy via labeler.assumeDriverInstalled
+      # (--assume-driver-installed, NVSentinel design 018's Manual
+      # Labeling Procedure). GKE gpuStack=driver-installer is exempt:
+      # Google's standalone nvidia-driver-installer DaemonSet supplies a
+      # driver pod the labeler detects. Issue #2175.
+      - function: CheckNVSentinelDriverLabelDetectable
+        severity: error
+      # Blocking: metadata-collector sets runtimeClassName (chart default
+      # nvidia) and the GPU Operator creates its primary RuntimeClass
+      # named after operator.runtimeClass (also default nvidia). Where a
+      # recipe retargets operator.runtimeClass — AKS azure-managed sets
+      # nvidia-container-runtime — no RuntimeClass named nvidia exists
+      # and the API server rejects every metadata-collector pod at
+      # admission (FailedCreate on the DaemonSet; no pod object is ever
+      # created). Value comparison on the resolved values, either side
+      # unset treated as the shared chart default, so it passes wherever
+      # operator.runtimeClass keeps its default. Remedy: --set
+      # nv-sentinel:metadata-collector.runtimeClassName=<operator class>.
+      # Distinct from and additive to the driver-label gate above: the
+      # label gets the collector scheduled, the runtime class gets its
+      # pods admitted. Issue #2176.
+      - function: CheckNVSentinelRuntimeClassCoherence
+        severity: error
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu

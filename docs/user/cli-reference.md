@@ -1297,15 +1297,15 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 | `passed` | Check or constraint passed |
 | `failed` | Check or constraint failed |
 | `skipped` | Check could not be evaluated (missing data, no-cluster mode) |
-| `other` | Unexpected outcome (crash, OOM, timeout) |
+| `other` | Indeterminate outcome — the check produced no usable verdict (crash, OOM, or a validator Job that failed for a non-deadline reason with no inspectable pod) |
 
 **Exit Codes:**
 | Code | Description |
 |------|-------------|
 | `0` | All phases passed or were skipped (also returned under `--fail-on-error=false` even when phases report `failed`/`other`) |
 | `2` | Invalid input (bad flags, missing recipe), a readiness pre-flight constraint not met, or a declared check that does not resolve to exactly one catalog validator in its phase (unmatched, cross-phase, or duplicate) — these pre-flight gates always fail closed here regardless of `--fail-on-error` |
-| `5` | Timeout (validator section or context deadline exceeded) |
-| `8` | One or more phase checks reported `failed` or `other` (crash/OOM/deadline) — when `--fail-on-error` is set |
+| `5` | A structured timeout reached the top-level CLI (recipe/snapshot load, snapshot-agent wait, evidence signing). A per-validator wait deadline becomes a check result instead and exits `8` — see [validation: CI/CD integration](validation.md#cicd-integration) |
+| `8` | One or more phase checks reported `failed` (including a validator Job killed on its `activeDeadlineSeconds`) or `other` (crash/OOM) — when `--fail-on-error` is set |
 
 ---
 
@@ -1398,10 +1398,10 @@ aicr bundle [flags]
 | `--output` | `-o` | string | Local output directory or `oci://` registry URI (default: current directory) |
 | `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `--repo` | | string | Git/OCI repository URL baked into Argo CD Application sources. Used with `--deployer argocd`. Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
-| `--set` | | string[] | Override **scalar** values in bundle files (repeatable, format: `component:path=value`). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`). Scalar-only — for list/object values use `--set-json` / `--set-file`. |
-| `--set-json` | | string[] | Override values with a JSON-encoded **list or object** (repeatable, format: `component:path=<json>`, e.g. `--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'`). Object values deep-merge into existing maps; lists and scalars replace. Takes precedence over `--set` on the same path. See [List and Object Value Overrides](#list-and-object-value-overrides). |
-| `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge semantics. |
-| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
+| `--set` | | string[] | Override **scalar** values in bundle files (repeatable, format: `component:path=value`). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`). Scalar-only — for list/object values use `--set-json` / `--set-file`. An override whose component is absent from the generated bundle is rejected rather than silently discarded; the scalar `enabled=false` spelling is exempt on a declared component (it is the removal mechanism). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
+| `--set-json` | | string[] | Override values with a JSON-encoded **list or object** (repeatable, format: `component:path=<json>`, e.g. `--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'`). Object values deep-merge into existing maps; lists and scalars replace. Takes precedence over `--set` on the same path. An override whose component is absent from the generated bundle is rejected — no `enabled` exemption on the typed path (`enabled` is honored only via scalar `--set`); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). See [List and Object Value Overrides](#list-and-object-value-overrides). |
+| `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge and absent-component-rejection semantics (no `enabled` exemption on the typed path). |
+| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate-verified paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what a bundle-time gate verified; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
@@ -1594,7 +1594,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 |--------|-------------|
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
 | `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
-| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths. |
+| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 | `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
 
@@ -1997,7 +1997,7 @@ Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
 **Argo CD deployer behavior:**
 
-The `--deployer argocd-helm` generates a Helm chart app-of-apps where all non-profile-owned values are overridable at install time. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
+The `--deployer argocd-helm` generates a Helm chart app-of-apps where all non-profile-owned values are overridable at install time. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml` for components that resolve to remote Helm charts. Local-chart components (Helm with no upstream `Source`, common on OCP overlays) and non-Helm components have no install-time stub surface — `--dynamic` naming them is rejected rather than silently dropped.
 
 ```shell
 helm install aicr-bundle ./bundle \

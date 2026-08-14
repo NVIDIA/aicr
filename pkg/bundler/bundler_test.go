@@ -1290,7 +1290,7 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 			}
 			recipeResult.Metadata.GPUDriverState = tt.state
 
-			if _, _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
+			if _, _, _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 
@@ -3543,6 +3543,14 @@ func TestMake_DynamicValuesValidComponent(t *testing.T) {
 	}
 }
 
+// TestMake_DisabledComponentWithDynamic pins that a --dynamic
+// declaration on a component removed from the bundle is REJECTED. This
+// test previously pinned the opposite — the declaration was silently
+// dropped and the bundle succeeded — which is the exact silent discard
+// the absent-component override gate removes: the two flags ask for
+// contradictory things (remove the component; defer one of its values
+// to install-time editing), and a dynamic path on an absent component
+// exports nothing.
 func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	t.Parallel()
 
@@ -3587,30 +3595,23 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	_, makeErr := bundler.Make(ctx, recipeResult, tmpDir)
-	if makeErr != nil {
-		t.Fatalf("Make() error = %v", makeErr)
+	if makeErr == nil {
+		t.Fatal("Make() = nil error, want the absent-component --dynamic rejection")
 	}
-
-	// Disabled component should NOT have a directory at all (under any numbering).
-	// The directory check implies cluster-values.yaml absence, so don't double-check.
-	for _, dir := range []string{"aws-ebs-csi-driver", "001-aws-ebs-csi-driver", "002-aws-ebs-csi-driver"} {
-		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
-			t.Errorf("expected %s directory to NOT be created (component is disabled)", dir)
+	if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want ErrCodeInvalidRequest", makeErr)
+	}
+	for _, want := range []string{
+		"--dynamic awsebscsidriver:controller.replicaCount cannot take effect",
+		"not in the generated bundle",
+	} {
+		if !strings.Contains(makeErr.Error(), want) {
+			t.Errorf("error missing %q: %v", want, makeErr)
 		}
 	}
-
-	// Enabled component should still exist (gpu-operator is the only enabled → 001)
-	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator", "values.yaml")); os.IsNotExist(statErr) {
-		t.Error("expected 001-gpu-operator/values.yaml to be created")
-	}
-
-	// deploy.sh should not reference the disabled component
-	deployScript, readErr := os.ReadFile(filepath.Join(tmpDir, "deploy.sh"))
-	if readErr != nil {
-		t.Fatalf("failed to read deploy.sh: %v", readErr)
-	}
-	if strings.Contains(string(deployScript), "aws-ebs-csi-driver") {
-		t.Error("deploy.sh should not contain aws-ebs-csi-driver (disabled component)")
+	// Nothing may be emitted for a rejected bundle.
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator")); !os.IsNotExist(statErr) {
+		t.Error("rejected bundle must not emit component directories")
 	}
 }
 

@@ -16,7 +16,7 @@ user-invocable: true
 # automatic path that removing the explicit nested call did not.
 disallowed-tools: Skill
 argument-hint: "<PR-number-or-URL>"
-version: 0.3.21
+version: 0.3.22
 ---
 
 # AICR Cross-Review: Multi-Agent PR Review with Consensus
@@ -98,6 +98,85 @@ ones under review. Ask for a trusted checkout. This catches the accidental case 
    session's active review. (Each worktree adds sandbox deny-list paths; at ~70 the
    profile exceeded the OS spawn-arg limit and every sandboxed Bash call failed with
    `E2BIG`. Recovery needs a fresh session.)
+3. Reap dead runs' pinned inputs. A session killed between Batch B and Phase 5 leaks
+   its two `refs/cr/*` and its temp diff file permanently — nothing else reclaims
+   them, and they accumulate in the same slow way the worktrees above do.
+
+   ```bash
+   RUNS="$(git -C "<repo-path>" rev-parse --path-format=absolute --git-common-dir)/cr-runs"
+   find "$RUNS" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true
+   git -C "<repo-path>" for-each-ref --format='%(refname)' 'refs/cr/pr*' 'refs/cr/base*' |
+   while read -r REF; do
+     KEY=${REF#refs/cr/}                                  # want <n>-<SID>
+     case "$KEY" in pr*) KEY=${KEY#pr};; base*) KEY=${KEY#base};; esac
+     case "$KEY" in *-*) ;; *) continue;; esac             # must have both components
+     case "${KEY%-*}" in ''|*[!0-9]*) continue;; esac      # <n> is a PR number
+     case "${KEY##*-}" in ??????) ;; *) continue;; esac    # <SID> is mktemp's six chars
+     [ -e "$RUNS/$KEY" ] || git -C "<repo-path>" update-ref -d "$REF"
+   done
+   find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'cross-review-pr*.??????' -mmin +1440 -delete 2>/dev/null || true
+   ```
+
+   Liveness comes from the per-run marker Batch B drops in `cr-runs/`, not from the
+   ref and not from the diff file. Both alternatives are broken:
+
+   - **Not the ref.** `git gc` packs `refs/cr/*` into `packed-refs`, after which the
+     per-ref file under `.git/refs/cr/` no longer exists and an mtime gate silently
+     stops reaping — and `git fetch`, which Batch B runs, triggers `gc --auto`. The
+     two substitutes fail too: `refs/cr/*` has no reflog (`core.logAllRefUpdates`
+     covers only `refs/heads`, `refs/remotes`, `refs/notes`, and `HEAD`), and
+     `%(creatordate)` is the *commit's* date, so a ref created a minute ago on
+     yesterday's `main` reports "21 hours ago".
+   - **Not the diff file.** `TMPDIR` is not stable across sessions, or even within
+     one: under Claude Code's sandbox it is `/tmp/claude-<uid>`, and with the sandbox
+     bypassed it is the shell default (`/var/folders/…/T/` on macOS). A reaper that
+     tested for the diff file would miss a live session's file whenever the two
+     disagree and delete that session's pinned refs — the one thing this skill must
+     never do.
+
+   `cr-runs/` sits next to the refs it guards, under the **common** git dir, so every
+   worktree of a clone shares one view, exactly as `refs/cr/*` are shared. Git ignores
+   unknown entries there, so nothing packs or prunes it and the marker keeps a real
+   creation timestamp. The last `find` is only a temp-file janitor: it reclaims diff
+   files in whatever `TMPDIR` this session sees, and reclaiming none is harmless.
+
+   **The three `case` guards are the safety boundary, and all three are load-bearing.**
+   A candidate must have both components, a numeric `<n>`, and a six-character `<SID>`
+   before it can be deleted. Prefix-stripping alone is not enough: `refs/cr/pr*` also
+   matches `refs/cr/private-ABC123`, which strips to `ivate-ABC123` and would pass a
+   suffix-only check. Hand-made bookmarks (`refs/cr/2183-r5`, `refs/cr/2187-test`) are
+   deliberate, often pin active work, and must survive — the only names that now
+   collide are a literal `pr<digits>-<six characters>` or `base<digits>-<six
+   characters>`, since the loop accepts both prefixes, so do not use either shape
+   for one. `find … -delete` rather than `rm` for the same reason as everywhere else in
+   this skill: managed permission policies gate `rm:*` behind a prompt. The janitor
+   is `-type f` so a directory that happens to match the diff-file pattern is never
+   removed.
+
+   **The marker key is `<n>-<SID>`, never `<SID>` alone.** `mktemp` guarantees the
+   full filename it returns is unique; it does not reserve the suffix. Two concurrent
+   reviews of *different* PRs pass different templates, so both can be handed the same
+   six characters — their refs stay distinct, but a `<SID>`-keyed marker would be one
+   shared file, and whichever run finished first would delete the other's protection.
+   Reviews of the *same* PR are safe whenever they share a `TMPDIR`, since `mktemp`
+   guarantees distinct names within one directory. It guarantees nothing across
+   directories, so same-PR runs under different `TMPDIR` roots can still collide —
+   but on `$SID` itself, which makes `PRREF` and `BASEREF` collide first. That is a
+   property of how Batch B derives `$SID`, not of this reaper, and is left to a
+   follow-up.
+
+   **The gate is 24 hours, and it must stay far above any real run.** Nothing enforces
+   an end-to-end limit on a review: Codex gets a five-wait, ~45-minute budget in the
+   Review phase and again in Cross-review, with Verify on top. A gate near the
+   expected duration would let a later Phase 1 reap a *live* run's marker, then its
+   refs, and the temp-file janitor would take its `DIFFPATH` with them — the run would
+   destroy itself. The gate measures **age since Batch B stamped the marker, not
+   inactivity** — the marker is written once and never refreshed — so a run still
+   alive a day later is outside every documented budget and is treated as dead. The
+   temp-file janitor is gated independently, on each diff file's own mtime, so
+   refreshing the marker would not cover `DIFFPATH` either way. Since this reaper
+   exists for leaks that accumulate over days, waiting a day to collect one costs
+   nothing. Do not tune it down toward the expected runtime.
 
 **Batch B — after A** (needs `HEAD_SHA` and `baseRefName`). `gh pr diff` takes no
 SHA argument, so pin the diff with `git fetch`. Refs and the diff file are
@@ -110,6 +189,13 @@ BASE="<baseRefName>"                    # from step 1 — never hardcode "main"
 DIFFPATH=$(mktemp "${TMPDIR:-/tmp}/cross-review-pr<n>.XXXXXX")   # must end in X on macOS
 SID=${DIFFPATH##*.}                     # reuse mktemp's unique suffix to scope the refs
 PRREF="refs/cr/pr<n>-$SID"; BASEREF="refs/cr/base<n>-$SID"
+# Liveness marker for Batch A step 3's reaper, written BEFORE the refs exist so no
+# concurrent reaper can ever see a ref without its marker. Keyed by <n>-$SID — mktemp
+# guarantees the full filename is unique, not the suffix, so a $SID-only key would
+# collide with a concurrent review of a DIFFERENT PR. Under the common git dir, so
+# every worktree of this clone shares one view.
+RUNS="$(git -C "<repo-path>" rev-parse --path-format=absolute --git-common-dir)/cr-runs"
+RUNMARK="$RUNS/<n>-$SID"; mkdir -p "$RUNS"; : > "$RUNMARK"
 # Fetch from the canonical repo by URL, not from `origin`: in GitHub's standard fork
 # layout `origin` is the contributor's fork, and refs/pull/* exist only on the canonical
 # repository.
@@ -119,12 +205,13 @@ git -C "<repo-path>" fetch "https://github.com/NVIDIA/aicr.git" \
 # otherwise abort before the names are ever printed, leaving them unreclaimable.
 if [ "$(git -C "<repo-path>" rev-parse "$PRREF")" != "<HEAD_SHA>" ]; then
   git -C "<repo-path>" update-ref -d "$PRREF"; git -C "<repo-path>" update-ref -d "$BASEREF"
-  find "$DIFFPATH" -maxdepth 0 -delete; echo "HEAD moved since setup — restart the review"; exit 1
+  find "$DIFFPATH" "$RUNMARK" -maxdepth 0 -delete
+  echo "HEAD moved since setup — restart the review"; exit 1
 fi
 # Echo the names FIRST: under `set -e` an empty or failing diff aborts, and any
 # echo below it would never run — leaking the refs and the temp file with a random
 # suffix nobody recorded, which Phase 5 then cannot clean up.
-echo "DIFFPATH=$DIFFPATH"; echo "PRREF=$PRREF"; echo "BASEREF=$BASEREF"
+echo "DIFFPATH=$DIFFPATH"; echo "PRREF=$PRREF"; echo "BASEREF=$BASEREF"; echo "RUNMARK=$RUNMARK"
 git -C "<repo-path>" diff "$BASEREF...$PRREF" > "$DIFFPATH"
 test -s "$DIFFPATH"                     # a real PR diff is never empty
 # repoNotes source, pinned to the BASE ref — a fork PR must not be able to rewrite
@@ -136,7 +223,7 @@ git -C "<repo-path>" show "$BASEREF":.claude/CLAUDE.md 2>/dev/null || echo "(no 
 echo "BASE_SHA=$(git -C "<repo-path>" rev-parse "$BASEREF")"
 ```
 
-Capture `DIFFPATH`, `BASE_SHA`, `PRREF`, `BASEREF` — shell variables do not persist
+Capture `DIFFPATH`, `BASE_SHA`, `PRREF`, `BASEREF`, `RUNMARK` — shell variables do not persist
 between Bash calls and Phase 5 needs the ref names.
 
 Then build `repoNotes` for the Claude reviewer only (never fed to Codex — lean-context
@@ -842,7 +929,12 @@ posting it) so no finding is left as a bare one-liner.
   earlier abort path would otherwise fail the call and skip the ref cleanup below —
   and delete the
   two scoped refs captured in Phase 1 (`git -C "<repo-path>" update-ref -d "$PRREF"`,
-  same for `"$BASEREF"` — use the exact names echoed there, not a guess). Confirm no
+  same for `"$BASEREF"` — use the exact names echoed there, not a guess) and the
+  `RUNMARK` liveness marker (`find "<the RUNMARK echoed in Phase 1>" -maxdepth 0
+  -delete 2>/dev/null || true`). Delete the marker **last**: it is what tells Phase 1
+  Batch A step 3 the refs are still in use, so removing it before the refs invites a
+  concurrent session's reaper into the gap. If this run is killed before any of it
+  runs, step 3 reaps all three on a later run. Confirm no
   `${TMPDIR:-/tmp}/cr-rabbit.*` worktree path remains in `git worktree list` — write the
   fallback out, since setup creates the worktree under `${TMPDIR:-/tmp}` and with `TMPDIR`
   unset a bare `$TMPDIR/cr-rabbit.*` names `/cr-rabbit.*` while the leak sits in `/tmp` —

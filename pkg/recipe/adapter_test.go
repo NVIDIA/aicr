@@ -990,3 +990,42 @@ func TestWithResolvedValues(t *testing.T) {
 		}
 	})
 }
+
+// TestWithDeclaredComponents pins the explicit-presence contract: the
+// attachment bit is HasDeclaredComponents, never a slice-length
+// inference — a union that happens to have the same length as the
+// filtered refs is still an attached union.
+func TestWithDeclaredComponents(t *testing.T) {
+	t.Parallel()
+
+	base := &RecipeResult{ComponentRefs: []ComponentRef{{Name: "a"}}}
+	if base.HasDeclaredComponents() {
+		t.Error("HasDeclaredComponents() = true on a result without an attached union")
+	}
+	if got := base.DeclaredComponentRefs(); len(got) != 1 || got[0].Name != "a" {
+		t.Errorf("DeclaredComponentRefs() fallback = %v, want ComponentRefs", got)
+	}
+
+	union := []ComponentRef{{Name: "b"}} // same length as ComponentRefs — the inference trap
+	view := base.WithDeclaredComponents(union)
+	if !view.HasDeclaredComponents() {
+		t.Error("HasDeclaredComponents() = false after WithDeclaredComponents")
+	}
+	if got := view.DeclaredComponentRefs(); len(got) != 1 || got[0].Name != "b" {
+		t.Errorf("DeclaredComponentRefs() = %v, want the attached union", got)
+	}
+	if base.HasDeclaredComponents() {
+		t.Error("WithDeclaredComponents mutated the receiver")
+	}
+
+	var nilResult *RecipeResult
+	if nilResult.HasDeclaredComponents() {
+		t.Error("HasDeclaredComponents() on nil = true")
+	}
+	if nilResult.WithDeclaredComponents(union) != nil {
+		t.Error("WithDeclaredComponents on nil receiver must return nil")
+	}
+	if base.WithDeclaredComponents(nil) != base {
+		t.Error("WithDeclaredComponents(nil) must return the receiver unchanged")
+	}
+}

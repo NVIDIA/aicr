@@ -1645,7 +1645,7 @@ func TestEffectiveComponentValues_PreservesResolverCode(t *testing.T) {
 		t.Fatalf("resolver error is not structured: %v", directErr)
 	}
 
-	_, err := effectiveComponentValues(ctx, rr, nil, "gpu-operator", []string{"gpu-operator"})
+	_, err := effectiveComponentValues(ctx, rr, nil, "gpu-operator", []string{"gpu-operator"}, "driver-ownership coherence")
 	if err == nil {
 		t.Fatal("expected blocking error, got nil")
 	}

@@ -1006,6 +1006,19 @@ type RecipeResult struct {
 	// case GetValuesForComponent* resolves through the DataProvider as
 	// before. See WithResolvedValues for why read-once matters.
 	resolvedValues map[string]map[string]any
+
+	// declaredComponents carries the recipe's PRE-filter component union
+	// for the duration of one operation. Set only by
+	// WithDeclaredComponents (shallow copy, like resolvedValues); nil on
+	// every other result, in which case DeclaredComponentRefs falls back
+	// to ComponentRefs. The bundler filters ComponentRefs (recipe
+	// enabled=false, --set enabled=false, the bundlers filter) before
+	// running component validations, so a cross-component gate that
+	// needs another component's declaration as EVIDENCE — not as output
+	// — would otherwise lose it: a bundlers=nvsentinel subset bundle
+	// dropped the gpu-operator ref whose driver.enabled=false is exactly
+	// what the NVSentinel gates key on. See DeclaredComponentRefs.
+	declaredComponents []ComponentRef
 }
 
 // DataProvider returns the DataProvider that produced this result. A

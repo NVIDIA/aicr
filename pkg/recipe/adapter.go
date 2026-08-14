@@ -246,6 +246,47 @@ func (r *RecipeResult) WithResolvedValues(values map[string]map[string]any) *Rec
 	return &pinned
 }
 
+// WithDeclaredComponents returns a shallow copy of r carrying refs as the
+// recipe's pre-filter component union, retrievable via
+// DeclaredComponentRefs. The bundler sets it on the view it hands to
+// component validations: ComponentRefs stays FILTERED (it drives which
+// components' checks run and what the bundle renders), while
+// cross-component gates read the union so a component excluded from the
+// output — recipe-disabled, --set-disabled, or dropped by the bundlers
+// filter — still serves as evidence about the platform. Same
+// one-operation shallow-copy semantics as WithResolvedValues.
+func (r *RecipeResult) WithDeclaredComponents(refs []ComponentRef) *RecipeResult {
+	if r == nil {
+		return nil
+	}
+	if len(refs) == 0 {
+		return r
+	}
+	view := *r
+	view.declaredComponents = refs
+	return &view
+}
+
+// DeclaredComponentRefs returns the recipe's pre-filter component union
+// when one was attached via WithDeclaredComponents, and ComponentRefs
+// otherwise. Callers must treat the result as read-only.
+func (r *RecipeResult) DeclaredComponentRefs() []ComponentRef {
+	if r == nil {
+		return nil
+	}
+	if r.declaredComponents != nil {
+		return r.declaredComponents
+	}
+	return r.ComponentRefs
+}
+
+// HasDeclaredComponents reports whether a pre-filter component union was
+// attached via WithDeclaredComponents — the explicit presence bit, so
+// consumers do not have to infer attachment from slice lengths.
+func (r *RecipeResult) HasDeclaredComponents() bool {
+	return r != nil && r.declaredComponents != nil
+}
+
 // GetComponentValues resolves the effective Helm values for a single
 // ComponentRef (base values.yaml → ValuesFile → inline Overrides) using the
 // package-global embedded DataProvider. It mirrors GetManifestContent for

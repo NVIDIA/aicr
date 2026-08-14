@@ -309,24 +309,30 @@ spec:
               ($error == null): true
 
     - name: helm-disabled-component-with-dynamic
-      description: Disabled component with --dynamic should NOT appear in output at all.
+      description: >-
+        --dynamic on a component removed from the bundle is REJECTED. This
+        step previously pinned the opposite (the declaration was silently
+        dropped and the bundle succeeded) — the exact silent discard the
+        absent-component override gate removes: a dynamic path on an absent
+        component exports nothing, so the two flags ask for contradictory
+        things.
       try:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-dynamic"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/helm-disabled-dynamic" \
+              set +e
+              OUT=$(${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/helm-disabled-dynamic" \
                 --set awsebscsidriver:enabled=false \
-                --dynamic awsebscsidriver:controller.replicaCount
-              # Disabled component directory should NOT exist (any NNN-aws-ebs-csi-driver folder)
-              MATCHES=$(ls -d "${WORK}"/helm-disabled-dynamic/[0-9][0-9][0-9]-aws-ebs-csi-driver 2>/dev/null | wc -l)
-              [ "${MATCHES}" -eq 0 ] || { echo "disabled aws-ebs-csi-driver folder still exists" >&2; exit 1; }
-              # deploy.sh should not mention disabled component
-              ! grep -q "aws-ebs-csi-driver" "${WORK}/helm-disabled-dynamic/deploy.sh"
-              # Enabled component should still work
-              VAL=$(ls "${WORK}"/helm-disabled-dynamic/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null \
-                | grep -v -- '-gpu-operator-post' | head -1)
-              [ -n "${VAL}" ] || { echo "gpu-operator values.yaml missing" >&2; exit 1; }
+                --dynamic awsebscsidriver:controller.replicaCount 2>&1)
+              RC=$?
+              set -e
+              [ "${RC}" -ne 0 ] || { echo "expected rejection, bundle succeeded" >&2; exit 1; }
+              echo "${OUT}" | grep -q -- "--dynamic awsebscsidriver:controller.replicaCount cannot take effect" \
+                || { echo "missing rejection message; got: ${OUT}" >&2; exit 1; }
+              # Nothing may be emitted for a rejected bundle.
+              [ ! -d "${WORK}/helm-disabled-dynamic" ] \
+                || { echo "rejected bundle emitted output" >&2; exit 1; }
             check:
               ($error == null): true
 

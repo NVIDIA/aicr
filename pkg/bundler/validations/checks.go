@@ -22,6 +22,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -49,6 +50,8 @@ func init() {
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
+	registerCheck("CheckNVSentinelDriverLabelDetectable", CheckNVSentinelDriverLabelDetectable)
+	registerCheck("CheckNVSentinelRuntimeClassCoherence", CheckNVSentinelRuntimeClassCoherence)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -561,6 +564,11 @@ func componentDisabled(ref *recipe.ComponentRef, bundlerConfig *config.Config, k
 }
 
 // effectiveComponentValues resolves the FINAL effective Helm values for a
+// component on behalf of the verification named by purpose (e.g.
+// "driver-ownership coherence"), which the error messages quote so each
+// gate reports its own subject.
+//
+// It resolves the values for a
 // component: the recipe merge (base values → valuesFile → inline
 // overrides) plus the user's bundle-time overrides applied in the
 // bundler's own order — scalar --set first, then typed
@@ -582,7 +590,7 @@ func componentDisabled(ref *recipe.ComponentRef, bundlerConfig *config.Config, k
 // override it cannot reconstruct would disarm the gate for that candidate —
 // with gpuDriverState=absent that could let a driverless configuration pass —
 // so the gate independently fails closed.
-func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, componentName string, keys []string) (map[string]any, error) {
+func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, componentName string, keys []string, purpose string) (map[string]any, error) {
 	values, err := recipeResult.GetValuesForComponentWithContext(ctx, componentName)
 	if err != nil {
 		// Preserve an already-coded classification (overlay read failures
@@ -598,8 +606,8 @@ func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeRe
 			code = structured.Code
 		}
 		return nil, aicrerrors.WrapWithContext(code,
-			fmt.Sprintf("cannot verify driver-ownership coherence for component %q: "+
-				"failed to resolve its effective values", componentName),
+			fmt.Sprintf("cannot verify %s for component %q: "+
+				"failed to resolve its effective values", purpose, componentName),
 			err, map[string]any{logKeyComponent: componentName})
 	}
 	if bundlerConfig == nil {
@@ -610,8 +618,8 @@ func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeRe
 		delete(setOverrides, config.ComponentEnabledKey)
 		if applyErr := component.ApplyMapOverrides(values, setOverrides); applyErr != nil {
 			return nil, aicrerrors.WrapWithContext(aicrerrors.ErrCodeInvalidRequest,
-				fmt.Sprintf("cannot verify driver-ownership coherence for component %q: "+
-					"failed to apply --set overrides to its effective values", componentName),
+				fmt.Sprintf("cannot verify %s for component %q: "+
+					"failed to apply --set overrides to its effective values", purpose, componentName),
 				applyErr, map[string]any{logKeyComponent: componentName})
 		}
 	}
@@ -620,8 +628,8 @@ func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeRe
 		delete(typedOverrides, config.ComponentEnabledKey)
 		if applyErr := component.ApplyTypedOverrides(values, typedOverrides); applyErr != nil {
 			return nil, aicrerrors.WrapWithContext(aicrerrors.ErrCodeInvalidRequest,
-				fmt.Sprintf("cannot verify driver-ownership coherence for component %q: "+
-					"failed to apply --set-json/--set-file overrides to its effective values", componentName),
+				fmt.Sprintf("cannot verify %s for component %q: "+
+					"failed to apply --set-json/--set-file overrides to its effective values", purpose, componentName),
 				applyErr, map[string]any{logKeyComponent: componentName})
 		}
 	}
@@ -770,26 +778,75 @@ func resolveDRARoot(draValues map[string]any, componentName string) (string, boo
 // cluster-values.yaml, where no bundle-time gate runs — editing it there
 // recreates the driver/DRA incoherence this validation blocks.
 func dynamicOwnershipViolations(bundlerConfig *config.Config, componentName string, keys []string, guarded []string) []string {
+	hits := dynamicPathIntersections(bundlerConfig, keys, guarded)
+	msgs := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		msgs = append(msgs, fmt.Sprintf(
+			"%s: --dynamic %s:%s targets the driver-ownership path %s — dynamic "+
+				"paths move to the operator-editable cluster-values.yaml at install "+
+				"time, where no ownership-coherence gate runs, so editing it there "+
+				"can recreate the driver/DRA incoherence this check blocks. Bake "+
+				"ownership values statically (--set/--set-json) instead.",
+			componentName, hit.key, hit.path, hit.guard))
+	}
+	return msgs
+}
+
+// dynamicPathIntersection records one --dynamic declaration (key:path)
+// that intersects a guarded values path.
+type dynamicPathIntersection struct {
+	key   string
+	path  string
+	guard string
+}
+
+// dynamicPathIntersections returns every --dynamic declaration under any
+// of the candidate component keys whose path intersects a guarded path
+// (equal, ancestor, or descendant). Shared by the driver-ownership guard
+// above and the NVSentinel gates below: dynamic paths are exported to
+// the operator-editable cluster-values.yaml, which the deployer loads
+// AFTER the statically validated values, so an install-time edit there
+// silently undoes whatever a bundle-time gate verified.
+func dynamicPathIntersections(bundlerConfig *config.Config, keys []string, guarded []string) []dynamicPathIntersection {
 	if bundlerConfig == nil || !bundlerConfig.HasDynamicValues() {
 		return nil
 	}
 	dynamic := bundlerConfig.DynamicValues()
-	var msgs []string
+	var hits []dynamicPathIntersection
 	for _, key := range keys {
 		for _, p := range dynamic[key] {
 			for _, g := range guarded {
 				if p == g || strings.HasPrefix(g, p+".") || strings.HasPrefix(p, g+".") {
-					msgs = append(msgs, fmt.Sprintf(
-						"%s: --dynamic %s:%s targets the driver-ownership path %s — dynamic "+
-							"paths move to the operator-editable cluster-values.yaml at install "+
-							"time, where no ownership-coherence gate runs, so editing it there "+
-							"can recreate the driver/DRA incoherence this check blocks. Bake "+
-							"ownership values statically (--set/--set-json) instead.",
-						componentName, key, p, g))
+					hits = append(hits, dynamicPathIntersection{key: key, path: p, guard: g})
 					break
 				}
 			}
 		}
+	}
+	return hits
+}
+
+// nvsentinelDynamicGuardViolations rejects --dynamic declarations that
+// intersect the values paths the NVSentinel gates verify. Both gates
+// validate the STATIC resolved values; a dynamic declaration on the same
+// path moves it into cluster-values.yaml, loaded after them at install
+// time, so an operator edit there undoes the validated remedy with no
+// gate left to notice — including the degenerate immediate case, where
+// a path the recipe never set is exported as an empty stub ready to be
+// filled with a breaking value. gateReason describes, in the message's
+// "which <gateReason>" slot, what the guarded path means to the gate and
+// what an install-time edit would break.
+func nvsentinelDynamicGuardViolations(bundlerConfig *config.Config, componentName string, keys []string, guarded []string, gateReason string) []string {
+	hits := dynamicPathIntersections(bundlerConfig, keys, guarded)
+	msgs := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		msgs = append(msgs, fmt.Sprintf(
+			"%s: --dynamic %s:%s targets %s, which %s. Dynamic paths move to the "+
+				"operator-editable cluster-values.yaml at install time, loaded after "+
+				"the values this gate verified, so editing it there silently undoes "+
+				"the validated configuration. Bake the value statically "+
+				"(--set/--set-json) instead.",
+			componentName, hit.key, hit.path, hit.guard, gateReason))
 	}
 	return msgs
 }
@@ -870,7 +927,7 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 	draDynMsgs := dynamicOwnershipViolations(bundlerConfig, draRef.Name, draKeys,
 		[]string{"nvidiaDriverRoot"})
 	msgs = append(msgs, draDynMsgs...)
-	draValues, draErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, draRef.Name, draKeys)
+	draValues, draErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, draRef.Name, draKeys, "driver-ownership coherence")
 	if draErr != nil {
 		return msgs, []error{draErr}
 	}
@@ -1034,7 +1091,7 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 			componentName, recordedState, recipe.GPUDriverStatePreinstalled, recipe.GPUDriverStateAbsent))
 	}
 
-	values, resolveErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, gpuOpKeys)
+	values, resolveErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, gpuOpKeys, "driver-ownership coherence")
 	if resolveErr != nil {
 		for _, msg := range msgs {
 			slog.Warn(msg, logKeyComponent, componentName)
@@ -1146,6 +1203,730 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 		slog.Warn(msg, logKeyComponent, componentName)
 	}
 	return msgs, errs
+}
+
+// gpuOperatorComponentNames are the registry-level component names that
+// carry GPU Operator driver-ownership values (the canonical chart and its
+// OCP variant). This package cannot import pkg/bundler (dependency cycle
+// — see draDriverComponentNames above for the identical constraint and
+// the agreed keep-in-sync disposition), so this list is a local
+// duplicate of pkg/bundler's gpuOperatorComponentNames; it also mirrors
+// the pair that registers CheckDriverOwnershipCoherence in
+// recipes/registry.yaml. Keep all three in sync.
+var gpuOperatorComponentNames = []string{"gpu-operator", "gpu-operator-ocp"}
+
+// nvsentinelAssumeDriverInstalledOverrideSet is the documented
+// bundle-time override that makes the NVSentinel labeler apply
+// nvsentinel.dgxc.nvidia.com/driver.installed without watching for a
+// driver pod. It renders the labeler's --assume-driver-installed flag,
+// the chart-level automation of the Manual Labeling Procedure in
+// NVSentinel design 018. Phrased as a remedy alongside
+// gpuOperatorManagedOverrideSet above.
+const nvsentinelAssumeDriverInstalledOverrideSet = "--set nv-sentinel:labeler.assumeDriverInstalled=true"
+
+// nvsentinelDriverLabelPath is the nvsentinel values path that carries
+// the flag. "labeler" is the subchart key (the chart declares no alias),
+// so the override path is subchart-scoped rather than top-level.
+const nvsentinelDriverLabelPath = "labeler.assumeDriverInstalled"
+
+// gkeDriverInstallerProfileValue is the GKE gpuStack profile value whose
+// documented operational prerequisite is Google's standalone
+// nvidia-driver-installer DaemonSet (recipes/overlays/gke-cos.yaml). That
+// DaemonSet's pods ARE a driver pod the NVSentinel labeler detects, so
+// this value is the one driver.enabled=false shape that the label gate
+// below must not reject.
+const gkeDriverInstallerProfileValue = "driver-installer"
+
+// gpuStackProfileName is the ADR-015 configuration-profile name that
+// selects who installs the GPU driver on AKS and GKE.
+const gpuStackProfileName = "gpuStack"
+
+// resolveGPUOperatorRef looks up the GPU Operator's ComponentRef by
+// trying every known name variant in turn, mirroring
+// resolveDRAComponentRef: GetComponentRef matches an EXACT name, so a
+// bare canonical-name call silently returns nil on an OCP recipe.
+//
+// The lookup runs against a DECLARED-union view of the recipe
+// (declaredUnionView): the bundler filters ComponentRefs before
+// validations run, so on a subset bundle (bundlers=nvsentinel) the
+// gpu-operator ref is absent from the filtered refs even though its
+// declaration — driver.enabled, operator.runtimeClass — is exactly the
+// platform evidence the NVSentinel gates key on. The returned view must
+// also be what the caller resolves the GPU Operator's values against,
+// so GetValuesForComponentWithContext finds the ref.
+func resolveGPUOperatorRef(recipeResult *recipe.RecipeResult) (string, *recipe.ComponentRef, *recipe.RecipeResult) {
+	union := declaredUnionView(recipeResult)
+	for _, name := range gpuOperatorComponentNames {
+		if ref := union.GetComponentRef(name); ref != nil {
+			return name, ref, union
+		}
+	}
+	return "", nil, union
+}
+
+// declaredUnionView returns recipeResult when no pre-filter union is
+// attached, and otherwise a shallow copy whose ComponentRefs is the
+// declared union — so ref lookups and values resolution see every
+// component the recipe names, not just the ones this bundle renders.
+// Attachment is the explicit HasDeclaredComponents bit, not a slice-
+// length inference.
+func declaredUnionView(recipeResult *recipe.RecipeResult) *recipe.RecipeResult {
+	if !recipeResult.HasDeclaredComponents() {
+		return recipeResult
+	}
+	view := *recipeResult
+	view.ComponentRefs = recipeResult.DeclaredComponentRefs()
+	return &view
+}
+
+// helmTruthy reports whether value would satisfy a Helm `{{ if }}` guard,
+// which is how the labeler chart consumes assumeDriverInstalled
+// (`{{- if .Values.assumeDriverInstalled }}` → `--assume-driver-installed`).
+// Helm inherits Go's text/template truth rule, so delegate to
+// template.IsTrue rather than re-deriving it: empty maps, slices, arrays,
+// and strings are FALSE (an empty-map value — e.g. --set-json
+// nv-sentinel:labeler.assumeDriverInstalled={} — renders WITHOUT the
+// flag, recreating the exact silent 0-desired state the gate exists to
+// block), non-empty strings are TRUE (so a --set spelling the chart
+// would honor is never rejected), numbers by non-zero, booleans by
+// value. The !ok case (no meaningful truth value) is fail-closed to
+// not-the-remedy.
+func helmTruthy(value any) bool {
+	truth, ok := template.IsTrue(value)
+	return ok && truth
+}
+
+// nvsentinelAssumesDriverInstalled reports whether the effective
+// nvsentinel values enable the labeler's assume-driver-installed mode.
+func nvsentinelAssumesDriverInstalled(values map[string]any) bool {
+	labeler, ok := values["labeler"].(map[string]any)
+	if !ok {
+		return false
+	}
+	raw, present := labeler["assumeDriverInstalled"]
+	if !present {
+		return false
+	}
+	return helmTruthy(raw)
+}
+
+// labelerObservesDriverPod reports whether some driver pod the NVSentinel
+// labeler recognizes exists on this recipe's platform even though the GPU
+// Operator installs no driver.
+//
+// One shipping configuration qualifies: GKE COS with
+// --profile gpuStack=driver-installer, whose documented prerequisite is
+// Google's standalone nvidia-driver-installer DaemonSet on pools created
+// with gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml). The
+// labeler's driver-pod detection sees those pods, so the driver.installed
+// label IS applied and the gate below must stay silent. Its sibling value
+// gke-default bakes the driver into the node at pool creation, so no
+// driver pod exists there — that value is affected.
+//
+// The exemption is scoped to GKE COS recipes, not to the profile
+// identifier alone: profile names are not reserved, and an external
+// --data overlay on any service can declare a gpuStack profile whose
+// value happens to be named driver-installer — with no Google installer
+// DaemonSet ever deploying. Fail closed on anything but the one shape
+// the embedded catalog documents (recipes/overlays/gke-cos.yaml); a
+// recipe without criteria stays blocked for the same reason.
+func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
+	if recipeResult.Criteria == nil ||
+		recipeResult.Criteria.Service != recipe.CriteriaServiceGKE ||
+		recipeResult.Criteria.OS != recipe.CriteriaOSCOS {
+
+		return false
+	}
+	selected := recipeResult.Metadata.SelectedProfile
+	if selected == nil {
+		return false
+	}
+	return selected.Name == gpuStackProfileName && selected.Value == gkeDriverInstallerProfileValue
+}
+
+// NVSENTINEL GATE POLICY — what an nvsentinel gate means when parts of
+// nvsentinel are disabled or filtered away (three review rounds probed
+// this from different angles; keep the rules in one place):
+//
+//  1. Evidence is the DECLARED union; enforcement follows the OUTPUT.
+//     The gates read other components (gpu-operator) from the
+//     pre-filter declaration via resolveGPUOperatorRef — a component
+//     excluded from a subset bundle still describes the platform — but
+//     a gate only runs at all when nvsentinel itself is rendered
+//     (RunComponentValidations iterates the filtered refs). This is
+//     the ADR-018 union rule.
+//  2. An explicitly-disabled consumer subchart renders nothing, so it
+//     neither triggers a gate nor may deployment validation require
+//     it: the RuntimeClass gate skips when metadata-collector is
+//     disabled, the driver-label gate skips when BOTH label consumers
+//     (metadata-collector, syslog monitors) are disabled, and the
+//     health check's DaemonSet assertions use the negative form that
+//     tolerates a true 404. A PARTIALLY disabled consumer set does not
+//     skip — the remaining consumer still needs the remedy.
+//  3. When rendered, a consumer must be fully rolled out — 0 desired
+//     (the #2175 signature) and partial rollout both fail the health
+//     check; the gates exist so that state is rejected at bundle time
+//     instead.
+//
+// CheckNVSentinelDriverLabelDetectable blocks a bundle whose NVSentinel
+// deployment would silently come up half-rolled-out.
+//
+// The NVSentinel labeler decides
+// nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
+// driver pod. Where the driver ships in the node image and no driver pod
+// exists — AKS gpuStack=azure-managed, GKE COS gpuStack=gke-default, OKE
+// — the label is never applied, so metadata-collector and both
+// syslog-health-monitor DaemonSets report 0 desired pods. Nothing
+// reports an error: a DaemonSet whose node selector matches no node is
+// not unhealthy, it emits no event, and gpu-health-monitor keeps running
+// because it selects on the DCGM label instead. The stack looks healthy
+// while half of it was never scheduled (issue #2175).
+//
+// The chart automates the remedy: labeler.assumeDriverInstalled renders
+// --assume-driver-installed, which is the Manual Labeling Procedure of
+// NVSentinel design 018 expressed as configuration. Manually labeling
+// nodes is NOT an equivalent workaround — the labeler computes an empty
+// desired value when no driver pod exists and removes the label on its
+// next reconcile.
+//
+// The gate fires only when every one of the following holds, so the flag
+// is never demanded where the GPU Operator owns the driver (setting it
+// there would skip detection and mask an unloaded or unhealthy driver):
+//
+//   - nvsentinel is present and enabled,
+//   - the GPU Operator is present, enabled, and has driver.enabled=false
+//     in its FINAL effective values (recipe merge plus the user's
+//     --set/--set-json overrides), so the documented
+//     GPU-Operator-managed override set clears the gate,
+//   - no other driver pod source the labeler recognizes exists
+//     (labelerObservesDriverPod — GKE gpuStack=driver-installer), and
+//   - labeler.assumeDriverInstalled is not truthy in nvsentinel's
+//     effective values.
+//
+// It stays silent when the GPU Operator is absent or disabled: no AICR
+// recipe ships nvsentinel without it, and with no driver-ownership
+// signal to key on the gate would be guessing rather than detecting.
+//
+// When the driver toggle cannot be read as a boolean the gate defers to
+// CheckDriverOwnershipCoherence, which rejects that on the same values,
+// rather than adding a second message derived from a guessed default.
+// That deferral holds only while the sibling actually runs: it is
+// registered on the GPU Operator (recipes/registry.yaml) and
+// RunComponentValidations iterates the FILTERED ComponentRefs, so a
+// subset bundle (bundlers=nvsentinel) renders nvsentinel without it and
+// nothing would report the malformed toggle. The declared union
+// supplies this gate's evidence but cannot make the sibling execute, so
+// the gate fails closed when the operator it read the toggle from is
+// not itself rendered.
+//
+// Registered with severity error on nvsentinel (recipes/registry.yaml),
+// which converts the returned message into a blocking
+// ErrCodeInvalidRequest in RunValidations. Hard errors are returned only
+// when a component's effective values cannot be resolved or the user's
+// overrides cannot be reapplied to them (see effectiveComponentValues):
+// the state this gate must verify is then unknown, so it fails closed.
+func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	// A nil bundler config means the caller is Client.BundleComponents,
+	// the values-only SDK path, which produces no deployable artifact and
+	// exposes no way to pass --set (pkg/client/v1/aicr.go passes nil for
+	// exactly this reason: "validations that act solely on bundle-time
+	// flags no-op on a nil config"). This gate's sole remedy IS a
+	// bundle-time flag — no recipe or overlay sets
+	// labeler.assumeDriverInstalled — so firing here would make every
+	// affected recipe permanently unbundleable through that API with no
+	// expressible fix. Every path that actually writes a bundle
+	// (DefaultBundler.Make, Client.MakeBundle, POST /v1/bundle) carries a
+	// non-nil config and is gated. Documented boundary, closure owned by
+	// issue #2181: once the recipes own the remedy values, the gates are
+	// runnable on the SDK path with no override channel and this no-op
+	// is to be removed (an acceptance criterion recorded there).
+	if bundlerConfig == nil {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	gpuOpName, gpuOpRef, gpuOpView := resolveGPUOperatorRef(recipeResult)
+	if gpuOpRef == nil {
+		return nil, nil
+	}
+	gpuOpKeys := componentOverrideKeys(gpuOpName, provider)
+	if componentDisabled(gpuOpRef, bundlerConfig, gpuOpKeys) {
+		return nil, nil
+	}
+
+	gpuOpValues, err := effectiveComponentValues(ctx, gpuOpView, bundlerConfig, gpuOpName, gpuOpKeys, "NVSentinel driver-label detectability")
+	if err != nil {
+		return nil, []error{err}
+	}
+	driverToggle, driverProblem := ownershipToggle(gpuOpValues, "driver")
+	// unreadableOwnership records that the operator's driver toggle could
+	// not be read AND no sibling will report it. The gate deliberately
+	// does not block here: every exit below (an observable driver pod,
+	// both label consumers disabled, the remedy already set) is an
+	// independent reason #2175 cannot occur, and short-circuiting past
+	// them would reject bundles that are fine — a bundle carrying the
+	// remedy most of all, since the flag makes the label unconditional
+	// whatever the operator's toggle says. Ownership is instead read
+	// conservatively as host-installed, so the gate blocks exactly where
+	// a readable driver.enabled=false would have.
+	unreadableOwnership := false
+	if driverProblem != "" {
+		if recipeResult.GetComponentRef(gpuOpName) != nil {
+			// The operator renders in this bundle, so
+			// CheckDriverOwnershipCoherence reports the malformed toggle
+			// against the component that declares it; a second message
+			// derived from a guessed default would only mislead.
+			return nil, nil
+		}
+		// Subset bundle (bundlers=nvsentinel): the operator supplied the
+		// evidence through the declared union but its own checks never
+		// run, so this gate is the only place the malformed toggle can
+		// surface. A falsy non-boolean (--set-json
+		// gpuoperator:driver.enabled=0, an explicitly null section)
+		// renders no driver pod — exactly the state that leaves the
+		// labeler at 0 desired.
+		unreadableOwnership = true
+	}
+	if !unreadableOwnership && (driverToggle == nil || *driverToggle) {
+		// Absent key → the chart default (true): the operator installs
+		// the driver, so its driver pod is exactly what the labeler
+		// watches for. No dynamic guard fires on this exit: #2175 is
+		// unreachable here regardless of any install-time edit to the
+		// remedy or consumer paths (the driver pod exists either way),
+		// and the flag is likewise permitted statically on these
+		// platforms — a guard would reject valid unaffected bundles
+		// (e.g. EKS with a --dynamic on a consumer-enable path).
+		return nil, nil
+	}
+
+	if labelerObservesDriverPod(recipeResult) {
+		// Same reasoning as the driver-enabled exit: Google's installer
+		// DaemonSet supplies an observable driver pod, so no install-time
+		// edit to the guarded paths can create the 0-desired state.
+		return nil, nil
+	}
+
+	// Affected platform (host-installed driver, no observable pod) — the
+	// exits below are decisions an install-time edit could undo, so the
+	// dynamic guards are scoped from here on, each firing only when the
+	// gate's outcome actually depends on the guarded path. Truth table
+	// (pinned by the test rows):
+	//
+	//   (a)  both consumers statically disabled, no consumer-enable
+	//        dynamic → skip; a remedy-path dynamic is allowed (nothing
+	//        reads the label, so no install-time edit to the remedy can
+	//        recreate #2175);
+	//   (b)  both statically disabled, NO usable static remedy, and a
+	//        consumer-enable path is dynamic → blocked (the skip's basis
+	//        is install-time editable and a re-enabled consumer would
+	//        find no remedy);
+	//   (b1) both statically disabled, static remedy applied and the
+	//        remedy path itself static → a consumer-enable dynamic is
+	//        allowed (an install-time re-enable finds the remedy in
+	//        place, so #2175 cannot recur);
+	//   (b2) both statically disabled, static remedy applied but the
+	//        remedy path ALSO dynamic → blocked (both bases are
+	//        install-time editable: strip the remedy, re-enable a
+	//        consumer);
+	//   (c)  consumers active → the gate depends on the remedy, so a
+	//        remedy-path dynamic is blocked whether the static remedy is
+	//        set (an edit strips it) or not (the export defers it).
+	sentinelValues, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys, "NVSentinel driver-label detectability")
+	if err != nil {
+		return nil, []error{err}
+	}
+	remedyStatic := nvsentinelAssumesDriverInstalled(sentinelValues)
+	remedyDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys,
+		[]string{nvsentinelDriverLabelPath})) > 0
+	// Consumer-aware skip: metadata-collector and the syslog monitors are
+	// the components that select on the driver.installed label. When the
+	// resolved values explicitly disable BOTH subcharts, nothing reads
+	// the label and demanding the remedy would serve no consumer. A
+	// single disabled consumer does not skip — the other still needs the
+	// label. (See the policy comment above CheckNVSentinelDriverLabelDetectable.)
+	// Evaluated BEFORE the remedy-path guard: with both consumers gone
+	// and their enable paths static, the remedy is irrelevant and a
+	// dynamic on it is harmless (row (a)).
+	if nvsentinelDriverLabelConsumerDisabled(sentinelValues, "metadataCollector") &&
+		nvsentinelDriverLabelConsumerDisabled(sentinelValues, "syslogHealthMonitor") {
+		// Row (b1): a static remedy on a static remedy path makes an
+		// install-time consumer re-enable safe — the label is applied
+		// regardless — so the consumer-enable guard must not fire.
+		if remedyStatic && !remedyDynamic {
+			return nil, nil
+		}
+		// Rows (b)/(b2): the consumer-enable paths are guarded exactly
+		// when this skip is what clears the gate AND no static remedy
+		// would cover a re-enabled consumer — either none is set, or the
+		// remedy path is itself dynamic and an install-time edit can
+		// strip it.
+		if dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+			[]string{"global.metadataCollector.enabled", "global.syslogHealthMonitor.enabled"},
+			"cleared the driver-label gate (both label consumers are disabled, so "+
+				"nothing reads the label — an install-time edit re-enabling a consumer "+
+				"would recreate the silent 0-desired DaemonSet state of issue #2175, "+
+				"because the static remedy is absent or itself declared dynamic)"); len(dynMsgs) > 0 {
+			for _, msg := range dynMsgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return dynMsgs, nil
+		}
+
+		return nil, nil
+	}
+
+	// Row (c): consumers render, so the gate stands or falls on the
+	// remedy — whether it passes via the static remedy or blocks
+	// demanding it, a dynamic on the path defers the remedy to the
+	// operator-editable cluster-values.yaml, where stripping it
+	// recreates #2175.
+	if dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+		[]string{nvsentinelDriverLabelPath},
+		"the driver-label gate verifies on this platform (an install-time edit "+
+			"can strip the remedy and recreate the silent 0-desired DaemonSet "+
+			"state of issue #2175)"); len(dynMsgs) > 0 {
+		for _, msg := range dynMsgs {
+			slog.Warn(msg, logKeyComponent, componentName)
+		}
+		return dynMsgs, nil
+	}
+
+	if remedyStatic {
+		return nil, nil
+	}
+
+	// Name only the label consumers this configuration actually renders:
+	// with one subchart explicitly disabled its DaemonSets do not exist,
+	// and listing them would misstate the blast radius.
+	var affected []string
+	if !nvsentinelDriverLabelConsumerDisabled(sentinelValues, "metadataCollector") {
+		affected = append(affected, "metadata-collector")
+	}
+	if !nvsentinelDriverLabelConsumerDisabled(sentinelValues, "syslogHealthMonitor") {
+		affected = append(affected, "syslog-health-monitor-regular", "syslog-health-monitor-kata")
+	}
+
+	// The ownership clause differs when the toggle could not be read: the
+	// gate is acting on the conservative reading, and saying
+	// driver.enabled=false outright would misreport what the values say.
+	ownershipClause := fmt.Sprintf(
+		"the effective values leave the NVIDIA driver to the node image "+
+			"(%s driver.enabled=false)", gpuOpName)
+	if unreadableOwnership {
+		ownershipClause = fmt.Sprintf(
+			"the GPU Operator's driver ownership is unreadable (%s) and this bundle "+
+				"does not render the GPU Operator (a bundlers= subset), so the check "+
+				"that normally reports a malformed toggle does not run on it — read "+
+				"conservatively, the driver is left to the node image", driverProblem)
+	}
+	msg := fmt.Sprintf(
+		"%s: %s and no driver pod the NVSentinel labeler can "+
+			"observe is deployed, but %s is not set. The labeler therefore never "+
+			"applies the nvsentinel.dgxc.nvidia.com/driver.installed node label, and "+
+			"%s come up with 0 desired pods — silently: a "+
+			"DaemonSet that matches no node reports no error and emits no event, and "+
+			"gpu-health-monitor stays healthy because it selects on the DCGM label "+
+			"instead, so the stack looks fully rolled out. Set the documented upstream "+
+			"flag at bundle time: %s. Note that labeling the nodes by hand does not "+
+			"persist — the labeler removes the label on its next reconcile. Do not set "+
+			"the flag where the GPU Operator installs the driver: it skips driver-pod "+
+			"detection entirely and would mask an unloaded driver.",
+		componentName, ownershipClause, nvsentinelDriverLabelPath,
+		strings.Join(affected, ", "), nvsentinelAssumeDriverInstalledOverrideSet)
+	slog.Warn(msg, logKeyComponent, componentName)
+	return []string{msg}, nil
+}
+
+// defaultRuntimeClassName is the shared chart default: the gpu-operator
+// chart ships operator.runtimeClass: nvidia (v26.3.3, verified against
+// the pinned chart values), and nvsentinel's metadata-collector subchart
+// ships runtimeClassName: "nvidia" (v1.9.0, charts/metadata-collector/
+// values.yaml:31). Either side left unset therefore resolves to this
+// name.
+const defaultRuntimeClassName = "nvidia"
+
+// nvsentinelMetadataCollectorRuntimeClassPath is the nvsentinel values
+// path carrying the metadata-collector pod's runtimeClassName.
+// "metadata-collector" is the subchart key (no alias in the parent
+// Chart.yaml), so the override path is subchart-scoped.
+const nvsentinelMetadataCollectorRuntimeClassPath = "metadata-collector.runtimeClassName"
+
+// resolvedStringValue walks a dot-separated path through values and
+// returns the string found there. ok is false when the path is absent
+// or any intermediate step is not a map — the caller then applies the
+// chart default. A present-but-non-string leaf returns ok=false with
+// valid=false so callers can distinguish "absent → default" from
+// "present but unreadable → cannot verify".
+func resolvedStringValue(values map[string]any, path string) (value string, ok bool, valid bool) {
+	cur := values
+	parts := strings.Split(path, ".")
+	for i, part := range parts {
+		raw, present := cur[part]
+		if !present {
+			return "", false, true
+		}
+		if i == len(parts)-1 {
+			s, isString := raw.(string)
+			if !isString {
+				return "", false, false
+			}
+			return s, true, true
+		}
+		next, isMap := raw.(map[string]any)
+		if !isMap {
+			return "", false, true
+		}
+		cur = next
+	}
+	return "", false, true
+}
+
+// nvsentinelDriverLabelConsumerDisabled reports whether the resolved
+// nvsentinel values switch OFF the named subchart via its chart
+// condition (global.<key>.enabled=false). Absent or malformed keys
+// count as enabled — the chart defaults both consumers to true, and the
+// gate must fail closed when it cannot prove nobody reads the label.
+func nvsentinelDriverLabelConsumerDisabled(values map[string]any, key string) bool {
+	global, ok := values["global"].(map[string]any)
+	if !ok {
+		return false
+	}
+	section, ok := global[key].(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, isBool := section["enabled"].(bool)
+	return isBool && !enabled
+}
+
+// nvsentinelMetadataCollectorDisabled reports whether the resolved
+// nvsentinel values switch the metadata-collector subchart off
+// (global.metadataCollector.enabled=false, the chart's subchart
+// condition). With the subchart disabled no DaemonSet renders, so a
+// runtime-class mismatch has nothing to reject.
+func nvsentinelMetadataCollectorDisabled(values map[string]any) bool {
+	return nvsentinelDriverLabelConsumerDisabled(values, "metadataCollector")
+}
+
+// CheckNVSentinelRuntimeClassCoherence blocks a bundle whose NVSentinel
+// metadata-collector pods would be rejected at admission.
+//
+// The metadata-collector DaemonSet sets runtimeClassName (chart default
+// "nvidia"), and the GPU Operator's ClusterPolicy controller creates the
+// primary RuntimeClass named after operator.runtimeClass (also default
+// "nvidia"). When a recipe retargets operator.runtimeClass — the AKS
+// azure-managed profile sets nvidia-container-runtime because that is
+// the handler preconfigured on the AKS node image — no RuntimeClass
+// named "nvidia" exists on the cluster, and the API server rejects every
+// metadata-collector pod at admission: `pod rejected: RuntimeClass
+// "nvidia" not found` (issue #2176).
+//
+// The failure mode is easy to misread: the pods are rejected before a
+// pod object is created, so there is nothing to kubectl describe — the
+// DaemonSet shows N desired / 0 created and the only signal is a
+// FailedCreate event on it. Distinct from and additive to the
+// driver-label gap (CheckNVSentinelDriverLabelDetectable, #2175): the
+// label gets metadata-collector scheduled, the runtime class gets its
+// pods admitted.
+//
+// This is a value comparison, not a platform matrix: the gate fires
+// exactly when the two resolved names differ, treating either side
+// unset as the shared chart default "nvidia" (both defaults verified
+// against the pinned charts — see defaultRuntimeClassName). It
+// therefore passes wherever the recipes leave operator.runtimeClass at
+// its default (EKS, GKE, OKE, AKS operator-managed) and fails AKS
+// azure-managed until the override is passed. An explicitly EMPTY
+// metadata-collector.runtimeClassName also passes: the subchart omits
+// the field entirely then, and a pod without runtimeClassName is always
+// admitted.
+//
+// The gate stays silent when the GPU Operator is absent or disabled
+// (nothing manages RuntimeClasses, so there is no authoritative name to
+// compare against), when the metadata-collector subchart is disabled
+// (global.metadataCollector.enabled=false — no DaemonSet renders), when
+// either value is present but not a string (the install fails on its
+// own terms; guessing a default here could invert the verdict), and on
+// a nil bundler config (the values-only Client.BundleComponents path —
+// same rationale as CheckNVSentinelDriverLabelDetectable, the remedy is
+// a --set that path cannot express).
+//
+// Registered with severity error on nvsentinel (recipes/registry.yaml).
+// Hard errors are returned only when effective values cannot be
+// resolved (effectiveComponentValues) — the state this gate must verify
+// is then unknown, so it fails closed.
+func CheckNVSentinelRuntimeClassCoherence(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	if bundlerConfig == nil {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	gpuOpName, gpuOpRef, gpuOpView := resolveGPUOperatorRef(recipeResult)
+	if gpuOpRef == nil {
+		return nil, nil
+	}
+	gpuOpKeys := componentOverrideKeys(gpuOpName, provider)
+	if componentDisabled(gpuOpRef, bundlerConfig, gpuOpKeys) {
+		return nil, nil
+	}
+
+	gpuOpValues, err := effectiveComponentValues(ctx, gpuOpView, bundlerConfig, gpuOpName, gpuOpKeys, "NVSentinel RuntimeClass coherence")
+	if err != nil {
+		return nil, []error{err}
+	}
+	operatorClass, present, valid := resolvedStringValue(gpuOpValues, "operator.runtimeClass")
+	if !valid {
+		return nil, nil
+	}
+	if !present || operatorClass == "" {
+		// Absent and explicitly empty both fall back to the chart
+		// default: the gpu-operator chart templates the RuntimeClass
+		// name via a default-applying helper.
+		operatorClass = defaultRuntimeClassName
+	}
+
+	sentinelValues, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys, "NVSentinel RuntimeClass coherence")
+	if err != nil {
+		return nil, []error{err}
+	}
+	if nvsentinelMetadataCollectorDisabled(sentinelValues) {
+		// The enable condition is guarded exactly when this skip is what
+		// clears the gate AND an install-time re-enable would deploy a
+		// collector whose runtime class is NOT verifiably coherent. When
+		// the statically resolved collector class is already coherent
+		// with the operator's (matching, or explicitly empty and
+		// therefore omitted) and neither class path is itself dynamic, a
+		// re-enabled collector is admitted — the alignment was verified
+		// even though nothing renders now — so the guard must not fire.
+		// It fires when the class is unset-default-
+		// mismatched, misaligned, unreadable, or either class path is
+		// install-time editable.
+		disabledClass, disabledPresent, disabledValid := resolvedStringValue(sentinelValues, nvsentinelMetadataCollectorRuntimeClassPath)
+		if !disabledPresent {
+			disabledClass = defaultRuntimeClassName
+		}
+		coherent := disabledValid && (disabledClass == "" || disabledClass == operatorClass)
+		// Which class paths make the coherent state install-time editable
+		// mirrors the enabled-collector logic below: an explicitly EMPTY
+		// collector class omits runtimeClassName from the pod spec, so a
+		// re-enabled collector is admitted under ANY operator class and
+		// only the collector's own path (an edit could fill it with a
+		// nonexistent class) endangers the verified state —
+		// operator.runtimeClass does not. A MATCHING non-empty class
+		// depends on both sides staying put, so both paths count.
+		classPathsDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys,
+			[]string{nvsentinelMetadataCollectorRuntimeClassPath})) > 0
+		if !disabledValid || disabledClass != "" {
+			classPathsDynamic = classPathsDynamic ||
+				len(dynamicPathIntersections(bundlerConfig, gpuOpKeys,
+					[]string{"operator.runtimeClass"})) > 0
+		}
+		if coherent && !classPathsDynamic {
+			return nil, nil
+		}
+		if dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+			[]string{"global.metadataCollector.enabled"},
+			"cleared the RuntimeClass-coherence gate (the metadata-collector "+
+				"subchart is disabled and its runtime class is not verifiably "+
+				"coherent — misaligned, unreadable, or itself declared dynamic — so "+
+				"an install-time edit re-enabling it can deploy a collector whose "+
+				"pods are rejected at admission, issue #2176)"); len(dynMsgs) > 0 {
+			for _, msg := range dynMsgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return dynMsgs, nil
+		}
+
+		return nil, nil
+	}
+
+	collectorClass, present, valid := resolvedStringValue(sentinelValues, nvsentinelMetadataCollectorRuntimeClassPath)
+	if !valid {
+		return nil, nil
+	}
+	if !present {
+		collectorClass = defaultRuntimeClassName
+	}
+	guardReason := "the RuntimeClass-coherence gate verifies (an install-time edit can " +
+		"desynchronize the collector from the operator's RuntimeClass and every " +
+		"metadata-collector pod is then rejected at admission — issue #2176)"
+	if collectorClass == "" {
+		// Explicitly empty: the subchart omits runtimeClassName from the
+		// pod spec entirely, and a pod without one is always admitted —
+		// so retargeting the OPERATOR's class at install time cannot
+		// cause #2176 and operator.runtimeClass is not guarded here. The
+		// COLLECTOR path stays guarded: an install-time edit could
+		// replace the empty value with a class name no RuntimeClass
+		// matches, recreating exactly the admission rejection this exit
+		// stands behind not happening.
+		if dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+			[]string{nvsentinelMetadataCollectorRuntimeClassPath}, guardReason); len(dynMsgs) > 0 {
+			for _, msg := range dynMsgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return dynMsgs, nil
+		}
+
+		return nil, nil
+	}
+
+	// The collector renders with a real runtime class and this gate is
+	// about to stand behind the coherence of the two resolved names. A
+	// --dynamic on either class path defers it to the operator-editable
+	// cluster-values.yaml, where a retarget desynchronizes exactly what
+	// was verified — so both paths are guarded whenever the comparison is
+	// reached, on every platform (a matching pair is one edit away from a
+	// mismatched one). Not guarded on the blocking path below: a
+	// mismatched bundle is rejected outright either way.
+	dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+		[]string{nvsentinelMetadataCollectorRuntimeClassPath}, guardReason)
+	dynMsgs = append(dynMsgs, nvsentinelDynamicGuardViolations(bundlerConfig, componentName, gpuOpKeys,
+		[]string{"operator.runtimeClass"}, guardReason)...)
+	if len(dynMsgs) > 0 {
+		for _, msg := range dynMsgs {
+			slog.Warn(msg, logKeyComponent, componentName)
+		}
+		return dynMsgs, nil
+	}
+
+	if collectorClass == operatorClass {
+		return nil, nil
+	}
+
+	msg := fmt.Sprintf(
+		"%s: metadata-collector sets runtimeClassName=%q but the GPU Operator creates "+
+			"its primary RuntimeClass as %q (%s operator.runtimeClass), so no RuntimeClass "+
+			"with that name will exist and the API server rejects every metadata-collector "+
+			"pod at admission (`pod rejected: RuntimeClass %q not found`). The DaemonSet "+
+			"then shows desired pods but zero created — no pod object ever exists, so there "+
+			"is nothing to kubectl describe; the only signal is a FailedCreate event on the "+
+			"DaemonSet. Align the collector with the operator's runtime class at bundle "+
+			"time: --set nv-sentinel:%s=%s.",
+		componentName, collectorClass, operatorClass, gpuOpName, collectorClass,
+		nvsentinelMetadataCollectorRuntimeClassPath, operatorClass)
+	slog.Warn(msg, logKeyComponent, componentName)
+	return []string{msg}, nil
 }
 
 // CheckMariaDBOperatorOwnershipCoherence enforces the snapshot-driven

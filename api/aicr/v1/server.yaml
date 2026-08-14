@@ -1452,6 +1452,13 @@ paths:
             (namePrefix, destinationServer, project, cascadeDelete),
             e.g. deployer:namePrefix=tenant-a-. Unknown deployer keys
             are rejected.
+
+            An override whose component is absent from the generated
+            bundle is rejected with HTTP 400 (INVALID_REQUEST, "cannot
+            take effect") rather than silently discarded. The scalar
+            enabled=false spelling is exempt on a declared component
+            (it is the removal mechanism); "enabled" is never honored
+            from typed overrides.
           schema:
             type: array
             items:
@@ -1472,6 +1479,16 @@ paths:
             Declare value paths as install-time parameters (format: component:path.to.field).
             Can be repeated. Dynamic paths are removed from values.yaml and placed
             in cluster-values.yaml for the user to fill in at install time.
+
+            A declaration whose component is absent from the generated
+            bundle is rejected with HTTP 400 (INVALID_REQUEST, "cannot
+            take effect"); no path is exempt. Certain gate-verified paths
+            on present components are also rejected — driver-ownership
+            paths, GPU allocation-policy keys, and, where the
+            corresponding NVSentinel gate applies on the recipe's
+            platform and configuration, the NVSentinel
+            remedy/consumer/runtime-class paths — because an install-time
+            edit there would undo what a bundle-time gate verified.
           schema:
             type: array
             items:
@@ -2044,7 +2061,10 @@ components:
       name: set
       in: query
       required: false
-      description: Repeatable component:path=value override.
+      description: >-
+        Repeatable component:path=value override. Rejected with HTTP 400
+        when the component is absent from the generated bundle (scalar
+        enabled=false exempt on a declared component).
       schema:
         type: array
         items:
@@ -2055,7 +2075,14 @@ components:
       name: dynamic
       in: query
       required: false
-      description: Repeatable install-time component:path declaration.
+      description: >-
+        Repeatable install-time component:path declaration. Rejected with
+        HTTP 400 when the component is absent from the generated bundle;
+        no path is exempt. Certain gate-verified paths on present
+        components are also rejected (driver-ownership paths, GPU
+        allocation-policy keys, and — where the corresponding NVSentinel
+        gate applies on the recipe's platform and configuration — the
+        NVSentinel remedy/consumer/runtime-class paths).
       schema:
         type: array
         items:

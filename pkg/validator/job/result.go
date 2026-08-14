@@ -28,13 +28,20 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
 	// ValidatorContainerName is the required name for the validator container.
 	// This is part of the validator package contract to ensure sidecar-safety.
 	ValidatorContainerName = "validator"
+
+	// validatorExitFailed is the container exit code that ctrf maps to
+	// StatusFailed. Used when a Job-level condition is a definitive verdict
+	// even though no container status survives to report it.
+	validatorExitFailed int32 = 1
 )
 
 // ExtractResult reads the exit code, termination message, and stdout from the
@@ -60,9 +67,12 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 	// Find the pod for this Job
 	jobPod, err := d.getPodForJob(ctx)
 	if err != nil {
-		// Pod was never created or was deleted externally
-		result.ExitCode = -1
-		result.TerminationMsg = fmt.Sprintf("pod not found for Job %s: %v", d.jobName, err)
+		// Pod was never created, was deleted externally, or — the common
+		// case — the Job controller killed and deleted it on
+		// activeDeadlineSeconds expiry. The Job object still records why,
+		// so classify from its Failed condition instead of reporting a bare
+		// "pod not found" (see issue #2186).
+		result.ExitCode, result.TerminationMsg = d.missingPodOutcome(ctx, err)
 		return result
 	}
 
@@ -106,6 +116,114 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 	}
 
 	return result
+}
+
+// missingPodOutcome classifies an ExtractResult run whose Job pod could not be
+// found, returning the exit code and termination message to report.
+//
+// The dominant cause is not a vanished pod but a deadline: when a validator Job
+// exceeds its activeDeadlineSeconds, the Job controller kills the pod AND
+// deletes it, so the pod lookup legitimately finds nothing. Reporting the raw
+// "pod not found" there mislabels a reproducible, deadline-bounded failure as
+// an inconclusive infrastructure error (StatusOther), burying the fact that the
+// Job never reached a passing verdict in the time it was given (issue #2186).
+//
+// The Job object outlives its pod and still carries the reason, so:
+//
+//   - Failed/DeadlineExceeded — a definitive verdict: the validator Job did not
+//     succeed within its own deadline. Reported as exit code 1 (StatusFailed)
+//     with the deadline named, so the operator reads "this check did not pass
+//     in time", not "the infrastructure hiccuped". Note this says nothing about
+//     whether the container body ever ran: a pod that stayed Pending for the
+//     whole deadline (see the required dependency-affinity case documented in
+//     pkg/validator/v1/affinity.go) reaches the same condition, and the two are
+//     indistinguishable from Job status once the pod is deleted (issue #2189).
+//     The wording below is deliberately about the Job, not the check body.
+//   - Any other Failed condition — the reason and message are surfaced for
+//     diagnosis, but the exit code stays -1 (StatusOther): the pod is gone and
+//     the underlying container verdict is genuinely unknown.
+//   - No terminal Failed condition (or the Job itself cannot be read) — the
+//     original "pod not found" wording is preserved verbatim.
+//
+// Both branches remain blocking (ctrf.IsFailingStatus covers failed and other), so
+// this changes only diagnostic fidelity, never whether the phase fails.
+func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCode int32, msg string) {
+	notFound := fmt.Sprintf("pod not found for Job %s: %v", d.jobName, findErr)
+
+	// Only a CONFIRMED absence licenses a Job-condition diagnosis.
+	// GetPodForJob distinguishes "every candidate is gone" (ErrCodeNotFound)
+	// from "the List itself failed" (ErrCodeInternal); an apiserver hiccup is
+	// the latter, and it establishes nothing about the pod. Promoting it to a
+	// definitive verdict on the strength of a Job condition alone would flatten
+	// an ambiguous lookup into a claim the controller deleted the pod, which is
+	// exactly the failure mode the repo's fail-closed lookup rule forbids. An
+	// unestablished absence stays inconclusive.
+	if !stderrors.Is(findErr, errors.New(errors.ErrCodeNotFound, "")) {
+		return -1, notFound
+	}
+
+	job, cond, ok := d.jobFailedCondition(ctx)
+	if !ok {
+		return -1, notFound
+	}
+
+	detail := strings.TrimSpace(cond.Message)
+	if detail == "" {
+		detail = cond.Reason
+	}
+
+	// Both messages interpolate Job condition text straight from API state, so
+	// they are capped like any other termination message. The constant exists
+	// precisely because the result flows into ConfigMaps and rendered reports,
+	// and the pod-status branch above already bounds its own message the same
+	// way — an unbounded Job condition would be the one way around it.
+	if cond.Reason == batchv1.JobReasonDeadlineExceeded {
+		// States the observed fact — no pod remains — rather than naming a
+		// cause. ErrCodeNotFound covers a pod deleted by the Job controller on
+		// deadline expiry (the dominant case), one never created at all
+		// (quota or webhook rejection), and one removed externally; asserting
+		// controller deletion would name a false root cause for the other two.
+		return validatorExitFailed, boundTerminationMsg(fmt.Sprintf(
+			"validator Job did not complete within its %s deadline; no pod remains for it, so its logs are unavailable (Job condition Failed/%s: %s)",
+			enforcedDeadline(job, d.config.Entry.Timeout), cond.Reason, detail),
+			defaults.ValidatorMaxTerminationMsgBytes)
+	}
+
+	return -1, boundTerminationMsg(fmt.Sprintf("Job %s failed (%s): %s; pod not found: %v",
+		d.jobName, cond.Reason, detail, findErr),
+		defaults.ValidatorMaxTerminationMsgBytes)
+}
+
+// jobFailedCondition returns the validator Job and its terminal Failed
+// condition, if the Job can still be read and carries one. The Job itself is
+// returned alongside the condition so callers can report the deadline
+// Kubernetes actually enforced (spec.activeDeadlineSeconds) rather than
+// re-deriving it. A Get failure (including the
+// NotFound left by an already-reaped Job) is reported at DEBUG and yields
+// ok=false so the caller falls back to its original message — diagnosis must
+// never be blocked on a second API call succeeding.
+//
+// The read is explicitly bounded: `aicr validate` opts out of a facade-level
+// deadline (WithValidationTimeout(0)), so the inherited context may carry none
+// at all. Left unbounded, a stalled apiserver would hang result extraction
+// indefinitely instead of emitting the very diagnosis this call exists to
+// produce. K8sCleanupTimeout is the same short allowance the orchestrator
+// already grants the sibling post-mortem capture around HandleTimeout.
+func (d *Deployer) jobFailedCondition(ctx context.Context) (*batchv1.Job, batchv1.JobCondition, bool) {
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+
+	job, err := d.config.Clientset.BatchV1().Jobs(d.config.Namespace).Get(ctx, d.jobName, metav1.GetOptions{})
+	if err != nil {
+		slog.Debug("failed to read Job while diagnosing missing pod", "job", d.jobName, "error", err)
+		return nil, batchv1.JobCondition{}, false
+	}
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return job, c, true
+		}
+	}
+	return nil, batchv1.JobCondition{}, false
 }
 
 // processValidatorLogs turns raw pod logs into the structured Extra map and the
@@ -222,6 +340,25 @@ func effectiveTimeout(configured time.Duration) time.Duration {
 		return defaults.ValidatorDefaultTimeout
 	}
 	return configured
+}
+
+// enforcedDeadline is the deadline Kubernetes actually applied, as opposed to
+// the duration the catalog asked for. The authoritative source is the live
+// Job's spec.activeDeadlineSeconds — the literal value the Job controller
+// enforced — so it is preferred whenever the Job could be read and carries it.
+//
+// The fallback re-derives it the way BuildJobPlan does, converting the catalog
+// timeout with int64(timeout.Seconds()) before assigning it to
+// ActiveDeadlineSeconds (pkg/validator/v1/job_plan.go), so any sub-second
+// component is truncated away: a 1500ms entry yields a 1s Job deadline.
+// Reporting the raw duration would name a deadline that never existed, and the
+// whole point of this message is to describe the Kubernetes state that produced
+// the failure.
+func enforcedDeadline(job *batchv1.Job, configured time.Duration) time.Duration {
+	if job != nil && job.Spec.ActiveDeadlineSeconds != nil {
+		return time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second
+	}
+	return time.Duration(int64(effectiveTimeout(configured).Seconds())) * time.Second
 }
 
 // waitFailureMessage renders the TerminationMsg for a validator whose container
