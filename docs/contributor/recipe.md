@@ -176,7 +176,10 @@ in `criteria.go` counts six fields: `service`, `accelerator`,
 specificity ascending, so less-specific overlays merge first. Note:
 `nodes` is included in `Specificity()` to allow nodes-only CLI queries
 to pass the guard, but it does **not** participate in `Matches()` — no
-overlay gates on node count (see #1781).
+overlay in the **embedded catalog** gates on node count (see #1781).
+External `--data` catalogs that set `criteria.nodes` on an overlay are
+rejected at load time (`ErrCodeInvalidRequest`); operators must remove
+or zero that field before upgrading.
 
 **Matching is asymmetric.** Recipe-side `any` is a wildcard (matches
 anything in the query); query-side `any` is *not* a wildcard (matches
@@ -463,12 +466,15 @@ The error's `uncovered` context entries (`dimension`, `requestedValue`,
 `validCompletions`) are computed from the maximal set of overlays that carry
 the requested value without conflicting with any other stated dimension —
 see `completionTuplesFor` / `minimalTuples`. `nodes` is deliberately excluded
-from `coverageDimensions`: no overlay gates on node count, so covering it
-would reject every `--nodes` query. It does not participate in
-`Criteria.Matches()` (removed in #1781 — no overlay gates on it), but it
-is retained in `Criteria.Specificity()` so that nodes-only CLI queries
-pass the minimum-specificity guard. It carries no coverage guarantee —
-it is advisory metadata.
+from `coverageDimensions`: no overlay in the embedded catalog gates on
+node count, so covering it would reject every `--nodes` query. It does
+not participate in `Criteria.Matches()` (removed in #1781), but is
+retained in `Criteria.Specificity()` so that nodes-only CLI queries pass
+the minimum-specificity guard. It carries no coverage guarantee — it is
+advisory metadata. External `--data` catalogs that set `criteria.nodes`
+on any overlay are rejected at load time (`ErrCodeInvalidRequest`) to
+prevent silent match-all behaviour; operators must remove or zero that
+field before upgrading.
 
 **Composition with the OS guard.** `requireOSIfNeeded` (the joint
 service+accelerator OS gate) is a separate, pre-existing check and runs
