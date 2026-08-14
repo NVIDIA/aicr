@@ -89,7 +89,7 @@ func TestGenerate(t *testing.T) {
 			name: "dynamic paths stubbed in root values.yaml",
 			input: &Generator{
 				RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
+					{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
 				}),
 				ComponentValues: map[string]map[string]any{
 					"gpu-operator": {"driver": map[string]any{"version": "580", "registry": "nvcr.io"}},
@@ -148,7 +148,7 @@ func TestGenerate(t *testing.T) {
 			name: "transformed template uses values",
 			input: &Generator{
 				RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
+					{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
 				}),
 				ComponentValues: map[string]map[string]any{
 					"gpu-operator": {"driver": map[string]any{"version": "580"}},
@@ -189,7 +189,7 @@ func TestGenerate(t *testing.T) {
 			name: "deployment steps reference helm install",
 			input: &Generator{
 				RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1.0.0"},
+					{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1.0.0"},
 				}),
 				ComponentValues: map[string]map[string]any{"gpu-operator": {}},
 				Version:         "test",
@@ -214,7 +214,7 @@ func TestGenerate(t *testing.T) {
 			name: "Chart.yaml has correct version from recipe",
 			input: &Generator{
 				RecipeResult: newRecipeResult("2.5.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1.0.0"},
+					{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1.0.0"},
 				}),
 				ComponentValues: map[string]map[string]any{"gpu-operator": {}},
 				Version:         "test",
