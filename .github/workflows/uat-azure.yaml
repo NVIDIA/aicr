@@ -862,7 +862,7 @@ jobs:
         if: always() && steps.conformance.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: uat-azure-evidence-pointer-${{ github.run_id }}
+          name: uat-azure-evidence-pointer-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/pointer.yaml
           # Org policy caps at 90d; anything higher is silently clamped.
           retention-days: 90
@@ -890,7 +890,7 @@ jobs:
         if: failure() && (steps.prep.outcome != 'skipped' || steps.client.outcome == 'success')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: uat-azure-debug-${{ github.run_id }}
+          name: uat-azure-debug-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             snapshot.yaml
             recipe.yaml
