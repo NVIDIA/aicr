@@ -96,11 +96,14 @@ spec:
           value: "true"
         - name: NVIDIA_SETUP_KERNEL_ALLOW_NEWER
           value: "false"
+      {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */}}
+      {{- /* as such or deployers like Argo that continuously sync the resources will result in a */}}
+      {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */}}
       resources:
-        cpuLimit: 4000m
-        cpuRequest: 2000m
-        memoryLimit: 8192Mi
-        memoryRequest: 4096Mi
+        cpuLimit: 4
+        cpuRequest: 2
+        memoryLimit: 8Gi
+        memoryRequest: 4Gi
 
     {{- /* Per-package gate (default true). The AKS overlays set tuningEnabled: false */}}
     {{- /* under the Azure-managed driver profile: skipping nvidia-tuned avoids its */}}
@@ -145,18 +148,21 @@ spec:
       containerSHA: sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad
       interrupt:
         type: reboot
+      {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */}}
+      {{- /* as such or deployers like Argo that continuously sync the resources will result in a */}}
+      {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */}}
       resources:
-        # Elevated from 4000m/8192Mi for the EFA DKMS build. efa_installer.sh's
+        # Elevated from 4 CPU / 8Gi for the EFA DKMS build. efa_installer.sh's
         # "Inspecting kernel" autoconf is a highly parallel kernel-module build;
         # inside the skyhook chroot nproc reports the host core count, so make -j
         # oversubscribes. Under the prior 4 CPU / 8Gi cgroup it was CFS-throttled
         # and its feature probes were starved/OOM-killed, so efa misdetected the
         # kernel and emitted compat shims that fail to compile on 6.17. More CPU
         # and memory headroom lets the probes complete and detect correctly.
-        cpuLimit: 8000m
-        cpuRequest: 4000m
-        memoryLimit: 16384Mi
-        memoryRequest: 8192Mi
+        cpuLimit: 8
+        cpuRequest: 4
+        memoryLimit: 16Gi
+        memoryRequest: 8Gi
       configMap:
         {{- if $cust.service }}
         service: {{ $cust.service }}

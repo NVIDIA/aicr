@@ -123,6 +123,14 @@ compute:
         - name: gpu-worker
           instanceType: p6e-gb200.36xlarge
           architecture: arm64               # GB200 = Grace/arm64 (arm64 Ubuntu EKS AMI)
+          # Pin the worker AMI. Absent imageId, the actuator resolves
+          # data.aws_ami.ubuntu_eks (most_recent Canonical ubuntu-eks/k8s_1.35
+          # for this arch), which drifted to ubuntu-resolute-26.04 on 2026-08-05
+          # and broke the GPU stack (no nvidia.com/gpu advertised → prep fails,
+          # both intents). This pins the last 24.04 (noble) arm64 build,
+          # ubuntu-noble-24.04-arm64-server-20260714, k8s 1.35, us-east-1.
+          # Re-resolve when eks.version bumps (AMI is version- and region-specific).
+          imageId: ami-06be8c2e8ec2ed261
           gpuType: gb200
           # REQUIRED: auto-derivation breaks on the "p6e-gb200.*" name — the
           # actuator keys its accelerator map on "p6e" but split(".")[0] yields

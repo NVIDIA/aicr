@@ -90,6 +90,14 @@ compute:
       workers:
         - name: gpu-worker
           instanceType: p5.48xlarge
+          # Pin the worker AMI. Absent imageId, the actuator resolves
+          # data.aws_ami.ubuntu_eks (most_recent Canonical ubuntu-eks/k8s_1.35
+          # for this arch, x86_64 here), which drifted to ubuntu-resolute-26.04
+          # on 2026-08-05 — the same drift that broke the GB200 arm64 lane. This
+          # pins the last 24.04 (noble) amd64 build,
+          # ubuntu-noble-24.04-amd64-server-20260714, k8s 1.35, us-east-1.
+          # Re-resolve when eks.version bumps (AMI is version- and region-specific).
+          imageId: ami-0f89c7be98052c189
           capacity:
             # Two GPU nodes: activates the multi-node NCCL East-West fabric
             # check (nccl-all-reduce-bw, which skips on a single GPU node) and
