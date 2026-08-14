@@ -184,6 +184,17 @@ Trust is established through evidence, not assertions. Every released artifact c
    git push origin your-branch
    ```
 
+   Append commits rather than amending or rebasing while the PR is open for review.
+   The exceptions are narrow: a catch-up rebase onto `main` that the merge gate
+   requires when your branch falls behind, a missing signature or sign-off, a wrong
+   base branch, or a committed secret. Say on the PR whenever you do any of them.
+   A force-push outdates every inline comment and drops the anchors reviewers left,
+   which makes "was this addressed?" a manual diff. There is no need to tidy the
+   history first: pull requests merge by squash, so the branch's commits become one
+   commit on `main` regardless. Keep the PR in draft while you are still reshaping
+   it — draft PRs do not page reviewers, and that is the phase where rewriting
+   history is free.
+
 4. **Merge**: Once approved and CI passes, a maintainer will merge
 
 ### AI-Assisted Contributions Policy
@@ -284,15 +295,36 @@ Fix the most recent commit and re-push:
 
 ```bash
 git commit --amend -s -S --no-edit
-git push --force-with-lease origin your-branch
+git push --force-with-lease --force-if-includes origin your-branch
 ```
 
 For an entire branch, re-sign every commit at once:
 
 ```bash
 git rebase --exec 'git commit --amend -s -S --no-edit' origin/main
-git push --force-with-lease origin your-branch
+git push --force-with-lease --force-if-includes origin your-branch
 ```
+
+`--force-if-includes` checks your local **branch reflog**, so in a fresh clone it can
+reject the push even when nothing is wrong — the clone's only reflog entry is the
+clone itself, which is not a valid rewrite base. It fails safe. Fetching does not
+help, because what is missing is a local reflog entry rather than remote data; push
+once with a pinned lease instead. Read the remote's current tip first and check it is
+the commit you meant to replace, then pass that recorded value explicitly:
+
+```bash
+git ls-remote origin your-branch          # note the SHA, and confirm it is yours
+git push --force-with-lease=your-branch:<that-sha> origin your-branch
+```
+
+Do not inline the lookup into the push (`--force-with-lease=your-branch:$(git ls-remote …)`).
+That re-reads the remote at push time, so a commit someone else pushed in the meantime
+becomes the expected value and is silently overwritten — the same failure the pinned
+lease exists to prevent.
+
+If the PR is already under review, say on the PR that you force-pushed and name the
+old and new SHA, since re-signing rewrites every commit and outdates the inline
+comments.
 
 ### What You're Certifying
 
@@ -357,6 +389,12 @@ Explain the problem being solved and why this approach was chosen.
 
 Signed-off-by: Your Name <your@email.com>
 ```
+
+**Where this text ends up.** Pull requests merge by squash, and the repo composes the
+merged commit from the **PR title** with an empty body, so a branch commit's body is
+discarded at merge — only the title and trailers reach `main`. Write the body for
+your reviewers, and put anything that needs to outlive the PR in the PR title and
+description.
 
 ### Code Style
 
