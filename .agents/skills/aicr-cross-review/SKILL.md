@@ -442,8 +442,23 @@ the consensus mechanics):
   a resume that comes back unavailable again, confirms the job is dead and the review
   must be re-run rather than resumed. For a live job: poll it
   with the companion status command until it is terminal (a background 60-second loop is
-  fine — polling is cheap once the workflow is no longer holding a lane open for it),
-  then resume: `Workflow({scriptPath, resumeFromRunId: "<wf_...>", args: {...prevArgs,
+  fine — polling is cheap once the workflow is no longer holding a lane open for it).
+
+  Resolve the companion the same way the lane does, with `-t` — the lane's messages
+  refer to `$comp` but cannot export it across Bash calls:
+
+  ```bash
+  comp=$(ls -t ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | head -1)
+  node "$comp" status <job-id> --cwd "<repo-path>" --json
+  ```
+
+  `ls -t` picks the most recently installed companion, which is the version the plugin
+  system has active. Dropping the `-t` sorts by version *name* instead and can select a
+  stale cached copy — polling a job with a different companion version than dispatched it
+  returns misleading results (`status` finding a job that `result` then reports as
+  unknown), which reads exactly like a dead job and is not one.
+
+  Then resume: `Workflow({scriptPath, resumeFromRunId: "<wf_...>", args: {...prevArgs,
   codexResumeJobId: "<job id>"}})` — `prevArgs` is the previous run's args object, unchanged. The three completed lanes replay from cache, the
   Codex dispatch agent is skipped entirely (the workflow logs
   `Codex resume: waiting on existing job <id>`), the wait agent collects the existing
@@ -492,12 +507,16 @@ the consensus mechanics):
 - CodeRabbit slow runs: check the newest file in `~/.coderabbit/logs/` (429/queue lines
   mean cloud-side queueing) and confirm `which -a coderabbit` resolves to the
   brew-managed binary — a stale `~/.local/bin` copy shadows it.
-- **A sandboxed CodeRabbit run hangs instead of failing.** `~/.coderabbit` is outside the
-  default sandbox write allowlist, so the CLI cannot create its log or review store; it
-  stalls at `connecting_to_review_service` until the timebox kills it. The lane therefore
-  **probes** in step 1 whether `~/.coderabbit` is sandbox-writable, and runs the
-  `coderabbit` command (and only that command) with sandbox bypass exactly when the probe
-  says it is not.
+- **A sandboxed CodeRabbit run hangs instead of failing.** The sandbox can deny the CLI
+  two independent ways, and both stall at `connecting_to_review_service` until the
+  timebox kills it: `~/.coderabbit` outside the write allowlist (the CLI cannot create
+  its log or review store), or the `coderabbit.ai` hosts outside the allowed-hosts list.
+  The lane therefore **probes both** in step 1 — writability of `~/.coderabbit` *and*
+  reachability of both CLI hosts, `cli.coderabbit.ai` (startup config fetch) and
+  `ide.coderabbit.ai` (the review session's WebSocket) — and runs the `coderabbit`
+  command (and only that command) with sandbox bypass when any check fails. The hosts
+  are probed separately because the allowlist is per-host: an entry naming only the
+  config host passes the first check and still hangs step 2 on the WebSocket connect.
 
   **Why probe-gated bypass rather than an allowlist assumption.** Adding `~/.coderabbit`
   to the sandbox write allowlist is the narrower grant, but this skill is checked into
@@ -508,17 +527,25 @@ the consensus mechanics):
   timebox per wrong guess. The step-1 probe settles it in milliseconds: machines with
   the allowlist entry run step 2 fully sandboxed and pay **no bypass prompt at all**;
   every other machine gets the bypass from the start, portable and self-documenting at
-  the call site. Add `~/.coderabbit` (and `~/.claude/plugins/data`, for the Codex
-  companion's job log) to your local sandbox `filesystem.allowWrite` if you run this
-  often — that is what removes the per-round approval prompts — but the skill must not
-  depend on it.
+  the call site. If you run this often, add **both** grants — `~/.coderabbit` (and
+  `~/.claude/plugins/data`, for the Codex companion's job log) to your local sandbox
+  `filesystem.allowWrite`, *and* the `coderabbit.ai` hosts to the network allowlist —
+  since that pair is what removes the per-round approval prompts. The skill must not
+  depend on either. Granting only the filesystem half is worse than granting neither:
+  it satisfies the write probe while the network stays blocked, and an earlier
+  writability-only probe read that state as sandbox-clean and hung the lane for a full
+  ten-minute timebox. The probe now tests both for exactly this reason.
 
-  **Diagnose it by absence:** a stall at `connecting` *with no new file in
-  `~/.coderabbit/logs/`* is sandbox denial — a process killed mid-run still flushes a
-  partial log, so zero bytes means it never created one. A real cloud problem leaves a log
-  with 429/queue lines. Do not read this stall as an outage or as contention with another
-  session: an unsandboxed run succeeding while a sandboxed one hangs looks exactly like
-  contention and is not.
+  **Diagnose it from the log directory**, since the two denials differ there. A stall at
+  `connecting` *with no new file in `~/.coderabbit/logs/`* is **filesystem** denial — a
+  process killed mid-run still flushes a partial log, so zero bytes means it never created
+  one. A stall *with* a log naming the allowlist (`403 Forbidden` on
+  `https://cli.coderabbit.ai/public-configs.json`, `"data":"Connection blocked by network
+  allowlist"`, then repeated `wss://ide.coderabbit.ai/ws` retries) is **network** denial —
+  do not read the presence of a log as proof the sandbox was not the cause. A real cloud
+  problem leaves a log with 429/queue lines instead. Do not read either stall as an outage
+  or as contention with another session: an unsandboxed run succeeding while a sandboxed
+  one hangs looks exactly like contention and is not.
 - **Persisted-store fallback.** If a run still fails, the lane checks
   `~/.coderabbit/reviews/*/*/reviews/*/git.json`, whichever session produced the record.
   Acceptance is `head` plus **the pinned change itself** — never `baseCommitId`. Measured:
@@ -784,11 +811,13 @@ posting it) so no finding is left as a bare one-liner.
   - **Codex companion** — it writes its job log under `~/.claude/plugins/data`, which is
     sandbox-denied by default. If dispatch fails on that write, bypass for that call
     only; a machine whose sandbox allowlist covers the path never needs the bypass.
-  - **CodeRabbit review** — `~/.coderabbit` is outside the default write allowlist, so a
-    sandboxed CLI cannot create its log or review store and hangs at
-    `connecting_to_review_service` until the timebox kills it. Step 1 of the three-step
-    CodeRabbit protocol probes whether `~/.coderabbit` is sandbox-writable; when it is
-    not, bypass **step 2 only**, which is a lone `coderabbit review` command. When the
+  - **CodeRabbit review** — `~/.coderabbit` is outside the default write allowlist and
+    the `coderabbit.ai` hosts are outside the default network allowlist; under either
+    denial a sandboxed CLI hangs at `connecting_to_review_service` until the timebox
+    kills it. Step 1 of the three-step CodeRabbit protocol probes writability of
+    `~/.coderabbit` and reachability of both `cli.coderabbit.ai` and
+    `ide.coderabbit.ai` (the WebSocket host); when any check fails, bypass
+    **step 2 only**, which is a lone `coderabbit review` command. When the
     probe passes, step 2 runs sandboxed and no bypass happens at all. Worktree setup and
     cleanup live in steps 1 and 3 and stay sandboxed always.
 

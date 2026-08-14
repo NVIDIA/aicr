@@ -26,9 +26,11 @@ const (
 	// StatusNotYetCovered means the item is a real, shipping capability that no
 	// executable signal touches today. Honest gap, not a silent omission.
 	StatusNotYetCovered Status = "not-yet-covered"
-	// StatusStubbed means signal trees exist but no workflow runs them (today
-	// only the Azure UAT trees). Distinct from not-yet-covered: the assets are
-	// present but inert pending a revive-or-retire decision (DC6, #1280).
+	// StatusStubbed means UAT signal trees exist but nothing scheduled executes
+	// the journey — either no reservation is enrolled for its intent, or the
+	// journey's workload step is disabled in the per-cloud pipelines. Distinct
+	// from not-yet-covered: the assets are present but inert, and the row's note
+	// names which of the two causes applies.
 	StatusStubbed Status = "stubbed"
 )
 
@@ -78,11 +80,21 @@ type Row struct {
 	Note string
 }
 
+// VersionAxis is the AICR-version dimension the nightly UAT batch exercises per
+// enrolled reservation: tip-of-main plus PreviousReleases stable releases below
+// it. The structural matrix records the axis only; the per-version live posture
+// is a link into TestGrid, never a cell here.
+type VersionAxis struct {
+	// PreviousReleases is how many stable releases below main each enrolled
+	// reservation runs nightly — uat-nightly-batch.yaml's
+	// `inputs.previous_n || 'N'` schedule fallback, which the cron path uses
+	// because a schedule event has an empty inputs context (workflow_dispatch
+	// defaults are not applied). Zero means the batch runs main only.
+	PreviousReleases int
+}
+
 // Matrix is the full, sorted set of rows plus metadata for the rendered page.
 type Matrix struct {
-	Rows []Row
-	// VersionAxis lists the AICR versions the live UAT matrix exercises per
-	// recipe (main + the previous N stable releases). The structural matrix only
-	// records the axis; the per-version live posture is a link into TestGrid.
-	VersionAxis []string
+	Rows        []Row
+	VersionAxis VersionAxis
 }

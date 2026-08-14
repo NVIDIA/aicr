@@ -56,6 +56,7 @@ jobs:
       bom: ${{ steps.changes.outputs.bom }}
       tuning: ${{ steps.changes.outputs.tuning }}
       notices: ${{ steps.changes.outputs.notices }}
+      coverage: ${{ steps.changes.outputs.coverage }}
       docs: ${{ steps.changes.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -171,6 +172,34 @@ jobs:
               - 'validators/performance/requirements.txt'
               - 'validators/performance/licenses/**'
               - 'THIRD_PARTY_NOTICES.md'
+            coverage:
+              # Inputs to the committed CUJ/CLI coverage-matrix freshness check.
+              # The matrix is derived, so a change to ANY of its signal sources
+              # can move a row without touching the doc — and until #1977 the
+              # only thing keeping the committed page accurate was that nobody
+              # regenerated it. Watched here:
+              #   - the committed doc itself (catches a hand edit)
+              #   - the generator and pkg/cli (the verb registry it walks)
+              #   - infra/uat/reservations.yaml + pkg/uatbroker: which lanes are
+              #     nightly-enrolled, and for which intents
+              #   - the per-cloud uat-*.yaml pipelines: which CUJ phases are
+              #     actually enabled steps (a commented-out phase is not coverage)
+              #   - uat-nightly-batch.yaml: the previous_n version axis
+              #   - tests/uat, tests/chainsaw, demos: the scanned signal trees
+              #   - Makefile + this workflow: the generate/check contract and the
+              #     coverage-freshness job itself, so a change to either cannot
+              #     skip its own gate
+              - 'docs/user/coverage-matrix.md'
+              - 'tools/coverage/**'
+              - 'pkg/cli/**'
+              - 'pkg/uatbroker/**'
+              - 'infra/uat/reservations.yaml'
+              - '.github/workflows/uat-*.yaml'
+              - 'tests/uat/**'
+              - 'tests/chainsaw/**'
+              - 'demos/**'
+              - 'Makefile'
+              - '.github/workflows/merge-gate.yaml'
             docs:
               # Inputs to the parser-level MDX gate. Only the Fern-published
               # trees matter — a change anywhere under them can introduce a
@@ -611,6 +640,47 @@ jobs:
       - run: echo "No dependency/generator changes — notices freshness check not required"
 
   # ---------------------------------------------------------------------------
+  # Coverage-matrix freshness — ensures the committed docs/user/coverage-matrix.md
+  # matches the CLI registry, the nightly UAT wiring, and the in-repo test
+  # signals, on PRs touching its inputs (mirrors bom-freshness). Before #1977 the
+  # page was only accurate because contributors avoided regenerating it; this is
+  # the check that makes regeneration mandatory rather than optional.
+  # ---------------------------------------------------------------------------
+
+  coverage-freshness:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.coverage == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+      - name: Verify committed coverage matrix is up to date
+        env:
+          GOFLAGS: -mod=vendor
+        # `make coverage-check` regenerates the matrix in place and fails if the
+        # working tree differs. The generator itself fails closed on an
+        # unresolvable UAT wiring or version axis, so a moved registry or renamed
+        # workflow input errors here instead of quietly reporting the affected
+        # rows as uncovered.
+        run: make coverage-check
+
+  coverage-freshness-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.coverage != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No coverage-matrix inputs changed — freshness check not required"
+
+  # ---------------------------------------------------------------------------
   # Aggregate gate — the single required status check
   # ---------------------------------------------------------------------------
 
@@ -638,6 +708,8 @@ jobs:
       - tuning-freshness-skip
       - notices-freshness
       - notices-freshness-skip
+      - coverage-freshness
+      - coverage-freshness-skip
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:

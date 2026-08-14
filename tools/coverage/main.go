@@ -51,7 +51,10 @@ func main() {
 }
 
 func run(repoRoot, out string, deterministic, noTitle bool) error {
-	matrix := BuildMatrix(repoRoot)
+	matrix, err := BuildMatrix(repoRoot)
+	if err != nil {
+		return err
+	}
 	body := Render(matrix, deterministic, noTitle)
 
 	if dir := filepath.Dir(out); dir != "" {

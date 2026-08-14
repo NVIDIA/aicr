@@ -22,10 +22,15 @@ import (
 
 // cujSpec describes a critical user journey and the in-repo signals that prove
 // it is exercised. UAT execution is keyed off the journey's intent (matched
-// against the scheduled workflows' wired configs), not mere tree presence.
+// against the intents the nightly-enrolled reservations run), not mere tree
+// presence.
 type cujSpec struct {
 	id     string // canonical matrix id
-	intent string // intent a wired UAT config must select for live coverage
+	intent string // intent a nightly-enrolled reservation must run
+	// uatPhase is the UAT runner phase that executes this journey's workload.
+	// Enrolling the intent only proves the stack is deployed and validated; the
+	// journey itself is live only when this phase is an enabled pipeline step.
+	uatPhase string
 	// chainsawGlobs are paths (relative to tests/chainsaw) whose existence signals
 	// per-PR chainsaw coverage.
 	chainsawGlobs []string
@@ -39,13 +44,13 @@ type cujSpec struct {
 func canonicalCUJs() []cujSpec {
 	return []cujSpec{
 		{
-			id: "cuj1-training-kubeflow", intent: "training",
+			id: "cuj1-training-kubeflow", intent: "training", uatPhase: "train",
 			chainsawGlobs: []string{"cli/cuj1-training"},
 			demoGlobs:     []string{"cuj1-*.md"},
 			uatTreeGlobs:  []string{"tests/cuj1-training"},
 		},
 		{
-			id: "cuj2-inference-dynamo", intent: "inference",
+			id: "cuj2-inference-dynamo", intent: "inference", uatPhase: "serve",
 			chainsawGlobs: []string{"cli/cuj2-inference"},
 			demoGlobs:     []string{"cuj2*.md"},
 			uatTreeGlobs:  []string{"tests/cuj2-inference"},
@@ -53,28 +58,34 @@ func canonicalCUJs() []cujSpec {
 	}
 }
 
-// versionAxis lists the AICR versions actually exercised today. The scheduled
-// UAT workflows build only the current checkout (`go build -o ./aicr
-// ./cmd/aicr`), so the live axis is just `main`. The multi-version matrix
-// (main + previous N stable releases) is owned by the dynamic-clusters epic
-// (DC5) and is rendered here only once those workflows exist.
-func versionAxis() []string {
-	return []string{"main"}
-}
-
 // BuildMatrix assembles the full coverage matrix from the live CLI registry and
-// the in-repo signal trees rooted at repoRoot.
-func BuildMatrix(repoRoot string) Matrix {
-	m := Matrix{VersionAxis: versionAxis()}
-	wired := scanWiredUAT(repoRoot)
-
-	for _, cuj := range canonicalCUJs() {
-		harnesses, unwiredUAT := scanCUJ(repoRoot, cuj, wired)
-		m.Rows = append(m.Rows, newRow(KindCUJ, cuj.id, harnesses, unwiredUAT))
+// the in-repo signal trees rooted at repoRoot. It fails closed on an unresolvable
+// UAT wiring or version axis rather than reporting the affected rows as
+// uncovered — a generated doc must not turn a broken input into a quiet
+// downgrade of real nightly coverage.
+func BuildMatrix(repoRoot string) (Matrix, error) {
+	wired, err := scanWiredUAT(repoRoot)
+	if err != nil {
+		return Matrix{}, err
+	}
+	axis, err := scanVersionAxis(repoRoot)
+	if err != nil {
+		return Matrix{}, err
 	}
 
-	for verb, harnesses := range scanVerbs(repoRoot, cliVerbs()) {
-		m.Rows = append(m.Rows, newRow(KindCLI, verb, harnesses, false))
+	verbs, err := scanVerbs(repoRoot, cliVerbs(), wired)
+	if err != nil {
+		return Matrix{}, err
+	}
+
+	m := Matrix{VersionAxis: axis}
+	for _, cuj := range canonicalCUJs() {
+		harnesses, stubNote := scanCUJ(repoRoot, cuj, wired)
+		m.Rows = append(m.Rows, newRow(KindCUJ, cuj.id, harnesses, stubNote))
+	}
+
+	for verb, harnesses := range verbs {
+		m.Rows = append(m.Rows, newRow(KindCLI, verb, harnesses, ""))
 	}
 
 	sort.Slice(m.Rows, func(i, j int) bool {
@@ -83,28 +94,43 @@ func BuildMatrix(repoRoot string) Matrix {
 		}
 		return m.Rows[i].Item < m.Rows[j].Item
 	})
-	return m
+	return m, nil
 }
 
-// scanCUJ resolves the harness set for a CUJ and whether present-but-unwired UAT
-// assets exist for it (which the caller renders as stubbed, not covered).
-func scanCUJ(repoRoot string, cuj cujSpec, wired wiredUAT) (harnesses map[Harness]bool, unwiredUAT bool) {
+// Stub notes explain *why* present UAT assets are not live coverage. The two
+// causes are operationally different — one is fixed in the registry, the other
+// in the per-cloud pipelines — so the row names the one that applies.
+const (
+	noteIntentNotEnrolled = "UAT assets present but no nightly-enrolled reservation runs this intent " +
+		"(see infra/uat/reservations.yaml)"
+	noteJourneyStepDisabled = "the intent runs nightly and its stack is deployed and validated, but the " +
+		"journey's own workload step is disabled in the per-cloud UAT pipelines"
+)
+
+// scanCUJ resolves the harness set for a CUJ and, when present-but-unexecuted
+// UAT assets exist for it, the note explaining why (which the caller renders as
+// stubbed, not covered).
+func scanCUJ(repoRoot string, cuj cujSpec, wired wiredUAT) (harnesses map[Harness]bool, stubNote string) {
 	harnesses = map[Harness]bool{}
 	if anyGlobExists(filepath.Join(repoRoot, "tests", "chainsaw"), cuj.chainsawGlobs) {
 		harnesses[HarnessChainsaw] = true
 	}
-	if wired.intents[cuj.intent] {
+	// Live nightly coverage needs both halves: a reservation enrolled for the
+	// intent, AND its pipeline actually executing the journey's workload phase.
+	live := wired.runsJourney(cuj.intent, cuj.uatPhase)
+	if live {
 		harnesses[HarnessUAT] = true
 	}
 	if anyGlobExists(filepath.Join(repoRoot, "demos"), cuj.demoGlobs) {
 		harnesses[HarnessDemo] = true
 	}
-	// UAT assets present on disk but the journey's intent is not wired into any
-	// scheduled workflow → stub, not live coverage.
-	if !wired.intents[cuj.intent] && uatAssetsExist(repoRoot, cuj.uatTreeGlobs) {
-		unwiredUAT = true
+	if !live && uatAssetsExist(repoRoot, cuj.uatTreeGlobs) {
+		stubNote = noteIntentNotEnrolled
+		if wired.runsIntent(cuj.intent) {
+			stubNote = noteJourneyStepDisabled
+		}
 	}
-	return harnesses, unwiredUAT
+	return harnesses, stubNote
 }
 
 // uatAssetsExist reports whether any tests/uat/<cloud> dir contains one of globs.
@@ -142,8 +168,9 @@ func anyGlobExists(base string, globs []string) bool {
 
 // newRow derives the rendered row from the harness set. A row is covered when an
 // executable harness (chainsaw/KWOK, or a wired UAT/GPU-nightly) exercises it;
-// stubbed when only present-but-unwired UAT assets exist; otherwise not-yet-covered.
-func newRow(kind Kind, item string, harnesses map[Harness]bool, unwiredUAT bool) Row {
+// stubbed when only present-but-unexecuted UAT assets exist (stubNote says why);
+// otherwise not-yet-covered.
+func newRow(kind Kind, item string, harnesses map[Harness]bool, stubNote string) Row {
 	r := Row{Kind: kind, Item: item, Harnesses: harnesses}
 
 	executable := harnesses[HarnessChainsaw] || harnesses[HarnessKWOK] ||
@@ -152,9 +179,9 @@ func newRow(kind Kind, item string, harnesses map[Harness]bool, unwiredUAT bool)
 	switch {
 	case executable:
 		r.Status = StatusCovered
-	case unwiredUAT:
+	case stubNote != "":
 		r.Status = StatusStubbed
-		r.Note = "UAT assets present but no scheduled workflow runs them — inference UAT tracked by DC3 (#1276), Azure by DC6 (#1280)"
+		r.Note = stubNote
 	default:
 		r.Status = StatusNotYetCovered
 		if harnesses[HarnessDemo] {
