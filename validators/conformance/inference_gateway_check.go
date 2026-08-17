@@ -125,7 +125,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	requiredCRDs := []string{
 		"gateways.gateway.networking.k8s.io",
 		"httproutes.gateway.networking.k8s.io",
-		"inferencepools.inference.networking.x-k8s.io",
+		"inferencepools.inference.networking.k8s.io",
 	}
 	var crdSummary strings.Builder
 	for _, crdName := range requiredCRDs {
