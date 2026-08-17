@@ -74,9 +74,12 @@ jobs:
             ];
 
             // type(scope)!: subject -- scope and the breaking-change "!" are
-            // both optional; subject must be non-empty.
+            // both optional; subject must be non-empty. Scope allows mixed
+            // case: Conventional Commits does not define a lowercase-only
+            // scope grammar, and fix(GB200): / fix(H100): / feat(API): are
+            // all plausible here.
             const PATTERN = new RegExp(
-              `^(${TYPES.join('|')})(\\([a-z0-9][a-z0-9._/-]*\\))?(!)?: .+$`
+              `^(${TYPES.join('|')})(\\([a-zA-Z0-9][a-zA-Z0-9._/-]*\\))?(!)?: .+$`
             );
 
             // Advisory only. CONTRIBUTING.md asks for titles under this
@@ -112,7 +115,10 @@ jobs:
                 'title becomes the entire commit message on `main` and cannot be fixed after merge.\n\n'
               );
               core.summary.addRaw(`Received: <code>${esc(title)}</code>\n\n`);
-              core.summary.addRaw('Expected: `type(scope): subject` or `type: subject`\n\n');
+              core.summary.addRaw(
+                'Expected one of: `type: subject`, `type(scope): subject`, ' +
+                '`type!: subject`, `type(scope)!: subject` ("!" marks a breaking change)\n\n'
+              );
               core.summary.addRaw(`Valid types: ${TYPES.map((t) => `\`${t}\``).join(', ')}\n\n`);
               core.summary.addRaw('Examples: `fix(bundler): reject conflicting gpu-operator variants`, `docs: add ADR-019`\n\n');
               core.summary.addRaw('Editing the title re-runs this check automatically -- no new commit needed.\n');
