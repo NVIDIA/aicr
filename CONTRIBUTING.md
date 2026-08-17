@@ -403,14 +403,16 @@ Commits format:
 ```text
 type: subject            # scope optional
 type(scope): subject
-type(scope)!: subject    # "!" marks a breaking change
+type!: subject           # "!" marks a breaking change
+type(scope)!: subject
 ```
 
 Valid types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`,
 `revert`, `style`, `test`. A malformed title fails the check; editing the title
 re-runs it automatically, so no new commit is needed. Titles over 70 characters
 produce a warning but do not block: dependency-bot titles embed pseudo-versions
-that cannot be shortened.
+that cannot be shortened. Titles of 70 characters or fewer pass without a
+warning.
 
 ### Code Style
 

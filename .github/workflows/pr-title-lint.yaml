@@ -129,7 +129,7 @@ jobs:
 
             if (title.length > SOFT_MAX) {
               core.warning(
-                `PR title is ${title.length} characters; CONTRIBUTING.md asks for under ${SOFT_MAX}. ` +
+                `PR title is ${title.length} characters; CONTRIBUTING.md asks for ${SOFT_MAX} or fewer. ` +
                 'Not blocking, but this is the whole commit message on `main`.'
               );
             }
