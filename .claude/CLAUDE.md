@@ -562,10 +562,24 @@ Process and unique findings below; the rule sections above (Error Wrapping, Cont
 
 **Mandatory lint gate for Go changes:** If your PR changes any `.go` files, you MUST run `golangci-lint run -c .golangci.yaml` on each affected package path (e.g., `./pkg/recipe/...`, `./cmd/aicr/...`, `./tests/chainsaw/...`) and confirm zero issues before creating or pushing the PR. For a full module scan, use `./...`. Do not rely on CI to catch lint failures — fix them locally first. This applies even to PRs labeled as "documentation only" if they include Go code changes.
 
-**Branch hygiene:**
-- Always rebase onto the target branch before pushing: `git fetch origin main && git rebase origin/main`
-- Squash commits into a single commit before push
-- Cryptographically sign commits (`git commit -S`)
+**Branch hygiene.** The governing idea: the SHA a reviewer is reading should be the SHA you want reviewed.
+
+- **Keep the PR in draft while you are still changing it**; flip it to ready only when you want eyes on it. Draft PRs do not page reviewers, and that is the phase where rewriting history is free.
+- **While the PR is a draft, rebase and squash freely.** Do not key this on whether comments exist: CodeRabbit auto-reviews drafts here (`.coderabbit.yaml`, `auto_review.drafts: true`), so a bot comment lands minutes after the first push.
+- **Once the PR is not a draft — whether you flipped it or opened it that way — append commits instead of rewriting history.** Inline comments anchor to SHAs, and any rewrite outdates every one of them. Each appended commit dismisses approvals (`dismiss_stale_reviews_on_push` is on); that is the intended cost, since a force-push dismisses them too *and* destroys the anchors. Returning to draft stops paging reviewers and restores the draft phase's freedom to rewrite; if inline comments already exist, say on the PR that you rewrote and name the old and new SHA so reviewers know to restart.
+- **Do not hand-squash before merge.** `NVIDIA/aicr` is squash-merge-only, so GitHub composes the commit on `main` from the PR title; by default only the title and trailers reach `main`. Durable wording belongs in the PR title.
+- **Once the PR is not a draft, rebase only when the merge gate requires it** — but it does require it: the repo enforces up-to-date branches, so a PR behind `main` cannot merge. `git fetch origin main && git rebase origin/main`, never GitHub's "Update branch" button or a merge commit. A rebase is itself a force-push and can outdate anchors even when the content is unchanged, so treat it as one. To confirm it replayed your work cleanly, compare `git diff origin/main...HEAD` before and after, or use `git range-diff <old-sha>...HEAD`.
+- **Once the PR is not a draft, force-push only when you must** — a gate-required rebase, a missing signature or sign-off, a wrong base, a committed secret. Nothing else qualifies at that point; while it is still a draft the bullets above apply. Use exactly one of these two, never both:
+  - `--force-with-lease=<refname>:<sha-you-observed>` — `<refname>` is the branch name as it exists on the remote, unprefixed, e.g. `git push origin my-branch --force-with-lease=my-branch:abc1234`; or
+  - `--force-with-lease --force-if-includes` (or `push.useForceIfIncludes=true` once, globally), which adds a reflog check.
+
+  `--force-if-includes` is a documented no-op when the lease already names an expected SHA, so pairing them leaves you trusting a guard git has disabled. A bare `--force-with-lease` alone can silently pass, because a background fetch or a concurrent session sharing the clone may have refreshed the remote-tracking ref its lease reads. Never plain `--force`. Say on the PR that you force-pushed, naming the old and new SHA.
+- Verify what you are about to push: `git log --oneline origin/main..HEAD` and `git diff --stat origin/main...HEAD`.
+- Sign every commit both ways: `git commit -S -s` (see Git Configuration above).
+
+**Responding to review:**
+- **Answer feedback on the thread, not only in code.** Reply with what changed and where — or why you disagreed or deferred. Do not make a reviewer diff two SHAs to find out, including when the feedback came via Slack.
+- Re-request review when you have finished responding to a round, and after any rewrite that changes the reviewed SHA. Not once per appended commit.
 
 **Documentation updates:** When a PR adds or changes user-visible behavior (new CLI flag, API endpoint, component, recipe field, deployment pattern, environment variable, error code), update the relevant page in `docs/` in the same PR — don't defer to a follow-up. Common targets by kind of change:
 - CLI flag / subcommand → `docs/user/cli-reference.md`

@@ -20,6 +20,13 @@ rm -rf bundle
 BUNDLE_ARGS=(
   --recipe recipe.yaml
   --accelerated-node-toleration nvidia.com/gpu:NoSchedule
+  # Kind recipes are deliberately host-installed (nvkind: driver.enabled=false,
+  # driver preinstalled on the host, no driver pod for the NVSentinel labeler
+  # to observe), so bundling without the documented remedy is a blocking error
+  # (CheckNVSentinelDriverLabelDetectable, issue #2175). This is the
+  # detect-don't-fix model: the CI caller passes the remedy the gate names,
+  # exactly as an operator would; the recipe itself stays unchanged (#2179).
+  --set nv-sentinel:labeler.assumeDriverInstalled=true
   --output bundle
 )
 

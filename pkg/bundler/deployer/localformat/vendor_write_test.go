@@ -122,15 +122,23 @@ func TestWrite_VendorCharts_PureHelm(t *testing.T) {
 		t.Errorf("values.yaml not nested under subchart name:\n%s", valuesYAML)
 	}
 
-	// No upstream.env, no -post folder.
+	// No upstream.env, and no -post folder: this component is pure Helm,
+	// so there are no recipe-side manifests to wrap.
 	if _, err := os.Stat(filepath.Join(outDir, folders[0].Dir, "upstream.env")); err == nil {
 		t.Error("upstream.env should not exist in vendored folder")
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "002-nfd-post")); err == nil {
-		t.Error("vendored mode should not emit -post folder")
+		t.Error("pure-Helm vendored component should not emit a -post folder")
 	}
 }
 
+// TestWrite_VendorCharts_Mixed pins the #1835 contract: a vendored mixed
+// component emits the same primary + "<name>-post" release pair as the
+// non-vendored path. Recipe-side manifests are tracked members of the -post
+// release (three-way-merge on upgrade, removed on uninstall) instead of
+// helm.sh/hook resources, which Helm treats as fire-and-forget: skipped by
+// helm upgrade, left behind by helm uninstall, and mapped to an Argo CD
+// PostSync hook that never fires under syncPolicy.automated.
 func TestWrite_VendorCharts_Mixed(t *testing.T) {
 	outDir := t.TempDir()
 
@@ -157,38 +165,121 @@ func TestWrite_VendorCharts_Mixed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	if len(folders) != 1 {
-		t.Fatalf("got %d folders, want 1 (mixed should collapse)", len(folders))
+	if len(folders) != 2 {
+		t.Fatalf("got %d folders, want 2 (vendored primary + injected -post)", len(folders))
 	}
 	if len(recs) != 1 {
-		t.Fatalf("got %d vendor records, want 1", len(recs))
+		t.Fatalf("got %d vendor records, want 1 (the -post wrapper has no upstream provenance)", len(recs))
 	}
-	if !folders[0].CarriesPostManifests {
-		t.Error("folders[0].CarriesPostManifests = false, want true — the collapsed vendored folder " +
-			"embeds the post manifests as hook templates and deployers key the helm-diff bypass off this marker")
+	if got, want := folders[0].Dir, "001-alloy"; got != want {
+		t.Errorf("Folders[0].Dir = %q, want %q", got, want)
 	}
-
-	// Manifest in templates/ has post-install hook annotation.
-	tmplPath := filepath.Join(outDir, folders[0].Dir, "templates", "clusterrole.yaml")
-	tmpl, err := os.ReadFile(tmplPath)
-	if err != nil {
-		t.Fatalf("read templates/clusterrole.yaml: %v", err)
+	if got, want := folders[1].Dir, "002-alloy-post"; got != want {
+		t.Errorf("Folders[1].Dir = %q, want %q", got, want)
 	}
-	for _, want := range []string{"helm.sh/hook: post-install", "helm.sh/hook-weight: \"100\""} {
-		if !strings.Contains(string(tmpl), want) {
-			t.Errorf("hook annotation missing %q\n--- got:\n%s", want, tmpl)
-		}
+	if folders[0].CarriesPostManifests {
+		t.Error("Folders[0].CarriesPostManifests = true, want false — the vendored primary no longer embeds post manifests")
+	}
+	if !folders[1].CarriesPostManifests {
+		t.Error("Folders[1].CarriesPostManifests = false, want true — deployers key the helm-diff bypass off this marker")
 	}
 
-	// No -post folder emitted.
-	entries, err := os.ReadDir(outDir)
-	if err != nil {
-		t.Fatalf("read output dir: %v", err)
+	// The vendored primary must carry only the wrapper chart, no recipe templates.
+	if _, statErr := os.Stat(filepath.Join(outDir, folders[0].Dir, "templates")); statErr == nil {
+		t.Error("vendored primary must not contain a templates/ directory; manifests belong to the -post release")
 	}
-	for _, e := range entries {
-		if strings.Contains(e.Name(), "-post") {
-			t.Errorf("vendored mixed component should not emit -post folder, found %q", e.Name())
-		}
+	if _, statErr := os.Stat(filepath.Join(outDir, folders[0].Dir, "charts", "alloy-1.2.3.tgz")); statErr != nil {
+		t.Errorf("vendored primary missing chart tarball: %v", statErr)
+	}
+
+	// The -post folder is a self-contained local chart whose manifests are
+	// ordinary templates — no hook annotations at all.
+	postTmpl := filepath.Join(outDir, folders[1].Dir, "templates", "clusterrole.yaml")
+	tmpl, err := os.ReadFile(postTmpl)
+	if err != nil {
+		t.Fatalf("read -post templates/clusterrole.yaml: %v", err)
+	}
+	if strings.Contains(string(tmpl), "helm.sh/hook") {
+		t.Errorf("-post template must not carry helm.sh/hook annotations:\n%s", tmpl)
+	}
+	if _, statErr := os.Stat(filepath.Join(outDir, folders[1].Dir, "Chart.yaml")); statErr != nil {
+		t.Errorf("-post folder missing Chart.yaml: %v", statErr)
+	}
+}
+
+// TestWrite_VendorCharts_MixedCascadeDeleteKinds is the regression guard for
+// the data-loss path that blocked the earlier post-upgrade hook approach: a
+// CRD or Namespace routed through the vendored mixed path must never receive
+// helm.sh/hook + helm.sh/hook-delete-policy: before-hook-creation, because
+// firing that hook on every helm upgrade deletes the resource first and the
+// apiserver garbage-collects everything it owns (CRs of the CRD, objects in
+// the Namespace). As tracked -post release members they are patched in place
+// instead. Author-declared hooks are stripped for the same reason the
+// non-vendored path strips them: NNN- folder ordering already sequences the
+// releases, and a leftover hook annotation would make Argo CD treat the
+// resource as a PostSync hook that never fires under syncPolicy.automated.
+func TestWrite_VendorCharts_MixedCascadeDeleteKinds(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileName string
+		manifest string
+	}{
+		{
+			name:     "crd without author hook",
+			fileName: "gateway-api-crds.yaml",
+			manifest: "apiVersion: apiextensions.k8s.io/v1\n" +
+				"kind: CustomResourceDefinition\nmetadata:\n  name: gateways.gateway.networking.k8s.io\n",
+		},
+		{
+			name:     "crd with author-declared upgrade hook",
+			fileName: "nic-cluster-policy.yaml",
+			manifest: "apiVersion: apiextensions.k8s.io/v1\n" +
+				"kind: CustomResourceDefinition\nmetadata:\n  name: nicclusterpolicies.mellanox.com\n" +
+				"  annotations:\n    helm.sh/hook: post-install,post-upgrade\n" +
+				"    helm.sh/hook-delete-policy: before-hook-creation\n",
+		},
+		{
+			name:     "namespace",
+			fileName: "namespace.yaml",
+			manifest: "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: owned-ns\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			res, err := localformat.Write(context.Background(), localformat.Options{
+				OutputDir: outDir,
+				Components: []localformat.Component{{
+					Name:       "network-operator",
+					Namespace:  "nvidia-network-operator",
+					Repository: "https://helm.ngc.nvidia.com/nvidia",
+					ChartName:  "network-operator",
+					Version:    "24.7.0",
+				}},
+				ComponentPostManifests: map[string]map[string][]byte{
+					"network-operator": {tt.fileName: []byte(tt.manifest)},
+				},
+				VendorCharts: true,
+				Puller:       &fakePuller{},
+			})
+			if err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if len(res.Folders) != 2 {
+				t.Fatalf("got %d folders, want 2 (vendored primary + -post)", len(res.Folders))
+			}
+			got, err := os.ReadFile(filepath.Join(outDir, res.Folders[1].Dir, "templates", tt.fileName))
+			if err != nil {
+				t.Fatalf("read -post template: %v", err)
+			}
+			for _, forbidden := range []string{"helm.sh/hook", "before-hook-creation"} {
+				if strings.Contains(string(got), forbidden) {
+					t.Errorf("cascade-delete kind must not carry %q — a firing hook with "+
+						"before-hook-creation deletes it on every upgrade and GCs owned objects:\n%s",
+						forbidden, got)
+				}
+			}
+		})
 	}
 }
 
@@ -252,12 +343,10 @@ func TestWrite_VendorCharts_OCIPrefixedVersion(t *testing.T) {
 }
 
 // TestWrite_VendorCharts_PreManifests pins the contract that pre
-// injection runs even when --vendor-charts is on. Vendored mode
-// collapses post manifests into the primary folder (no -post split),
-// but the pre folder is independent of the primary's chart shape and
-// must always be emitted ahead of it — the os-talos mixin's
-// privileged-Namespace manifest needs to exist before any vendored
-// chart's pods schedule.
+// injection runs even when --vendor-charts is on: the pre folder is
+// independent of the primary's chart shape and must always be emitted
+// ahead of it — the os-talos mixin's privileged-Namespace manifest
+// needs to exist before any vendored chart's pods schedule.
 //
 // Asserts: two folders (pre + primary), pre is a local-helm wrapper,
 // primary is the vendored Helm folder with the chart tarball; the

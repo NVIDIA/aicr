@@ -258,13 +258,13 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 		// orders apply, not diff — so on a fresh cluster its mapper
 		// check can never pass (network-operator's NicClusterPolicy on
 		// AKS; kubeflow-trainer's ClusterTrainingRuntime). Keyed off
-		// Folder.CarriesPostManifests, which both the injected -post
-		// wrapper and the collapsed vendored mixed folder set — a
-		// release-name suffix check would silently miss the vendored
-		// layout, where Name == Parent. Primaries without post
-		// manifests and -pre wrappers (whose manifests apply before
-		// the chart and cannot depend on its CRDs) keep the mapper
-		// sanity check per issue #929.
+		// Folder.CarriesPostManifests, which the injected -post wrapper
+		// sets for both vendored and non-vendored mixed components
+		// (#1835). A release-name suffix check alone is brittle when
+		// folder naming drifts; the marker travels with the manifests.
+		// Primaries without post manifests and -pre wrappers (whose
+		// manifests apply before the chart and cannot depend on its
+		// CRDs) keep the mapper sanity check per issue #929.
 		if f.CarriesPostManifests && flags[f.Parent].ManifestsUseChartCRDs {
 			rel.DisableValidation = true
 		}

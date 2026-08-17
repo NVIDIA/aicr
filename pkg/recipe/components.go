@@ -137,12 +137,12 @@ type ComponentConfig struct {
 	// helm-diff REST-mapper check can therefore never pass. This flag
 	// instructs the helmfile deployer to emit `disableValidation: true`
 	// on the release whose folder carries the post-phase manifests —
-	// the injected -post wrapper, or the collapsed single folder under
-	// --vendor-charts (mixed components do not split there). Releases
-	// without post manifests and -pre wrappers keep the mapper check;
-	// see issue #929. Canonical examples: network-operator (the AKS
-	// overlay attaches a NicClusterPolicy CR whose CRD the chart
-	// installs) and kubeflow-trainer (platform-kubeflow attaches a
+	// the injected -post wrapper under both vendored and non-vendored
+	// layouts (#1835). Releases without post manifests and -pre
+	// wrappers keep the mapper check; see issue #929. Canonical
+	// examples: network-operator (the AKS overlay attaches a
+	// NicClusterPolicy CR whose CRD the chart installs) and
+	// kubeflow-trainer (platform-kubeflow attaches a
 	// ClusterTrainingRuntime CR of the CRD shipped in the chart's
 	// crds/).
 	ManifestsUseChartCRDs bool `yaml:"manifestsUseChartCRDs,omitempty"`

@@ -780,6 +780,176 @@ func TestSlurmLeavesIncludeSharedStoragePreManifest(t *testing.T) {
 	}
 }
 
+func TestSlurmLeavesIncludeEnrootPreManifest(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	const wantManifest = "components/slinky-slurm/manifests/enroot-config.yaml"
+	for _, name := range []string{
+		"gb200-eks-ubuntu-training-slurm",
+		"h100-aks-ubuntu-training-slurm",
+		"h100-eks-ubuntu-training-slurm",
+		"h100-gke-cos-training-slurm",
+		"h100-kind-training-slurm",
+	} {
+		t.Run(name, func(t *testing.T) {
+			leaf, ok := store.GetRecipeByName(name)
+			if !ok {
+				t.Fatalf("overlay %q not found in store", name)
+			}
+			result, buildErr := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
+			if buildErr != nil {
+				t.Fatalf("BuildRecipeResult failed: %v", buildErr)
+			}
+			slurm := result.GetComponentRef("slinky-slurm")
+			if slurm == nil {
+				t.Fatal("resolved recipe missing slinky-slurm")
+			}
+			if !slices.Contains(slurm.PreManifestFiles, wantManifest) {
+				t.Errorf("preManifestFiles = %v, want %q", slurm.PreManifestFiles, wantManifest)
+			}
+		})
+	}
+}
+
+func TestSlinkySlurmEnrootDefaultsRenderConfigMap(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	leaf, ok := store.GetRecipeByName("h100-eks-ubuntu-training-slurm")
+	if !ok {
+		t.Fatal("overlay h100-eks-ubuntu-training-slurm not found")
+	}
+	result, err := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
+	if err != nil {
+		t.Fatalf("BuildRecipeResult failed: %v", err)
+	}
+	slurm := result.GetComponentRef("slinky-slurm")
+	if slurm == nil {
+		t.Fatal("resolved recipe missing slinky-slurm")
+	}
+	values, err := result.GetValuesForComponentWithContext(ctx, slurm.Name)
+	if err != nil {
+		t.Fatalf("GetValuesForComponentWithContext(%s) failed: %v", slurm.Name, err)
+	}
+
+	config := valueAtPath[map[string]any](t, values, "enroot", "config")
+	if got := len(config); got != 2 {
+		t.Errorf("len(enroot.config) = %d, want 2: %v", got, config)
+	}
+	for _, key := range []string{"ENROOT_MOUNT_HOME", "ENROOT_REMAP_ROOT"} {
+		if got := config[key]; got != "yes" {
+			t.Errorf("enroot.config.%s = %v, want yes", key, got)
+		}
+	}
+	env := valueAtPath[map[string]any](t, values, "enroot", "env")
+	if got := env["NCCL_DEBUG"]; got != "WARN" {
+		t.Errorf("enroot.env.NCCL_DEBUG = %v, want WARN", got)
+	}
+
+	for _, path := range [][]string{
+		{"loginsets", "slinky", "podSpec", "volumes"},
+		{"nodesets", "slinky", "podSpec", "volumes"},
+	} {
+		volumes := valueAtPath[[]any](t, values, path...)
+		assertSingleNameField(t, volumes, "name", "enroot-config")
+		volume := volumes[0].(map[string]any)
+		configMap, ok := volume["configMap"].(map[string]any)
+		if !ok {
+			t.Fatalf("%v[0].configMap = %T, want map[string]any", path, volume["configMap"])
+		}
+		if got := configMap["name"]; got != "slinky-slurm-enroot-config" {
+			t.Errorf("%v[0].configMap.name = %v, want slinky-slurm-enroot-config", path, got)
+		}
+	}
+
+	for _, tt := range []struct {
+		name string
+		path []string
+	}{
+		{name: "login", path: []string{"loginsets", "slinky", "login", "volumeMounts"}},
+		{name: "compute", path: []string{"nodesets", "slinky", "slurmd", "volumeMounts"}},
+	} {
+		t.Run(tt.name+" mounts", func(t *testing.T) {
+			mounts := valueAtPath[[]any](t, values, tt.path...)
+			want := map[string]string{
+				"/etc/enroot/enroot.conf":                    "enroot.conf",
+				"/etc/enroot/environ.d/99-aicr-defaults.env": "99-aicr-defaults.env",
+			}
+			seen := make(map[string]int, len(want))
+			for _, item := range mounts {
+				mount, mountOK := item.(map[string]any)
+				if !mountOK {
+					t.Fatalf("%v item = %T, want map[string]any", tt.path, item)
+				}
+				mountPath, _ := mount["mountPath"].(string)
+				if subPath, found := want[mountPath]; found {
+					seen[mountPath]++
+					if got := mount["name"]; got != "enroot-config" {
+						t.Errorf("mount %q name = %v, want enroot-config", mountPath, got)
+					}
+					if got := mount["subPath"]; got != subPath {
+						t.Errorf("mount %q subPath = %v, want %q", mountPath, got, subPath)
+					}
+				}
+			}
+			for mountPath := range want {
+				if seen[mountPath] != 1 {
+					t.Errorf("%v mount %q count = %d, want 1", tt.path, mountPath, seen[mountPath])
+				}
+			}
+		})
+	}
+
+	const manifestPath = "components/slinky-slurm/manifests/enroot-config.yaml"
+	content, err := GetManifestContentWithContext(ctx, result.DataProvider(), manifestPath)
+	if err != nil {
+		t.Fatalf("GetManifestContentWithContext(%q) failed: %v", manifestPath, err)
+	}
+	rendered, err := manifest.Render(content, manifest.RenderInput{
+		ComponentName: slurm.Name,
+		Namespace:     slurm.Namespace,
+		ChartName:     slurm.Chart,
+		ChartVersion:  slurm.Version,
+		Values:        values,
+	})
+	if err != nil {
+		t.Fatalf("render Enroot ConfigMap: %v", err)
+	}
+	var configMap struct {
+		APIVersion string `yaml:"apiVersion"`
+		Kind       string `yaml:"kind"`
+		Metadata   struct {
+			Name      string `yaml:"name"`
+			Namespace string `yaml:"namespace"`
+		} `yaml:"metadata"`
+		Data map[string]string `yaml:"data"`
+	}
+	if err := yaml.Unmarshal(rendered, &configMap); err != nil {
+		t.Fatalf("unmarshal rendered Enroot ConfigMap: %v\n%s", err, rendered)
+	}
+	if configMap.APIVersion != "v1" || configMap.Kind != "ConfigMap" {
+		t.Errorf("rendered object type = %s/%s, want v1/ConfigMap", configMap.APIVersion, configMap.Kind)
+	}
+	if configMap.Metadata.Name != "slinky-slurm-enroot-config" || configMap.Metadata.Namespace != "slurm" {
+		t.Errorf("rendered ConfigMap identity = %s/%s, want slurm/slinky-slurm-enroot-config",
+			configMap.Metadata.Namespace, configMap.Metadata.Name)
+	}
+	enrootConfig := configMap.Data["enroot.conf"]
+	hasMountHome := strings.Contains(enrootConfig, "ENROOT_MOUNT_HOME=yes")
+	hasRemapRoot := strings.Contains(enrootConfig, "ENROOT_REMAP_ROOT=yes")
+	if !hasMountHome || !hasRemapRoot {
+		t.Errorf("rendered enroot.conf missing defaults:\n%s", enrootConfig)
+	}
+	if got := configMap.Data["99-aicr-defaults.env"]; !strings.Contains(got, "NCCL_DEBUG=WARN") {
+		t.Errorf("rendered 99-aicr-defaults.env missing default:\n%s", got)
+	}
+}
+
 func TestGPUSlurmLeavesConfigureGRESAndTaskCgroup(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)

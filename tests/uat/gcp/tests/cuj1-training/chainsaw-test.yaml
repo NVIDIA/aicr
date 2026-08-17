@@ -125,7 +125,8 @@ spec:
                 --output "${WORK}/bundle" \
                 --system-node-selector nodeGroup=system-pool \
                 --accelerated-node-selector nodeGroup=gpu-worker \
-                --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+                --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
+                --set nv-sentinel:labeler.assumeDriverInstalled=true
 
     - name: assert-bundle-structure
       description: Verify bundle contains expected files.

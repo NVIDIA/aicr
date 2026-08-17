@@ -6,16 +6,16 @@ It is a **structural** matrix: it reports *which* CUJs and CLI verbs are exercis
 
 This is a **different axis** from the per-recipe **Coverage** column in the recipe-health matrix (ADR-009 `declared_coverage`): that column counts declared named checks per validation phase for a single recipe, whereas this matrix answers "which journeys and CLI verbs are exercised, where, and how often." The recipe-health page cross-links the other way through its presence-gated Evidence column (RQ1, #1283): a recipe with a published dashboard coordinate deep-links to it, and shows `pending` only when none exists. See also the [CLI reference](./cli-reference.md).
 
-**AICR-version axis.** Scheduled UAT builds only the current checkout, so the live axis today is `main`. The multi-version matrix (main + the previous N stable releases) is owned by the dynamic-clusters epic (DC5); per-version posture will be a TestGrid link, not a cell here.
+**AICR-version axis.** The nightly UAT batch runs every enrolled reservation against tip-of-`main`, built from source, plus the previous stable release, installed from its release artifacts. Each version is a full provision, CUJ and teardown cell per intent. The rows below are version-independent: per-version pass/fail posture is a TestGrid link, not a cell here.
 
-**Legend.** `covered` = exercised by an executable *journey* signal — a chainsaw/KWOK test or a wired nightly UAT runner; `not-yet-covered` = a shipping capability no such journey touches yet; `stubbed` = UAT assets exist but no scheduled workflow runs them. This tracks CUJ/CLI journey coverage — per-package Go unit-test coverage is a separate gate (`make test-coverage`), not reflected here.
+**Legend.** `covered` = exercised by an executable *journey* signal — a chainsaw/KWOK test or a wired nightly UAT runner; `not-yet-covered` = a shipping capability no such journey touches yet; `stubbed` = UAT assets exist but nothing scheduled executes the journey, for the reason the row's note gives. This tracks CUJ/CLI journey coverage — per-package Go unit-test coverage is a separate gate (`make test-coverage`), not reflected here.
 
 ## Critical user journeys (CUJs)
 
 | Item | Exercised by | Hardware | Cadence | Status | Notes |
 |------|--------------|----------|---------|--------|-------|
 | `cuj1-training-kubeflow` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `cuj2-inference-dynamo` | demo | GPU (unwired) | — | stubbed | UAT assets present but no scheduled workflow runs them — inference UAT tracked by DC3 (#1276), Azure by DC6 (#1280) |
+| `cuj2-inference-dynamo` | demo | GPU (unwired) | — | stubbed | the intent runs nightly and its stack is deployed and validated, but the journey's own workload step is disabled in the per-cloud UAT pipelines |
 
 ## CLI verbs
 

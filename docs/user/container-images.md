@@ -142,7 +142,7 @@ _No images extracted._
 
 ### gpu-operator
 
-- `docker.io/library/busybox:1.38.0@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d`
+- `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
 - `nvcr.io/nvidia/cloud-native/dcgm:4.5.2-1-ubuntu22.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.5.2`
 - `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.0`
@@ -227,7 +227,7 @@ _No images extracted._
 
 ### network-operator
 
-- `docker.io/library/busybox:1.38.0@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d`
+- `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.4.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`

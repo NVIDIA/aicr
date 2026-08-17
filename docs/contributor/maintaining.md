@@ -145,9 +145,23 @@ history **persists after a tag or release is deleted**, whereas `/tags` and
 GitHub Release are cleaned up once the final ships) would otherwise reappear as
 an unexplained identity hit even though it was a genuine signing. That exact
 false positive is what [#1902](https://github.com/NVIDIA/aicr/issues/1902)
-caught. Runs of any conclusion count (a release that signed and then flaked in a
-later step still produced a legitimate entry). The correlation fetch reads the
-workflow name from the `RELEASE_WORKFLOW_FILE` env var; `CERT_SUBJECT` is a
+caught.
+
+Runs count in any lifecycle state and with any conclusion, so the query filters
+on neither. GitHub mints the SAN only while a run of the workflow is executing
+at `refs/tags/<tag>`, which makes the run's *existence* at that ref the proof;
+its lifecycle state is not part of the identity. Filtering on
+`status=completed` hid a release for the ~32 minutes it takes to run even
+though its signing jobs write entries ~20 minutes in, which is exactly where
+the hourly scan lands: that is the false positive
+[#2153](https://github.com/NVIDIA/aicr/issues/2153) caught on `v0.19.0`. It also
+let a re-run of a job that signs nothing (a flaky post-publish deploy) revoke a
+tag's allowlist entry by flipping the run back to `in_progress`. Widening to
+in-flight runs does not weaken the control: under the old gate, anyone able to
+push a tag could already allowlist it by waiting for the run to finish.
+
+The correlation fetch reads the workflow name from the
+`RELEASE_WORKFLOW_FILE` env var; `CERT_SUBJECT` is a
 separate literal regex that names the same workflow, kept in sync by convention
 (both sit in the env block with a "change both together" note). They are not
 auto-derived from one value: building the anchored, regex-escaped `CERT_SUBJECT`
@@ -163,16 +177,17 @@ operational). A broken correlation input can never silently silence a real hit.
 Two residual gaps are accepted, both requiring the attacker to also subvert the
 signing path (not just forge a log entry). First, an attacker who re-signs an
 *existing* release tag is suppressed, because that tag is on the allowlist.
-Second, the allowlist keys on a completed on-tag run of **any conclusion**, not
-on proof that the sign step itself ran: signing happens mid-run, so a real
-release whose later step flakes still concludes `failure` (e.g. `v0.18.0`
-itself) and must stay on the allowlist, which means gating on `conclusion ==
-success` is not viable (it would re-create the [#1902](https://github.com/NVIDIA/aicr/issues/1902)
-false positive on genuine releases). In-progress runs are excluded
-(`status=completed`), but a run that failed *before* the sign step still
-allowlists its tag. Closing both tightly needs a per-signing-step or per-tag
-entry-count / provenance check (did the sign step succeed; how many entries a
-known tag is expected to have), tracked as a follow-up in
+Second, the allowlist keys on the existence of an on-tag run at
+`refs/tags/<tag>` in **any state and of any conclusion**, not on proof that the
+sign step itself ran: signing happens mid-run, so a real release whose later
+step flakes still concludes `failure` (e.g. `v0.18.0` itself) and must stay on
+the allowlist, which means gating on `conclusion == success` is not viable (it
+would re-create the [#1902](https://github.com/NVIDIA/aicr/issues/1902) false
+positive on genuine releases). A run that failed *before* the sign step
+therefore still allowlists its tag. Closing both tightly needs a
+per-signing-step or per-tag entry-count / provenance check (did the sign step
+succeed; how many entries a known tag is expected to have), tracked as a
+follow-up in
 [#1887](https://github.com/NVIDIA/aicr/issues/1887).
 
 ### Why v2, and why identity monitoring is feasible now

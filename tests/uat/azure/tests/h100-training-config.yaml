@@ -64,6 +64,16 @@ spec:
       target: ./bundle
     deployment:
       deployer: helmfile
+      # NVSentinel remedies for the azure-managed default profile (the
+      # driver ships in the AKS node image, so no driver pod exists for
+      # the labeler to observe, and the profile retargets
+      # operator.runtimeClass to nvidia-container-runtime). Bundling
+      # without them is a blocking error
+      # (CheckNVSentinelDriverLabelDetectable / issue #2175,
+      # CheckNVSentinelRuntimeClassCoherence / issue #2176).
+      set:
+        - nv-sentinel:labeler.assumeDriverInstalled=true
+        - nv-sentinel:metadata-collector.runtimeClassName=nvidia-container-runtime
     scheduling:
       acceleratedNodeSelector:
         nodeGroup: gpu-worker
