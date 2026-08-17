@@ -147,25 +147,23 @@ const (
 // pattern MUST NOT match. ValidateIdentityPattern compiles the candidate and
 // tests it against every one of them, rejecting any pattern that matches.
 //
-// This behavioral check is the second of two layers, and exists because the
-// substring anchor is necessary but NOT sufficient: a pattern can carry the
-// required repository prefix and still match everything, most simply via
-// alternation:
+// This behavioral check is the last of three layers, and exists because
+// requiring the repository prefix is necessary but NOT sufficient: a pattern
+// can begin with it and still match everything, most simply via alternation:
 //
 //	^https://github\.com/NVIDIA/aicr/.*|.*$
 //
-// That contains the prefix, compiles cleanly, and is even anchored at the
-// prefix — yet its second branch matches any string. Since the identity
-// matcher pins only the OIDC issuer beyond this pattern, such a pattern
-// silently reduces the gate to "any GitHub Actions workflow in any
-// repository".
+// That begins with the prefix and compiles cleanly, yet its second branch
+// matches any string. Since the identity matcher pins only the OIDC issuer
+// beyond this pattern, such a pattern silently reduces the gate to "any GitHub
+// Actions workflow in any repository".
 //
-// The top-level-alternation rule in ValidateIdentityPattern handles the branch
-// case, including branches too narrow for any fixed canary set to catch (a
-// single attacker-controlled repository). These canaries cover the widening
-// that survives a structural read — an empty branch inside a group, say, which
-// leaves the root op unchanged while making the whole pattern match anything.
-// Neither layer subsumes the other.
+// The prefix and top-level-alternation rules in ValidateIdentityPattern handle
+// the branch cases, including branches too narrow for any fixed canary set to
+// catch (a single attacker-controlled repository). These canaries cover the
+// widening that survives a structural read — an empty branch inside a group,
+// say, which leaves the root op unchanged while making the whole pattern match
+// anything. No layer subsumes another.
 //
 // Each entry is shaped like a real GitHub Actions SAN, because that is the
 // only identity form this pattern is ever matched against.
@@ -181,7 +179,9 @@ var foreignIdentityCanaries = []string{
 // VerifyOptions configures verification behavior.
 type VerifyOptions struct {
 	// CertificateIdentityRegexp overrides the default identity pinning pattern
-	// for binary attestation verification. Must contain "NVIDIA/aicr".
+	// for binary attestation verification. Must BEGIN with
+	// "https://github.com/NVIDIA/aicr/" (a leading "^" is allowed) and must
+	// not use top-level alternation; see ValidateIdentityPattern.
 	// Defaults to TrustedRepositoryPattern if empty.
 	CertificateIdentityRegexp string
 

@@ -634,10 +634,11 @@ Rekor are. The result is content-identical to the one-shot path.
 `SignCatalog` is the counterpart to `VerifyCatalog`, signing this
 Client's catalog and returning the serialized Sigstore bundle.
 
-**`SignCatalog` only accepts signing modes `VerifyCatalog` can verify.**
-Verification checks against the public-good Sigstore root, requires a
+**`SignCatalog` rejects the signing modes it can tell `VerifyCatalog`
+will not verify** — with one documented exception, below. Verification
+checks against the public-good Sigstore root, requires a
 transparency-log entry, and accepts keyless GitHub OIDC certificates
-only, so these three `OIDCResolve` settings are rejected with
+only, so these four `OIDCResolve` settings are rejected with
 `ErrCodeInvalidRequest` before any signing work runs:
 
 | Setting | Why it is rejected |
@@ -647,15 +648,20 @@ only, so these three `OIDCResolve` settings are rejected with
 | `RekorURL` | A private log's entries do not verify against the public-good root either. A public-good v1 URL would verify, but the two are indistinguishable from the URL alone, so this fails closed. |
 | `DisableTLogUpload` | Verification requires a transparency-log entry. |
 
-The point of the guard is that you cannot successfully sign a catalog
-and then discover the documented counterpart refuses it; if private
-catalog signing is ever needed, both halves move together.
+The point of the guard is that you should not be able to sign a catalog
+successfully and then discover the documented counterpart refuses it;
+if private catalog signing is ever needed, both halves move together.
 
-This is a guard, not a decision procedure. `SigningConfigPath` passes
-through because the release path requires it, and a signing config can
-itself name a private Fulcio or Rekor. Every rejected setting above
-exists *only* to depart from the public-good defaults, which is what
-makes rejecting them unambiguous; a signing config does not.
+**The exception: `SigningConfigPath` is not validated.** It passes
+through because the release path requires it, and a Sigstore signing
+config can itself name a private Fulcio or Rekor — so a signing config
+*can* still produce a catalog `VerifyCatalog` rejects. Treat the guard
+as covering the four settings above, not as a guarantee about every
+input. Each rejected setting exists *only* to depart from the
+public-good defaults, which is what makes rejecting it unambiguous; a
+signing config does not, and rejecting it would break the release.
+Validating the loaded config against the public-good endpoints is the
+principled fix if this exception ever bites.
 
 Neither signing method imposes a facade timeout, unlike their
 verification counterparts: keyless OIDC can block on a human completing
@@ -692,9 +698,10 @@ facade cap, per `context.WithTimeout` semantics — a caller passing a
 tighter deadline keeps it; a caller passing `context.Background()` gets
 the facade cap.
 
-Not every entry point is capped. The exceptions are listed below and
-run under the caller's context unchanged, so a caller passing
-`context.Background()` gets no deadline at all.
+Not every entry point is capped. `PublishEvidence` and `SignCatalog`
+never are, and `MakeBundle` is not when `BundleOptions.Timeout` is `0`
+(its default). Those run under the caller's context unchanged, so a
+caller passing `context.Background()` gets no deadline at all.
 
 Per-operation caps:
 

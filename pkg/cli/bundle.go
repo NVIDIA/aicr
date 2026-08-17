@@ -891,7 +891,8 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringFlag{
 				Name: "certificate-identity-regexp",
 				Usage: `Override the certificate identity pattern for binary attestation verification.
-	Must contain "NVIDIA/aicr". Use for testing with binaries attested by non-release
+	Must begin with "https://github.com/NVIDIA/aicr/" (a leading "^" is allowed) and
+	must not use top-level alternation. Use for testing with binaries attested by non-release
 	workflows (e.g., build-attested.yaml). Not intended for production use.`,
 				Category: catDeployment,
 			},

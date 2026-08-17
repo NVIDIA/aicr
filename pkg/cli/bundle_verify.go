@@ -96,7 +96,8 @@ Output as JSON:
 			&cli.StringFlag{
 				Name: "certificate-identity-regexp",
 				Usage: `Override the certificate identity pattern for binary attestation verification.
-	Must contain "NVIDIA/aicr". Default pins to the release workflow on tag refs.`,
+	Must begin with "https://github.com/NVIDIA/aicr/" (a leading "^" is allowed) and
+	must not use top-level alternation. Default pins to the release workflow on tag refs.`,
 			},
 			&cli.StringFlag{
 				Name:  "key",

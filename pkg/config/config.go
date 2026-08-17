@@ -423,7 +423,9 @@ type VerifyPolicySpec struct {
 // key material is ever part of the schema.
 type VerifyTrustSpec struct {
 	// CertificateIdentityRegexp overrides the certificate identity pattern
-	// used for binary attestation verification. Must contain "NVIDIA/aicr".
+	// used for binary attestation verification. Must BEGIN with
+	// "https://github.com/NVIDIA/aicr/" (a leading "^" is allowed) and must
+	// not use top-level alternation, so it stays confined to the repository.
 	CertificateIdentityRegexp string `yaml:"certificateIdentityRegexp,omitempty" json:"certificateIdentityRegexp,omitempty"`
 
 	// Key is a KMS key URI (awskms:// | gcpkms:// | azurekms:// |

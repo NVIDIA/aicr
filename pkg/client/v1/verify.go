@@ -76,7 +76,9 @@ const EvidenceCauseCanceled = evverifier.CauseCanceled
 // disable that check.
 type BundleVerifyOptions struct {
 	// CertificateIdentityRegexp overrides the identity pattern that binary
-	// attestation verification pins to. Must contain "NVIDIA/aicr";
+	// attestation verification pins to. Must BEGIN with
+	// "https://github.com/NVIDIA/aicr/" (a leading "^" is allowed) and must
+	// not use top-level alternation, so it stays confined to the repository;
 	// VerifyBundle rejects a pattern that does not before doing any work.
 	// Empty uses TrustedIdentityPattern.
 	CertificateIdentityRegexp string
@@ -325,7 +327,9 @@ func (c *Client) VerifyEvidence(ctx context.Context, opts EvidenceVerifyOptions)
 // CatalogVerifyOptions configures Client.VerifyCatalog.
 type CatalogVerifyOptions struct {
 	// CertificateIdentityRegexp overrides the NVIDIA CI identity pattern.
-	// Must contain "NVIDIA/aicr". Empty uses TrustedIdentityPattern.
+	// Must BEGIN with "https://github.com/NVIDIA/aicr/" (a leading "^" is
+	// allowed) and must not use top-level alternation. Empty uses
+	// TrustedIdentityPattern.
 	CertificateIdentityRegexp string
 }
 

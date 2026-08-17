@@ -201,7 +201,7 @@ spec:
       requireCreator: ci@myorg.example.com
       cliVersionConstraint: ">= 0.16.0"
     trust:                           # material verification runs against
-      certificateIdentityRegexp: ""  # must contain NVIDIA/aicr when set
+      certificateIdentityRegexp: ""  # when set, must BEGIN with https://github.com/NVIDIA/aicr/
       key: ""                        # KMS URI or local PEM public-key path
       trustRoot: ""                  # private Sigstore trusted_root.json
 ```

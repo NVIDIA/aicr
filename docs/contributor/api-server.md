@@ -262,9 +262,12 @@ the running `os.Executable()` binary's digest.
 pattern the attestation is verified against: `verifier.TrustedRepositoryPattern`
 (the release `on-tag.yaml` workflow) by default, or the
 `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` override when set. The override is
-validated by `verifier.ValidateIdentityPattern`, which requires it to contain
-`NVIDIA/aicr`, so it can only retarget which NVIDIA workflow attested the binary
-(e.g. the server-kms e2e build), never widen the org. A bad override fails
+validated by `verifier.ValidateIdentityPattern`, which requires it to *begin
+with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed) and to avoid
+top-level alternation, so it can only retarget which NVIDIA workflow attested
+the binary (e.g. the server-kms e2e build), never widen the org. Merely
+containing `NVIDIA/aicr` is not enough: a pattern that reaches the repository
+down one branch and something else down another is rejected. A bad override fails
 startup fast. This mirrors the CLI's `--certificate-identity-regexp`, and a
 custom pattern is logged because bundles the server then signs will not pass a
 verifier using the default identity.

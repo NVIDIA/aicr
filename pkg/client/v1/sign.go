@@ -115,9 +115,11 @@ type CatalogSignOptions struct {
 	// SignCatalog sets Attest itself — signing is the whole operation —
 	// so leaving that field false does not disable it.
 	//
-	// Three fields are REJECTED rather than passed through, because
-	// VerifyCatalog cannot verify what they would produce. See
-	// SignCatalog's godoc for the full statement of that constraint.
+	// Four fields are REJECTED rather than passed through, because
+	// VerifyCatalog cannot verify what they would produce: SigningKey,
+	// FulcioURL, RekorURL, and DisableTLogUpload. See SignCatalog's godoc
+	// for the full statement of that constraint, including what it does
+	// NOT cover.
 	OIDCResolve OIDCResolveOptions
 }
 
@@ -148,7 +150,7 @@ type CatalogSignResult struct {
 // recipe catalog is a release artifact NVIDIA signs — not something a consumer
 // re-signs privately.
 //
-// SignCatalog therefore REJECTS the three OIDCResolve settings that would
+// SignCatalog therefore REJECTS the four OIDCResolve settings that would
 // produce a signature its own counterpart could not check:
 //
 //   - SigningKey — a key-signed catalog has no verification path at all.

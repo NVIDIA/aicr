@@ -27,7 +27,9 @@ import (
 // VerifyOptions configures a Verify call.
 type VerifyOptions struct {
 	// CertificateIdentityRegexp overrides the default NVIDIA CI identity
-	// pinning pattern. Must contain "NVIDIA/aicr". Defaults to
+	// pinning pattern. Must BEGIN with "https://github.com/NVIDIA/aicr/"
+	// (a leading "^" is allowed) and must not use top-level alternation.
+	// Defaults to
 	// verifier.TrustedRepositoryPattern when empty.
 	CertificateIdentityRegexp string
 }
