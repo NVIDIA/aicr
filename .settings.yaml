@@ -30,7 +30,7 @@ build_tools:
 # Linting
 linting:
   # renovate: datasource=go depName=golang.org/x/exp depType=linting
-  apidiff: 'v0.0.0-20260727155853-b88d891fe743'
+  apidiff: 'v0.0.0-20260813180055-c1d0aacb2297'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.12.2'
   # renovate: datasource=pypi depName=yamllint depType=linting
