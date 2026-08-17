@@ -74,12 +74,15 @@ jobs:
             ];
 
             // type(scope)!: subject -- scope and the breaking-change "!" are
-            // both optional; subject must be non-empty. Scope allows mixed
+            // both optional; the subject must contain a non-whitespace
+            // character -- `.+` alone would accept "fix:   ", which under
+            // squash_merge_commit_message: BLANK lands on main as an
+            // effectively empty commit message. Scope allows mixed
             // case: Conventional Commits does not define a lowercase-only
             // scope grammar, and fix(GB200): / fix(H100): / feat(API): are
             // all plausible here.
             const PATTERN = new RegExp(
-              `^(${TYPES.join('|')})(\\([a-zA-Z0-9][a-zA-Z0-9._/-]*\\))?(!)?: .+$`
+              `^(${TYPES.join('|')})(\\([a-zA-Z0-9][a-zA-Z0-9._/-]*\\))?(!)?: +\\S.*$`
             );
 
             // Advisory only. CONTRIBUTING.md asks for titles under this
