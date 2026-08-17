@@ -14,7 +14,10 @@
 
 package verifier
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTrustLevel_String(t *testing.T) {
 	tests := []struct {
@@ -62,12 +65,13 @@ func TestValidateIdentityPattern(t *testing.T) {
 		pattern string
 		wantErr bool
 	}{
-		// Valid — contains ://github.com/NVIDIA/aicr/
+		// Valid — begins with https://github.com/NVIDIA/aicr/ (leading "^"
+		// optional, escaped-dot form accepted).
 		{TrustedRepositoryPattern, false},
 		{`https://github.com/NVIDIA/aicr/.github/workflows/.*`, false},
 		{`https://github.com/NVIDIA/aicr/.github/workflows/build-attested\.yaml@.*`, false},
 
-		// Invalid — missing ://github.com/NVIDIA/aicr/
+		// Invalid — does not begin with the required repository prefix.
 		{`https://github.com/attacker/aicr/.*`, true},
 		{`https://github.com/NVIDIA/other-repo/.*`, true},
 		{`.*`, true},
@@ -81,11 +85,10 @@ func TestValidateIdentityPattern(t *testing.T) {
 		{`https://evil.com/github.com/NVIDIA/aicr/.*`, true},           // github.com as path, not domain
 		{`https://evil.com/redirect?to=github.com/NVIDIA/aicr/`, true}, // github.com in query string
 
-		// Widening bypasses: each carries the required repository prefix (so
-		// the substring anchor passes) and compiles cleanly, but is not
-		// CONFINED to the repository. Left unguarded these reduce the gate to
-		// the OIDC issuer pin alone, which any GitHub Actions workflow in any
-		// repository satisfies.
+		// Widening bypasses: each BEGINS with the required repository prefix
+		// and compiles cleanly, but is not CONFINED to it. Left unguarded
+		// these reduce the gate to the OIDC issuer pin alone, which any GitHub
+		// Actions workflow in any repository satisfies.
 		{`^https://github\.com/NVIDIA/aicr/.*|.*$`, true},                             // trailing alternation matches anything
 		{`.*|https://github.com/NVIDIA/aicr/.*`, true},                                // leading alternation matches anything
 		{`https://github.com/NVIDIA/aicr/.*|^https://github\.com/evil/repo/.*`, true}, // alternation to a foreign repo
@@ -111,6 +114,35 @@ func TestValidateIdentityPattern(t *testing.T) {
 			err := ValidateIdentityPattern(tt.pattern)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateIdentityPattern(%q) error = %v, wantErr %v", tt.pattern, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateIdentityPattern_RejectionNamesTheRepository pins that every
+// rejection reason tells the operator what to anchor to.
+//
+// The CLI surfaces only the message, not the structured context, so a reason
+// that omits the repository leaves the reader with "that is wrong" and no way
+// to fix it. The e2e coverage in
+// tests/chainsaw/signing/bundle-attestation-ci asserts on this substring
+// rather than the prose, so that a reworded message does not break it — this
+// test is what keeps that assertion honest.
+func TestValidateIdentityPattern_RejectionNamesTheRepository(t *testing.T) {
+	rejected := []string{
+		`.*`, // no prefix
+		`^https://github\.com/NVIDIA/aicr/.*|.*$`, // top-level alternation
+		`(https://github.com/NVIDIA/aicr/|)`,      // nested, prefix not at the start
+		`https://github.com/attacker/aicr/.*`,     // wrong owner
+	}
+	for _, pattern := range rejected {
+		t.Run(pattern, func(t *testing.T) {
+			err := ValidateIdentityPattern(pattern)
+			if err == nil {
+				t.Fatalf("ValidateIdentityPattern(%q) = nil, want rejection", pattern)
+			}
+			if !strings.Contains(err.Error(), "NVIDIA/aicr") {
+				t.Errorf("rejection does not name the required repository: %v", err)
 			}
 		})
 	}

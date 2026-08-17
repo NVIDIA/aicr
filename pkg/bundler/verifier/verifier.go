@@ -319,8 +319,13 @@ func ValidateIdentityPattern(pattern string) error {
 			"certificate identity pattern could not be parsed", err)
 	}
 	if parsed.Op == syntax.OpAlternate {
+		// Name the required prefix here too, not only in the context map: the
+		// CLI surfaces the message alone, and a reader who has just been told
+		// "no top-level alternation" still needs to know what to anchor to.
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
-			"certificate identity pattern must not use top-level alternation: only one branch has to match, so an unpinned branch would defeat the repository pin. Move the alternatives into a group after the repository prefix.",
+			fmt.Sprintf("certificate identity pattern must not use top-level alternation: only one branch has to match, "+
+				"so an unpinned branch would defeat the pin to %q. Move the alternatives into a group after the prefix, "+
+				"e.g. %s\\.github/workflows/(on-tag|release)\\.yaml@.*", requiredIdentityPrefix, requiredIdentityPrefixEscaped),
 			map[string]any{
 				"pattern":          pattern,
 				"requiredRepoPath": requiredRepoPrefix,

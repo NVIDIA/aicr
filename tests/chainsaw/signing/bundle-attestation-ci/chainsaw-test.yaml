@@ -202,16 +202,39 @@ spec:
               ($error == null): true
 
     - name: verify-invalid-pattern-rejected
-      description: Invalid --certificate-identity-regexp is rejected.
+      description: |
+        A --certificate-identity-regexp that is not confined to NVIDIA/aicr is
+        rejected. Covers both shapes: '.*' never mentions the repository, while
+        the alternation carries it down one branch and matches anything down
+        the other.
       try:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-attestation-ci"
-              ${AICR_BIN} verify "${WORK}/bundle" \
-                --certificate-identity-regexp '.*' 2>&1 || true
+              # Capture the status explicitly rather than `|| true`: swallowing
+              # it would let a regression that ACCEPTS these patterns pass this
+              # negative test, which is the dangerous direction.
+              for pattern in '.*' '^https://github\.com/NVIDIA/aicr/.*|.*$'; do
+                set +e
+                output=$(${AICR_BIN} verify "${WORK}/bundle" \
+                  --certificate-identity-regexp "${pattern}" 2>&1)
+                rc=$?
+                set -e
+                echo "${output}"
+                if [ "${rc}" -eq 0 ]; then
+                  echo "FAIL: pattern ${pattern} was accepted; the repository pin is not enforced" >&2
+                  exit 1
+                fi
+                # Assert on the repository path rather than the prose, so a
+                # reworded message does not break this test again.
+                case "${output}" in
+                  *NVIDIA/aicr*) ;;
+                  *) echo "FAIL: rejection for ${pattern} did not name the required repository" >&2; exit 1 ;;
+                esac
+              done
             check:
-              (contains($stdout, 'must contain') || contains($stderr, 'must contain')): true
+              ($error == null): true
 
     - name: cleanup
       description: Remove temporary files.
