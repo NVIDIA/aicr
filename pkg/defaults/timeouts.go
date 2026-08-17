@@ -144,7 +144,7 @@ const (
 	// Bundle and catalog verification are offline (locally cached or embedded
 	// Sigstore trusted root), so their own work is sub-second; the budget
 	// exists for the two paths that do reach the network — a KMS key URI in
-	// VerifyBundleOptions.Key still makes a live GetPublicKey call, and
+	// BundleVerifyOptions.Key still makes a live GetPublicKey call, and
 	// VerifyEvidence pulls an OCI artifact when its input is a pointer or a
 	// registry reference.
 	//

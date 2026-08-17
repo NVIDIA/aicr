@@ -16,7 +16,6 @@ package aicr_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
@@ -131,40 +130,13 @@ func TestSignCatalog_RejectsModesVerifyCatalogCannotVerify(t *testing.T) {
 	}
 }
 
-// TestSignCatalog_AllowsPublicGoodTransparencyLogSettings guards the other
-// direction: the release path passes a signing config (and may target a
-// public-good Rekor v1 URL), and neither is asymmetric, so neither may be
-// swept up by the rejection above.
+// The "symmetric settings are NOT rejected" direction is asserted against
+// rejectUnverifiableCatalogSigning directly, in the internal test file. It
+// cannot be asserted through SignCatalog: an accepted setting by definition
+// reaches the attester, and with no OIDC token available that falls through to
+// the interactive browser flow, which hangs a headless CI run.
 //
-// Both cases must get PAST the symmetry check and fail later for want of an
-// OIDC token, so the assertion is that the error is not the symmetry rejection.
-func TestSignCatalog_AllowsPublicGoodTransparencyLogSettings(t *testing.T) {
-	t.Parallel()
-
-	client := newVerifyClient(t)
-
-	for _, tt := range []struct {
-		name    string
-		resolve aicr.OIDCResolveOptions
-	}{
-		{name: "signing config", resolve: aicr.OIDCResolveOptions{SigningConfigPath: "/nonexistent/signing-config.json"}},
-		{name: "rekor url", resolve: aicr.OIDCResolveOptions{RekorURL: "https://rekor.sigstore.dev"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := client.SignCatalog(context.Background(), aicr.CatalogSignOptions{OIDCResolve: tt.resolve})
-			if err == nil {
-				return // reached signing; the symmetry check did not block it
-			}
-			if strings.Contains(err.Error(), "not supported") {
-				t.Errorf("setting was rejected as unverifiable, but it is symmetric with VerifyCatalog: %v", err)
-			}
-		})
-	}
-}
-
-// SignCatalog's success path is deliberately not unit tested: it needs a real
-// OIDC token, and driving it without one would fall through to the interactive
-// browser flow and hang. The "SignCatalog sets Attest itself" contract and the
-// nil-bundle rejection are covered by the goreleaser release hook that calls
+// SignCatalog's success path is deliberately not unit tested for the same
+// reason. The "SignCatalog sets Attest itself" contract and the nil-bundle
+// rejection are covered by the goreleaser release hook that calls
 // `aicr recipe sign-catalog` on every tagged build.

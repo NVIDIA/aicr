@@ -590,19 +590,26 @@ pre-validates operator-supplied input against the same rule the verify
 entry points apply internally.
 
 An override must be *confined* to the NVIDIA repository, not merely
-mention it. Containing `://github.com/NVIDIA/aicr/` is necessary but not
-sufficient: validation also rejects top-level alternation and any
-pattern that still matches an unrelated identity. Both rules exist
-because the identity matcher pins only the OIDC issuer beyond this
-pattern, so a widened pattern silently degrades the gate to "any GitHub
-Actions workflow in any repository" rather than failing visibly.
+mention it. Two rules enforce that, and they are load-bearing together:
+the pattern must **begin with** `https://github.com/NVIDIA/aicr/` (a
+leading `^` is allowed, and `github\.com` is accepted too), and it must
+not use **top-level alternation**. Both exist because the identity
+matcher pins only the OIDC issuer beyond this pattern, so a widened
+pattern silently degrades the gate to "any GitHub Actions workflow in
+any repository" rather than failing visibly.
 
 ```go
-// Rejected: carries the prefix, compiles, is even anchored to it —
-// but the second branch matches anything.
+// Rejected: begins with the prefix, but the second branch matches
+// anything — only one branch of an alternation has to match.
 aicr.ValidateIdentityPattern(`^https://github\.com/NVIDIA/aicr/.*|.*$`)
 
-// Accepted: alternatives live inside a group after the prefix.
+// Rejected: the alternation is nested in a group, so the pattern no
+// longer begins with the prefix and one branch escapes the repository.
+aicr.ValidateIdentityPattern(
+	`(https://github.com/NVIDIA/aicr/.*|https://github.com/attacker/x/.*)`)
+
+// Accepted: alternatives sit AFTER the prefix, so every branch is
+// already behind the pin.
 aicr.ValidateIdentityPattern(
 	`^https://github\.com/NVIDIA/aicr/\.github/workflows/(on-tag|release)\.yaml@.*`)
 ```
@@ -637,14 +644,18 @@ only, so these three `OIDCResolve` settings are rejected with
 |---|---|
 | `SigningKey` | A key-signed catalog has no verification path at all. |
 | `FulcioURL` | A private CA's certificate does not chain to the public-good root. |
+| `RekorURL` | A private log's entries do not verify against the public-good root either. A public-good v1 URL would verify, but the two are indistinguishable from the URL alone, so this fails closed. |
 | `DisableTLogUpload` | Verification requires a transparency-log entry. |
 
-`RekorURL` and `SigningConfigPath` pass through — they select which
-public-good transparency log and signing config to use, which
-verification handles. The point of the guard is that you cannot
-successfully sign a catalog and then discover the documented
-counterpart refuses it; if private catalog signing is ever needed, both
-halves move together.
+The point of the guard is that you cannot successfully sign a catalog
+and then discover the documented counterpart refuses it; if private
+catalog signing is ever needed, both halves move together.
+
+This is a guard, not a decision procedure. `SigningConfigPath` passes
+through because the release path requires it, and a signing config can
+itself name a private Fulcio or Rekor. Every rejected setting above
+exists *only* to depart from the public-good defaults, which is what
+makes rejecting them unambiguous; a signing config does not.
 
 Neither signing method imposes a facade timeout, unlike their
 verification counterparts: keyless OIDC can block on a human completing
@@ -674,12 +685,16 @@ if stderrors.As(err, &se) && se.Code == aicrerrors.ErrCodeInvalidRequest {
 ## Context handling
 
 `ResolveRecipe` (and every other context-aware facade method) honours
-context cancellation. Each facade entry point unconditionally wraps the
-caller's context with `context.WithTimeout` against its per-operation
-cap. The effective deadline is the smaller of the caller's deadline
-and the facade cap, per `context.WithTimeout` semantics — a caller
-passing a tighter deadline keeps it; a caller passing
-`context.Background()` gets the facade cap.
+context cancellation. Capped entry points wrap the caller's context
+with `context.WithTimeout` against their per-operation cap; the
+effective deadline is then the smaller of the caller's deadline and the
+facade cap, per `context.WithTimeout` semantics — a caller passing a
+tighter deadline keeps it; a caller passing `context.Background()` gets
+the facade cap.
+
+Not every entry point is capped. The exceptions are listed below and
+run under the caller's context unchanged, so a caller passing
+`context.Background()` gets no deadline at all.
 
 Per-operation caps:
 

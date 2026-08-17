@@ -92,6 +92,19 @@ func TestValidateIdentityPattern(t *testing.T) {
 		{`(https://github.com/NVIDIA/aicr/|)`, true},                                  // empty alternation branch matches anything
 		{`https://github.com/NVIDIA/aicr/.*|`, true},                                  // trailing empty branch
 		{`(?s)https://github\.com/NVIDIA/aicr/.*|(?s).*`, true},                       // inline flags plus alternation
+
+		// Nested alternation. The root op here is OpCapture, not OpAlternate,
+		// so a root-only structural check misses it; and the foreign branch
+		// names a repository no fixed canary set can enumerate. Rejected
+		// because the pattern does not BEGIN with the repository prefix.
+		{`(https://github.com/NVIDIA/aicr/.*|https://github.com/attacker/isolated/.*)`, true},
+		{`(?:https://github.com/NVIDIA/aicr/.*|https://github.com/attacker/x/.*)`, true},
+		{`(https://github.com/NVIDIA/aicr/|https://github.com/evil/repo/).*`, true},
+
+		// Alternatives placed AFTER the prefix stay valid: every branch is
+		// already behind the pin, so the match cannot leave the repository.
+		{`^https://github\.com/NVIDIA/aicr/\.github/workflows/(on-tag|release)\.yaml@.*`, false},
+		{`https://github.com/NVIDIA/aicr/\.github/workflows/(a|b)\.yaml@refs/tags/.*`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {

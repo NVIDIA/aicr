@@ -473,6 +473,21 @@ func TestValidateIdentityPattern(t *testing.T) {
 			pattern: `(https://github.com/NVIDIA/aicr/|)`,
 			wantErr: true,
 		},
+		{
+			// Nested in a group, so the root op is a capture rather than an
+			// alternation, and the foreign branch names a repository no fixed
+			// canary set can enumerate. Rejected because the pattern does not
+			// begin with the repository prefix.
+			name:    "nested alternation to a foreign repository",
+			pattern: `(https://github.com/NVIDIA/aicr/.*|https://github.com/attacker/isolated/.*)`,
+			wantErr: true,
+		},
+		{
+			// Alternatives after the prefix stay valid: every branch is
+			// already behind the pin.
+			name:    "alternation after the prefix",
+			pattern: `^https://github\.com/NVIDIA/aicr/\.github/workflows/(on-tag|release)\.yaml@.*`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

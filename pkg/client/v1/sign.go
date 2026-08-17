@@ -154,13 +154,21 @@ type CatalogSignResult struct {
 //   - SigningKey — a key-signed catalog has no verification path at all.
 //   - FulcioURL — a certificate from a private CA does not chain to the
 //     public-good root.
+//   - RekorURL — an entry in a private transparency log cannot be verified
+//     against the public-good root either. The flag can name a public-good v1
+//     URL as well, which would verify, but the two are indistinguishable from
+//     the URL alone, so this fails closed.
 //   - DisableTLogUpload — verification requires a transparency-log entry.
 //
 // Each is rejected with ErrCodeInvalidRequest before any signing work runs, so
 // the failure is immediate and explains itself rather than surfacing later as
-// an unverifiable artifact. RekorURL and SigningConfigPath pass through: they
-// select which public-good transparency log and signing config to use, which
-// verification handles.
+// an unverifiable artifact.
+//
+// This is a guard, not a decision procedure, and the residual gap is worth
+// stating: SigningConfigPath passes through because the release path requires
+// it, and a signing config can itself name a private Fulcio or Rekor. Every
+// rejected setting above exists ONLY to depart from the public-good defaults,
+// which is what makes rejecting them unambiguous; a signing config does not.
 //
 // If private catalog signing is ever needed, both halves have to move
 // together — widening this without widening VerifyCatalog is what this guard
@@ -209,7 +217,11 @@ func (c *Client) SignCatalog(ctx context.Context, opts CatalogSignOptions) (*Cat
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "recipe catalog signing failed")
 	}
-	if result.BundleJSON == nil {
+	// The nil-result arm is defensive: Sign pairs every nil return with an
+	// error today. Checking it anyway keeps a future (nil, nil) from turning
+	// into a panic across a stability-guaranteed boundary, where a coded error
+	// is the contract.
+	if result == nil || result.BundleJSON == nil {
 		return nil, errors.New(errors.ErrCodeUnauthorized,
 			"attester produced no Sigstore bundle (is an OIDC token available?)")
 	}
@@ -234,6 +246,10 @@ func rejectUnverifiableCatalogSigning(resolve OIDCResolveOptions) error {
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"catalog signing against a private Fulcio is not supported: VerifyCatalog verifies against the public-good Sigstore root, which a private CA's certificate does not chain to",
 			map[string]any{settingKey: "OIDCResolve.FulcioURL"})
+	case resolve.RekorURL != "":
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"catalog signing against an explicit Rekor URL is not supported: VerifyCatalog verifies transparency-log entries against the public-good root, and a private log's entries do not verify there. Use the Rekor v2 default, or SigningConfigPath",
+			map[string]any{settingKey: "OIDCResolve.RekorURL"})
 	case resolve.DisableTLogUpload:
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"catalog signing without a transparency-log entry is not supported: VerifyCatalog requires one",

@@ -133,6 +133,14 @@ const (
 	// would bypass a domain-less check). The escaped form handles regex patterns.
 	requiredRepoPrefix        = "://github.com/NVIDIA/aicr/"
 	requiredRepoPrefixEscaped = `://github\.com/NVIDIA/aicr/`
+
+	// requiredIdentityPrefix is the scheme-qualified form a pattern must START
+	// with. Anchoring on the full "https://" (rather than the "://" fragment
+	// above, which exists to keep github.com from being a path segment) is
+	// what lets ValidateIdentityPattern reason about the whole match instead
+	// of a substring hit somewhere inside it.
+	requiredIdentityPrefix        = "https" + requiredRepoPrefix
+	requiredIdentityPrefixEscaped = "https" + requiredRepoPrefixEscaped
 )
 
 // foreignIdentityCanaries are certificate identities that a correctly pinned
@@ -239,25 +247,54 @@ func newUnionTrustedRoot(path string) (attestation.TrustedRootSource, error) {
 	}, nil
 }
 
-// ValidateIdentityPattern checks that a certificate identity pattern contains
-// the required NVIDIA/aicr GitHub repository URL path. Accepts both literal
-// and regex-escaped forms (e.g., "github.com" or "github\.com").
+// ValidateIdentityPattern checks that a certificate identity pattern is
+// CONFINED to the NVIDIA/aicr GitHub repository, not merely that it mentions
+// it. Accepts both literal and regex-escaped forms of the domain (e.g.,
+// "github.com" or "github\.com").
+//
+// Confinement needs two rules together, because the identity matcher pins only
+// the OIDC issuer beyond this pattern: a widened pattern silently degrades the
+// gate to "any GitHub Actions workflow in any repository" rather than failing
+// visibly.
+//
+//  1. The pattern must BEGIN with the repository prefix (an optional leading
+//     "^" aside). Requiring it as a prefix rather than a substring is what
+//     makes the check sound: a pattern that starts with a literal, and whose
+//     root is not an alternation, can only match strings starting with that
+//     literal. A mere substring test admits alternations that reach the prefix
+//     down one branch while another branch matches something else entirely.
+//  2. The root must not be an alternation, since only one branch of an
+//     alternation has to match.
+//
+// Together these reject `(good|https://github.com/attacker/x/.*)` (does not
+// begin with the prefix) and `^https://github\.com/NVIDIA/aicr/.*|.*$` (root
+// alternation), while still accepting alternatives placed AFTER the prefix,
+// e.g. `.../aicr/\.github/workflows/(on-tag|release)\.yaml@.*`, where every
+// branch is already behind the pin.
+//
+// A leading "^" is optional rather than required so existing unanchored
+// patterns keep working. That is safe for the identity form this is matched
+// against: a GitHub Actions SAN cannot embed a second "://", because neither
+// repository names nor git refs may contain ":".
 func ValidateIdentityPattern(pattern string) error {
 	if pattern == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "certificate identity pattern cannot be empty")
 	}
-	// Accept both literal and regex-escaped dots in the domain
-	if !strings.Contains(pattern, requiredRepoPrefix) &&
-		!strings.Contains(pattern, requiredRepoPrefixEscaped) {
+	// One optional leading anchor is stripped before the prefix test so both
+	// "^https://..." and "https://..." spellings are accepted.
+	body := strings.TrimPrefix(pattern, "^")
+	if !strings.HasPrefix(body, requiredIdentityPrefix) &&
+		!strings.HasPrefix(body, requiredIdentityPrefixEscaped) {
 
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("certificate identity pattern must contain %q to pin to the NVIDIA repository", requiredRepoPrefix))
+			fmt.Sprintf("certificate identity pattern must begin with %q to pin to the NVIDIA repository "+
+				"(a leading \"^\" is allowed; put any alternatives after the prefix)", requiredIdentityPrefix))
 	}
-	// The anchor check above is a substring test, so a pattern can carry the
-	// required repository and still not be a valid regexp. Compile it here so
-	// callers that validate up-front report the failure against their own
-	// input (a CLI flag or a config field, with its spec path) rather than
-	// letting it surface later from the identity matcher.
+	// A pattern can begin with the required repository and still not be a
+	// valid regexp. Compile it here so callers that validate up-front report
+	// the failure against their own input (a CLI flag or a config field, with
+	// its spec path) rather than letting it surface later from the identity
+	// matcher.
 	compiled, err := regexp.Compile(pattern)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest,
