@@ -521,10 +521,13 @@ Bundle artifacts + recipe (deploymentOrder, componentRefs)
       helm / argocd / argocd-helm / helmfile — numbered NNN-<component>/
         (via pkg/bundler/deployer/localformat)
       flux — unnumbered <component>/ dirs with HelmRelease CRs (no NNN- prefix)
-
-For the localformat-backed deployers, each component folder holds install.sh,
-values.yaml, and cluster-values.yaml (there is no scripts/ subdirectory).
 ```
+
+Component file contents are deployer-specific. In the Helm upstream-chart
+layout, each component folder holds `install.sh`, `values.yaml`, and
+`cluster-values.yaml` (there is no `scripts/` subdirectory). Argo CD folders
+instead carry `application.yaml` (and typically `values.yaml`); see the
+deployer sections below.
 
 ### Deployment Order Flow
 

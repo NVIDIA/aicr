@@ -225,12 +225,15 @@ Every release includes:
 ### Container Attestations
 
 Verify the **digest-pinned** image that a tag currently resolves to. Tag refs
-are registry-rewritable; attestations bind to digests.
+are registry-rewritable; attestations bind to digests. Requires `crane` (or
+substitute `docker buildx imagetools inspect` for digest resolution).
 
 ```bash
-export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+set -euo pipefail
+export TAG=$(curl -fsS https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+[[ -n "${TAG}" && "${TAG}" != null ]] || { echo "failed to resolve latest TAG" >&2; exit 1; }
 
-# Resolve an immutable digest for each image (crane, or: docker buildx imagetools inspect …)
+# Resolve an immutable digest for each image
 resolve() { crane digest "ghcr.io/nvidia/$1:${TAG}"; }
 
 # GitHub CLI (core images)
@@ -256,21 +259,44 @@ cosign verify-attestation \
 ### Binary Checksums
 
 `aicr_checksums.txt` lists digests for release archives (and SBOMs). Download
-the files you care about into the same directory as the checksums file before
-running `sha256sum -c` — checking against an empty directory verifies nothing
-(`--ignore-missing` skips missing paths).
+the archive you intend to verify **and** the checksums file into the same
+directory, assert the archive is present and non-empty, then check **that**
+file’s line — do not use `--ignore-missing` (it can pass with zero files
+verified). On macOS, use `shasum -a 256` (built-in); on Linux, `sha256sum`
+(GNU coreutils).
 
 ```bash
-export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+set -euo pipefail
+export TAG=$(curl -fsS https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+[[ -n "${TAG}" && "${TAG}" != null ]] || { echo "failed to resolve latest TAG" >&2; exit 1; }
+
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+archive="aicr_${TAG#v}_${os}_${arch}.tar.gz"
+
 tmpdir=$(mktemp -d)
-# Example: this host's CLI archive + the checksums file
+trap 'rm -rf "${tmpdir}"' EXIT
 gh release download "${TAG}" -R NVIDIA/aicr -D "${tmpdir}" \
   -p "aicr_checksums.txt" \
-  -p "aicr_*_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
-(
-  cd "${tmpdir}"
-  sha256sum -c aicr_checksums.txt --ignore-missing
-)
+  -p "${archive}"
+
+cd "${tmpdir}"
+[[ -s "${archive}" ]] || { echo "missing or empty archive: ${archive}" >&2; exit 1; }
+[[ -s aicr_checksums.txt ]] || { echo "missing aicr_checksums.txt" >&2; exit 1; }
+
+# Fail closed: verify only the downloaded archive line from the checksums file.
+line=$(grep -F "  ${archive}" aicr_checksums.txt) || {
+  echo "no checksum entry for ${archive}" >&2
+  exit 1
+}
+if command -v sha256sum >/dev/null 2>&1; then
+  printf '%s\n' "${line}" | sha256sum -c -
+elif command -v shasum >/dev/null 2>&1; then
+  printf '%s\n' "${line}" | shasum -a 256 -c -
+else
+  echo "need sha256sum (GNU coreutils) or shasum" >&2
+  exit 1
+fi
 ```
 
 ## Demo Deployment
