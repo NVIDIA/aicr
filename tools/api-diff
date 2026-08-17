@@ -58,6 +58,8 @@ readonly ALIAS_TARGETS=(
     'OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions'
     'BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output'
     'CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry'
+    'BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult'
+    'EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult'
 )
 readonly VERSIONS_FILE="${REPO_ROOT}/.settings.yaml"
 readonly EXCEPTIONS_FILE="${API_DIFF_EXCEPTIONS_FILE:-${REPO_ROOT}/pkg/client/v1/api-diff-exceptions.yaml}"

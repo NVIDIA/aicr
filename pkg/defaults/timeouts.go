@@ -136,6 +136,23 @@ const (
 	// catalog-vs-facade relationship is asserted in
 	// pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
+
+	// VerifyOperationTimeout is the facade-level upper bound for a single
+	// Client.VerifyBundle, Client.VerifyEvidence, Client.VerifyCatalog, or
+	// Client.RecipeDigest call when the caller's context has no deadline.
+	//
+	// Bundle and catalog verification are offline (locally cached or embedded
+	// Sigstore trusted root), so their own work is sub-second; the budget
+	// exists for the two paths that do reach the network — a KMS key URI in
+	// VerifyBundleOptions.Key still makes a live GetPublicKey call, and
+	// VerifyEvidence pulls an OCI artifact when its input is a pointer or a
+	// registry reference.
+	//
+	// Deliberately NOT applied to Client.PublishEvidence or
+	// Client.SignCatalog: keyless signing can block on a human completing a
+	// browser or device-code OIDC flow, so a fixed cap there would cut short
+	// an interactive run that works today.
+	VerifyOperationTimeout = 5 * time.Minute
 )
 
 // Health computation timeouts.

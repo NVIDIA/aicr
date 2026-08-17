@@ -37,7 +37,9 @@ import (
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	bundlerresult "github.com/NVIDIA/aicr/pkg/bundler/result"
+	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	evverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -257,6 +259,101 @@ func TestStability_HealthAndEvidence(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria) (*health.Report, error)]((*aicr.Client).ComputeHealth)
 	requireSignature[func(*aicr.Client, []*aicr.PhaseResult) *ctrf.Report]((*aicr.Client).MergeReports)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, []*aicr.PhaseResult, aicr.EvidenceOptions) error]((*aicr.Client).EmitRecipeEvidence)
+}
+
+// TestStability_Verification pins the consumer-side verification surface: the
+// four Client-bound entry points, the stateless primitives, the option and
+// result shapes, and the re-exported verdict constants a CI gate branches on.
+func TestStability_Verification(t *testing.T) {
+	t.Parallel()
+
+	requireSignature[func(*aicr.Client, context.Context, string, aicr.BundleVerifyOptions) (*aicr.BundleVerification, error)]((*aicr.Client).VerifyBundle)
+	requireSignature[func(*aicr.Client, context.Context, aicr.EvidenceVerifyOptions) (*aicr.EvidenceVerification, error)]((*aicr.Client).VerifyEvidence)
+	requireSignature[func(*aicr.Client, context.Context, string, aicr.CatalogVerifyOptions) (*aicr.CatalogVerification, error)]((*aicr.Client).VerifyCatalog)
+	requireSignature[func(*aicr.Client, context.Context, aicr.RecipeDigestOptions) (string, error)]((*aicr.Client).RecipeDigest)
+
+	requireSignature[func(context.Context, aicr.BinaryAttestationVerifyOptions) (string, error)](aicr.VerifyBinaryAttestation)
+	requireSignature[func(string) error](aicr.ValidateIdentityPattern)
+	requireSignature[func() []string](aicr.TrustLevels)
+	requireSignature[func(*aicr.EvidenceVerification) ([]byte, error)](aicr.RenderEvidenceJSON)
+	requireSignature[func(*aicr.EvidenceVerification) string](aicr.RenderEvidenceMarkdown)
+
+	var bv aicr.BundleVerifyOptions
+	_ = bv.CertificateIdentityRegexp
+	_ = bv.Key
+	_ = bv.TrustRoot
+	_ = bv.MinTrustLevel
+	_ = bv.RequireCreator
+	_ = bv.CLIVersionConstraint
+	_ = bv.IgnoreTLog
+
+	var verification aicr.BundleVerification
+	_ = verification.Report
+	_ = verification.PolicyFailure
+
+	var ev aicr.EvidenceVerifyOptions
+	_ = ev.Input
+	_ = ev.BundleRef
+	_ = ev.ExpectedIssuer
+	_ = ev.ExpectedIdentityRegexp
+	_ = ev.PlainHTTP
+	_ = ev.InsecureTLS
+	_ = ev.AllowUnpinnedTag
+
+	_ = aicr.CatalogVerifyOptions{}.CertificateIdentityRegexp
+	_ = aicr.CatalogVerification{}.Identity
+	_ = aicr.CatalogVerification{}.Digest
+
+	var rd aicr.RecipeDigestOptions
+	_ = rd.Path
+	_ = rd.Kubeconfig
+	_ = rd.Profile
+
+	var ba aicr.BinaryAttestationVerifyOptions
+	_ = ba.Attestation
+	_ = ba.BinaryDigest
+	_ = ba.IdentityRegexp
+
+	const (
+		_ string = aicr.TrustedIdentityPattern
+		_ string = aicr.EvidenceCauseCanceled
+		_ int    = aicr.EvidenceExitValidPassed
+		_ int    = aicr.EvidenceExitValidPhaseFailures
+		_ int    = aicr.EvidenceExitInvalid
+		_ int    = aicr.EvidenceExitIncomplete
+	)
+
+	// Transparent aliases over the two report trees. Same contract as the
+	// aliases in TestStability_TypesAndAliases: keeping them assignable
+	// from external code is part of the promise.
+	//nolint:staticcheck // QF1011: explicit types pin the aliases' target types.
+	var (
+		_ *bundleverifier.VerifyResult = (*aicr.BundleVerifyReport)(nil)
+		_ *evverifier.VerifyResult     = (*aicr.EvidenceVerification)(nil)
+	)
+}
+
+// TestStability_Signing pins the producer-side supply-chain surface.
+func TestStability_Signing(t *testing.T) {
+	t.Parallel()
+
+	requireSignature[func(*aicr.Client, context.Context, aicr.EvidencePublishOptions) error]((*aicr.Client).PublishEvidence)
+	requireSignature[func(*aicr.Client, context.Context, aicr.CatalogSignOptions) (*aicr.CatalogSignResult, error)]((*aicr.Client).SignCatalog)
+
+	var ep aicr.EvidencePublishOptions
+	_ = ep.BundleDir
+	_ = ep.Push
+	_ = ep.PlainHTTP
+	_ = ep.InsecureTLS
+	_ = ep.NoSign
+	_ = ep.OIDCResolve
+
+	var cs aicr.CatalogSignOptions
+	_ = cs.Output
+	_ = cs.OIDCResolve
+
+	_ = aicr.CatalogSignResult{}.Digest
+	_ = aicr.CatalogSignResult{}.BundleJSON
 }
 
 // TestStability_Query pins the package-level query selector, in both its

@@ -20,8 +20,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
 // evidencePublishCmd implements `aicr evidence publish <bundle-dir> --push <ref>`.
@@ -130,16 +130,20 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	err := attestation.Publish(ctx, attestation.PublishOptions{
+	client, err := embeddedClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	// The facade stamps AICRVersion from the Client's version and already
+	// returns coded pkg/errors, so no re-wrap here.
+	return client.PublishEvidence(ctx, aicr.EvidencePublishOptions{
 		BundleDir:   dir,
 		Push:        push,
 		PlainHTTP:   cmd.Bool(flagPlainHTTP),
 		InsecureTLS: cmd.Bool(flagInsecureTLS),
 		NoSign:      noSign,
-		AICRVersion: version,
 		OIDCResolve: oidcResolve,
 	})
-	// Publish already returns coded pkg/errors; PropagateOrWrap preserves
-	// those and only classifies any uncoded error that slips through.
-	return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to publish evidence bundle")
 }

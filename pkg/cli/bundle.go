@@ -30,7 +30,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -1141,7 +1140,7 @@ func runBundleCmdWithDependencies(
 
 	// Validate custom identity pattern if provided
 	if opts.certificateIdentityRegexp != "" {
-		if validErr := verifier.ValidateIdentityPattern(opts.certificateIdentityRegexp); validErr != nil {
+		if validErr := aicr.ValidateIdentityPattern(opts.certificateIdentityRegexp); validErr != nil {
 			return validErr
 		}
 	}

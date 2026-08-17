@@ -22,10 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	recipecat "github.com/NVIDIA/aicr/pkg/recipe/catalog"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 )
 
 func recipeSignCatalogCmd() *cli.Command {
@@ -89,36 +86,30 @@ func runRecipeSignCatalogCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	attester, err := attestation.ResolveAttesterLazy(ctx, attestation.ResolveOptions{
-		Attest:              true,
-		IdentityToken:       cmd.String(flagIdentityToken),
-		AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
-		AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
-		DeviceFlow:          cmd.Bool(flagOIDCDeviceFlow),
-		FulcioURL:           cmd.String(flagFulcioURL),
-		RekorURL:            rekorURL,
-		SigningConfigPath:   signingConfig,
-		UseTUFSigningConfig: useV2,
-		PromptWriter:        os.Stderr,
-	})
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeUnauthorized, "could not resolve OIDC attester")
-	}
-
-	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-
-	result, err := recipecat.Sign(ctx, provider, recipecat.SignOptions{
-		Attester:    attester,
-		Output:      output,
-		ToolVersion: version,
-	})
+	client, err := embeddedClient()
 	if err != nil {
 		return err
 	}
+	defer func() { _ = client.Close() }()
 
-	if result.BundleJSON == nil {
-		return errors.New(errors.ErrCodeInternal,
-			"attester produced no bundle (is OIDC token available?)")
+	// The facade sets Attest, resolves the attester lazily, stamps
+	// ToolVersion from the Client's version, and rejects a nil bundle.
+	result, err := client.SignCatalog(ctx, aicr.CatalogSignOptions{
+		Output: output,
+		OIDCResolve: aicr.OIDCResolveOptions{
+			IdentityToken:       cmd.String(flagIdentityToken),
+			AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+			AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+			DeviceFlow:          cmd.Bool(flagOIDCDeviceFlow),
+			FulcioURL:           cmd.String(flagFulcioURL),
+			RekorURL:            rekorURL,
+			SigningConfigPath:   signingConfig,
+			UseTUFSigningConfig: useV2,
+			PromptWriter:        os.Stderr,
+		},
+	})
+	if err != nil {
+		return err
 	}
 
 	slog.Info("catalog signed", "digest", result.Digest, "output", output)

@@ -20,9 +20,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // evidenceDigestCmd implements `aicr evidence digest -r <recipe-or-overlay>`.
@@ -86,9 +85,17 @@ func runEvidenceDigestCmd(ctx context.Context, cmd *cli.Command) error {
 			"--recipe is required: aicr evidence digest -r <recipe-or-overlay>")
 	}
 
-	dp := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	digest, err := attestation.ComputeRecipeDigestWithProfile(
-		ctx, dp, path, cmd.String("kubeconfig"), version, cmd.String(flagProfile))
+	client, err := embeddedClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	digest, err := client.RecipeDigest(ctx, aicr.RecipeDigestOptions{
+		Path:       path,
+		Kubeconfig: cmd.String("kubeconfig"),
+		Profile:    cmd.String(flagProfile),
+	})
 	if err != nil {
 		return err
 	}
