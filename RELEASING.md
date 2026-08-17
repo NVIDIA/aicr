@@ -224,33 +224,53 @@ Every release includes:
 
 ### Container Attestations
 
+Verify the **digest-pinned** image that a tag currently resolves to. Tag refs
+are registry-rewritable; attestations bind to digests.
+
 ```bash
 export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
 
+# Resolve an immutable digest for each image (crane, or: docker buildx imagetools inspect …)
+resolve() { crane digest "ghcr.io/nvidia/$1:${TAG}"; }
+
 # GitHub CLI (core images)
-gh attestation verify oci://ghcr.io/nvidia/aicr:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicrd:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicr-gate:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr@$(resolve aicr)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicrd@$(resolve aicrd)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-gate@$(resolve aicr-gate)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
 # GitHub CLI (validator images)
-gh attestation verify oci://ghcr.io/nvidia/aicr-validators/deployment:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicr-validators/performance:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicr-validators/conformance:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicr-validators/aiperf-bench:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/deployment@$(resolve aicr-validators/deployment)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@$(resolve aicr-validators/performance)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@$(resolve aicr-validators/conformance)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@$(resolve aicr-validators/aiperf-bench)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
-# Cosign
+# Cosign (same digest-pinned refs)
+DIGEST=$(resolve aicr)
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
-  ghcr.io/nvidia/aicr:${TAG}
+  "ghcr.io/nvidia/aicr@${DIGEST}"
 ```
 
 ### Binary Checksums
 
+`aicr_checksums.txt` lists digests for release archives (and SBOMs). Download
+the files you care about into the same directory as the checksums file before
+running `sha256sum -c` — checking against an empty directory verifies nothing
+(`--ignore-missing` skips missing paths).
+
 ```bash
-curl -sL "https://github.com/NVIDIA/aicr/releases/download/${TAG}/aicr_checksums.txt" -o checksums.txt
-sha256sum -c checksums.txt --ignore-missing
+export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+tmpdir=$(mktemp -d)
+# Example: this host's CLI archive + the checksums file
+gh release download "${TAG}" -R NVIDIA/aicr -D "${tmpdir}" \
+  -p "aicr_checksums.txt" \
+  -p "aicr_*_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+(
+  cd "${tmpdir}"
+  sha256sum -c aicr_checksums.txt --ignore-missing
+)
 ```
 
 ## Demo Deployment
