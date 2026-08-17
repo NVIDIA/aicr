@@ -207,8 +207,15 @@ cleanup_ns() {
     kubectl delete pods --all -n "$ns" --ignore-not-found --wait=true --timeout=30s &>/dev/null || true
     # Delete resourceclaims (finalizer removed after pod deletion)
     kubectl delete resourceclaims --all -n "$ns" --ignore-not-found --wait=true --timeout=30s &>/dev/null || true
-    # Now namespace can terminate cleanly
-    kubectl delete namespace "$ns" --ignore-not-found --timeout=60s &>/dev/null || true
+    # Now namespace can terminate cleanly. Unlike the best-effort deletes above
+    # (the namespace delete cascades them anyway), this result is returned to
+    # the caller: a refused namespace delete can leave a GPU workload running,
+    # which a section's verdict must not report as a clean PASS.
+    if ! kubectl delete namespace "$ns" --ignore-not-found --timeout=60s &>/dev/null; then
+        log_warn "Failed to delete namespace ${ns} — resources may still be running"
+        return 1
+    fi
+    return 0
 }
 
 # ensure_fresh_namespace deletes any prior run's namespace and VERIFIES it is
@@ -1759,7 +1766,31 @@ collect_service_metrics() {
     local dynamo_ns="dynamo-workload"
     local nim_ns="nim-workload"
 
-    if kubectl get pods -n "${dynamo_ns}" -l nvidia.com/dynamo-component-type=worker --no-headers 2>/dev/null | grep -q .; then
+    # Probe Dynamo with the status captured, not through a `| grep -q .`
+    # pipeline: a pipeline's status is grep's, so an RBAC, auth, or API error
+    # would be indistinguishable from "no workload" and would silently fall
+    # through to the NIM or trainer path — producing unrelated evidence after a
+    # failed read. A read failure is routed to the Dynamo collector, which
+    # fails closed.
+    local dynamo_pods="" dynamo_rc=0 route_dynamo=false
+    dynamo_pods=$(kubectl get pods -n "${dynamo_ns}" -l nvidia.com/dynamo-component-type=worker --no-headers 2>/dev/null) || dynamo_rc=$?
+    if [ "${dynamo_rc}" -ne 0 ]; then
+        # The pod list failed. ONLY a namespace confirmed absent means "no Dynamo
+        # workload here"; every other outcome — the namespace exists, or the
+        # namespace probe itself fails — is routed to the Dynamo collector so it
+        # fails closed. Falling through on an unclassifiable error would emit
+        # unrelated NIM or trainer evidence after a cluster-wide read failure.
+        local ns_err=""
+        if ns_err=$(kubectl get namespace "${dynamo_ns}" 2>&1 >/dev/null); then
+            route_dynamo=true
+        elif ! printf '%s' "${ns_err}" | grep -qi 'not found'; then
+            route_dynamo=true
+        fi
+    elif [ -n "${dynamo_pods}" ]; then
+        route_dynamo=true
+    fi
+
+    if [ "${route_dynamo}" = "true" ]; then
         collect_service_metrics_dynamo
     elif kubectl get pods -n "${nim_ns}" -l app.kubernetes.io/managed-by=k8s-nim-operator --no-headers 2>/dev/null | grep -q .; then
         collect_service_metrics_nim
@@ -1783,20 +1814,27 @@ for automatic target discovery.
 EOF
 
     local NS="dynamo-workload"
-    local deployed_dynamo=false
 
-    # Deploy Dynamo workload if not already running
-    if ! kubectl get pods -n "${NS}" -l nvidia.com/dynamo-component-type=worker --no-headers 2>/dev/null | grep -q .; then
-        local manifest="${SCRIPT_DIR}/manifests/dynamo-vllm-agg.yaml"
-        if [ -f "${manifest}" ]; then
-            log_info "Deploying Dynamo vLLM workload from embedded manifest..."
-            kubectl apply -f "${manifest}"
-            deployed_dynamo=true
-        else
-            log_warn "No Dynamo workload running and manifest not found at ${manifest}"
-            echo "**Result: SKIP (prerequisite absent)** — no Dynamo workload or deployment manifest was found." >> "${EVIDENCE_FILE}"
-            return
-        fi
+    # This section MEASURES an existing Dynamo workload; it never deploys one.
+    # collect_service_metrics routes here only when worker pods are already
+    # running, so a deploy-if-absent path could never execute — and deploying a
+    # workload the section would then have to tear down risks destroying
+    # user-owned resources (the manifest carries a cluster-scoped Queue).
+    # Deploying is the operator's step, documented under Cleanup below.
+    #
+    # A failed read must not be flattened into "absent": a transient API error
+    # would otherwise be reported as a missing prerequisite.
+    local worker_pods="" pods_rc=0
+    worker_pods=$(kubectl get pods -n "${NS}" -l nvidia.com/dynamo-component-type=worker --no-headers 2>/dev/null) || pods_rc=$?
+    if [ "${pods_rc}" -ne 0 ]; then
+        log_error "Could not list Dynamo worker pods in ${NS} (exit ${pods_rc})"
+        echo "**Result: FAIL** — could not list Dynamo worker pods in ${NS} (kubectl exit ${pods_rc}); the workload state is unknown." >> "${EVIDENCE_FILE}"
+        return
+    fi
+    if [ -z "${worker_pods}" ]; then
+        log_warn "No Dynamo worker pods running in ${NS}"
+        echo "**Result: SKIP (prerequisite absent)** — no running Dynamo workload in ${NS}; deploy one (see Cleanup below) to collect inference metrics evidence." >> "${EVIDENCE_FILE}"
+        return
     fi
 
     # Wait for Dynamo workload pods to be ready (poll every 15s, up to 5 minutes)
@@ -1981,19 +2019,18 @@ for r in data['data']['result']:
     fi
     kill "${pf_pid}" 2>/dev/null || true
 
-    # Cleanup deployed workload if we created it
-    if [ "${deployed_dynamo}" = "true" ] && [ "${NO_CLEANUP}" != "true" ]; then
-        log_info "Cleaning up deployed Dynamo workload..."
-        kubectl delete -f "${SCRIPT_DIR}/manifests/dynamo-vllm-agg.yaml" --ignore-not-found 2>/dev/null || true
-    fi
-
-    # Always document cleanup steps
+    # No cleanup: this section deploys nothing, so it owns nothing to delete.
+    # The workload it measures belongs to whoever deployed it.
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Cleanup
+## Workload Lifecycle
 
-**Delete workload namespace**
+This section measures a Dynamo workload that is already running; it neither
+deploys nor deletes one, so it leaves no residue on the cluster. To provision a
+workload for this evidence, and to remove it afterwards:
+
 ```
+$ kubectl apply -f manifests/dynamo-vllm-agg.yaml
 $ kubectl delete ns dynamo-workload
 ```
 EOF
@@ -2421,7 +2458,8 @@ with an implementation for advanced traffic management for inference services.
 3. **Gateway API CRDs** — All present (GatewayClass, Gateway, HTTPRoute, GRPCRoute, ReferenceGrant)
 4. **Active Gateway** — `inference-gateway` with class `agentgateway`, programmed with a load balancer address
 5. **Inference Extension CRDs** — InferencePool, InferenceObjective, InferenceModelRewrite installed
-6. **Result: PASS**
+
+The result is stated by the verdict line at the end of this section, after the checks run.
 
 ---
 
@@ -2772,12 +2810,17 @@ INVALID_CR
     echo "" >> "${EVIDENCE_FILE}"
     local crd_count
     crd_count=$(kubectl get crds 2>/dev/null | grep -c "apps\.nvidia\.com" || true)
-    local running_pods
-    running_pods=$(kubectl get pods -n "${nim_ns}" -l app.kubernetes.io/managed-by=k8s-nim-operator --no-headers 2>/dev/null | grep -c "Running" || true)
+    # Count pods with Ready=True, not phase Running: a Running pod may be 0/1
+    # ready (model still loading, or a persistent readiness failure), so a
+    # phase-based count can certify unready inference workloads as healthy.
+    local ready_pods
+    ready_pods=$(kubectl get pods -n "${nim_ns}" -l app.kubernetes.io/managed-by=k8s-nim-operator \
+        -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
+        | grep -c '^True$' || true)
 
-    if [ "${crd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
-        echo "**Result: PASS** — NIM operator running, webhooks operational (webhook-attributed rejection verified), ${crd_count} CRDs registered, NIMService reconciled with ${running_pods} healthy inference pod(s)." >> "${EVIDENCE_FILE}"
-    elif [ "${crd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ]; then
+    if [ "${crd_count}" -gt 0 ] && [ "${ready_pods}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
+        echo "**Result: PASS** — NIM operator running, webhooks operational (webhook-attributed rejection verified), ${crd_count} CRDs registered, NIMService reconciled with ${ready_pods} healthy inference pod(s)." >> "${EVIDENCE_FILE}"
+    elif [ "${crd_count}" -gt 0 ] && [ "${ready_pods}" -gt 0 ]; then
         echo "**Result: FAIL** — NIM operator running and NIMService reconciled, but a webhook-attributed rejection was not demonstrated (see the webhook test above)." >> "${EVIDENCE_FILE}"
     elif [ "${crd_count}" -gt 0 ]; then
         echo "**Result: FAIL** — NIMService found but no healthy inference pods." >> "${EVIDENCE_FILE}"
@@ -2916,8 +2959,13 @@ INVALID_CR
     else
         dgd_query_ok=false
     fi
-    local running_pods
-    running_pods=$(kubectl get pods -n dynamo-workload -l nvidia.com/dynamo-graph-deployment-name --no-headers 2>/dev/null | grep -c "Running" || true)
+    # Count pods with Ready=True, not phase Running: a Running pod may be 0/1
+    # ready (model still loading, or a persistent readiness failure), so a
+    # phase-based count can certify unready workloads as reconciled.
+    local ready_pods
+    ready_pods=$(kubectl get pods -n dynamo-workload -l nvidia.com/dynamo-graph-deployment-name \
+        -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
+        | grep -c '^True$' || true)
 
     if [ "${dgd_query_ok}" != "true" ]; then
         echo "**Result: FAIL** — DynamoGraphDeployment query failed (fail closed); rerun against a reachable API server." >> "${EVIDENCE_FILE}"
@@ -2927,8 +2975,8 @@ INVALID_CR
         # state on a stock inference cluster) must not convert an observed
         # webhook failure into a non-failing SKIP.
         echo "**Result: FAIL** — a webhook-attributed rejection was not demonstrated (see the webhook test above); operational webhooks are required regardless of whether a workload DynamoGraphDeployment exists." >> "${EVIDENCE_FILE}"
-    elif [ "${dgd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ]; then
-        echo "**Result: PASS** — Dynamo operator running, webhooks operational (webhook-attributed rejection verified), CRDs registered, DynamoGraphDeployment reconciled with ${running_pods} healthy workload pod(s)." >> "${EVIDENCE_FILE}"
+    elif [ "${dgd_count}" -gt 0 ] && [ "${ready_pods}" -gt 0 ]; then
+        echo "**Result: PASS** — Dynamo operator running, webhooks operational (webhook-attributed rejection verified), CRDs registered, DynamoGraphDeployment reconciled with ${ready_pods} healthy workload pod(s)." >> "${EVIDENCE_FILE}"
     elif [ "${dgd_count}" -gt 0 ]; then
         echo "**Result: FAIL** — DynamoGraphDeployment found but no healthy workload pods." >> "${EVIDENCE_FILE}"
     else
@@ -2955,7 +3003,8 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 3. **GPU Stress Workload** — Deployment running CUDA N-Body Simulation to generate GPU load
 4. **HPA Configuration** — Targets `gpu_utilization` with threshold of 50%
 5. **HPA Scale-Up** — Successfully scales replicas when GPU utilization exceeds target
-6. **Result: PASS**
+
+The result is stated by the verdict line at the end of this section, after the checks run.
 
 ---
 
@@ -3048,14 +3097,11 @@ EOF
 EOF
     capture "Pods after scale-up" kubectl get pods -n hpa-test -o wide
 
-    # Verdict — require actual scale-up for PASS
-    echo "" >> "${EVIDENCE_FILE}"
-    if [ "${hpa_scaled}" = "true" ]; then
-        echo "**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold." >> "${EVIDENCE_FILE}"
-    else
-        echo "**Result: FAIL** — HPA did not scale replicas within the timeout. Check GPU workload, DCGM exporter, and prometheus-adapter configuration." >> "${EVIDENCE_FILE}"
-    fi
-
+    # Cleanup runs BEFORE the verdict so its outcome can gate the result. The
+    # test workload is an unbounded CUDA loop, so a namespace that refuses to
+    # delete pins GPUs indefinitely — reporting PASS in that state would
+    # certify an outcome the run did not achieve. evidence_result() requires
+    # exactly one verdict line per file, so this cannot be a second Result.
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
 ## Cleanup
@@ -3064,7 +3110,20 @@ EOF
         kubectl delete deploy gpu-workload -n hpa-test --ignore-not-found 2>/dev/null || true
         kubectl delete pods -n hpa-test -l app=gpu-workload --force --grace-period=0 2>/dev/null || true
     fi
-    capture "Delete test namespace" cleanup_ns hpa-test
+    local cleanup_ok=false
+    if capture "Delete test namespace" cleanup_ns hpa-test; then
+        cleanup_ok=true
+    fi
+
+    # Verdict — require actual scale-up AND a completed cleanup for PASS
+    echo "" >> "${EVIDENCE_FILE}"
+    if [ "${hpa_scaled}" = "true" ] && [ "${cleanup_ok}" = "true" ]; then
+        echo "**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold." >> "${EVIDENCE_FILE}"
+    elif [ "${hpa_scaled}" = "true" ]; then
+        echo "**Result: FAIL** — HPA scaled correctly, but the hpa-test namespace could not be deleted. The GPU stress workload may still be running and pinning GPUs; delete the namespace manually before relying on this cluster." >> "${EVIDENCE_FILE}"
+    else
+        echo "**Result: FAIL** — HPA did not scale replicas within the timeout. Check GPU workload, DCGM exporter, and prometheus-adapter configuration." >> "${EVIDENCE_FILE}"
+    fi
 
     log_info "Pod autoscaling evidence collection complete."
 }
