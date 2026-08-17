@@ -15,7 +15,6 @@
 package localformat
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,20 +77,16 @@ func TestWriteLocalHelmFolder_AllManifestsEmpty(t *testing.T) {
 	}
 }
 
-// TestWriteMixedManifests_AllManifestsEmpty pins the lazy-templates/ fix on the
-// vendored/mixed-manifest path (writeMixedManifests): a mixed component whose
-// recipe-side manifests all render empty must produce NO templates/ directory
-// and an empty returned path list — mirroring the local_helm.go path covered by
-// TestWriteLocalHelmFolder_AllManifestsEmpty. Without the lazy creation, the
+// TestWriteLocalHelmFolder_AllMixedManifestsEmpty pins the lazy-templates/
+// contract for the mixed-component post wrapper, which both the vendored and
+// non-vendored paths now share (#1835): a mixed component whose recipe-side
+// manifests all render empty must produce NO templates/ directory and a
+// Folder that references no templates file. Without the lazy creation, the
 // eager MkdirAll would leave an empty templates/ dir that the inventory
 // verifier rejects.
-func TestWriteMixedManifests_AllManifestsEmpty(t *testing.T) {
+func TestWriteLocalHelmFolder_AllMixedManifestsEmpty(t *testing.T) {
 	outDir := t.TempDir()
 	dir := "003-network-operator-post"
-	folderDir := filepath.Join(outDir, dir)
-	if err := os.MkdirAll(folderDir, 0o755); err != nil {
-		t.Fatalf("mkdir folder: %v", err)
-	}
 
 	// A gated-off manifest renders to nothing (no YAML objects).
 	manifests := map[string][]byte{
@@ -99,14 +94,17 @@ func TestWriteMixedManifests_AllManifestsEmpty(t *testing.T) {
 	}
 	c := Component{Name: "network-operator", Namespace: "nvidia-network-operator"}
 
-	paths, err := writeMixedManifests(context.Background(), folderDir, dir, c, manifests)
+	folder, err := writeLocalHelmFolder(outDir, dir, 3, c, manifests, renderInputFor(c),
+		"network-operator-post", "network-operator", true)
 	if err != nil {
-		t.Fatalf("writeMixedManifests returned error for all-empty render: %v", err)
+		t.Fatalf("writeLocalHelmFolder returned error for all-empty render: %v", err)
 	}
-	if len(paths) != 0 {
-		t.Errorf("expected no template paths for all-empty render, got %v", paths)
+	for _, f := range folder.Files {
+		if filepath.Base(filepath.Dir(f)) == "templates" {
+			t.Errorf("Folder.Files must not include a templates entry when render is empty: %q", f)
+		}
 	}
-	templatesDir := filepath.Join(folderDir, "templates")
+	templatesDir := filepath.Join(outDir, dir, "templates")
 	if _, statErr := os.Stat(templatesDir); statErr == nil {
 		t.Errorf("templates/ directory must not exist when all mixed manifests render empty: %s", templatesDir)
 	} else if !os.IsNotExist(statErr) {

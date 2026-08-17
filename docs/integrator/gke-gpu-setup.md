@@ -57,8 +57,12 @@ aicr recipe --service gke --accelerator h100 --os cos --intent training \
 #   ... or, for labeled pools with the standalone driver installer:
 #   --profile gpuStack=driver-installer
 
-# 3. Bundle.
-aicr bundle -r recipe.yaml -o ./bundles
+# 3. Bundle. The NVSentinel labeler flag is required under the
+#    gke-default default (no driver pod the labeler can observe); omit it
+#    under driver-installer. See the NVSentinel note below.
+aicr bundle -r recipe.yaml \
+  --set nv-sentinel:labeler.assumeDriverInstalled=true \
+  -o ./bundles
 ```
 
 The reading qualifies the selection — it does not choose for you. Every
@@ -137,6 +141,52 @@ Under `gke-default` **no device-plugin DaemonSet is rendered at all**
 (the nodes carrying `cloud.google.com/gke-accelerator`) may carry the opt-out
 label `gke-no-default-nvidia-gpu-device-plugin`. A labeled node fails the
 pre-flight closed (exit 2) before any check Job deploys.
+
+**NVSentinel needs `labeler.assumeDriverInstalled` under `gke-default`.** The
+NVSentinel labeler decides the node label
+`nvsentinel.dgxc.nvidia.com/driver.installed` by watching for a GPU driver pod.
+Under `gke-default` the driver is provisioned at pool creation and finalized by
+an init container of GKE's kube-system DaemonSet, so there is **no driver pod
+the labeler can observe**. The label is never applied, and the three DaemonSets
+that select on it — `metadata-collector`, `syslog-health-monitor-regular`, and
+`syslog-health-monitor-kata` — come up with **0 desired pods**
+([#2175](https://github.com/NVIDIA/aicr/issues/2175)).
+
+This is easy to miss: a DaemonSet matching no node is not unhealthy, so it
+reports no error and emits no event, and `gpu-health-monitor` keeps running
+because it selects on the DCGM label instead. The stack presents as fully
+rolled out. Pass the flag at bundle time:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --set nv-sentinel:labeler.assumeDriverInstalled=true \
+  -o ./bundles
+```
+
+It renders the labeler's `--assume-driver-installed` argument — the chart-level
+automation of the Manual Labeling Procedure in NVSentinel design 018 —
+and, per the upstream decision in
+[NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583),
+the recommended, permanent mechanism for host-installed drivers (no
+automatic detection fallback will be added). Bundling
+a `gke-default` recipe without it is a **blocking error**
+(`CheckNVSentinelDriverLabelDetectable`), so the silent half-rollout cannot
+ship. The `driver-installer` value below does **not** need the flag and must
+not be given it: Google's standalone `nvidia-driver-installer` DaemonSet
+supplies a driver pod the labeler detects, and forcing the flag would keep the
+label applied across an unloaded driver.
+
+**Labeling the nodes by hand does not persist.** Applying the label manually:
+
+```shell
+kubectl label node <node> nvsentinel.dgxc.nvidia.com/driver.installed=true
+```
+
+takes effect immediately and then silently reverts — with no driver pod to
+observe, the labeler computes an empty desired value and removes the label on
+its next reconcile. Design 018 documents manual labeling as the procedure for
+this case, so an operator following it will see it work and later find the
+DaemonSets back at 0 desired.
 
 ### Alternative: Let GPU Operator Manage the Device Plugin
 

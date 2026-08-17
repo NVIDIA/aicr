@@ -89,7 +89,7 @@ func TestGenerate(t *testing.T) {
 			name: "dynamic paths stubbed in root values.yaml",
 			input: &Generator{
 				RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
+					{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
 				}),
 				ComponentValues: map[string]map[string]any{
 					"gpu-operator": {"driver": map[string]any{"version": "580", "registry": "nvcr.io"}},
@@ -148,7 +148,7 @@ func TestGenerate(t *testing.T) {
 			name: "transformed template uses values",
 			input: &Generator{
 				RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
+					{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
 				}),
 				ComponentValues: map[string]map[string]any{
 					"gpu-operator": {"driver": map[string]any{"version": "580"}},
@@ -189,7 +189,7 @@ func TestGenerate(t *testing.T) {
 			name: "deployment steps reference helm install",
 			input: &Generator{
 				RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1.0.0"},
+					{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1.0.0"},
 				}),
 				ComponentValues: map[string]map[string]any{"gpu-operator": {}},
 				Version:         "test",
@@ -214,7 +214,7 @@ func TestGenerate(t *testing.T) {
 			name: "Chart.yaml has correct version from recipe",
 			input: &Generator{
 				RecipeResult: newRecipeResult("2.5.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1.0.0"},
+					{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1.0.0"},
 				}),
 				ComponentValues: map[string]map[string]any{"gpu-operator": {}},
 				Version:         "test",
@@ -953,6 +953,64 @@ func TestGenerate_DataFiles(t *testing.T) {
 				if !strings.Contains(string(content), tt.stageDataFile) {
 					t.Errorf("checksums.txt should contain %q entry", tt.stageDataFile)
 				}
+			}
+		})
+	}
+}
+
+// TestGenerate_DynamicRejectedForLocalChart verifies --dynamic fails closed
+// when the named component is a local chart (Helm with empty Source). Before
+// #1949 the request was silently dropped: Generate exited 0 and the root
+// values.yaml carried no stub, so install-time overrides had nowhere to land.
+func TestGenerate_DynamicRejectedForLocalChart(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  recipe.ComponentRef
+	}{
+		{
+			name: "local helm chart empty source",
+			ref:  recipe.ComponentRef{Name: "nfd-ocp", Namespace: "nfd", Type: recipe.ComponentTypeHelm, Source: ""},
+		},
+		{
+			// HasExternalChart is case-insensitive for Helm; a lowercase
+			// "kustomize" must not be mistaken for a remote chart just because
+			// Source is set (the pre-#1949 Type!=Kustomize check would).
+			name: "uncanonicalized kustomize with source",
+			ref: recipe.ComponentRef{
+				Name: "nfd-ocp", Namespace: "nfd",
+				Type: recipe.ComponentType("kustomize"), Source: "https://example.com/overlay",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			localManifest := map[string][]byte{
+				"nfd.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: nfd\n"),
+			}
+			gen := &Generator{
+				RecipeResult: newRecipeResult("v1.0.0", []recipe.ComponentRef{tt.ref}),
+				ComponentValues: map[string]map[string]any{
+					"nfd-ocp": {"image": map[string]any{"tag": "v1"}},
+				},
+				ComponentPostManifests: map[string]map[string][]byte{
+					"nfd-ocp": localManifest,
+				},
+				Version: "test",
+				RepoURL: "https://github.com/example/repo.git",
+				DynamicValues: map[string][]string{
+					"nfd-ocp": {"image.tag"},
+				},
+			}
+
+			_, err := gen.Generate(context.Background(), t.TempDir())
+			if err == nil {
+				t.Fatal("Generate() error = nil, want ErrCodeInvalidRequest for --dynamic on unsupported component")
+			}
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), "nfd-ocp") || !strings.Contains(err.Error(), "--dynamic") {
+				t.Fatalf("Generate() error = %v, want mention of --dynamic and component name", err)
 			}
 		})
 	}

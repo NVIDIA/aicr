@@ -19,12 +19,14 @@ metadata:
   name: cli-bundle-vendor-charts
 spec:
   description: |
-    End-to-end test for --vendor-charts: bundle a real recipe with the flag set,
-    confirm every Helm component is emitted as a single wrapped local-chart folder
-    (Chart.yaml with `dependencies:`, adjacent charts/<chart>-<version>.tgz,
-    values nested under the subchart name, no upstream.env), and that provenance.yaml
-    at the bundle root lists one entry per vendored chart with name/chart/version/
-    repository/sha256.
+    End-to-end test for --vendor-charts: bundle a real eks-inference recipe
+    with the flag set (inference pulls in agentgateway-crds, a vendored mixed
+    component), confirm every Helm component is emitted as a wrapped local-chart
+    folder (Chart.yaml with `dependencies:`, adjacent charts/<chart>-<version>.tgz,
+    values nested under the subchart name, no upstream.env), that mixed
+    components emit a tracked <name>-post/templates/ folder with no helm.sh/hook
+    annotations (#1835), and that provenance.yaml at the bundle root lists one
+    entry per vendored chart with name/chart/version/repository/sha256.
 
     Uses a fake `helm` binary on PATH (a shell script that writes a canned tarball
     to `--destination`) so the test is hermetic — CI doesn't need a real Helm
@@ -57,8 +59,8 @@ spec:
               trap 'rm -rf "${WORK}"' EXIT
               mkdir -p "${WORK}/fakebin"
 
-              ${AICR_BIN} recipe --service eks --accelerator gb200 --os ubuntu \
-                --intent training -o "${WORK}/recipe.yaml"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent inference -o "${WORK}/recipe.yaml"
 
               # Fake `helm` for the bundle puller. Handles:
               #   helm version --short
@@ -154,8 +156,49 @@ spec:
                   echo "${name}: upstream.env should not exist under --vendor-charts" >&2
                   missing=$((missing + 1))
                 fi
+                # #1835: recipe-side manifests of mixed components ship as a
+                # tracked <name>-post release, never as helm.sh/hook resources
+                # inside the vendored wrapper. A hook annotation anywhere in a
+                # vendored bundle means the collapsed-wrapper shape regressed:
+                # helm upgrade would skip the resource, helm uninstall would
+                # orphan it, and Argo CD would treat it as a PostSync hook that
+                # never fires under syncPolicy.automated.
+                if [ -d "${dir}templates" ] && \
+                   grep -rq 'helm.sh/hook' "${dir}templates" 2>/dev/null; then
+                  echo "${name}: templates/ must not carry helm.sh/hook annotations" >&2
+                  missing=$((missing + 1))
+                fi
               done
               [ "$missing" -eq 0 ] || exit 1
+
+              # Presence check for the #1835 layout: eks-inference vendors
+              # agentgateway-crds (mixed), which must emit a tracked -post
+              # folder with templates. Absence-only grep above would still
+              # pass if -post injection silently stopped emitting manifests.
+              post_templates="$(ls -d "${WORK}"/out/[0-9][0-9][0-9]-agentgateway-crds-post/templates 2>/dev/null || true)"
+              if [ -z "${post_templates}" ]; then
+                echo "expected NNN-agentgateway-crds-post/templates/ for vendored mixed component" >&2
+                exit 1
+              fi
+              if ! ls "${post_templates}"/*.yaml >/dev/null 2>&1; then
+                echo "NNN-agentgateway-crds-post/templates/ is empty" >&2
+                exit 1
+              fi
+              # Vendored primary must wrap the tarball and must not embed
+              # recipe manifests (those live in -post).
+              primary="$(ls -d "${WORK}"/out/[0-9][0-9][0-9]-agentgateway-crds 2>/dev/null | head -1 || true)"
+              if [ -z "${primary}" ]; then
+                echo "expected NNN-agentgateway-crds/ vendored primary" >&2
+                exit 1
+              fi
+              if [ -d "${primary}/templates" ]; then
+                echo "vendored primary ${primary} must not contain templates/" >&2
+                exit 1
+              fi
+              if ! ls "${primary}/charts/"*.tgz >/dev/null 2>&1; then
+                echo "vendored primary ${primary} missing charts/*.tgz" >&2
+                exit 1
+              fi
 
               # provenance.yaml must be valid K8s-style YAML. We use `yq` to
               # convert to JSON so the validator can use stdlib `json` only —

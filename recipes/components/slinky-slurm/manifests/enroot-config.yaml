@@ -12,27 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-enabled: true
-additional_trustees:
-  - atif1996
-  - ayuskauskas
-  - coffeepac
-  - cullenmcdermott
-  - dims
-  - Kevin-Hawkins
-  - kaynetu
-  - lockwobr
-  - mchmarny
-  - njhensley
-  - sttts
-  - svcsectool
-  - tabern
-  - valcharry
-  - xdu31
-  - yuanchen8911
-  - JRosenboimNVIDIA
-  - hkii
-  - tjrasche
-  - rorajani
-  - varmesh
-  - bmcadams1
+{{ $component := index .Values "slinky-slurm" }}
+{{ $enroot := index $component "enroot" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slinky-slurm-enroot-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: slinky-slurm
+    app.kubernetes.io/component: enroot-config
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  enroot.conf: |
+    {{- range $key, $value := index $enroot "config" }}
+    {{ $key }}={{ $value }}
+    {{- end }}
+  99-aicr-defaults.env: |
+    {{- range $key, $value := index $enroot "env" }}
+    {{ $key }}={{ $value }}
+    {{- end }}

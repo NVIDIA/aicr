@@ -70,17 +70,23 @@ func preamble(m Matrix) string {
 	b.WriteString("dashboard coordinate deep-links to it, and shows `pending` only when none ")
 	b.WriteString("exists. See also the [CLI reference](./cli-reference.md).\n\n")
 
-	b.WriteString("**AICR-version axis.** Scheduled UAT builds only the current checkout, so ")
-	b.WriteString("the live axis today is `")
-	b.WriteString(strings.Join(m.VersionAxis, "`, `"))
-	b.WriteString("`. The multi-version matrix (main + the previous N stable releases) is ")
-	b.WriteString("owned by the dynamic-clusters epic (DC5); per-version posture will be a ")
+	b.WriteString("**AICR-version axis.** The nightly UAT batch runs every enrolled ")
+	b.WriteString("reservation against tip-of-`main`, built from source")
+	switch n := m.VersionAxis.PreviousReleases; {
+	case n == 1:
+		b.WriteString(", plus the previous stable release, installed from its release artifacts")
+	case n > 1:
+		fmt.Fprintf(&b, ", plus the previous %d stable releases, installed from their release artifacts", n)
+	}
+	b.WriteString(". Each version is a full provision, CUJ and teardown cell per intent. ")
+	b.WriteString("The rows below are version-independent: per-version pass/fail posture is a ")
 	b.WriteString("TestGrid link, not a cell here.\n\n")
 
 	b.WriteString("**Legend.** `covered` = exercised by an executable *journey* signal — a ")
 	b.WriteString("chainsaw/KWOK test or a wired nightly UAT runner; `not-yet-covered` = a ")
 	b.WriteString("shipping capability no such journey touches yet; `stubbed` = UAT assets exist ")
-	b.WriteString("but no scheduled workflow runs them. This tracks CUJ/CLI journey coverage — ")
+	b.WriteString("but nothing scheduled executes the journey, for the reason the row's note ")
+	b.WriteString("gives. This tracks CUJ/CLI journey coverage — ")
 	b.WriteString("per-package Go unit-test coverage is a separate gate (`make test-coverage`), ")
 	b.WriteString("not reflected here.\n")
 	return b.String()

@@ -26,26 +26,19 @@
 // were authored against the upstream chart's value schema, so the
 // wrapper emits them nested under the upstream chart's name.
 //
-// For mixed components (Helm + raw manifests), the recipe-side raw
-// manifests are placed in the wrapper's templates/ directory with
-// helm.sh/hook: post-install + a stable hook-weight so they apply
-// after the subchart's resources.
+// Mixed-component recipe-side manifests are NOT placed in the wrapper
+// templates/ (#1835). Write emits a separate <name>-post local-helm
+// folder after the vendored primary, matching the non-vendored path.
 
 package localformat
 
 import (
 	"bytes"
 	"embed"
-	stderrors "errors"
-	"io"
-	"strconv"
 	"text/template"
 
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed templates/wrapper-chart.yaml.tmpl
@@ -111,153 +104,7 @@ func nestUnderSubchart(values map[string]any, subchart string) map[string]any {
 	// Deep-copy so the inner reference is not shared with the caller.
 	// Without this, downstream writes (e.g., a later helper mutating the
 	// returned map) would silently mutate the caller's values map and
-	// produce non-deterministic bundle content. splitDynamicPaths and
-	// renderInputForVendored already deep-copy for the same reason.
+	// produce non-deterministic bundle content. splitDynamicPaths already
+	// deep-copies for the same reason.
 	return map[string]any{subchart: component.DeepCopyMap(values)}
-}
-
-// postInstallHookWeightBase is the starting hook-weight applied to
-// recipe-side raw manifests in mixed-component wrappers. Hook weights
-// are int strings; lower runs first. We set a positive base so any
-// future need to inject a "very early" or "very late" wrapper-level
-// hook (negative weight, or weight > base+N) has room.
-const postInstallHookWeightBase = 100
-
-// InjectPostInstallHooks rewrites a multi-document YAML stream to add
-// post-install hook annotations. Exported for deployers that build
-// vendored mixed-component folders outside of localformat.Write()
-// (e.g., flux).
-func InjectPostInstallHooks(in []byte) ([]byte, error) {
-	return injectPostInstallHooks(in)
-}
-
-// injectPostInstallHooks rewrites a multi-document YAML stream to add
-// `helm.sh/hook: post-install` and a stable per-document hook-weight on
-// every top-level resource that doesn't already declare a hook. Used in
-// mixed-component vendored wrappers so the recipe-side raw manifests
-// install AFTER the vendored subchart's resources.
-//
-// Stable ordering: documents are visited in input order; weights start
-// at postInstallHookWeightBase and increment by 1. This preserves the
-// sort order that the recipe author saw in their manifest list. Callers
-// MUST feed manifests in deterministic order (writeMixedManifests
-// sorts by basename before calling).
-//
-// Idempotence: if a document already has helm.sh/hook annotation set,
-// it is left untouched (and does not consume a weight). This lets
-// recipes that intentionally tag a manifest as a different hook (e.g.
-// pre-install) opt out of post-install coercion.
-//
-// Empty docs and comment-only docs are skipped in the output rather
-// than preserved — yaml.v3's Decoder collapses them naturally, and the
-// downstream Helm renderer doesn't care about the missing whitespace.
-//
-// Built on yaml.v3's streaming Decoder so document boundaries are
-// recognized inside YAML's quoting and literal-block rules — a leading
-// `---`, a literal-block string containing `---` on its own line, and
-// interleaved comments all parse correctly.
-func injectPostInstallHooks(in []byte) ([]byte, error) {
-	if len(in) == 0 {
-		return in, nil
-	}
-
-	dec := yaml.NewDecoder(bytes.NewReader(in))
-	out := &bytes.Buffer{}
-	weight := postInstallHookWeightBase
-	first := true
-
-	for {
-		var doc map[string]any
-		err := dec.Decode(&doc)
-		if stderrors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-				"parse manifest doc for hook injection", err)
-		}
-		if len(doc) == 0 {
-			// Comment-only / empty doc; skip.
-			continue
-		}
-
-		if injectHookOnDoc(doc, weight) {
-			weight++
-		}
-
-		// Deterministic marshal so hook-injected manifests are byte-stable
-		// across runs — they end up in checksums.txt and the bundle attestation.
-		body, mErr := serializer.MarshalYAMLDeterministic(doc)
-		if mErr != nil {
-			return nil, errors.PropagateOrWrap(mErr, errors.ErrCodeInternal,
-				"re-marshal manifest doc after hook injection")
-		}
-		if !first {
-			out.WriteString("---\n")
-		}
-		out.Write(body)
-		first = false
-	}
-	return out.Bytes(), nil
-}
-
-// injectHookOnDoc adds the post-install hook annotations to a parsed
-// document if helm.sh/hook is not already set. Returns true when the
-// caller should consume a hook-weight.
-func injectHookOnDoc(doc map[string]any, weight int) bool {
-	meta, _ := doc["metadata"].(map[string]any)
-	if meta == nil {
-		meta = map[string]any{}
-		doc["metadata"] = meta
-	}
-	// Recover annotations whether they were emitted as map[string]any
-	// (yaml.v3 default) or as map[interface{}]interface{} (yaml.v2 /
-	// upstream tooling that round-trips through that shape). Without the
-	// second case we'd silently allocate a fresh map and overwrite the
-	// author's existing annotations.
-	annos := annotationsAsStringMap(meta["annotations"])
-	if annos == nil {
-		annos = map[string]any{}
-	}
-	meta["annotations"] = annos
-	if _, alreadyHooked := annos["helm.sh/hook"]; alreadyHooked {
-		// Honor an author-declared hook (could be pre-install,
-		// post-upgrade, etc.). Don't overwrite, don't consume a weight.
-		return false
-	}
-	annos["helm.sh/hook"] = "post-install"
-	annos["helm.sh/hook-weight"] = strconv.Itoa(weight)
-	// Honor an author-declared delete-policy for the same reason we
-	// honor an author-declared hook: a recipe author who tagged a
-	// resource explicitly (e.g., "keep" to preserve install-time state
-	// across upgrades) means it.
-	if _, alreadySetPolicy := annos["helm.sh/hook-delete-policy"]; !alreadySetPolicy {
-		annos["helm.sh/hook-delete-policy"] = "before-hook-creation"
-	}
-	return true
-}
-
-// annotationsAsStringMap normalizes the value at metadata.annotations to
-// a map[string]any regardless of which YAML library produced it. Returns
-// nil when the value is absent or not a map. Preserves existing entries
-// so the hook-injection caller doesn't accidentally clobber them.
-func annotationsAsStringMap(v any) map[string]any {
-	switch m := v.(type) {
-	case map[string]any:
-		return m
-	case map[any]any:
-		// Convert keys to strings; non-string keys are skipped (Kubernetes
-		// annotations are always string-keyed by the schema).
-		out := make(map[string]any, len(m))
-		for k, val := range m {
-			ks, ok := k.(string)
-			if !ok {
-				continue
-			}
-			out[ks] = val
-		}
-		return out
-	default:
-		return nil
-	}
 }

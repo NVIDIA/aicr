@@ -1366,22 +1366,32 @@ func TestReleaseHomebrewBehavior(t *testing.T) {
 	}
 }
 
+// blockedCommandTimeoutSeconds is the AICR_NETWORK_TIMEOUT_SECONDS value the
+// blocked-command subtests configure. blockedCommandBudget scales the wall-clock
+// assertion off it with generous headroom: the elapsed time also covers shell
+// startup and process spawning, so a tight bound only produces flakes under
+// load. The assertion exists solely to catch an indefinite hang — the "script
+// failed" and "artifact not mutated" assertions prove the real behavior.
+const (
+	blockedCommandTimeoutSeconds = 1
+	blockedCommandBudget         = 10 * blockedCommandTimeoutSeconds * time.Second
+)
+
 func TestReleaseNetworkBoundsTerminateBlockedCommands(t *testing.T) {
-	t.Parallel()
 	t.Run("candidate resolver", func(t *testing.T) {
-		t.Parallel()
 		fixture := newReleaseFixture(t)
 		writeExecutable(t, filepath.Join(fixture.bin, "timeout"), fakeTimeout)
 		writeExecutable(t, filepath.Join(fixture.bin, "crane"), blockingCommand)
 		output := filepath.Join(fixture.dir, "digests.json")
-		environment := append(fixture.environment(), "AICR_NETWORK_TIMEOUT_SECONDS=1")
+		environment := append(fixture.environment(),
+			fmt.Sprintf("AICR_NETWORK_TIMEOUT_SECONDS=%d", blockedCommandTimeoutSeconds))
 		started := time.Now()
 		result := runScript(t, environment, ".github/scripts/release-images.sh", "resolve", output)
 		if result.err == nil {
 			t.Fatal("resolver accepted a blocked registry command")
 		}
-		if elapsed := time.Since(started); elapsed > 4*time.Second {
-			t.Errorf("resolver timeout took %s, want under 4s", elapsed)
+		if elapsed := time.Since(started); elapsed > blockedCommandBudget {
+			t.Errorf("resolver timeout took %s, want under %s", elapsed, blockedCommandBudget)
 		}
 		if _, err := os.Stat(output); !os.IsNotExist(err) {
 			t.Errorf("timed-out resolver published output: %v", err)
@@ -1392,7 +1402,6 @@ func TestReleaseNetworkBoundsTerminateBlockedCommands(t *testing.T) {
 	})
 
 	t.Run("Homebrew checksum fetch", func(t *testing.T) {
-		t.Parallel()
 		dir := t.TempDir()
 		bin := filepath.Join(dir, "bin")
 		formulaDir := filepath.Join(dir, "tap", "Formula")
@@ -1416,15 +1425,15 @@ func TestReleaseNetworkBoundsTerminateBlockedCommands(t *testing.T) {
 		environment := append(os.Environ(),
 			"PATH="+bin+":"+os.Getenv("PATH"),
 			"RELEASE_TAG=v1.2.3",
-			"AICR_NETWORK_TIMEOUT_SECONDS=1",
+			fmt.Sprintf("AICR_NETWORK_TIMEOUT_SECONDS=%d", blockedCommandTimeoutSeconds),
 		)
 		started := time.Now()
 		result := runScript(t, environment, ".github/scripts/publish-homebrew.sh", candidate, filepath.Join(dir, "tap"))
 		if result.err == nil {
 			t.Fatal("Homebrew publisher accepted a blocked checksum request")
 		}
-		if elapsed := time.Since(started); elapsed > 4*time.Second {
-			t.Errorf("Homebrew timeout took %s, want under 4s", elapsed)
+		if elapsed := time.Since(started); elapsed > blockedCommandBudget {
+			t.Errorf("Homebrew timeout took %s, want under %s", elapsed, blockedCommandBudget)
 		}
 		if got := readOptional(t, destination); got != existing {
 			t.Error("timed-out checksum request modified the tap")

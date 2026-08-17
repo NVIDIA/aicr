@@ -1242,7 +1242,11 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	// (severity: error) on a recipe resolved from a snapshot that observed
 	// no NVIDIA kernel driver. This path has no bundle-time --set
 	// overrides, so the bundler config is nil; validations that act solely
-	// on bundle-time flags no-op on a nil config.
+	// on bundle-time flags no-op on a nil config. For the NVSentinel gates
+	// that is a documented boundary, closure owned by issue #2181: once
+	// the recipes own the remedy values, those gates are runnable here
+	// with no override channel and their nil-config no-op is to be
+	// removed (an acceptance criterion recorded on that issue).
 	preflightWarnings, preflightErr := validations.RunComponentValidations(ctx, pinned, nil)
 	for _, warning := range preflightWarnings {
 		slog.Warn(warning, "source", "component-validation")

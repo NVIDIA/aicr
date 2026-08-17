@@ -142,6 +142,22 @@ storage:
     storageClassName: ""
     size: 100Gi
 
+# Enroot settings shared by the login and compute containers. The matching
+# pre-manifest renders these maps as /etc/enroot/enroot.conf and
+# /etc/enroot/environ.d/99-aicr-defaults.env. Keep values provider-neutral here;
+# leaf overlays and bundle-time overrides can add site-specific settings.
+enroot:
+  config:
+    # Cluster policy defaults. Jobs can opt out with the corresponding
+    # Pyxis --no-container-* options.
+    ENROOT_MOUNT_HOME: "yes"
+    ENROOT_REMAP_ROOT: "yes"
+  # Cluster-wide baseline for every Pyxis workload. WARN preserves actionable
+  # NCCL failure diagnostics without INFO-level log volume. To override a key
+  # for one job, export it and pass its name with srun --container-env.
+  env:
+    NCCL_DEBUG: WARN
+
 # Secure default: the login pod is intentionally unreachable via SSH
 # (empty rootSshAuthorizedKeys + PasswordAuthentication off) until an
 # operator supplies real keys. Do not "fix" without wiring key delivery.
@@ -156,11 +172,25 @@ loginsets:
         repository: ghcr.io/slinkyproject/login-pyxis
         tag: 26.05-ubuntu26.04
         digest: sha256:9e782d1a645aff1dedc498d7a3256733cde55a152659f44716e8a5f0dca02028
+      volumeMounts:
+        - name: enroot-config
+          mountPath: /etc/enroot/enroot.conf
+          subPath: enroot.conf
+          readOnly: true
+        - name: enroot-config
+          mountPath: /etc/enroot/environ.d/99-aicr-defaults.env
+          subPath: 99-aicr-defaults.env
+          readOnly: true
     # Pin the initconf sidecar to an immutable Alpine tag (chart default
     # is :latest).
     initconf:
       image:
         tag: "3.23.3"
+    podSpec:
+      volumes:
+        - name: enroot-config
+          configMap:
+            name: slinky-slurm-enroot-config
     rootSshAuthorizedKeys: |
       # PLACEHOLDER -- override via valuesFile or --set before deploy
       # ssh-ed25519 AAAA... user@example.com
@@ -193,11 +223,25 @@ nodesets:
         repository: ghcr.io/slinkyproject/slurmd-pyxis
         tag: 26.05-ubuntu26.04
         digest: sha256:0c03f87d5b5725df2d11392702fb647922b3060c076e9ce4b4f13c9a67c904b3
+      volumeMounts:
+        - name: enroot-config
+          mountPath: /etc/enroot/enroot.conf
+          subPath: enroot.conf
+          readOnly: true
+        - name: enroot-config
+          mountPath: /etc/enroot/environ.d/99-aicr-defaults.env
+          subPath: 99-aicr-defaults.env
+          readOnly: true
     # Pin the logfile sidecar to an immutable Alpine tag (chart default
     # is :latest).
     logfile:
       image:
         tag: "3.23.3"
+    podSpec:
+      volumes:
+        - name: enroot-config
+          configMap:
+            name: slinky-slurm-enroot-config
     partition:
       enabled: true
       configMap:
