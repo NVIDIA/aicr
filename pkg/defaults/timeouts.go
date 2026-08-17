@@ -139,7 +139,17 @@ const (
 
 	// VerifyOperationTimeout is the facade-level upper bound for a single
 	// Client.VerifyBundle, Client.VerifyEvidence, Client.VerifyCatalog, or
-	// Client.RecipeDigest call when the caller's context has no deadline.
+	// Client.RecipeDigest call.
+	//
+	// It is an UNCONDITIONAL ceiling, not a fallback for deadline-less
+	// callers: those methods always wrap the caller's context, and
+	// context.WithTimeout takes the smaller of the two. A caller that
+	// deliberately allows 20 minutes for a slow OCI pull is still capped
+	// here. The trade is deliberate — an unbounded verify can hang a
+	// controller reconcile — but it has one sharp edge worth knowing, called
+	// out on Client.VerifyEvidence: a cap breach surfaces as an error, not as
+	// the Incomplete verdict a CI gate uses to tell "could not check this"
+	// from "checked it and it failed".
 	//
 	// Bundle and catalog verification are offline (locally cached or embedded
 	// Sigstore trusted root), so their own work is sub-second; the budget

@@ -90,6 +90,14 @@ func (c *Client) PublishEvidence(ctx context.Context, opts EvidencePublishOption
 		return err
 	}
 
+	// c.version is read without holding c.mu, unlike the snapshot in
+	// SignCatalog and RecipeDigest. That is safe by the Client's own contract
+	// — version is set once in NewClient and never mutated, as its field
+	// comment states — and MergeReports reads it the same way. Those other two
+	// methods take the lock for the DataProvider, which IS cleared by Close,
+	// and pick up version while they are already holding it; this method needs
+	// no provider, so there is no lock to piggyback on. Do NOT copy this
+	// pattern for a field that Close mutates.
 	err := evattest.Publish(ctx, evattest.PublishOptions{
 		BundleDir:   opts.BundleDir,
 		Push:        opts.Push,

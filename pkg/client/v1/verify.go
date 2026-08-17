@@ -27,9 +27,13 @@ import (
 
 // TrustedIdentityPattern is the default certificate-identity regexp that
 // binary-attestation verification pins to: NVIDIA's release workflow on tag
-// refs. Supply a different pattern only to verify a fork or a pre-release
-// workflow; ValidateIdentityPattern enforces that any override stays within
-// the NVIDIA/aicr repository.
+// refs.
+//
+// Override it only to pin a DIFFERENT WORKFLOW within NVIDIA/aicr — a
+// pre-release or e2e build, say. Verifying a fork is not possible through this
+// option and is not meant to be: ValidateIdentityPattern requires every
+// override to begin with https://github.com/NVIDIA/aicr/, so a fork's
+// certificate identity can never satisfy it.
 const TrustedIdentityPattern = bundleverifier.TrustedRepositoryPattern
 
 // Evidence verification verdicts, mirroring the "exit" field on an
@@ -167,7 +171,9 @@ type BundleVerification struct {
 //
 // This method does not touch the Client's recipe catalog. It hangs off Client
 // so that a single configured Client is the one object a consumer needs, and
-// so config-driven verification has a home.
+// so config-driven verification has a home. Any open Client will do — a
+// hot-path caller can construct one against EmbeddedSource and reuse it,
+// rather than building one per verification.
 func (c *Client) VerifyBundle(ctx context.Context, bundleDir string, opts BundleVerifyOptions) (*BundleVerification, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -291,6 +297,17 @@ type EvidenceVerification = evverifier.VerifyResult
 //
 // Unlike bundle verification this can reach the network: a pointer or OCI
 // input pulls the artifact from its registry.
+//
+// That makes one interaction worth knowing. The call is capped by
+// defaults.VerifyOperationTimeout, which is an unconditional ceiling rather
+// than a deadline-less fallback, so a slow registry can trip it even when the
+// caller's own context allowed longer. A cap breach returns an ERROR, not
+// EvidenceExitIncomplete — so a gate that distinguishes "could not check this"
+// from "checked it and it failed" must treat a context-deadline error as the
+// former, alongside the Incomplete verdict.
+//
+// The Client's recipe catalog is not consulted, so any open Client will do —
+// including one a hot-path caller keeps around and reuses.
 func (c *Client) VerifyEvidence(ctx context.Context, opts EvidenceVerifyOptions) (*EvidenceVerification, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -472,8 +489,10 @@ type BinaryAttestationVerifyOptions struct {
 	BinaryDigest []byte
 
 	// IdentityRegexp overrides the certificate identity the attestation is
-	// pinned to. Empty uses TrustedIdentityPattern. Must contain
-	// "NVIDIA/aicr".
+	// pinned to. Empty uses TrustedIdentityPattern. Must BEGIN with
+	// "https://github.com/NVIDIA/aicr/" (a leading "^" is allowed) and must
+	// not use top-level alternation, so the override stays confined to the
+	// repository; see ValidateIdentityPattern.
 	IdentityRegexp string
 }
 
@@ -524,6 +543,10 @@ func ValidateIdentityPattern(pattern string) error {
 // rank). Intended for building help text, shell completions, and input
 // validation. The meta-value "max" is deliberately absent: it is a policy
 // instruction rather than a level a bundle can be at.
+//
+// That matters when validating BundleVerifyOptions.MinTrustLevel input: this
+// list alone is NOT the accepted set. Accept "max" and the empty string too,
+// or the check rejects the very default the option documents.
 //
 // Each call returns a fresh slice, so a caller may sort or filter it.
 func TrustLevels() []string {
