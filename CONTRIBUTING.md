@@ -400,9 +400,10 @@ description.
 `main` and cannot be corrected after merge, CI checks it against Conventional
 Commits format:
 
-```
-type(scope): subject     # scope optional
-type!: subject           # "!" marks a breaking change
+```text
+type: subject            # scope optional
+type(scope): subject
+type(scope)!: subject    # "!" marks a breaking change
 ```
 
 Valid types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`,

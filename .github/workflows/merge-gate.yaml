@@ -731,13 +731,22 @@ jobs:
             });
             const title = pr.title;
 
+            // The title is attacker-influenced: anyone opening a PR chooses
+            // it. core.summary.addRaw does not escape, so HTML-escape before
+            // embedding, and wrap in <code> rather than a markdown code span
+            // so a title containing backticks renders literally.
+            const esc = (v) => v
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+
             if (!PATTERN.test(title)) {
               core.summary.addHeading('PR title does not follow Conventional Commits', 3);
               core.summary.addRaw(
                 'The repo squash-merges with `squash_merge_commit_message: BLANK`, so this ' +
                 'title becomes the entire commit message on `main` and cannot be fixed after merge.\n\n'
               );
-              core.summary.addRaw(`Received: \`${title}\`\n\n`);
+              core.summary.addRaw(`Received: <code>${esc(title)}</code>\n\n`);
               core.summary.addRaw('Expected: `type(scope): subject` or `type: subject`\n\n');
               core.summary.addRaw(`Valid types: ${TYPES.map((t) => `\`${t}\``).join(', ')}\n\n`);
               core.summary.addRaw('Examples: `fix(bundler): reject conflicting gpu-operator variants`, `docs: add ADR-019`\n\n');
