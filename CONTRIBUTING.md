@@ -407,10 +407,10 @@ type(scope)!: subject    # "!" marks a breaking change
 ```
 
 Valid types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`,
-`revert`, `style`, `test`. A malformed title fails the merge gate. After editing
-the title, use **Re-run failed jobs** — the check re-reads the current title, so
-no new commit is needed. Titles over 70 characters produce a warning but do not
-block: dependency-bot titles embed pseudo-versions that cannot be shortened.
+`revert`, `style`, `test`. A malformed title fails the check; editing the title
+re-runs it automatically, so no new commit is needed. Titles over 70 characters
+produce a warning but do not block: dependency-bot titles embed pseudo-versions
+that cannot be shortened.
 
 ### Code Style
 
