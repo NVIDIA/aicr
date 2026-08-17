@@ -16,6 +16,7 @@ package aicr_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
@@ -79,6 +80,85 @@ func TestSignCatalog_Guards(t *testing.T) {
 			t.Parallel()
 			_, err := tt.client.SignCatalog(tt.ctx, aicr.CatalogSignOptions{})
 			wantInvalidRequest(t, err)
+		})
+	}
+}
+
+// TestSignCatalog_RejectsModesVerifyCatalogCannotVerify pins the sign/verify
+// symmetry invariant. VerifyCatalog checks against the public-good Sigstore
+// root, requires a transparency-log entry, and accepts keyless GitHub OIDC
+// certificates only — so every signing mode outside that envelope must be
+// rejected up front rather than producing an artifact the documented
+// counterpart cannot verify.
+//
+// The rejection has to happen before the attester is resolved, which is what
+// makes it testable here: no OIDC token is needed to observe it.
+func TestSignCatalog_RejectsModesVerifyCatalogCannotVerify(t *testing.T) {
+	t.Parallel()
+
+	client := newVerifyClient(t)
+
+	tests := []struct {
+		name    string
+		resolve aicr.OIDCResolveOptions
+	}{
+		{
+			name:    "KMS key has no catalog verification path",
+			resolve: aicr.OIDCResolveOptions{SigningKey: "awskms://alias/aicr-catalog"},
+		},
+		{
+			name:    "local PEM key has no catalog verification path",
+			resolve: aicr.OIDCResolveOptions{SigningKey: "./catalog-signer.key"},
+		},
+		{
+			name:    "private Fulcio does not chain to the public-good root",
+			resolve: aicr.OIDCResolveOptions{FulcioURL: "https://fulcio.internal.example"},
+		},
+		{
+			name:    "no transparency-log entry to verify",
+			resolve: aicr.OIDCResolveOptions{DisableTLogUpload: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := client.SignCatalog(context.Background(), aicr.CatalogSignOptions{OIDCResolve: tt.resolve})
+			wantInvalidRequest(t, err)
+			if got != nil {
+				t.Errorf("result = %+v, want nil alongside the error", got)
+			}
+		})
+	}
+}
+
+// TestSignCatalog_AllowsPublicGoodTransparencyLogSettings guards the other
+// direction: the release path passes a signing config (and may target a
+// public-good Rekor v1 URL), and neither is asymmetric, so neither may be
+// swept up by the rejection above.
+//
+// Both cases must get PAST the symmetry check and fail later for want of an
+// OIDC token, so the assertion is that the error is not the symmetry rejection.
+func TestSignCatalog_AllowsPublicGoodTransparencyLogSettings(t *testing.T) {
+	t.Parallel()
+
+	client := newVerifyClient(t)
+
+	for _, tt := range []struct {
+		name    string
+		resolve aicr.OIDCResolveOptions
+	}{
+		{name: "signing config", resolve: aicr.OIDCResolveOptions{SigningConfigPath: "/nonexistent/signing-config.json"}},
+		{name: "rekor url", resolve: aicr.OIDCResolveOptions{RekorURL: "https://rekor.sigstore.dev"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := client.SignCatalog(context.Background(), aicr.CatalogSignOptions{OIDCResolve: tt.resolve})
+			if err == nil {
+				return // reached signing; the symmetry check did not block it
+			}
+			if strings.Contains(err.Error(), "not supported") {
+				t.Errorf("setting was rejected as unverifiable, but it is symmetric with VerifyCatalog: %v", err)
+			}
 		})
 	}
 }

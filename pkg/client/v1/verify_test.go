@@ -441,8 +441,38 @@ func TestValidateIdentityPattern(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "trusted default", pattern: aicr.TrustedIdentityPattern},
+		{
+			name:    "retargeted NVIDIA workflow",
+			pattern: `^https://github\.com/NVIDIA/aicr/\.github/workflows/server-kms-e2e\.yaml@.*`,
+		},
 		{name: "other repository", pattern: `^https://github\.com/evil/repo/.*`, wantErr: true},
 		{name: "empty", pattern: "", wantErr: true},
+		{name: "match anything", pattern: `.*`, wantErr: true},
+
+		// Widening bypasses. Each carries the required repository prefix, so a
+		// substring anchor alone lets them through, but each admits identities
+		// outside NVIDIA/aicr — reducing the gate to the OIDC issuer pin, which
+		// any GitHub Actions workflow in any repository satisfies.
+		{
+			name:    "trailing alternation matches anything",
+			pattern: `^https://github\.com/NVIDIA/aicr/.*|.*$`,
+			wantErr: true,
+		},
+		{
+			name:    "leading alternation matches anything",
+			pattern: `.*|https://github.com/NVIDIA/aicr/.*`,
+			wantErr: true,
+		},
+		{
+			name:    "alternation to one foreign repository",
+			pattern: `https://github.com/NVIDIA/aicr/.*|^https://github\.com/evil/repo/.*`,
+			wantErr: true,
+		},
+		{
+			name:    "empty branch inside a group",
+			pattern: `(https://github.com/NVIDIA/aicr/|)`,
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

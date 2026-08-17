@@ -80,6 +80,18 @@ func TestValidateIdentityPattern(t *testing.T) {
 		{`github.com/NVIDIA/aicr/.*`, true},                            // missing scheme ://
 		{`https://evil.com/github.com/NVIDIA/aicr/.*`, true},           // github.com as path, not domain
 		{`https://evil.com/redirect?to=github.com/NVIDIA/aicr/`, true}, // github.com in query string
+
+		// Widening bypasses: each carries the required repository prefix (so
+		// the substring anchor passes) and compiles cleanly, but is not
+		// CONFINED to the repository. Left unguarded these reduce the gate to
+		// the OIDC issuer pin alone, which any GitHub Actions workflow in any
+		// repository satisfies.
+		{`^https://github\.com/NVIDIA/aicr/.*|.*$`, true},                             // trailing alternation matches anything
+		{`.*|https://github.com/NVIDIA/aicr/.*`, true},                                // leading alternation matches anything
+		{`https://github.com/NVIDIA/aicr/.*|^https://github\.com/evil/repo/.*`, true}, // alternation to a foreign repo
+		{`(https://github.com/NVIDIA/aicr/|)`, true},                                  // empty alternation branch matches anything
+		{`https://github.com/NVIDIA/aicr/.*|`, true},                                  // trailing empty branch
+		{`(?s)https://github\.com/NVIDIA/aicr/.*|(?s).*`, true},                       // inline flags plus alternation
 	}
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {

@@ -113,9 +113,11 @@ type CatalogSignOptions struct {
 
 	// OIDCResolve carries the keyless-signing token-resolution inputs.
 	// SignCatalog sets Attest itself — signing is the whole operation —
-	// so leaving that field false does not disable it. Every other field
-	// (identity token, ambient OIDC, device flow, Fulcio/Rekor URLs,
-	// signing config) is passed through as given.
+	// so leaving that field false does not disable it.
+	//
+	// Three fields are REJECTED rather than passed through, because
+	// VerifyCatalog cannot verify what they would produce. See
+	// SignCatalog's godoc for the full statement of that constraint.
 	OIDCResolve OIDCResolveOptions
 }
 
@@ -138,6 +140,32 @@ type CatalogSignResult struct {
 // As with VerifyCatalog, the digest is computed over THIS Client's
 // DataProvider, so what gets signed is the catalog the Client resolves with.
 //
+// # Signing modes are constrained to what VerifyCatalog can verify
+//
+// VerifyCatalog verifies against the public-good Sigstore root, requires a
+// transparency-log entry, and pins the certificate to the GitHub Actions OIDC
+// issuer. It exposes no key, no trust-root, and no offline option, because the
+// recipe catalog is a release artifact NVIDIA signs — not something a consumer
+// re-signs privately.
+//
+// SignCatalog therefore REJECTS the three OIDCResolve settings that would
+// produce a signature its own counterpart could not check:
+//
+//   - SigningKey — a key-signed catalog has no verification path at all.
+//   - FulcioURL — a certificate from a private CA does not chain to the
+//     public-good root.
+//   - DisableTLogUpload — verification requires a transparency-log entry.
+//
+// Each is rejected with ErrCodeInvalidRequest before any signing work runs, so
+// the failure is immediate and explains itself rather than surfacing later as
+// an unverifiable artifact. RekorURL and SigningConfigPath pass through: they
+// select which public-good transparency log and signing config to use, which
+// verification handles.
+//
+// If private catalog signing is ever needed, both halves have to move
+// together — widening this without widening VerifyCatalog is what this guard
+// exists to prevent.
+//
 // A signature that yields no bundle is treated as a failure rather than a
 // silent success: it means the attester could not obtain an OIDC token.
 func (c *Client) SignCatalog(ctx context.Context, opts CatalogSignOptions) (*CatalogSignResult, error) {
@@ -146,6 +174,9 @@ func (c *Client) SignCatalog(ctx context.Context, opts CatalogSignOptions) (*Cat
 	}
 	if ctx == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if err := rejectUnverifiableCatalogSigning(opts.OIDCResolve); err != nil {
+		return nil, err
 	}
 
 	c.mu.RLock()
@@ -183,4 +214,30 @@ func (c *Client) SignCatalog(ctx context.Context, opts CatalogSignOptions) (*Cat
 			"attester produced no Sigstore bundle (is an OIDC token available?)")
 	}
 	return &CatalogSignResult{Digest: result.Digest, BundleJSON: result.BundleJSON}, nil
+}
+
+// rejectUnverifiableCatalogSigning enforces the sign/verify symmetry stated in
+// SignCatalog's godoc: every signing mode it accepts must be one VerifyCatalog
+// can check. Kept separate from SignCatalog so the invariant is testable
+// without an OIDC token, which the signing path itself requires.
+func rejectUnverifiableCatalogSigning(resolve OIDCResolveOptions) error {
+	// settingKey names the offending field in the error's structured context so
+	// a caller can branch on which setting to drop.
+	const settingKey = "setting"
+
+	switch {
+	case resolve.SigningKey != "":
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"key-based catalog signing is not supported: VerifyCatalog verifies keyless GitHub OIDC certificates only, so a key-signed catalog could not be verified through the facade",
+			map[string]any{settingKey: "OIDCResolve.SigningKey"})
+	case resolve.FulcioURL != "":
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"catalog signing against a private Fulcio is not supported: VerifyCatalog verifies against the public-good Sigstore root, which a private CA's certificate does not chain to",
+			map[string]any{settingKey: "OIDCResolve.FulcioURL"})
+	case resolve.DisableTLogUpload:
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"catalog signing without a transparency-log entry is not supported: VerifyCatalog requires one",
+			map[string]any{settingKey: "OIDCResolve.DisableTLogUpload"})
+	}
+	return nil
 }

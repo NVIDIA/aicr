@@ -183,7 +183,7 @@ Environment variables read at startup:
 | `AICR_SIGNING_CONFIG_PATH` | unset | `parseSigningConfig` (both modes; Rekor v2) |
 | `AICR_TLOG_UPLOAD` | `true` | `parseSigningConfig` (Mode A only) |
 | `AICR_BINARY_ATTESTATION_FILE` | unset → `<executable>-attestation.sigstore.json` next to the binary | `resolveBinaryAttestationPath` (override for ko `KO_DATA_PATH` layouts) |
-| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | unset → `verifier.TrustedRepositoryPattern` (release `on-tag.yaml`) | `resolveBinaryAttestationIdentityPattern` (must contain `NVIDIA/aicr`, validated by `verifier.ValidateIdentityPattern`; retargets the attesting NVIDIA workflow, e.g. an e2e build) |
+| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | unset → `verifier.TrustedRepositoryPattern` (release `on-tag.yaml`) | `resolveBinaryAttestationIdentityPattern` (must be confined to `NVIDIA/aicr` — prefix substring, no top-level alternation, and no match against foreign-identity canaries — validated by `verifier.ValidateIdentityPattern`; retargets the attesting NVIDIA workflow, e.g. an e2e build) |
 
 See [Server-Side Bundle Signing](#server-side-bundle-signing) for the identity
 model and validation rules behind these variables.

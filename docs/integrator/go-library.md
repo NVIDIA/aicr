@@ -589,6 +589,24 @@ Override the pinned identity with `IdentityRegexp` (defaults to
 pre-validates operator-supplied input against the same rule the verify
 entry points apply internally.
 
+An override must be *confined* to the NVIDIA repository, not merely
+mention it. Containing `://github.com/NVIDIA/aicr/` is necessary but not
+sufficient: validation also rejects top-level alternation and any
+pattern that still matches an unrelated identity. Both rules exist
+because the identity matcher pins only the OIDC issuer beyond this
+pattern, so a widened pattern silently degrades the gate to "any GitHub
+Actions workflow in any repository" rather than failing visibly.
+
+```go
+// Rejected: carries the prefix, compiles, is even anchored to it —
+// but the second branch matches anything.
+aicr.ValidateIdentityPattern(`^https://github\.com/NVIDIA/aicr/.*|.*$`)
+
+// Accepted: alternatives live inside a group after the prefix.
+aicr.ValidateIdentityPattern(
+	`^https://github\.com/NVIDIA/aicr/\.github/workflows/(on-tag|release)\.yaml@.*`)
+```
+
 ## Signing artifacts
 
 The producing half of the supply chain is on the facade too.
@@ -608,6 +626,25 @@ Rekor are. The result is content-identical to the one-shot path.
 
 `SignCatalog` is the counterpart to `VerifyCatalog`, signing this
 Client's catalog and returning the serialized Sigstore bundle.
+
+**`SignCatalog` only accepts signing modes `VerifyCatalog` can verify.**
+Verification checks against the public-good Sigstore root, requires a
+transparency-log entry, and accepts keyless GitHub OIDC certificates
+only, so these three `OIDCResolve` settings are rejected with
+`ErrCodeInvalidRequest` before any signing work runs:
+
+| Setting | Why it is rejected |
+|---|---|
+| `SigningKey` | A key-signed catalog has no verification path at all. |
+| `FulcioURL` | A private CA's certificate does not chain to the public-good root. |
+| `DisableTLogUpload` | Verification requires a transparency-log entry. |
+
+`RekorURL` and `SigningConfigPath` pass through — they select which
+public-good transparency log and signing config to use, which
+verification handles. The point of the guard is that you cannot
+successfully sign a catalog and then discover the documented
+counterpart refuses it; if private catalog signing is ever needed, both
+halves move together.
 
 Neither signing method imposes a facade timeout, unlike their
 verification counterparts: keyless OIDC can block on a human completing

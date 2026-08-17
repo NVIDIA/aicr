@@ -54,11 +54,11 @@ Keyless OIDC signing uses the same precedence chain as 'aicr bundle --attest':
 				Usage:   "Use OAuth 2.0 device authorization grant for OIDC.",
 				Sources: cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 			},
-			&cli.StringFlag{
-				Name:    flagFulcioURL,
-				Usage:   "Override the Fulcio CA URL (defaults to public-good).",
-				Sources: cli.EnvVars("AICR_FULCIO_URL"),
-			},
+			// No --fulcio-url counterpart to `bundle --attest`: the catalog
+			// signature is verified by `recipe verify-catalog` against the
+			// public-good Sigstore root only, so a private CA here could only
+			// produce an artifact nothing can verify. Client.SignCatalog
+			// rejects the setting for the same reason.
 			&cli.StringFlag{
 				Name:    flagRekorURL,
 				Usage:   "Sign to Rekor v1 at this URL instead of the Rekor v2 default (e.g. a private v1 instance, or the public-good v1 URL).",
@@ -101,7 +101,6 @@ func runRecipeSignCatalogCmd(ctx context.Context, cmd *cli.Command) error {
 			AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
 			AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
 			DeviceFlow:          cmd.Bool(flagOIDCDeviceFlow),
-			FulcioURL:           cmd.String(flagFulcioURL),
 			RekorURL:            rekorURL,
 			SigningConfigPath:   signingConfig,
 			UseTUFSigningConfig: useV2,
