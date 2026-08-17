@@ -704,7 +704,11 @@ func TestRecipeCmd_NoCriteriaValidation(t *testing.T) {
 // or it may fail for an unrelated reason — but it must never fail with the
 // no-criteria guard message.
 func TestRecipeCmd_NodesCriteriaPassesGuard(t *testing.T) {
-	err := recipeCmd().Run(context.Background(), []string{"recipe", "--no-cluster", "--nodes", "8"})
+	// Note: --no-cluster is NOT passed here. That flag exists only on
+	// `aicr validate`, not `aicr recipe`. The recipe command is already
+	// offline (reads inputs only; never deploys to a cluster), so no
+	// isolation flag is needed or available.
+	err := recipeCmd().Run(context.Background(), []string{"recipe", "--nodes", "8"})
 	// Whatever the outcome, "no criteria provided" must not appear — that would
 	// mean the Specificity()==0 guard fired, which is the regression this test
 	// prevents. If nodes were removed from Specificity(), this assertion would
