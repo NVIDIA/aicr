@@ -386,14 +386,15 @@ func sanitizeCompletionArgs(args []string) []string {
 // The "initializing external data provider" INFO log matches validate /
 // bundle / mirror so a `--data` invocation is auditable.
 func recipeClientFromCmd(cmd *cli.Command, cfg *config.AICRConfig) (*aicr.Client, error) {
-	dataDir := cmd.String("data")
-	if dataDir == "" {
-		dataDir = cfg.Recipe().DataDir()
-	}
 	source := aicr.EmbeddedSource()
-	if dataDir != "" {
+	if dataDir := cmd.String("data"); dataDir != "" {
 		slog.Info("initializing external data provider", "directory", dataDir)
 		source = aicr.FilesystemSource(dataDir)
+	} else if configured, ok := aicr.WrapConfig(cfg).RecipeSource(); ok {
+		// spec.recipe.data, derived through the facade so an SDK caller
+		// building a Client from the same document gets the same source.
+		slog.Info("initializing external data provider", "source", "spec.recipe.data")
+		source = configured
 	}
 	client, err := aicr.NewClient(
 		aicr.WithRecipeSource(source),
@@ -510,4 +511,20 @@ func durationFlagOrConfig(cmd *cli.Command, flagName string, fallback *time.Dura
 		slog.Info("CLI flag overriding config value", "flag", flagName, "config", *fallback, "override", v)
 	}
 	return v
+}
+
+// loadFacadeConfig reads --config and returns it as the facade *aicr.Config,
+// so commands derive their options through pkg/client/v1 rather than reaching
+// into pkg/config themselves. Returns a nil *aicr.Config when the flag is not
+// set; every derivation on it is nil-safe, so callers need no branch.
+//
+// The flag-over-config overlay stays in this package deliberately: it depends
+// on cmd.IsSet, which distinguishes "user passed the zero value" from "user
+// said nothing" — a distinction the facade's plain-struct options cannot make.
+func loadFacadeConfig(ctx context.Context, cmd *cli.Command) (*aicr.Config, error) {
+	cfg, err := loadCmdConfig(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	return aicr.WrapConfig(cfg), nil
 }

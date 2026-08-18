@@ -22,6 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -193,7 +194,7 @@ Override snapshot-detected criteria:
 			//   3. AICR_CRITERIA_STRICT env var (honored at registry init)
 			// AICR_CRITERIA_STRICT is read when the registry is first
 			// constructed, so we only need to apply the flag + config here.
-			if cmd.Bool("criteria-strict") || cfg.Recipe().IsCriteriaStrict() {
+			if cmd.Bool("criteria-strict") || aicr.WrapConfig(cfg).IsCriteriaStrict() {
 				client.CriteriaRegistry().SetStrict(true)
 			}
 
@@ -301,10 +302,13 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 // distinction (e.g. the no-snapshot criteria path) may pass nil; marks are
 // then no-ops.
 func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry, touched map[string]bool) error {
-	resolved, err := cfg.Recipe().ResolveCriteriaWithRegistry(reg)
+	derived, err := aicr.WrapConfig(cfg).RecipeCriteria(reg)
 	if err != nil {
 		return err
 	}
+	// Back to the internal shape: the merge below assigns into a
+	// *recipe.Criteria whose fields are enum types, not strings.
+	resolved := aicr.ToInternalCriteria(derived)
 	if resolved.Service != "" {
 		logCriteriaOverride(flagService, string(criteria.Service), string(resolved.Service))
 		criteria.Service = resolved.Service

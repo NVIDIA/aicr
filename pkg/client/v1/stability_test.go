@@ -39,6 +39,7 @@ import (
 	bundlerresult "github.com/NVIDIA/aicr/pkg/bundler/result"
 	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	evverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -251,6 +252,7 @@ func TestStability_Translations(t *testing.T) {
 	requireSignature[func(*recipe.Criteria) *aicr.Criteria](aicr.WrapCriteria)
 	requireSignature[func(*recipe.AllowLists) *aicr.AllowLists](aicr.WrapAllowLists)
 	requireSignature[func(*aicr.AllowLists) *recipe.AllowLists](aicr.ToInternalAllowLists)
+	requireSignature[func(*aicr.Criteria) *recipe.Criteria](aicr.ToInternalCriteria)
 }
 
 // TestStability_HealthAndEvidence pins the health and evidence surfaces.
@@ -355,6 +357,25 @@ func TestStability_Signing(t *testing.T) {
 
 	_ = aicr.CatalogSignResult{}.Digest
 	_ = aicr.CatalogSignResult{}.BundleJSON
+}
+
+// TestStability_Config pins the AICRConfig binding: loading, the bridge from
+// an externally-parsed document, and the per-section derivations.
+func TestStability_Config(t *testing.T) {
+	t.Parallel()
+
+	requireSignature[func(context.Context, string) (*aicr.Config, error)](aicr.LoadConfig)
+	requireSignature[func(*appconfig.AICRConfig) *aicr.Config](aicr.WrapConfig)
+	requireSignature[func(*aicr.Config) *appconfig.AICRConfig]((*aicr.Config).Unwrap)
+
+	requireSignature[func(*aicr.Config) (aicr.BundleVerifyOptions, error)]((*aicr.Config).BundleVerifyOptions)
+	requireSignature[func(*aicr.Config) string]((*aicr.Config).RecipeProfile)
+	requireSignature[func(*aicr.Config) (string, bool, error)]((*aicr.Config).RecipeAccountingMode)
+	requireSignature[func(*aicr.Config) (aicr.RecipeSourceOption, bool)]((*aicr.Config).RecipeSource)
+	requireSignature[func(*aicr.Config, *aicr.CriteriaRegistry) (*aicr.Criteria, error)]((*aicr.Config).RecipeCriteria)
+	requireSignature[func(*aicr.Config) ([]aicr.RecipeResolveOption, error)]((*aicr.Config).RecipeResolveOptions)
+	requireSignature[func(*aicr.Config) string]((*aicr.Config).SnapshotPath)
+	requireSignature[func(*aicr.Config) bool]((*aicr.Config).IsCriteriaStrict)
 }
 
 // TestStability_Query pins the package-level query selector, in both its

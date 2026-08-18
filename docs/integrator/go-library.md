@@ -486,6 +486,89 @@ generated from an externally-decoded recipe reloadable by the file loader. The
 caller's own `RecipeResult` is never mutated, and `APIVersion` is validated but
 never rewritten.
 
+## Using a committed AICRConfig
+
+A team that has standardized on an `AICRConfig` — the version-controlled
+document `aicr --config` reads — can consume the same file from their own
+tooling, so the CLI and an embedding runtime agree on the settings by
+construction rather than by convention.
+
+```go
+cfg, err := aicr.LoadConfig(ctx, "aicr-config.yaml")   // path or HTTP(S) URL
+if err != nil {
+	log.Fatal(err)
+}
+
+// spec.recipe.data decides how the Client is constructed.
+source := aicr.EmbeddedSource()
+if configured, ok := cfg.RecipeSource(); ok {
+	source = configured
+}
+client, err := aicr.NewClient(aicr.WithRecipeSource(source))
+if err != nil {
+	log.Fatal(err)
+}
+defer client.Close()
+
+// spec.recipe.criteria, parsed against this Client's registry so a value
+// contributed by a --data overlay validates against the same catalog.
+criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())
+if err != nil {
+	log.Fatal(err)
+}
+opts, err := cfg.RecipeResolveOptions()   // spec.recipe.profile + accounting mode
+if err != nil {
+	log.Fatal(err)
+}
+
+result, err := client.ResolveRecipeFromCriteriaWithOptions(ctx, criteria, opts...)
+```
+
+**Config derives options; it never applies them.** A `Config` does not attach
+to a `Client` and is never consulted implicitly. Each method returns a
+populated value you may then override:
+
+```go
+verifyOpts, err := cfg.BundleVerifyOptions()   // from spec.verify
+verifyOpts.MinTrustLevel = "verified"          // caller wins, visibly
+v, err := client.VerifyBundle(ctx, "./bundle", verifyOpts)
+```
+
+That is deliberate rather than incidental. The facade's options are plain
+structs, so a field left at its zero value is indistinguishable from one set
+to the zero value on purpose — there is no equivalent of the CLI's
+`cmd.IsSet`. An implicit merge would have to guess, and would silently hand
+the config's value back to a caller who deliberately cleared a setting.
+Deriving keeps precedence to one readable line at the call site.
+
+It also mirrors what the CLI does: build options from config, then let an
+explicitly-set flag win. The flag half necessarily stays in `pkg/cli`, the
+only layer that knows a flag was set.
+
+**Every method is nil-safe.** A nil `*Config` — what you get when no document
+was supplied — returns zero values rather than panicking, so derivations can
+run unconditionally.
+
+| Method | Reads |
+|---|---|
+| `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
+| `RecipeSource()` | `spec.recipe.data` |
+| `RecipeCriteria(reg)` | `spec.recipe.criteria` |
+| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode` |
+| `RecipeProfile()` / `RecipeAccountingMode()` | the same two, raw, for callers applying their own precedence first |
+| `SnapshotPath()` | `spec.recipe.input.snapshot` |
+| `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
+
+`spec.bundle`, `spec.validate`, and `spec.snapshot` are not yet projected;
+`Unwrap()` reaches the raw document meanwhile. Needing it is worth reporting —
+it means a derivation is missing, and `pkg/config` carries no stability
+guarantee.
+
+One asymmetry worth knowing: `IgnoreTLog` has no config counterpart, so
+`BundleVerifyOptions()` always leaves it false. It weakens the trust floor by
+dropping the transparency-log requirement, and keeping it command-line-only
+means a checked-in file can never silently disable that check.
+
 ## Verifying artifacts
 
 Every artifact AICR produces can be checked back through the same facade,

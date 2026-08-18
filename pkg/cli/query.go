@@ -163,7 +163,7 @@ Use in shell scripts:
 // is seeded.
 func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
 	reg := client.CriteriaRegistry()
-	profile := stringFlagOrConfig(cmd, flagProfile, cfg.Recipe().ProfileSelection())
+	profile := stringFlagOrConfig(cmd, flagProfile, aicr.WrapConfig(cfg).RecipeProfile())
 	resolveOpts, err := accountingResolveOptions(cmd, cfg)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		resolveOpts = append(resolveOpts, aicr.WithProfile(profile))
 	}
 
-	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.Recipe().SnapshotPath())
+	snapFilePath := stringFlagOrConfig(cmd, "snapshot", aicr.WrapConfig(cfg).SnapshotPath())
 
 	if snapFilePath != "" {
 		slog.Info("loading snapshot from", "uri", snapFilePath)
@@ -252,14 +252,14 @@ func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.
 		if cfg == nil {
 			return nil, nil
 		}
-		mode, present, err := cfg.Spec.Recipe.ResolveAccountingMode()
+		mode, present, err := aicr.WrapConfig(cfg).RecipeAccountingMode()
 		if err != nil {
 			return nil, err
 		}
 		if !present {
 			return nil, nil
 		}
-		value = string(mode)
+		value = mode
 	}
 	if _, err := recipe.ParseAccountingMode(value); err != nil {
 		return nil, err
