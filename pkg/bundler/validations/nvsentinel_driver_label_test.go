@@ -718,33 +718,35 @@ func TestNVSentinelDriverLabelPlatformMatrix(t *testing.T) {
 			wantBlocked: false,
 		},
 		{
-			// Kind is deliberately out of #2181's matrix: it keeps the
-			// bundle-time remedy its CI caller already passes.
-			name: "Kind (host-installed driver, no driver pod) → blocked",
+			// The kind overlay supplies the value at overlay level (#2181),
+			// which is what lets Client.BundleComponents — a nil-config path
+			// with no --set channel — resolve a Kind recipe at all.
+			name: "Kind (host-installed driver, overlay supplies the value)",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceKind, Accelerator: recipe.CriteriaAcceleratorH100,
 				Intent: recipe.CriteriaIntentTraining,
 			},
-			wantBlocked: true,
+			wantBlocked: false,
 		},
 		{
-			name: "Kind with the documented remedy (as the CI caller passes it) → passes",
+			// Control against a vacuous pass on the row above.
+			name: "Kind with the overlay value overridden to false → blocked",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceKind, Accelerator: recipe.CriteriaAcceleratorH100,
 				Intent: recipe.CriteriaIntentTraining,
 			},
 			overrides: map[string]map[string]string{
-				"nv-sentinel": {"labeler.assumeDriverInstalled": "true"},
+				"nv-sentinel": {"labeler.assumeDriverInstalled": "false"},
 			},
-			wantBlocked: false,
+			wantBlocked: true,
 		},
 		{
-			name: "Kind inference (host-installed driver) → blocked",
+			name: "Kind inference (host-installed driver, overlay supplies the value)",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceKind, Accelerator: recipe.CriteriaAcceleratorH100,
 				Intent: recipe.CriteriaIntentInference,
 			},
-			wantBlocked: true,
+			wantBlocked: false,
 		},
 		{
 			name: "EKS (GPU Operator installs the driver)",

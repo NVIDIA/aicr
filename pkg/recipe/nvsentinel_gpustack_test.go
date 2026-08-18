@@ -94,6 +94,15 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 			wantAssume: ptr(true),
 		},
 		{
+			name: "Kind: nvkind host-installs the driver (overlay-level, no profile)",
+			criteria: &Criteria{
+				Service:     CriteriaServiceKind,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+			},
+			wantAssume: ptr(true),
+		},
+		{
 			name: "EKS: the operator installs the driver, both chart defaults already match",
 			criteria: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -212,14 +221,20 @@ func TestAKSRuntimeClassNamesAgreeUnderEveryProfileValue(t *testing.T) {
 // TestNVSentinelReferencedInEveryProfileValue pins the catalog choice that
 // makes NVSentinel mandatory on the profiled families.
 //
-// This cannot be left to union totality. Totality is evaluated over
-// leaf-flattened override paths BEFORE synthetic presence is added, and the
-// engine deliberately exempts presence-only componentRefs from it (see
+// Today union totality happens to backstop this: the references assign leaf
+// paths, so dropping one from a single value produces a path-set mismatch
+// that ValidateProfileDeclaration rejects. That backstop is incidental, not
+// structural. Totality is evaluated over leaf-flattened override paths BEFORE
+// synthetic presence is added, and the engine deliberately exempts
+// presence-only componentRefs from it (see
 // TestValidateProfileDeclaration/"presence-only componentRef is exempt from
-// union totality"). So a value that dropped its nvsentinel reference
-// entirely would still validate, and NVSentinel's presence lock would
-// silently depend on which value the user selected. The reference in every
-// value is a deliberate catalog decision and is pinned here as one.
+// union totality"). So the moment a future edit makes these references
+// presence-only — or moves the leaf values elsewhere — totality stops
+// covering them and NVSentinel's presence lock silently becomes dependent on
+// which value the user selected.
+//
+// Pinning the reference directly means this test keeps holding under that
+// edit, when the incidental backstop would not.
 func TestNVSentinelReferencedInEveryProfileValue(t *testing.T) {
 	t.Parallel()
 

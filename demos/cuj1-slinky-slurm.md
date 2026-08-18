@@ -253,14 +253,13 @@ No GPU pools or taints; omit accelerated flags unless your Kind config adds them
 aicr bundle \
   --recipe recipe.yaml \
   --deployer helm \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
   --output bundle
 ```
 
-> The `nv-sentinel` flag is required on Kind too — the driver (when
-> present at all) is host-installed, so no driver pod is observable by
-> the NVSentinel labeler. On GKE COS and AKS above the equivalent flags
-> are already in the commands; see
+> No `nv-sentinel` flag is needed on any of these platforms. The driver is
+> host-installed on Kind (and node-image-installed on GKE COS and AKS
+> above), so no driver pod is observable by the NVSentinel labeler — and
+> the recipes now assign `labeler.assumeDriverInstalled` themselves. See
 > [NVSentinel on provider-installed-driver platforms](../docs/user/component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
 
 For automated no-GPU checks, see `make kwok-e2e` / `make check-health COMPONENT=slinky-slurm` in the repo Makefile.

@@ -516,12 +516,12 @@ chart-level automation of the Manual Labeling Procedure in NVSentinel design
 018 — and, per the upstream decision in
 [NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583),
 the recommended, permanent mechanism for host-installed drivers (no automatic
-detection fallback will be added). A recipe that reaches bundle generation
-without it is still a **blocking error**
+detection fallback will be added). Under `azure-managed` a recipe that reaches
+bundle generation without it is a **blocking error**
 (`CheckNVSentinelDriverLabelDetectable`), so the silent half-rollout cannot
-ship. Under `operator-managed` the profile sets it to an explicit `false`: the
-operator's driver pod is the evidence there, and skipping detection would keep
-the label applied across an unloaded driver.
+ship. Under `operator-managed` the profile sets it to an explicit `false` and
+the gate does not fire at all: the operator's driver pod is the evidence there,
+and skipping detection would keep the label applied across an unloaded driver.
 
 **Runtime class (`metadata-collector.runtimeClassName`).** The
 metadata-collector DaemonSet requests a RuntimeClass by name, and the GPU

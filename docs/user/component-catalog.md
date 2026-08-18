@@ -132,7 +132,7 @@ See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/
 
 ## NVSentinel on Provider-Installed-Driver Platforms
 
-The recipes configure NVSentinel for you on every supported platform. This section explains what they set and why, so the values are recognizable in a generated bundle and the failure signatures are diagnosable if they ever reappear.
+The recipes configure NVSentinel for you on every platform that needs it. This section explains what they set and why, so the values are recognizable in a generated bundle and the failure signatures are diagnosable if they ever reappear.
 
 **Symptom.** NVSentinel's `metadata-collector` and both `syslog-health-monitor` DaemonSets report **0 desired pods** and never schedule, while everything else looks fine ([#2175](https://github.com/NVIDIA/aicr/issues/2175)).
 
@@ -150,13 +150,15 @@ The recipes now carry that value wherever it is needed ([#2181](https://github.c
 | GKE COS `gpuStack=driver-installer` | Google's standalone `nvidia-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
 | OKE | none — driver is in the node image | `true` | the overlay (OKE has no profile) |
 | EKS | the operator's driver pod | unset (chart default `false`) | — |
-| Kind (nvkind) | none — driver is host-installed | not set by the recipe | **you**, at bundle time |
+| Kind (nvkind) | none — driver is host-installed | `true` | the overlay (Kind has no profile) |
 
 The explicit `false` on the operator-managed variants is deliberate rather than redundant: it keeps the path profile-owned, so it cannot be flipped into an unsafe hybrid later. Do **not** assume a preinstalled driver where the GPU Operator installs one — skipping detection there would keep the label applied across an unloaded or unhealthy driver.
 
 **NVSentinel is mandatory on the profiled families.** Because the AKS and GKE-COS `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as OKE and EKS.
 
-**Kind still needs the flag at bundle time**, since it has no profile and no overlay value:
+Only AKS and GKE-COS get the install-time profile lock; OKE and Kind set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
+
+If you do need to set it yourself on an unlisted platform, it is an ordinary override:
 
 ```shell
 aicr bundle -r recipe.yaml \
