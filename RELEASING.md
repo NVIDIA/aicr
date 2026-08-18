@@ -228,10 +228,22 @@ Verify the **digest-pinned** image that a tag currently resolves to. Tag refs
 are registry-rewritable; attestations bind to digests. Requires `crane` (or
 substitute `docker buildx imagetools inspect` for digest resolution).
 
+Predicate types attach at two different levels of the image index, so the
+digest you verify against depends on what you are asking for:
+
+| Predicate | Attached to | Verify against |
+|-----------|-------------|----------------|
+| SLSA provenance (`slsaprovenance1`) | multi-arch index | `crane digest <image>:<tag>` |
+| OpenVEX (`openvex`) | multi-arch index | `crane digest <image>:<tag>` |
+| SBOM (`spdxjson`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
+
+Asking for `spdxjson` against the index digest fails with `none of the
+attestations matched the predicate type`.
+
 ```bash
 set -euo pipefail
-export TAG=$(curl -fsS https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
-[[ -n "${TAG}" && "${TAG}" != null ]] || { echo "failed to resolve latest TAG" >&2; exit 1; }
+TAG=$(gh release view --repo NVIDIA/aicr --json tagName -q .tagName)
+[[ -n "${TAG}" ]] || { echo "failed to resolve latest TAG" >&2; exit 1; }
 
 # Resolve an immutable digest for each image
 resolve() { crane digest "ghcr.io/nvidia/$1:${TAG}"; }
@@ -247,13 +259,25 @@ gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@$(resolv
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@$(resolve aicr-validators/conformance)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@$(resolve aicr-validators/aiperf-bench)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
-# Cosign (same digest-pinned refs)
-DIGEST=$(resolve aicr)
+# Cosign — provenance and OpenVEX are on the index
+IDENTITY='^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$'
+INDEX=$(resolve aicr)
+for predicate in slsaprovenance1 openvex; do
+  cosign verify-attestation \
+    --type "${predicate}" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp "${IDENTITY}" \
+    "ghcr.io/nvidia/aicr@${INDEX}" >/dev/null
+done
+
+# Cosign — the SBOM is on the per-platform child manifest
+platform="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr:${TAG}")
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
-  "ghcr.io/nvidia/aicr@${DIGEST}"
+  --certificate-identity-regexp "${IDENTITY}" \
+  "ghcr.io/nvidia/aicr@${CHILD}" >/dev/null
 ```
 
 ### Binary Checksums
@@ -267,8 +291,8 @@ verified). On macOS, use `shasum -a 256` (built-in); on Linux, `sha256sum`
 
 ```bash
 set -euo pipefail
-export TAG=$(curl -fsS https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
-[[ -n "${TAG}" && "${TAG}" != null ]] || { echo "failed to resolve latest TAG" >&2; exit 1; }
+TAG=$(gh release view --repo NVIDIA/aicr --json tagName -q .tagName)
+[[ -n "${TAG}" ]] || { echo "failed to resolve latest TAG" >&2; exit 1; }
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
