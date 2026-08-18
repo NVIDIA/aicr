@@ -26,9 +26,14 @@ import (
 // coverageDimension names one criteria dimension subject to the coverage
 // post-condition and knows how to read its value from a Criteria.
 //
-// nodes is deliberately absent: no overlay gates on nodes, so covering it
-// would reject every --nodes query. It remains a matching dimension but
-// carries no coverage guarantee (issue #1542, design 4.3).
+// nodes is deliberately absent: no overlay in the embedded catalog gates on
+// nodes, so it does not participate in overlay selection or coverage.
+// nodes IS included in Criteria.Specificity() so that nodes-only CLI queries
+// pass the minimum-specificity guard — but it is NOT in Criteria.Matches(),
+// so it never filters overlays. External --data catalogs with criteria.nodes
+// set on any overlay are rejected at load time (ErrCodeInvalidRequest) to
+// prevent silent match-all behavior; operators must remove or zero
+// criteria.nodes before upgrading. See issue #1781 (design 4.3, #1542).
 type coverageDimension struct {
 	name  string
 	value func(*Criteria) string

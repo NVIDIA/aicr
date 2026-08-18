@@ -240,10 +240,14 @@ paths:
                         value: "13.1"
         "400":
           description: >
-            Invalid request: malformed criteria, allowlist violation, a resolved
-            profile (which requires `/v2/recipe`), or a stated criteria dimension
-            not honored by any applicable recipe overlay (uncovered dimension).
-            Uncovered-dimension errors carry a machine-readable
+            Invalid request. Common causes: (1) no criteria provided — all
+            criteria parameters omitted or defaulting to `any`; returns code
+            `INVALID_REQUEST` with message `"no criteria provided: specify at
+            least one of service, accelerator, intent, os, platform, nodes"`.
+            (2) Malformed criteria or allowlist violation. (3) A resolved
+            profile (which requires `/v2/recipe`). (4) A stated criteria
+            dimension not honored by any applicable recipe overlay (uncovered
+            dimension); uncovered-dimension errors carry a machine-readable
             `details.uncovered` array (dimension, requestedValue,
             validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
             SDK) may additionally attach `excludedOverlays` /
@@ -428,10 +432,14 @@ paths:
                 $ref: "#/components/schemas/LegacyRecipeResponse"
         "400":
           description: >
-            Invalid request: malformed criteria, allowlist violation, a resolved
-            profile (which requires `/v2/recipe`), or a stated criteria dimension
-            not honored by any applicable recipe overlay (uncovered dimension).
-            Uncovered-dimension errors carry a machine-readable
+            Invalid request. Common causes: (1) no criteria provided — all
+            criteria fields omitted or defaulting to `any`; returns code
+            `INVALID_REQUEST` with message `"no criteria provided: specify at
+            least one of service, accelerator, intent, os, platform, nodes"`.
+            (2) Malformed criteria or allowlist violation. (3) A resolved
+            profile (which requires `/v2/recipe`). (4) A stated criteria
+            dimension not honored by any applicable recipe overlay (uncovered
+            dimension); uncovered-dimension errors carry a machine-readable
             `details.uncovered` array (dimension, requestedValue,
             validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
             SDK) may additionally attach `excludedOverlays` /
@@ -645,14 +653,17 @@ paths:
                     useOpenKernelModules: true
         "400":
           description: >
-            Invalid request: an omitted selector, malformed criteria, allowlist
-            violation, a resolved profile (which requires `/v2/query`), or a stated
-            criteria dimension not honored by any applicable recipe overlay
-            (uncovered dimension).
-            Uncovered-dimension errors carry a machine-readable
-            `details.uncovered` array (dimension, requestedValue,
-            validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
-            SDK) may additionally attach `excludedOverlays` /
+            Invalid request. Common causes: (1) no criteria provided — all
+            criteria parameters omitted or defaulting to `any`; returns code
+            `INVALID_REQUEST` with message `"no criteria provided: specify at
+            least one of service, accelerator, intent, os, platform, nodes"`.
+            (2) An omitted selector. (3) Malformed criteria or allowlist
+            violation. (4) A resolved profile (which requires `/v2/query`). (5)
+            A stated criteria dimension not honored by any applicable recipe
+            overlay (uncovered dimension); uncovered-dimension errors carry a
+            machine-readable `details.uncovered` array (dimension,
+            requestedValue, validCompletions). Snapshot-driven resolution (CLI
+            `--snapshot` / Go SDK) may additionally attach `excludedOverlays` /
             `constraintWarnings`; this HTTP API resolves from criteria only and
             never emits those fields.
           headers:
@@ -791,10 +802,14 @@ paths:
                 description: The value at the selector path (scalar, object, or array)
         "400":
           description: >
-            Invalid request: malformed criteria, allowlist violation, a resolved
-            profile (which requires `/v2/query`), or a stated criteria dimension
-            not honored by any applicable recipe overlay (uncovered dimension).
-            Uncovered-dimension errors carry a machine-readable
+            Invalid request. Common causes: (1) no criteria provided — all
+            criteria fields omitted or defaulting to `any`; returns code
+            `INVALID_REQUEST` with message `"no criteria provided: specify at
+            least one of service, accelerator, intent, os, platform, nodes"`.
+            (2) Malformed criteria or allowlist violation. (3) A resolved
+            profile (which requires `/v2/query`). (4) A stated criteria
+            dimension not honored by any applicable recipe overlay (uncovered
+            dimension); uncovered-dimension errors carry a machine-readable
             `details.uncovered` array (dimension, requestedValue,
             validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
             SDK) may additionally attach `excludedOverlays` /

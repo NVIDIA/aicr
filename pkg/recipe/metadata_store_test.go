@@ -3686,3 +3686,118 @@ func TestBuildRecipeResultWithEvaluator_CoverageAfterExclusion(t *testing.T) {
 		t.Error("coverage error should carry constraintWarnings context")
 	}
 }
+
+// TestLoadMetadataStore_ExternalOverlayNodesError verifies that loading an
+// external overlay whose criteria.nodes is non-zero returns an error (#1781).
+// Since nodes no longer participates in Matches(), such an overlay would
+// silently match every query — failing closed at load time is safer than
+// warn-and-continue.
+func TestLoadMetadataStore_ExternalOverlayNodesError(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	baseYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`)
+	// External overlay with criteria.nodes set — must be rejected.
+	externalYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: nodes-gated
+spec:
+  criteria:
+    nodes: 8
+  componentRefs: []
+`)
+
+	dp := &externalSourceProvider{files: map[string][]byte{
+		"overlays/base.yaml":        baseYAML,
+		"overlays/nodes-gated.yaml": externalYAML,
+	}}
+
+	_, err := LoadMetadataStoreFor(context.Background(), dp)
+	if err == nil {
+		t.Fatal("expected error loading external overlay with criteria.nodes, got nil")
+	}
+	if !strings.Contains(err.Error(), "criteria.nodes") {
+		t.Errorf("error = %v, want it to mention criteria.nodes", err)
+	}
+	if !strings.Contains(err.Error(), "nodes-gated") {
+		t.Errorf("error = %v, want it to name the overlay 'nodes-gated'", err)
+	}
+	// Verify the error code so callers can distinguish this from internal errors.
+	// Use errors.Is with a sentinel StructuredError — the project-preferred pattern
+	// per CLAUDE.md (see e.g. line 1179 in this file).
+	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+	}
+}
+
+// externalSourceProvider is an in-memory DataProvider whose Source() always
+// returns CatalogSourceExternal, simulating an overlay loaded via --data.
+type externalSourceProvider struct {
+	files map[string][]byte
+}
+
+func (p *externalSourceProvider) ReadFile(_ context.Context, path string) ([]byte, error) {
+	content, ok := p.files[path]
+	if !ok {
+		return nil, fs.ErrNotExist
+	}
+	return content, nil
+}
+
+func (p *externalSourceProvider) WalkDir(_ context.Context, _ string, fn fs.WalkDirFunc) error {
+	for path := range p.files {
+		if err := fn(path, inMemoryDirEntry{name: path}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *externalSourceProvider) Source(_ string) string {
+	return CatalogSourceExternal
+}
+
+// TestLoadMetadataStore_EmbeddedOverlayNodesDoesNotError verifies that an
+// embedded (non-external) overlay with criteria.nodes != 0 loads without
+// error — the hard-error guard must fire only for external --data overlays.
+func TestLoadMetadataStore_EmbeddedOverlayNodesDoesNotError(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	baseYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`)
+	embeddedYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: nodes-embedded
+spec:
+  criteria:
+    nodes: 8
+  componentRefs: []
+`)
+
+	// inMemoryDataProvider.Source() returns tag+":"+path, not CatalogSourceExternal.
+	dp := newInMemoryProvider("embedded", map[string][]byte{
+		"overlays/base.yaml":           baseYAML,
+		"overlays/nodes-embedded.yaml": embeddedYAML,
+	})
+
+	store, err := LoadMetadataStoreFor(context.Background(), dp)
+	if err != nil {
+		t.Fatalf("embedded overlay with criteria.nodes should load without error, got: %v", err)
+	}
+	// Also verify the overlay was actually loaded, not silently discarded.
+	if _, ok := store.GetRecipeByName("nodes-embedded"); !ok {
+		t.Error("embedded overlay with criteria.nodes was not loaded into the store")
+	}
+}
