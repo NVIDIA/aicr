@@ -120,7 +120,6 @@ aicr bundle \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   --system-node-selector nodeGroup=system-worker \
   --storage-class <storage-class> \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
   --output bundle
 ```
 

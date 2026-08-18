@@ -213,7 +213,6 @@ aicr bundle \
   --accelerated-node-selector nodeGroup=gpu-worker \
   --accelerated-node-toleration dedicated=gpu-workload:NoSchedule \
   --storage-class <storage-class> \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
   --set slinkyslurm:nodesets.slinky.replicas=2 \
   --set-json 'slinkyslurm:controller.podSpec={"nodeSelector":{"nodeGroup":"cpu-worker"}}' \
   --set-json 'slinkyslurm:restapi.podSpec={"nodeSelector":{"nodeGroup":"cpu-worker"}}' \
@@ -237,8 +236,6 @@ aicr bundle \
   --system-node-toleration CriticalAddonsOnly=true:NoSchedule \
   --accelerated-node-selector agentpool=gpuworker1 \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
-  --set nv-sentinel:metadata-collector.runtimeClassName=nvidia-container-runtime \
   --set slinkyslurm:nodesets.slinky.replicas=2 \
   --set-json 'slinkyslurm:controller.podSpec={"nodeSelector":{"agentpool":"cpuworker1"}}' \
   --set-json 'slinkyslurm:restapi.podSpec={"nodeSelector":{"agentpool":"cpuworker1"}}' \

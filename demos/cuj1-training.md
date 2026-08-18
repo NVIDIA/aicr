@@ -126,7 +126,6 @@ aicr bundle \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   --system-node-selector nodeGroup=system-worker \
   --storage-class <storage-class> \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
   --output bundle
 ```
 
@@ -301,11 +300,8 @@ spec:
       target: ./bundle
     deployment:
       deployer: helmfile
-      # Required on GKE COS (gke-default): no driver pod is observable by
-      # the NVSentinel labeler, so bundling without the flag is a
-      # blocking error (issue #2175).
-      set:
-        - nv-sentinel:labeler.assumeDriverInstalled=true
+      # No NVSentinel override needed: the gke-default gpuStack profile
+      # assigns labeler.assumeDriverInstalled itself (#2181).
     scheduling:
       acceleratedNodeSelector:
         nodeGroup: gpu-worker
