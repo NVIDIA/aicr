@@ -552,10 +552,12 @@ first consumer before the registry classification lands.
 **Component required-ness under standalone class artifacts.**
 [#2181](https://github.com/NVIDIA/aicr/issues/2181) as implemented adds no
 required-ness property to `registry.yaml`: it configures NVSentinel from the
-existing ADR-015 `gpuStack` profile, which locks that component's presence
-through the profile's existing synthetic presence marker. There is no
-`requirePresence` field and no registry-level skippability to coordinate the
-`class` field against.
+existing ADR-015 `gpuStack` profile, which pins that component's presence
+through the profile's existing synthetic presence marker. Consistent with
+the alternative rejected below, reselection still never adds or removes a
+component: NVSentinel is referenced by every value of the declaration. There
+is no `requirePresence` field and no registry-level skippability to
+coordinate the `class` field against.
 
 This ADR's v1 is unaffected, because it validates the complete resolved
 recipe before partitioning and partitions only for rendering. A component
@@ -566,8 +568,9 @@ profile-locked presence and the `class` cut do not interact.
 The two axes would meet only if a future revision emitted a class artifact
 as a **standalone** deployable rather than one member of a co-deployed set.
 Such an artifact would have to prove that every profile-required component
-it omits is supplied by a compatible sibling bundle; today's whole-union
-validation gives that for free and would no longer. That proof obligation,
+it omits is supplied by a compatible sibling bundle — today's whole-union
+validation gives that for free, and a standalone artifact would not. That
+proof obligation,
 not a registry property, is the thing to design against if standalone class
 artifacts are ever pursued.
 

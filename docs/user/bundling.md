@@ -148,6 +148,12 @@ never honored from `--set-json`/`--set-file` (present or absent — the
 typed path would write a literal `enabled:` chart value instead of
 toggling the component).
 
+A component whose presence a configuration profile owns cannot be removed
+at all — `enabled=false` on it is rejected regardless of the rule above.
+NVSentinel is in that position on the AKS and GKE-COS families, whose
+`gpuStack` profiles name it; see
+[NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
+
 The same rule applies to `--set-json`, `--set-file`, `--dynamic`, and
 the REST API's equivalent parameters. For `--dynamic` no path is exempt,
 `enabled` included: a dynamic path on an absent component exports

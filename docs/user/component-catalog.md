@@ -154,6 +154,8 @@ The recipes now carry that value wherever it is needed ([#2181](https://github.c
 
 The explicit `false` on the operator-managed variants is deliberate rather than redundant: it keeps the path profile-owned, so it cannot be flipped into an unsafe hybrid later. Do **not** assume a preinstalled driver where the GPU Operator installs one — skipping detection there would keep the label applied across an unloaded or unhealthy driver.
 
+**NVSentinel is mandatory on the profiled families.** Because the AKS and GKE-COS `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as OKE and EKS.
+
 **Kind still needs the flag at bundle time**, since it has no profile and no overlay value:
 
 ```shell
