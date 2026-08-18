@@ -53,6 +53,17 @@ func gkeNetworkClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient 
 		objects...)
 }
 
+// notFoundClient models a cluster that does not serve networks.networking.gke.io
+// — i.e. one created without --enable-multi-networking.
+func notFoundClient() *dynamicfake.FakeDynamicClient {
+	client := gkeNetworkClient()
+	client.PrependReactor("list", "networks", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(
+			schema.GroupResource{Group: "networking.gke.io", Resource: "networks"}, "")
+	})
+	return client
+}
+
 func tcpxoContext(client *dynamicfake.FakeDynamicClient, declared bool) *validators.Context {
 	ctx := &validators.Context{Ctx: context.Background(), DynamicClient: client}
 	if declared {
@@ -104,7 +115,7 @@ func TestCheckGKEGPUNICNetworks(t *testing.T) {
 				t.Errorf("message %q does not report the shortfall %q", err.Error(), tt.wantInMsg)
 			}
 			// The message must name the prerequisite so it is actionable.
-			for _, want := range []string{"GKENetworkParamSet", "kubectl get network.networking.gke.io"} {
+			for _, want := range []string{"GKENetworkParamSet", "kubectl get network.networking.gke.io", "gpu-nic"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("message %q does not name %q", err.Error(), want)
 				}
@@ -202,6 +213,34 @@ func TestCheckGKEGPUNICNetworksApplicability(t *testing.T) {
 			})
 		}
 	}
+
+	// An ABSENT Network API is clean absence, not an infra failure: the CRD
+	// arrives with --enable-multi-networking, so a cluster created without it
+	// does not serve this GVR at all. Undeclared must skip; declared must still
+	// get the actionable prerequisite message rather than a generic read error.
+	t.Run("absent Network API skips when undeclared", func(t *testing.T) {
+		err := checkGKEGPUNICNetworks(tcpxoContext(notFoundClient(), false))
+		if !validators.IsSkip(err) {
+			t.Fatalf("expected Skip when the API is absent and %s is undeclared, got: %v",
+				tcpxoComponent, err)
+		}
+	})
+
+	t.Run("absent Network API fails with the prerequisite when declared", func(t *testing.T) {
+		err := checkGKEGPUNICNetworks(tcpxoContext(notFoundClient(), true))
+		if err == nil || validators.IsSkip(err) {
+			t.Fatalf("expected a failure, got: %v", err)
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			t.Errorf("expected ErrCodeNotFound, got: %v", err)
+		}
+		// Must name the prerequisite, not just "failed to read".
+		for _, want := range []string{"--enable-multi-networking", "GKENetworkParamSet", "gpu-nic"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("message %q does not name %q", err.Error(), want)
+			}
+		}
+	})
 
 	t.Run("missing dynamic client is rejected", func(t *testing.T) {
 		err := checkGKEGPUNICNetworks(&validators.Context{Ctx: context.Background()})

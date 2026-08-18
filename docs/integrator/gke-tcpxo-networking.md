@@ -32,7 +32,17 @@ will work.
    `network=NETWORK,subnetwork=SUBNET`.
 4. **Apply the `Network` and `GKENetworkParamSet` CRs** — one pair per GPU NIC,
    binding each additional node network into the cluster so pods can reference
-   it by name.
+   it by name. **Name each one so it contains `gpu-nic`** (for example
+   `gpu-nic-0` through `gpu-nic-7`, optionally with a cluster prefix such as
+   `aicr-demo2-gpu-nic-0`).
+
+> **The `gpu-nic` naming is a requirement, not a convention.** AICR discovers
+> these networks by matching `gpu-nic` in `metadata.name` — both the
+> `gke-gpu-nic-networks` deployment check and the NCCL benchmark's own interface
+> mapping. Google's sample manifests name the Device networks `vpc1`–`vpc8`;
+> applied verbatim those are invisible to AICR, and the deployment check reports
+> 0 of 8 on a cluster that is otherwise correctly provisioned. Rename them when
+> following that procedure.
 
 > **Multi-networking cannot be enabled after cluster creation.** `--enable-multi-networking`
 > is a create-time flag; there is no `gcloud container clusters update` equivalent,

@@ -41,10 +41,10 @@ import (
 // separately.
 const RequiredGPUNICNetworks = 8
 
-// gpuNICNameSubstring identifies a GPU NIC network by name. GKE provisions
+// GPUNICNameSubstring identifies a GPU NIC network by name. GKE provisions
 // these with cluster-specific prefixes (e.g. "aicr-demo2-gpu-nic-0"), so the
 // names cannot be matched exactly.
-const gpuNICNameSubstring = "gpu-nic"
+const GPUNICNameSubstring = "gpu-nic"
 
 // NetworkGVR is the cluster-scoped GKE Network CR that multi-networking
 // binds into the cluster. Its absence is what this package detects.
@@ -72,7 +72,7 @@ func DiscoverGPUNICNetworks(ctx context.Context, dynamicClient dynamic.Interface
 
 	var gpuNICs []string
 	for _, n := range networks.Items {
-		if name := n.GetName(); strings.Contains(name, gpuNICNameSubstring) {
+		if name := n.GetName(); strings.Contains(name, GPUNICNameSubstring) {
 			gpuNICs = append(gpuNICs, name)
 		}
 	}

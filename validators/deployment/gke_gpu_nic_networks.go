@@ -21,6 +21,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/gkenet"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // tcpxoComponent is the recipe componentRef that supplies GPUDirect TCPXO.
@@ -47,22 +48,36 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 
 	gpuNICs, listErr := gkenet.DiscoverGPUNICNetworks(ctx.Ctx, ctx.DynamicClient)
 
-	// Applicability gate (#2122). A List error NEVER skips — an RBAC denial or
-	// an apiserver hiccup is not evidence that TCPXO is inapplicable. Note the
-	// CRD being absent entirely surfaces here as a NotFound-shaped list error
-	// on a non-served group-version, which RequireList also blocks on.
-	if err := (validators.Capability{
+	capability := validators.Capability{
 		Component: tcpxoComponent,
 		Subject:   "GKE Networks (networks.networking.gke.io)",
-	}).RequireList(listErr); err != nil {
+		AbsentMsg: absentPrerequisiteMsg("the cluster does not serve networks.networking.gke.io at all, " +
+			"so it was created without --enable-multi-networking"),
+		InapplicableMsg: tcpxoComponent + " not declared in recipe and the cluster has no GKE Network " +
+			"API — cluster does not use GPUDirect TCPXO",
+	}
+
+	// An ABSENT Network API is clean absence, not an infrastructure failure: the
+	// CRD arrives with --enable-multi-networking, so a cluster created without it
+	// legitimately does not serve this GVR. Route that shape through Require,
+	// which is declaration-gated — an undeclared recipe skips, a declared one gets
+	// the actionable message. RequireList would classify it as a blocking INTERNAL
+	// error, which both false-fails an undeclared recipe and hides the missing
+	// prerequisite behind "failed to read" on a declared one.
+	if apierrors.IsNotFound(listErr) {
+		return capability.Require(ctx, listErr, false)
+	}
+
+	// Every other list error blocks regardless of declaration — an RBAC denial or
+	// an apiserver hiccup is not evidence that TCPXO is inapplicable.
+	if err := capability.RequireList(listErr); err != nil {
 		return err
 	}
 
 	// The prerequisite belongs to gke-nccl-tcpxo: a recipe that does not declare
 	// the component is not asking for TCPXO, so its cluster's networking is not
 	// this check's business. This also covers the #1327 standalone-run boundary,
-	// where there is no recipe context at all. Placed AFTER RequireList so an
-	// infrastructure error still blocks on an undeclared recipe.
+	// where there is no recipe context at all.
 	if !validators.RecipeDeclares(ctx, tcpxoComponent) {
 		return validators.Skip(
 			tcpxoComponent + " not declared in recipe — GPUDirect TCPXO networking is inapplicable")
@@ -75,14 +90,28 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 	}
 
 	if len(gpuNICs) < gkenet.RequiredGPUNICNetworks {
-		return errors.New(errors.ErrCodeNotFound, fmt.Sprintf(
-			"recipe declares %s but the cluster has %d of %d GPU NIC networks — "+
-				"GPUDirect TCPXO requires Network and GKENetworkParamSet objects bound into the cluster. "+
-				"These are provisioned with the cluster, not by AICR, and multi-networking cannot be "+
-				"enabled after cluster creation. Verify with: kubectl get network.networking.gke.io "+
-				"(see docs/integrator/gke-tcpxo-networking.md)",
-			tcpxoComponent, len(gpuNICs), gkenet.RequiredGPUNICNetworks))
+		return errors.New(errors.ErrCodeNotFound, absentPrerequisiteMsg(fmt.Sprintf(
+			"the cluster has %d of %d", len(gpuNICs), gkenet.RequiredGPUNICNetworks)))
 	}
 
 	return nil
+}
+
+// absentPrerequisiteMsg builds the operator-facing message for a missing GPU NIC
+// networking prerequisite. detail names what was actually observed; the rest is
+// the constant remediation, kept in one place so the absent-API path and the
+// short-count path cannot drift.
+//
+// The message names the required naming convention because it is a real way to
+// hit a zero count on an otherwise correctly provisioned cluster: discovery
+// matches on the name substring, and Google's own sample manifests name the
+// Device networks vpc1..vpc8.
+func absentPrerequisiteMsg(detail string) string {
+	return fmt.Sprintf(
+		"recipe declares %s but %s GPU NIC networks — GPUDirect TCPXO requires Network and "+
+			"GKENetworkParamSet objects bound into the cluster, each named to contain %q. "+
+			"These are provisioned with the cluster, not by AICR, and multi-networking cannot be "+
+			"enabled after cluster creation. Verify with: kubectl get network.networking.gke.io "+
+			"(see docs/integrator/gke-tcpxo-networking.md)",
+		tcpxoComponent, detail, gkenet.GPUNICNameSubstring)
 }
