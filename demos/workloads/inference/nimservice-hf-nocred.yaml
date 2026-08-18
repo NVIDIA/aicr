@@ -29,6 +29,18 @@
 # exist and must contain an HF_TOKEN key. An empty value is sufficient for an
 # ungated model; a gated Hugging Face repository needs a real token.
 #
+# Off-label combination: this is a Llama-specific NIM image serving a Hugging
+# Face model it was not built for. The container runs its own profile
+# (model_tag meta/llama-3.1-8b-instruct) against the downloaded weights, which
+# works and is verified below, but it is not the image's advertised use. The
+# image intended for arbitrary hf:// models is nvcr.io/nim/nvidia/llm-nim,
+# which is a gated repository and therefore needs an NGC pull secret --
+# choosing it trades the credential-free property for a supported pairing.
+# Pin the tag (not latest) so the pairing you validated is the one you ship.
+# The hf:// capability is version-dependent: 2.0.10 honours it, while 2.0.9
+# ignores NIM_MODEL_NAME, falls back to its own NGC profile, and fails with an
+# authentication error. Re-verify before moving this pin.
+#
 # Prerequisites:
 #   - k8s-nim-operator deployed (via AICR NIM recipe); no credential needed
 #
@@ -65,7 +77,7 @@ spec:
   authSecret: hf-secret
   image:
     repository: nvcr.io/nim/meta/llama-3.1-8b-instruct
-    tag: latest
+    tag: "2.0.10"
     pullPolicy: IfNotPresent
     # No pullSecrets: this repository serves anonymous registry tokens.
   env:

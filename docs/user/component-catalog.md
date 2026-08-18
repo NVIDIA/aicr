@@ -206,7 +206,7 @@ spec:
   authSecret: hf-secret                                  # holds only HF_TOKEN
   image:
     repository: nvcr.io/nim/meta/llama-3.1-8b-instruct   # pulls anonymously; no pullSecrets
-    tag: latest
+    tag: "2.0.10"                                        # pin a version; avoid the mutable latest
   env:
     - name: NIM_MODEL_NAME
       value: hf://Qwen/Qwen3-0.6B                        # ungated model
@@ -214,7 +214,11 @@ spec:
 
 The `HF_TOKEN` key must exist in the secret — that reference is not optional — but an empty value is sufficient for an ungated model. A gated Hugging Face repository needs a real token here.
 
-Model-specific NIM repositories (for example `nim/meta/llama-3.1-8b-instruct`) serve anonymous registry tokens; the generic Multi-LLM image `nim/nvidia/llm-nim` does not and requires a pull secret. See `demos/workloads/inference/nimservice-hf-nocred.yaml` for a complete example.
+Model-specific NIM repositories (for example `nim/meta/llama-3.1-8b-instruct`) serve anonymous registry tokens; the generic Multi-LLM image `nim/nvidia/llm-nim` does not and requires a pull secret.
+
+Note that pairing a model-specific image with an unrelated `hf://` model is off-label: the container runs its own profile against the downloaded weights. It works, but `nim/nvidia/llm-nim` is the image intended for arbitrary Hugging Face models — and because that repository is gated, choosing it trades the credential-free property for a supported pairing. Pin an image tag rather than `latest` so the pairing you validated is the one you ship.
+
+See `demos/workloads/inference/nimservice-hf-nocred.yaml` for a complete example.
 
 ## Inference Gateway Network Exposure
 
