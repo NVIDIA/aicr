@@ -16,6 +16,7 @@ package aicr_test
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +24,13 @@ import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
+
+// validSnapshotBody is a snapshot the loader accepts. Tests that are not
+// specifically exercising a rejection MUST use it: a document the loader
+// rejects for its own reasons (an empty measurements list, say) makes an
+// "expected an error" assertion pass without proving anything.
+var validSnapshotBody = "kind: Snapshot\napiVersion: " + snapshotter.FullAPIVersion +
+	"\nmeasurements:\n  - type: K8s\n"
 
 // writeSnapshot writes a snapshot document to a temp file and returns its path.
 func writeSnapshot(t *testing.T, body string) string {
@@ -40,8 +48,7 @@ func writeSnapshot(t *testing.T, body string) string {
 func TestLoadSnapshot_RoundTripsThroughTheFacadeShape(t *testing.T) {
 	t.Parallel()
 
-	path := writeSnapshot(t, "kind: Snapshot\napiVersion: "+snapshotter.FullAPIVersion+
-		"\nmeasurements:\n  - type: K8s\n")
+	path := writeSnapshot(t, validSnapshotBody)
 
 	client := newVerifyClient(t)
 	snap, err := client.LoadSnapshot(context.Background(), path, "")
@@ -76,8 +83,7 @@ func TestLoadSnapshot_RoundTripsThroughTheFacadeShape(t *testing.T) {
 func TestLoadSnapshot_RawIsEmpty(t *testing.T) {
 	t.Parallel()
 
-	path := writeSnapshot(t, "kind: Snapshot\napiVersion: "+snapshotter.FullAPIVersion+
-		"\nmeasurements:\n  - type: K8s\n")
+	path := writeSnapshot(t, validSnapshotBody)
 
 	client := newVerifyClient(t)
 	snap, err := client.LoadSnapshot(context.Background(), path, "")
@@ -111,6 +117,12 @@ func TestLoadSnapshot_FailsClosedOnNonSnapshot(t *testing.T) {
 			name: "unsupported apiVersion",
 			body: "kind: Snapshot\napiVersion: aicr.nvidia.com/v1alpha1\nmeasurements: []\n",
 		},
+		{
+			// Correctly stamped but carrying nothing to specialize on.
+			// Resolving it would emit the generic fallback recipe.
+			name: "no usable measurements",
+			body: "kind: Snapshot\napiVersion: " + snapshotter.FullAPIVersion + "\nmeasurements: []\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -142,7 +154,7 @@ func TestLoadSnapshot_Guards(t *testing.T) {
 
 	client := newVerifyClient(t)
 	closed := newClosedClient(t)
-	path := writeSnapshot(t, "kind: Snapshot\nmeasurements: []\n")
+	path := writeSnapshot(t, validSnapshotBody)
 
 	tests := []struct {
 		name   string
@@ -166,15 +178,33 @@ func TestLoadSnapshot_Guards(t *testing.T) {
 
 // TestLoadSnapshot_HonorsContextCancellation proves the caller's context
 // reaches the loader rather than being replaced by the facade's own bound.
+//
+// Two things make this assertion real rather than incidental. The fixture is
+// one the loader ACCEPTS, so the only reason to fail is the canceled context —
+// an independently-invalid document would satisfy a bare "err != nil" while
+// proving nothing. And the assertion is on the cause, not the presence of an
+// error, so a future change that fails for some unrelated reason does not
+// keep this test green.
 func TestLoadSnapshot_HonorsContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	path := writeSnapshot(t, "kind: Snapshot\nmeasurements: []\n")
+	path := writeSnapshot(t, validSnapshotBody)
+	client := newVerifyClient(t)
+
+	// Guard the premise: the same fixture must load cleanly under a live
+	// context, or the cancellation assertion below means nothing.
+	if _, err := client.LoadSnapshot(context.Background(), path, ""); err != nil {
+		t.Fatalf("fixture does not load under a live context, so this test cannot isolate cancellation: %v", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	client := newVerifyClient(t)
-	if _, err := client.LoadSnapshot(ctx, path, ""); err == nil {
-		t.Error("expected an error for an already-canceled context")
+	_, err := client.LoadSnapshot(ctx, path, "")
+	if err == nil {
+		t.Fatal("expected an error for an already-canceled context")
+	}
+	if !stderrors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want one wrapping context.Canceled", err)
 	}
 }
