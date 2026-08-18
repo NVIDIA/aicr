@@ -182,14 +182,26 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 				fmt.Sprintf("Created namespace=%s deployment=%s hpa=%s for nodePool=%s",
 					report.Namespace, report.DeploymentName, report.HPAName, report.NodePoolName))
 			recordRawTextArtifact(ctx, "Cluster Autoscaling Behavioral Test",
-				"kubectl get hpa && kubectl get nodes && kubectl get pods",
+				fmt.Sprintf("kubectl get hpa -n %s && kubectl get nodes && kubectl get pods -n %s",
+					report.Namespace, report.Namespace),
 				fmt.Sprintf("NodePool:              %s\nNamespace:             %s\nHPA desired/current:   %d/%d\nKarpenter nodes:       baseline=%d observed=%d\nScheduled pods:        %d/%d",
 					report.NodePoolName, report.Namespace, report.HPADesiredReplicas,
 					report.HPACurrentReplicas, report.BaselineNodeCount, report.ObservedNodeCount,
 					report.ScheduledPodCount, report.ObservedPodCount))
+			// The behavioral validation's deferred cleanup has already run by the
+			// time this executes, but a returning Delete call only means the
+			// request was accepted — the namespace terminates asynchronously.
+			// The artifact therefore records that deletion was requested, never
+			// that it completed; a rejected request is reported by the warning
+			// cleanup logs.
 			recordRawTextArtifact(ctx, "Delete test namespace",
-				"kubectl delete namespace cluster-auto-test-<id> --ignore-not-found",
-				fmt.Sprintf("Deleted namespace %s after cluster autoscaling test.", report.Namespace))
+				fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", report.Namespace),
+				fmt.Sprintf("Deletion of namespace %s was requested after the cluster autoscaling test; "+
+					"the namespace terminates asynchronously and this artifact does not confirm it. "+
+					"If the request failed, the check logs a warning naming the namespace. "+
+					"Find leftovers from earlier runs with: "+
+					"kubectl get namespaces -o name | grep %s",
+					report.Namespace, clusterAutoTestPrefix))
 			return nil
 		}
 		slog.Debug("behavioral validation failed for NodePool",
@@ -235,8 +247,14 @@ func validateClusterAutoscaling(ctx context.Context, clientset kubernetes.Interf
 		slog.Debug("cleaning up cluster autoscaling test namespace", "namespace", nsName)
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
-		_ = k8s.IgnoreNotFound(clientset.CoreV1().Namespaces().Delete(
-			cleanupCtx, nsName, metav1.DeleteOptions{}))
+		// Surface a failed delete: silently discarding it leaves the namespace
+		// (and anything still running in it) behind with no operator-visible
+		// signal, while the recorded artifact describes a cleanup that ran.
+		if err := k8s.IgnoreNotFound(clientset.CoreV1().Namespaces().Delete(
+			cleanupCtx, nsName, metav1.DeleteOptions{})); err != nil {
+			slog.Warn("failed to delete cluster autoscaling test namespace; delete it manually",
+				"namespace", nsName, "error", err)
+		}
 	}()
 
 	// Baseline: count existing Karpenter nodes for this pool before creating test resources.
