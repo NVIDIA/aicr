@@ -72,7 +72,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
-| slinky-topograph | helm | topograph/topograph | 0.5.0 | 1 |
+| slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.6.0 | 0 |
 
 ## Version variants
@@ -320,7 +320,7 @@ _No images extracted._
 
 ### slinky-topograph
 
-- `ghcr.io/nvidia/topograph:v0.5.0`
+- `ghcr.io/nvidia/topograph:v1.0.0`
 
 ### slurm-accounting-mariadb
 

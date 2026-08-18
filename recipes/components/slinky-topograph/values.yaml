@@ -22,44 +22,45 @@
 # it deploys after slinky-slurm so that chart owns the config-extra
 # ConfigMap before Topograph patches it.
 #
-# global.provider.name is the REQUIRED per-overlay override — set it in the
-# consuming overlay's overrides: block. global.engine.name is pinned to
-# slinky below: the chart schema requires global.engine, but this shared
-# values file already satisfies it, so overlays do not need to repeat it
-# (the slurm leaves still set it explicitly, which is harmless).
-#   Valid providers (chart values.schema.json @ v0.5.0): aws, aws-sim, cw,
-#   dra, dsx-sim, gcp, gcp-sim, infiniband-bm, infiniband-k8s, lambdai,
+# provider.name is the REQUIRED per-overlay override — set it in the
+# consuming overlay's overrides: block. engine.name already defaults to
+# slinky below: the chart schema requires engine, but this shared values
+# file already satisfies it, so overlays do not need to repeat it (the
+# slurm leaves still set it explicitly, which is harmless).
+#   Valid providers (chart values.schema.json @ v1.0.0): aws, aws-sim, dra,
+#   dsx-sim, gcp, gcp-sim, infiniband-bm, infiniband-k8s, lambdai,
 #   lambdai-sim, nebius, nebius-sim, netq, nscale, nscale-sim, oci,
 #   oci-imds, oci-sim, test
-#   Valid engines: graph, k8s, slinky, slurm
+#   Valid engines: graph, k8s, nfd, slinky, slurm
 # Example (GKE + Slinky):
 #   overrides:
-#     global:
-#       provider:
-#         name: gcp
+#     provider:
+#       name: gcp
 
 # Stabilize the Deployment name to "slinky-topograph"; health-check assertions
-# and dependencyRef consumers rely on it.
+# and dependencyRef consumers rely on it. nodeObserver and nodeDataBroker
+# Deployment/DaemonSet names derive from this fullname (no separate
+# fullnameOverride for those components — they are rendered from the same
+# chart, not standalone sub-charts).
 fullnameOverride: slinky-topograph
 
-global:
-  service:
-    type: ClusterIP
-    port: 49021
-  engine:
-    name: slinky
-    params:
-      plugin: topology/tree
-      podSelector:
-        matchLabels:
-          app.kubernetes.io/name: slurmd
-      # Chart-owned ConfigMap rendered by the slurm chart from .Values.configFiles
-      # (<fullname>-config-extra) and mounted into slurmctld via the Controller
-      # CR's configFileRefs. Topograph patches ONLY the topology.conf key
-      # (create-or-update with key-level merge), preserving cgroup.conf/gres.conf.
-      topologyConfigmapName: slinky-slurm-config-extra
-      topologyConfigPath: topology.conf
-      namespace: slurm
+service:
+  type: ClusterIP
+  port: 49021
+engine:
+  name: slinky
+  params:
+    plugin: topology/tree
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: slurmd
+    # Chart-owned ConfigMap rendered by the slurm chart from .Values.configFiles
+    # (<fullname>-config-extra) and mounted into slurmctld via the Controller
+    # CR's configFileRefs. Topograph patches ONLY the topology.conf key
+    # (create-or-update with key-level merge), preserving cgroup.conf/gres.conf.
+    topologyConfigmapName: slinky-slurm-config-extra
+    topologyConfigPath: topology.conf
+    namespace: slurm
 
 # Topology request batching delay. Topograph waits this long after the first
 # request before querying the provider API, collecting parallel requests into
@@ -72,19 +73,17 @@ serviceAccount:
   create: true
   name: slinky-topograph
 
-# node-observer sub-chart — watches the Topograph API pod and triggers
-# topology regeneration on API restarts or selected node/pod changes.
-# Bundled as a local chart dependency; always deployed alongside topograph.
-node-observer:
-  # Stabilize the Deployment name for health-check assertions.
-  fullnameOverride: slinky-topograph-node-observer
+# Node Observer — watches the Topograph API pod and triggers topology
+# regeneration on API restarts or selected node/pod changes. Rendered from
+# the same chart as topograph (not a sub-chart); always deployed alongside it.
+nodeObserver:
   topograph:
     trigger:
       podSelector:
         matchLabels:
           app.kubernetes.io/name: slurmd
 
-# node-data-broker sub-chart
-# Bundled as a local chart dependency.
-node-data-broker:
-  fullnameOverride: slinky-topograph-node-data-broker
+# Node Data Broker — rendered from the same chart as topograph (not a
+# sub-chart). Enabled by default; leaves that don't need it set
+# nodeDataBroker.enabled: false in their overlay overrides.
+nodeDataBroker: {}
