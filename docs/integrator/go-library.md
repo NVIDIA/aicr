@@ -95,6 +95,41 @@ Client's recipe source; they are surfaced through the Client only to
 keep the facade uniform and leave room for future per-Client
 telemetry hooks.
 
+### Loading a snapshot you already have
+
+Most integrations do not capture a snapshot inline. One pipeline stage
+records cluster state, a later stage resolves or validates against it —
+or the snapshot is committed and replayed. `LoadSnapshot` is the entry
+point for that case, and needs no cluster:
+
+```go
+snap, err := client.LoadSnapshot(ctx, "./snapshot.yaml", "")
+if err != nil {
+	log.Fatalf("load snapshot: %v", err)
+}
+
+results, err := client.ValidateState(ctx, recipe, snap,
+	aicr.WithValidationNoCluster(true))
+```
+
+`path` takes a local file, an HTTP(S) URL, or a `cm://namespace/name`
+ConfigMap URI; the `kubeconfig` argument resolves the `cm://` form and
+is ignored for the other two.
+
+**It fails closed on a document that is not a snapshot** — a wrong
+`kind` (an `AICRConfig`, say) or an `apiVersion` this build does not
+understand. That gate matters more than it looks: snapshot
+deserialization is non-strict, so without it a typo'd path would decode
+into an empty `Snapshot`, derive `criteria(any)`, and silently resolve
+the generic fallback recipe with exit 0. Empty `kind` and `apiVersion`
+are tolerated for snapshots that predate those fields.
+
+`Snapshot.Raw` is **not** populated by `LoadSnapshot` — only
+`CollectSnapshot` sets it. The bytes on disk are already the durable
+artifact; read the file directly if you need them.
+
+### Capturing a snapshot from a live cluster
+
 ```go
 // CollectSnapshot deploys a snapshotter Job to the target cluster and
 // returns the resulting Snapshot. cfg is a facade-owned struct that
@@ -706,6 +741,9 @@ caller passing `context.Background()` gets no deadline at all.
 Per-operation caps:
 
 - `ResolveRecipe` / `BundleComponents`: `defaults.RecipeOperationTimeout`
+- `LoadSnapshot`: `defaults.SnapshotLoadTimeout` — a file read, or a
+  `cm://` ConfigMap fetch against the Kubernetes API. Distinct from
+  `SnapshotOperationTimeout` below, which bounds deploying an agent Job.
 - `CollectSnapshot`: caller-controlled via `AgentConfig.Timeout` (falling
   back to `defaults.SnapshotOperationTimeout` when unset), plus
   `defaults.SnapshotOperationGrace`. The grace exists because

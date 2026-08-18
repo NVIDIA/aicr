@@ -28,7 +28,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/diff"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 // diffCmd creates the "diff" CLI command.
@@ -107,17 +106,27 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 
 	slog.Debug("snapshot diff", slog.String("baseline", baselinePath), slog.String("target", targetPath))
 
-	baseline, err := snapshotter.LoadFromFileWithKubeconfig(ctx, baselinePath, kubeconfig)
+	client, err := embeddedClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	baseline, err := client.LoadSnapshot(ctx, baselinePath, kubeconfig)
 	if err != nil {
 		return err
 	}
 
-	target, err := snapshotter.LoadFromFileWithKubeconfig(ctx, targetPath, kubeconfig)
+	target, err := client.LoadSnapshot(ctx, targetPath, kubeconfig)
 	if err != nil {
 		return err
 	}
 
-	result := diff.Snapshots(baseline, target)
+	// Unwrap to reach pkg/diff, which still takes the internal shape. This is
+	// the last direct hop left in this command; exposing diff on the facade
+	// (#2025) is what removes it, and it was deliberately sequenced after
+	// LoadSnapshot so it can take facade snapshots rather than paths.
+	result := diff.Snapshots(baseline.Unwrap(), target.Unwrap())
 	result.BaselineSource = baselinePath
 	result.TargetSource = targetPath
 

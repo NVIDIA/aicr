@@ -29,6 +29,9 @@
 //   - BundleComponents — resolve Helm values and stitched manifests for
 //     each component in a *RecipeResult.
 //   - CollectSnapshot — deploy the snapshotter Job and retrieve a *Snapshot.
+//   - LoadSnapshot — read a previously captured *Snapshot from a file,
+//     URL, or cm:// ConfigMap, for the common case where the snapshot
+//     already exists and no cluster is needed.
 //   - ValidateState — evaluate a resolved recipe against a snapshot,
 //     running deployment / conformance / performance phases.
 //

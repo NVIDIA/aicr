@@ -23,7 +23,6 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 // recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
@@ -136,7 +135,7 @@ func emitRecipeEvidence(
 	ctx context.Context,
 	client *aicr.Client,
 	rec *aicr.RecipeResult,
-	snap *snapshotter.Snapshot,
+	snap *aicr.Snapshot,
 	results []*aicr.PhaseResult,
 	cfg *recipeEvidenceConfig,
 ) error {
@@ -153,7 +152,7 @@ func emitRecipeEvidence(
 		}
 	}
 
-	return client.EmitRecipeEvidence(ctx, rec, aicr.WrapSnapshot(snap), results, aicr.EvidenceOptions{
+	return client.EmitRecipeEvidence(ctx, rec, snap, results, aicr.EvidenceOptions{
 		OutDir:      cfg.OutDir,
 		BOMPath:     cfg.BOMPath,
 		Push:        cfg.Push,

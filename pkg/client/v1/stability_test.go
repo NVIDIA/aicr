@@ -78,6 +78,7 @@ func TestStability_RecipeResolution(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot, ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshotWithOptions)
 	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.RecipeResult, error)]((*aicr.Client).LoadRecipe)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.AgentConfig) (*aicr.Snapshot, error)]((*aicr.Client).CollectSnapshot)
+	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.Snapshot, error)]((*aicr.Client).LoadSnapshot)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithProfile)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithAccountingMode)
 
