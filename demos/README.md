@@ -28,6 +28,18 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | [private-signing.md](private-signing.md) | Private/enterprise signing & verification (self-hosted Sigstore, KMS-backed, headless OIDC) |
 | [examples/CUJ2-Test-Report.md](examples/CUJ2-Test-Report.md) | Dated historical capture (2026-03-13) of a CUJ2 inference run — example test report, not a runbook |
 
+## Workload Samples
+
+Deployable manifests used by the demos above and by conformance evidence collection. Each carries its prerequisites and setup commands in its header.
+
+| Sample | Description |
+|--------|-------------|
+| [workloads/inference/vllm-agg.yaml](workloads/inference/vllm-agg.yaml) | Dynamo vLLM aggregated inference (DynamoGraphDeployment); pulls an ungated Hugging Face model, no credential required |
+| [workloads/inference/nimservice-llama-3-2-1b.yaml](workloads/inference/nimservice-llama-3-2-1b.yaml) | NIM inference via the NGC model path; requires an `NGC_API_KEY` secret |
+| [workloads/inference/nimservice-hf-nocred.yaml](workloads/inference/nimservice-hf-nocred.yaml) | NIM inference via an `hf://` model; no NGC credential required (see [NIM workload credentials](../docs/user/component-catalog.md#nim-workload-credentials)) |
+| [workloads/training/gke-nccl-test-tcpxo.yaml](workloads/training/gke-nccl-test-tcpxo.yaml) | NCCL all-reduce bandwidth test for GKE TCPXO fabric |
+
+
 ## Recording Test Runs
 
 Use the `script` command to capture a terminal session for sharing or archival:

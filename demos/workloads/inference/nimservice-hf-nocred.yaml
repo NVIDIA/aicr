@@ -1,0 +1,93 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+# NIM Service — credential-free inference via a Hugging Face model.
+# Serves an ungated Hugging Face model through NIM without any NGC credential:
+# no NGC_API_KEY and no registry pull secret.
+#
+# How it avoids credentials:
+#   - NIM_MODEL_NAME uses an hf:// URI, which puts the operator on its Hugging
+#     Face path. There it marks NGC_API_KEY optional and injects HF_TOKEN from
+#     the same authSecret, so the secret need not carry an NGC key at all.
+#   - Model-specific NIM repositories (nim/meta/*) serve anonymous registry
+#     tokens, so no pullSecrets are required. The generic Multi-LLM image
+#     nvcr.io/nim/nvidia/llm-nim is gated and would need one.
+#
+# spec.authSecret is required by the NIMService schema, so the secret must
+# exist and must contain an HF_TOKEN key. An empty value is sufficient for an
+# ungated model; a gated Hugging Face repository needs a real token.
+#
+# Prerequisites:
+#   - k8s-nim-operator deployed (via AICR NIM recipe); no credential needed
+#
+# Setup:
+#   kubectl create ns nim-workload
+#   kubectl create secret generic hf-secret \
+#     --from-literal=HF_TOKEN="" -n nim-workload
+#
+# Deploy:
+#   kubectl apply -f nimservice-hf-nocred.yaml
+#
+# Test:
+#   kubectl port-forward svc/qwen3-nocred 8000:8000 -n nim-workload
+#   curl http://localhost:8000/v1/models
+#   curl http://localhost:8000/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"Hello!"}],"max_tokens":30}'
+#
+# Node scheduling below targets an AKS GPU pool. Adjust nodeSelector and
+# tolerations for other platforms (EKS/GKE use different pool labels and taints).
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nim-workload
+---
+apiVersion: apps.nvidia.com/v1alpha1
+kind: NIMService
+metadata:
+  name: qwen3-nocred
+  namespace: nim-workload
+spec:
+  # Required by the schema. Holds only HF_TOKEN — no NGC_API_KEY.
+  authSecret: hf-secret
+  image:
+    repository: nvcr.io/nim/meta/llama-3.1-8b-instruct
+    tag: latest
+    pullPolicy: IfNotPresent
+    # No pullSecrets: this repository serves anonymous registry tokens.
+  env:
+    - name: NIM_MODEL_NAME
+      value: hf://Qwen/Qwen3-0.6B
+    - name: NIM_SERVED_MODEL_NAME
+      value: Qwen/Qwen3-0.6B
+  storage:
+    emptyDir:
+      sizeLimit: 60Gi
+  replicas: 1
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+  nodeSelector:
+    agentpool: gpuworker1
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Equal
+      value: present
+      effect: NoSchedule
+  expose:
+    service:
+      type: ClusterIP
+      port: 8000

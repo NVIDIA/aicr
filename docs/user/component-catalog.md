@@ -33,7 +33,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a NATS-backed Kubernetes event plane for KV-cache events, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
-| **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
+| **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
 | **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
 | **mariadb-operator-crds** | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
@@ -175,6 +175,46 @@ aicr bundle -r recipe.yaml \
 (The keyed toleration is required on AKS independently of NVSentinel — bundling an AKS recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration` — and is harmless elsewhere.)
 
 `aicr bundle` rejects the mismatch too (`CheckNVSentinelRuntimeClassCoherence`): it compares the two resolved names, treating either side unset as the shared chart default `nvidia`, so it passes wherever the recipes leave `operator.runtimeClass` at its default (EKS, GKE, OKE, AKS `operator-managed` — omit the override there) and fails AKS `azure-managed` until the override is passed. See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) for the per-profile guidance.
+
+## NIM Workload Credentials
+
+AICR installs the **k8s-nim-operator** only. It does not create a `NIMService` and does not create credentials — deploying a workload is an operator step, and there are two ways to supply the model.
+
+Whichever path you take, `spec.authSecret` is required by the `NIMService` schema and must name an existing secret in the workload's namespace. `spec.image.pullSecrets` is optional; the image block requires only `repository` and `tag`.
+
+### NGC path
+
+Model artifacts come from NGC, so the secret must carry a valid `NGC_API_KEY`:
+
+```bash
+kubectl create secret generic ngc-api-secret \
+  --from-literal=NGC_API_KEY="$NGC_API_KEY" -n nim-workload
+```
+
+Add a `docker-registry` secret and reference it from `image.pullSecrets` when the image lives in a private or authenticated registry path. See `demos/workloads/inference/nimservice-llama-3-2-1b.yaml` for a complete example.
+
+### Credential-free path (Hugging Face)
+
+Setting `NIM_MODEL_NAME` to an `hf://` URI puts the operator on its Hugging Face path, where it marks `NGC_API_KEY` optional and injects `HF_TOKEN` from the same `authSecret`. With an ungated Hugging Face model and a NIM image that pulls anonymously, no NGC credential is needed anywhere:
+
+```bash
+kubectl create secret generic hf-secret --from-literal=HF_TOKEN="" -n nim-workload
+```
+
+```yaml
+spec:
+  authSecret: hf-secret                                  # holds only HF_TOKEN
+  image:
+    repository: nvcr.io/nim/meta/llama-3.1-8b-instruct   # pulls anonymously; no pullSecrets
+    tag: latest
+  env:
+    - name: NIM_MODEL_NAME
+      value: hf://Qwen/Qwen3-0.6B                        # ungated model
+```
+
+The `HF_TOKEN` key must exist in the secret — that reference is not optional — but an empty value is sufficient for an ungated model. A gated Hugging Face repository needs a real token here.
+
+Model-specific NIM repositories (for example `nim/meta/llama-3.1-8b-instruct`) serve anonymous registry tokens; the generic Multi-LLM image `nim/nvidia/llm-nim` does not and requires a pull secret. See `demos/workloads/inference/nimservice-hf-nocred.yaml` for a complete example.
 
 ## Inference Gateway Network Exposure
 
