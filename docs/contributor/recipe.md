@@ -517,7 +517,9 @@ arguments name the dimensions the *caller* stated; everything else is
 treated as derived. If a coverage error's uncovered dimensions are *all*
 safely relaxable, the facade clears them to unstated and retries resolution
 once, logging a warning per relaxed dimension and reporting them in
-`RecipeResult.RelaxedDimensions`.
+`pkg/client/v1.RecipeResult.RelaxedDimensions` — the facade's result type,
+not the resolver's `RecipeResult` documented under
+[Observable RecipeResult Surfaces](#observable-reciperesult-surfaces) below.
 
 **Not every uncovered dimension is relaxable**, and the distinction is why
 `verifyCriteriaCoverage` records `constraintExcluded` per entry. A dimension
