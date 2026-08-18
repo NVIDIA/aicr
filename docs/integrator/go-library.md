@@ -458,9 +458,12 @@ error rather than retrying:
   overlay's floor, say. Relaxing there converts "your cluster does not meet
   this overlay's requirements" into a broader recipe that resolves cleanly,
   discarding the finding you most need.
-- **A relaxation that would leave `criteria(any)`.** Resolving that emits the
-  generic fallback recipe at exit 0 — the fail-open the pre-resolution
-  specificity guard exists to prevent (#1888).
+- **A relaxation that would leave no stated coverage dimension.** Such criteria
+  match every overlay and resolve the generic fallback recipe at exit 0 — the
+  fail-open the pre-resolution specificity guard exists to prevent (#1888).
+  Note this is not the same as "criteria is empty": a fingerprint-derived
+  `nodes` value survives the clear, but no overlay gates on `nodes`, so it
+  selects nothing.
 
 The distinction in the second case is *why* the dimension is uncovered: no
 overlay states it at all (safe to relax — nothing in the recipe distinguishes

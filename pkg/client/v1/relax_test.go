@@ -29,10 +29,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
-// statedSet builds a statedDimensionSet from dimension names, panicking on an
-// unknown one so a typo in a test fixture surfaces as a failure rather than a
-// silently-empty set (which would make a never-relax-stated case pass for the
-// wrong reason).
 // dimNames projects extracted entries to their names for order-sensitive
 // comparison.
 func dimNames(dims []uncoveredDimension) []CriteriaDimension {
@@ -46,6 +42,10 @@ func dimNames(dims []uncoveredDimension) []CriteriaDimension {
 	return out
 }
 
+// statedSet builds a statedDimensionSet from dimension names, panicking on an
+// unknown one so a typo in a test fixture surfaces as a failure rather than a
+// silently-empty set (which would make a never-relax-stated case pass for the
+// wrong reason).
 func statedSet(dims ...CriteriaDimension) statedDimensionSet {
 	var s statedDimensionSet
 	for _, d := range dims {
@@ -149,9 +149,9 @@ func TestRelaxDerivedCoverage(t *testing.T) {
 			wantOK:   false,
 		},
 		{
-			// service is retained (not uncovered), so specificity survives the
-			// clear — without it this case would collapse to criteria(any) and
-			// be refused by the generic-fallback guard.
+			// service is retained (not uncovered), so a coverage dimension
+			// survives the clear — without it this case would collapse and be
+			// refused by the generic-fallback guard.
 			name: "multiple derived dimensions all relax",
 			err:  mkCoverageErr(DimensionOS, DimensionIntent),
 			criteria: &recipe.Criteria{
@@ -233,13 +233,29 @@ func TestRelaxDerivedCoverage(t *testing.T) {
 			wantCleared: []CriteriaDimension{DimensionOS},
 		},
 		{
-			// Relaxing the only stated dimension leaves criteria(any), whose
-			// resolve emits the generic fallback recipe at exit 0 (#1888).
-			name:     "relaxation collapsing to criteria(any) is refused",
+			// Relaxing the only stated dimension leaves nothing that selects an
+			// overlay, so the retry resolves the generic fallback at exit 0
+			// (#1888).
+			name:     "relaxation collapsing to no coverage dimension is refused",
 			err:      mkCoverageErr(DimensionOS),
 			criteria: &recipe.Criteria{OS: recipe.CriteriaOSType("ubuntu")},
 			stated:   statedSet(),
 			wantOK:   false,
+		},
+		{
+			// Same collapse, but with the nodes value fingerprint.ToCriteria
+			// sets from node-count topology. nodes scores a Specificity point
+			// while gating no overlay (#1781), so a Specificity()-based guard
+			// is skipped here and the retry resolves criteria(nodes=8) into
+			// the generic fallback. The guard must count coverage dimensions.
+			name: "collapse guard is not fooled by a surviving nodes value",
+			err:  mkCoverageErr(DimensionOS),
+			criteria: &recipe.Criteria{
+				OS:    recipe.CriteriaOSType("ubuntu"),
+				Nodes: 8,
+			},
+			stated: statedSet(),
+			wantOK: false,
 		},
 	}
 

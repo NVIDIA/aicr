@@ -243,9 +243,6 @@ func TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed(t *testing.T) {
 	}
 }
 
-// TestRecipeCmd_Snapshot_DerivedDimensionRelaxed is the companion success
-// case: the same snapshot with NO os flag resolves, because the
-// fingerprint-derived os (untouched) is relaxed on retry.
 // constraintFailingKindSnapshotYAML fingerprints to service=kind on a
 // Kubernetes version below the kind overlay's `K8s.server.version >= 1.25`
 // constraint, so the only overlay covering service=kind is excluded by
@@ -286,6 +283,9 @@ func TestRecipeCmd_Snapshot_ConstraintFailureNotRelaxed(t *testing.T) {
 	}
 }
 
+// TestRecipeCmd_Snapshot_DerivedDimensionRelaxed is the companion success
+// case: the same snapshot with NO os flag resolves, because the
+// fingerprint-derived os (untouched) is relaxed on retry.
 func TestRecipeCmd_Snapshot_DerivedDimensionRelaxed(t *testing.T) {
 	snapPath := writeYAML(t, "snapshot.yaml", kindSnapshotYAML)
 	outPath := filepath.Join(t.TempDir(), "recipe.yaml")

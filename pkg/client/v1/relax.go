@@ -92,8 +92,12 @@ func AllCriteriaDimensions() []CriteriaDimension {
 //     observed cluster failed its constraints. Relaxing there would turn "this
 //     cluster does not meet the overlay's requirements" into a broader recipe
 //     that resolves cleanly — discarding the finding the operator most needs.
-//   - A relaxation that would leave criteria(any), whose resolve emits the
-//     generic fallback recipe at exit 0 (the fail-open behind issue #1888).
+//   - A relaxation that would leave NO stated coverage dimension, whose
+//     resolve matches every overlay and emits the generic fallback recipe at
+//     exit 0 (the fail-open behind issue #1888). Note this is not the same as
+//     "criteria is empty": a fingerprint-derived Nodes value survives the
+//     clear and still renders in Criteria.String(), but no overlay gates on
+//     nodes, so it selects nothing.
 //
 // # Passing no dimensions is meaningful
 //
@@ -142,6 +146,25 @@ func WithSnapshotCriteriaRelaxation(stated ...CriteriaDimension) RecipeResolveOp
 // validCriteriaDimension reports whether dim is one of the coverage dimensions.
 func validCriteriaDimension(dim CriteriaDimension) bool {
 	return slices.Contains(AllCriteriaDimensions(), dim)
+}
+
+// hasStatedCoverageDimension reports whether c still states at least one
+// dimension that participates in overlay selection.
+//
+// Deliberately NOT recipe.Criteria.Specificity(). That counts Nodes as a
+// specificity point (so a nodes-only CLI query clears the minimum-specificity
+// guard), but Nodes does not participate in Criteria.Matches() — no overlay
+// gates on it (#1781/#2155). A criteria whose only remaining value is Nodes
+// therefore matches everything and resolves the generic fallback, while
+// scoring 1. Counting only coverage dimensions asks the question that
+// actually matters: will the retry still select on anything?
+func hasStatedCoverageDimension(c *recipe.Criteria) bool {
+	for _, dim := range AllCriteriaDimensions() {
+		if v := criteriaDimensionValue(c, dim); v != "" && v != recipe.CriteriaAnyValue {
+			return true
+		}
+	}
+	return false
 }
 
 // statedDimensionSet is a set of coverage dimensions the caller declared it
@@ -200,15 +223,17 @@ func (s statedDimensionSet) with(dim CriteriaDimension) (statedDimensionSet, boo
 //     would convert "this cluster does not meet the overlay's requirements"
 //     into a broader recipe that resolves cleanly — the failure the operator
 //     most needs to see, silently discarded.
-//  4. Clearing the dimensions would collapse criteria to criteria(any).
-//     Resolving that emits the generic fallback recipe with exit 0, which is
-//     the same fail-open the CLI's pre-resolution specificity guard exists to
-//     prevent (issue #1888); relaxation must not reintroduce it downstream.
+//  4. Clearing the dimensions would leave no stated COVERAGE dimension.
+//     Resolving that matches every overlay and emits the generic fallback
+//     recipe with exit 0 — the same fail-open the CLI's pre-resolution
+//     specificity guard exists to prevent (issue #1888); relaxation must not
+//     reintroduce it downstream. See hasStatedCoverageDimension for why this
+//     is not Specificity() == 0.
 //
 // Cases 3 and 4 overlap in practice but neither subsumes the other: a
-// constraint-excluded dimension can leave other dimensions stated (so
-// specificity survives), and a catalog-agnostic dimension can be the only one
-// stated (so specificity collapses with no exclusion involved).
+// constraint-excluded dimension can leave other dimensions stated (so the
+// selection survives), and a catalog-agnostic dimension can be the only one
+// stated (so selection collapses with no exclusion involved).
 func relaxDerivedCoverage(
 	err error,
 	criteria *recipe.Criteria,
@@ -244,9 +269,9 @@ func relaxDerivedCoverage(
 		cleared = append(cleared, dim.name)
 	}
 
-	if next.Specificity() == 0 {
-		slog.Info("not relaxing criteria: every stated dimension is uncovered, so the retry "+
-			"would resolve the generic fallback recipe",
+	if !hasStatedCoverageDimension(&next) {
+		slog.Info("not relaxing criteria: every stated coverage dimension is uncovered, so the "+
+			"retry would resolve the generic fallback recipe",
 			"criteria", criteria.String())
 		return nil, nil, false
 	}

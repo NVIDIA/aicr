@@ -528,9 +528,12 @@ distinguishes the detected value. A dimension whose only provider was
 removed by constraint evaluation is not: clearing it converts a real
 incompatibility (the cluster failed that overlay's constraints) into a
 broader recipe that resolves at exit 0. The facade refuses in that case, and
-refuses again if clearing would leave `criteria(any)`, which would resolve
-the generic fallback — the same fail-open as issue #1888. A stated dimension
-is never relaxed either way.
+refuses again if clearing would leave no stated *coverage* dimension, which
+would match every overlay and resolve the generic fallback — the same
+fail-open as issue #1888. That check counts only the five coverage
+dimensions, not `Specificity()`, because `nodes` scores a specificity point
+while participating in no overlay match (#1781). A stated dimension is never
+relaxed either way.
 
 This lets an overlay tree that is deliberately agnostic to a dimension
 (e.g. Kind's OS-agnostic overlays) tolerate a snapshot that still reports a
