@@ -81,6 +81,11 @@ spec:
         - expected-resources
         - gpu-operator-version
         - check-nvidia-smi
+        # Fails closed when the cluster lacks the Network / GKENetworkParamSet
+        # objects GPUDirect TCPXO needs. The gke-nccl-tcpxo DaemonSets roll out
+        # cleanly without them, so without this the gap only surfaces as a
+        # performance-phase abort with no bandwidth number produced (#2216).
+        - gke-gpu-nic-networks
       constraints:
         - name: Deployment.gpu-operator.version
           value: ">= v24.6.0"

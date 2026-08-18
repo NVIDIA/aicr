@@ -21,6 +21,7 @@
 //	deployment expected-resources
 //	deployment gpu-operator-version
 //	deployment check-nvidia-smi
+//	deployment gke-gpu-nic-networks
 package main
 
 import (
@@ -33,5 +34,6 @@ func main() {
 		"expected-resources":   checkExpectedResources,
 		"gpu-operator-version": checkGPUOperatorVersion,
 		"check-nvidia-smi":     checkNvidiaSMI,
+		"gke-gpu-nic-networks": checkGKEGPUNICNetworks,
 	})
 }
