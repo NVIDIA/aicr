@@ -102,8 +102,9 @@ const (
 	RecipeOperationTimeout = 30 * time.Second
 
 	// SnapshotLoadTimeout is the upper bound for a single
-	// Client.LoadSnapshot call: reading a snapshot document from disk, an
-	// HTTP(S) URL, or a cm://namespace/name ConfigMap.
+	// Client.LoadSnapshot call, and bounds the whole load whatever the
+	// source: a local file read, an HTTP(S) fetch, or a
+	// cm://namespace/name ConfigMap read against the Kubernetes API.
 	//
 	// Matches RecipeOperationTimeout, which bounds Client.LoadRecipe over
 	// the same cm:// resolution path against the Kubernetes API. Named

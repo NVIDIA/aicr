@@ -29,13 +29,17 @@ import (
 // It is the counterpart to CollectSnapshot for the case an integrator hits
 // far more often: the snapshot already exists. A pipeline captures cluster
 // state in one stage and resolves or validates against it in another, or the
-// snapshot is committed to a repository and replayed. Only the live-capture
-// path needs a cluster.
+// snapshot is committed to a repository and replayed.
 //
 // path accepts the same forms the CLI does — a local file, an HTTP(S) URL, or
 // a cm://namespace/name ConfigMap URI. kubeconfig resolves the cm:// form;
 // empty uses the standard KUBECONFIG, ~/.kube/config, then in-cluster
 // discovery chain, and is ignored entirely for the other two.
+//
+// Cluster access is therefore source-dependent: a local file or an HTTP(S)
+// URL needs none, while a cm:// URI reads a ConfigMap through the Kubernetes
+// API and needs working credentials for that cluster. Only CollectSnapshot
+// needs a cluster unconditionally, since it deploys an agent Job.
 //
 // The loader FAILS CLOSED on a document that is not a snapshot this build can
 // consume: a wrong kind (an AICRConfig, say), or an apiVersion this binary
@@ -49,10 +53,11 @@ import (
 //
 // Snapshot.Raw carries the exact bytes a collection agent emitted and is set
 // only by CollectSnapshot. A loaded snapshot leaves it empty, because the
-// bytes on disk are already the durable artifact — re-exposing them here would
-// invite callers to round-trip a file through the parsed type, which is what
-// Raw exists to discourage. Read the file directly if the original bytes are
-// what you need.
+// source is already the durable artifact — re-exposing its bytes here would
+// invite callers to round-trip a stored snapshot through the parsed type,
+// which is what Raw exists to discourage. If the original bytes are what you
+// need, retrieve them from the source: read the file for a local path, or
+// re-fetch the URL or ConfigMap.
 //
 // This method does not touch the Client's recipe catalog, so any open Client
 // will do; it hangs off Client to keep the surface uniform and to give

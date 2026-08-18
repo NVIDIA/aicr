@@ -235,7 +235,7 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 	// (network mount, FUSE, /proc anomaly) must not stall past the deadline.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		_ = file.Close()
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "file read canceled", ctxErr)
+		return nil, abortError(ctxErr, "file read")
 	}
 
 	// Read the bounded content fully so the size limit is actually enforced.
@@ -251,7 +251,7 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 	if readErr != nil {
 		_ = file.Close()
 		if errors.IsTransient(readErr) {
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "file read canceled", readErr)
+			return nil, abortError(readErr, "file read")
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read file", readErr)
 	}
@@ -579,6 +579,22 @@ func ReadFileBytesWithKubeconfigContext(
 // a cm:// URI.
 func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig string, opts ...ReaderOption) (*T, error) {
 	return fromFileWithKubeconfigContext[T](ctx, path, kubeconfig, opts...)
+}
+
+// abortError shapes a context abort so a deliberate operator cancellation
+// stays distinguishable from an environmental deadline.
+//
+// The distinction is load-bearing rather than cosmetic: errors.IsTransient
+// reports true for ErrCodeTimeout and for a bare context.Canceled, so coding a
+// Ctrl-C as a timeout lets a caller's retry loop re-enter on an abort the
+// operator explicitly requested. Only an ErrCodeCanceled wrapper stops that —
+// which is exactly what that code's godoc says it exists for. Mirrors the
+// helper of the same name in pkg/evidence/verifier.
+func abortError(cause error, what string) error {
+	if stderrors.Is(cause, context.Canceled) {
+		return errors.Wrap(errors.ErrCodeCanceled, what+" canceled", cause)
+	}
+	return errors.Wrap(errors.ErrCodeTimeout, what+" timed out", cause)
 }
 
 func fromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig string, opts ...ReaderOption) (*T, error) {

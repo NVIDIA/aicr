@@ -100,7 +100,8 @@ telemetry hooks.
 Most integrations do not capture a snapshot inline. One pipeline stage
 records cluster state, a later stage resolves or validates against it —
 or the snapshot is committed and replayed. `LoadSnapshot` is the entry
-point for that case, and needs no cluster:
+point for that case, and needs no cluster for a local file or an
+HTTP(S) URL:
 
 ```go
 snap, err := client.LoadSnapshot(ctx, "./snapshot.yaml", "")
@@ -125,8 +126,10 @@ the generic fallback recipe with exit 0. Empty `kind` and `apiVersion`
 are tolerated for snapshots that predate those fields.
 
 `Snapshot.Raw` is **not** populated by `LoadSnapshot` — only
-`CollectSnapshot` sets it. The bytes on disk are already the durable
-artifact; read the file directly if you need them.
+`CollectSnapshot` sets it. The source you loaded from is already the
+durable artifact, so if you need the original bytes, retrieve them from
+that source yourself: read the file for a local path, or re-fetch the
+URL or ConfigMap.
 
 ### Capturing a snapshot from a live cluster
 
@@ -741,8 +744,9 @@ caller passing `context.Background()` gets no deadline at all.
 Per-operation caps:
 
 - `ResolveRecipe` / `BundleComponents`: `defaults.RecipeOperationTimeout`
-- `LoadSnapshot`: `defaults.SnapshotLoadTimeout` — a file read, or a
-  `cm://` ConfigMap fetch against the Kubernetes API. Distinct from
+- `LoadSnapshot`: `defaults.SnapshotLoadTimeout` — bounds the whole
+  load whatever the source: a local file read, an HTTP(S) fetch, or a
+  `cm://` ConfigMap read against the Kubernetes API. Distinct from
   `SnapshotOperationTimeout` below, which bounds deploying an agent Job.
 - `CollectSnapshot`: caller-controlled via `AgentConfig.Timeout` (falling
   back to `defaults.SnapshotOperationTimeout` when unset), plus

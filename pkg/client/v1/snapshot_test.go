@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -206,5 +207,16 @@ func TestLoadSnapshot_HonorsContextCancellation(t *testing.T) {
 	}
 	if !stderrors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want one wrapping context.Canceled", err)
+	}
+	// Assert the CODE, not just the cause. A deliberate abort must not be
+	// coded as a timeout: errors.IsTransient reports true for ErrCodeTimeout
+	// and for a bare context.Canceled, so a caller's retry loop would
+	// re-enter on a Ctrl-C. Only ErrCodeCanceled stops that.
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != aicrerrors.ErrCodeCanceled {
+		t.Errorf("error code = %v, want %v", err, aicrerrors.ErrCodeCanceled)
+	}
+	if aicrerrors.IsTransient(err) {
+		t.Error("a canceled load reports as transient; a retry loop would re-enter on an operator abort")
 	}
 }
