@@ -104,12 +104,13 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 //
 // The message names the required naming convention because it is a real way to
 // hit a zero count on an otherwise correctly provisioned cluster: discovery
-// matches on the name substring, and Google's own sample manifests name the
-// Device networks vpc1..vpc8.
+// matches the substring against the NETWORK name only, and Google's own sample
+// manifests name the Device networks vpc1..vpc8.
 func absentPrerequisiteMsg(detail string) string {
 	return fmt.Sprintf(
-		"recipe declares %s but %s GPU NIC networks — GPUDirect TCPXO requires Network and "+
-			"GKENetworkParamSet objects bound into the cluster, each named to contain %q. "+
+		"recipe declares %s but %s GPU NIC networks — GPUDirect TCPXO requires one Network "+
+			"per GPU NIC, each bound to a GKENetworkParamSet and each with %q in its own "+
+			"metadata.name (the GKENetworkParamSet name is not matched). "+
 			"These are provisioned with the cluster, not by AICR, and multi-networking cannot be "+
 			"enabled after cluster creation. Verify with: kubectl get network.networking.gke.io "+
 			"(see docs/integrator/gke-tcpxo-networking.md)",

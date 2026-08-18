@@ -32,17 +32,23 @@ will work.
    `network=NETWORK,subnetwork=SUBNET`.
 4. **Apply the `Network` and `GKENetworkParamSet` CRs** — one pair per GPU NIC,
    binding each additional node network into the cluster so pods can reference
-   it by name. **Name each one so it contains `gpu-nic`** (for example
+   it by name. **Each `Network` name must contain `gpu-nic`** — for example
    `gpu-nic-0` through `gpu-nic-7`, optionally with a cluster prefix such as
-   `aicr-demo2-gpu-nic-0`).
+   `aicr-demo2-gpu-nic-0`. The paired `GKENetworkParamSet` is referenced by the
+   `Network` through `spec.parametersRef`, so its own name is unconstrained.
 
 > **The `gpu-nic` naming is a requirement, not a convention.** AICR discovers
-> these networks by matching `gpu-nic` in `metadata.name` — both the
-> `gke-gpu-nic-networks` deployment check and the NCCL benchmark's own interface
-> mapping. Google's sample manifests name the Device networks `vpc1`–`vpc8`;
-> applied verbatim those are invisible to AICR, and the deployment check reports
-> 0 of 8 on a cluster that is otherwise correctly provisioned. Rename them when
-> following that procedure.
+> these networks by matching `gpu-nic` in the `Network` object's
+> `metadata.name` — both the `gke-gpu-nic-networks` deployment check and the
+> NCCL benchmark's own interface mapping. Google's sample manifests name the
+> Device networks `vpc1`–`vpc8`; applied verbatim those are invisible to AICR,
+> and the deployment check reports 0 of 8 on a cluster that is otherwise
+> correctly provisioned. Rename them when following that procedure.
+>
+> Beyond containing `gpu-nic`, the exact names are yours to choose — but the
+> workload annotation below must reference the names your cluster actually has.
+> The example there uses `gpu-nic0`–`gpu-nic7`; if you provisioned
+> `gpu-nic-0`–`gpu-nic-7`, use those instead.
 
 > **Multi-networking cannot be enabled after cluster creation.** `--enable-multi-networking`
 > is a create-time flag; there is no `gcloud container clusters update` equivalent,
