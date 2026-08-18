@@ -510,6 +510,14 @@ if err != nil {
 }
 defer client.Close()
 
+// REQUIRED before deriving criteria: loading the catalog is what seeds this
+// Client's registry with the values its overlays contribute. Skip it and a
+// value defined only by spec.recipe.data is still unknown, so the derivation
+// below rejects it.
+if err = client.LoadCatalog(ctx); err != nil {
+	log.Fatal(err)
+}
+
 // spec.recipe.criteria, parsed against this Client's registry so a value
 // contributed by a --data overlay validates against the same catalog.
 criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())

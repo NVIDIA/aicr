@@ -445,11 +445,17 @@ func embeddedClient() (*aicr.Client, error) {
 //
 //nolint:nilnil
 func loadCmdConfig(ctx context.Context, cmd *cli.Command) (*config.AICRConfig, error) {
-	src := cmd.String("config")
-	if src == "" {
-		return nil, nil
+	cfg, err := loadFacadeConfig(ctx, cmd)
+	if err != nil {
+		return nil, err
 	}
-	return config.Load(ctx, src)
+	// Unwrap rather than load again: aicr.LoadConfig is the single loader for
+	// the CLI, so there is no second path whose validation or error handling
+	// could drift from what an SDK consumer sees. Commands still holding the
+	// internal type are the ones whose spec sections the facade does not
+	// project yet (bundle, validate, snapshot); each converts here, not by
+	// loading independently.
+	return cfg.Unwrap(), nil
 }
 
 // stringFlagOrConfig returns the resolved value for a string CLI flag with

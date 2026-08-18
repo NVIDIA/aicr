@@ -55,6 +55,7 @@ spec:
       accelerator: h100
       intent: training
       os: ubuntu
+      platform: kubeflow
       nodes: 8
 `
 
@@ -161,6 +162,7 @@ func TestLoadConfig_DerivesRecipeInputs(t *testing.T) {
 		{"Accelerator", criteria.Accelerator, "h100"},
 		{"Intent", criteria.Intent, "training"},
 		{"OS", criteria.OS, "ubuntu"},
+		{"Platform", criteria.Platform, "kubeflow"},
 	} {
 		if tt.got != tt.want {
 			t.Errorf("Criteria.%s = %q, want %q", tt.field, tt.got, tt.want)
@@ -482,6 +484,9 @@ func TestToInternalCriteria(t *testing.T) {
 	}
 	if string(internal.OS) != derived.OS {
 		t.Errorf("OS = %q, want %q", internal.OS, derived.OS)
+	}
+	if string(internal.Platform) != derived.Platform {
+		t.Errorf("Platform = %q, want %q", internal.Platform, derived.Platform)
 	}
 	if internal.Nodes != derived.Nodes {
 		t.Errorf("Nodes = %d, want %d", internal.Nodes, derived.Nodes)

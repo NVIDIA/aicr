@@ -167,9 +167,14 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Overlay the flags. Every field is CLI-flag-over-config, matching the
-	// precedence the other --config-aware commands use. The facade validates
-	// the identity pattern and the --insecure-ignore-tlog/--key pairing, so
-	// both rejections still happen before any verification work runs.
+	// precedence the other --config-aware commands use.
+	//
+	// Note the derivation above validated none of this: cfg.BundleVerifyOptions
+	// only projects spec.verify, and IgnoreTLog has no config field at all.
+	// Client.VerifyBundle is what rejects a bad identity pattern and an
+	// IgnoreTLog without a Key, before any verification work runs. The pairing
+	// check is repeated below purely to word the message in flags rather than
+	// struct fields.
 	opts := aicr.BundleVerifyOptions{
 		CertificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertificateIdentityRegexp),
 		Key:                       stringFlagOrConfig(cmd, "key", resolved.Key),
