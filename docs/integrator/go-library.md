@@ -398,12 +398,63 @@ For a per-resolution Slurm accounting mode, use
 `aicr.WithAccountingMode("customer-managed")`. The original criteria and
 snapshot method signatures remain unchanged for source compatibility.
 
+### Criteria relaxation on the snapshot path
+
+A snapshot resolve is strict by default — every criteria dimension you state
+must be honored by an applied overlay, or resolution fails with
+`ErrCodeInvalidRequest` and a `details.uncovered` payload.
+
+That is right for criteria a user typed, but wrong for criteria you *derived*
+from the snapshot fingerprint. An overlay tree can be deliberately agnostic to
+a dimension (Kind's overlays state no `os`) while the fingerprint still detects
+a concrete value on the node — nothing in the recipe distinguishes it, so
+failing there rejects a legitimate query.
+
+Pass `aicr.WithSnapshotCriteriaRelaxation` and name the dimensions **you
+received explicitly**. Anything else is treated as derived, and a coverage
+failure limited to derived dimensions is retried once with those cleared:
+
+```go
+criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).
+    ToCriteria(client.CriteriaRegistry())
+criteria.Intent = recipe.CriteriaIntentTraining // the user asked for this one
+
+result, err := client.ResolveRecipeFromSnapshotWithOptions(
+    ctx, aicr.WrapCriteria(criteria), snap,
+    aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
+if err != nil {
+    log.Fatalf("resolve: %v", err)
+}
+for _, dim := range result.RelaxedDimensions {
+    log.Printf("resolved recipe is broader than requested: %s was relaxed", dim)
+}
+```
+
+Three properties worth knowing:
+
+- **A dimension you name is never relaxed.** If it comes back uncovered, the
+  original error propagates — no retry. Relaxing a value the caller asked for
+  would silently resolve a different recipe.
+- **Passing no dimensions is meaningful,** not a no-op: it means every
+  dimension was derived and all are relaxable. That is the common case for a
+  pure fingerprint query. Presence of the option is what enables the policy, so
+  omitting it entirely is how you keep strict behavior.
+- **It is snapshot-only.** On `ResolveRecipeFromCriteria` there is no
+  fingerprint, so the option is rejected with `ErrCodeInvalidRequest` rather
+  than ignored.
+
+Both attempts share the call's timeout budget, and relaxation happens at most
+once.
+
 The returned `*RecipeResult` carries:
 
 - `Name`, `Version`, `TranslatedAt` — stable identity
 - `Components` — `[]ComponentRef` (Name, Kind, Version, Source, Chart, Namespace)
 - `SelectedProfile` — selected name/value and declaration-wide `OwnedPaths`;
   nil for legacy recipes
+- `RelaxedDimensions` — criteria dimensions cleared by
+  `WithSnapshotCriteriaRelaxation`; empty unless that option was passed and the
+  first attempt failed coverage
 - `Resolved()` — the upstream `*pkg/recipe.RecipeResult` for callers that
   need constraints, deployment order, validation config, or metadata
   (e.g., evidence emission). Do not mutate; do not retain past the

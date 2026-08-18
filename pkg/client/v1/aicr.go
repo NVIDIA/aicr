@@ -608,6 +608,9 @@ func (c *Client) resolveCriteria(
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectSnapshotOnlyOptions(cfg); err != nil {
+		return nil, err
+	}
 	return builder.BuildFromCriteriaWithProfile(ctx, criteria, cfg.profile, buildOpts...)
 }
 
@@ -629,10 +632,27 @@ func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, err
 			opt(cfg)
 		}
 	}
-	if cfg.accountingModeErr != nil {
-		return nil, cfg.accountingModeErr
+	if cfg.optErr != nil {
+		return nil, cfg.optErr
 	}
 	return cfg, nil
+}
+
+// rejectSnapshotOnlyOptions fails a criteria-only resolve that was handed an
+// option meaningful only on the snapshot path.
+//
+// WithSnapshotCriteriaRelaxation is rejected rather than ignored: with no
+// fingerprint every dimension is caller-supplied, so relaxing one would clear
+// a value the caller explicitly stated — and silently dropping the option
+// would leave the caller believing they had `--snapshot` semantics.
+func rejectSnapshotOnlyOptions(cfg *recipeResolveConfig) error {
+	if cfg.relaxDerived {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"WithSnapshotCriteriaRelaxation is valid only on the snapshot resolve path "+
+				"(ResolveRecipeFromSnapshot); a criteria-only resolve derives no dimensions, "+
+				"so every dimension is caller-stated and none may be relaxed")
+	}
+	return nil
 }
 
 // ResolveRecipeFromCriteria resolves a facade Criteria into a facade
@@ -731,16 +751,22 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 // shared resolve path: criteria outside the configured allowlist are rejected
 // before the recipe is built.
 //
-// The criteria-coverage post-condition (issue #1542) is STRICT here: every
-// stated criteria dimension must be honored by an applied overlay or
-// resolution fails with ErrCodeInvalidRequest carrying details.uncovered.
-// The CLI's `aicr recipe --snapshot` additionally relaxes dimensions that
-// were derived from the snapshot fingerprint (never user-stated ones) and
-// retries once — that relaxation is CLI-layer policy, implemented in pkg/cli
-// on top of this facade, because only the CLI knows which dimensions the
-// user explicitly stated. Callers replicating `--snapshot` behavior must
-// implement the same policy themselves (clear the uncovered dimensions they
-// derived rather than received, then retry).
+// The criteria-coverage post-condition (issue #1542) is STRICT by default
+// here: every stated criteria dimension must be honored by an applied overlay
+// or resolution fails with ErrCodeInvalidRequest carrying details.uncovered.
+//
+// To reproduce `aicr recipe --snapshot`, which additionally relaxes
+// dimensions derived from the snapshot fingerprint and retries once, pass
+// WithSnapshotCriteriaRelaxation and name the dimensions you received
+// explicitly:
+//
+//	result, err := client.ResolveRecipeFromSnapshotWithOptions(ctx, criteria, snap,
+//	    aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
+//
+// Only the caller knows which dimensions a user stated versus which it
+// derived, so the facade cannot infer that — but it does accept it as a
+// parameter and applies the policy itself. Dimensions actually cleared are
+// reported in RecipeResult.RelaxedDimensions.
 //
 // The same guards and synchronization as ResolveRecipeFromCriteria apply: nil
 // receiver, nil context, nil criteria, and nil snapshot are rejected with
@@ -841,8 +867,41 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	}
 	internal, err := builder.BuildFromCriteriaWithEvaluatorAndProfile(
 		ctx, internalCriteria, evaluator, resolveCfg.profile, buildOpts...)
+
+	// Relax-and-retry: when the caller opted in via
+	// WithSnapshotCriteriaRelaxation and the build failed the criteria-coverage
+	// post-condition on dimensions it DERIVED rather than stated, clear those
+	// and build once more. Both attempts share this call's timeout budget, so
+	// relaxation cannot extend the bound a caller set.
+	var relaxedDims []CriteriaDimension
 	if err != nil {
-		return nil, err
+		if !resolveCfg.relaxDerived {
+			return nil, err
+		}
+		relaxedCriteria, cleared, ok := relaxDerivedCoverage(err, internalCriteria, resolveCfg.stated)
+		if !ok {
+			// Not a coverage failure, or an uncovered dimension was
+			// caller-stated. Either way the original error stands.
+			return nil, err
+		}
+		// Re-fence the relaxed criteria. Relaxation only ever clears a
+		// dimension to "any", which ValidateCriteria always permits, so this
+		// cannot fail today — it is here so "every criteria the builder sees
+		// was allowlist-checked" holds locally, rather than depending on that
+		// property of pkg/recipe/allowlist.go staying true.
+		if allowErr := c.enforceAllowLists(relaxedCriteria); allowErr != nil {
+			return nil, allowErr
+		}
+		slog.Info("retrying recipe resolution with snapshot-derived criteria relaxed",
+			"criteria", relaxedCriteria.String())
+		internal, err = builder.BuildFromCriteriaWithEvaluatorAndProfile(
+			ctx, relaxedCriteria, evaluator, resolveCfg.profile, buildOpts...)
+		if err != nil {
+			// One retry only. The relaxed attempt's error is the useful one:
+			// it describes the resolve the caller actually ended up asking for.
+			return nil, err
+		}
+		relaxedDims = cleared
 	}
 	// Snapshot-driven post-processing: when the sampled GPU node already
 	// has the NVIDIA kernel driver loaded AND the resolved overlay
@@ -867,6 +926,7 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	result.RelaxedDimensions = relaxedDims
 	result.owner = c
 	return result, nil
 }

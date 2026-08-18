@@ -48,6 +48,23 @@ var coverageDimensions = []coverageDimension{
 	{"platform", func(c *Criteria) string { return string(c.Platform) }},
 }
 
+// CoverageDimensionNames returns the criteria dimension names subject to the
+// coverage post-condition, in canonical (coverageDimensions) order.
+//
+// These are the exact strings that appear as the "dimension" key of each
+// details.uncovered entry on a coverage failure, so a caller acting on that
+// error — clearing the reported dimensions and retrying, as
+// pkg/client/v1's snapshot-criteria relaxation does — can pin its own
+// dimension vocabulary against this list rather than hand-copying it.
+// nodes is absent for the reason given on coverageDimension.
+func CoverageDimensionNames() []string {
+	names := make([]string, 0, len(coverageDimensions))
+	for _, dim := range coverageDimensions {
+		names = append(names, dim.name)
+	}
+	return names
+}
+
 // isSpecifiedCriteriaValue reports whether a criteria field value is
 // explicitly stated ("" and "any" both mean unstated, consistent with
 // MatchesCriteriaField).

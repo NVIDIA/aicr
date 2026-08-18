@@ -82,10 +82,26 @@ func TestStability_RecipeResolution(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.Snapshot, error)]((*aicr.Client).LoadSnapshot)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithProfile)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithAccountingMode)
+	requireSignature[func(...aicr.CriteriaDimension) aicr.RecipeResolveOption](aicr.WithSnapshotCriteriaRelaxation)
+	requireSignature[func() []aicr.CriteriaDimension](aicr.AllCriteriaDimensions)
 
 	_ = []aicr.RecipeResolveOption{
 		aicr.WithProfile("profile"),
 		aicr.WithAccountingMode("disabled"),
+		// Both the no-argument form (every dimension derived, all relaxable)
+		// and the narrowing form are part of the contract.
+		aicr.WithSnapshotCriteriaRelaxation(),
+		aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionOS),
+	}
+
+	// The dimension vocabulary is public API: callers name these constants to
+	// declare what they stated, so renaming or dropping one breaks them.
+	_ = []aicr.CriteriaDimension{
+		aicr.DimensionService,
+		aicr.DimensionAccelerator,
+		aicr.DimensionIntent,
+		aicr.DimensionOS,
+		aicr.DimensionPlatform,
 	}
 }
 
@@ -101,6 +117,7 @@ func TestStability_RecipeResult(t *testing.T) {
 	_ = r.Version
 	_ = r.Components
 	_ = r.SelectedProfile
+	_ = r.RelaxedDimensions
 	requireSignature[func(*aicr.RecipeResult) *recipe.RecipeResult]((*aicr.RecipeResult).Resolved)
 	_ = r.Resolved()
 }

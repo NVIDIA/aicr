@@ -138,6 +138,7 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | `ResolveRecipe(ctx, RecipeRequest)` | `recipe`, `query` (request can hold criteria, file path, or snapshot input) |
 | `ResolveRecipeFromCriteria(ctx, *Criteria)` | criteria-only fast path |
 | `ResolveRecipeFromSnapshot(ctx, *Criteria, *Snapshot)` | `validate`, `recipe --snapshot` |
+| `ResolveRecipeFromSnapshotWithOptions(ctx, *Criteria, *Snapshot, opts...)` | `recipe --snapshot`, `query --snapshot` — with `WithSnapshotCriteriaRelaxation(stated...)` for the derived-criteria retry |
 | `LoadRecipe(ctx, path, kubeconfig)` | `bundle`, `validate`, `diff` (read a previously emitted recipe file) |
 | `BundleComponents(ctx, *RecipeResult)` | `bundle` |
 | `LoadSnapshot(ctx, path, kubeconfig)` | `validate`, `query`, `diff` (read a previously captured snapshot; file, URL, or `cm://` ConfigMap) |
@@ -154,6 +155,14 @@ Adding business logic in the handler — recipe resolution loops, bundle
 rendering, validator orchestration, OCI pushes — is a boundary
 violation. If the facade is missing the surface you need, add it to
 `pkg/client/v1` first.
+
+**What `--snapshot` still owns.** `buildRecipeFromCmdWithConfig` in
+`query.go` derives criteria from the snapshot fingerprint, layers config and
+flags on top, and records which of the five coverage dimensions were
+explicitly stated in a `touched` map. That map becomes the argument to
+`aicr.WithSnapshotCriteriaRelaxation` — the relax-and-retry itself lives in
+the facade (issue #2027). Only this layer can know a flag was set, so
+declaring the stated set is the CLI's job; acting on it is not.
 
 ## Output Writers
 

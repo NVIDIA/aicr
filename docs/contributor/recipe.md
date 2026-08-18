@@ -499,21 +499,38 @@ non-`NotFound` error through `aicrerrors.PropagateOrWrap(..., ErrCodeInternal,
 ...)` before returning it — an evaluator that hasn't adopted `pkg/errors`
 still surfaces a coded error instead of an uncoded 500 at the server layer.
 
-**The engine stays strict; the CLI's snapshot path relaxes derived-only
+**The engine stays strict; the SDK's snapshot path can relax derived-only
 failures.** Everything above describes `pkg/recipe`'s behavior, which never
 relaxes the post-condition — a coverage failure there is always terminal.
-The CLI's `--snapshot` flow (`pkg/cli/query.go`) layers a caller-side
-retry on top: `service`, `accelerator`, and `os` can be derived from the
-snapshot fingerprint rather than stated by the user (`intent` and
-`platform` are always user-stated — the fingerprint never derives them).
-If a coverage error's uncovered dimensions are *all* fingerprint-derived
-(none came from `--config` or a CLI flag), the CLI clears those dimensions
-to unstated and retries resolution once, logging a warning per relaxed
-dimension; if any uncovered dimension was user-stated, the error still
-propagates unchanged. This lets an overlay tree that is deliberately
-agnostic to a dimension (e.g. Kind's OS-agnostic overlays) tolerate a
-snapshot that still reports a concrete value for it, without weakening the
-post-condition for anyone who asked for that dimension explicitly.
+The relax-and-retry lives one layer up, in `pkg/client/v1`
+(`relax.go`), behind an opt-in resolve option:
+
+```go
+result, err := client.ResolveRecipeFromSnapshotWithOptions(ctx, criteria, snap,
+    aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
+```
+
+`service`, `accelerator`, and `os` can be derived from the snapshot
+fingerprint rather than stated by the user (`intent` and `platform` are
+always user-stated — the fingerprint never derives them). The option's
+arguments name the dimensions the *caller* stated; everything else is
+treated as derived. If a coverage error's uncovered dimensions are *all*
+derived, the facade clears them to unstated and retries resolution once,
+logging a warning per relaxed dimension and reporting them in
+`RecipeResult.RelaxedDimensions`. If any uncovered dimension was stated,
+the error propagates unchanged.
+
+This lets an overlay tree that is deliberately agnostic to a dimension
+(e.g. Kind's OS-agnostic overlays) tolerate a snapshot that still reports a
+concrete value for it, without weakening the post-condition for anyone who
+asked for that dimension explicitly.
+
+Omitting the option keeps the strict behavior, so the coverage
+post-condition is unchanged for every caller that does not opt in — the
+REST recipe endpoint among them. `pkg/cli/query.go` passes the option and
+supplies the stated set from its `touched` map; declaring which dimensions
+a user typed is the one part of the policy that has to stay in the CLI,
+since only that layer knows a flag was set (issue #2027).
 
 ## Determinism
 
