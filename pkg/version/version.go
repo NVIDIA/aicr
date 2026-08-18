@@ -23,9 +23,11 @@ import (
 	pkgerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// gkeSuffixPrefix is the prefix that identifies GKE-specific build number
-// extras of the form "-gke.NNNNNN" (e.g. "-gke.1318000").
-const gkeSuffixPrefix = "gke."
+// GKESuffixPrefix is the bare prefix (without the leading dash) that identifies
+// GKE-specific build number extras. Full extras have the form "-gke.NNNNNN";
+// this constant is "gke." — callers must strip the leading "-" before using
+// it with strings.HasPrefix. Prefer ExtractGKEBuild for safe consumption.
+const GKESuffixPrefix = "gke."
 
 // Error types for version parsing failures
 var (
@@ -181,16 +183,16 @@ func (v Version) Equals(other Version) bool {
 	return v.Major == other.Major && v.Minor == other.Minor && v.Patch == other.Patch
 }
 
-// extractGKEBuild parses a GKE-specific build number from the Extras field of
+// ExtractGKEBuild parses a GKE-specific build number from the Extras field of
 // a Version. It expects extras in the form "-gke.NNNNNN" (e.g. "-gke.1318000")
 // and returns the integer build number and true on success. Non-GKE extras
 // (e.g. "-eks-3025e55", "-hotfix.20240322", "") return (0, false).
-func extractGKEBuild(extras string) (int64, bool) {
+func ExtractGKEBuild(extras string) (int64, bool) {
 	s := strings.TrimPrefix(extras, "-")
-	if !strings.HasPrefix(s, gkeSuffixPrefix) {
+	if !strings.HasPrefix(s, GKESuffixPrefix) {
 		return 0, false
 	}
-	numStr := s[len(gkeSuffixPrefix):]
+	numStr := s[len(GKESuffixPrefix):]
 	if numStr == "" {
 		return 0, false
 	}
@@ -258,8 +260,8 @@ func (v Version) Compare(other Version) int {
 	//  - Only actual has GKE suffix → actual is a GKE build of a bare
 	//    version that it satisfies, so actual is considered newer (1).
 	//  - Neither has GKE suffix (or neither is parseable) → equal (0).
-	leftBuild, leftIsGKE := extractGKEBuild(v.Extras)
-	rightBuild, rightIsGKE := extractGKEBuild(other.Extras)
+	leftBuild, leftIsGKE := ExtractGKEBuild(v.Extras)
+	rightBuild, rightIsGKE := ExtractGKEBuild(other.Extras)
 	switch {
 	case leftIsGKE && rightIsGKE:
 		if leftBuild < rightBuild {

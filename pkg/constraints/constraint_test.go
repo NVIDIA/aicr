@@ -392,6 +392,13 @@ func TestParseCompoundConstraint(t *testing.T) {
 			expr:        ">= 1.34.3 || || >= 1.35.0",
 			expectError: true,
 		},
+		{
+			// Malformed GKE suffix in a term — PropagateOrWrap surfaces the
+			// ErrCodeInvalidRequest from ParseConstraintExpression.
+			name:        "malformed GKE suffix in compound expr errors",
+			expr:        ">= 1.34.3-gke.-1 < 1.35.0 || >= 1.35.0-gke.2745000",
+			expectError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -585,6 +592,46 @@ func TestLooksLikeVersion(t *testing.T) {
 			got := looksLikeVersion(tt.input)
 			if got != tt.want {
 				t.Errorf("looksLikeVersion(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseConstraintExpression_MalformedGKESuffix verifies that constraint
+// values with a "-gke." prefix but invalid build number are rejected at parse
+// time, preventing Compare() from silently treating them as unordered extras.
+func TestParseConstraintExpression_MalformedGKESuffix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		expr        string
+		wantErr     bool
+		wantErrCode errors.ErrorCode
+	}{
+		// Valid GKE suffix — must parse cleanly.
+		{name: "valid GKE suffix parses", expr: ">= 1.34.3-gke.1318000", wantErr: false},
+		// Negative build number must be rejected with ErrCodeInvalidRequest.
+		{name: "negative GKE build rejected", expr: ">= 1.34.3-gke.-1", wantErr: true, wantErrCode: errors.ErrCodeInvalidRequest},
+		// Non-numeric GKE suffix must be rejected.
+		{name: "non-numeric GKE build rejected", expr: ">= 1.34.3-gke.abc", wantErr: true, wantErrCode: errors.ErrCodeInvalidRequest},
+		// Empty build number must be rejected.
+		{name: "empty GKE build rejected", expr: ">= 1.34.3-gke.", wantErr: true, wantErrCode: errors.ErrCodeInvalidRequest},
+		// Non-GKE suffix is fine — no validation applied.
+		{name: "EKS suffix not validated", expr: ">= 1.33.5-eks-3025e55", wantErr: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseConstraintExpression(tt.expr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseConstraintExpression(%q) error = %v, wantErr %v", tt.expr, err, tt.wantErr)
+			}
+			if err != nil && tt.wantErrCode != "" {
+				if !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+					t.Errorf("ParseConstraintExpression(%q) error code = %v, want %v", tt.expr, err, tt.wantErrCode)
+				}
 			}
 		})
 	}

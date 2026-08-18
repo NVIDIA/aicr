@@ -108,6 +108,27 @@ func ParseConstraintExpression(expr string) (*ParsedConstraint, error) {
 		pc.IsVersionComparison = true
 	}
 
+	// Reject a version constraint value whose Extras carry a "-gke." prefix but
+	// an invalid (e.g. negative or non-numeric) build number. ExtractGKEBuild
+	// returns (0, false) for such values, so Compare() treats the constraint
+	// as an unordered extra and fall through to return 0 — allowing a bare
+	// version to satisfy ">= 1.34.3-gke.-1" incorrectly.
+	// Scoped to GTE/GT/LTE/LT only: EQ and NE call Equals() (ignores Extras)
+	// and Exact does a raw string compare, so the GKE build number is never
+	// consulted for those operators.
+	isComparisonOp := pc.Operator == OperatorGTE || pc.Operator == OperatorGT ||
+		pc.Operator == OperatorLTE || pc.Operator == OperatorLT
+	if isComparisonOp {
+		if parsed, err := version.ParseVersion(pc.Value); err == nil {
+			if strings.HasPrefix(strings.TrimPrefix(parsed.Extras, "-"), version.GKESuffixPrefix) {
+				if _, ok := version.ExtractGKEBuild(parsed.Extras); !ok {
+					return nil, errors.New(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("constraint value %q has a malformed GKE build suffix (must be -gke.N with N >= 0)", pc.Value))
+				}
+			}
+		}
+	}
+
 	return pc, nil
 }
 
@@ -322,13 +343,17 @@ func ParseCompoundConstraint(expr string) (*CompoundConstraint, error) {
 	for _, clause := range orClauses {
 		terms, err := splitAndTerms(clause)
 		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid AND clause in constraint", err)
+			// PropagateOrWrap preserves the inner ErrCodeInvalidRequest code;
+			// the fallback message is unreachable since splitAndTerms always
+			// returns a *StructuredError, but documents intent for future callers.
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid AND clause in constraint")
 		}
 		andGroup := make([]ParsedConstraint, 0, len(terms))
 		for _, term := range terms {
 			pc, err := ParseConstraintExpression(term)
 			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid constraint term", err)
+				// Same: fallback message unreachable; preserves ErrCodeInvalidRequest.
+				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid constraint term")
 			}
 			andGroup = append(andGroup, *pc)
 		}
