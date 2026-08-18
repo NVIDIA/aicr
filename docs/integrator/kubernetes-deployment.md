@@ -236,6 +236,10 @@ duplicated here.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | 8080 | HTTP server port |
+| `AICR_SERVER_ADDRESS` | (unset = all interfaces) | Listen address. Unset binds every interface (required for the in-tree Kubernetes Deployment: kubelet livenessProbe/readinessProbe and kube-proxy both dial the pod IP directly, not loopback). Set to `127.0.0.1` for a loopback-only bind on a sidecar or bare-host deployment fronted by a same-pod reverse proxy. Set to a specific interface to constrain listener binding. |
+| `AICR_ALLOW_VENDOR_CHARTS` | `false` | Opt-in for `POST /v1/bundle?vendor-charts=true`. When off (default) the vendor path is rejected with 400 — this endpoint drives server-side `helm pull` against a caller-supplied URL and must not be exposed on an unauthenticated network. Parsed by Go's `strconv.ParseBool`: accepts `1`/`t`/`T`/`TRUE`/`true`/`True` to enable (or the matching false values to disable); any other value (including `yes`, `on`, or a typo) is treated as disabled and logged as a warning. |
+| `AICR_HELM_REPOSITORY_HOST` | (unset = no credentials attached) | The single repository host the vendor-charts index pre-check may send `HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` to. Attaches credentials ONLY when: this env is set, the request scheme is `https`, and the request host case-insensitively matches this value. Any mismatch suppresses credentials silently so a caller-supplied `Repository` URL cannot exfiltrate the operator's helm credentials. Leave unset unless you need the index pre-check to authenticate against a specific private HTTP repo. |
+| `HELM_REPOSITORY_USERNAME` / `HELM_REPOSITORY_PASSWORD` | (unset) | Basic-auth credentials for the vendor-charts index pre-check. Gated by `AICR_HELM_REPOSITORY_HOST` above — no credentials fly unless that host allowlist is set. The upstream `helm pull --repo` subprocess does NOT itself consume these vars; private HTTP repos require an out-of-band `helm repo add --username --password` in the aicrd image. |
 | `SHUTDOWN_TIMEOUT_SECONDS` | 30 | Graceful-shutdown drain timeout (seconds) |
 | `AICR_LOG_LEVEL` | info | Logging level: debug, info, warn, error |
 | `AICR_ALLOWED_ACCELERATORS` | (unset = all) | Comma-separated allowlist of accelerator types (e.g. `h100,l40`) |
@@ -244,6 +248,57 @@ duplicated here.
 | `AICR_ALLOWED_OS` | (unset = all) | Comma-separated allowlist of OS types (e.g. `ubuntu,rhel`) |
 
 **Note:** These are the only environment variables the API server reads for criteria filtering and transport; server-side bundle signing (`POST /v1/bundle?attest=true`) reads an additional set documented in [API Reference › Server-Side Signing](../user/api-reference.md#server-side-signing). The four `AICR_ALLOWED_*` allowlists are parsed once at startup to restrict which criteria values the server will accept. Rate-limit, request-timeout, and body-size settings are compiled-in constants from `pkg/defaults`, not environment-tunable. The server uses structured JSON logging to stderr. The CLI supports three logging modes (CLI/Text/JSON), but the API server always uses JSON for consistent log aggregation.
+
+### Network Egress from the Vendor-Charts Path
+
+`POST /v1/bundle?vendor-charts=true` performs server-side `helm pull` against
+the repository URL declared by each component in the submitted recipe. Four
+controls keep this endpoint safe by default:
+
+1. **Opt-in gate.** Off unless the operator sets
+   `AICR_ALLOW_VENDOR_CHARTS=true`. The bundle handler rejects
+   `vendor-charts=true` with `400` when the server is not opted in, so an
+   accidentally-exposed instance never performs egress on behalf of a request.
+2. **Repository egress policy.** Even with opt-in, the vendor layer rejects
+   repository hosts that resolve to loopback, link-local, RFC1918 / CGNAT /
+   ULA private ranges, multicast, unspecified, or the well-known cloud-
+   metadata IPs (169.254.169.254, 100.100.100.200, fd00:ec2::254,
+   fe80::a9fe:a9fe).
+3. **Index-yaml pre-check (HTTP(S) only).** Before invoking `helm pull`, the
+   server fetches `<repo>/index.yaml` through a hardened HTTP client
+   (bounded body, redirect-hops validated against the same egress policy),
+   parses the entries for the requested chart+version, resolves relative
+   URLs, and rejects the request if ANY declared tarball URL points at a
+   disallowed host. This closes the classic "public index.yaml points at a
+   private-network tarball" SSRF vector at pre-check time.
+4. **Artifact size cap.** The pulled `.tgz` is capped at 64 MiB — well
+   above real charts, low enough to bound server memory.
+
+**Residual risks that require operator-side controls:**
+
+- **DNS rebinding** between the pre-check and helm's own re-resolution when
+  it actually fetches (helm re-resolves without exposing the resolved IP to
+  us).
+- **HTTP redirects during helm's tarball fetch** — helm is a subprocess and
+  its redirect hops are not visible to the pre-check.
+- **OCI protocol** — the OCI distribution redirect chain (manifest → blob
+  GETs, which registries commonly redirect to a CDN URL) is not intercepted.
+- **Resolver divergence** — the pre-check re-implements Helm's semver
+  constraint resolution to select which chart-version entry from the
+  fetched `index.yaml` to egress-check. Helm itself re-fetches the index
+  and re-resolves independently when it actually pulls, so the URL the
+  pre-check egress-validated can differ from the URL Helm pulls if the
+  index changes between calls or if the two resolvers pick differently
+  under ambiguous inputs — a defense-in-depth check that can bit-rot as
+  Helm evolves.
+
+For all four, the operational control is a Kubernetes `NetworkPolicy` on
+the aicrd pod or an equivalent egress firewall that allow-lists only the
+public chart registries the deployment needs. If you cannot enforce that
+network boundary, keep `AICR_ALLOW_VENDOR_CHARTS` off and front the server
+with authenticated ingress. A follow-up will move the tarball fetch
+in-process to close these residuals without needing a network-layer
+control.
 
 ### ConfigMap for Custom Recipe Data (Advanced)
 
