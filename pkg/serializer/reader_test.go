@@ -1330,9 +1330,14 @@ func TestClassifyConfigMapGetError(t *testing.T) {
 			wantCode: errors.ErrCodeTimeout,
 		},
 		{
+			// Cancellation is CANCELED, not TIMEOUT. This case previously
+			// pinned the opposite, which made an operator abort report
+			// transient via errors.IsTransient and let a caller's retry loop
+			// re-enter on it. Wrapped here on purpose: the classifier must
+			// see through client-go's own wrapping.
 			name:     "wrapped cancellation",
 			err:      fmt.Errorf("ConfigMap get interrupted: %w", context.Canceled),
-			wantCode: errors.ErrCodeTimeout,
+			wantCode: errors.ErrCodeCanceled,
 		},
 		{
 			name:     "Kubernetes timeout status",

@@ -1940,3 +1940,78 @@ func TestCollectSnapshot_RejectsBeforeClusterAccess(t *testing.T) {
 		})
 	}
 }
+
+// TestRejectUnverifiableCatalogSigning covers both directions of the
+// sign/verify symmetry invariant SignCatalog enforces.
+//
+// This is an internal test on purpose. The "accepted" cases cannot be asserted
+// through SignCatalog: an accepted setting by definition reaches the attester,
+// and with no OIDC token available that falls through to the interactive
+// browser flow — which opens a browser locally and hangs in CI, where there is
+// none. Calling the guard directly asserts the invariant with no signing,
+// no network, and no token.
+func TestRejectUnverifiableCatalogSigning(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		resolve    OIDCResolveOptions
+		wantReject bool
+	}{
+		{
+			name:       "KMS key has no catalog verification path",
+			resolve:    OIDCResolveOptions{SigningKey: "awskms://alias/aicr-catalog"},
+			wantReject: true,
+		},
+		{
+			name:       "local PEM key has no catalog verification path",
+			resolve:    OIDCResolveOptions{SigningKey: "./catalog-signer.key"},
+			wantReject: true,
+		},
+		{
+			name:       "private Fulcio does not chain to the public-good root",
+			resolve:    OIDCResolveOptions{FulcioURL: "https://fulcio.internal.example"},
+			wantReject: true,
+		},
+		{
+			name:       "no transparency-log entry to verify",
+			resolve:    OIDCResolveOptions{DisableTLogUpload: true},
+			wantReject: true,
+		},
+		{
+			// Fails closed: a public-good v1 URL would verify, but it is
+			// indistinguishable from a private log by URL alone.
+			name:       "explicit Rekor URL may name a private log",
+			resolve:    OIDCResolveOptions{RekorURL: "https://rekor.internal.example"},
+			wantReject: true,
+		},
+		{
+			name:       "public-good Rekor URL is rejected too",
+			resolve:    OIDCResolveOptions{RekorURL: "https://rekor.sigstore.dev"},
+			wantReject: true,
+		},
+		// Accepted: verification handles both, and the release path passes a
+		// signing config, so neither may be swept up by the rejection.
+		{name: "zero value", resolve: OIDCResolveOptions{}},
+		{
+			name:    "signing config selects a public-good target",
+			resolve: OIDCResolveOptions{SigningConfigPath: "/etc/aicr/signing-config.json"},
+		},
+		{
+			name:    "token sources are orthogonal to verifiability",
+			resolve: OIDCResolveOptions{IdentityToken: "token", DeviceFlow: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := rejectUnverifiableCatalogSigning(tt.resolve)
+			if tt.wantReject && err == nil {
+				t.Fatal("setting was accepted, but VerifyCatalog cannot verify what it produces")
+			}
+			if !tt.wantReject && err != nil {
+				t.Fatalf("setting was rejected, but it is symmetric with VerifyCatalog: %v", err)
+			}
+		})
+	}
+}

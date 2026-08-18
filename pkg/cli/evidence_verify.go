@@ -22,8 +22,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
 )
 
 const (
@@ -127,7 +127,13 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) (err error) {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}
 
-	result, verifyErr := verifier.Verify(ctx, verifier.VerifyOptions{
+	client, clientErr := embeddedClient()
+	if clientErr != nil {
+		return clientErr
+	}
+	defer func() { _ = client.Close() }()
+
+	result, verifyErr := client.VerifyEvidence(ctx, aicr.EvidenceVerifyOptions{
 		Input:                  input,
 		BundleRef:              cmd.String("bundle"),
 		ExpectedIssuer:         cmd.String("expected-issuer"),
@@ -166,15 +172,15 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) (err error) {
 // ErrCodeInvalidRequest share it); consumers that need to tell them apart read
 // the JSON "exit" field. Verdict 3 gets its own codes precisely so a CI gate
 // can distinguish "we could not check this" from "we checked it and it failed".
-func verdictError(result *verifier.VerifyResult) error {
+func verdictError(result *aicr.EvidenceVerification) error {
 	switch result.Exit {
-	case verifier.ExitValidPassed:
+	case aicr.EvidenceExitValidPassed:
 		return nil
-	case verifier.ExitValidPhaseFailures:
+	case aicr.EvidenceExitValidPhaseFailures:
 		return errors.New(errors.ErrCodeConflict,
 			"bundle valid; recorded validator results show failures")
-	case verifier.ExitIncomplete:
-		if result.FailureCause != nil && result.FailureCause.Class == verifier.CauseCanceled {
+	case aicr.EvidenceExitIncomplete:
+		if result.FailureCause != nil && result.FailureCause.Class == aicr.EvidenceCauseCanceled {
 			return errors.New(errors.ErrCodeCanceled,
 				"bundle verification aborted before a verdict was reached")
 		}
@@ -209,9 +215,9 @@ func openVerifyOutput(path string, stdout io.Writer) (io.Writer, func() error, e
 	return f, f.Close, nil
 }
 
-func writeVerifyOutput(w io.Writer, format string, r *verifier.VerifyResult) error {
+func writeVerifyOutput(w io.Writer, format string, r *aicr.EvidenceVerification) error {
 	if format == evidenceVerifyFormatJSON {
-		body, err := verifier.RenderJSON(r)
+		body, err := aicr.RenderEvidenceJSON(r)
 		if err != nil {
 			return err
 		}
@@ -220,7 +226,7 @@ func writeVerifyOutput(w io.Writer, format string, r *verifier.VerifyResult) err
 		}
 		return nil
 	}
-	if _, err := fmt.Fprint(w, verifier.RenderMarkdown(r)); err != nil {
+	if _, err := fmt.Fprint(w, aicr.RenderEvidenceMarkdown(r)); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write Markdown output", err)
 	}
 	return nil

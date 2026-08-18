@@ -27,7 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -211,9 +211,9 @@ func resolveBinaryAttestationPath(binPath string) (string, error) {
 func resolveBinaryAttestationIdentityPattern() (string, error) {
 	p := os.Getenv(defaults.EnvBinaryAttestationIdentityRegexp)
 	if p == "" {
-		return verifier.TrustedRepositoryPattern, nil
+		return aicr.TrustedIdentityPattern, nil
 	}
-	if err := verifier.ValidateIdentityPattern(p); err != nil {
+	if err := aicr.ValidateIdentityPattern(p); err != nil {
 		return "", err // already coded (ErrCodeInvalidRequest)
 	}
 	slog.Warn("using custom binary-attestation identity pattern; bundles this server signs "+
@@ -258,7 +258,11 @@ func defaultBinaryAttestationVerifier(ctx context.Context) ([]byte, error) {
 	if int64(len(data)) > defaults.MaxAttestationFileBytes {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "binary attestation exceeds size limit")
 	}
-	if _, verifyErr := verifier.VerifyBinaryAttestationData(ctx, data, identityPattern, digest); verifyErr != nil {
+	if _, verifyErr := aicr.VerifyBinaryAttestation(ctx, aicr.BinaryAttestationVerifyOptions{
+		Attestation:    data,
+		BinaryDigest:   digest,
+		IdentityRegexp: identityPattern,
+	}); verifyErr != nil {
 		return nil, verifyErr // already coded
 	}
 	return data, nil

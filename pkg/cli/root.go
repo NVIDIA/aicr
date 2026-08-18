@@ -405,6 +405,30 @@ func recipeClientFromCmd(cmd *cli.Command, cfg *config.AICRConfig) (*aicr.Client
 	return client, nil
 }
 
+// embeddedClient constructs an aicr.Client bound to the embedded recipe data,
+// for the supply-chain commands that operate on an artifact rather than on a
+// recipe catalog (verify, evidence verify/digest/publish, recipe
+// verify-catalog/sign-catalog).
+//
+// Deliberately NOT recipeClientFromCmd: none of these commands defines --data,
+// and routing them through the config-aware constructor would make a
+// spec.recipe.data entry in an unrelated AICRConfig change (or fail) an
+// artifact verification that never reads the catalog. The catalog commands
+// verify and sign the EMBEDDED catalog specifically, which is what ships
+// signed as a release asset.
+//
+// Callers MUST Close the returned Client (defer client.Close()).
+func embeddedClient() (*aicr.Client, error) {
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+		aicr.WithVersion(version),
+	)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize aicr client", err)
+	}
+	return client, nil
+}
+
 // loadCmdConfig reads --config from the command and returns a parsed
 // *AICRConfig (or nil when the flag is not set). The returned config is
 // fully validated; callers can rely on enum fields parsing without

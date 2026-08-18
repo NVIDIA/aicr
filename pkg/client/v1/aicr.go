@@ -22,23 +22,42 @@
 //
 // # Surface
 //
-// Client exposes the four end-to-end operations the CLI / server share:
+// Client exposes the end-to-end operations the CLI / server share:
 //
 //   - ResolveRecipe / ResolveRecipeFromCriteria / ResolveRecipeFromSnapshot
 //     and LoadRecipe — produce or load a *RecipeResult.
 //   - BundleComponents — resolve Helm values and stitched manifests for
 //     each component in a *RecipeResult.
 //   - CollectSnapshot — deploy the snapshotter Job and retrieve a *Snapshot.
+//   - LoadSnapshot — read a previously captured *Snapshot from a file,
+//     URL, or cm:// ConfigMap, for the common case where the snapshot
+//     already exists and no cluster is needed.
 //   - ValidateState — evaluate a resolved recipe against a snapshot,
 //     running deployment / conformance / performance phases.
+//
+// The supply-chain half covers both producing and checking artifacts:
+//
+//   - VerifyBundle — check a deployment bundle's checksums and attestation
+//     chain, and evaluate a trust-floor / creator / version policy.
+//   - VerifyEvidence — check a recipe-evidence bundle's signature and hash
+//     chain, from a pointer file, an OCI reference, or a directory.
+//   - VerifyCatalog / SignCatalog — check or produce the Sigstore signature
+//     over this Client's recipe catalog.
+//   - RecipeDigest — the canonical recipe digest an evidence predicate
+//     records, for CI gates detecting stale evidence.
+//   - EmitRecipeEvidence / PublishEvidence — build, then sign and push, a
+//     recipe-evidence bundle.
+//   - VerifyBinaryAttestation — package-level; prove an aicr binary was
+//     built by NVIDIA CI.
 //
 // All facade types (Snapshot, AgentConfig, Criteria, RecipeRequest,
 // RecipeResult, ComponentBundle, ComponentRef, PhaseResult, AllowLists)
 // are facade-owned structs translated to and from the upstream pkg/*
 // shapes, so internal field renames don't churn external callers.
 //
-// Five types remain deliberate transparent aliases: BundleConfig,
-// BundleAttester, BundleArtifact, OIDCResolveOptions, and CriteriaRegistry.
+// Seven types remain deliberate transparent aliases: BundleConfig,
+// BundleAttester, BundleArtifact, OIDCResolveOptions, CriteriaRegistry,
+// BundleVerifyReport, and EvidenceVerification.
 // They preserve direct interoperability with the configuration builders,
 // attestation implementations, bundle results, and provider-scoped criteria
 // registry used elsewhere in AICR. The API compatibility gate compares their

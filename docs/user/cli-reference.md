@@ -782,7 +782,7 @@ aicr recipe verify-catalog <bundle-path> [flags]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--identity-pattern` | string | | Override the NVIDIA CI certificate identity regexp. Must contain `NVIDIA/aicr` — overrides that drop the repo prefix are rejected. Also reads `AICR_CATALOG_IDENTITY_PATTERN`. |
+| `--identity-pattern` | string | | Override the NVIDIA CI certificate identity regexp. Must *begin with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed; `github\.com` also accepted) and must not use top-level alternation, so the pattern stays confined to the repository. Put any alternatives after the prefix, e.g. `.../aicr/\.github/workflows/(on-tag\|release)\.yaml@.*`. Also reads `AICR_CATALOG_IDENTITY_PATTERN`. |
 
 **Examples:**
 

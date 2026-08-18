@@ -21,10 +21,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 // recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
@@ -50,7 +48,7 @@ type recipeEvidenceConfig struct {
 	// (see attestation.Emit): Fulcio binds the token to a fresh nonce at
 	// issue, and a multi-minute validation run between resolve and sign
 	// invalidates it.
-	OIDCResolve bundleattest.ResolveOptions
+	OIDCResolve aicr.OIDCResolveOptions
 
 	// AssumeYes bypasses the interactive keyless-signing identity-disclosure
 	// prompt (--yes / AICR_ASSUME_YES). The banner is still emitted.
@@ -116,8 +114,8 @@ func evidenceConfigForRunMode(noCluster bool, cfg *recipeEvidenceConfig) *recipe
 // commands expose no Rekor-v1 override today, so this is unconditional; add the
 // bundle command's --rekor-url / --signing-config opt-outs here if a private
 // evidence-signing use case appears. See #1650.
-func oidcResolveOptionsFromFlags(cmd *cli.Command) bundleattest.ResolveOptions {
-	return bundleattest.ResolveOptions{
+func oidcResolveOptionsFromFlags(cmd *cli.Command) aicr.OIDCResolveOptions {
+	return aicr.OIDCResolveOptions{
 		IdentityToken:       cmd.String(flagIdentityToken),
 		AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
 		AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
@@ -137,7 +135,7 @@ func emitRecipeEvidence(
 	ctx context.Context,
 	client *aicr.Client,
 	rec *aicr.RecipeResult,
-	snap *snapshotter.Snapshot,
+	snap *aicr.Snapshot,
 	results []*aicr.PhaseResult,
 	cfg *recipeEvidenceConfig,
 ) error {
@@ -154,7 +152,7 @@ func emitRecipeEvidence(
 		}
 	}
 
-	return client.EmitRecipeEvidence(ctx, rec, aicr.WrapSnapshot(snap), results, aicr.EvidenceOptions{
+	return client.EmitRecipeEvidence(ctx, rec, snap, results, aicr.EvidenceOptions{
 		OutDir:      cfg.OutDir,
 		BOMPath:     cfg.BOMPath,
 		Push:        cfg.Push,

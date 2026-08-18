@@ -26,6 +26,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"regexp/syntax"
 	"runtime"
 	"strings"
 	"sync"
@@ -132,12 +133,55 @@ const (
 	// would bypass a domain-less check). The escaped form handles regex patterns.
 	requiredRepoPrefix        = "://github.com/NVIDIA/aicr/"
 	requiredRepoPrefixEscaped = `://github\.com/NVIDIA/aicr/`
+
+	// requiredIdentityPrefix is the scheme-qualified form a pattern must START
+	// with. Anchoring on the full "https://" (rather than the "://" fragment
+	// above, which exists to keep github.com from being a path segment) is
+	// what lets ValidateIdentityPattern reason about the whole match instead
+	// of a substring hit somewhere inside it.
+	requiredIdentityPrefix        = "https" + requiredRepoPrefix
+	requiredIdentityPrefixEscaped = "https" + requiredRepoPrefixEscaped
 )
+
+// foreignIdentityCanaries are certificate identities that a correctly pinned
+// pattern MUST NOT match. ValidateIdentityPattern compiles the candidate and
+// tests it against every one of them, rejecting any pattern that matches.
+//
+// This behavioral check is the last of three layers, and exists because
+// requiring the repository prefix is necessary but NOT sufficient: a pattern
+// can begin with it and still match everything, most simply via alternation:
+//
+//	^https://github\.com/NVIDIA/aicr/.*|.*$
+//
+// That begins with the prefix and compiles cleanly, yet its second branch
+// matches any string. Since the identity matcher pins only the OIDC issuer
+// beyond this pattern, such a pattern silently reduces the gate to "any GitHub
+// Actions workflow in any repository".
+//
+// The prefix and top-level-alternation rules in ValidateIdentityPattern handle
+// the branch cases, including branches too narrow for any fixed canary set to
+// catch (a single attacker-controlled repository). These canaries cover the
+// widening that survives a structural read — an empty branch inside a group,
+// say, which leaves the root op unchanged while making the whole pattern match
+// anything. No layer subsumes another.
+//
+// Each entry is shaped like a real GitHub Actions SAN, because that is the
+// only identity form this pattern is ever matched against.
+var foreignIdentityCanaries = []string{
+	"https://github.com/evil/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0",
+	"https://github.com/NVIDIA/other-repo/.github/workflows/on-tag.yaml@refs/tags/v1.0.0",
+	"https://github.com/NVIDIA/aicr-lookalike/.github/workflows/on-tag.yaml@refs/tags/v1.0.0",
+	"https://github.com/attacker/repo/.github/workflows/pwn.yaml@refs/heads/main",
+	"https://gitlab.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0",
+	"",
+}
 
 // VerifyOptions configures verification behavior.
 type VerifyOptions struct {
 	// CertificateIdentityRegexp overrides the default identity pinning pattern
-	// for binary attestation verification. Must contain "NVIDIA/aicr".
+	// for binary attestation verification. Must BEGIN with
+	// "https://github.com/NVIDIA/aicr/" (a leading "^" is allowed) and must
+	// not use top-level alternation; see ValidateIdentityPattern.
 	// Defaults to TrustedRepositoryPattern if empty.
 	CertificateIdentityRegexp string
 
@@ -203,28 +247,106 @@ func newUnionTrustedRoot(path string) (attestation.TrustedRootSource, error) {
 	}, nil
 }
 
-// ValidateIdentityPattern checks that a certificate identity pattern contains
-// the required NVIDIA/aicr GitHub repository URL path. Accepts both literal
-// and regex-escaped forms (e.g., "github.com" or "github\.com").
+// ValidateIdentityPattern checks that a certificate identity pattern is
+// CONFINED to the NVIDIA/aicr GitHub repository, not merely that it mentions
+// it. Accepts both literal and regex-escaped forms of the domain (e.g.,
+// "github.com" or "github\.com").
+//
+// Confinement needs two rules together, because the identity matcher pins only
+// the OIDC issuer beyond this pattern: a widened pattern silently degrades the
+// gate to "any GitHub Actions workflow in any repository" rather than failing
+// visibly.
+//
+//  1. The pattern must BEGIN with the repository prefix (an optional leading
+//     "^" aside). Requiring it as a prefix rather than a substring is what
+//     makes the check sound: a pattern that starts with a literal, and whose
+//     root is not an alternation, can only match strings starting with that
+//     literal. A mere substring test admits alternations that reach the prefix
+//     down one branch while another branch matches something else entirely.
+//  2. The root must not be an alternation, since only one branch of an
+//     alternation has to match.
+//
+// Together these reject `(good|https://github.com/attacker/x/.*)` (does not
+// begin with the prefix) and `^https://github\.com/NVIDIA/aicr/.*|.*$` (root
+// alternation), while still accepting alternatives placed AFTER the prefix,
+// e.g. `.../aicr/\.github/workflows/(on-tag|release)\.yaml@.*`, where every
+// branch is already behind the pin.
+//
+// A leading "^" is optional rather than required so existing unanchored
+// patterns keep working. That is safe for the identity form this is matched
+// against: a GitHub Actions SAN cannot embed a second "://", because neither
+// repository names nor git refs may contain ":".
 func ValidateIdentityPattern(pattern string) error {
 	if pattern == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "certificate identity pattern cannot be empty")
 	}
-	// Accept both literal and regex-escaped dots in the domain
-	if !strings.Contains(pattern, requiredRepoPrefix) &&
-		!strings.Contains(pattern, requiredRepoPrefixEscaped) {
+	// One optional leading anchor is stripped before the prefix test so both
+	// "^https://..." and "https://..." spellings are accepted.
+	body := strings.TrimPrefix(pattern, "^")
+	if !strings.HasPrefix(body, requiredIdentityPrefix) &&
+		!strings.HasPrefix(body, requiredIdentityPrefixEscaped) {
 
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("certificate identity pattern must contain %q to pin to the NVIDIA repository", requiredRepoPrefix))
+			fmt.Sprintf("certificate identity pattern must begin with %q to pin to the NVIDIA repository "+
+				"(a leading \"^\" is allowed; put any alternatives after the prefix)", requiredIdentityPrefix))
 	}
-	// The anchor check above is a substring test, so a pattern can carry the
-	// required repository and still not be a valid regexp. Compile it here so
-	// callers that validate up-front report the failure against their own
-	// input (a CLI flag or a config field, with its spec path) rather than
-	// letting it surface later from the identity matcher.
-	if _, err := regexp.Compile(pattern); err != nil {
+	// A pattern can begin with the required repository and still not be a
+	// valid regexp. Compile it here so callers that validate up-front report
+	// the failure against their own input (a CLI flag or a config field, with
+	// its spec path) rather than letting it surface later from the identity
+	// matcher.
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest,
 			"certificate identity pattern is not a valid regular expression", err)
+	}
+
+	// Reject top-level alternation. The substring check above proves the
+	// required repository appears SOMEWHERE in the pattern; it cannot prove
+	// every branch requires it. `a|b` only needs one branch to match, so a
+	// single unpinned branch defeats the whole gate — and the branch can be
+	// narrow (one attacker-controlled repository) rather than a broad `.*`,
+	// which is why the canary sweep below cannot be the only guard.
+	//
+	// A pattern pinning one repository never needs alternation at the top
+	// level: alternatives belong inside a group after the prefix, e.g.
+	// `.../aicr/\.github/workflows/(release|on-tag)\.yaml@.*`. Parsing rather
+	// than splitting on "|" keeps separators inside groups and character
+	// classes from being misread.
+	parsed, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"certificate identity pattern could not be parsed", err)
+	}
+	if parsed.Op == syntax.OpAlternate {
+		// Name the required prefix here too, not only in the context map: the
+		// CLI surfaces the message alone, and a reader who has just been told
+		// "no top-level alternation" still needs to know what to anchor to.
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("certificate identity pattern must not use top-level alternation: only one branch has to match, "+
+				"so an unpinned branch would defeat the pin to %q. Move the alternatives into a group after the prefix, "+
+				"e.g. %s\\.github/workflows/(on-tag|release)\\.yaml@.*", requiredIdentityPrefix, requiredIdentityPrefixEscaped),
+			map[string]any{
+				"pattern":          pattern,
+				"requiredRepoPath": requiredRepoPrefix,
+			})
+	}
+
+	// Carrying the repository prefix still does not mean the pattern is
+	// CONFINED to it — see foreignIdentityCanaries. Fail closed on any pattern
+	// that also admits an unrelated identity, which catches widening the
+	// structural rule above cannot see (an empty branch inside a group, for
+	// instance).
+	for _, canary := range foreignIdentityCanaries {
+		if compiled.MatchString(canary) {
+			return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+				"certificate identity pattern is not confined to the NVIDIA repository: it also matches an unrelated identity",
+				map[string]any{
+					"pattern":          pattern,
+					"alsoMatches":      canary,
+					"requiredRepoPath": requiredRepoPrefix,
+				})
+		}
 	}
 	return nil
 }

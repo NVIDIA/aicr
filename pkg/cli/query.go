@@ -30,7 +30,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 func queryCmdFlags() []cli.Flag {
@@ -177,7 +176,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 
 	if snapFilePath != "" {
 		slog.Info("loading snapshot from", "uri", snapFilePath)
-		snap, loadErr := snapshotter.LoadFromFileWithKubeconfig(ctx, snapFilePath, cmd.String("kubeconfig"))
+		snap, loadErr := client.LoadSnapshot(ctx, snapFilePath, cmd.String("kubeconfig"))
 		if loadErr != nil {
 			return nil, loadErr
 		}
@@ -186,7 +185,10 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		// user-stated (config or CLI flag) rather than derived from the
 		// snapshot fingerprint below — see relaxSnapshotDerivedCoverage.
 		touched := map[string]bool{}
-		criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria(reg)
+		// Unwrap to reach the measurements: fingerprinting still reads the
+		// internal shape. The resolve calls below take the facade snapshot
+		// directly.
+		criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).ToCriteria(reg)
 		if applyErr := applyCriteriaFromConfig(criteria, cfg, reg, touched); applyErr != nil {
 			return nil, applyErr
 		}
@@ -215,7 +217,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		// internally (constraints.Evaluate against snap), mirroring the
 		// pre-facade BuildFromCriteriaWithEvaluator path.
 		result, resolveErr := client.ResolveRecipeFromSnapshotWithOptions(
-			ctx, aicr.WrapCriteria(criteria), aicr.WrapSnapshot(snap), resolveOpts...)
+			ctx, aicr.WrapCriteria(criteria), snap, resolveOpts...)
 		if resolveErr == nil {
 			return result, nil
 		}
@@ -227,7 +229,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 
 		slog.Info("retrying recipe resolution with snapshot-derived criteria relaxed", "criteria", relaxed.String())
 		return client.ResolveRecipeFromSnapshotWithOptions(
-			ctx, aicr.WrapCriteria(relaxed), aicr.WrapSnapshot(snap), resolveOpts...)
+			ctx, aicr.WrapCriteria(relaxed), snap, resolveOpts...)
 	}
 
 	criteria, err := mergeCriteriaFromCmdAndConfig(cmd, cfg, reg)

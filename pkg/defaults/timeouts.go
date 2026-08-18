@@ -101,6 +101,21 @@ const (
 	// are implemented).
 	RecipeOperationTimeout = 30 * time.Second
 
+	// SnapshotLoadTimeout is the upper bound for a single
+	// Client.LoadSnapshot call, and bounds the whole load whatever the
+	// source: a local file read, an HTTP(S) fetch, or a
+	// cm://namespace/name ConfigMap read against the Kubernetes API.
+	//
+	// Matches RecipeOperationTimeout, which bounds Client.LoadRecipe over
+	// the same cm:// resolution path against the Kubernetes API. Named
+	// separately because a snapshot load is not a recipe operation and
+	// should not silently inherit a change made for recipe resolution.
+	//
+	// Distinct from SnapshotOperationTimeout below, which bounds
+	// CollectSnapshot — deploying an agent Job and waiting for it, an
+	// operation orders of magnitude longer than reading a file.
+	SnapshotLoadTimeout = 30 * time.Second
+
 	// SnapshotOperationTimeout is the facade-level upper bound for
 	// Client.CollectSnapshot when neither the caller's context nor
 	// AgentConfig.Timeout supplies one. Matches CLISnapshotTimeout so
@@ -136,6 +151,33 @@ const (
 	// catalog-vs-facade relationship is asserted in
 	// pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
+
+	// VerifyOperationTimeout is the facade-level upper bound for a single
+	// Client.VerifyBundle, Client.VerifyEvidence, Client.VerifyCatalog, or
+	// Client.RecipeDigest call.
+	//
+	// It is an UNCONDITIONAL ceiling, not a fallback for deadline-less
+	// callers: those methods always wrap the caller's context, and
+	// context.WithTimeout takes the smaller of the two. A caller that
+	// deliberately allows 20 minutes for a slow OCI pull is still capped
+	// here. The trade is deliberate — an unbounded verify can hang a
+	// controller reconcile — but it has one sharp edge worth knowing, called
+	// out on Client.VerifyEvidence: a cap breach surfaces as an error, not as
+	// the Incomplete verdict a CI gate uses to tell "could not check this"
+	// from "checked it and it failed".
+	//
+	// Bundle and catalog verification are offline (locally cached or embedded
+	// Sigstore trusted root), so their own work is sub-second; the budget
+	// exists for the two paths that do reach the network — a KMS key URI in
+	// BundleVerifyOptions.Key still makes a live GetPublicKey call, and
+	// VerifyEvidence pulls an OCI artifact when its input is a pointer or a
+	// registry reference.
+	//
+	// Deliberately NOT applied to Client.PublishEvidence or
+	// Client.SignCatalog: keyless signing can block on a human completing a
+	// browser or device-code OIDC flow, so a fixed cap there would cut short
+	// an interactive run that works today.
+	VerifyOperationTimeout = 5 * time.Minute
 )
 
 // Health computation timeouts.

@@ -235,7 +235,7 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 	// (network mount, FUSE, /proc anomaly) must not stall past the deadline.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		_ = file.Close()
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "file read canceled", ctxErr)
+		return nil, abortError(ctxErr, "file read")
 	}
 
 	// Read the bounded content fully so the size limit is actually enforced.
@@ -251,7 +251,7 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 	if readErr != nil {
 		_ = file.Close()
 		if errors.IsTransient(readErr) {
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "file read canceled", readErr)
+			return nil, abortError(readErr, "file read")
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read file", readErr)
 	}
@@ -581,6 +581,31 @@ func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 	return fromFileWithKubeconfigContext[T](ctx, path, kubeconfig, opts...)
 }
 
+// abortError shapes a context abort so a deliberate operator cancellation
+// stays distinguishable from an environmental deadline.
+//
+// The distinction is load-bearing rather than cosmetic: errors.IsTransient
+// reports true for ErrCodeTimeout and for a bare context.Canceled, so coding a
+// Ctrl-C as a timeout lets a caller's retry loop re-enter on an abort the
+// operator explicitly requested. Only an ErrCodeCanceled wrapper stops that —
+// which is exactly what that code's godoc says it exists for. Mirrors the
+// helper of the same name in pkg/evidence/verifier.
+//
+// EVERY read path in this package routes cancellation through here, not just
+// the local-file one: a reader accepts local paths, HTTP(S) URLs, and cm://
+// ConfigMap URIs interchangeably, so classifying only one of them leaves the
+// guarantee true for whichever source a caller happened to test with. The
+// HTTP path additionally has to reach this from inside a *url.Error, and the
+// ConfigMap path from inside an apierrors classification, which is why both
+// test for context.Canceled explicitly rather than relying on the code they
+// would otherwise assign.
+func abortError(cause error, what string) error {
+	if stderrors.Is(cause, context.Canceled) {
+		return errors.Wrap(errors.ErrCodeCanceled, what+" canceled", cause)
+	}
+	return errors.Wrap(errors.ErrCodeTimeout, what+" timed out", cause)
+}
+
 func fromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig string, opts ...ReaderOption) (*T, error) {
 	// Check for ConfigMap URI
 	if strings.HasPrefix(path, ConfigMapURIScheme) {
@@ -723,8 +748,13 @@ func readConfigMapDataWithKubeconfigContext(
 
 func classifyConfigMapGetError(namespace, name string, err error) error {
 	switch {
+	// Split cancellation out of the timeout group. Grouping them coded an
+	// operator abort as ErrCodeTimeout, which errors.IsTransient reports as
+	// retryable — so a Ctrl-C during a cm:// read could re-enter a caller's
+	// retry loop. A genuine deadline or apiserver timeout stays Timeout.
+	case stderrors.Is(err, context.Canceled):
+		return abortError(err, fmt.Sprintf("getting ConfigMap %s/%s", namespace, name))
 	case stderrors.Is(err, context.DeadlineExceeded),
-		stderrors.Is(err, context.Canceled),
 		apierrors.IsTimeout(err),
 		apierrors.IsServerTimeout(err):
 
