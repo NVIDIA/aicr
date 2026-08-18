@@ -33,6 +33,19 @@ import (
 // unknown one so a typo in a test fixture surfaces as a failure rather than a
 // silently-empty set (which would make a never-relax-stated case pass for the
 // wrong reason).
+// dimNames projects extracted entries to their names for order-sensitive
+// comparison.
+func dimNames(dims []uncoveredDimension) []CriteriaDimension {
+	if dims == nil {
+		return nil
+	}
+	out := make([]CriteriaDimension, 0, len(dims))
+	for _, d := range dims {
+		out = append(out, d.name)
+	}
+	return out
+}
+
 func statedSet(dims ...CriteriaDimension) statedDimensionSet {
 	var s statedDimensionSet
 	for _, d := range dims {
@@ -52,13 +65,28 @@ func mkCoverageErr(dims ...CriteriaDimension) error {
 	entries := make([]map[string]any, 0, len(dims))
 	for _, d := range dims {
 		entries = append(entries, map[string]any{
-			"dimension":        string(d),
-			"requestedValue":   "whatever",
-			"validCompletions": []map[string]string{},
+			"dimension":          string(d),
+			"requestedValue":     "whatever",
+			"validCompletions":   []map[string]string{},
+			"constraintExcluded": false,
 		})
 	}
 	return errors.NewWithContext(errors.ErrCodeInvalidRequest, "coverage failed", map[string]any{
 		"uncovered": entries,
+	})
+}
+
+// mkConstraintExcludedErr shapes a coverage failure where the dimension's only
+// provider was removed by constraint evaluation — the fail-open direction.
+func mkConstraintExcludedErr(dim CriteriaDimension) error {
+	return errors.NewWithContext(errors.ErrCodeInvalidRequest, "coverage failed", map[string]any{
+		"uncovered": []map[string]any{{
+			"dimension":          string(dim),
+			"requestedValue":     "whatever",
+			"validCompletions":   []map[string]string{},
+			"constraintExcluded": true,
+		}},
+		"excludedOverlays": []map[string]any{{"name": "some-overlay", "reason": "constraint-failed"}},
 	})
 }
 
@@ -121,11 +149,15 @@ func TestRelaxDerivedCoverage(t *testing.T) {
 			wantOK:   false,
 		},
 		{
+			// service is retained (not uncovered), so specificity survives the
+			// clear — without it this case would collapse to criteria(any) and
+			// be refused by the generic-fallback guard.
 			name: "multiple derived dimensions all relax",
 			err:  mkCoverageErr(DimensionOS, DimensionIntent),
 			criteria: &recipe.Criteria{
-				OS:     recipe.CriteriaOSType("ubuntu"),
-				Intent: recipe.CriteriaIntentType("training"),
+				Service: recipe.CriteriaServiceType("kind"),
+				OS:      recipe.CriteriaOSType("ubuntu"),
+				Intent:  recipe.CriteriaIntentType("training"),
 			},
 			stated:      statedSet(),
 			wantOK:      true,
@@ -154,6 +186,58 @@ func TestRelaxDerivedCoverage(t *testing.T) {
 			name:     "nil error does not retry",
 			err:      nil,
 			criteria: recipe.NewCriteria(),
+			stated:   statedSet(),
+			wantOK:   false,
+		},
+		{
+			// The fail-open this guard exists for: the dimension IS carried by
+			// an overlay, which the observed cluster's constraints excluded.
+			// Relaxing turns "your cluster fails this overlay" into a pass.
+			name: "constraint-excluded dimension refuses to relax",
+			err:  mkConstraintExcludedErr(DimensionService),
+			criteria: &recipe.Criteria{
+				Service: recipe.CriteriaServiceType("kind"),
+				OS:      recipe.CriteriaOSType("ubuntu"),
+			},
+			stated: statedSet(),
+			wantOK: false,
+		},
+		{
+			// Ambiguity fails closed: no per-dimension attribution, but the
+			// resolve did exclude overlays, so the cause cannot be ruled out.
+			name: "missing attribution with exclusions present refuses to relax",
+			err: errors.NewWithContext(errors.ErrCodeInvalidRequest, "coverage failed", map[string]any{
+				"uncovered":        []map[string]any{{"dimension": string(DimensionOS)}},
+				"excludedOverlays": []map[string]any{{"name": "x", "reason": "constraint-failed"}},
+			}),
+			criteria: &recipe.Criteria{
+				Service: recipe.CriteriaServiceType("kind"),
+				OS:      recipe.CriteriaOSType("ubuntu"),
+			},
+			stated: statedSet(),
+			wantOK: false,
+		},
+		{
+			// Same missing attribution, but nothing was excluded, so the
+			// dimension is genuinely catalog-agnostic and safe to relax.
+			name: "missing attribution with no exclusions still relaxes",
+			err: errors.NewWithContext(errors.ErrCodeInvalidRequest, "coverage failed", map[string]any{
+				"uncovered": []map[string]any{{"dimension": string(DimensionOS)}},
+			}),
+			criteria: &recipe.Criteria{
+				Service: recipe.CriteriaServiceType("kind"),
+				OS:      recipe.CriteriaOSType("ubuntu"),
+			},
+			stated:      statedSet(),
+			wantOK:      true,
+			wantCleared: []CriteriaDimension{DimensionOS},
+		},
+		{
+			// Relaxing the only stated dimension leaves criteria(any), whose
+			// resolve emits the generic fallback recipe at exit 0 (#1888).
+			name:     "relaxation collapsing to criteria(any) is refused",
+			err:      mkCoverageErr(DimensionOS),
+			criteria: &recipe.Criteria{OS: recipe.CriteriaOSType("ubuntu")},
 			stated:   statedSet(),
 			wantOK:   false,
 		},
@@ -281,7 +365,7 @@ func TestUncoveredCoverageDimensions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := uncoveredCoverageDimensions(tt.err)
+			got := dimNames(uncoveredCoverageDimensions(tt.err))
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("uncoveredCoverageDimensions() = %v, want %v", got, tt.want)
 			}
@@ -385,6 +469,143 @@ func kindUbuntuSnapshot() *snapshotter.Snapshot {
 	}
 }
 
+// constraintFailingKindSnapshot fingerprints to service=kind on a Kubernetes
+// version below the kind overlay's `K8s.server.version >= 1.25` constraint, so
+// constraint evaluation excludes the only overlay that covers service=kind.
+func constraintFailingKindSnapshot() *snapshotter.Snapshot {
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: "K8s",
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "node",
+						Data: map[string]measurement.Reading{
+							"provider": measurement.Str("kind"),
+						},
+					},
+					{
+						Name: "server",
+						Data: map[string]measurement.Reading{
+							"version": measurement.Str("1.20.0"),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestResolveRecipeFromSnapshot_ConstraintExcludedIsNotRelaxed pins the
+// fail-open direction: a cluster whose Kubernetes version fails the matching
+// overlay's constraint must NOT be handed a broader recipe that resolves
+// cleanly.
+//
+// Before this guard, the derived service=kind was cleared and the retry
+// resolved criteria(any) into an 11-component generic recipe at exit 0, while
+// the identical query with service stated explicitly correctly failed. The
+// operator's cluster is too old either way; only one of those answers says so.
+func TestResolveRecipeFromSnapshot_ConstraintExcludedIsNotRelaxed(t *testing.T) {
+	client := newEmbeddedTestClient(t)
+	snap := constraintFailingKindSnapshot()
+
+	criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria(client.CriteriaRegistry())
+	if criteria.Service != recipe.CriteriaServiceKind {
+		t.Fatalf("fingerprint service = %q, want kind", criteria.Service)
+	}
+
+	strictErr := func(t *testing.T) error {
+		t.Helper()
+		_, err := client.ResolveRecipeFromSnapshot(t.Context(), WrapCriteria(criteria), WrapSnapshot(snap))
+		if err == nil {
+			t.Fatal("strict resolve succeeded on a constraint-failing cluster; " +
+				"did the kind overlay's version constraint change?")
+		}
+		return err
+	}
+
+	t.Run("strict resolve reports the constraint exclusion", func(t *testing.T) {
+		err := strictErr(t)
+		var se *errors.StructuredError
+		if !stderrors.As(err, &se) {
+			t.Fatalf("error is not structured: %v", err)
+		}
+		if se.Context["excludedOverlays"] == nil {
+			t.Fatalf("coverage error carries no excludedOverlays; attribution would be lost: %v", err)
+		}
+		dims := uncoveredCoverageDimensions(err)
+		if len(dims) != 1 || dims[0].name != DimensionService {
+			t.Fatalf("uncovered = %v, want a single service entry: %v", dims, err)
+		}
+		if !dims[0].constraintExcluded {
+			t.Error("service is not marked constraintExcluded; pkg/recipe's attribution has drifted")
+		}
+	})
+
+	t.Run("relaxation refuses and preserves the original error", func(t *testing.T) {
+		result, err := client.ResolveRecipeFromSnapshotWithOptions(
+			t.Context(), WrapCriteria(criteria), WrapSnapshot(snap),
+			WithSnapshotCriteriaRelaxation())
+		if err == nil {
+			t.Fatalf("relaxation produced a recipe (%q, %d components, relaxed=%v) for a cluster "+
+				"that fails the overlay's constraints; the failure was silently discarded",
+				result.Name, len(result.Components), result.RelaxedDimensions)
+		}
+		// Same error the strict path returns — relaxation must not reword or
+		// reclassify the constraint failure.
+		if err.Error() != strictErr(t).Error() {
+			t.Errorf("relaxed error differs from strict error:\n got: %v\nwant: %v", err, strictErr(t))
+		}
+	})
+
+	// Isolates the constraint-excluded guard from the generic-fallback guard.
+	// Adding a detected h100 keeps accelerator stated, so clearing the
+	// constraint-excluded service still leaves criteria(accelerator=h100) —
+	// specificity 1, which sails past the collapse check. Only the
+	// constraint-excluded guard refuses here; with it disabled this resolves
+	// an 11-component recipe.
+	t.Run("refuses even when specificity survives the clear", func(t *testing.T) {
+		withGPU := constraintFailingKindSnapshot()
+		withGPU.Measurements = append(withGPU.Measurements, &measurement.Measurement{
+			Type: "GPU",
+			Subtypes: []measurement.Subtype{
+				{
+					Name: "hardware",
+					Data: map[string]measurement.Reading{"model": measurement.Str("h100")},
+				},
+			},
+		})
+
+		gpuCriteria := fingerprint.FromMeasurements(withGPU.Measurements).ToCriteria(client.CriteriaRegistry())
+		if gpuCriteria.Specificity() < 2 {
+			t.Fatalf("criteria %s has specificity %d, want >= 2 so the clear cannot collapse to any",
+				gpuCriteria.String(), gpuCriteria.Specificity())
+		}
+
+		result, err := client.ResolveRecipeFromSnapshotWithOptions(
+			t.Context(), WrapCriteria(gpuCriteria), WrapSnapshot(withGPU),
+			WithSnapshotCriteriaRelaxation())
+		if err == nil {
+			t.Fatalf("relaxation produced %q (%d components, relaxed=%v); a constraint-excluded "+
+				"dimension was relaxed because specificity survived",
+				result.Name, len(result.Components), result.RelaxedDimensions)
+		}
+	})
+
+	// The asymmetry that made the bug visible: stating the same value
+	// explicitly always failed. Both paths must now agree.
+	t.Run("agrees with an explicitly stated dimension", func(t *testing.T) {
+		stated := recipe.NewCriteria()
+		stated.Service = recipe.CriteriaServiceKind
+		_, err := client.ResolveRecipeFromSnapshotWithOptions(
+			t.Context(), WrapCriteria(stated), WrapSnapshot(snap),
+			WithSnapshotCriteriaRelaxation(DimensionService))
+		if err == nil {
+			t.Fatal("explicitly stated service=kind resolved on a constraint-failing cluster")
+		}
+	})
+}
+
 func newEmbeddedTestClient(t *testing.T) *Client {
 	t.Helper()
 	client, err := NewClient(
@@ -422,7 +643,7 @@ func TestResolveRecipeFromSnapshot_Relaxation(t *testing.T) {
 			t.Fatal("expected a coverage failure for snapshot-derived os on the kind overlay tree, " +
 				"got success — did a kind overlay gain os coverage?")
 		}
-		if got := uncoveredCoverageDimensions(err); !slices.Equal(got, []CriteriaDimension{DimensionOS}) {
+		if got := dimNames(uncoveredCoverageDimensions(err)); !slices.Equal(got, []CriteriaDimension{DimensionOS}) {
 			t.Fatalf("uncovered = %v, want [%s]; the coverage error shape may have drifted "+
 				"from pkg/recipe/coverage.go: %v", got, DimensionOS, err)
 		}
@@ -452,7 +673,7 @@ func TestResolveRecipeFromSnapshot_Relaxation(t *testing.T) {
 		if err == nil {
 			t.Fatal("resolve succeeded with os stated; a caller-stated dimension was relaxed")
 		}
-		if got := uncoveredCoverageDimensions(err); !slices.Equal(got, []CriteriaDimension{DimensionOS}) {
+		if got := dimNames(uncoveredCoverageDimensions(err)); !slices.Equal(got, []CriteriaDimension{DimensionOS}) {
 			t.Fatalf("uncovered = %v, want the original coverage error naming [%s]: %v",
 				got, DimensionOS, err)
 		}

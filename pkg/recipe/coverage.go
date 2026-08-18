@@ -233,12 +233,20 @@ func (s *MetadataStore) verifyCriteriaCoverage(criteria *Criteria, appliedOverla
 	for _, dimName := range uncovered {
 		want := criteriaDimensionValue(criteria, dimName)
 		tuples := s.completionTuplesFor(criteria, dimName, want)
-		onlyExcluded := len(tuples) == 0 && s.excludedOverlayProvides(dimName, want, excluded)
+		// constraintExcluded distinguishes WHY the dimension is uncovered: an
+		// overlay carrying it exists but the observed cluster failed its
+		// constraints, versus no overlay states it at all. Callers that relax
+		// uncovered dimensions and retry (pkg/client/v1) must not relax the
+		// former — doing so converts "your cluster fails this overlay's
+		// requirements" into a broader recipe that silently succeeds.
+		constraintExcluded := s.excludedOverlayProvides(dimName, want, excluded)
+		onlyExcluded := len(tuples) == 0 && constraintExcluded
 		clauses = append(clauses, completionClause(criteria, dimName, want, tuples, onlyExcluded))
 		entries = append(entries, map[string]any{
-			"dimension":        dimName,
-			"requestedValue":   want,
-			"validCompletions": tuples,
+			"dimension":          dimName,
+			"requestedValue":     want,
+			"validCompletions":   tuples,
+			"constraintExcluded": constraintExcluded,
 		})
 	}
 

@@ -415,6 +415,15 @@ received explicitly**. Anything else is treated as derived, and a coverage
 failure limited to derived dimensions is retried once with those cleared:
 
 ```go
+import (
+    aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+
+    // Deriving criteria from a snapshot has no facade-owned helper yet, so
+    // this step reaches past the stable surface — see the caveat below.
+    "github.com/NVIDIA/aicr/pkg/fingerprint" // Internal
+    "github.com/NVIDIA/aicr/pkg/recipe"      // Public (evolving)
+)
+
 criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).
     ToCriteria(client.CriteriaRegistry())
 criteria.Intent = recipe.CriteriaIntentTraining // the user asked for this one
@@ -430,11 +439,37 @@ for _, dim := range result.RelaxedDimensions {
 }
 ```
 
-Three properties worth knowing:
+> **The fingerprint step is an escape hatch, not stable API.** `pkg/fingerprint`
+> is [Internal](public-api.md#stability-tiers) and may change without notice;
+> `pkg/recipe` is Public (evolving) and may change in a minor bump. Only the
+> `aicr.*` calls above carry the facade's compatibility guarantee. Pin the AICR
+> version and re-audit this block on upgrade, or derive criteria yourself and
+> hand the facade an `*aicr.Criteria`. If you need this without the coupling,
+> say so on [#2016](https://github.com/NVIDIA/aicr/issues/2016) — a facade-owned
+> snapshot-to-criteria helper is the obvious gap it exposes.
 
-- **A dimension you name is never relaxed.** If it comes back uncovered, the
-  original error propagates — no retry. Relaxing a value the caller asked for
-  would silently resolve a different recipe.
+Relaxation is deliberately narrow. Three cases propagate the original coverage
+error rather than retrying:
+
+- **A dimension you named.** Relaxing a value the caller asked for would
+  silently resolve a different recipe than requested.
+- **A constraint-excluded dimension.** An overlay carrying it exists, but the
+  observed cluster failed its constraints — a Kubernetes version below the
+  overlay's floor, say. Relaxing there converts "your cluster does not meet
+  this overlay's requirements" into a broader recipe that resolves cleanly,
+  discarding the finding you most need.
+- **A relaxation that would leave `criteria(any)`.** Resolving that emits the
+  generic fallback recipe at exit 0 — the fail-open the pre-resolution
+  specificity guard exists to prevent (#1888).
+
+The distinction in the second case is *why* the dimension is uncovered: no
+overlay states it at all (safe to relax — nothing in the recipe distinguishes
+the value) versus an overlay states it but was constraint-excluded (not safe).
+The resolver reports which, per dimension, in the coverage error's
+`details.uncovered[].constraintExcluded`.
+
+Two more properties:
+
 - **Passing no dimensions is meaningful,** not a no-op: it means every
   dimension was derived and all are relaxable. That is the common case for a
   pure fingerprint query. Presence of the option is what enables the policy, so
@@ -453,8 +488,11 @@ The returned `*RecipeResult` carries:
 - `SelectedProfile` — selected name/value and declaration-wide `OwnedPaths`;
   nil for legacy recipes
 - `RelaxedDimensions` — criteria dimensions cleared by
-  `WithSnapshotCriteriaRelaxation`; empty unless that option was passed and the
-  first attempt failed coverage
+  `WithSnapshotCriteriaRelaxation`. Non-empty only when the first attempt failed
+  coverage on derived dimensions **and** the retry succeeded. Every other
+  outcome — option not passed, first attempt succeeded, relaxation refused, or
+  the retry itself failed — yields either an empty slice or `nil, error` with no
+  `RecipeResult` at all, so this field is never the way to detect a failure
 - `Resolved()` — the upstream `*pkg/recipe.RecipeResult` for callers that
   need constraints, deployment order, validation config, or metadata
   (e.g., evidence emission). Do not mutate; do not retain past the

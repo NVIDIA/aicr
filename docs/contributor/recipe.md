@@ -515,10 +515,20 @@ fingerprint rather than stated by the user (`intent` and `platform` are
 always user-stated — the fingerprint never derives them). The option's
 arguments name the dimensions the *caller* stated; everything else is
 treated as derived. If a coverage error's uncovered dimensions are *all*
-derived, the facade clears them to unstated and retries resolution once,
-logging a warning per relaxed dimension and reporting them in
-`RecipeResult.RelaxedDimensions`. If any uncovered dimension was stated,
-the error propagates unchanged.
+safely relaxable, the facade clears them to unstated and retries resolution
+once, logging a warning per relaxed dimension and reporting them in
+`RecipeResult.RelaxedDimensions`.
+
+**Not every uncovered dimension is relaxable**, and the distinction is why
+`verifyCriteriaCoverage` records `constraintExcluded` per entry. A dimension
+no overlay states at all is safe to clear — nothing in the recipe
+distinguishes the detected value. A dimension whose only provider was
+removed by constraint evaluation is not: clearing it converts a real
+incompatibility (the cluster failed that overlay's constraints) into a
+broader recipe that resolves at exit 0. The facade refuses in that case, and
+refuses again if clearing would leave `criteria(any)`, which would resolve
+the generic fallback — the same fail-open as issue #1888. A stated dimension
+is never relaxed either way.
 
 This lets an overlay tree that is deliberately agnostic to a dimension
 (e.g. Kind's OS-agnostic overlays) tolerate a snapshot that still reports a

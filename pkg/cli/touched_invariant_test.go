@@ -246,6 +246,46 @@ func TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed(t *testing.T) {
 // TestRecipeCmd_Snapshot_DerivedDimensionRelaxed is the companion success
 // case: the same snapshot with NO os flag resolves, because the
 // fingerprint-derived os (untouched) is relaxed on retry.
+// constraintFailingKindSnapshotYAML fingerprints to service=kind on a
+// Kubernetes version below the kind overlay's `K8s.server.version >= 1.25`
+// constraint, so the only overlay covering service=kind is excluded by
+// constraint evaluation rather than absent from the catalog.
+const constraintFailingKindSnapshotYAML = `kind: Snapshot
+measurements:
+  - type: K8s
+    subtypes:
+      - subtype: node
+        data:
+          provider: kind
+      - subtype: server
+        data:
+          version: "1.20.0"
+`
+
+// TestRecipeCmd_Snapshot_ConstraintFailureNotRelaxed drives the full CLI path
+// for the fail-open direction: `aicr recipe --snapshot` against a cluster whose
+// Kubernetes version fails the matching overlay's constraint must report that
+// failure, not relax the derived service and emit the generic fallback recipe
+// at exit 0.
+func TestRecipeCmd_Snapshot_ConstraintFailureNotRelaxed(t *testing.T) {
+	snapPath := writeYAML(t, "snapshot.yaml", constraintFailingKindSnapshotYAML)
+	outPath := filepath.Join(t.TempDir(), "recipe.yaml")
+
+	err := newRootCmd().Run(context.Background(), []string{
+		name, "recipe", "--snapshot", snapPath, "-o", outPath,
+	})
+	if err == nil {
+		t.Fatal("recipe --snapshot succeeded on a cluster failing the kind overlay's version " +
+			"constraint; the constraint failure was relaxed away into a generic recipe")
+	}
+	if !strings.Contains(err.Error(), "kind") {
+		t.Errorf("error should name the constraint-excluded service: %v", err)
+	}
+	if _, statErr := os.Stat(outPath); statErr == nil {
+		t.Error("a recipe file was written despite the constraint failure")
+	}
+}
+
 func TestRecipeCmd_Snapshot_DerivedDimensionRelaxed(t *testing.T) {
 	snapPath := writeYAML(t, "snapshot.yaml", kindSnapshotYAML)
 	outPath := filepath.Join(t.TempDir(), "recipe.yaml")

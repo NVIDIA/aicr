@@ -404,9 +404,15 @@ type RecipeResult struct {
 	// RelaxedDimensions lists the criteria dimensions cleared by
 	// WithSnapshotCriteriaRelaxation because no applied overlay
 	// distinguished the derived value, in the order the coverage failure
-	// reported them. Empty when the option was absent or the first resolve
-	// succeeded — so a non-empty value means the resolved recipe is broader
+	// reported them. A non-empty value means the resolved recipe is BROADER
 	// than the criteria originally requested.
+	//
+	// It is non-empty only when the first attempt failed coverage on derived
+	// dimensions AND the retry succeeded. Every other outcome — the option was
+	// not passed, the first attempt succeeded, relaxation was refused, or the
+	// retry itself failed — leaves it empty or returns no RecipeResult at all.
+	// So this field reports what a successful resolve gave up; it is never how
+	// a caller detects a failure, which is always the returned error.
 	//
 	// The CLI surfaces the same fact as a slog.Warn per dimension; this is
 	// the programmatic form, for callers that need to branch on it or report

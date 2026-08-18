@@ -82,12 +82,18 @@ func AllCriteriaDimensions() []CriteriaDimension {
 // and retries the resolve exactly once. The dimensions actually cleared are
 // reported in RecipeResult.RelaxedDimensions.
 //
-// # The invariant
+// # What is never relaxed
 //
-// A dimension named in stated is NEVER relaxed. If any uncovered dimension
-// was stated, the original coverage error propagates unchanged — no retry.
-// Relaxing a value the caller explicitly asked for would silently resolve a
-// different recipe than the one requested.
+// Three cases propagate the original coverage error instead of retrying:
+//
+//   - A dimension named in stated. Relaxing a value the caller explicitly
+//     asked for would silently resolve a different recipe than requested.
+//   - A CONSTRAINT-EXCLUDED dimension: an overlay carrying it exists, but the
+//     observed cluster failed its constraints. Relaxing there would turn "this
+//     cluster does not meet the overlay's requirements" into a broader recipe
+//     that resolves cleanly — discarding the finding the operator most needs.
+//   - A relaxation that would leave criteria(any), whose resolve emits the
+//     generic fallback recipe at exit 0 (the fail-open behind issue #1888).
 //
 // # Passing no dimensions is meaningful
 //
@@ -180,14 +186,29 @@ func (s statedDimensionSet) with(dim CriteriaDimension) (statedDimensionSet, boo
 
 // relaxDerivedCoverage inspects a recipe-resolution error for the
 // criteria-coverage post-condition (issue #1542, pkg/recipe/coverage.go) and,
-// when EVERY uncovered dimension was derived (i.e. absent from stated), clears
-// those dimensions back to unstated on a COPY of criteria and returns it for a
-// single retry, along with the dimensions cleared.
+// when every uncovered dimension is safely relaxable, clears those dimensions
+// back to unstated on a COPY of criteria and returns it for a single retry,
+// along with the dimensions cleared.
 //
-// ok is false when err is not a coverage failure, or when any uncovered
-// dimension was caller-stated — in which case the caller propagates err
-// unchanged. This is the enforcement point for the never-relax-stated
-// invariant documented on WithSnapshotCriteriaRelaxation.
+// ok is false — meaning the caller propagates err unchanged — in four cases:
+//
+//  1. err is not a coverage failure.
+//  2. An uncovered dimension was caller-stated. This is the never-relax-stated
+//     invariant documented on WithSnapshotCriteriaRelaxation.
+//  3. An uncovered dimension was CONSTRAINT-EXCLUDED: an overlay carrying it
+//     exists, but the observed cluster failed its constraints. Relaxing there
+//     would convert "this cluster does not meet the overlay's requirements"
+//     into a broader recipe that resolves cleanly — the failure the operator
+//     most needs to see, silently discarded.
+//  4. Clearing the dimensions would collapse criteria to criteria(any).
+//     Resolving that emits the generic fallback recipe with exit 0, which is
+//     the same fail-open the CLI's pre-resolution specificity guard exists to
+//     prevent (issue #1888); relaxation must not reintroduce it downstream.
+//
+// Cases 3 and 4 overlap in practice but neither subsumes the other: a
+// constraint-excluded dimension can leave other dimensions stated (so
+// specificity survives), and a catalog-agnostic dimension can be the only one
+// stated (so specificity collapses with no exclusion involved).
 func relaxDerivedCoverage(
 	err error,
 	criteria *recipe.Criteria,
@@ -198,43 +219,77 @@ func relaxDerivedCoverage(
 	if len(uncovered) == 0 {
 		return nil, nil, false
 	}
+
 	for _, dim := range uncovered {
-		if stated.has(dim) {
+		if stated.has(dim.name) {
+			return nil, nil, false
+		}
+		if dim.constraintExcluded {
+			slog.Info("not relaxing criteria dimension: its overlay was excluded for failed constraints",
+				"dimension", string(dim.name),
+				"detectedValue", criteriaDimensionValue(criteria, dim.name))
 			return nil, nil, false
 		}
 	}
 
+	// Build the relaxed copy before logging anything, so a refusal below does
+	// not leave a "relaxing X" warning behind for a relaxation that never
+	// happened.
 	next := *criteria
+	detected := make([]string, 0, len(uncovered))
 	cleared = make([]CriteriaDimension, 0, len(uncovered))
 	for _, dim := range uncovered {
-		detected := criteriaDimensionValue(&next, dim)
-		clearCriteriaDimension(&next, dim)
-		cleared = append(cleared, dim)
+		detected = append(detected, criteriaDimensionValue(&next, dim.name))
+		clearCriteriaDimension(&next, dim.name)
+		cleared = append(cleared, dim.name)
+	}
+
+	if next.Specificity() == 0 {
+		slog.Info("not relaxing criteria: every stated dimension is uncovered, so the retry "+
+			"would resolve the generic fallback recipe",
+			"criteria", criteria.String())
+		return nil, nil, false
+	}
+
+	for i, dim := range cleared {
 		slog.Warn("relaxing snapshot-detected criteria dimension: no recipe content distinguishes it",
-			"dimension", string(dim), "detectedValue", detected)
+			"dimension", string(dim), "detectedValue", detected[i])
 	}
 	return &next, cleared, true
 }
 
-// uncoveredCoverageDimensions extracts the uncovered dimension names from a
+// uncoveredDimension is one entry of a coverage failure's details.uncovered
+// payload, reduced to what relaxation needs: which dimension, and whether its
+// coverage was removed by constraint evaluation rather than never existing.
+type uncoveredDimension struct {
+	name               CriteriaDimension
+	constraintExcluded bool
+}
+
+// uncoveredCoverageDimensions extracts the uncovered dimensions from a
 // recipe-resolution error, or nil when err does not carry the
 // criteria-coverage post-condition failure (pkg/recipe/coverage.go's
 // verifyCriteriaCoverage builds ErrCodeInvalidRequest with a
-// Context["uncovered"] []map[string]any, each entry keyed by "dimension").
+// Context["uncovered"] []map[string]any, each entry keyed by "dimension" and
+// "constraintExcluded").
 //
 // Every StructuredError in the wrap chain is inspected rather than only the
 // outermost one, so an intermediate wrap added between the builder and this
 // caller cannot silently disable relaxation. The coverage error is identified
 // by its own node's code and context, regardless of outer decoration.
-func uncoveredCoverageDimensions(err error) []CriteriaDimension {
+func uncoveredCoverageDimensions(err error) []uncoveredDimension {
 	for cur := err; cur != nil; {
 		var se *errors.StructuredError
 		if !stderrors.As(cur, &se) {
 			return nil
 		}
 		if se.Code == errors.ErrCodeInvalidRequest {
-			if names := uncoveredDimensionNames(se.Context["uncovered"]); len(names) > 0 {
-				return names
+			// Read both keys off the SAME error node: attribution only holds
+			// if the exclusion list and the uncovered list describe one
+			// resolve.
+			hadExclusions := hasExcludedOverlays(se.Context["excludedOverlays"])
+			if dims := uncoveredDimensionEntries(se.Context["uncovered"], hadExclusions); len(dims) > 0 {
+				return dims
 			}
 		}
 		cur = se.Unwrap()
@@ -242,8 +297,24 @@ func uncoveredCoverageDimensions(err error) []CriteriaDimension {
 	return nil
 }
 
-// uncoveredDimensionNames pulls the "dimension" names out of a coverage
-// error's uncovered payload. It accepts both the in-process shape built by
+// hasExcludedOverlays reports whether the coverage error recorded any overlay
+// removed by constraint evaluation. verifyCriteriaCoverage attaches the key
+// only when the list is non-empty, so presence alone is the signal; the shape
+// varies ([]ExcludedOverlay in process, []any once decoded from JSON) and is
+// deliberately not inspected beyond emptiness.
+func hasExcludedOverlays(raw any) bool {
+	switch v := raw.(type) {
+	case nil:
+		return false
+	case []any:
+		return len(v) > 0
+	default:
+		return true
+	}
+}
+
+// uncoveredDimensionEntries pulls the dimensions out of a coverage error's
+// uncovered payload. It accepts both the in-process shape built by
 // verifyCriteriaCoverage ([]map[string]any) and the decoded-JSON shape
 // ([]any of map[string]any) so a marshaling boundary cannot silently disable
 // relaxation.
@@ -252,7 +323,15 @@ func uncoveredCoverageDimensions(err error) []CriteriaDimension {
 // returned: relaxation switches on these names, and clearCriteriaDimension
 // would no-op on an unknown one, producing an unchanged retry that fails
 // identically. Skipping keeps the "did anything relax?" answer honest.
-func uncoveredDimensionNames(raw any) []CriteriaDimension {
+//
+// hadExclusions decides the AMBIGUOUS case. An entry with no
+// "constraintExcluded" key predates that field or came from a hand-built
+// error, so its cause is unknown. When the resolve excluded no overlays at
+// all, no dimension can be constraint-excluded and the answer is safely
+// false. When it did exclude some, the entry is treated as excluded — the
+// unsafe direction here is relaxing a constraint failure into a passing
+// recipe, so an unattributable dimension fails closed.
+func uncoveredDimensionEntries(raw any, hadExclusions bool) []uncoveredDimension {
 	var entries []map[string]any
 	switch v := raw.(type) {
 	case []map[string]any:
@@ -266,7 +345,7 @@ func uncoveredDimensionNames(raw any) []CriteriaDimension {
 	default:
 		return nil
 	}
-	names := make([]CriteriaDimension, 0, len(entries))
+	dims := make([]uncoveredDimension, 0, len(entries))
 	for _, e := range entries {
 		name, ok := e["dimension"].(string)
 		if !ok {
@@ -278,12 +357,16 @@ func uncoveredDimensionNames(raw any) []CriteriaDimension {
 				"dimension", name, "valid", recipe.CoverageDimensionNames())
 			continue
 		}
-		names = append(names, dim)
+		excluded, present := e["constraintExcluded"].(bool)
+		if !present {
+			excluded = hadExclusions
+		}
+		dims = append(dims, uncoveredDimension{name: dim, constraintExcluded: excluded})
 	}
-	if len(names) == 0 {
+	if len(dims) == 0 {
 		return nil
 	}
-	return names
+	return dims
 }
 
 // criteriaDimensionValue reads one of the 5 coverage dimensions by name.
