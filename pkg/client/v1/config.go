@@ -62,11 +62,30 @@ type Config struct {
 // LoadConfig reads and validates an AICRConfig from a file path or an
 // HTTP(S) URL.
 //
-// The returned Config is fully validated: enum fields are guaranteed to parse,
-// so callers need not re-check them. Errors keep the loader's structured codes
-// — ErrCodeNotFound for a missing file, ErrCodeInvalidRequest for malformed
-// input or a strict-decode rejection, ErrCodeUnavailable for an HTTP failure —
-// rather than being flattened.
+// Errors keep the loader's structured codes — ErrCodeNotFound for a missing
+// file, ErrCodeInvalidRequest for malformed input or a strict-decode
+// rejection, ErrCodeUnavailable for an HTTP failure — rather than being
+// flattened.
+//
+// # Criteria values are validated later, not here
+//
+// Loading checks structure, not criteria MEMBERSHIP. Whether "eks" or some
+// value your own catalog defines is legal depends on the CriteriaRegistry,
+// which is per-DataProvider — and the provider named by spec.recipe.data does
+// not exist yet at load time. Validating here could only check the embedded
+// catalog, which would reject every externally-contributed value and make a
+// config-driven external catalog unusable.
+//
+// So membership is checked at RecipeCriteria, where a registry is in hand:
+//
+//	cfg, err := aicr.LoadConfig(ctx, path)          // structure
+//	source, _ := cfg.RecipeSource()                 // spec.recipe.data
+//	client, err := aicr.NewClient(aicr.WithRecipeSource(source))
+//	err = client.LoadCatalog(ctx)                   // seeds the registry
+//	criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())  // membership
+//
+// A value in no catalog still fails — at that last step rather than the
+// first.
 func LoadConfig(ctx context.Context, source string) (*Config, error) {
 	if ctx == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")

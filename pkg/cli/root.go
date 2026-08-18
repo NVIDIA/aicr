@@ -521,10 +521,23 @@ func durationFlagOrConfig(cmd *cli.Command, flagName string, fallback *time.Dura
 // The flag-over-config overlay stays in this package deliberately: it depends
 // on cmd.IsSet, which distinguishes "user passed the zero value" from "user
 // said nothing" — a distinction the facade's plain-struct options cannot make.
+//
+// (nil, nil) is the deliberate "config flag not set" signal, matching
+// loadCmdConfig; a sentinel error would force every caller into a useless
+// error-check branch when --config is simply absent.
+//
+//nolint:nilnil
 func loadFacadeConfig(ctx context.Context, cmd *cli.Command) (*aicr.Config, error) {
-	cfg, err := loadCmdConfig(ctx, cmd)
-	if err != nil {
-		return nil, err
+	src := cmd.String("config")
+	if src == "" {
+		// (nil, nil) is the deliberate "flag not set" signal, matching
+		// loadCmdConfig. Every derivation on a nil *aicr.Config is nil-safe,
+		// so callers need no branch.
+		return nil, nil
 	}
-	return aicr.WrapConfig(cfg), nil
+	// aicr.LoadConfig, not pkg/config.Load: routing through the facade is the
+	// point. A second loader path here would let validation or error handling
+	// drift between what the CLI sees and what an SDK consumer sees from the
+	// same document.
+	return aicr.LoadConfig(ctx, src)
 }

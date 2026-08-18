@@ -107,8 +107,25 @@ func (r *RecipeSpec) validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"spec.recipe.criteria and spec.recipe.input.snapshot are mutually exclusive")
 	}
-	if _, err := r.ResolveCriteriaWithRegistry(nil); err != nil {
-		return err
+	// Criteria VALUES are deliberately not validated here. Membership is a
+	// property of the CriteriaRegistry, and the authoritative registry is
+	// per-DataProvider: a value contributed by an external catalog
+	// (spec.recipe.data, or --data) only exists once that provider has been
+	// constructed and its overlays loaded. Validating against a nil registry
+	// checks the EMBEDDED catalog, which rejects every external value —
+	// making an external catalog unusable from a config document at all.
+	//
+	// Phase two runs at consumption, where the registry is known:
+	// ResolveCriteriaWithRegistry(reg) below, reached through
+	// pkg/client/v1.(*Config).RecipeCriteria and the CLI's
+	// applyCriteriaFromConfig. Both criteria-consuming paths go through it,
+	// so a bogus value still fails closed — just against the right catalog.
+	//
+	// Nodes is the exception and stays here: a negative count is malformed
+	// regardless of which catalog is in play, so there is nothing to defer.
+	if r.Criteria != nil && r.Criteria.Nodes < 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("spec.recipe.criteria.nodes must be >= 0, got %d", r.Criteria.Nodes))
 	}
 	if _, err := recipe.ParseProfileSelection(r.Profile); err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,

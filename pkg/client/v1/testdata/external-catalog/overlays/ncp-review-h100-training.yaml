@@ -1,0 +1,20 @@
+# Test fixture: an external overlay contributing a service value absent from
+# the embedded catalog.
+#
+# The service name is deliberately not a real one. It exists to prove that a
+# criteria value reachable ONLY through --data / spec.recipe.data survives the
+# LoadConfig -> RecipeSource -> LoadCatalog -> RecipeCriteria chain.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+
+metadata:
+  name: ncp-review-h100-training
+
+spec:
+  base: h100-eks-ubuntu-training
+
+  criteria:
+    service: ncp-review
+    accelerator: h100
+    os: ubuntu
+    intent: training

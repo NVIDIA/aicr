@@ -549,6 +549,14 @@ only layer that knows a flag was set.
 was supplied — returns zero values rather than panicking, so derivations can
 run unconditionally.
 
+**Criteria values are validated at `RecipeCriteria`, not at `LoadConfig`.**
+Whether a value is legal depends on the `CriteriaRegistry`, which is
+per-`DataProvider` — so a value your own catalog contributes is unknown until
+that provider is built and its catalog loaded. That is why the order in the
+example above matters: load, construct, `LoadCatalog`, *then* derive criteria.
+Loading checks structure only; a value in no catalog still fails, at the
+derive step rather than the load step.
+
 | Method | Reads |
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |

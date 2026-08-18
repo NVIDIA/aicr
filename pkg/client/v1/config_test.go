@@ -16,11 +16,13 @@ package aicr_test
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // writeConfig writes an AICRConfig document to a temp file and returns its path.
@@ -297,13 +299,22 @@ func TestLoadConfig_Guards(t *testing.T) {
 		wantInvalidRequest(t, err)
 	})
 
-	t.Run("malformed document is rejected", func(t *testing.T) {
+	t.Run("structurally malformed document is rejected", func(t *testing.T) {
 		t.Parallel()
+		// Negative nodes, not a bogus criteria VALUE: membership is checked
+		// at consumption against the provider registry, so an unknown value
+		// loads cleanly by design (see
+		// TestLoadConfig_ExternalCatalogCriteria). A negative count is
+		// registry-independent and still fails here.
 		_, err := aicr.LoadConfig(context.Background(), writeConfig(t,
-			"apiVersion: aicr.run/v1alpha2\nkind: AICRConfig\nspec:\n  recipe:\n    criteria:\n      service: not-a-service\n"))
+			"apiVersion: aicr.run/v1alpha2\nkind: AICRConfig\nmetadata:\n  name: t\nspec:\n  recipe:\n    criteria:\n      nodes: -1\n"))
 		if err == nil {
-			t.Fatal("expected an error for an invalid criteria value")
+			t.Fatal("expected an error for a negative node count")
 		}
+		// Assert the CODE, not just failure: the code is how a caller tells a
+		// malformed document from an unreachable one, and a regression that
+		// flattened it to Internal would still satisfy a non-nil check.
+		wantInvalidRequest(t, err)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
@@ -311,6 +322,10 @@ func TestLoadConfig_Guards(t *testing.T) {
 		_, err := aicr.LoadConfig(context.Background(), filepath.Join(t.TempDir(), "absent.yaml"))
 		if err == nil {
 			t.Fatal("expected an error for a missing config file")
+		}
+		var se *aicrerrors.StructuredError
+		if !stderrors.As(err, &se) || se.Code != aicrerrors.ErrCodeNotFound {
+			t.Errorf("error = %v, want code %v", err, aicrerrors.ErrCodeNotFound)
 		}
 	})
 }
@@ -470,5 +485,129 @@ func TestToInternalCriteria(t *testing.T) {
 	}
 	if internal.Nodes != derived.Nodes {
 		t.Errorf("Nodes = %d, want %d", internal.Nodes, derived.Nodes)
+	}
+}
+
+// TestLoadConfig_ExternalCatalogCriteria is the regression test for the
+// external-catalog blocker: a config naming a criteria value that exists only
+// in an external overlay could not be loaded at all.
+//
+// config.Load validated criteria against a nil registry — the EMBEDDED catalog
+// — before spec.recipe.data could construct the provider whose registry
+// defines the value. LoadConfig failed with "invalid service type", which made
+// the documented provider-aware RecipeCriteria(client.CriteriaRegistry()) path
+// unreachable: you could never get past loading to build the Client.
+//
+// Exercises the whole chain rather than the fix in isolation, because each hop
+// is where it previously broke:
+//
+//	LoadConfig -> RecipeSource -> NewClient -> LoadCatalog -> RecipeCriteria
+func TestLoadConfig_ExternalCatalogCriteria(t *testing.T) {
+	t.Parallel()
+
+	dataDir, err := filepath.Abs("testdata/external-catalog")
+	if err != nil {
+		t.Fatalf("resolve fixture path: %v", err)
+	}
+	cfgPath := writeConfig(t, `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: external
+spec:
+  recipe:
+    data: `+dataDir+`
+    criteria:
+      service: ncp-review
+      accelerator: h100
+      intent: training
+      os: ubuntu
+`)
+
+	// 1. Load must not reject a value the embedded catalog does not know.
+	cfg, err := aicr.LoadConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig rejected an external-catalog value: %v", err)
+	}
+
+	// 2. The document decides the recipe source.
+	source, ok := cfg.RecipeSource()
+	if !ok {
+		t.Fatal("RecipeSource reported unset, but spec.recipe.data is populated")
+	}
+	client, err := aicr.NewClient(aicr.WithRecipeSource(source))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	// 3. Loading the catalog seeds this provider's registry with the
+	//    overlay-contributed value.
+	if err = client.LoadCatalog(context.Background()); err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+
+	// 4. Now the value parses, because the registry finally knows it.
+	//
+	// Strict mode is explicitly disabled first, and that is the point rather
+	// than a workaround: strict mode exists to hide registry entries
+	// contributed by an external overlay, so an external value is legal only
+	// when it is off. The suite runs with AICR_CRITERIA_STRICT=1, which seeds
+	// every registry strict — without this the test would assert the opposite
+	// of what strict mode is for. The strict half is asserted below.
+	reg := client.CriteriaRegistry()
+	reg.SetStrict(false)
+
+	criteria, err := cfg.RecipeCriteria(reg)
+	if err != nil {
+		t.Fatalf("RecipeCriteria against the provider registry: %v", err)
+	}
+	if criteria.Service != "ncp-review" {
+		t.Errorf("Service = %q, want ncp-review", criteria.Service)
+	}
+
+	// Strict mode must still reject it: the value is real but externally
+	// contributed, which is exactly what strict mode fences off.
+	reg.SetStrict(true)
+	if _, err = cfg.RecipeCriteria(reg); err == nil {
+		t.Error("strict mode accepted an externally-contributed criteria value")
+	}
+}
+
+// TestLoadConfig_ExternalCatalogCriteriaStillFailsClosed is the other half:
+// deferring membership must not mean accepting anything. A value in no
+// catalog — embedded or external — still fails, just at consumption rather
+// than at load.
+func TestLoadConfig_ExternalCatalogCriteriaStillFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	dataDir, err := filepath.Abs("testdata/external-catalog")
+	if err != nil {
+		t.Fatalf("resolve fixture path: %v", err)
+	}
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: external
+spec:
+  recipe:
+    data: `+dataDir+`
+    criteria:
+      service: not-in-any-catalog
+`))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err = client.LoadCatalog(context.Background()); err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+
+	if _, err = cfg.RecipeCriteria(client.CriteriaRegistry()); err == nil {
+		t.Error("RecipeCriteria accepted a value in no catalog; deferral must not mean silent acceptance")
 	}
 }
