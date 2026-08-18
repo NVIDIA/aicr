@@ -163,9 +163,11 @@ SERVE_NAME="${SERVE_NAME:-vllm-agg}"
 SERVE_QUEUE="${SERVE_QUEUE:-dynamo}"
 SERVE_MODEL="${SERVE_MODEL:-Qwen/Qwen3-0.6B}"
 SERVE_RUNTIME_IMAGE="${SERVE_RUNTIME_IMAGE:-nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1}"
-# GPU worker placement. The demo pins nodeGroup=gpu-worker; both UAT clusters
-# label their GPU pool the same way (tests/uat/*/cluster-config.yaml), so the
-# default lands the decode worker on the GPU node on either cloud.
+# GPU node placement, applied to BOTH graph components (#1644 — the Frontend
+# co-locates to reuse the worker's cached vllm-runtime image). The demo pins
+# nodeGroup=gpu-worker; every UAT cluster labels its GPU pool the same way
+# (tests/uat/*/cluster-config.yaml), so the default lands the graph on the GPU
+# node on any of the clouds.
 SERVE_GPU_NODE_SELECTOR_KEY="${SERVE_GPU_NODE_SELECTOR_KEY:-nodeGroup}"
 SERVE_GPU_NODE_SELECTOR_VALUE="${SERVE_GPU_NODE_SELECTOR_VALUE:-gpu-worker}"
 SERVE_FRONTEND_PORT="${SERVE_FRONTEND_PORT:-8000}"
@@ -1325,8 +1327,18 @@ phase_serve() {
   # (AWS and GKE GPU pools use different `dedicated` values, the AKS pool carries
   # only nvidia.com/gpu; the DRA/gpu-operator adds nvidia.com/gpu). Tolerating a
   # taint a node does not carry is a no-op, so one list schedules correctly on
-  # any of the clouds. The Frontend deliberately omits
-  # the nvidia.com/gpu toleration so it stays OFF the scarce GPU nodes.
+  # any of the clouds.
+  #
+  # Both components pin to the GPU node (#1644). The Frontend shares the decode
+  # worker's ~12GB vllm-runtime image, so co-locating lets it reuse the node's
+  # cached copy; left unpinned it landed on a fresh non-GPU node and wedged in
+  # ContainerCreating pulling the image from scratch, exceeding
+  # SERVE_READY_TIMEOUT_SECONDS. It therefore also needs the nvidia.com/gpu
+  # toleration (the AKS pool carries only that taint). Co-location does not
+  # consume a device: the Frontend declares no nvidia.com/gpu limit, so the
+  # device plugin never allocates one to it. This matches how the inference-perf
+  # validator places every component on the GPU cohort
+  # (validators/performance/inference_perf_constraint.go).
   echo "::group::Deploy DynamoGraphDeployment (${SERVE_NAME} in ${SERVE_NAMESPACE})"
   kubectl apply -f - <<EOF
 apiVersion: scheduling.run.ai/v2
@@ -1358,12 +1370,15 @@ spec:
       replicas: 1
       podTemplate:
         spec:
+          nodeSelector:
+            ${SERVE_GPU_NODE_SELECTOR_KEY}: ${SERVE_GPU_NODE_SELECTOR_VALUE}
           tolerations:
             - {key: dedicated, operator: Equal, value: worker-workload, effect: NoSchedule}
             - {key: dedicated, operator: Equal, value: worker-workload, effect: NoExecute}
             - {key: dedicated, operator: Equal, value: gpu-workload, effect: NoSchedule}
             - {key: dedicated, operator: Equal, value: system-workload, effect: NoSchedule}
             - {key: dedicated, operator: Equal, value: system-workload, effect: NoExecute}
+            - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
           containers:
             - name: main
               image: ${SERVE_RUNTIME_IMAGE}

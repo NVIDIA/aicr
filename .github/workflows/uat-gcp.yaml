@@ -694,18 +694,18 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run train "${TEST_CONFIG}"
 
-      # TEMPORARILY DISABLED (step commented out below). The vLLM workload run is
-      # excluded from UAT for now because the Frontend component pulls the full
-      # ~12GB vllm-runtime image on a fresh (non-GPU) node and never finishes
-      # within the 30m readiness budget: the decode worker reuses the GPU node's
-      # cached image (`already present on machine`), but the Frontend lands on a
-      # different node and pulls from scratch, wedging in ContainerCreating until
-      # the phase times out. The inference STACK (dynamo + KAI scheduler + DRA
-      # driver) is still stood up and validated by prep/install/conformance/verify;
-      # only the served-workload run is skipped (the Serve summary row is a static
-      # `disabled`). Re-enable by uncommenting the step once the pull is addressed
-      # (pre-pull/image cache, or pin the Frontend to the GPU node so it reuses
-      # the cached image).
+      # STILL DISABLED (step commented out below), but the root cause is now
+      # addressed: phase_serve pins the Frontend to the GPU node via
+      # SERVE_GPU_NODE_SELECTOR_*, so it reuses the decode worker's cached ~12GB
+      # vllm-runtime image instead of cold-pulling it on a fresh non-GPU node and
+      # wedging in ContainerCreating past the 30m readiness budget. The step
+      # stays commented until an inference UAT run demonstrates a served
+      # completion on the pinned layout — re-enable then, and restore the Serve
+      # summary row below to `${{ steps.serve.outcome }}`. Until then the
+      # inference STACK (dynamo + KAI scheduler + DRA driver) is still stood up
+      # and validated by prep/install/conformance/verify; only the
+      # served-workload run is skipped (the Serve summary row is a static
+      # `disabled`). Tracked by #1644.
       #
       # - name: UAT - serve (DynamoGraphDeployment + endpoint)
       #   id: serve
