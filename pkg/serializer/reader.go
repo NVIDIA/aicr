@@ -590,6 +590,15 @@ func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 // operator explicitly requested. Only an ErrCodeCanceled wrapper stops that —
 // which is exactly what that code's godoc says it exists for. Mirrors the
 // helper of the same name in pkg/evidence/verifier.
+//
+// EVERY read path in this package routes cancellation through here, not just
+// the local-file one: a reader accepts local paths, HTTP(S) URLs, and cm://
+// ConfigMap URIs interchangeably, so classifying only one of them leaves the
+// guarantee true for whichever source a caller happened to test with. The
+// HTTP path additionally has to reach this from inside a *url.Error, and the
+// ConfigMap path from inside an apierrors classification, which is why both
+// test for context.Canceled explicitly rather than relying on the code they
+// would otherwise assign.
 func abortError(cause error, what string) error {
 	if stderrors.Is(cause, context.Canceled) {
 		return errors.Wrap(errors.ErrCodeCanceled, what+" canceled", cause)
@@ -739,8 +748,13 @@ func readConfigMapDataWithKubeconfigContext(
 
 func classifyConfigMapGetError(namespace, name string, err error) error {
 	switch {
+	// Split cancellation out of the timeout group. Grouping them coded an
+	// operator abort as ErrCodeTimeout, which errors.IsTransient reports as
+	// retryable — so a Ctrl-C during a cm:// read could re-enter a caller's
+	// retry loop. A genuine deadline or apiserver timeout stays Timeout.
+	case stderrors.Is(err, context.Canceled):
+		return abortError(err, fmt.Sprintf("getting ConfigMap %s/%s", namespace, name))
 	case stderrors.Is(err, context.DeadlineExceeded),
-		stderrors.Is(err, context.Canceled),
 		apierrors.IsTimeout(err),
 		apierrors.IsServerTimeout(err):
 

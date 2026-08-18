@@ -72,9 +72,11 @@ func NewTemplateFileWriter(templatePath, outputPath string) (*TemplateWriter, er
 // The data is passed directly to the template, which can access all exported fields.
 // The template can be loaded from a local file path or HTTP/HTTPS URL.
 func (t *TemplateWriter) Serialize(ctx context.Context, data any) error {
-	// Check context before starting
+	// Check context before starting. Routed through abortError for the same
+	// reason the read paths are: an operator abort must not report transient
+	// and re-enter a caller's retry loop.
 	if ctx.Err() != nil {
-		return errors.Wrap(errors.ErrCodeTimeout, "context canceled before template execution", ctx.Err())
+		return abortError(ctx.Err(), "template execution")
 	}
 
 	// Read template content (supports both file paths and URLs)

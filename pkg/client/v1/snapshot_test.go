@@ -17,9 +17,12 @@ package aicr_test
 import (
 	"context"
 	stderrors "errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -218,5 +221,70 @@ func TestLoadSnapshot_HonorsContextCancellation(t *testing.T) {
 	}
 	if aicrerrors.IsTransient(err) {
 		t.Error("a canceled load reports as transient; a retry loop would re-enter on an operator abort")
+	}
+}
+
+// TestLoadSnapshot_HTTPSourceHonorsCancellation extends the abort contract to
+// the HTTP(S) source.
+//
+// LoadSnapshot accepts three source forms, and the classification lives on a
+// different code path for each: a local file read, a *url.Error from the HTTP
+// transport, and an apierrors classification for cm://. Asserting the contract
+// on only one of them leaves it true for whichever source a caller happened to
+// test with — so the network source is covered here, and the cm:// classifier
+// is covered directly in pkg/serializer (it needs a live API client to reach
+// end to end, and the classification is the whole behavior under test).
+func TestLoadSnapshot_HTTPSourceHonorsCancellation(t *testing.T) {
+	t.Parallel()
+
+	// Serve a valid snapshot on one path and block forever on another, so the
+	// same server proves both that the HTTP source works and that canceling
+	// it aborts rather than fails transiently.
+	released := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/snapshot.yaml", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(validSnapshotBody))
+	})
+	mux.HandleFunc("/blocked.yaml", func(_ http.ResponseWriter, _ *http.Request) {
+		<-released
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		close(released)
+		srv.Close()
+	})
+
+	client := newVerifyClient(t)
+
+	// Guard the premise: the HTTP source must work at all, or the abort
+	// assertion below proves nothing.
+	snap, err := client.LoadSnapshot(context.Background(), srv.URL+"/snapshot.yaml", "")
+	if err != nil {
+		t.Fatalf("HTTP source does not load, so this test cannot isolate cancellation: %v", err)
+	}
+	if snap.Kind != "Snapshot" {
+		t.Fatalf("Kind = %q, want Snapshot", snap.Kind)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	t.Cleanup(cancel)
+
+	_, err = client.LoadSnapshot(ctx, srv.URL+"/blocked.yaml", "")
+	if err == nil {
+		t.Fatal("expected an error for an already-canceled context")
+	}
+	if !stderrors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want one wrapping context.Canceled", err)
+	}
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != aicrerrors.ErrCodeCanceled {
+		t.Errorf("error code = %v, want %v", err, aicrerrors.ErrCodeCanceled)
+	}
+	if aicrerrors.IsTransient(err) {
+		t.Error("a canceled HTTP load reports as transient; a retry loop would re-enter on an operator abort")
 	}
 }
