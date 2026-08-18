@@ -23,6 +23,10 @@ import (
 	pkgerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// gkeSuffixPrefix is the prefix that identifies GKE-specific build number
+// extras of the form "-gke.NNNNNN" (e.g. "-gke.1318000").
+const gkeSuffixPrefix = "gke."
+
 // Error types for version parsing failures
 var (
 	ErrEmptyVersion      = errors.New("version string is empty")
@@ -177,10 +181,35 @@ func (v Version) Equals(other Version) bool {
 	return v.Major == other.Major && v.Minor == other.Minor && v.Patch == other.Patch
 }
 
+// extractGKEBuild parses a GKE-specific build number from the Extras field of
+// a Version. It expects extras in the form "-gke.NNNNNN" (e.g. "-gke.1318000")
+// and returns the integer build number and true on success. Non-GKE extras
+// (e.g. "-eks-3025e55", "-hotfix.20240322", "") return (0, false).
+func extractGKEBuild(extras string) (int64, bool) {
+	s := strings.TrimPrefix(extras, "-")
+	if !strings.HasPrefix(s, gkeSuffixPrefix) {
+		return 0, false
+	}
+	numStr := s[len(gkeSuffixPrefix):]
+	if numStr == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(numStr, 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
 // Compare returns an integer comparing two versions:
 // -1 if v < other, 0 if v == other, 1 if v > other.
 // This comparison respects precision like EqualsOrNewer.
-// Useful for sorting versions.
+//
+// When the numeric core (Major.Minor.Patch) is equal and both versions carry a
+// GKE build suffix in the form "-gke.NNNNNN", the build numbers are compared
+// numerically. If only the constraint (other) carries a GKE suffix, v is
+// considered older (-1). If only v carries a GKE suffix, v is considered newer
+// (1). Non-GKE Extras fields (e.g. "-eks-3025e55") are never compared.
 func (v Version) Compare(other Version) int {
 	// Use lower precision for comparison
 	precision := min(v.Precision, other.Precision)
@@ -219,5 +248,34 @@ func (v Version) Compare(other Version) int {
 		return 1
 	}
 
-	return 0
+	// Numeric cores are equal. Break ties with GKE build numbers when the
+	// extras match the "-gke.NNNNNN" pattern.
+	//
+	// Rationale:
+	//  - Both GKE → compare build numbers numerically.
+	//  - Only constraint has GKE suffix → actual lacks the required build
+	//    floor, so actual is considered older (-1).
+	//  - Only actual has GKE suffix → actual is a GKE build of a bare
+	//    version that it satisfies, so actual is considered newer (1).
+	//  - Neither has GKE suffix (or neither is parseable) → equal (0).
+	leftBuild, leftIsGKE := extractGKEBuild(v.Extras)
+	rightBuild, rightIsGKE := extractGKEBuild(other.Extras)
+	switch {
+	case leftIsGKE && rightIsGKE:
+		if leftBuild < rightBuild {
+			return -1
+		}
+		if leftBuild > rightBuild {
+			return 1
+		}
+		return 0
+	case rightIsGKE:
+		// Actual has no GKE suffix; fails the GKE build floor.
+		return -1
+	case leftIsGKE:
+		// Actual is a GKE build satisfying a bare version constraint.
+		return 1
+	default:
+		return 0
+	}
 }

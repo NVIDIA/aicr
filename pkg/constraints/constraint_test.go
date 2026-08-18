@@ -16,6 +16,7 @@ package constraints
 
 import (
 	stderrors "errors"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -317,6 +318,242 @@ func TestParsedConstraint_Evaluate(t *testing.T) {
 			}
 			if result != tt.want {
 				t.Errorf("Evaluate(%q) = %v, want %v", tt.actual, result, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCompoundConstraint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		expr             string
+		wantAlternatives int
+		wantTermsInFirst int
+		wantFirstTermOp  string // operator of first term in first alternative (empty = skip check)
+		wantFirstTermVal string // value of first term in first alternative (empty = skip check)
+		expectError      bool
+	}{
+		{
+			name:             "single term",
+			expr:             ">= 1.32.4",
+			wantAlternatives: 1,
+			wantTermsInFirst: 1,
+		},
+		{
+			name:             "range AND (two terms in one clause)",
+			expr:             ">= 1.34.3-gke.1318000 < 1.35.0",
+			wantAlternatives: 1,
+			wantTermsInFirst: 2,
+			wantFirstTermOp:  ">=",
+			wantFirstTermVal: "1.34.3-gke.1318000",
+		},
+		{
+			name:             "OR of two single clauses",
+			expr:             ">= 1.32.4 || >= 1.35.0",
+			wantAlternatives: 2,
+			wantTermsInFirst: 1,
+		},
+		{
+			name:             "full per-track GKE expression",
+			expr:             ">= 1.34.3-gke.1318000 < 1.35.0 || >= 1.35.0-gke.2745000",
+			wantAlternatives: 2,
+			wantTermsInFirst: 2,
+		},
+		{
+			name:             "exact match is a single term",
+			expr:             "ubuntu",
+			wantAlternatives: 1,
+			wantTermsInFirst: 1,
+		},
+		{
+			name:        "empty expression errors",
+			expr:        "",
+			expectError: true,
+		},
+		{
+			name:        "whitespace-only expression errors",
+			expr:        "   ",
+			expectError: true,
+		},
+		{
+			name:        "leading || errors (empty first clause)",
+			expr:        "|| >= 1.34.3",
+			expectError: true,
+		},
+		{
+			name:        "trailing || errors (empty last clause)",
+			expr:        ">= 1.34.3 ||",
+			expectError: true,
+		},
+		{
+			name:        "consecutive || errors (empty middle clause)",
+			expr:        ">= 1.34.3 || || >= 1.35.0",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cc, err := ParseCompoundConstraint(tt.expr)
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(cc.Alternatives) != tt.wantAlternatives {
+				t.Errorf("Alternatives count = %d, want %d", len(cc.Alternatives), tt.wantAlternatives)
+			}
+			if len(cc.Alternatives) > 0 && len(cc.Alternatives[0]) != tt.wantTermsInFirst {
+				t.Errorf("terms in first alternative = %d, want %d", len(cc.Alternatives[0]), tt.wantTermsInFirst)
+			}
+			if tt.wantFirstTermOp != "" && len(cc.Alternatives) > 0 && len(cc.Alternatives[0]) > 0 {
+				if got := string(cc.Alternatives[0][0].Operator); got != tt.wantFirstTermOp {
+					t.Errorf("first term Operator = %q, want %q", got, tt.wantFirstTermOp)
+				}
+			}
+			if tt.wantFirstTermVal != "" && len(cc.Alternatives) > 0 && len(cc.Alternatives[0]) > 0 {
+				if got := cc.Alternatives[0][0].Value; got != tt.wantFirstTermVal {
+					t.Errorf("first term Value = %q, want %q", got, tt.wantFirstTermVal)
+				}
+			}
+			if cc.String() != strings.TrimSpace(tt.expr) {
+				t.Errorf("String() = %q, want %q", cc.String(), strings.TrimSpace(tt.expr))
+			}
+		})
+	}
+}
+
+func TestCompoundConstraint_Evaluate(t *testing.T) {
+	t.Parallel()
+
+	// The core expression under test: per-track GKE version floors.
+	// Track 1.34: must be >= 1.34.3-gke.1318000 and < 1.35.0
+	// Track 1.35: must be >= 1.35.0-gke.2745000
+	// Any 1.36+ version qualifies.
+	const perTrackExpr = ">= 1.34.3-gke.1318000 < 1.35.0 || >= 1.35.0-gke.2745000"
+
+	tests := []struct {
+		name    string
+		expr    string
+		actual  string
+		want    bool
+		wantErr bool
+	}{
+		// --- Core GKE bug regression ---
+		{
+			name:   "1.34.3-gke.1000000 fails per-track floor (GKE build too low)",
+			expr:   perTrackExpr,
+			actual: "1.34.3-gke.1000000",
+			want:   false,
+		},
+		{
+			name:   "1.34.3-gke.1318000 passes per-track floor (exact floor match)",
+			expr:   perTrackExpr,
+			actual: "1.34.3-gke.1318000",
+			want:   true,
+		},
+		{
+			name:   "1.35.0-gke.0001 fails per-track floor (1.35 track build too low)",
+			expr:   perTrackExpr,
+			actual: "1.35.0-gke.0001",
+			want:   false,
+		},
+		{
+			name:   "1.35.0-gke.2745000 passes per-track floor (exact 1.35 track match)",
+			expr:   perTrackExpr,
+			actual: "1.35.0-gke.2745000",
+			want:   true,
+		},
+		{
+			name:   "1.35.0-gke.3000000 passes per-track floor (above 1.35 track floor)",
+			expr:   perTrackExpr,
+			actual: "1.35.0-gke.3000000",
+			want:   true,
+		},
+		{
+			name:   "1.34.5-gke.1318000 passes per-track floor (higher patch in 1.34 track)",
+			expr:   perTrackExpr,
+			actual: "1.34.5-gke.1318000",
+			want:   true,
+		},
+		// --- Bare actual vs GKE compound (tests leftIsGKE=false, rightIsGKE=true path) ---
+		{
+			name:   "bare 1.34.3 fails GKE compound floor (no GKE suffix)",
+			expr:   perTrackExpr,
+			actual: "1.34.3",
+			want:   false,
+		},
+		{
+			// 1.34.5 > 1.34.3 numerically, so it satisfies ">= 1.34.3-gke.1318000"
+			// despite having no GKE suffix — the patch version alone clears the floor.
+			// Only at the exact same patch (1.34.3) does the GKE build number matter.
+			name:   "bare 1.34.5 passes GKE compound floor (higher patch clears floor numerically)",
+			expr:   perTrackExpr,
+			actual: "1.34.5",
+			want:   true,
+		},
+		// --- GKE actual vs bare constraint (tests leftIsGKE=true, rightIsGKE=false path) ---
+		{
+			name:   "GKE actual passes bare >= constraint",
+			expr:   ">= 1.34.3",
+			actual: "1.34.3-gke.1318000",
+			want:   true,
+		},
+		// --- Simple single-expression backward compat ---
+		{
+			name:   "simple >= 1.32.4 passes 1.33.0",
+			expr:   ">= 1.32.4",
+			actual: "1.33.0",
+			want:   true,
+		},
+		{
+			name:   "simple >= 1.32.4 fails 1.31.0",
+			expr:   ">= 1.32.4",
+			actual: "1.31.0",
+			want:   false,
+		},
+		{
+			name:   "exact match ubuntu passes",
+			expr:   "ubuntu",
+			actual: "ubuntu",
+			want:   true,
+		},
+		{
+			name:   "exact match ubuntu fails rhel",
+			expr:   "ubuntu",
+			actual: "rhel",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cc, err := ParseCompoundConstraint(tt.expr)
+			if err != nil {
+				t.Fatalf("ParseCompoundConstraint(%q) unexpected error: %v", tt.expr, err)
+			}
+			got, err := cc.Evaluate(tt.actual)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Evaluate(%q) unexpected error: %v", tt.actual, err)
+			}
+			if got != tt.want {
+				t.Errorf("Evaluate(%q) = %v, want %v (expr=%q)", tt.actual, got, tt.want, tt.expr)
 			}
 		})
 	}
