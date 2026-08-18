@@ -26,9 +26,10 @@ will work.
    eight in total, in the cluster's region.
 2. **Create the cluster** with `--enable-multi-networking`, plus its two
    prerequisites `--enable-dataplane-v2` and `--enable-ip-alias`.
-3. **Create the GPU node pool** on an `a3-megagpu-8g` machine type, attaching the
-   eight VPC/subnet pairs as repeated `--additional-node-network` entries, one
-   per pair, each in the form `network=NETWORK,subnetwork=SUBNET`.
+3. **Create the GPU node pool** on an `a3-megagpu-8g` machine type with
+   `--enable-gvnic`, attaching the eight VPC/subnet pairs as repeated
+   `--additional-node-network` entries, one per pair, each in the form
+   `network=NETWORK,subnetwork=SUBNET`.
 4. **Apply the `Network` and `GKENetworkParamSet` CRs** — one pair per GPU NIC,
    binding each additional node network into the cluster so pods can reference
    it by name.
@@ -40,7 +41,10 @@ will work.
 > be added later, and the CRs can be applied at any point.
 
 AICR installs the TCPXO DaemonSets and detects the CRs; it does not provision any
-of this networking.
+of this networking. These steps are a summary of the prerequisite AICR depends
+on, not a complete provisioning runbook — for the full procedure, including the
+per-VPC firewall rules and the supported GKE version floors, follow Google's
+[GPUDirect and multi-networking guide](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx).
 
 Steps 1–3 without step 4 is the failure mode worth knowing: the VMs come up with
 all nine NICs attached and the AICR TCPXO DaemonSets roll out cleanly, but with
@@ -65,7 +69,9 @@ letting it surface later as a performance-phase abort with no bandwidth number.
 **Important:** The GPU node pool must be provisioned with only the 8 GPU NIC
 networks (`gpu-nic-0` through `gpu-nic-7`). Do **not** include a gVNIC additional
 network — it takes a GPU NIC PCI slot (`0000:06:00.0`), leaving only 7/8 GPUs
-available for TCPXO.
+available for TCPXO. This is distinct from the `--enable-gvnic` node-pool flag,
+which selects the gVNIC driver and **is** required: pass the flag, but do not add
+a ninth `--additional-node-network` entry for it.
 
 ## Workload Pod Configuration (NRI Profile)
 
