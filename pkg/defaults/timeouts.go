@@ -959,6 +959,66 @@ const (
 	// EnvServerShutdownTimeoutSeconds is the environment variable that
 	// overrides ServerShutdownTimeout (value parsed as seconds).
 	EnvServerShutdownTimeoutSeconds = "SHUTDOWN_TIMEOUT_SECONDS"
+
+	// ServerDefaultBindAddress is the default listen address for aicrd.
+	// Empty means bind every interface — required for Kubernetes deployment
+	// because kubelet probes (livenessProbe/readinessProbe httpGet) dial
+	// the pod IP directly, kube-proxy routes Service traffic to the pod IP,
+	// and Cloud Run / Fargate style runtimes route inbound requests to the
+	// container's advertised interface. A loopback-only default would
+	// CrashLoop every in-tree Deployment because probes cannot reach a
+	// service bound to 127.0.0.1. Operators who need a tighter bind on a
+	// bare-host or sidecar deployment set EnvServerAddress explicitly.
+	// The SSRF hardening for /v1/bundle?vendor-charts=true does not rely
+	// on the bind address; the opt-in gate + egress policy + index
+	// pre-check + artifact cap are the acute controls (see issue #2118).
+	ServerDefaultBindAddress = ""
+
+	// EnvServerAddress overrides ServerDefaultBindAddress. Both "unset"
+	// and "set to empty string" resolve to the same all-interfaces bind
+	// — parseConfig uses os.LookupEnv (not os.Getenv) so the two cases
+	// are distinguishable at parse time, but the resulting cfg.Address
+	// is the same empty string in either case. Set to "127.0.0.1" for a
+	// loopback-only bind on a sidecar/bare-host deployment, or to a
+	// specific interface to constrain listener binding. Any pod-network
+	// deployment should leave this unset (or empty) so kubelet probes
+	// and kube-proxy can reach the container.
+	EnvServerAddress = "AICR_SERVER_ADDRESS"
+
+	// EnvAllowVendorCharts opts the server into honoring vendor-charts=true
+	// on bundle requests. Off by default because vendor-charts drives
+	// server-side helm pull against a caller-supplied URL — see the SSRF
+	// egress-policy check in pkg/bundler/deployer/localformat.vendor.go.
+	// Even with the egress-policy filter and artifact size cap, an operator
+	// must explicitly acknowledge the network egress this endpoint performs.
+	// Parsed by strconv.ParseBool — accepts 1/t/T/TRUE/true/True to enable
+	// (and 0/f/F/FALSE/false/False to disable). Any other value (including
+	// "yes", "on", or a typo) fails closed to disabled with a WARN log.
+	EnvAllowVendorCharts = "AICR_ALLOW_VENDOR_CHARTS"
+
+	// EnvHelmRepositoryHost names the single repository host the vendor
+	// path is allowed to send EnvHelmRepositoryUsername /
+	// EnvHelmRepositoryPassword to during the index.yaml pre-check.
+	// Unset (default) suppresses credentials even when the username env
+	// is set, so a caller-supplied Repository URL cannot steer operator
+	// credentials at an attacker-controlled host. Credentials are also
+	// only attached over HTTPS; a scheme mismatch or host mismatch
+	// suppresses them silently. Go's http.Client strips Authorization on
+	// cross-origin redirects automatically, so this env var is the
+	// initial-URL gate.
+	EnvHelmRepositoryHost = "AICR_HELM_REPOSITORY_HOST"
+
+	// EnvHelmRepositoryUsername / EnvHelmRepositoryPassword are the
+	// commonly-documented Helm repository-auth env vars. The upstream
+	// helm CLI does NOT read these for `helm pull --repo <url>` — the
+	// subprocess sends no Authorization header regardless. They are
+	// consumed only by the vendor path's own index.yaml pre-check when
+	// EnvHelmRepositoryHost gates the attachment (see attachHelmBasicAuth
+	// in pkg/bundler/deployer/localformat/vendor.go). Named here as
+	// constants so the raw string literals do not drift between the
+	// production call site, the attachment gate, and the test coverage.
+	EnvHelmRepositoryUsername = "HELM_REPOSITORY_USERNAME"
+	EnvHelmRepositoryPassword = "HELM_REPOSITORY_PASSWORD"
 )
 
 // Server-side bundle-signing configuration (see docs/plans/2026-07-20-server-bundle-attestation-design.md).
@@ -1247,6 +1307,39 @@ const (
 	// repo-index downloads on cold starts can extend the wall time well
 	// beyond the default HTTPClientTimeout.
 	HelmChartPullTimeout = 5 * time.Minute
+
+	// HelmChartArtifactLimit caps the size of a single vendored chart .tgz.
+	// Real charts on the AICR registry are single-digit MB; the cap sits well
+	// above headroom for future growth (multi-arch bundles, embedded CRDs)
+	// while still bounding server memory. An attacker who can steer the
+	// vendor path at a large blob is otherwise limited only by disk and
+	// HelmChartPullTimeout — see localformat.(*CLIChartPuller).Pull.
+	HelmChartArtifactLimit int64 = 64 * 1024 * 1024 // 64 MiB
+
+	// HelmChartIndexBodyLimit caps the response body for a repository
+	// index.yaml pre-fetch (used by the vendor path to validate every
+	// declared chart tarball URL against the egress policy before invoking
+	// helm). Real indexes range from ~50 KB (single-chart repos) to ~450 KB
+	// (charts.jetstack.io); mega-repos with tens of thousands of charts can
+	// hit tens of MB. 32 MiB gives multi-decade growth headroom for real
+	// repos while bounding memory against a hostile index-of-the-index-of.
+	HelmChartIndexBodyLimit int64 = 32 * 1024 * 1024 // 32 MiB
+
+	// HelmChartIndexMaxRedirects bounds how many HTTP redirect hops the
+	// vendor pre-check will follow when fetching a repository's index.yaml.
+	// helm's own default is 10; matching it avoids rejecting legitimate
+	// charts served behind CDN chains while still bounding both time and
+	// the CheckRedirect callback fanout.
+	HelmChartIndexMaxRedirects = 10
+
+	// HelmChartIndexPreCheckTimeout bounds the pre-check GET of a
+	// repository's index.yaml. Sized for a small YAML fetch through a
+	// CDN or geographically distant registry, not a large tarball —
+	// HelmChartPullTimeout (5 minutes) is the wrong ceiling here. Real
+	// indexes come back in well under a second; the buffer covers cold
+	// resolver caches and slow-start CDN edges without letting a stalled
+	// upstream tie up an aicrd request slot for minutes.
+	HelmChartIndexPreCheckTimeout = 30 * time.Second
 )
 
 // OCI publication phase budgets. The whole-publish ceiling covers two source

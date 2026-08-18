@@ -68,7 +68,10 @@ func newTestBundleHandler(t *testing.T) *bundleHandler {
 		t.Fatalf("NewClient: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	return newBundleHandler(client, nil, nil)
+	// Tests default to allowVendorCharts=true so pre-existing coverage of the
+	// vendor-charts path keeps running; the new "disabled" case gets its own
+	// dedicated test with the flag off.
+	return newBundleHandler(client, nil, nil, true)
 }
 
 func TestDecodeRecipeResultRequestStrictForConfiguredRecipes(t *testing.T) {
@@ -630,6 +633,64 @@ func TestBundleHandler_EmptyComponentRefs(t *testing.T) {
 	h.HandleBundles(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+// TestBundleHandler_VendorChartsDisabled pins issue #2118: an aicrd instance
+// that has NOT opted into vendor-charts (allowVendorCharts=false, the safe
+// default) must reject vendor-charts=true with 400 BEFORE it decodes the
+// body or reaches the vendoring code. The rejection is what prevents an
+// untrusted caller from steering server-side helm pull at an internal URL.
+func TestBundleHandler_VendorChartsDisabled(t *testing.T) {
+	t.Parallel()
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	// allowVendorCharts=false — the default in Serve() unless the operator
+	// sets AICR_ALLOW_VENDOR_CHARTS.
+	h := newBundleHandler(client, nil, nil, false)
+
+	// Body is deliberately garbage: the vendor-charts gate must fire on the
+	// query string before the body decoder even runs, so a malformed body
+	// must not change the response code.
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle?vendor-charts=true", strings.NewReader("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleBundles(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "vendor-charts is not enabled") {
+		t.Errorf("body does not mention the gate: %s", w.Body.String())
+	}
+}
+
+// TestBundleHandler_VendorChartsFalseAllowed verifies vendor-charts=false is
+// always allowed regardless of the server opt-in — the gate only guards the
+// egress-triggering true value.
+func TestBundleHandler_VendorChartsFalseAllowed(t *testing.T) {
+	t.Parallel()
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	h := newBundleHandler(client, nil, nil, false)
+
+	// Empty componentRefs is rejected downstream — proves we got PAST the
+	// vendor-charts gate rather than being short-circuited by it.
+	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "RecipeResult", "componentRefs": []}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle?vendor-charts=false", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleBundles(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "vendor-charts is not enabled") {
+		t.Errorf("vendor-charts gate fired on false; body: %s", w.Body.String())
 	}
 }
 
