@@ -247,11 +247,6 @@ func WrapCriteria(c *recipe.Criteria) *Criteria {
 	}
 }
 
-// toInternalCriteria translates a facade Criteria back into the
-// pkg/recipe.Criteria enum-typed shape the resolver consumes. The string
-// values are wrapped in the corresponding pkg/recipe enum types without
-// validation — registry-strict mode at resolve time is the gate that
-// rejects unknown values (with ErrCodeInvalidRequest).
 // ToInternalCriteria projects a facade Criteria back onto the upstream
 // pkg/recipe shape, parsing the plain-string fields into their enum types.
 // Returns nil for nil input.
@@ -264,6 +259,11 @@ func ToInternalCriteria(c *Criteria) *recipe.Criteria {
 	return toInternalCriteria(c)
 }
 
+// toInternalCriteria translates a facade Criteria back into the
+// pkg/recipe.Criteria enum-typed shape the resolver consumes. The string
+// values are wrapped in the corresponding pkg/recipe enum types without
+// validation — registry-strict mode at resolve time is the gate that
+// rejects unknown values (with ErrCodeInvalidRequest).
 func toInternalCriteria(c *Criteria) *recipe.Criteria {
 	if c == nil {
 		return nil
