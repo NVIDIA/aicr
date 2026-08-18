@@ -127,9 +127,14 @@ are tolerated for snapshots that predate those fields.
 
 `Snapshot.Raw` is **not** populated by `LoadSnapshot` — only
 `CollectSnapshot` sets it. The source you loaded from is already the
-durable artifact, so if you need the original bytes, retrieve them from
-that source yourself: read the file for a local path, or re-fetch the
-URL or ConfigMap.
+durable artifact.
+
+If you need the bytes, you can read the source again — but that returns
+its **current** contents, which for a URL or a ConfigMap (or a file
+someone rewrote) need not be what this call parsed. When byte-for-byte
+identity with the loaded snapshot matters, such as hashing what you
+validated, capture the source contents yourself and load from that
+capture instead of re-reading afterwards.
 
 ### Capturing a snapshot from a live cluster
 

@@ -55,9 +55,15 @@ import (
 // only by CollectSnapshot. A loaded snapshot leaves it empty, because the
 // source is already the durable artifact — re-exposing its bytes here would
 // invite callers to round-trip a stored snapshot through the parsed type,
-// which is what Raw exists to discourage. If the original bytes are what you
-// need, retrieve them from the source: read the file for a local path, or
-// re-fetch the URL or ConfigMap.
+// which is what Raw exists to discourage.
+//
+// A caller needing the bytes can read the source again, but note what that
+// does and does not give you: re-reading returns the source's CURRENT
+// contents, which for a URL or a ConfigMap (and for a file someone rewrote)
+// need not be the bytes this call parsed. If byte-for-byte identity with the
+// loaded snapshot matters — hashing what you validated, say — capture the
+// source contents yourself and load from that capture, rather than reading
+// the source a second time afterwards.
 //
 // This method does not touch the Client's recipe catalog, so any open Client
 // will do; it hangs off Client to keep the surface uniform and to give
