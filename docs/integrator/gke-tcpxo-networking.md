@@ -27,8 +27,8 @@ will work.
 2. **Create the cluster** with `--enable-multi-networking`, plus its two
    prerequisites `--enable-dataplane-v2` and `--enable-ip-alias`.
 3. **Create the GPU node pool** on an `a3-megagpu-8g` machine type, attaching the
-   eight VPC/subnet pairs with one repeated `--additional-node-network
-   network=<vpc>,subnetwork=<subnet>` entry each.
+   eight VPC/subnet pairs as repeated `--additional-node-network` entries, one
+   per pair, each in the form `network=NETWORK,subnetwork=SUBNET`.
 4. **Apply the `Network` and `GKENetworkParamSet` CRs** — one pair per GPU NIC,
    binding each additional node network into the cluster so pods can reference
    it by name.
