@@ -61,6 +61,12 @@ func prefixed(prefix string, count int) []string {
 	return names
 }
 
+// Note on sort coverage: DiscoverGPUNICNetworks sorts its result, and that
+// order is load-bearing (the performance validator maps it positionally onto
+// eth1..eth8). It is deliberately NOT asserted here — the fake dynamic client
+// returns List items already in name order, so a case that inserts names out of
+// order still passes with sort.Strings removed. Such a test would assert
+// nothing; covering the sort needs a fake that preserves insertion order.
 func TestDiscoverGPUNICNetworks(t *testing.T) {
 	tests := []struct {
 		name    string

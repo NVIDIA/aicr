@@ -163,6 +163,46 @@ func TestCheckGKEGPUNICNetworksApplicability(t *testing.T) {
 		})
 	}
 
+	// A timeout or a transport failure must block for the same reason: neither
+	// is evidence that TCPXO is inapplicable.
+	infraErrs := []struct {
+		name     string
+		err      error
+		wantCode errors.ErrorCode
+	}{
+		{
+			name:     "timeout",
+			err:      apierrors.NewTimeoutError("list timed out", 1),
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name:     "transport failure",
+			err:      apierrors.NewServiceUnavailable("apiserver unavailable"),
+			wantCode: errors.ErrCodeUnavailable,
+		},
+	}
+	for _, ie := range infraErrs {
+		for _, declared := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s blocks (declared=%v)", ie.name, declared), func(t *testing.T) {
+				client := gkeNetworkClient()
+				client.PrependReactor("list", "networks", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, ie.err
+				})
+
+				err := checkGKEGPUNICNetworks(tcpxoContext(client, declared))
+				if err == nil {
+					t.Fatalf("expected an error on a %s", ie.name)
+				}
+				if validators.IsSkip(err) {
+					t.Fatalf("a %s must not skip: %v", ie.name, err)
+				}
+				if !stderrors.Is(err, errors.New(ie.wantCode, "")) {
+					t.Errorf("expected %s, got: %v", ie.wantCode, err)
+				}
+			})
+		}
+	}
+
 	t.Run("missing dynamic client is rejected", func(t *testing.T) {
 		err := checkGKEGPUNICNetworks(&validators.Context{Ctx: context.Background()})
 		if err == nil || validators.IsSkip(err) {

@@ -18,23 +18,29 @@ The last two ship in the AICR bundle. The first two are **cluster provisioning**
 
 ### Provisioning multi-NIC networking
 
-The four steps are coupled and **order-dependent**. Each one depends on the one
-before it, so they cannot be applied piecemeal to an existing cluster.
+These four steps are ordered. Step 2 is the one that cannot be undone later;
+steps 3 and 4 must both complete before any TCPXO workload — or `aicr validate` —
+will work.
 
 1. **Create the VPCs and subnets** — one dedicated VPC + subnet per GPU NIC,
    eight in total, in the cluster's region.
-2. **Create the cluster with `--enable-multi-networking`**, passing the eight
-   subnets via `--additional-ip-ranges` (alongside `--enable-dataplane-v2`).
-3. **Create the GPU node pool with `--additional-node-network`**, one entry per
-   GPU NIC network, on an `a3-megagpu-8g` machine type.
+2. **Create the cluster** with `--enable-multi-networking`, plus its two
+   prerequisites `--enable-dataplane-v2` and `--enable-ip-alias`.
+3. **Create the GPU node pool** on an `a3-megagpu-8g` machine type, attaching the
+   eight VPC/subnet pairs with one repeated `--additional-node-network
+   network=<vpc>,subnetwork=<subnet>` entry each.
 4. **Apply the `Network` and `GKENetworkParamSet` CRs** — one pair per GPU NIC,
    binding each additional node network into the cluster so pods can reference
    it by name.
 
 > **Multi-networking cannot be enabled after cluster creation.** `--enable-multi-networking`
-> is a create-time flag; there is no `gcloud container clusters update` equivalent.
-> A cluster created without it must be **recreated** — adding the node pool
-> networks or the CRs afterwards will not work. Plan this before provisioning.
+> is a create-time flag; there is no `gcloud container clusters update` equivalent,
+> so a cluster created without it must be **recreated**. Steps 3 and 4, by
+> contrast, can be done on an existing multi-networking cluster — a node pool can
+> be added later, and the CRs can be applied at any point.
+
+AICR installs the TCPXO DaemonSets and detects the CRs; it does not provision any
+of this networking.
 
 Steps 1–3 without step 4 is the failure mode worth knowing: the VMs come up with
 all nine NICs attached and the AICR TCPXO DaemonSets roll out cleanly, but with
