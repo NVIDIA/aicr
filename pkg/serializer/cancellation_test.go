@@ -15,6 +15,7 @@
 package serializer
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"net/http"
@@ -129,4 +130,67 @@ func TestCancellation_DeadlineStaysTimeout(t *testing.T) {
 	if !errors.IsTransient(err) {
 		t.Error("a deadline must stay transient so legitimate retries still happen")
 	}
+}
+
+// TestCancellation_HTTPDeadlineStaysTimeout pins the other half of the HTTP
+// mapping. Only an abort becomes ErrCodeCanceled; a deadline is an
+// environmental fault and must stay Timeout AND transient, or the fix above
+// would have suppressed legitimate retries on a slow server.
+func TestCancellation_HTTPDeadlineStaysTimeout(t *testing.T) {
+	t.Parallel()
+
+	released := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-released
+	}))
+	t.Cleanup(func() {
+		close(released)
+		srv.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	t.Cleanup(cancel)
+
+	_, err := NewHTTPReader().ReadWithContext(ctx, srv.URL)
+	if err == nil {
+		t.Fatal("expected an error for an expired deadline")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != errors.ErrCodeTimeout {
+		t.Errorf("error = %v, want code %v", err, errors.ErrCodeTimeout)
+	}
+	if !errors.IsTransient(err) {
+		t.Error("an HTTP deadline must stay transient so legitimate retries still happen")
+	}
+}
+
+// TestCancellation_HTTPTemplate covers the template loader's HTTP boundary.
+//
+// readTemplateContent wraps whatever ReadWithContext returns. Wrapping with a
+// fixed ErrCodeUnavailable silently undid the classification one call down,
+// making an abort transient again — the classification has to survive every
+// layer between the cancellation and the caller, not just the one that
+// observes it.
+func TestCancellation_HTTPTemplate(t *testing.T) {
+	t.Parallel()
+
+	released := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-released
+	}))
+	t.Cleanup(func() {
+		close(released)
+		srv.Close()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	t.Cleanup(cancel)
+
+	var buf bytes.Buffer
+	err := NewTemplateWriter(srv.URL, &buf).Serialize(ctx, struct{}{})
+	wantCanceledAndNotTransient(t, err, "http template")
 }

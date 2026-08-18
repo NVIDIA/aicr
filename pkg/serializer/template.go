@@ -185,7 +185,12 @@ func readTemplateContent(ctx context.Context, path string) ([]byte, error) {
 		httpReader := NewHTTPReader()
 		content, err := httpReader.ReadWithContext(ctx, path)
 		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeUnavailable, fmt.Sprintf("failed to fetch template from URL %q", path), err)
+			// PropagateOrWrap, not Wrap: ReadWithContext already classifies
+			// an abort as ErrCodeCanceled and a deadline as ErrCodeTimeout.
+			// Overwriting those with Unavailable made an operator abort
+			// transient again, undoing the classification one call down.
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeUnavailable,
+				fmt.Sprintf("failed to fetch template from URL %q", path))
 		}
 		return content, nil
 	}
