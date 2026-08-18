@@ -1429,23 +1429,16 @@ func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName str
 	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
 		return nil, nil
 	}
-	// A nil bundler config means the caller is Client.BundleComponents,
-	// the values-only SDK path, which produces no deployable artifact and
-	// exposes no way to pass --set (pkg/client/v1/aicr.go passes nil for
-	// exactly this reason: "validations that act solely on bundle-time
-	// flags no-op on a nil config"). This gate's sole remedy IS a
-	// bundle-time flag — no recipe or overlay sets
-	// labeler.assumeDriverInstalled — so firing here would make every
-	// affected recipe permanently unbundleable through that API with no
-	// expressible fix. Every path that actually writes a bundle
-	// (DefaultBundler.Make, Client.MakeBundle, POST /v1/bundle) carries a
-	// non-nil config and is gated. Documented boundary, closure owned by
-	// issue #2181: once the recipes own the remedy values, the gates are
-	// runnable on the SDK path with no override channel and this no-op
-	// is to be removed (an acceptance criterion recorded there).
-	if bundlerConfig == nil {
-		return nil, nil
-	}
+	// A nil bundler config is the values-only Client.BundleComponents SDK
+	// path, which exposes no way to pass --set. That used to no-op this
+	// gate: the remedy was a bundle-time flag only, so firing here would
+	// have made every affected recipe permanently unbundleable through
+	// that API with no expressible fix. Since #2181 the recipes
+	// themselves carry labeler.assumeDriverInstalled for every supported
+	// configuration that needs it, so the gate is satisfiable from
+	// resolved values alone and runs on this path too. The helpers below
+	// read recipe values and skip the override merge when the config is
+	// nil.
 	sentinelRef := recipeResult.GetComponentRef(componentName)
 	if sentinelRef == nil {
 		return nil, nil
@@ -1756,10 +1749,14 @@ func nvsentinelMetadataCollectorDisabled(values map[string]any) bool {
 // compare against), when the metadata-collector subchart is disabled
 // (global.metadataCollector.enabled=false — no DaemonSet renders), when
 // either value is present but not a string (the install fails on its
-// own terms; guessing a default here could invert the verdict), and on
-// a nil bundler config (the values-only Client.BundleComponents path —
-// same rationale as CheckNVSentinelDriverLabelDetectable, the remedy is
-// a --set that path cannot express).
+// own terms; guessing a default here could invert the verdict).
+//
+// It also runs on a nil bundler config — the values-only
+// Client.BundleComponents path. That path used to be exempt because the
+// remedy was a --set it cannot express; since #2181 the AKS profile
+// owns both operator.runtimeClass and
+// metadata-collector.runtimeClassName, so the coherent state is
+// reachable from resolved values alone.
 //
 // Registered with severity error on nvsentinel (recipes/registry.yaml).
 // Hard errors are returned only when effective values cannot be
@@ -1767,9 +1764,6 @@ func nvsentinelMetadataCollectorDisabled(values map[string]any) bool {
 // is then unknown, so it fails closed.
 func CheckNVSentinelRuntimeClassCoherence(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
-		return nil, nil
-	}
-	if bundlerConfig == nil {
 		return nil, nil
 	}
 	sentinelRef := recipeResult.GetComponentRef(componentName)
