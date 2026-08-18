@@ -73,9 +73,10 @@ TCPXO cannot function.
 kubectl get network.networking.gke.io
 ```
 
-Expect eight GPU NIC entries (plus the `default` network). The names carry a
-cluster-specific prefix — for example `aicr-demo2-gpu-nic-0` — so match on the
-`gpu-nic` substring rather than an exact name.
+Expect eight GPU NIC entries (plus the `default` network). Match on the
+`gpu-nic` substring rather than an exact name: the rest of each name is chosen
+at provisioning time and may carry a local prefix, such as
+`aicr-demo2-gpu-nic-0`.
 
 Fewer than eight means the prerequisite is incomplete. AICR's
 `gke-gpu-nic-networks` deployment check asserts this same count, so

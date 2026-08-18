@@ -41,9 +41,15 @@ import (
 // separately.
 const RequiredGPUNICNetworks = 8
 
-// GPUNICNameSubstring identifies a GPU NIC network by name. GKE provisions
-// these with cluster-specific prefixes (e.g. "aicr-demo2-gpu-nic-0"), so the
-// names cannot be matched exactly.
+// GPUNICNameSubstring identifies a GPU NIC network by name.
+//
+// Network names are chosen by whoever provisions the cluster, not assigned by
+// GKE — Google's own sample manifests name them "vpc1".."vpc8". Matching a
+// substring rather than exact names is what lets a cluster carry a local prefix
+// (e.g. "aicr-demo2-gpu-nic-0") while still being discoverable. Because the
+// names are operator-chosen, containing this substring is a documented
+// provisioning REQUIREMENT, not an observation about GKE's behavior; see
+// docs/integrator/gke-tcpxo-networking.md.
 const GPUNICNameSubstring = "gpu-nic"
 
 // NetworkGVR is the cluster-scoped GKE Network CR that multi-networking
@@ -56,11 +62,17 @@ var NetworkGVR = schema.GroupVersionResource{
 // GPU NIC network names, sorted alphabetically.
 //
 // The returned error is the RAW Kubernetes API error, deliberately not wrapped
-// in a pkg/errors code: callers classify it themselves (the deployment check
-// routes it through validators.Capability.RequireList so an RBAC denial is
-// reported as Unauthorized rather than a blanket internal error). A cluster
-// with no multi-networking returns an empty slice and a nil error — "none
-// found" is a verdict for the caller, not a failure to read.
+// in a pkg/errors code, because callers classify it by shape and would lose
+// that ability behind a wrap. The deployment check relies on exactly this:
+// it routes an apierrors.IsNotFound error (the cluster does not serve this GVR
+// at all, i.e. it was created without --enable-multi-networking) through
+// validators.Capability.Require, which is declaration-gated, and every other
+// error through RequireList, which always blocks. Do not wrap or normalize
+// these errors without updating that caller.
+//
+// A cluster that serves the API but has no matching networks returns an empty
+// slice and a nil error — "none found" is a verdict for the caller, distinct
+// from both a failure to read and an absent API.
 func DiscoverGPUNICNetworks(ctx context.Context, dynamicClient dynamic.Interface) ([]string, error) {
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
