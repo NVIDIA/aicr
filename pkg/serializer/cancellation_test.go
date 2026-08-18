@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -193,4 +194,61 @@ func TestCancellation_HTTPTemplate(t *testing.T) {
 	var buf bytes.Buffer
 	err := NewTemplateWriter(srv.URL, &buf).Serialize(ctx, struct{}{})
 	wantCanceledAndNotTransient(t, err, "http template")
+}
+
+// blockingBody is a response body that never yields data until the context is
+// done, then reports why. It makes the body-read cancellation deterministic:
+// a real server races the client's header processing, so a cancel fired from
+// the handler can land while Client.Do is still returning and never reach the
+// read at all.
+type blockingBody struct{ ctx context.Context } //nolint:containedctx // the body's whole job is to block on it
+
+func (b blockingBody) Read([]byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+func (b blockingBody) Close() error { return nil }
+
+// blockingTransport returns headers immediately with a body that blocks, so
+// Client.Do succeeds and the failure can only come from io.ReadAll.
+type blockingTransport struct{}
+
+func (blockingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       blockingBody{ctx: req.Context()},
+		Request:    req,
+	}, nil
+}
+
+// TestCancellation_HTTPDuringBodyRead exercises the io.ReadAll branch, which
+// TestCancellation_HTTP does not reach.
+//
+// That test cancels before response headers arrive, so it fails inside
+// Client.Do and never enters the body read — the body-read classification had
+// no coverage at all. Verified by mutation: deleting that branch left the
+// whole package green.
+//
+// The message assertion pins this to the intended branch. Without it a timing
+// shift could satisfy the test through the Do path, which is exactly how the
+// gap went unnoticed.
+func TestCancellation_HTTPDuringBodyRead(t *testing.T) {
+	t.Parallel()
+
+	reader := NewHTTPReader()
+	reader.Client = &http.Client{Transport: blockingTransport{}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	t.Cleanup(cancel)
+
+	_, err := reader.ReadWithContext(ctx, "http://body-read.test/snapshot.yaml")
+	wantCanceledAndNotTransient(t, err, "http body read")
+	if err != nil && !strings.Contains(err.Error(), "body read") {
+		t.Errorf("error = %v, want it to come from the body-read branch", err)
+	}
 }
