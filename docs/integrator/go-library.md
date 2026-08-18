@@ -22,6 +22,33 @@ You _may_ also import `pkg/*` subpackages directly, but their APIs are
 not covered by the same stability guarantees — see the [public API
 surface](./public-api.md) for the details.
 
+## Runnable examples
+
+Every flow on this page has a compiled counterpart in
+[`pkg/client/v1`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#pkg-examples).
+They are ordinary Go example functions, so `go test` builds them on every
+change and `make qualify` runs them — a facade change that breaks a
+documented flow fails in AICR's tree rather than in yours.
+
+| Example | Covers |
+|---|---|
+| `Example` | Quick start: client, resolve from criteria |
+| `Example_errorCodes` | Matching structured error codes |
+| `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order |
+| `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation |
+| `Example_bundleAndVerify` | Resolve → bundle → verify |
+| `ExampleClient_VerifyEvidence` | Evidence verification and exit classes |
+| `ExampleVerifyBinaryAttestation` | Proving a binary came from NVIDIA CI |
+| `Example_trustLevels`, `Example_criteriaDimensions` | Enumerating the accepted values |
+
+Examples printing an `Output:` block are executed and their output asserted;
+the rest are compiled but not run, because they reference paths
+(`aicr-config.yaml`, `snapshot.yaml`) that belong to your environment rather
+than AICR's test tree.
+
+Prefer copying from those over copying from this page: the snippets here are
+trimmed for reading, while the examples are complete and known to build.
+
 ## Installing
 
 ```bash
@@ -906,7 +933,9 @@ concern the caller owns, so both can run unattended from a server.
 ## Errors
 
 All errors returned by the facade are `*pkg/errors.StructuredError`
-values carrying an `ErrorCode`. Use `errors.As` to inspect:
+values carrying an `ErrorCode`. Match on the code with `errors.Is` —
+`StructuredError.Is` reports a match when the target is a `StructuredError`
+with the same code, so this works through wrap chains:
 
 ```go
 import (
@@ -916,9 +945,25 @@ import (
 )
 
 _, err := client.ResolveRecipe(ctx, req)
-var se *aicrerrors.StructuredError
-if stderrors.As(err, &se) && se.Code == aicrerrors.ErrCodeInvalidRequest {
+switch {
+case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")):
 	// handle invalid input
+case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, "")):
+	// handle missing recipe
+}
+```
+
+Runnable version: [`Example_errorCodes`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#example-package-ErrorCodes).
+
+Reach for `errors.As` only when you need the error's *payload* rather than
+its class — `se.Context`, which carries structured detail such as a coverage
+failure's `uncovered` dimensions:
+
+```go
+var se *aicrerrors.StructuredError
+if stderrors.As(err, &se) {
+	uncovered := se.Context["uncovered"]
+	_ = uncovered
 }
 ```
 
@@ -965,6 +1010,36 @@ Per-operation caps:
 
 Passing a `nil` `context.Context` returns `ErrCodeInvalidRequest`. Use
 `context.Background()` (or a deadline-bounded child) for unbounded callers.
+
+## The integrator contract
+
+Four commitments, stated plainly, so you know what you are depending on.
+
+**Import `pkg/client/v1`. That is the contract.** Everything else under
+`pkg/*` stays importable, but only this package is compatibility-reviewed, and
+only its exported surface is checked by the API-diff gate on every PR. The
+[stability matrix](./public-api.md#stability-tiers) tiers each package;
+`Internal` packages will break you on upgrade.
+
+**When the facade is missing something, tell us instead of routing around
+it.** [Open an issue](https://github.com/NVIDIA/aicr/issues/new/choose)
+describing the capability. Reaching into an evolving subpackage works today
+and is the thing most likely to break you later, and we would rather extend
+the facade — that is how `LoadSnapshot`, `LoadConfig`, and the verification
+surface all arrived. Where this guide shows a deliberate escape hatch (the
+fingerprint step under [Criteria relaxation](#criteria-relaxation-on-the-snapshot-path)),
+it says so and explains the coupling you are accepting.
+
+**Breaking changes are detected, not merely intended.** `tools/api-diff`
+compares the facade and its transparent-alias targets against the last release
+on every PR; an incompatible change fails CI and requires a recorded, reviewed
+exception. That is a mechanical guarantee, not a policy promise — but note
+what it does *not* cover: behavior. A function keeping its signature while
+changing what it does passes the gate.
+
+**Documented code is compiled.** The [runnable
+examples](#runnable-examples) build in AICR's own test suite, so a facade
+change that invalidates a documented flow fails here first.
 
 ## Compatibility
 
