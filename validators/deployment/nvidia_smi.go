@@ -71,9 +71,11 @@ const (
 // nvidia-smi banner. Matches both legacy ("Driver Version:") and renamed
 // ("KMD Version:") fields, case-insensitively, including the table-row layout
 // where fields sit on one pipe-delimited line (issue #1667). Caps at three
-// numeric components — NVIDIA driver versions are Major.Minor.Patch.
+// numeric components — NVIDIA driver versions are Major.Minor.Patch — and
+// requires a non-version terminator so a four-component string like
+// "580.95.05.1" is rejected rather than silently truncated to "580.95.05".
 var nvidiaSMIDriverVersionRE = regexp.MustCompile(
-	`(?i)(?:driver|kmd)\s+version:\s*([0-9]+(?:\.[0-9]+){0,2})`)
+	`(?i)(?:driver|kmd)\s+version:\s*([0-9]+(?:\.[0-9]+){0,2})(?![0-9.])`)
 
 // gpuNodeCoverage partitions check-nvidia-smi's discovered GPU nodes into the
 // schedulable cohort actually validated and the cordoned cohort skipped. It

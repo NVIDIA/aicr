@@ -224,6 +224,13 @@ func TestParseNvidiaSMIDriverVersion(t *testing.T) {
 			logs:    "NVIDIA-SMI\nCUDA Version: 12.8\n",
 			wantErr: true,
 		},
+		{
+			// Four numeric components must not truncate to a three-component
+			// prefix that could falsely satisfy a floor (#1995 CodeRabbit).
+			name:    "rejects more than three version components",
+			logs:    "Driver Version: 580.95.05.1\n",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
