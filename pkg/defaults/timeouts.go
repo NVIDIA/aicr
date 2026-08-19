@@ -1343,7 +1343,7 @@ const (
 
 	// HelmChartIndexRetryBudget is the maximum number of index fetch
 	// attempts before failing permanently. Retryable errors are transport
-	// failures, connection resets, and 5xx / 429 responses from the upstream.
+	// failures, connection resets, and 5xx / 408 / 429 responses from the upstream.
 	HelmChartIndexRetryBudget = 3
 
 	// HelmChartIndexRetryInitialBackoff is the wait between the first and
