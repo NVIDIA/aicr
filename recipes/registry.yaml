@@ -888,24 +888,24 @@ components:
     helm:
       defaultRepository: https://nvidia.github.io/topograph
       defaultChart: topograph/topograph
-      defaultVersion: "0.5.0"
+      defaultVersion: "1.0.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - nodeSelector
-          - node-observer.nodeSelector
+          - nodeObserver.nodeSelector
         tolerationPaths:
           - tolerations
-          - node-observer.tolerations
+          - nodeObserver.tolerations
       accelerated:
         nodeSelectorPaths:
-          # node-observer.topograph.trigger.nodeSelector is a watch filter —
+          # nodeObserver.topograph.trigger.nodeSelector is a watch filter —
           # it narrows which node-change events trigger topology regeneration.
-          - node-observer.topograph.trigger.nodeSelector
-          - node-data-broker.nodeSelector
+          - nodeObserver.topograph.trigger.nodeSelector
+          - nodeDataBroker.nodeSelector
         tolerationPaths:
-          - node-data-broker.tolerations
+          - nodeDataBroker.tolerations
 
   - name: gatekeeper
     displayName: Gatekeeper

@@ -102,11 +102,10 @@ spec:
         - slinky-slurm-operator-crds
         - slinky-slurm
       overrides:
-        global:
-          provider:
-            name: gcp
-          engine:
-            name: slinky
+        provider:
+          name: gcp
+        engine:
+          name: slinky
 
     - name: slinky-slurm
       type: Helm
