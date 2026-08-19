@@ -276,11 +276,14 @@ func (v Version) Compare(other Version) int {
 		return -1
 	case leftIsGKE:
 		// Actual is a GKE build satisfying a bare version constraint.
-		// NOTE: this means a GKE build sorts *strictly after* its bare numeric
+		// NOTE: a GKE build is treated as strictly newer than its bare numeric
 		// core: "1.35.0-gke.N" fails "<= 1.35.0" and passes "> 1.35.0". This
-		// is intentional — a GKE build is a build *of* 1.35.0, so the exclusive
-		// upper bound "< 1.35.0" in per-track compound expressions correctly
-		// excludes it from the 1.34 track and routes it to the 1.35 track clause.
+		// is intentional — the exclusive upper bound "< 1.35.0" in per-track
+		// compound expressions excludes any 1.35.0-gke.N from the 1.34 track,
+		// pushing it to the 1.35 track clause. Note that the 1.35 track clause
+		// may still reject it if the build number is below the floor (e.g.
+		// 1.35.0-gke.500 fails ">= 1.35.0-gke.2745000"), so exclusion from one
+		// track does not guarantee acceptance by another.
 		return 1
 	default:
 		return 0
