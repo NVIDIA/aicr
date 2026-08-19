@@ -43,15 +43,45 @@ runs:
     - name: Install E2E testing tools
       uses: ./.github/actions/install-e2e-tools
 
-    - name: Create Kind cluster
-      shell: bash
-      run: make cluster-create
-
-    - name: Deploy aicrd to Kind
+    - name: Create Kind cluster and deploy aicrd
       shell: bash
       env:
         GOFLAGS: -mod=vendor
       run: |
+        # cluster-create (~35s locally; Kind bring-up + registry) touches
+        # neither Go's build cache nor the registry that the host binaries
+        # below get pushed to, so start it in the background and overlap it
+        # with the CPU-bound compiles instead of waiting on it first. Every
+        # later step that DOES need the cluster/registry (ko build, docker
+        # push, kubectl) waits on $pid_cluster before running.
+        make cluster-create > /tmp/cluster-create.log 2>&1 &
+        pid_cluster=$!
+
+        mkdir -p dist/validator dist/e2e
+        for phase in deployment performance conformance; do
+          mkdir -p "validators/${phase}/testdata"
+        done
+
+        # Compile validator binaries + the host aicr CLI on the runner (Go
+        # build cache hit) while the cluster comes up. This is also much
+        # faster than building inside Docker (no cache sharing there).
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment &
+        pid_dep=$!
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance &
+        pid_perf=$!
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance &
+        pid_conf=$!
+        go build -o dist/e2e/aicr ./cmd/aicr &
+        pid_cli=$!
+        wait $pid_dep
+        wait $pid_perf
+        wait $pid_conf
+        wait $pid_cli
+
+        # Everything below needs the cluster (and its registry) up.
+        wait $pid_cluster
+        cat /tmp/cluster-create.log
+
         # Build and push aicrd image (replaces Tilt custom_build)
         KO_DOCKER_REPO=localhost:5001/aicrd ko build --bare --tags=tilt ./cmd/aicrd
 
@@ -59,22 +89,11 @@ runs:
         kubectl apply -f tilt/k8s/namespace.yaml
         kubectl apply -f tilt/k8s/
 
-        # Build images + CLI binary in parallel while deployment starts
+        # Build + push the remaining images. Validator binaries are already
+        # compiled above; this is just the COPY-only image build + push.
         KO_DOCKER_REPO=localhost:5001/aicr ko build --bare --tags=local ./cmd/aicr &
         pid_aicr=$!
-        # Compile validator binaries on host (Go build cache hit) then COPY-only images.
-        # This is much faster than building inside Docker (no cache sharing).
         (
-          mkdir -p dist/validator
-          CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment &
-          CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance &
-          CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance &
-          wait
-          # Build per-phase COPY-only images and push to local registry.
-          # Ensure testdata dirs exist (conformance has none).
-          for phase in deployment performance conformance; do
-            mkdir -p "validators/${phase}/testdata"
-          done
           for phase in deployment performance conformance; do
             docker build -t "localhost:5001/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
         FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
@@ -99,9 +118,7 @@ runs:
           docker push "localhost:5001/aicr-validators/aiperf-bench:latest"
         ) &
         pid_validators=$!
-        go build -o dist/e2e/aicr ./cmd/aicr &
-        pid_cli=$!
-        wait $pid_aicr $pid_validators $pid_cli
+        wait $pid_aicr $pid_validators
 
         # Wait for deployment rollout (may already be ready)
         kubectl rollout status deployment/aicrd -n aicr --timeout=120s
