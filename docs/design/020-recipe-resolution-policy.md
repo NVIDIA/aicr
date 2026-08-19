@@ -127,15 +127,39 @@ spec:
 // ResolutionPolicy governs how unstated criteria dimensions are treated
 // during overlay resolution. It inherits through spec.base like any other
 // spec field and is stripped from the hydrated RecipeResult.
+//
+// The field is a POINTER on RecipeMetadataSpec so that "absent" and
+// "explicitly empty" stay distinguishable: a nil *ResolutionPolicy inherits
+// the parent policy, while a non-nil policy replaces it outright. Collapsing
+// the two would let every overlay that omits the field silently clear the
+// base's list, which is precisely the fail-open this ADR exists to prevent.
 type ResolutionPolicy struct {
     // StrictDimensions may not be silently generalized: if leaving one
     // unstated would cause resolution to skip an overlay that jointly
     // carries more of the stated criteria, resolution fails instead of
     // returning the weaker match. Dimensions absent from this list are
     // elective: unstated means "give me the generic tier".
-    StrictDimensions []string `json:"strictDimensions,omitempty" yaml:"strictDimensions,omitempty"`
+    //
+    // An explicit empty list clears every inherited strict dimension. It is
+    // therefore NOT tagged omitempty: a declared `strictDimensions: []` must
+    // survive a round trip as a distinct state from an omitted field.
+    StrictDimensions []string `json:"strictDimensions" yaml:"strictDimensions"`
 }
 ```
+
+**Merge semantics.** `RecipeMetadataSpec.Merge` composes the policy by
+whole-value replacement, not element union:
+
+| child `spec.resolution` | result |
+| --- | --- |
+| omitted (`nil`) | inherits the parent policy unchanged |
+| `strictDimensions: [os]` | replaces the inherited list with `[os]` |
+| `strictDimensions: []` | clears every inherited strict dimension |
+
+Element union was rejected because it makes opting out impossible: a subtree
+could never drop a dimension its ancestor declared. Whole-value replacement
+keeps the override total and legible in the file that performs it, and the
+three cases above are pinned by tests.
 
 No dimension name appears in any Go type, function, or field. The only place
 `os` appears is catalog data.
@@ -166,6 +190,15 @@ deliberately not applied, so the candidate's own resolved policy governs,
 walked through its base chain. The overlay being skipped is the one asserting
 whether skipping it is acceptable. The applied set's merged policy is not
 consulted.
+
+Evaluation is therefore strictly **per candidate**: policies are never
+unioned across candidates, and no precedence order between them exists. Each
+overlay is tested against its own resolved list, and a query fails if any
+candidate fires. Two candidates in differently-configured subtrees can
+disagree about whether `os` is strict, and both answers stand. This keeps the
+result independent of overlay iteration order, which matters because
+`s.Overlays` is a Go map. The reporting rules under Error surface below then
+make the aggregated payload deterministic.
 
 **Inheritance is what keeps this fail-closed.** A new OS-gated overlay added
 to any catalog inherits `[os]` from base automatically. Authors annotate only
@@ -206,6 +239,30 @@ On the divergence catalog above, no applied overlay carries both `service`
 and `accelerator`, and supplying `os: ubuntu` would pull in
 `svc-accel-ubuntu`. `os` is strict, so resolution fails.
 
+**More than one strict dimension.** The embedded catalog declares a
+single-element list, but the field admits several, so the semantics are
+defined per *candidate overlay* rather than per dimension. For each overlay
+not currently applied, extend the query with that overlay's required values
+for dimensions that are (a) currently unstated and (b) strict. If the overlay
+becomes applied under that extension and needs nothing else, it is a
+candidate and resolution fails.
+
+Stating it per candidate settles the any/all ambiguity without a separate
+rule. A candidate needing only `os` fires on `os` alone; a candidate needing
+both `os` and `intent` fires only when both are strict and both are unstated,
+and reports both together, because supplying either alone would not reach it.
+An overlay that additionally requires an *elective* dimension is never a
+candidate, which is what preserves the generic tier.
+
+Worked example with `strictDimensions: [os, intent]` and a query stating
+`service` and `accelerator` only:
+
+| candidate needs | strict? | fires |
+| --- | --- | --- |
+| `os: ubuntu` | yes | yes, reporting `os` |
+| `os: ubuntu` + `intent: training` | both | yes, reporting `os` and `intent` |
+| `intent: training` + `platform: kubeflow` | `platform` is elective | no |
+
 `requireOSIfNeeded` and `availableOSForCriteria` are deleted, along with both
 call sites in `metadata_store.go`.
 
@@ -243,7 +300,7 @@ than a restatement of it.
 
 Joint-sufficiency failures carry their own context key, **not** `uncovered`:
 
-```
+```yaml
 details.strictDimensions: [
   { dimension: "os",
     validValues: ["ubuntu"],
@@ -257,11 +314,37 @@ here the dimension is *unstated*, so the shape does not fit. And
 `pkg/client/v1` relaxation clears `details.uncovered` dimensions and retries;
 routing joint failures there would let relaxation clear the check and return
 the partial recipe, reinstating #1542. A distinct key is fail-closed by
-default and needs no change to `relax.go`.
+default and needs no change to `relax.go`. That property is load-bearing
+rather than incidental, so it is pinned by a `pkg/client/v1` contract test
+asserting that a strict-dimension failure survives relaxation instead of
+degrading into a partial recipe.
+
+**The payload is a v1 contract, so it is specified, not left to the
+implementation.** Error `details` are API surface: they cross the HTTP
+boundary through `WriteErrorFromErr` and are consumed programmatically.
+
+- `dimension` is one of `CoverageDimensionNames()`. Exactly one entry per
+  distinct dimension set: a candidate requiring `os` alone and one requiring
+  `os` plus `intent` produce separate entries, never a merged one.
+- `validValues` are the values that would reach some candidate, deduplicated
+  and sorted lexically.
+- `wouldCover` lists the stated dimensions the candidate would carry, in
+  `coverageDimensions` order, deduplicated.
+- `via` names the contributing overlays, deduplicated and sorted lexically.
+  It is diagnostic. Overlay names are catalog-defined and an external `--data`
+  catalog may rename them, so callers must not key behavior on it.
+- Entries are ordered by `coverageDimensions` position, then by
+  `tupleKey`-style canonical rendering, so the same catalog and query always
+  produce byte-identical output. This is the existing determinism requirement
+  ("same inputs, same outputs, always"), which randomized Go map iteration
+  would otherwise violate.
+
+The key is added to the error-response schema in `api/aicr/v1/server.yaml`
+alongside `uncovered` in the implementation PR.
 
 The message keeps the guard's actionable shape:
 
-```
+```text
 service 'eks' with accelerator 'h100' requires os (valid: ubuntu)
 ```
 
