@@ -245,39 +245,51 @@ set -euo pipefail
 TAG=$(gh release view --repo NVIDIA/aicr --json tagName -q .tagName)
 [[ -n "${TAG}" ]] || { echo "failed to resolve latest TAG" >&2; exit 1; }
 
-# Resolve an immutable digest for each image
-resolve() { crane digest "ghcr.io/nvidia/$1:${TAG}"; }
+# Resolve immutable digests up front so a missing image / crane failure
+# aborts here (set -e) instead of being attributed to a later gh/cosign step.
+AICR_INDEX=$(crane digest "ghcr.io/nvidia/aicr:${TAG}")
+AICRD_INDEX=$(crane digest "ghcr.io/nvidia/aicrd:${TAG}")
+GATE_INDEX=$(crane digest "ghcr.io/nvidia/aicr-gate:${TAG}")
+DEPLOY_INDEX=$(crane digest "ghcr.io/nvidia/aicr-validators/deployment:${TAG}")
+PERF_INDEX=$(crane digest "ghcr.io/nvidia/aicr-validators/performance:${TAG}")
+CONF_INDEX=$(crane digest "ghcr.io/nvidia/aicr-validators/conformance:${TAG}")
+AIPERF_INDEX=$(crane digest "ghcr.io/nvidia/aicr-validators/aiperf-bench:${TAG}")
 
-# GitHub CLI (core images)
-gh attestation verify "oci://ghcr.io/nvidia/aicr@$(resolve aicr)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify "oci://ghcr.io/nvidia/aicrd@$(resolve aicrd)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify "oci://ghcr.io/nvidia/aicr-gate@$(resolve aicr-gate)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+# GitHub CLI (core images) — --source-ref binds the attestation to this tag
+gh attestation verify "oci://ghcr.io/nvidia/aicr@${AICR_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicrd@${AICRD_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-gate@${GATE_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
 # GitHub CLI (validator images)
-gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/deployment@$(resolve aicr-validators/deployment)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@$(resolve aicr-validators/performance)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@$(resolve aicr-validators/conformance)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@$(resolve aicr-validators/aiperf-bench)" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/deployment@${DEPLOY_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@${PERF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@${CONF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@${AIPERF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
-# Cosign — provenance and OpenVEX are on the index
+# Cosign — provenance and OpenVEX are on the index. Pin the workflow *and*
+# the exact tag ref (same binding as --source-ref above): without
+# --certificate-github-workflow-ref, the identity regexp alone would accept
+# an attestation signed for any release tag on a digest this tag was
+# rewritten to point at.
 IDENTITY='^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$'
-INDEX=$(resolve aicr)
 for predicate in slsaprovenance1 openvex; do
   cosign verify-attestation \
     --type "${predicate}" \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     --certificate-identity-regexp "${IDENTITY}" \
-    "ghcr.io/nvidia/aicr@${INDEX}" >/dev/null
+    --certificate-github-workflow-ref "refs/tags/${TAG}" \
+    "ghcr.io/nvidia/aicr@${AICR_INDEX}" >/dev/null
 done
 
 # Cosign — the SBOM is on the per-platform child manifest
 platform="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
-CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr:${TAG}")
+AICR_CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr:${TAG}")
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp "${IDENTITY}" \
-  "ghcr.io/nvidia/aicr@${CHILD}" >/dev/null
+  --certificate-github-workflow-ref "refs/tags/${TAG}" \
+  "ghcr.io/nvidia/aicr@${AICR_CHILD}" >/dev/null
 ```
 
 ### Binary Checksums
