@@ -71,11 +71,11 @@ const (
 // nvidia-smi banner. Matches both legacy ("Driver Version:") and renamed
 // ("KMD Version:") fields, case-insensitively, including the table-row layout
 // where fields sit on one pipe-delimited line (issue #1667). Caps at three
-// numeric components — NVIDIA driver versions are Major.Minor.Patch — and
-// requires a non-version terminator so a four-component string like
-// "580.95.05.1" is rejected rather than silently truncated to "580.95.05".
+// numeric components — NVIDIA driver versions are Major.Minor.Patch. Truncation
+// of a longer version (e.g. "580.95.05.1") is rejected in
+// parseNvidiaSMIDriverVersion: Go's RE2 engine has no negative lookahead.
 var nvidiaSMIDriverVersionRE = regexp.MustCompile(
-	`(?i)(?:driver|kmd)\s+version:\s*([0-9]+(?:\.[0-9]+){0,2})(?![0-9.])`)
+	`(?i)(?:driver|kmd)\s+version:\s*([0-9]+(?:\.[0-9]+){0,2})`)
 
 // gpuNodeCoverage partitions check-nvidia-smi's discovered GPU nodes into the
 // schedulable cohort actually validated and the cordoned cohort skipped. It
@@ -426,12 +426,27 @@ func verifyNvidiaSMILogs(podLogs string, pod *v1.Pod) error {
 // parseable version is present so callers can fail closed when a recipe floor
 // requires one.
 func parseNvidiaSMIDriverVersion(podLogs string) (string, error) {
-	match := nvidiaSMIDriverVersionRE.FindStringSubmatch(podLogs)
-	if len(match) < 2 || match[1] == "" {
+	loc := nvidiaSMIDriverVersionRE.FindStringSubmatchIndex(podLogs)
+	if len(loc) < 4 {
 		return "", errors.New(errors.ErrCodeNotFound,
 			"nvidia-smi output has no parseable Driver Version / KMD Version")
 	}
-	return match[1], nil
+	// loc[2]:loc[3] is the version capture. A trailing '.' means a fourth
+	// numeric component was truncated (e.g. "580.95.05.1" → "580.95.05");
+	// reject so a floor cannot pass on a silently shortened value. RE2 has
+	// no (?!...) lookahead, so this check lives here rather than in the
+	// pattern (issue #1995).
+	end := loc[3]
+	if end < len(podLogs) && podLogs[end] == '.' {
+		return "", errors.New(errors.ErrCodeNotFound,
+			"nvidia-smi driver version has more than three numeric components")
+	}
+	version := podLogs[loc[2]:loc[3]]
+	if version == "" {
+		return "", errors.New(errors.ErrCodeNotFound,
+			"nvidia-smi output has no parseable Driver Version / KMD Version")
+	}
+	return version, nil
 }
 
 // enforceGPUDriverVersionFloor evaluates Deployment.gpu-driver.version against
