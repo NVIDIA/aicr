@@ -1897,7 +1897,7 @@ func TestFetchIndexYAMLContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		// Cancel after backoff begins to ensure cancellation happens during sleep
 		go func() {
-			<-backoffStarted  // Wait for backoff to start
+			<-backoffStarted // Wait for backoff to start
 			cancel()
 		}()
 
