@@ -54,6 +54,24 @@ spec:
                   resources:
                     requests:
                       storage: 50Gi
+    # NVSentinel on OKE: the node image supplies the driver, so no driver pod
+    # exists for the labeler to watch. Without assumeDriverInstalled the
+    # nvsentinel.dgxc.nvidia.com/driver.installed label is never applied and
+    # metadata-collector plus both syslog-health-monitor DaemonSets sit at zero
+    # desired pods — silently, with no error and no event (#2175).
+    #
+    # OKE has no gpuStack profile, so this value is overlay-level and is NOT
+    # profile-owned: it does not receive the generated install-time profile
+    # lock that protects the equivalent AKS and GKE-COS values. The NVSentinel
+    # driver-label bundle gate still rejects bundle-time and declared-dynamic
+    # changes that would recreate #2175, but a manual post-generation edit to
+    # the rendered Helm values is outside that guarantee.
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        labeler:
+          assumeDriverInstalled: true
+
     # OKE DRA driver: host-installed driver root, compute domains enabled
     - name: nvidia-dra-driver-gpu
       type: Helm

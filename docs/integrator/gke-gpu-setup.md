@@ -57,12 +57,9 @@ aicr recipe --service gke --accelerator h100 --os cos --intent training \
 #   ... or, for labeled pools with the standalone driver installer:
 #   --profile gpuStack=driver-installer
 
-# 3. Bundle. The NVSentinel labeler flag is required under the
-#    gke-default default (no driver pod the labeler can observe); omit it
-#    under driver-installer. See the NVSentinel note below.
-aicr bundle -r recipe.yaml \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
-  -o ./bundles
+# 3. Bundle. NVSentinel needs no overrides: the gpuStack profile sets its
+#    labeler flag per value. See the NVSentinel note below.
+aicr bundle -r recipe.yaml -o ./bundles
 ```
 
 The reading qualifies the selection — it does not choose for you. Every
@@ -142,39 +139,45 @@ Under `gke-default` **no device-plugin DaemonSet is rendered at all**
 label `gke-no-default-nvidia-gpu-device-plugin`. A labeled node fails the
 pre-flight closed (exit 2) before any check Job deploys.
 
-**NVSentinel needs `labeler.assumeDriverInstalled` under `gke-default`.** The
-NVSentinel labeler decides the node label
-`nvsentinel.dgxc.nvidia.com/driver.installed` by watching for a GPU driver pod.
-Under `gke-default` the driver is provisioned at pool creation and finalized by
-an init container of GKE's kube-system DaemonSet, so there is **no driver pod
-the labeler can observe**. The label is never applied, and the three DaemonSets
-that select on it — `metadata-collector`, `syslog-health-monitor-regular`, and
+**NVSentinel's driver label is configured by the profile.** The NVSentinel
+labeler decides the node label `nvsentinel.dgxc.nvidia.com/driver.installed` by
+watching for a GPU driver pod. Under `gke-default` the driver is provisioned at
+pool creation and finalized by an init container of GKE's kube-system
+DaemonSet, so there is **no driver pod the labeler can observe**. Left unset the
+label is never applied, and the three DaemonSets that select on it —
+`metadata-collector`, `syslog-health-monitor-regular`, and
 `syslog-health-monitor-kata` — come up with **0 desired pods**
 ([#2175](https://github.com/NVIDIA/aicr/issues/2175)).
 
 This is easy to miss: a DaemonSet matching no node is not unhealthy, so it
 reports no error and emits no event, and `gpu-health-monitor` keeps running
 because it selects on the DCGM label instead. The stack presents as fully
-rolled out. Pass the flag at bundle time:
+rolled out.
 
-```shell
-aicr bundle -r recipe.yaml \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
-  -o ./bundles
-```
+The `gpuStack` profile sets `nvsentinel.labeler.assumeDriverInstalled` per
+value ([#2181](https://github.com/NVIDIA/aicr/issues/2181)), so no bundle-time
+override is needed:
 
-It renders the labeler's `--assume-driver-installed` argument — the chart-level
-automation of the Manual Labeling Procedure in NVSentinel design 018 —
-and, per the upstream decision in
-[NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583),
-the recommended, permanent mechanism for host-installed drivers (no
-automatic detection fallback will be added). Bundling
-a `gke-default` recipe without it is a **blocking error**
+| `gpuStack` value | `labeler.assumeDriverInstalled` | Why |
+|---|---|---|
+| `gke-default` (default) | `true` | no driver pod exists to observe |
+| `driver-installer` | `false` | Google's standalone `nvidia-driver-installer` DaemonSet supplies one |
+
+Because the path is profile-owned, a bundle-time `--set` diverging from the
+selected value is **rejected** rather than silently applied. The explicit
+`false` under `driver-installer` is deliberate: skipping detection there would
+keep the label applied across an unloaded driver.
+
+The value renders the labeler's `--assume-driver-installed` argument — the
+chart-level automation of the Manual Labeling Procedure in NVSentinel design
+018 — and, per the upstream decision in
+[NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583), the
+recommended, permanent mechanism for host-installed drivers (no automatic
+detection fallback will be added). Under `gke-default` a recipe that reaches
+bundle generation without it is a **blocking error**
 (`CheckNVSentinelDriverLabelDetectable`), so the silent half-rollout cannot
-ship. The `driver-installer` value below does **not** need the flag and must
-not be given it: Google's standalone `nvidia-driver-installer` DaemonSet
-supplies a driver pod the labeler detects, and forcing the flag would keep the
-label applied across an unloaded driver.
+ship. Under `driver-installer` the gate does not fire: the standalone installer
+supplies an observable driver pod.
 
 **Labeling the nodes by hand does not persist.** Applying the label manually:
 

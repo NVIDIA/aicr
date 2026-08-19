@@ -398,10 +398,13 @@ func TestCheckNVSentinelRuntimeClassCoherence(t *testing.T) {
 	}
 }
 
-// TestCheckNVSentinelRuntimeClassCoherence_NilConfigSkips mirrors the
-// driver-label gate's nil-config contract: the values-only SDK path
-// cannot express the --set remedy, so the gate must not fire there.
-func TestCheckNVSentinelRuntimeClassCoherence_NilConfigSkips(t *testing.T) {
+// TestCheckNVSentinelRuntimeClassCoherence_NilConfigRuns mirrors the
+// driver-label gate's nil-config contract: since #2181 the AKS profile
+// owns both operator.runtimeClass and
+// metadata-collector.runtimeClassName, so the coherent state is
+// reachable from resolved values alone and the values-only SDK path is
+// no longer exempt.
+func TestCheckNVSentinelRuntimeClassCoherence_NilConfigRuns(t *testing.T) {
 	t.Parallel()
 
 	rr := &recipe.RecipeResult{
@@ -414,25 +417,47 @@ func TestCheckNVSentinelRuntimeClassCoherence_NilConfigSkips(t *testing.T) {
 		},
 	}
 
-	// Control: non-nil config IS blocked on the same recipe.
+	// An incoherent recipe is blocked whether or not a config is
+	// supplied — the nil-config exemption is gone.
 	msgs, errs := CheckNVSentinelRuntimeClassCoherence(
 		t.Context(), nvsentinelComponent, rr, config.NewConfig(), nil)
 	if len(errs) != 0 || len(msgs) != 1 {
-		t.Fatalf("control: msgs = %v, errs = %v; want exactly one blocking message", msgs, errs)
+		t.Fatalf("non-nil config: msgs = %v, errs = %v; want exactly one blocking message", msgs, errs)
 	}
 
 	msgs, errs = CheckNVSentinelRuntimeClassCoherence(t.Context(), nvsentinelComponent, rr, nil, nil)
+	if len(errs) != 0 || len(msgs) != 1 {
+		t.Fatalf("nil config: msgs = %v, errs = %v; want exactly one blocking message", msgs, errs)
+	}
+
+	// Control against a gate that blocks unconditionally: a recipe whose
+	// two names already agree passes on the same nil-config path. This is
+	// the shape #2181 gives every profiled AKS recipe.
+	coherent := &recipe.RecipeResult{
+		Criteria: &recipe.Criteria{Service: recipe.CriteriaServiceAKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: nvsentinelComponent, Overrides: map[string]any{
+				"metadata-collector": map[string]any{"runtimeClassName": "nvidia-container-runtime"},
+			}},
+			{Name: "gpu-operator", Overrides: map[string]any{
+				"operator": map[string]any{"runtimeClass": "nvidia-container-runtime"},
+			}},
+		},
+	}
+	msgs, errs = CheckNVSentinelRuntimeClassCoherence(t.Context(), nvsentinelComponent, coherent, nil, nil)
 	if len(errs) != 0 || len(msgs) != 0 {
-		t.Fatalf("nil config: msgs = %v, errs = %v; want the gate skipped", msgs, errs)
+		t.Fatalf("nil config with coherent names: msgs = %v, errs = %v; want it to pass", msgs, errs)
 	}
 }
 
 // TestNVSentinelRuntimeClassPlatformSpotChecks runs the gate against
 // recipes resolved from the real embedded catalog. Unlike the
 // driver-label matrix this is a value comparison, so the platform
-// outcomes follow from the resolved operator.runtimeClass alone: AKS
-// azure-managed retargets it (nvidia-container-runtime) and must be
-// blocked; AKS operator-managed and EKS keep nvidia and must pass.
+// outcomes follow from the resolved values alone. Since #2181 the same
+// gpuStack value owns both names, so every profiled AKS recipe is
+// coherent by construction: azure-managed pairs
+// nvidia-container-runtime with itself, operator-managed pairs nvidia
+// with itself, and EKS keeps the chart default on both sides.
 func TestNVSentinelRuntimeClassPlatformSpotChecks(t *testing.T) {
 	t.Parallel()
 
@@ -444,23 +469,27 @@ func TestNVSentinelRuntimeClassPlatformSpotChecks(t *testing.T) {
 		wantBlocked bool
 	}{
 		{
-			name: "AKS azure-managed (default) → blocked",
+			name: "AKS azure-managed (default, profile pairs both names) → passes",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceAKS, Accelerator: recipe.CriteriaAcceleratorH100,
 				OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
 			},
-			wantBlocked: true,
+			wantBlocked: false,
 		},
 		{
-			name: "AKS azure-managed with the documented remedy → passes",
+			// Control against a vacuous pass on the row above: overriding
+			// the profile-supplied name back to the chart default
+			// reintroduces #2176 and must still block. (Bundle generation
+			// rejects it earlier still, at the profile lock.)
+			name: "AKS azure-managed with the profile value overridden to nvidia → blocked",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceAKS, Accelerator: recipe.CriteriaAcceleratorH100,
 				OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
 			},
 			overrides: map[string]map[string]string{
-				"nv-sentinel": {"metadata-collector.runtimeClassName": "nvidia-container-runtime"},
+				"nv-sentinel": {"metadata-collector.runtimeClassName": "nvidia"},
 			},
-			wantBlocked: false,
+			wantBlocked: true,
 		},
 		{
 			name: "AKS operator-managed → both nvidia → passes",

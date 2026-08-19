@@ -139,7 +139,9 @@ aicr bundle --recipe recipe.yaml \
 
 The two flags ask for contradictory things — remove the component, and
 configure it — so the command fails instead of shipping a bundle with
-one request quietly dropped. Only a scalar `--set <component>:enabled=false`
+one request quietly dropped. The rejection here is about the contradiction,
+not about who owns the component: a profile-owned presence lock is a
+separate rejection, described at the end of this section. Only a scalar `--set <component>:enabled=false`
 is exempt on a declared component: it is the supported way to remove
 one, and it is also accepted on a component the recipe already disables.
 `enabled=true` on a component the `bundlers=` filter excludes is
@@ -147,6 +149,12 @@ rejected like any other ineffective override, and the `enabled` key is
 never honored from `--set-json`/`--set-file` (present or absent — the
 typed path would write a literal `enabled:` chart value instead of
 toggling the component).
+
+A component whose presence a configuration profile owns cannot be removed
+at all — `enabled=false` on it is rejected regardless of the rule above.
+NVSentinel is in that position on the AKS and GKE-COS families, whose
+`gpuStack` profiles name it; see
+[NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
 
 The same rule applies to `--set-json`, `--set-file`, `--dynamic`, and
 the REST API's equivalent parameters. For `--dynamic` no path is exempt,

@@ -21,7 +21,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **gatekeeper** | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
 | **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. | [Nodewright](https://github.com/nvidia/nodewright) |
 | **nodewright-customizations** | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
-| **nvsentinel** | GPU health monitoring and automated remediation. Detects GPU errors and can cordon or drain affected nodes. On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, pass `--set nv-sentinel:labeler.assumeDriverInstalled=true` — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
+| **nvsentinel** | GPU health monitoring and automated remediation. Detects GPU errors and can cordon or drain affected nodes. On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
@@ -132,23 +132,33 @@ See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/
 
 ## NVSentinel on Provider-Installed-Driver Platforms
 
+The recipes configure NVSentinel for you on every platform that needs it. This section explains what they set and why, so the values are recognizable in a generated bundle and the failure signatures are diagnosable if they ever reappear.
+
 **Symptom.** NVSentinel's `metadata-collector` and both `syslog-health-monitor` DaemonSets report **0 desired pods** and never schedule, while everything else looks fine ([#2175](https://github.com/NVIDIA/aicr/issues/2175)).
 
 This is easy to miss. A DaemonSet whose node selector matches no node is not unhealthy — it reports no error and emits no event — and `gpu-health-monitor` keeps running normally because it selects on the DCGM label instead. The stack presents as fully rolled out.
 
-**Cause.** Those three DaemonSets select on the node label `nvsentinel.dgxc.nvidia.com/driver.installed`, which the NVSentinel labeler applies by watching for a GPU driver pod. Where the driver ships in the node image and no driver pod exists, the labeler never applies the label:
+**Cause.** Those three DaemonSets select on the node label `nvsentinel.dgxc.nvidia.com/driver.installed`, which the NVSentinel labeler applies by watching for a GPU driver pod. Where the driver ships in the node image and no driver pod exists, the labeler never applies the label — so `labeler.assumeDriverInstalled` must be set to skip driver-pod detection and label GPU nodes unconditionally.
 
-| Platform | GPU Operator installs driver | Driver pod the labeler can observe | Affected |
+The recipes now carry that value wherever it is needed ([#2181](https://github.com/NVIDIA/aicr/issues/2181)):
+
+| Platform | Driver pod the labeler can observe | `labeler.assumeDriverInstalled` | Supplied by |
 |---|---|---|---|
-| AKS `gpuStack=azure-managed` (default) | no | none — driver is in the node image | **yes** |
-| AKS `gpuStack=operator-managed` | yes | the operator's driver pod | no |
-| GKE COS `gpuStack=gke-default` (default) | no | none the labeler can observe — the driver is finalized by an init container of GKE's kube-system DaemonSet | **yes** |
-| GKE COS `gpuStack=driver-installer` | no | Google's standalone `nvidia-driver-installer` DaemonSet | no |
-| OKE | no | none — driver is in the node image | **yes** |
-| Kind (nvkind) | no | none — driver is host-installed | **yes** |
-| EKS | yes | the operator's driver pod | no |
+| AKS `gpuStack=azure-managed` (default) | none — driver is in the node image | `true` | the `gpuStack` profile |
+| AKS `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
+| GKE COS `gpuStack=gke-default` (default) | none the labeler can observe — the driver is finalized by an init container of GKE's kube-system DaemonSet | `true` | the `gpuStack` profile |
+| GKE COS `gpuStack=driver-installer` | Google's standalone `nvidia-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
+| OKE | none — driver is in the node image | `true` | the overlay (OKE has no profile) |
+| EKS | the operator's driver pod | unset (chart default `false`) | — |
+| Kind (nvkind) | none — driver is host-installed | `true` | the overlay (Kind has no profile) |
 
-**Remedy.** Pass the labeler's assume-driver-installed flag at bundle generation:
+The explicit `false` on the operator-managed variants is deliberate rather than redundant: it keeps the path profile-owned, so it cannot be flipped into an unsafe hybrid later. Do **not** assume a preinstalled driver where the GPU Operator installs one — skipping detection there would keep the label applied across an unloaded or unhealthy driver.
+
+**NVSentinel is mandatory on the profiled families.** Because the AKS and GKE-COS `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as OKE and EKS.
+
+Only AKS and GKE-COS get the install-time profile lock; OKE and Kind set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
+
+If you do need to set it yourself on an unlisted platform, it is an ordinary override:
 
 ```shell
 aicr bundle -r recipe.yaml \
@@ -156,25 +166,36 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-The flag renders the labeler's `--assume-driver-installed` argument, which labels all GPU nodes unconditionally and skips driver-pod detection. That is the chart-level automation of the Manual Labeling Procedure documented in NVSentinel design 018. Upstream has since settled the design question: the flag is the recommended, permanent mechanism for host-installed drivers — no automatic detection fallback will be added ([NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583)). Do **not** set it where the GPU Operator installs the driver: skipping detection there would keep the label applied across an unloaded or unhealthy driver.
+The value renders the labeler's `--assume-driver-installed` argument. That is the chart-level automation of the Manual Labeling Procedure documented in NVSentinel design 018. Upstream has settled the design question: it is the recommended, permanent mechanism for host-installed drivers — no automatic detection fallback will be added ([NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583)).
 
 **Do not label the nodes by hand.** `kubectl label node <node> nvsentinel.dgxc.nvidia.com/driver.installed=true` takes effect immediately — the DaemonSets roll out — and then silently reverts. With no driver pod to observe, the labeler computes an empty desired value and removes the label on its next reconcile. Because upstream design 018 documents manual labeling as the procedure for this case, an operator following it will see it work and later find the DaemonSets back at 0 desired.
 
-**`aicr bundle` now rejects the configuration.** A recipe that includes nvsentinel with no driver pod for the labeler to observe and without `labeler.assumeDriverInstalled` fails bundle generation with a blocking error (`CheckNVSentinelDriverLabelDetectable`) naming the remedy above, so the silent half-rollout cannot ship. The GKE `driver-installer` value is exempt — Google's installer DaemonSet supplies a driver pod the labeler detects.
+**`aicr bundle` rejects a configuration that would reintroduce the gap.** A recipe that includes nvsentinel with no observable driver pod and without `labeler.assumeDriverInstalled` fails bundle generation with a blocking error (`CheckNVSentinelDriverLabelDetectable`). On the profiled families the value is also profile-owned, so a `--set` diverging from the selected `gpuStack` value is rejected before the gate even runs.
 
-**A second, distinct failure on AKS `azure-managed`: RuntimeClass mismatch.** The metadata-collector DaemonSet sets `runtimeClassName: nvidia` (its chart default), but the AKS `azure-managed` profile retargets `operator.runtimeClass` to `nvidia-container-runtime`, so the GPU Operator never creates a RuntimeClass named `nvidia` and the API server rejects every metadata-collector pod at admission (`pod rejected: RuntimeClass "nvidia" not found` — [#2176](https://github.com/NVIDIA/aicr/issues/2176)). The two signatures differ: the label gap above shows **0 DESIRED** pods (never scheduled, no error, no event); the RuntimeClass mismatch shows **N desired / 0 CREATED** with a `FailedCreate` event on the DaemonSet and no pod object to describe. Both must be fixed for metadata-collector to become ready, composed in one bundle invocation:
+One exception, for completeness: the gate is silent if you disable *both* label consumers (`--set nv-sentinel:global.metadataCollector.enabled=false` **and** `--set nv-sentinel:global.syslogHealthMonitor.enabled=false`). Nothing then reads the label, so there is no gap to reintroduce. Disabling only one still requires the value, and no recipe disables either — both default to enabled, and the gate fails closed when it cannot prove otherwise. Everything above therefore applies to every shipped configuration.
+
+**A second, distinct failure on AKS `azure-managed`: RuntimeClass mismatch.** The metadata-collector DaemonSet requests a RuntimeClass by name, and the GPU Operator's ClusterPolicy controller names that object after `operator.runtimeClass`. The AKS `azure-managed` profile retargets it to `nvidia-container-runtime`, so a metadata-collector left on its chart default `nvidia` finds no such RuntimeClass and the API server rejects every pod at admission (`pod rejected: RuntimeClass "nvidia" not found` — [#2176](https://github.com/NVIDIA/aicr/issues/2176)).
+
+The two signatures differ: the label gap above shows **0 DESIRED** pods (never scheduled, no error, no event); the RuntimeClass mismatch shows **N desired / 0 CREATED** with a `FailedCreate` event on the DaemonSet and no pod object to describe.
+
+The AKS `gpuStack` profile now owns both names — `gpu-operator.operator.runtimeClass` and `nvsentinel.metadata-collector.runtimeClassName` — in the same profile value, so they agree by construction under either value and no override is needed:
+
+| AKS profile value | `operator.runtimeClass` | `metadata-collector.runtimeClassName` |
+|---|---|---|
+| `azure-managed` (default) | `nvidia-container-runtime` | `nvidia-container-runtime` |
+| `operator-managed` | `nvidia` | `nvidia` |
+
+Every other platform leaves `operator.runtimeClass` at the shared chart default `nvidia`, so neither side needs a value. `CheckNVSentinelRuntimeClassCoherence` still compares the two resolved names as defense in depth, treating either side unset as `nvidia`.
+
+An AKS bundle therefore needs no NVSentinel overrides at all — only the keyed toleration AKS requires independently of NVSentinel (bundling an AKS recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration`):
 
 ```shell
 aicr bundle -r recipe.yaml \
   --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
-  --set nv-sentinel:metadata-collector.runtimeClassName=nvidia-container-runtime \
   -o ./bundles
 ```
 
-(The keyed toleration is required on AKS independently of NVSentinel — bundling an AKS recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration` — and is harmless elsewhere.)
-
-`aicr bundle` rejects the mismatch too (`CheckNVSentinelRuntimeClassCoherence`): it compares the two resolved names, treating either side unset as the shared chart default `nvidia`, so it passes wherever the recipes leave `operator.runtimeClass` at its default (EKS, GKE, OKE, AKS `operator-managed` — omit the override there) and fails AKS `azure-managed` until the override is passed. See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) for the per-profile guidance.
+See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) for the per-profile guidance.
 
 ## Inference Gateway Network Exposure
 
