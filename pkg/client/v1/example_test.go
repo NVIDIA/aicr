@@ -324,8 +324,9 @@ func ExampleClient_LoadRecipe() {
 	}
 	defer func() { _ = client.Close() }()
 
-	// Path, URL, or cm://namespace/name. The kubeconfig argument is only
-	// consulted for the cm:// form.
+	// A file path or a cm://namespace/name ConfigMap URI. Unlike
+	// LoadSnapshot, LoadRecipe does NOT accept an HTTP(S) URL. The kubeconfig
+	// argument is consulted only for the cm:// form.
 	result, err := client.LoadRecipe(ctx, "recipe.yaml", "")
 	if err != nil {
 		log.Print(err)
@@ -366,7 +367,11 @@ func ExampleClient_CollectSnapshot() {
 }
 
 // ExampleClient_ValidateState evaluates a resolved recipe against observed
-// cluster state, running the deployment, conformance, and performance phases.
+// cluster state.
+//
+// Validation comprises three phases, executed in order: deployment,
+// conformance, performance. This example narrows to the first two with
+// WithValidationPhases; omitting that option runs all three.
 //
 // WithValidationNoCluster(true) keeps constraint evaluation but skips
 // everything needing a cluster — the mode CI uses to check a recipe against a
@@ -431,7 +436,14 @@ func ExampleClient_RecipeDigest() {
 
 // ExampleClient_VerifyCatalog checks the Sigstore signature over this Client's
 // recipe catalog — that the recipe data resolution is about to use was
-// published by NVIDIA CI and has not been altered.
+// published by NVIDIA CI and has not been altered. The bundle ships as the
+// recipe-catalog.sigstore.json release asset.
+//
+// The digest is computed over THIS Client's DataProvider. A Client layering
+// external data over the embedded tree is verifying different content, so it
+// will not match the released signature — that is the correct answer to "is
+// the catalog I am resolving against the signed one", not a failure to
+// work around.
 func ExampleClient_VerifyCatalog() {
 	ctx := context.Background()
 
@@ -442,7 +454,7 @@ func ExampleClient_VerifyCatalog() {
 	}
 	defer func() { _ = client.Close() }()
 
-	verification, err := client.VerifyCatalog(ctx, "catalog.sigstore.json", aicr.CatalogVerifyOptions{})
+	verification, err := client.VerifyCatalog(ctx, "recipe-catalog.sigstore.json", aicr.CatalogVerifyOptions{})
 	if err != nil {
 		log.Print(err)
 		return
@@ -468,7 +480,7 @@ func ExampleClient_SignCatalog() {
 	defer func() { _ = client.Close() }()
 
 	signed, err := client.SignCatalog(ctx, aicr.CatalogSignOptions{
-		Output: "catalog.sigstore.json",
+		Output: "recipe-catalog.sigstore.json",
 	})
 	if err != nil {
 		log.Print(err)

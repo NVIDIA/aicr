@@ -24,7 +24,7 @@ surface](./public-api.md) for the details.
 
 ## Runnable examples
 
-Each `Client` entry point below has a compiled counterpart in
+Each facade entry point below has a compiled counterpart in
 [`pkg/client/v1`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#pkg-examples).
 They are ordinary Go example functions, so `go test` builds them on every
 change — a facade change that breaks one of these fails in AICR's tree rather
@@ -41,7 +41,7 @@ than in yours.
 | `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation | no |
 | `ExampleClient_LoadRecipe` | Reading a previously emitted recipe | no |
 | `ExampleClient_CollectSnapshot` | Capturing cluster state via the snapshotter Job | no |
-| `ExampleClient_ValidateState` | Three-phase validation, including `--no-cluster` mode | no |
+| `ExampleClient_ValidateState` | Selecting validation phases, and `--no-cluster` mode | no |
 | `ExampleClient_RecipeDigest` | The digest a CI staleness gate compares | no |
 | `ExampleClient_VerifyEvidence` | Evidence verification and exit classes | no |
 | `ExampleClient_VerifyCatalog` / `ExampleClient_SignCatalog` | Checking and producing the catalog signature | no |
