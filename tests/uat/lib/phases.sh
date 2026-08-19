@@ -399,9 +399,44 @@ phase_prep() {
   echo "::endgroup::"
 }
 
+# Print the SHA256 of a file, using whichever of sha256sum (Linux) or shasum
+# (macOS) is present. Fails closed when neither is: a runner that cannot verify
+# a pinned checksum must not proceed to install the artifact.
+uat_sha256() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${file}" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${file}" | awk '{print $1}'
+  else
+    echo "::error::neither sha256sum nor shasum is available; cannot verify checksums" >&2
+    return 1
+  fi
+}
+
+# Map the host to a helm-diff release-asset suffix and the matching
+# .settings.yaml checksum key. Upstream labels macOS assets "macos" while the
+# checksum keys use GOOS names, so the two differ on Darwin.
+uat_helm_diff_platform() {
+  local os arch
+  case "$(uname -s)" in
+    Linux)  os=linux ;;
+    Darwin) os=darwin ;;
+    *) echo "::error::unsupported OS $(uname -s) for helm-diff install" >&2; return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64)  arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "::error::unsupported architecture $(uname -m) for helm-diff install" >&2; return 1 ;;
+  esac
+  # "<asset-suffix> <checksum-key>"
+  echo "${os/darwin/macos}-${arch} ${os}_${arch}"
+}
+
 phase_install() {
   command -v helmfile >/dev/null || { echo "helmfile not on PATH" >&2; exit 1; }
   command -v helm     >/dev/null || { echo "helm not on PATH"     >&2; exit 1; }
+  command -v curl     >/dev/null || { echo "curl not on PATH"     >&2; exit 1; }
 
   # Read helm-diff version from the single source of truth (.settings.yaml).
   local SCRIPT_DIR
@@ -409,6 +444,20 @@ phase_install() {
   local REPO_ROOT="${SCRIPT_DIR}/../../.."
   local HELM_DIFF_VERSION
   HELM_DIFF_VERSION="$(yq -r '.testing_tools.helm_diff' "${REPO_ROOT}/.settings.yaml")"
+
+  # Declared separately from the assignment: `local x="$(...)"` would mask the
+  # substitution's exit status behind local's own success.
+  local HELM_DIFF_PLATFORM
+  HELM_DIFF_PLATFORM="$(uat_helm_diff_platform)" || exit 1
+  local HELM_DIFF_ASSET HELM_DIFF_SHA_KEY
+  read -r HELM_DIFF_ASSET HELM_DIFF_SHA_KEY <<<"${HELM_DIFF_PLATFORM}"
+  local HELM_DIFF_SHA256
+  HELM_DIFF_SHA256="$(yq -r ".testing_tools.helm_diff_checksums.${HELM_DIFF_SHA_KEY} // \"\"" \
+    "${REPO_ROOT}/.settings.yaml")"
+  if [[ -z "${HELM_DIFF_SHA256}" ]]; then
+    echo "::error::no helm-diff checksum pinned for ${HELM_DIFF_SHA_KEY} in .settings.yaml; refresh with tools/update-helm-diff-checksums ${HELM_DIFF_VERSION}" >&2
+    exit 1
+  fi
 
   echo "::group::Install helm-diff plugin (${HELM_DIFF_VERSION})"
   # Check installed version; reinstall if missing or at a different version so the
@@ -428,15 +477,43 @@ phase_install() {
     # release key, pin it to the published fingerprint (fail closed on
     # mismatch), export it to a legacy keyring, and verify against it.
     #
-    # Run in a subshell with an EXIT trap so the temp GNUPGHOME/keyring are
-    # removed on every path — including a set -e (L41) abort, where a RETURN
+    # The signature proves the maintainer signed whatever was served; it does
+    # not pin *which* release we accept. So also gate on a SHA256 from
+    # .settings.yaml, bumped deliberately by tools/update-helm-diff-checksums.
+    # We fetch a copy to hash and helm then re-downloads: helm 4's local-tarball
+    # installer derives the expected archive root from the file's basename
+    # (helm-diff-linux-amd64), but helm-diff's tarball is rooted at diff/, so
+    # `helm plugin install <local .tgz>` cannot be used. helm's .prov check
+    # against the pinned key still covers that second fetch.
+    #
+    # Run in a subshell with an EXIT trap so the temp GNUPGHOME/keyring/tarball
+    # are removed on every path — including a set -e (L41) abort, where a RETURN
     # trap would not fire. The subshell keeps the trap and temp vars scoped to
-    # this block without disturbing the parent shell's traps.
+    # this block without disturbing the parent shell's traps. Its `|| exit 1`
+    # does not rely on the caller's set -e: a failed checksum or fingerprint
+    # check must abort even if phase_install is ever invoked in a condition
+    # context, where errexit is suppressed for the whole function body.
     (
       HELM_DIFF_KEY_FPR="C5645EF47482257A1F806D2BEA17A2A206AFF8CD"
+      HELM_DIFF_URL="https://github.com/databus23/helm-diff/releases/download/${HELM_DIFF_VERSION}/helm-diff-${HELM_DIFF_ASSET}.tgz"
       GNUPGHOME="$(mktemp -d)"; export GNUPGHOME
       HELM_DIFF_KEYRING="$(mktemp)"
-      trap 'rm -rf "${GNUPGHOME}" "${HELM_DIFF_KEYRING}"' EXIT
+      HELM_DIFF_TARBALL="$(mktemp)"
+      trap 'rm -rf "${GNUPGHOME}" "${HELM_DIFF_KEYRING}" "${HELM_DIFF_TARBALL}"' EXIT
+
+      # No --max-time: the tarball is ~33 MB and a slow-but-progressing
+      # transfer should not be killed. --retry-max-time bounds the retry window.
+      curl -fsSL --connect-timeout 10 \
+        --retry 3 --retry-delay 0 --retry-max-time 180 --retry-connrefused \
+        -o "${HELM_DIFF_TARBALL}" "${HELM_DIFF_URL}"
+      actual_sha="$(uat_sha256 "${HELM_DIFF_TARBALL}")"
+      if [[ "${actual_sha}" != "${HELM_DIFF_SHA256}" ]]; then
+        echo "::error::helm-diff tarball checksum mismatch for ${HELM_DIFF_URL}" >&2
+        echo "::error::expected ${HELM_DIFF_SHA256} (.settings.yaml testing_tools.helm_diff_checksums.${HELM_DIFF_SHA_KEY}), got ${actual_sha}" >&2
+        exit 1
+      fi
+      echo "helm-diff tarball checksum OK (${HELM_DIFF_SHA_KEY}: ${HELM_DIFF_SHA256})"
+
       curl -fsSL "https://github.com/databus23.gpg" | gpg --import
       if ! gpg --with-colons --fingerprint \
           | awk -F: '/^fpr:/{print $10}' | grep -qx "${HELM_DIFF_KEY_FPR}"; then
@@ -444,9 +521,8 @@ phase_install() {
         exit 1
       fi
       gpg --export "${HELM_DIFF_KEY_FPR}" > "${HELM_DIFF_KEYRING}"
-      helm plugin install "https://github.com/databus23/helm-diff/releases/download/${HELM_DIFF_VERSION}/helm-diff-linux-amd64.tgz" \
-        --keyring "${HELM_DIFF_KEYRING}"
-    )
+      helm plugin install "${HELM_DIFF_URL}" --keyring "${HELM_DIFF_KEYRING}"
+    ) || exit 1
   fi
   echo "::endgroup::"
 

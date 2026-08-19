@@ -122,5 +122,7 @@ jobs:
           # checksums getting committed alongside a version bump (the version
           # changes but the helmfile_checksums/chainsaw_checksums block does
           # not), which then breaks E2E/CLI E2E at the sha256 verify step.
-          RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^\\./tools/update-[a-z]+-checksums "]'
+          # `[a-z-]+` (not `[a-z]+`) so hyphenated tool names match too, e.g.
+          # tools/update-helm-diff-checksums.
+          RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^\\./tools/update-[a-z-]+-checksums "]'
           LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
