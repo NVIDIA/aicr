@@ -177,7 +177,8 @@ spec:
     # Kind has no gpuStack profile, so this value is overlay-level and is NOT
     # profile-owned — same asymmetry as OKE (#2181). The NVSentinel
     # driver-label bundle gate still rejects bundle-time and declared-dynamic
-    # changes that would recreate #2175.
+    # changes that would recreate #2175, but a manual post-generation edit to
+    # the rendered Helm values is outside that guarantee.
     - name: nvsentinel
       type: Helm
       overrides:

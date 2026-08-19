@@ -139,7 +139,9 @@ aicr bundle --recipe recipe.yaml \
 
 The two flags ask for contradictory things — remove the component, and
 configure it — so the command fails instead of shipping a bundle with
-one request quietly dropped. Only a scalar `--set <component>:enabled=false`
+one request quietly dropped. The rejection here is about the contradiction,
+not about who owns the component: a profile-owned presence lock is a
+separate rejection, described at the end of this section. Only a scalar `--set <component>:enabled=false`
 is exempt on a declared component: it is the supported way to remove
 one, and it is also accepted on a component the recipe already disables.
 `enabled=true` on a component the `bundlers=` filter excludes is
