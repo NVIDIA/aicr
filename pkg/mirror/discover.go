@@ -175,8 +175,16 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 					// would fail to pull in the disconnected environment, where
 					// diagnosis is hardest. Fail closed, matching
 					// prepareMirrorCandidate and the bundler.
+					// Bound the read: gctx may carry no deadline (the CLI
+					// root context does not), and a provider read that
+					// blocks — a values file on a stalled network mount —
+					// would otherwise hang discovery indefinitely. Cancel
+					// eagerly rather than deferring, so the timer is released
+					// before the render below rather than at goroutine exit.
+					valCtx, cancelVal := context.WithTimeout(gctx, defaults.FileReadTimeout)
 					var valErr error
-					values, valErr = rec.GetValuesForComponentWithContext(gctx, compRef.Name)
+					values, valErr = rec.GetValuesForComponentWithContext(valCtx, compRef.Name)
+					cancelVal()
 					if valErr != nil {
 						return errors.PropagateOrWrap(valErr, errors.ErrCodeInternal,
 							fmt.Sprintf("failed to load values for component %q", compRef.Name))
@@ -489,7 +497,11 @@ func prepareMirrorCandidate(
 			continue
 		}
 
-		values, valueErr := rec.GetValuesForComponentWithContext(ctx, ref.Name)
+		// Same bound as the unowned path in Discover: cancel eagerly rather
+		// than deferring, so timers do not accumulate across this loop.
+		valCtx, cancelVal := context.WithTimeout(ctx, defaults.FileReadTimeout)
+		values, valueErr := rec.GetValuesForComponentWithContext(valCtx, ref.Name)
+		cancelVal()
 		if valueErr != nil {
 			return nil, errors.PropagateOrWrap(valueErr, errors.ErrCodeInternal,
 				fmt.Sprintf("failed to load profile candidate values for component %q", ref.Name))
