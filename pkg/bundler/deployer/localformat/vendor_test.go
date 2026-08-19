@@ -985,7 +985,9 @@ func TestDefaultFetchIndexYAML(t *testing.T) {
 			http.Error(w, "boom", http.StatusInternalServerError)
 		}))
 		defer ts.Close()
-		_, err := defaultFetchIndexYAML(context.Background(), ts.URL+"/index.yaml")
+		// Use doFetchIndexYAMLAttempt directly to test status classification
+		// without triggering retry logic.
+		_, err := doFetchIndexYAMLAttempt(context.Background(), ts.URL+"/index.yaml")
 		if err == nil {
 			t.Fatal("expected error for 500")
 		}
@@ -1496,7 +1498,9 @@ func TestDefaultFetchIndexYAML_4xx(t *testing.T) {
 				http.Error(w, "boom", tt.status)
 			}))
 			defer ts.Close()
-			_, err := defaultFetchIndexYAML(context.Background(), ts.URL+"/index.yaml")
+			// Use doFetchIndexYAMLAttempt directly to test status classification
+			// without triggering retry logic.
+			_, err := doFetchIndexYAMLAttempt(context.Background(), ts.URL+"/index.yaml")
 			if err == nil {
 				t.Fatalf("expected error for HTTP %d", tt.status)
 			}
