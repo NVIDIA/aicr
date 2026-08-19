@@ -471,57 +471,87 @@ phase_install() {
       echo "helm-diff ${installed_ver} installed; removing to pin ${HELM_DIFF_VERSION}"
       helm plugin remove diff
     fi
-    # Install from the signed release tarball (helm-diff's recommended Helm 4
-    # method). Helm 4 verifies plugin provenance by default (--verify=true):
-    # the .prov signature is checked against a keyring. Import the maintainer's
-    # release key, pin it to the published fingerprint (fail closed on
-    # mismatch), export it to a legacy keyring, and verify against it.
+    # Install the exact bytes we verified. Three independent gates, all on one
+    # downloaded copy — helm never re-fetches, so there is no window in which a
+    # hostile cache can substitute different bytes between check and install:
     #
-    # The signature proves the maintainer signed whatever was served; it does
-    # not pin *which* release we accept. So also gate on a SHA256 from
-    # .settings.yaml, bumped deliberately by tools/update-helm-diff-checksums.
-    # We fetch a copy to hash and helm then re-downloads: helm 4's local-tarball
-    # installer derives the expected archive root from the file's basename
-    # (helm-diff-linux-amd64), but helm-diff's tarball is rooted at diff/, so
-    # `helm plugin install <local .tgz>` cannot be used. helm's .prov check
-    # against the pinned key still covers that second fetch.
+    #   1. SHA256 matches the .settings.yaml pin  — fixes *which* release.
+    #   2. The .prov clearsign carries VALIDSIG for the pinned maintainer
+    #      fingerprint                            — proves upstream authorship.
+    #   3. The SHA256 recorded inside that signed .prov equals the pin
+    #                                             — binds (2) to (1), so the
+    #      signature covers our bytes rather than some other signed release.
     #
-    # Run in a subshell with an EXIT trap so the temp GNUPGHOME/keyring/tarball
-    # are removed on every path — including a set -e (L41) abort, where a RETURN
+    # Gate 3 is what lets us pass --verify=false safely. Helm's own --verify
+    # only establishes (2): it would accept any validly signed helm-diff
+    # release, including an older one replayed by a compromised cache, which
+    # is a downgrade past the pin. Doing the checks here is strictly stronger.
+    # The cost is a cosmetic `PROVENANCE: unsigned` in `helm plugin list`.
+    #
+    # The tarball is staged as diff.tgz because helm's local-tarball installer
+    # derives both the expected archive root and the install directory from the
+    # file's basename, and helm-diff's tarball is rooted at diff/.
+    #
+    # Run in a subshell with an EXIT trap so the temp GNUPGHOME/staging dir are
+    # removed on every path — including a set -e (L41) abort, where a RETURN
     # trap would not fire. The subshell keeps the trap and temp vars scoped to
     # this block without disturbing the parent shell's traps. Its `|| exit 1`
-    # does not rely on the caller's set -e: a failed checksum or fingerprint
-    # check must abort even if phase_install is ever invoked in a condition
-    # context, where errexit is suppressed for the whole function body.
+    # does not rely on the caller's set -e: a failed gate must abort even if
+    # phase_install is ever invoked in a condition context, where errexit is
+    # suppressed for the whole function body.
     (
       HELM_DIFF_KEY_FPR="C5645EF47482257A1F806D2BEA17A2A206AFF8CD"
-      HELM_DIFF_URL="https://github.com/databus23/helm-diff/releases/download/${HELM_DIFF_VERSION}/helm-diff-${HELM_DIFF_ASSET}.tgz"
+      HELM_DIFF_FILE="helm-diff-${HELM_DIFF_ASSET}.tgz"
+      HELM_DIFF_URL="https://github.com/databus23/helm-diff/releases/download/${HELM_DIFF_VERSION}/${HELM_DIFF_FILE}"
       GNUPGHOME="$(mktemp -d)"; export GNUPGHOME
-      HELM_DIFF_KEYRING="$(mktemp)"
-      HELM_DIFF_TARBALL="$(mktemp)"
-      trap 'rm -rf "${GNUPGHOME}" "${HELM_DIFF_KEYRING}" "${HELM_DIFF_TARBALL}"' EXIT
+      HELM_DIFF_STAGE="$(mktemp -d)"
+      trap 'rm -rf "${GNUPGHOME}" "${HELM_DIFF_STAGE}"' EXIT
+      tarball="${HELM_DIFF_STAGE}/diff.tgz"
 
       # No --max-time: the tarball is ~33 MB and a slow-but-progressing
       # transfer should not be killed. --retry-max-time bounds the retry window.
       curl -fsSL --connect-timeout 10 \
         --retry 3 --retry-delay 0 --retry-max-time 180 --retry-connrefused \
-        -o "${HELM_DIFF_TARBALL}" "${HELM_DIFF_URL}"
-      actual_sha="$(uat_sha256 "${HELM_DIFF_TARBALL}")"
+        -o "${tarball}" "${HELM_DIFF_URL}"
+      curl -fsSL --connect-timeout 10 \
+        --retry 3 --retry-delay 0 --retry-max-time 180 --retry-connrefused \
+        -o "${tarball}.prov" "${HELM_DIFF_URL}.prov"
+
+      # Gate 1: pinned bytes.
+      actual_sha="$(uat_sha256 "${tarball}")"
       if [[ "${actual_sha}" != "${HELM_DIFF_SHA256}" ]]; then
         echo "::error::helm-diff tarball checksum mismatch for ${HELM_DIFF_URL}" >&2
         echo "::error::expected ${HELM_DIFF_SHA256} (.settings.yaml testing_tools.helm_diff_checksums.${HELM_DIFF_SHA_KEY}), got ${actual_sha}" >&2
         exit 1
       fi
-      echo "helm-diff tarball checksum OK (${HELM_DIFF_SHA_KEY}: ${HELM_DIFF_SHA256})"
 
+      # Gate 2: the provenance document is signed by the pinned release key.
+      # The fingerprint check on the imported key gives a clearer error when
+      # the published key rotates; VALIDSIG is the one that actually binds the
+      # signature to that fingerprint.
       curl -fsSL "https://github.com/databus23.gpg" | gpg --import
       if ! gpg --with-colons --fingerprint \
           | awk -F: '/^fpr:/{print $10}' | grep -qx "${HELM_DIFF_KEY_FPR}"; then
         echo "::error::helm-diff release key fingerprint mismatch (expected ${HELM_DIFF_KEY_FPR})" >&2
         exit 1
       fi
-      gpg --export "${HELM_DIFF_KEY_FPR}" > "${HELM_DIFF_KEYRING}"
-      helm plugin install "${HELM_DIFF_URL}" --keyring "${HELM_DIFF_KEYRING}"
+      if ! gpg --verify --status-fd=1 "${tarball}.prov" 2>/dev/null \
+          | grep -q "^\[GNUPG:\] VALIDSIG ${HELM_DIFF_KEY_FPR} "; then
+        echo "::error::helm-diff provenance is not validly signed by ${HELM_DIFF_KEY_FPR}" >&2
+        exit 1
+      fi
+
+      # Gate 3: that signature covers the bytes we just pinned. The .prov keys
+      # its files map by the upstream asset name, not our staged filename.
+      prov_sha="$(gpg --decrypt "${tarball}.prov" 2>/dev/null \
+        | awk -v a="${HELM_DIFF_FILE}:" '$1==a {gsub(/"|sha256:/,"",$2); print $2}')"
+      if [[ "${prov_sha}" != "${HELM_DIFF_SHA256}" ]]; then
+        echo "::error::helm-diff provenance records sha256 ${prov_sha:-<none>} for ${HELM_DIFF_FILE}, pinned ${HELM_DIFF_SHA256}" >&2
+        exit 1
+      fi
+      echo "helm-diff verified (${HELM_DIFF_SHA_KEY}: ${HELM_DIFF_SHA256}, signed by ${HELM_DIFF_KEY_FPR})"
+
+      helm plugin install "${tarball}" --verify=false
     ) || exit 1
   fi
   echo "::endgroup::"

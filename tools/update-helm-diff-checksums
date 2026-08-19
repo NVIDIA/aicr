@@ -29,6 +29,18 @@ if [[ ! -f "${SETTINGS_FILE}" ]]; then
   exit 1
 fi
 
+# Refuse to write checksums for a release other than the pinned one. Renovate
+# runs this after updating testing_tools.helm_diff (postUpgradeTasks with
+# executionMode "update"), so the two always agree there; a hand-run with the
+# wrong argument would otherwise commit checksums that no runner can satisfy,
+# surfacing later as an opaque UAT checksum mismatch.
+PINNED_VERSION="$(yq -r '.testing_tools.helm_diff // ""' "${SETTINGS_FILE}")"
+if [[ "${PINNED_VERSION#v}" != "${VERSION_NO_V}" ]]; then
+  echo "ERROR: ${SETTINGS_FILE} pins helm_diff ${PINNED_VERSION}, refusing to write checksums for ${VERSION_WITH_V}" >&2
+  echo "       Bump testing_tools.helm_diff first, then re-run with the matching version." >&2
+  exit 1
+fi
+
 # Upstream release asset is named helm-diff_<version>_checksums.txt (same
 # convention as helmfile, unlike chainsaw's plain checksums.txt). Embedding the
 # version in the filename means a release-asset rename would surface here as a
@@ -36,7 +48,16 @@ fi
 CHECKSUMS_URL="https://github.com/databus23/helm-diff/releases/download/${VERSION_WITH_V}/helm-diff_${VERSION_NO_V}_checksums.txt"
 
 TMPDIR=$(mktemp -d)
-trap 'rm -rf "${TMPDIR}"' EXIT
+# The replacement file must live on the same filesystem as ${SETTINGS_FILE} so
+# the final mv is an atomic rename. ${TMPDIR} is frequently a separate
+# filesystem, where mv degrades to copy-then-delete and a failure mid-copy
+# would leave .settings.yaml truncated.
+NEW_FILE="$(mktemp "${SETTINGS_FILE}.new.XXXXXX")"
+trap 'rm -rf "${TMPDIR}" "${NEW_FILE}"' EXIT
+# mktemp creates 0600; seed from the target so the rename preserves its mode
+# (cp -p sets the destination's mode from the source, and the later `>`
+# redirect truncates without changing it).
+cp -p "${SETTINGS_FILE}" "${NEW_FILE}"
 
 echo "Fetching ${CHECKSUMS_URL}"
 # Retry on transient failures (5xx, 408/429, connection refused, network
@@ -84,7 +105,6 @@ echo "  darwin_arm64: ${DARWIN_ARM64}"
 # drops blank lines between top-level mappings and would reformat the entire
 # file on every Renovate PR — see the failure-modes note in
 # .github/RENOVATE.md.
-NEW_FILE="${TMPDIR}/settings.new"
 awk -v amd64="${LINUX_AMD64}" -v arm64="${LINUX_ARM64}" \
     -v damd64="${DARWIN_AMD64}" -v darm64="${DARWIN_ARM64}" '
     BEGIN { in_block = 0 }
