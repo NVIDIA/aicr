@@ -369,18 +369,19 @@ spec:
 			},
 		},
 		{
-			// When an image already carries an inline @digest (e.g. from a
-			// scalar image field), a sibling digest field must not re-append.
+			// When the repository already carries an inline @digest, the
+			// sibling digest field must not re-append a different digest.
+			// The inline digest is preserved and the sibling is ignored.
 			name: "operator image mapping does not double-append digest when ref already has one",
 			in: `spec:
   pinned:
     image:
-      repository: ghcr.io/example/pinned
+      repository: ghcr.io/example/pinned@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b
       tag: v1
-      digest: sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b
+      digest: sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad
 `,
 			want: []string{
-				"ghcr.io/example/pinned:v1@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b",
+				"ghcr.io/example/pinned@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b",
 			},
 		},
 	}
