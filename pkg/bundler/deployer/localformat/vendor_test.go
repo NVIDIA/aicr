@@ -1792,6 +1792,20 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 			// Mock the per-attempt fetch function to control success/failure
 			origAttempt := fetchIndexYAMLAttempt
 			t.Cleanup(func() { fetchIndexYAMLAttempt = origAttempt })
+
+			// Stub egress check to avoid DNS resolution
+			origCheckTarget := checkFetchTargetURL
+			t.Cleanup(func() { checkFetchTargetURL = origCheckTarget })
+			checkFetchTargetURL = func(ctx context.Context, url string) error { return nil }
+
+			// Stub timer to avoid production sleep times
+			origTimer := newBackoffTimer
+			t.Cleanup(func() { newBackoffTimer = origTimer })
+			newBackoffTimer = func(d time.Duration) *time.Timer {
+				// Return a timer that fires immediately
+				return time.NewTimer(1 * time.Nanosecond)
+			}
+
 			fetchIndexYAMLAttempt = func(ctx context.Context, indexURL string) ([]byte, error) {
 				attempt++
 				if attempt < tt.succeedAt {
@@ -1804,10 +1818,10 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 					case "status":
 						// Simulate what doFetchIndexYAMLAttempt does: parse HTTP status
 						code := errors.ErrCodeUnavailable
-						switch {
-						case tt.statusCode == http.StatusNotFound:
+						switch tt.statusCode {
+						case http.StatusNotFound:
 							code = errors.ErrCodeNotFound
-						case tt.statusCode == http.StatusUnauthorized || tt.statusCode == http.StatusForbidden:
+						case http.StatusUnauthorized, http.StatusForbidden:
 							code = errors.ErrCodeUnauthorized
 						}
 						return nil, errors.New(code,
@@ -1847,6 +1861,13 @@ func TestFetchIndexYAMLContextCancellation(t *testing.T) {
 		attempt := 0
 		origAttempt := fetchIndexYAMLAttempt
 		t.Cleanup(func() { fetchIndexYAMLAttempt = origAttempt })
+
+		// Stub egress check to avoid DNS resolution
+		origCheckTarget := checkFetchTargetURL
+		t.Cleanup(func() { checkFetchTargetURL = origCheckTarget })
+		checkFetchTargetURL = func(ctx context.Context, url string) error { return nil }
+
+		// Use real timer for this test to verify cancellation during backoff works
 		fetchIndexYAMLAttempt = func(ctx context.Context, indexURL string) ([]byte, error) {
 			attempt++
 			if attempt == 1 {
@@ -1870,6 +1891,9 @@ func TestFetchIndexYAMLContextCancellation(t *testing.T) {
 		_, err := defaultFetchIndexYAML(ctx, "https://example.com/index.yaml")
 		if err == nil {
 			t.Error("expected error from canceled context")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+			t.Errorf("expected ErrCodeCanceled, got error %v", err)
 		}
 		if !stderrors.Is(ctx.Err(), context.Canceled) {
 			t.Errorf("context should be canceled, got %v", ctx.Err())

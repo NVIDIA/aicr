@@ -584,6 +584,10 @@ var fetchIndexYAML = defaultFetchIndexYAML
 // to control retry behavior.
 var fetchIndexYAMLAttempt = doFetchIndexYAMLAttempt
 
+// newBackoffTimer creates a timer for retry backoff. Tests inject a no-op to
+// avoid production sleep times.
+var newBackoffTimer = time.NewTimer
+
 // defaultFetchIndexYAML performs the production HTTP GET with retries on
 // transient failures. Every redirect hop is passed back through
 // checkEgressPolicy so a public repo cannot redirect the index-fetch itself
@@ -620,7 +624,7 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 		// Check parent context cancellation first.
 		if parentErr := ctx.Err(); parentErr != nil {
 			if stderrors.Is(parentErr, context.Canceled) {
-				return nil, errors.Wrap(errors.ErrCodeInternal,
+				return nil, errors.Wrap(errors.ErrCodeCanceled,
 					"vendor-charts: index pre-check canceled", parentErr)
 			}
 			if stderrors.Is(parentErr, context.DeadlineExceeded) {
@@ -654,12 +658,12 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 			"attempt", attempt, "error", err)
 
 		// Sleep with exponential backoff, but honor parent context cancellation.
-		timer := time.NewTimer(backoff)
+		timer := newBackoffTimer(backoff)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			if stderrors.Is(ctx.Err(), context.Canceled) {
-				return nil, errors.Wrap(errors.ErrCodeInternal,
+				return nil, errors.Wrap(errors.ErrCodeCanceled,
 					"vendor-charts: index pre-check canceled during backoff", ctx.Err())
 			}
 			return nil, errors.Wrap(errors.ErrCodeTimeout,
