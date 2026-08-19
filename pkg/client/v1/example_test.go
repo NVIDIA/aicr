@@ -39,6 +39,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log"
+	"os"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -170,8 +171,9 @@ func Example_committedConfig() {
 //
 // WithSnapshotCriteriaRelaxation names the dimensions the caller stated
 // EXPLICITLY; everything else is treated as derived and may be cleared if no
-// overlay distinguishes it. Passing none — as here — means every dimension came
-// from the snapshot and all are relaxable.
+// overlay distinguishes it. Here intent was typed by the user and the rest came
+// from the snapshot, so intent is protected and the rest are relaxable. Passing
+// no dimensions at all is the pure-fingerprint case: everything is relaxable.
 func Example_resolveFromSnapshot() {
 	ctx := context.Background()
 
@@ -206,8 +208,32 @@ func Example_resolveFromSnapshot() {
 }
 
 // Example_bundleAndVerify is the integrator path end to end: resolve a recipe,
-// render its deployment bundle, then check the result's checksums and
-// attestation chain against a trust policy.
+// render its deployment bundle, then check what was written.
+//
+// It runs hermetically against the embedded catalog, into a temporary
+// directory, with no signing and no network — which is why it can assert its
+// output, and why that output is "unverified".
+//
+// # Reading the result
+//
+// Failure arrives on THREE independent channels, and checking one is not
+// enough:
+//
+//   - the returned error — the bundle could not be produced at all;
+//   - BundleArtifact.HasErrors() — per-bundler failures that did not abort
+//     the run, so files exist but the set is incomplete;
+//   - on verification, BundleVerification.PolicyFailure (the trust floor was
+//     not met) AND Report.Errors (a check itself failed, e.g. a bad checksum).
+//
+// # Why "unverified"
+//
+// BundleOptions.Attester is nil here, so MakeBundle uses the no-op attester —
+// the same default as `aicr bundle` without --attest. An unsigned bundle can
+// reach "unverified" (checksums valid, no attestation) and no higher, so
+// demanding MinTrustLevel "verified" would fail every time. Leaving it empty
+// selects the "max" default: verify against the highest level this bundle can
+// actually achieve. To reach "verified", pass an Attester and a binary
+// attestation.
 func Example_bundleAndVerify() {
 	ctx := context.Background()
 
@@ -231,7 +257,7 @@ func Example_bundleAndVerify() {
 		return
 	}
 
-	// Per-component Helm values and stitched manifests, without writing to disk.
+	// Per-component Helm values and stitched manifests, without touching disk.
 	bundles, err := client.BundleComponents(ctx, result)
 	if err != nil {
 		log.Print(err)
@@ -243,16 +269,30 @@ func Example_bundleAndVerify() {
 		_ = b.Manifests
 	}
 
-	// Or write a full bundle directory, then verify what was written.
-	if _, err = client.MakeBundle(ctx, result, aicr.BundleOptions{
-		OutputDir: "./bundles",
-	}); err != nil {
+	// Or write a full bundle directory.
+	outputDir, err := os.MkdirTemp("", "aicr-bundle-")
+	if err != nil {
 		log.Print(err)
 		return
 	}
+	defer func() { _ = os.RemoveAll(outputDir) }()
 
-	verification, err := client.VerifyBundle(ctx, "./bundles", aicr.BundleVerifyOptions{
-		MinTrustLevel: "verified",
+	artifact, err := client.MakeBundle(ctx, result, aicr.BundleOptions{
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	// Non-fatal per-bundler failures: files were written, but not all of them.
+	if artifact.HasErrors() {
+		log.Printf("bundle completed with %d errors", len(artifact.Errors))
+		return
+	}
+
+	verification, err := client.VerifyBundle(ctx, outputDir, aicr.BundleVerifyOptions{
+		// Empty means "max": verify against the highest level achievable.
+		MinTrustLevel: "",
 	})
 	if err != nil {
 		log.Print(err)
@@ -262,7 +302,200 @@ func Example_bundleAndVerify() {
 		log.Printf("policy: %s", verification.PolicyFailure)
 		return
 	}
+	if len(verification.Report.Errors) > 0 {
+		log.Printf("verification: %s", verification.Report.Errors[0])
+		return
+	}
+
 	fmt.Println(verification.Report.TrustLevel)
+	// Output: unverified
+}
+
+// ExampleClient_LoadRecipe reads a recipe emitted earlier by `aicr recipe -o`,
+// instead of resolving a new one. The result is interchangeable with a
+// resolved one: bundle it, or validate it against a snapshot.
+func ExampleClient_LoadRecipe() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	// Path, URL, or cm://namespace/name. The kubeconfig argument is only
+	// consulted for the cm:// form.
+	result, err := client.LoadRecipe(ctx, "recipe.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	fmt.Println(result.Name)
+}
+
+// ExampleClient_CollectSnapshot captures cluster state by deploying the
+// snapshotter Job, for callers that do not already have a snapshot file.
+// Requires a reachable cluster and RBAC to create the Job.
+func ExampleClient_CollectSnapshot() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	snap, err := client.CollectSnapshot(ctx, &aicr.AgentConfig{
+		Namespace: "aicr-system",
+		Cleanup:   true,
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	// Persist Raw rather than re-serializing: a newer agent image can emit
+	// fields this binary's Snapshot type does not model, and a typed round
+	// trip silently drops them.
+	if err = os.WriteFile("snapshot.yaml", snap.Raw, 0o600); err != nil {
+		log.Print(err)
+		return
+	}
+}
+
+// ExampleClient_ValidateState evaluates a resolved recipe against observed
+// cluster state, running the deployment, conformance, and performance phases.
+//
+// WithValidationNoCluster(true) keeps constraint evaluation but skips
+// everything needing a cluster — the mode CI uses to check a recipe against a
+// captured snapshot without provisioning hardware.
+func ExampleClient_ValidateState() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	recipe, err := client.LoadRecipe(ctx, "recipe.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	snap, err := client.LoadSnapshot(ctx, "snapshot.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	phases, err := client.ValidateState(ctx, recipe, snap,
+		aicr.WithValidationNoCluster(true),
+		aicr.WithValidationPhases(aicr.PhaseDeployment, aicr.PhaseConformance),
+	)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	for _, p := range phases {
+		fmt.Printf("%s: %d passed, %d failed\n", p.Phase, p.Summary.Passed, p.Summary.Failed)
+	}
+}
+
+// ExampleClient_RecipeDigest computes the canonical digest an evidence
+// predicate records. A CI gate compares this against the digest inside a
+// published evidence bundle to detect evidence that has gone stale relative to
+// the recipe it claims to describe.
+func ExampleClient_RecipeDigest() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	digest, err := client.RecipeDigest(ctx, aicr.RecipeDigestOptions{
+		Path: "recipe.yaml",
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	fmt.Println(digest)
+}
+
+// ExampleClient_VerifyCatalog checks the Sigstore signature over this Client's
+// recipe catalog — that the recipe data resolution is about to use was
+// published by NVIDIA CI and has not been altered.
+func ExampleClient_VerifyCatalog() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource("/etc/aicr/recipes")))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	verification, err := client.VerifyCatalog(ctx, "catalog.sigstore.json", aicr.CatalogVerifyOptions{})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	fmt.Printf("signed by %s over %s\n", verification.Identity, verification.Digest)
+}
+
+// ExampleClient_SignCatalog signs a recipe catalog with keyless Sigstore.
+//
+// Signing is deliberately NOT bounded by a facade timeout: keyless OIDC can
+// block on a human completing a browser flow. It also rejects settings that
+// would produce a signature VerifyCatalog cannot check — a private Fulcio or
+// Rekor, a signing key, or a disabled transparency-log upload — rather than
+// letting the asymmetry surface later as an unverifiable artifact.
+func ExampleClient_SignCatalog() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource("/etc/aicr/recipes")))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	signed, err := client.SignCatalog(ctx, aicr.CatalogSignOptions{
+		Output: "catalog.sigstore.json",
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	fmt.Printf("signed catalog digest %s (%d bytes)\n", signed.Digest, len(signed.BundleJSON))
+}
+
+// ExampleClient_PublishEvidence signs a recipe-evidence bundle and pushes it to
+// an OCI registry, the producing half of ExampleClient_VerifyEvidence.
+func ExampleClient_PublishEvidence() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	if err = client.PublishEvidence(ctx, aicr.EvidencePublishOptions{
+		BundleDir: "./evidence",
+		Push:      "ghcr.io/example/aicr-evidence:v1",
+	}); err != nil {
+		log.Print(err)
+		return
+	}
 }
 
 // ExampleClient_VerifyEvidence checks a recipe-evidence bundle's signature and

@@ -34,9 +34,11 @@
 //     already exists and no cluster is needed.
 //   - ValidateState — evaluate a resolved recipe against a snapshot,
 //     running deployment / conformance / performance phases.
-//   - LoadConfig / WrapConfig — parse the AICRConfig a team commits, then
-//     DERIVE options from it (Config.BundleVerifyOptions,
-//     Config.RecipeSource, Config.RecipeCriteria, ...). A Config never
+//   - LoadConfig — read and validate the AICRConfig a team commits, from a
+//     file or an HTTP(S) URL. WrapConfig lifts one already parsed elsewhere;
+//     it does no parsing itself. Either way the resulting Config DERIVES
+//     options (Config.BundleVerifyOptions, Config.RecipeSource,
+//     Config.RecipeCriteria, ...) rather than applying them: a Config never
 //     attaches to a Client and is never consulted implicitly, so caller
 //     precedence stays one readable line at the call site.
 //

@@ -24,30 +24,41 @@ surface](./public-api.md) for the details.
 
 ## Runnable examples
 
-Every flow on this page has a compiled counterpart in
+Each `Client` entry point below has a compiled counterpart in
 [`pkg/client/v1`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#pkg-examples).
 They are ordinary Go example functions, so `go test` builds them on every
-change and `make qualify` runs them — a facade change that breaks a
-documented flow fails in AICR's tree rather than in yours.
+change — a facade change that breaks one of these fails in AICR's tree rather
+than in yours.
 
-| Example | Covers |
-|---|---|
-| `Example` | Quick start: client, resolve from criteria |
-| `Example_errorCodes` | Matching structured error codes |
-| `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order |
-| `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation |
-| `Example_bundleAndVerify` | Resolve → bundle → verify |
-| `ExampleClient_VerifyEvidence` | Evidence verification and exit classes |
-| `ExampleVerifyBinaryAttestation` | Proving a binary came from NVIDIA CI |
-| `Example_trustLevels`, `Example_criteriaDimensions` | Enumerating the accepted values |
+| Example | Covers | Runs |
+|---|---|---|
+| `Example` | Quick start: client, resolve from criteria | yes |
+| `Example_errorCodes` | Matching structured error codes | yes |
+| `Example_bundleAndVerify` | Resolve → bundle → verify, hermetically | yes |
+| `Example_trustLevels` | The accepted trust levels, and their ordering trap | yes |
+| `Example_criteriaDimensions` | The coverage dimensions | yes |
+| `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order | no |
+| `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation | no |
+| `ExampleClient_LoadRecipe` | Reading a previously emitted recipe | no |
+| `ExampleClient_CollectSnapshot` | Capturing cluster state via the snapshotter Job | no |
+| `ExampleClient_ValidateState` | Three-phase validation, including `--no-cluster` mode | no |
+| `ExampleClient_RecipeDigest` | The digest a CI staleness gate compares | no |
+| `ExampleClient_VerifyEvidence` | Evidence verification and exit classes | no |
+| `ExampleClient_VerifyCatalog` / `ExampleClient_SignCatalog` | Checking and producing the catalog signature | no |
+| `ExampleClient_PublishEvidence` | Signing and pushing an evidence bundle | no |
+| `ExampleVerifyBinaryAttestation` | Proving a binary came from NVIDIA CI | no |
 
-Examples printing an `Output:` block are executed and their output asserted;
-the rest are compiled but not run, because they reference paths
-(`aicr-config.yaml`, `snapshot.yaml`) that belong to your environment rather
-than AICR's test tree.
+**What "runs" means, and what it does not.** Examples marked *yes* print an
+`Output:` block, so `go test` executes them and asserts the output. The rest
+are **compiled but not executed** — they need a cluster, a registry, a signing
+identity, or files that belong to your environment. Compilation still pins
+every signature, field name, and option they touch, so a renamed method or a
+dropped field breaks the build; it does not prove those flows behave
+correctly at runtime.
 
-Prefer copying from those over copying from this page: the snippets here are
-trimmed for reading, while the examples are complete and known to build.
+The guarantee covers the examples, not this page. Prose here can still drift,
+and short illustrative snippets outside the table are not compiled — prefer
+copying from the examples, which are complete and known to build.
 
 ## Installing
 
@@ -1037,9 +1048,11 @@ exception. That is a mechanical guarantee, not a policy promise — but note
 what it does *not* cover: behavior. A function keeping its signature while
 changing what it does passes the gate.
 
-**Documented code is compiled.** The [runnable
-examples](#runnable-examples) build in AICR's own test suite, so a facade
-change that invalidates a documented flow fails here first.
+**The examples are compiled.** Every entry in the [examples
+table](#runnable-examples) builds in AICR's own test suite, so a facade change
+that invalidates one fails here first. Scope that honestly: it covers those
+examples, not this page's prose or its shorter inline snippets, and for the
+majority it proves compilation rather than runtime behavior.
 
 ## Compatibility
 
