@@ -15,7 +15,7 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | Item | Exercised by | Hardware | Cadence | Status | Notes |
 |------|--------------|----------|---------|--------|-------|
 | `cuj1-training-kubeflow` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `cuj2-inference-dynamo` | demo | GPU (unwired) | — | stubbed | the intent runs nightly and its stack is deployed and validated, but the journey's own workload step is disabled in the per-cloud UAT pipelines |
+| `cuj2-inference-dynamo` | uat, demo | GPU (H100, real) | nightly | covered | — |
 
 ## CLI verbs
 
