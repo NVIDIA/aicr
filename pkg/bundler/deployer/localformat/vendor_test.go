@@ -1871,7 +1871,17 @@ func TestFetchIndexYAMLContextCancellation(t *testing.T) {
 		t.Cleanup(func() { checkFetchTargetURL = origCheckTarget })
 		checkFetchTargetURL = func(ctx context.Context, url string) error { return nil }
 
-		// Use real timer for this test to verify cancellation during backoff works
+		// Signal when backoff begins so we can cancel deterministically
+		backoffStarted := make(chan struct{})
+		origTimer := newBackoffTimer
+		t.Cleanup(func() { newBackoffTimer = origTimer })
+		newBackoffTimer = func(d time.Duration) *time.Timer {
+			// Signal that backoff has begun, then return a long timer
+			// so cancellation can interrupt it
+			close(backoffStarted)
+			return time.NewTimer(10 * time.Second)
+		}
+
 		fetchIndexYAMLAttempt = func(ctx context.Context, indexURL string) ([]byte, error) {
 			attempt++
 			if attempt == 1 {
@@ -1885,10 +1895,9 @@ func TestFetchIndexYAMLContextCancellation(t *testing.T) {
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
-		// Cancel after a short delay to let the first attempt complete
-		// and the backoff sleep begin
+		// Cancel after backoff begins to ensure cancellation happens during sleep
 		go func() {
-			time.Sleep(100 * time.Millisecond)
+			<-backoffStarted  // Wait for backoff to start
 			cancel()
 		}()
 
