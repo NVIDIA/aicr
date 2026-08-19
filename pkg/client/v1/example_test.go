@@ -178,11 +178,14 @@ func Example_committedConfig() {
 //
 // So SUPPLY every dimension yourself, then use WithSnapshotCriteriaRelaxation
 // to say which ones the user actually typed. Below, intent was typed and
-// service and accelerator were derived, so only those two may be relaxed.
+// service and os were derived, so only those two may be relaxed.
 //
-// Relaxation is unreachable if you name every dimension you supplied: the
-// coverage post-condition only reports dimensions you SPECIFIED, and a
-// specified-and-stated dimension is never cleared.
+// These values are chosen so relaxation genuinely fires: no kind overlay
+// states an os, so the derived os comes back uncovered and is cleared, while
+// the stated intent is protected. Two ways to make the policy inert, both
+// silent: name every dimension you supplied (a specified-and-stated dimension
+// is never cleared), or leave dimensions unset (the coverage post-condition
+// only reports dimensions you SPECIFIED, so an unset one is never uncovered).
 func Example_resolveFromSnapshot() {
 	ctx := context.Background()
 
@@ -201,9 +204,9 @@ func Example_resolveFromSnapshot() {
 	}
 
 	criteria := &aicr.Criteria{
-		Service:     "eks",      // derived: read off the snapshot
-		Accelerator: "h100",     // derived
-		Intent:      "training", // stated: the user asked for this
+		Service: "kind",      // derived: read off the snapshot
+		OS:      "ubuntu",    // derived, and uncovered by every kind overlay
+		Intent:  "inference", // stated: the user asked for this
 	}
 
 	result, err := client.ResolveRecipeFromSnapshotWithOptions(ctx, criteria, snap,
@@ -213,9 +216,9 @@ func Example_resolveFromSnapshot() {
 		return
 	}
 
-	// Non-empty only when the first attempt failed coverage on a derived
-	// dimension and the retry succeeded: the recipe is broader than asked for.
-	// Intent can never appear here — it was declared stated.
+	// Prints "relaxed os" for the criteria above: no kind overlay distinguishes
+	// ubuntu, so the derived os is cleared and the retry succeeds. Intent can
+	// never appear here — it was declared stated.
 	for _, dim := range result.RelaxedDimensions {
 		fmt.Printf("relaxed %s; resolved recipe is broader than requested\n", dim)
 	}
