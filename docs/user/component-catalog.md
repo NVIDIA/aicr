@@ -210,6 +210,8 @@ spec:
   env:
     - name: NIM_MODEL_NAME
       value: hf://Qwen/Qwen3-0.6B                        # ungated model
+    - name: NIM_SERVED_MODEL_NAME
+      value: Qwen/Qwen3-0.6B                             # the OpenAI-API `model` id
 ```
 
 The `HF_TOKEN` key must exist in the secret — that reference is not optional — but an empty value is sufficient for an ungated model. A gated Hugging Face repository needs a real token here.

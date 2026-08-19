@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 # NIM Service — credential-free inference via a Hugging Face model.
 # Serves an ungated Hugging Face model through NIM without any NGC credential:
 # no NGC_API_KEY and no registry pull secret.
@@ -21,18 +20,25 @@
 #   - NIM_MODEL_NAME uses an hf:// URI, which puts the operator on its Hugging
 #     Face path. There it marks NGC_API_KEY optional and injects HF_TOKEN from
 #     the same authSecret, so the secret need not carry an NGC key at all.
-#   - Model-specific NIM repositories (nim/meta/*) serve anonymous registry
-#     tokens, so no pullSecrets are required. The generic Multi-LLM image
-#     nvcr.io/nim/nvidia/llm-nim is gated and would need one.
+#   - This repository (nim/meta/llama-3.1-8b-instruct) serves anonymous
+#     registry tokens, so no pullSecrets are required. Availability is
+#     per-repository, not namespace-wide: verify any other image before
+#     assuming it pulls anonymously. The generic Multi-LLM image
+#     nvcr.io/nim/nvidia/llm-nim is gated and does need a pull secret.
 #
 # spec.authSecret is required by the NIMService schema, so the secret must
 # exist and must contain an HF_TOKEN key. An empty value is sufficient for an
 # ungated model; a gated Hugging Face repository needs a real token.
 #
 # Off-label combination: this is a Llama-specific NIM image serving a Hugging
-# Face model it was not built for. The container runs its own profile
-# (model_tag meta/llama-3.1-8b-instruct) against the downloaded weights, which
-# works and is verified below, but it is not the image's advertised use. The
+# Face model it was not built for. The image keeps its own profile identity
+# (logs report model_tag meta/llama-3.1-8b-instruct) while vLLM serves the
+# downloaded Hugging Face weights. It works, but it is not the image's
+# advertised use, and "verified" below means the service loads and returns a
+# completion -- a liveness check. An off-label pairing can still apply the
+# wrong chat template or tokenizer and degrade output quality silently, so
+# spot-check generations before relying on this for anything but a smoke
+# test. The
 # image intended for arbitrary hf:// models is nvcr.io/nim/nvidia/llm-nim,
 # which is a gated repository and therefore needs an NGC pull secret --
 # choosing it trades the credential-free property for a supported pairing.
@@ -93,6 +99,7 @@ spec:
     limits:
       nvidia.com/gpu: 1
   nodeSelector:
+    # Replace gpuworker1 with your own GPU pool's agentpool label.
     agentpool: gpuworker1
   tolerations:
     - key: nvidia.com/gpu

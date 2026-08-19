@@ -40,7 +40,6 @@ Deployable manifests used by the demos above and by conformance evidence collect
 | [workloads/inference/vllm-metrics-test.yaml](workloads/inference/vllm-metrics-test.yaml) | Standalone vLLM server with a Prometheus ServiceMonitor, used for AI Service Metrics evidence collection; no credential required |
 | [workloads/training/gke-nccl-test-tcpxo.yaml](workloads/training/gke-nccl-test-tcpxo.yaml) | NCCL all-reduce bandwidth test for GKE TCPXO fabric |
 
-
 ## Recording Test Runs
 
 Use the `script` command to capture a terminal session for sharing or archival:
