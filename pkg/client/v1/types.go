@@ -326,9 +326,29 @@ type RecipeRequest struct {
 type RecipeResolveOption func(*recipeResolveConfig)
 
 type recipeResolveConfig struct {
-	profile           string
-	accountingMode    *recipe.AccountingMode
-	accountingModeErr error
+	profile        string
+	accountingMode *recipe.AccountingMode
+
+	// relaxDerived records that WithSnapshotCriteriaRelaxation was passed.
+	// Kept separate from stated because an empty stated set is meaningful
+	// (every dimension derived, all relaxable) and must not read as "option
+	// absent".
+	relaxDerived bool
+	stated       statedDimensionSet
+
+	// optErr holds the first validation failure from any option. Options are
+	// applied in a loop with no error return, so a bad argument is recorded
+	// here and surfaced by resolveRecipeConfig before the resolve runs.
+	optErr error
+}
+
+// recordOptErr keeps the first option validation failure. Later failures are
+// dropped so the reported error names the argument the caller should fix first
+// rather than whichever option happened to be applied last.
+func (cfg *recipeResolveConfig) recordOptErr(err error) {
+	if cfg.optErr == nil {
+		cfg.optErr = err
+	}
 }
 
 // WithProfile selects a name=value configuration profile for a criteria- or
@@ -347,7 +367,7 @@ func WithAccountingMode(mode string) RecipeResolveOption {
 	return func(cfg *recipeResolveConfig) {
 		parsed, err := recipe.ParseAccountingMode(mode)
 		if err != nil {
-			cfg.accountingModeErr = err
+			cfg.recordOptErr(err)
 			return
 		}
 		cfg.accountingMode = &parsed
@@ -380,6 +400,24 @@ type RecipeResult struct {
 	// SelectedProfile is present when the resolved composition declares a
 	// configuration profile.
 	SelectedProfile *SelectedProfile
+
+	// RelaxedDimensions lists the criteria dimensions cleared by
+	// WithSnapshotCriteriaRelaxation because no applied overlay
+	// distinguished the derived value, in the order the coverage failure
+	// reported them. A non-empty value means the resolved recipe is BROADER
+	// than the criteria originally requested.
+	//
+	// It is non-empty only when the first attempt failed coverage on derived
+	// dimensions AND the retry succeeded. Every other outcome — the option was
+	// not passed, the first attempt succeeded, relaxation was refused, or the
+	// retry itself failed — leaves it empty or returns no RecipeResult at all.
+	// So this field reports what a successful resolve gave up; it is never how
+	// a caller detects a failure, which is always the returned error.
+	//
+	// The CLI surfaces the same fact as a slog.Warn per dimension; this is
+	// the programmatic form, for callers that need to branch on it or report
+	// it to their own users.
+	RelaxedDimensions []CriteriaDimension
 
 	// internal holds the upstream pkg/recipe.RecipeResult so
 	// BundleComponents can call its GetValuesForComponent /

@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,22 +25,48 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// uncoveredDims extracts the dimension names from a criteria-coverage failure
+// (pkg/recipe/coverage.go). Duplicated here rather than reached for in the
+// facade: the CLI no longer parses this payload — it only needs to confirm the
+// error that surfaced is the coverage one, naming the dimension it expects.
+func uncoveredDims(t *testing.T, err error) []string {
+	t.Helper()
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is not structured: %v", err)
+	}
+	entries, ok := se.Context["uncovered"].([]map[string]any)
+	if !ok {
+		t.Fatalf("error carries no uncovered context: %v", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if name, ok := e["dimension"].(string); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
 
 // These tests pin the touched-map production invariant behind snapshot
 // relaxation (issue #1542, PR #1784 review): applyCriteriaOverrides and
 // applyCriteriaFromConfig MUST mark every coverage dimension they set, and
-// only those. relaxSnapshotDerivedCoverage treats an unmarked dimension as
-// snapshot-derived and silently clears it on coverage failure — so a dropped
-// or mis-keyed markCriteriaTouched call would let a user-stated dimension be
-// relaxed away, shipping a recipe for different criteria than requested.
+// only those. The facade's WithSnapshotCriteriaRelaxation treats an unmarked
+// dimension as snapshot-derived and silently clears it on coverage failure —
+// so a dropped or mis-keyed markCriteriaTouched call would let a user-stated
+// dimension be relaxed away, shipping a recipe for different criteria than
+// requested.
 
 // assertTouched fails unless touched contains exactly want.
-func assertTouched(t *testing.T, touched map[string]bool, want ...string) {
+func assertTouched(t *testing.T, touched map[aicr.CriteriaDimension]bool, want ...aicr.CriteriaDimension) {
 	t.Helper()
-	got := make([]string, 0, len(touched))
+	got := make([]aicr.CriteriaDimension, 0, len(touched))
 	for dim, marked := range touched {
 		if marked {
 			got = append(got, dim)
@@ -56,17 +83,17 @@ func TestApplyCriteriaOverridesMarksTouched(t *testing.T) {
 	tests := []struct {
 		name        string
 		args        []string
-		wantTouched []string
+		wantTouched []aicr.CriteriaDimension
 	}{
-		{"service flag marks service", []string{"cmd", "--service", "eks"}, []string{coverageDimService}},
-		{"accelerator flag marks accelerator", []string{"cmd", "--accelerator", "h100"}, []string{coverageDimAccelerator}},
-		{"intent flag marks intent", []string{"cmd", "--intent", "training"}, []string{coverageDimIntent}},
-		{"os flag marks os", []string{"cmd", "--os", "ubuntu"}, []string{coverageDimOS}},
-		{"platform flag marks platform", []string{"cmd", "--platform", "kubeflow"}, []string{coverageDimPlatform}},
+		{"service flag marks service", []string{"cmd", "--service", "eks"}, []aicr.CriteriaDimension{aicr.DimensionService}},
+		{"accelerator flag marks accelerator", []string{"cmd", "--accelerator", "h100"}, []aicr.CriteriaDimension{aicr.DimensionAccelerator}},
+		{"intent flag marks intent", []string{"cmd", "--intent", "training"}, []aicr.CriteriaDimension{aicr.DimensionIntent}},
+		{"os flag marks os", []string{"cmd", "--os", "ubuntu"}, []aicr.CriteriaDimension{aicr.DimensionOS}},
+		{"platform flag marks platform", []string{"cmd", "--platform", "kubeflow"}, []aicr.CriteriaDimension{aicr.DimensionPlatform}},
 		{
 			"all five flags mark all five",
 			[]string{"cmd", "--service", "eks", "--accelerator", "h100", "--intent", "training", "--os", "ubuntu", "--platform", "kubeflow"},
-			[]string{coverageDimService, coverageDimAccelerator, coverageDimIntent, coverageDimOS, coverageDimPlatform},
+			[]aicr.CriteriaDimension{aicr.DimensionService, aicr.DimensionAccelerator, aicr.DimensionIntent, aicr.DimensionOS, aicr.DimensionPlatform},
 		},
 		{"nodes flag marks nothing (exempt from coverage)", []string{"cmd", "--nodes", "8"}, nil},
 		{"no flags mark nothing", []string{"cmd"}, nil},
@@ -74,7 +101,7 @@ func TestApplyCriteriaOverridesMarksTouched(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			touched := map[string]bool{}
+			touched := map[aicr.CriteriaDimension]bool{}
 			testCmd := &cli.Command{
 				Name: "test",
 				Flags: []cli.Flag{
@@ -101,17 +128,17 @@ func TestApplyCriteriaFromConfigMarksTouched(t *testing.T) {
 	tests := []struct {
 		name        string
 		criteria    *appcfg.CriteriaSpec
-		wantTouched []string
+		wantTouched []aicr.CriteriaDimension
 	}{
-		{"service marks service", &appcfg.CriteriaSpec{Service: "eks"}, []string{coverageDimService}},
-		{"accelerator marks accelerator", &appcfg.CriteriaSpec{Accelerator: "h100"}, []string{coverageDimAccelerator}},
-		{"intent marks intent", &appcfg.CriteriaSpec{Intent: "training"}, []string{coverageDimIntent}},
-		{"os marks os", &appcfg.CriteriaSpec{OS: "ubuntu"}, []string{coverageDimOS}},
-		{"platform marks platform", &appcfg.CriteriaSpec{Platform: "kubeflow"}, []string{coverageDimPlatform}},
+		{"service marks service", &appcfg.CriteriaSpec{Service: "eks"}, []aicr.CriteriaDimension{aicr.DimensionService}},
+		{"accelerator marks accelerator", &appcfg.CriteriaSpec{Accelerator: "h100"}, []aicr.CriteriaDimension{aicr.DimensionAccelerator}},
+		{"intent marks intent", &appcfg.CriteriaSpec{Intent: "training"}, []aicr.CriteriaDimension{aicr.DimensionIntent}},
+		{"os marks os", &appcfg.CriteriaSpec{OS: "ubuntu"}, []aicr.CriteriaDimension{aicr.DimensionOS}},
+		{"platform marks platform", &appcfg.CriteriaSpec{Platform: "kubeflow"}, []aicr.CriteriaDimension{aicr.DimensionPlatform}},
 		{
 			"all five fields mark all five",
 			&appcfg.CriteriaSpec{Service: "eks", Accelerator: "h100", Intent: "training", OS: "ubuntu", Platform: "kubeflow"},
-			[]string{coverageDimService, coverageDimAccelerator, coverageDimIntent, coverageDimOS, coverageDimPlatform},
+			[]aicr.CriteriaDimension{aicr.DimensionService, aicr.DimensionAccelerator, aicr.DimensionIntent, aicr.DimensionOS, aicr.DimensionPlatform},
 		},
 		{"nodes marks nothing (exempt from coverage)", &appcfg.CriteriaSpec{Nodes: 8}, nil},
 		{"empty criteria marks nothing", &appcfg.CriteriaSpec{}, nil},
@@ -120,7 +147,7 @@ func TestApplyCriteriaFromConfigMarksTouched(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			touched := map[string]bool{}
+			touched := map[aicr.CriteriaDimension]bool{}
 			cfg := &appcfg.AICRConfig{
 				Spec: appcfg.Spec{Recipe: &appcfg.RecipeSpec{Criteria: tt.criteria}},
 			}
@@ -195,7 +222,7 @@ measurements:
 
 // TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed drives the full CLI path
 // (flag parse → applyCriteriaOverrides marks touched → coverage failure →
-// relaxSnapshotDerivedCoverage refuses): a user-stated --os on a snapshot
+// the facade's relaxation refuses): a user-stated --os on a snapshot
 // whose overlay tree cannot cover it must propagate the coverage error, not
 // be silently relaxed like a fingerprint-derived value.
 func TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed(t *testing.T) {
@@ -208,11 +235,51 @@ func TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected coverage error for user-stated --os rhel on the kind overlay tree, got success — was the stated dimension silently relaxed?")
 	}
-	if uncovered := uncoveredCoverageDimensions(err); !slices.Equal(uncovered, []string{coverageDimOS}) {
-		t.Fatalf("uncoveredCoverageDimensions = %v, want [%s]; error: %v", uncovered, coverageDimOS, err)
+	if uncovered := uncoveredDims(t, err); !slices.Equal(uncovered, []string{string(aicr.DimensionOS)}) {
+		t.Fatalf("uncovered dimensions = %v, want [%s]; error: %v", uncovered, aicr.DimensionOS, err)
 	}
 	if !strings.Contains(err.Error(), "os 'rhel'") {
 		t.Errorf("error should name the stated os value: %v", err)
+	}
+}
+
+// constraintFailingKindSnapshotYAML fingerprints to service=kind on a
+// Kubernetes version below the kind overlay's `K8s.server.version >= 1.25`
+// constraint, so the only overlay covering service=kind is excluded by
+// constraint evaluation rather than absent from the catalog.
+const constraintFailingKindSnapshotYAML = `kind: Snapshot
+measurements:
+  - type: K8s
+    subtypes:
+      - subtype: node
+        data:
+          provider: kind
+      - subtype: server
+        data:
+          version: "1.20.0"
+`
+
+// TestRecipeCmd_Snapshot_ConstraintFailureNotRelaxed drives the full CLI path
+// for the fail-open direction: `aicr recipe --snapshot` against a cluster whose
+// Kubernetes version fails the matching overlay's constraint must report that
+// failure, not relax the derived service and emit the generic fallback recipe
+// at exit 0.
+func TestRecipeCmd_Snapshot_ConstraintFailureNotRelaxed(t *testing.T) {
+	snapPath := writeYAML(t, "snapshot.yaml", constraintFailingKindSnapshotYAML)
+	outPath := filepath.Join(t.TempDir(), "recipe.yaml")
+
+	err := newRootCmd().Run(context.Background(), []string{
+		name, "recipe", "--snapshot", snapPath, "-o", outPath,
+	})
+	if err == nil {
+		t.Fatal("recipe --snapshot succeeded on a cluster failing the kind overlay's version " +
+			"constraint; the constraint failure was relaxed away into a generic recipe")
+	}
+	if !strings.Contains(err.Error(), "kind") {
+		t.Errorf("error should name the constraint-excluded service: %v", err)
+	}
+	if _, statErr := os.Stat(outPath); statErr == nil {
+		t.Error("a recipe file was written despite the constraint failure")
 	}
 }
 

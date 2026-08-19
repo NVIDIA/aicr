@@ -35,4 +35,5 @@ const (
 	keyService    = "service"
 	keyProfile    = "profile"
 	keyNodes      = "nodes"
+	keyParam      = "param"
 )

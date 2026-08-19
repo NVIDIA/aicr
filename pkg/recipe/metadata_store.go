@@ -335,6 +335,22 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 		} else {
 			store.Overlays[metadata.Metadata.Name] = &metadata
 			store.OverlaySources[metadata.Metadata.Name] = provider.Source(path)
+			// Fail closed when an external overlay gates on nodes: nodes no
+			// longer participates in Criteria.Matches() (#1781), so the
+			// overlay would silently match every query and override configs
+			// it was never intended to reach. This fires at catalog load time
+			// (not request time) and surfaces as ErrCodeInvalidRequest so
+			// callers can distinguish it from internal errors. Operators must
+			// either remove criteria.nodes from their overlay or strip it to zero.
+			isExternal := provider.Source(path) == CatalogSourceExternal
+			hasNodes := metadata.Spec.Criteria != nil && metadata.Spec.Criteria.Nodes != 0
+			if isExternal && hasNodes {
+				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("external overlay %q sets criteria.nodes=%d which is no longer used for overlay selection (#1781): "+
+						"nodes is metadata-only and the overlay would silently match every query; "+
+						"remove or zero criteria.nodes in your --data catalog",
+						metadata.Metadata.Name, metadata.Spec.Criteria.Nodes))
+			}
 			// Stage this overlay's criteria for registration; the
 			// actual call to seedCriteriaRegistry is deferred until
 			// after every overlay parses cleanly, the base recipe is

@@ -24,9 +24,9 @@
 #   kubectl create ns nim-workload
 #   kubectl create secret docker-registry ngc-pull-secret \
 #     --docker-server=nvcr.io --docker-username='$oauthtoken' \
-#     --docker-password="$NGC_CLI_API_KEY" -n nim-workload
+#     --docker-password="$NGC_API_KEY" -n nim-workload
 #   kubectl create secret generic ngc-api-secret \
-#     --from-literal=NGC_API_KEY="$NGC_CLI_API_KEY" -n nim-workload
+#     --from-literal=NGC_API_KEY="$NGC_API_KEY" -n nim-workload
 #
 # Deploy:
 #   kubectl apply -f nimservice-llama-3-2-1b.yaml

@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/config"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 func newValid() *config.AICRConfig {
@@ -148,41 +149,11 @@ func TestValidate_Errors(t *testing.T) {
 			},
 			wantSub: "mutually exclusive",
 		},
-		{
-			name: "invalid service",
-			mutate: func(c *config.AICRConfig) {
-				c.Spec.Recipe.Criteria.Service = "bogus"
-			},
-			wantSub: "criteria.service",
-		},
-		{
-			name: "invalid accelerator",
-			mutate: func(c *config.AICRConfig) {
-				c.Spec.Recipe.Criteria.Accelerator = "h99999"
-			},
-			wantSub: "criteria.accelerator",
-		},
-		{
-			name: "invalid intent",
-			mutate: func(c *config.AICRConfig) {
-				c.Spec.Recipe.Criteria.Intent = "mining"
-			},
-			wantSub: "criteria.intent",
-		},
-		{
-			name: "invalid os",
-			mutate: func(c *config.AICRConfig) {
-				c.Spec.Recipe.Criteria.OS = "windows"
-			},
-			wantSub: "criteria.os",
-		},
-		{
-			name: "invalid platform",
-			mutate: func(c *config.AICRConfig) {
-				c.Spec.Recipe.Criteria.Platform = "spark"
-			},
-			wantSub: "criteria.platform",
-		},
+		// Criteria membership cases deliberately live in
+		// TestValidate_DefersCriteriaMembership and
+		// TestResolveCriteria_InvalidEnums instead. Validate() no longer
+		// checks them: membership belongs to a per-DataProvider registry
+		// that does not exist at load time.
 		{
 			name: "negative nodes",
 			mutate: func(c *config.AICRConfig) {
@@ -369,5 +340,43 @@ func TestValidate_RecipeBundleHandoff(t *testing.T) {
 				t.Errorf("error %q should contain %q", err.Error(), tt.wantErrSub)
 			}
 		})
+	}
+}
+
+// TestValidate_DefersCriteriaMembership pins both halves of the two-phase
+// contract introduced when external catalogs were found unusable from a config
+// document.
+//
+// Phase one (Validate) must ACCEPT a value the embedded catalog does not know:
+// a value contributed by spec.recipe.data or --data only exists once that
+// provider is built, so rejecting it here made the external-catalog path
+// unreachable — LoadConfig failed before a provider could be constructed.
+//
+// Phase two (ResolveCriteriaWithRegistry) must still REJECT it, or the
+// deferral would have traded a false rejection for silent acceptance.
+func TestValidate_DefersCriteriaMembership(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.AICRConfig{
+		APIVersion: header.GroupVersion,
+		Kind:       "AICRConfig",
+		Metadata:   config.Metadata{Name: "t"},
+		Spec: config.Spec{
+			Recipe: &config.RecipeSpec{
+				Data:     "/etc/aicr/recipes",
+				Criteria: &config.CriteriaSpec{Service: "ncp-review"},
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate rejected an external-catalog value; the provider-aware path is unreachable: %v", err)
+	}
+
+	// Against the embedded registry the value is still unknown, so consumption
+	// fails closed. A caller holding the external provider's registry passes
+	// it here instead and the same call succeeds.
+	if _, err := cfg.Spec.Recipe.ResolveCriteriaWithRegistry(nil); err == nil {
+		t.Error("ResolveCriteriaWithRegistry accepted an unknown value; deferral must not mean silent acceptance")
 	}
 }

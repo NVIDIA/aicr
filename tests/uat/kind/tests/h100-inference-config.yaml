@@ -57,13 +57,11 @@ spec:
       target: ./bundle
     deployment:
       deployer: helmfile
-      # NVSentinel remedy for Kind (host-installed driver via nvkind:
-      # driver.enabled=false, so no driver pod exists for the labeler to
-      # observe). Bundling without it is a blocking error
-      # (CheckNVSentinelDriverLabelDetectable / issue #2175); mirrors the
-      # kind runtime-install lane (generate-bundle.sh).
-      set:
-        - nv-sentinel:labeler.assumeDriverInstalled=true
+      # No NVSentinel override: the kind overlay assigns
+      # labeler.assumeDriverInstalled itself (#2181), so this lane exercises
+      # the recipe supplying the remedy unaided. Kind is host-installed via
+      # nvkind (driver.enabled=false), so no driver pod exists for the
+      # labeler to observe and the value is required.
     scheduling:
       acceleratedNodeTolerations:
         - nvidia.com/gpu=present:NoSchedule

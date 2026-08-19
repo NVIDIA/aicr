@@ -173,7 +173,13 @@ fast-path `switch` in `Parse<X>`. Adding a new value to a Go enum
 the count of non-`any`, non-empty fields. The current `Specificity()`
 in `criteria.go` counts six fields: `service`, `accelerator`,
 `intent`, `os`, `platform`, `nodes`. Overlays are sorted by
-specificity ascending, so less-specific overlays merge first.
+specificity ascending, so less-specific overlays merge first. Note:
+`nodes` is included in `Specificity()` to allow nodes-only CLI queries
+to pass the guard, but it does **not** participate in `Matches()` — no
+overlay in the **embedded catalog** gates on node count (see #1781).
+External `--data` catalogs that set `criteria.nodes` on an overlay are
+rejected at load time (`ErrCodeInvalidRequest`); operators must remove
+or zero that field before upgrading.
 
 **Matching is asymmetric.** Recipe-side `any` is a wildcard (matches
 anything in the query); query-side `any` is *not* a wildcard (matches
@@ -460,9 +466,15 @@ The error's `uncovered` context entries (`dimension`, `requestedValue`,
 `validCompletions`) are computed from the maximal set of overlays that carry
 the requested value without conflicting with any other stated dimension —
 see `completionTuplesFor` / `minimalTuples`. `nodes` is deliberately excluded
-from `coverageDimensions`: no overlay gates on node count, so covering it
-would reject every `--nodes` query. It remains a matching dimension (present
-in `Criteria.Matches`) but carries no coverage guarantee — it is advisory.
+from `coverageDimensions`: no overlay in the embedded catalog gates on
+node count, so covering it would reject every `--nodes` query. It does
+not participate in `Criteria.Matches()` (removed in #1781), but is
+retained in `Criteria.Specificity()` so that nodes-only CLI queries pass
+the minimum-specificity guard. It carries no coverage guarantee — it is
+advisory metadata. External `--data` catalogs that set `criteria.nodes`
+on any overlay are rejected at load time (`ErrCodeInvalidRequest`) to
+prevent silent match-all behaviour; operators must remove or zero that
+field before upgrading.
 
 **Composition with the OS guard.** `requireOSIfNeeded` (the joint
 service+accelerator OS gate) is a separate, pre-existing check and runs
@@ -487,21 +499,53 @@ non-`NotFound` error through `aicrerrors.PropagateOrWrap(..., ErrCodeInternal,
 ...)` before returning it — an evaluator that hasn't adopted `pkg/errors`
 still surfaces a coded error instead of an uncoded 500 at the server layer.
 
-**The engine stays strict; the CLI's snapshot path relaxes derived-only
+**The engine stays strict; the SDK's snapshot path can relax derived-only
 failures.** Everything above describes `pkg/recipe`'s behavior, which never
 relaxes the post-condition — a coverage failure there is always terminal.
-The CLI's `--snapshot` flow (`pkg/cli/query.go`) layers a caller-side
-retry on top: `service`, `accelerator`, and `os` can be derived from the
-snapshot fingerprint rather than stated by the user (`intent` and
-`platform` are always user-stated — the fingerprint never derives them).
-If a coverage error's uncovered dimensions are *all* fingerprint-derived
-(none came from `--config` or a CLI flag), the CLI clears those dimensions
-to unstated and retries resolution once, logging a warning per relaxed
-dimension; if any uncovered dimension was user-stated, the error still
-propagates unchanged. This lets an overlay tree that is deliberately
-agnostic to a dimension (e.g. Kind's OS-agnostic overlays) tolerate a
-snapshot that still reports a concrete value for it, without weakening the
-post-condition for anyone who asked for that dimension explicitly.
+The relax-and-retry lives one layer up, in `pkg/client/v1`
+(`relax.go`), behind an opt-in resolve option:
+
+```go
+result, err := client.ResolveRecipeFromSnapshotWithOptions(ctx, criteria, snap,
+    aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
+```
+
+`service`, `accelerator`, and `os` can be derived from the snapshot
+fingerprint rather than stated by the user (`intent` and `platform` are
+always user-stated — the fingerprint never derives them). The option's
+arguments name the dimensions the *caller* stated; everything else is
+treated as derived. If a coverage error's uncovered dimensions are *all*
+safely relaxable, the facade clears them to unstated and retries resolution
+once, logging a warning per relaxed dimension and reporting them in
+`pkg/client/v1.RecipeResult.RelaxedDimensions` — the facade's result type,
+not the resolver's `RecipeResult` documented under
+[Observable RecipeResult Surfaces](#observable-reciperesult-surfaces) below.
+
+**Not every uncovered dimension is relaxable**, and the distinction is why
+`verifyCriteriaCoverage` records `constraintExcluded` per entry. A dimension
+no overlay states at all is safe to clear — nothing in the recipe
+distinguishes the detected value. A dimension whose only provider was
+removed by constraint evaluation is not: clearing it converts a real
+incompatibility (the cluster failed that overlay's constraints) into a
+broader recipe that resolves at exit 0. The facade refuses in that case, and
+refuses again if clearing would leave no stated *coverage* dimension, which
+would match every overlay and resolve the generic fallback — the same
+fail-open as issue #1888. That check counts only the five coverage
+dimensions, not `Specificity()`, because `nodes` scores a specificity point
+while participating in no overlay match (#1781). A stated dimension is never
+relaxed either way.
+
+This lets an overlay tree that is deliberately agnostic to a dimension
+(e.g. Kind's OS-agnostic overlays) tolerate a snapshot that still reports a
+concrete value for it, without weakening the post-condition for anyone who
+asked for that dimension explicitly.
+
+Omitting the option keeps the strict behavior, so the coverage
+post-condition is unchanged for every caller that does not opt in — the
+REST recipe endpoint among them. `pkg/cli/query.go` passes the option and
+supplies the stated set from its `touched` map; declaring which dimensions
+a user typed is the one part of the policy that has to stay in the CLI,
+since only that layer knows a flag was set (issue #2027).
 
 ## Determinism
 

@@ -841,33 +841,16 @@ generate_bundle() {
         )
     fi
 
-    # NVSentinel remedies, mirroring the bundle-time gates' platform
-    # matrix (CheckNVSentinelDriverLabelDetectable / issue #2175,
-    # CheckNVSentinelRuntimeClassCoherence / issue #2176). KWOK
-    # recipes are criteria-only, so profiles sit at their defaults:
-    # AKS azure-managed, GKE-COS gke-default — both affected, as are
-    # OKE and Kind (host-installed drivers, no driver pod for the
-    # labeler to observe). Passing the documented remedy here is the
-    # detect-don't-fix model: the caller supplies what an operator
-    # would; the recipes stay unchanged (#2179 / #2177).
-    if grep -qx "nvsentinel" <<< "$bundled_components"; then
-        case "$service" in
-            aks)
-                conditional_sets+=(
-                    --set "nv-sentinel:labeler.assumeDriverInstalled=true"
-                    --set "nv-sentinel:metadata-collector.runtimeClassName=nvidia-container-runtime"
-                )
-                ;;
-            oke|kind)
-                conditional_sets+=(--set "nv-sentinel:labeler.assumeDriverInstalled=true")
-                ;;
-            gke)
-                if [[ "$os" == "cos" ]]; then
-                    conditional_sets+=(--set "nv-sentinel:labeler.assumeDriverInstalled=true")
-                fi
-                ;;
-        esac
-    fi
+    # No NVSentinel --set remedies here. The recipes assign
+    # labeler.assumeDriverInstalled and, on AKS,
+    # metadata-collector.runtimeClassName themselves — from the gpuStack
+    # profile on AKS and GKE-COS, at overlay level on OKE and Kind
+    # (#2181). KWOK recipes are criteria-only, so those profiles sit at
+    # their affected defaults (AKS azure-managed, GKE-COS gke-default),
+    # which makes these lanes the check that the recipes satisfy both
+    # blocking gates (CheckNVSentinelDriverLabelDetectable / #2175,
+    # CheckNVSentinelRuntimeClassCoherence / #2176) unaided. Re-adding
+    # the overrides would let the lanes pass without proving that.
 
     local bundle_output
     case "$DEPLOYER" in

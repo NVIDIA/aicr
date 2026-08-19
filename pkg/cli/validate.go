@@ -185,7 +185,7 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 // uses, rather than a second hand-rolled snapshotter.AgentConfig, so the facade
 // mirror is exercised here too. Output is left empty: validate consumes the
 // snapshot in memory and never writes it out.
-func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *validateAgentConfig) (*snapshotter.Snapshot, error) {
+func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *validateAgentConfig) (*aicr.Snapshot, error) {
 	snap, err := client.CollectSnapshot(ctx, cfg.toAgentConfig())
 	if err != nil {
 		// PropagateOrWrap: a structured error (e.g. ErrCodeInvalidRequest
@@ -193,7 +193,11 @@ func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *val
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to capture snapshot")
 	}
 
-	return snap.Unwrap(), nil
+	// Returned in the facade shape rather than unwrapped: both snapshot
+	// sources in this command now produce *aicr.Snapshot, so nothing
+	// downstream has to convert. Unwrapping here and re-wrapping at the
+	// ValidateState call also discarded Snapshot.Raw.
+	return snap, nil
 }
 
 // validationConfig holds all parameters for a validation run.
@@ -245,7 +249,7 @@ func runValidation(
 	ctx context.Context,
 	client *aicr.Client,
 	rec *aicr.RecipeResult,
-	snap *snapshotter.Snapshot,
+	snap *aicr.Snapshot,
 	cfg validationConfig,
 ) error {
 
@@ -302,7 +306,7 @@ func runValidation(
 		opts = append(opts, aicr.WithValidationPhases(facadePhases...))
 	}
 
-	results, err := client.ValidateState(ctx, rec, aicr.WrapSnapshot(snap), opts...)
+	results, err := client.ValidateState(ctx, rec, snap, opts...)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "validation failed")
 	}
@@ -799,7 +803,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				return err
 			}
 
-			var snap *snapshotter.Snapshot
+			var snap *aicr.Snapshot
 
 			// --no-cluster means "do not touch the cluster". The agent-deploy
 			// branch below contradicts that (it creates a Job and captures a
@@ -813,7 +817,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			if snapshotFilePath != "" {
 				slog.Info("loading snapshot", "uri", snapshotFilePath)
-				snap, err = snapshotter.LoadFromFileWithKubeconfig(ctx, snapshotFilePath, kubeconfig)
+				snap, err = client.LoadSnapshot(ctx, snapshotFilePath, kubeconfig)
 				if err != nil {
 					return err
 				}
@@ -833,7 +837,10 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// binary, and the snapshot-producing binary report different
 			// release versions. Mixed-version artifacts can cause confusing
 			// validation failures; this does not fail the command.
-			warnVersionSkew(version, rec.Resolved().Metadata.Version, snap.Metadata["version"])
+			// Unwrap for the snapshot's producer version: Metadata is not
+			// projected onto the facade Snapshot, which carries only the
+			// fields the resolve and validate paths consume.
+			warnVersionSkew(version, rec.Resolved().Metadata.Version, snap.Unwrap().Metadata["version"])
 
 			// Warn when a requested phase has no checks defined in the recipe.
 			// The helper reads the full recipe's Validation section, which the

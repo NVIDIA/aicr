@@ -164,10 +164,26 @@ spec:
                 cpu: 250m
                 memory: 256Mi
 
-    # nvsentinel: reduce resources for local development
+    # nvsentinel: reduce resources for local development, and assume the
+    # host-installed driver.
+    #
+    # nvkind preinstalls the driver on the host (gpu-operator driver.enabled
+    # is false above), so there is no driver pod for the NVSentinel labeler
+    # to watch. Without assumeDriverInstalled the
+    # nvsentinel.dgxc.nvidia.com/driver.installed label is never applied and
+    # metadata-collector plus both syslog-health-monitor DaemonSets sit at
+    # zero desired pods — silently, with no error and no event (#2175).
+    #
+    # Kind has no gpuStack profile, so this value is overlay-level and is NOT
+    # profile-owned — same asymmetry as OKE (#2181). The NVSentinel
+    # driver-label bundle gate still rejects bundle-time and declared-dynamic
+    # changes that would recreate #2175, but a manual post-generation edit to
+    # the rendered Helm values is outside that guarantee.
     - name: nvsentinel
       type: Helm
       overrides:
+        labeler:
+          assumeDriverInstalled: true
         platformConnector:
           resources:
             requests:

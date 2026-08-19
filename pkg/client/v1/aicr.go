@@ -29,8 +29,23 @@
 //   - BundleComponents — resolve Helm values and stitched manifests for
 //     each component in a *RecipeResult.
 //   - CollectSnapshot — deploy the snapshotter Job and retrieve a *Snapshot.
+//   - LoadSnapshot — read a previously captured *Snapshot from a file,
+//     URL, or cm:// ConfigMap, for the common case where the snapshot
+//     already exists and no cluster is needed.
 //   - ValidateState — evaluate a resolved recipe against a snapshot,
 //     running deployment / conformance / performance phases.
+//   - LoadConfig — read and validate the AICRConfig a team commits, from a
+//     file or an HTTP(S) URL. WrapConfig lifts one already parsed elsewhere;
+//     it does no parsing itself. Either way the resulting Config DERIVES
+//     options (Config.BundleVerifyOptions, Config.RecipeSource,
+//     Config.RecipeCriteria, ...) rather than applying them: a Config never
+//     attaches to a Client and is never consulted implicitly, so caller
+//     precedence stays one readable line at the call site.
+//
+// Resolution behavior is tuned per call with RecipeResolveOption —
+// WithProfile, WithAccountingMode, and WithSnapshotCriteriaRelaxation (the
+// relax-and-retry policy behind `aicr recipe --snapshot`, which takes the
+// criteria dimensions the caller stated explicitly and may clear the rest).
 //
 // The supply-chain half covers both producing and checking artifacts:
 //
@@ -605,6 +620,9 @@ func (c *Client) resolveCriteria(
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectSnapshotOnlyOptions(cfg); err != nil {
+		return nil, err
+	}
 	return builder.BuildFromCriteriaWithProfile(ctx, criteria, cfg.profile, buildOpts...)
 }
 
@@ -626,10 +644,27 @@ func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, err
 			opt(cfg)
 		}
 	}
-	if cfg.accountingModeErr != nil {
-		return nil, cfg.accountingModeErr
+	if cfg.optErr != nil {
+		return nil, cfg.optErr
 	}
 	return cfg, nil
+}
+
+// rejectSnapshotOnlyOptions fails a criteria-only resolve that was handed an
+// option meaningful only on the snapshot path.
+//
+// WithSnapshotCriteriaRelaxation is rejected rather than ignored: with no
+// fingerprint every dimension is caller-supplied, so relaxing one would clear
+// a value the caller explicitly stated — and silently dropping the option
+// would leave the caller believing they had `--snapshot` semantics.
+func rejectSnapshotOnlyOptions(cfg *recipeResolveConfig) error {
+	if cfg.relaxDerived {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"WithSnapshotCriteriaRelaxation is valid only on the snapshot resolve path "+
+				"(ResolveRecipeFromSnapshot); a criteria-only resolve derives no dimensions, "+
+				"so every dimension is caller-stated and none may be relaxed")
+	}
+	return nil
 }
 
 // ResolveRecipeFromCriteria resolves a facade Criteria into a facade
@@ -728,16 +763,22 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 // shared resolve path: criteria outside the configured allowlist are rejected
 // before the recipe is built.
 //
-// The criteria-coverage post-condition (issue #1542) is STRICT here: every
-// stated criteria dimension must be honored by an applied overlay or
-// resolution fails with ErrCodeInvalidRequest carrying details.uncovered.
-// The CLI's `aicr recipe --snapshot` additionally relaxes dimensions that
-// were derived from the snapshot fingerprint (never user-stated ones) and
-// retries once — that relaxation is CLI-layer policy, implemented in pkg/cli
-// on top of this facade, because only the CLI knows which dimensions the
-// user explicitly stated. Callers replicating `--snapshot` behavior must
-// implement the same policy themselves (clear the uncovered dimensions they
-// derived rather than received, then retry).
+// The criteria-coverage post-condition (issue #1542) is STRICT by default
+// here: every stated criteria dimension must be honored by an applied overlay
+// or resolution fails with ErrCodeInvalidRequest carrying details.uncovered.
+//
+// To reproduce `aicr recipe --snapshot`, which additionally relaxes
+// dimensions derived from the snapshot fingerprint and retries once, pass
+// WithSnapshotCriteriaRelaxation and name the dimensions you received
+// explicitly:
+//
+//	result, err := client.ResolveRecipeFromSnapshotWithOptions(ctx, criteria, snap,
+//	    aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
+//
+// Only the caller knows which dimensions a user stated versus which it
+// derived, so the facade cannot infer that — but it does accept it as a
+// parameter and applies the policy itself. Dimensions actually cleared are
+// reported in RecipeResult.RelaxedDimensions.
 //
 // The same guards and synchronization as ResolveRecipeFromCriteria apply: nil
 // receiver, nil context, nil criteria, and nil snapshot are rejected with
@@ -838,8 +879,41 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	}
 	internal, err := builder.BuildFromCriteriaWithEvaluatorAndProfile(
 		ctx, internalCriteria, evaluator, resolveCfg.profile, buildOpts...)
+
+	// Relax-and-retry: when the caller opted in via
+	// WithSnapshotCriteriaRelaxation and the build failed the criteria-coverage
+	// post-condition on dimensions it DERIVED rather than stated, clear those
+	// and build once more. Both attempts share this call's timeout budget, so
+	// relaxation cannot extend the bound a caller set.
+	var relaxedDims []CriteriaDimension
 	if err != nil {
-		return nil, err
+		if !resolveCfg.relaxDerived {
+			return nil, err
+		}
+		relaxedCriteria, cleared, ok := relaxDerivedCoverage(err, internalCriteria, resolveCfg.stated)
+		if !ok {
+			// Not a coverage failure, or an uncovered dimension was
+			// caller-stated. Either way the original error stands.
+			return nil, err
+		}
+		// Re-fence the relaxed criteria. Relaxation only ever clears a
+		// dimension to "any", which ValidateCriteria always permits, so this
+		// cannot fail today — it is here so "every criteria the builder sees
+		// was allowlist-checked" holds locally, rather than depending on that
+		// property of pkg/recipe/allowlist.go staying true.
+		if allowErr := c.enforceAllowLists(relaxedCriteria); allowErr != nil {
+			return nil, allowErr
+		}
+		slog.Info("retrying recipe resolution with snapshot-derived criteria relaxed",
+			"criteria", relaxedCriteria.String())
+		internal, err = builder.BuildFromCriteriaWithEvaluatorAndProfile(
+			ctx, relaxedCriteria, evaluator, resolveCfg.profile, buildOpts...)
+		if err != nil {
+			// One retry only. The relaxed attempt's error is the useful one:
+			// it describes the resolve the caller actually ended up asking for.
+			return nil, err
+		}
+		relaxedDims = cleared
 	}
 	// Snapshot-driven post-processing: when the sampled GPU node already
 	// has the NVIDIA kernel driver loaded AND the resolved overlay
@@ -864,6 +938,7 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	result.RelaxedDimensions = relaxedDims
 	result.owner = c
 	return result, nil
 }
@@ -1258,11 +1333,11 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	// (severity: error) on a recipe resolved from a snapshot that observed
 	// no NVIDIA kernel driver. This path has no bundle-time --set
 	// overrides, so the bundler config is nil; validations that act solely
-	// on bundle-time flags no-op on a nil config. For the NVSentinel gates
-	// that is a documented boundary, closure owned by issue #2181: once
-	// the recipes own the remedy values, those gates are runnable here
-	// with no override channel and their nil-config no-op is to be
-	// removed (an acceptance criterion recorded on that issue).
+	// on bundle-time flags no-op on a nil config. The two NVSentinel gates
+	// used to be in that category and are no longer: since #2181 the
+	// recipes carry the driver-label and RuntimeClass values for every
+	// supported configuration, so both gates verify resolved values here
+	// with no override channel.
 	preflightWarnings, preflightErr := validations.RunComponentValidations(ctx, pinned, nil)
 	for _, warning := range preflightWarnings {
 		slog.Warn(warning, "source", "component-validation")

@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -47,6 +48,11 @@ type config struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
+
+	// AllowVendorCharts opts the server into honoring vendor-charts=true on
+	// bundle requests. Off by default; the bundle handler rejects the
+	// vendor path with 400 when disabled. Set via EnvAllowVendorCharts.
+	AllowVendorCharts bool
 }
 
 // parseConfig returns sensible defaults
@@ -54,7 +60,7 @@ func parseConfig() *config {
 	cfg := &config{
 		Name:            "server",
 		Version:         "undefined",
-		Address:         "",
+		Address:         defaults.ServerDefaultBindAddress,
 		Port:            defaults.ServerDefaultPort,
 		RateLimit:       defaults.ServerDefaultRateLimit,
 		RateLimitBurst:  defaults.ServerDefaultRateLimitBurst,
@@ -62,6 +68,12 @@ func parseConfig() *config {
 		WriteTimeout:    defaults.ServerWriteTimeout,
 		IdleTimeout:     defaults.ServerIdleTimeout,
 		ShutdownTimeout: defaults.ServerShutdownTimeout,
+	}
+
+	// Address override — empty string binds all interfaces, so operators
+	// must set this explicitly to expose beyond loopback.
+	if addr, ok := os.LookupEnv(defaults.EnvServerAddress); ok {
+		cfg.Address = addr
 	}
 
 	// Override with environment variables if set
@@ -86,5 +98,27 @@ func parseConfig() *config {
 		}
 	}
 
+	// Opt-in vendor-charts. Same helper used by Serve() when wiring the
+	// bundle handler, so both surfaces read exactly one env value.
+	cfg.AllowVendorCharts = allowVendorChartsFromEnv()
+
 	return cfg
+}
+
+// allowVendorChartsFromEnv parses defaults.EnvAllowVendorCharts. Missing,
+// empty, or unparseable values fail closed to false and warn — the safer
+// default matches the missing-env case exactly, so a typo in the env value
+// never silently enables the vendor path.
+func allowVendorChartsFromEnv() bool {
+	raw := os.Getenv(defaults.EnvAllowVendorCharts)
+	if raw == "" {
+		return false
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		slog.Warn("failed to parse allow-vendor-charts env var, staying off",
+			"var", defaults.EnvAllowVendorCharts, "value", raw, "error", err)
+		return false
+	}
+	return v
 }

@@ -142,11 +142,14 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	// Load and resolve --config before any verification work so a malformed
 	// spec.verify fails immediately, with spec-path attribution, rather than
 	// after a full verification pass.
-	cfg, err := loadCmdConfig(ctx, cmd)
+	cfg, err := loadFacadeConfig(ctx, cmd)
 	if err != nil {
 		return err
 	}
-	resolved, err := cfg.Verification().Resolve()
+	// Derive the config-supplied options through the facade, so an SDK caller
+	// reading the same document gets the same values. The flag overlay below
+	// stays here: only this layer knows whether a flag was explicitly set.
+	resolved, err := cfg.BundleVerifyOptions()
 	if err != nil {
 		return err
 	}
@@ -163,17 +166,22 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 			"source", "spec.verify.policy.minTrustLevel")
 	}
 
-	// Build verify options. Every field is CLI-flag-over-config, matching the
-	// precedence the other --config-aware commands use. The facade validates
-	// the identity pattern and the --insecure-ignore-tlog/--key pairing, so
-	// both rejections still happen before any verification work runs.
+	// Overlay the flags. Every field is CLI-flag-over-config, matching the
+	// precedence the other --config-aware commands use.
+	//
+	// Note the derivation above validated none of this: cfg.BundleVerifyOptions
+	// only projects spec.verify, and IgnoreTLog has no config field at all.
+	// Client.VerifyBundle is what rejects a bad identity pattern and an
+	// IgnoreTLog without a Key, before any verification work runs. The pairing
+	// check is repeated below purely to word the message in flags rather than
+	// struct fields.
 	opts := aicr.BundleVerifyOptions{
 		CertificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertificateIdentityRegexp),
 		Key:                       stringFlagOrConfig(cmd, "key", resolved.Key),
 		TrustRoot:                 stringFlagOrConfig(cmd, "trust-root", resolved.TrustRoot),
 		MinTrustLevel:             stringFlagOrConfig(cmd, "min-trust-level", resolved.MinTrustLevel),
 		RequireCreator:            stringFlagOrConfig(cmd, "require-creator", resolved.RequireCreator),
-		CLIVersionConstraint:      stringFlagOrConfig(cmd, "cli-version-constraint", resolved.VersionConstraint),
+		CLIVersionConstraint:      stringFlagOrConfig(cmd, "cli-version-constraint", resolved.CLIVersionConstraint),
 		IgnoreTLog:                cmd.Bool("insecure-ignore-tlog"),
 	}
 	if opts.IgnoreTLog && opts.Key == "" {

@@ -549,15 +549,30 @@ the working rubric ("absence prevents scheduling/running" for `core`,
 a workload platform" for a potential third class) to be confirmed with the
 first consumer before the registry classification lands.
 
-**Coordination with the proposed skippability property.**
-[#2181](https://github.com/NVIDIA/aicr/issues/2181) proposes a
-required-ness/skippability property in the same registry file this ADR's
-`class` field lands in, with a criterion adjacent to the `core` rubric.
-The two are distinct axes — `class` answers *which bundle owns a
-component*; skippability answers *whether it may be absent at all* — but
-they are correlated, and accreting them independently in
-`registry.yaml` would be a design smell. Whichever lands second must be
-designed against the other; #2181 already cross-references this ADR.
+**Component required-ness under standalone class artifacts.**
+[#2181](https://github.com/NVIDIA/aicr/issues/2181) as implemented adds no
+required-ness property to `registry.yaml`: it configures NVSentinel from the
+existing ADR-015 `gpuStack` profile, which pins that component's presence
+through the profile's existing synthetic presence marker. Consistent with
+the alternative rejected below, reselection still never adds or removes a
+component: NVSentinel is referenced by every value of the declaration. There
+is no `requirePresence` field and no registry-level skippability to
+coordinate the `class` field against.
+
+This ADR's v1 is unaffected, because it validates the complete resolved
+recipe before partitioning and partitions only for rendering. A component
+omitted from one class directory is still present in the verified bundle
+set — absent from a directory, not absent from the deployment — so
+profile-locked presence and the `class` cut do not interact.
+
+The two axes would meet only if a future revision emitted a class artifact
+as a **standalone** deployable rather than one member of a co-deployed set.
+Such an artifact would have to prove that every profile-required component
+it omits is supplied by a compatible sibling bundle — today's whole-union
+validation gives that for free, and a standalone artifact would not. That
+proof obligation,
+not a registry property, is the thing to design against if standalone class
+artifacts are ever pursued.
 
 ## Alternatives Considered
 

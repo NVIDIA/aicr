@@ -34,6 +34,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
+	"github.com/NVIDIA/aicr/validators/internal/gkenet"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -834,13 +835,14 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// For GKE, discover GPU NIC network names (cluster-specific prefixes).
 	// Skipped for a recipe-supplied runtime, which owns its own fabric wiring.
 	if customRuntime == "" && service == recipe.CriteriaServiceGKE {
-		gpuNICs, err := discoverGKEGPUNICNetworks(ctx.Ctx, dynamicClient)
+		gpuNICs, err := gkenet.DiscoverGPUNICNetworks(ctx.Ctx, dynamicClient)
 		if err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to discover GKE GPU NIC networks", err)
 		}
-		if len(gpuNICs) < 8 {
+		if len(gpuNICs) < gkenet.RequiredGPUNICNetworks {
 			return aicrErrors.New(aicrErrors.ErrCodeInternal,
-				fmt.Sprintf("expected 8 GPU NIC networks, found %d — cluster may not have multi-NIC networking configured", len(gpuNICs)))
+				fmt.Sprintf("expected %d GPU NIC networks, found %d — cluster may not have multi-NIC networking configured",
+					gkenet.RequiredGPUNICNetworks, len(gpuNICs)))
 		}
 		templateData["GKE_NETWORK_INTERFACES"] = buildGKENetworkInterfacesAnnotation(gpuNICs)
 		templateData["NRI_DEVICE_ANNOTATION"] = buildNRIDeviceAnnotation(config.GPUCountPerNode)

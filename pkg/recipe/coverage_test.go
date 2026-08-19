@@ -43,6 +43,38 @@ func covOverlay(name string, criteria *Criteria, baseRef string) *RecipeMetadata
 	return o
 }
 
+// TestCoverageDimensionNames pins the exported accessor against the internal
+// list it projects, and against the strings that actually reach a caller: the
+// "dimension" key of each details.uncovered entry. Consumers switch on these
+// names to decide whether a dimension may be relaxed (pkg/client/v1), so a
+// rename here is a silent behavior change there, not just a cosmetic one.
+func TestCoverageDimensionNames(t *testing.T) {
+	got := CoverageDimensionNames()
+
+	want := make([]string, 0, len(coverageDimensions))
+	for _, dim := range coverageDimensions {
+		want = append(want, dim.name)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CoverageDimensionNames() = %v, want %v", got, want)
+	}
+
+	// nodes is exempt from the post-condition (#1781); including it would make
+	// callers treat a dimension no overlay gates on as relaxable.
+	for _, name := range got {
+		if name == "nodes" {
+			t.Errorf("CoverageDimensionNames() includes %q, which is exempt from coverage", name)
+		}
+	}
+
+	// The returned slice must not alias package state: a caller sorting or
+	// truncating it would silently reorder every coverage report.
+	got[0] = "mutated"
+	if CoverageDimensionNames()[0] == "mutated" {
+		t.Error("CoverageDimensionNames() returns an aliased slice; callers can corrupt the canonical order")
+	}
+}
+
 func TestUncoveredDimensions(t *testing.T) {
 	eks := covOverlay("eks", &Criteria{Service: CriteriaServiceEKS}, "")
 	h100Any := covOverlay("h100-any", &Criteria{Accelerator: CriteriaAcceleratorH100}, "")

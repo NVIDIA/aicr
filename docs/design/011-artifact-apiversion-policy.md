@@ -104,7 +104,9 @@ The gate lives in the shared loaders — `recipe.LoadFromFileWithProvider` (used
 by both CLI and server via `pkg/client/v1`) and the new
 `snapshotter.LoadFromFile` / `LoadFromFileWithKubeconfig`, which `validate`,
 `query`, and `diff` route through — so enforcement is uniform across entry
-points. This mirrors the strict reject already in `pkg/config` (`Validate`) and
+points. (Those three now reach the snapshot loader via
+`pkg/client/v1.Client.LoadSnapshot` rather than calling it directly, which
+strengthens rather than changes this: SDK consumers hit the same gate.) This mirrors the strict reject already in `pkg/config` (`Validate`) and
 `pkg/recipe` criteria parsing.
 
 ### 4. Transition window on a future bump

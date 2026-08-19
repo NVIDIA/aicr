@@ -13,10 +13,83 @@ GKE clusters must have multi-NIC networking configured before deploying AICR bun
 - `nccl-tcpxo-installer` DaemonSet on GPU nodes (included in AICR bundle)
 - `nri-device-injector` DaemonSet on GPU nodes (included in AICR bundle)
 
+The last two ship in the AICR bundle. The first two are **cluster provisioning**
+— AICR detects them but does not create them.
+
+### Provisioning multi-NIC networking
+
+These four steps are ordered. Step 2 is the one that cannot be undone later;
+steps 3 and 4 must both complete before any TCPXO workload — or `aicr validate` —
+will work.
+
+1. **Create the VPCs and subnets** — one dedicated VPC + subnet per GPU NIC,
+   eight in total, in the cluster's region.
+2. **Create the cluster** with `--enable-multi-networking`, plus its two
+   prerequisites `--enable-dataplane-v2` and `--enable-ip-alias`.
+3. **Create the GPU node pool** on an `a3-megagpu-8g` machine type with
+   `--enable-gvnic`, attaching the eight VPC/subnet pairs as repeated
+   `--additional-node-network` entries, one per pair, each in the form
+   `network=NETWORK,subnetwork=SUBNET`.
+4. **Apply the `Network` and `GKENetworkParamSet` CRs** — one pair per GPU NIC,
+   binding each additional node network into the cluster so pods can reference
+   it by name. **Each `Network` name must contain `gpu-nic`** — for example
+   `gpu-nic-0` through `gpu-nic-7`, optionally with a cluster prefix such as
+   `aicr-demo2-gpu-nic-0`. The paired `GKENetworkParamSet` is referenced by the
+   `Network` through `spec.parametersRef`, so its own name is unconstrained.
+
+> **The `gpu-nic` naming is a requirement, not a convention.** AICR discovers
+> these networks by matching `gpu-nic` in the `Network` object's
+> `metadata.name` — both the `gke-gpu-nic-networks` deployment check and the
+> NCCL benchmark's own interface mapping. Google's sample manifests name the
+> Device networks `vpc1`–`vpc8`; applied verbatim those are invisible to AICR,
+> and the deployment check reports 0 of 8 on a cluster that is otherwise
+> correctly provisioned. Rename them when following that procedure.
+>
+> Beyond containing `gpu-nic`, the exact names are yours to choose — but the
+> workload annotation below must reference the names your cluster actually has.
+> The example there uses `gpu-nic0`–`gpu-nic7`; if you provisioned
+> `gpu-nic-0`–`gpu-nic-7`, use those instead.
+
+> **Multi-networking cannot be enabled after cluster creation.** `--enable-multi-networking`
+> is a create-time flag; there is no `gcloud container clusters update` equivalent,
+> so a cluster created without it must be **recreated**. Steps 3 and 4, by
+> contrast, can be done on an existing multi-networking cluster — a node pool can
+> be added later, and the CRs can be applied at any point.
+
+AICR installs the TCPXO DaemonSets and detects the CRs; it does not provision any
+of this networking. These steps are a summary of the prerequisite AICR depends
+on, not a complete provisioning runbook — for the full procedure, including the
+per-VPC firewall rules and the supported GKE version floors, follow Google's
+[GPUDirect and multi-networking guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx).
+
+Completing steps 1–3 without step 4 is the failure mode worth knowing: the VMs
+come up with all nine NICs attached (the node's primary interface plus the eight
+GPU NICs) and the AICR TCPXO DaemonSets roll out cleanly, but with no `Network`
+objects bound into the cluster no pod can reference a GPU NIC and TCPXO cannot
+function.
+
+### Verifying
+
+```shell
+kubectl get network.networking.gke.io
+```
+
+Expect eight GPU NIC entries (plus the `default` network). Match on the
+`gpu-nic` substring rather than an exact name: the rest of each name is chosen
+at provisioning time and may carry a local prefix, such as
+`aicr-demo2-gpu-nic-0`.
+
+Fewer than eight means the prerequisite is incomplete. AICR's
+`gke-gpu-nic-networks` deployment check asserts this same count, so
+`aicr validate --phase deployment` reports the shortfall by name rather than
+letting it surface later as a performance-phase abort with no bandwidth number.
+
 **Important:** The GPU node pool must be provisioned with only the 8 GPU NIC
 networks (`gpu-nic-0` through `gpu-nic-7`). Do **not** include a gVNIC additional
 network — it takes a GPU NIC PCI slot (`0000:06:00.0`), leaving only 7/8 GPUs
-available for TCPXO.
+available for TCPXO. This is distinct from the `--enable-gvnic` node-pool flag,
+which selects the gVNIC driver and **is** required: pass the flag, but do not add
+a ninth `--additional-node-network` entry for it.
 
 ## Workload Pod Configuration (NRI Profile)
 

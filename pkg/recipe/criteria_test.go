@@ -292,6 +292,95 @@ func TestCriteriaMatches(t *testing.T) {
 			},
 			want: true,
 		},
+		// Nodes is metadata-only (#1781): it does not participate in overlay
+		// selection, so differing Nodes values must never prevent a match.
+		{
+			// Pure nodes-only: no other dimension set on either side.
+			// Before #1781, a nodes-specific recipe rejected a generic query.
+			name:     "nodes ignored: nodes-only recipe matches generic query",
+			criteria: &Criteria{Nodes: 8},
+			other:    NewCriteria(), // all-any query
+			want:     true,
+		},
+		{
+			// Pure nodes-only query matches all-any recipe.
+			name:     "nodes ignored: all-any recipe matches nodes-only query",
+			criteria: NewCriteria(),
+			other:    &Criteria{Nodes: 8},
+			want:     true,
+		},
+		{
+			name: "nodes ignored: query nodes=8 matches recipe with nodes=0",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				// Nodes unset (0 = any)
+			},
+			other: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   8,
+			},
+			want: true, // nodes is metadata-only; unset recipe still matches nodes query
+		},
+		{
+			name: "nodes ignored: query nodes=0 matches recipe with nodes=8",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   8,
+			},
+			other: &Criteria{
+				Service: CriteriaServiceEKS,
+				// Nodes unset (0 = any)
+			},
+			want: true, // nodes is metadata-only; nodes-set recipe still matches generic query
+		},
+		{
+			name: "nodes ignored: differing nodes values still match",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   4,
+			},
+			other: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   8,
+			},
+			want: true, // nodes is metadata-only; differing values do not prevent a match
+		},
+		{
+			// Full-criteria match with differing nodes — all five selection
+			// dimensions agree, nodes differs; must still match.
+			name: "nodes ignored: full criteria match with differing nodes",
+			criteria: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformKubeflow,
+				Nodes:       4,
+			},
+			other: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformKubeflow,
+				Nodes:       16,
+			},
+			want: true,
+		},
+		{
+			// Nodes difference must not mask a real mismatch on another dimension.
+			// Service differs (EKS vs GKE) so the match must still fail.
+			name: "nodes ignored: service mismatch still rejects despite differing nodes",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				Nodes:   4,
+			},
+			other: &Criteria{
+				Service: CriteriaServiceGKE,
+				Nodes:   8,
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -349,6 +438,13 @@ func TestCriteriaSpecificity(t *testing.T) {
 				Nodes:       100,
 			},
 			want: 6,
+		},
+		{
+			// Nodes participates in Specificity so that --nodes-only queries
+			// pass the CLI minimum-specificity guard (#1781).
+			name:     "nodes only - scores 1 so CLI guard passes",
+			criteria: &Criteria{Nodes: 8},
+			want:     1,
 		},
 		// Regression tests: YAML-parsed criteria have empty strings for omitted
 		// fields, not "any". Specificity must treat "" as equivalent to "any".

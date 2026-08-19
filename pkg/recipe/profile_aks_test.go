@@ -45,6 +45,14 @@ func TestAKSGPUStackProfile(t *testing.T) {
 			"driver.enabled", "enabled", "operator.runtimeClass", "toolkit.enabled",
 		},
 		"nvidia-dra-driver-gpu": {"enabled", "nvidiaDriverRoot"},
+		// nvsentinel's two paths follow from who installs the driver:
+		// the labeler's driver-pod evidence (#2175) and the RuntimeClass
+		// name the ClusterPolicy controller derives from
+		// operator.runtimeClass (#2176). Both are profile-owned so a
+		// bundle-time --set cannot reintroduce either defect (#2181).
+		"nvsentinel": {
+			"enabled", "labeler.assumeDriverInstalled", "metadata-collector.runtimeClassName",
+		},
 	}
 
 	tests := []struct {
@@ -55,6 +63,7 @@ func TestAKSGPUStackProfile(t *testing.T) {
 		wantToolkit    bool
 		wantRuntime    string
 		wantDriverRoot string
+		wantAssume     bool
 		wantConstraint string
 	}{
 		{
@@ -67,16 +76,18 @@ func TestAKSGPUStackProfile(t *testing.T) {
 			wantToolkit:    false,
 			wantRuntime:    "nvidia-container-runtime",
 			wantDriverRoot: "/",
+			wantAssume:     true,
 			wantConstraint: "Install",
 		},
 		{
-			name:           "operator value flips the four paths together",
+			name:           "operator value flips the owned paths together",
 			selection:      "gpuStack=operator-managed",
 			wantValue:      "operator-managed",
 			wantDriver:     true,
 			wantToolkit:    true,
 			wantRuntime:    "nvidia",
 			wantDriverRoot: "/run/nvidia/driver",
+			wantAssume:     false,
 			wantConstraint: "None",
 		},
 	}
@@ -130,6 +141,45 @@ func TestAKSGPUStackProfile(t *testing.T) {
 			}
 			if root, _ := dra.Overrides["nvidiaDriverRoot"].(string); root != tt.wantDriverRoot {
 				t.Fatalf("nvidiaDriverRoot = %v, want %q", dra.Overrides["nvidiaDriverRoot"], tt.wantDriverRoot)
+			}
+
+			// nvsentinel's metadata-collector requests the NVIDIA RuntimeClass
+			// by name, and the ClusterPolicy controller names that object
+			// after operator.runtimeClass. The two must agree or the API
+			// server rejects every metadata-collector pod at admission with
+			// `RuntimeClass "nvidia" not found` (#2176). Asserting against
+			// tt.wantRuntime — the same field the operator.runtimeClass
+			// assertion above uses — is what pins them together.
+			sentinel := result.GetComponentRef("nvsentinel")
+			if sentinel == nil {
+				t.Fatal("nvsentinel componentRef missing")
+			}
+			collector, ok := sentinel.Overrides["metadata-collector"].(map[string]any)
+			if !ok {
+				t.Fatalf("nvsentinel overrides[metadata-collector] = %#v, want map",
+					sentinel.Overrides["metadata-collector"])
+			}
+			if rc, _ := collector["runtimeClassName"].(string); rc != tt.wantRuntime {
+				t.Fatalf("metadata-collector.runtimeClassName = %v, want %q (must match operator.runtimeClass)",
+					collector["runtimeClassName"], tt.wantRuntime)
+			}
+
+			// The labeler infers driver presence from a driver pod. Under
+			// azure-managed the node image supplies the driver and no pod
+			// exists, so the label is never applied and three DaemonSets sit
+			// at zero desired pods (#2175). Under operator-managed the
+			// operator's driver pod is the evidence, so the value is an
+			// explicit false.
+			labeler, ok := sentinel.Overrides["labeler"].(map[string]any)
+			if !ok {
+				t.Fatalf("nvsentinel overrides[labeler] = %#v, want map", sentinel.Overrides["labeler"])
+			}
+			assume, present := labeler["assumeDriverInstalled"].(bool)
+			if !present {
+				t.Fatalf("nvsentinel labeler block has no assumeDriverInstalled, want %v", tt.wantAssume)
+			}
+			if assume != tt.wantAssume {
+				t.Fatalf("labeler.assumeDriverInstalled = %v, want %v", assume, tt.wantAssume)
 			}
 
 			// The selected value's distinguishing constraint is recorded in
@@ -237,6 +287,14 @@ func TestAKSDefaultKeepsPreProfileEffectiveValues(t *testing.T) {
 
 	// Byte-identical effective values for every component — the profile
 	// fragment must be value-identical to what the family always shipped.
+	//
+	// nvsentinel is the one deliberate exception: the pre-profile catalog
+	// set neither labeler.assumeDriverInstalled nor
+	// metadata-collector.runtimeClassName, which is exactly why
+	// azure-managed clusters silently lost three DaemonSets (#2175) and had
+	// every metadata-collector pod rejected at admission (#2176). The
+	// profile now supplies both. The delta is asserted exactly rather than
+	// waived, so any further drift still fails.
 	for _, name := range profiledNames {
 		got, err := profiled.GetValuesForComponentWithContext(ctx, name)
 		if err != nil {
@@ -245,6 +303,28 @@ func TestAKSDefaultKeepsPreProfileEffectiveValues(t *testing.T) {
 		want, err := legacy.GetValuesForComponentWithContext(ctx, name)
 		if err != nil {
 			t.Fatalf("legacy values for %s: %v", name, err)
+		}
+		if name == "nvsentinel" {
+			// Compare each whole subtree, not just the leaf: deleting the
+			// maps below would otherwise let a future fragment smuggle
+			// sibling keys past the DeepEqual that follows.
+			for key, wantSubtree := range map[string]map[string]any{
+				"labeler":            {"assumeDriverInstalled": true},
+				"metadata-collector": {"runtimeClassName": "nvidia-container-runtime"},
+			} {
+				subtree, subtreeOK := got[key].(map[string]any)
+				if !subtreeOK {
+					t.Fatalf("nvsentinel %s = %#v, want a map", key, got[key])
+				}
+				if !reflect.DeepEqual(subtree, wantSubtree) {
+					t.Fatalf("nvsentinel %s = %#v, want exactly %#v", key, subtree, wantSubtree)
+				}
+				if _, preexisting := want[key]; preexisting {
+					t.Fatalf("pre-profile catalog already sets nvsentinel %s; "+
+						"fold the value back into the component values file instead of the profile", key)
+				}
+				delete(got, key)
+			}
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("effective values for %s diverged from the pre-profile catalog", name)

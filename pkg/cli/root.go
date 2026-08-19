@@ -386,14 +386,15 @@ func sanitizeCompletionArgs(args []string) []string {
 // The "initializing external data provider" INFO log matches validate /
 // bundle / mirror so a `--data` invocation is auditable.
 func recipeClientFromCmd(cmd *cli.Command, cfg *config.AICRConfig) (*aicr.Client, error) {
-	dataDir := cmd.String("data")
-	if dataDir == "" {
-		dataDir = cfg.Recipe().DataDir()
-	}
 	source := aicr.EmbeddedSource()
-	if dataDir != "" {
+	if dataDir := cmd.String("data"); dataDir != "" {
 		slog.Info("initializing external data provider", "directory", dataDir)
 		source = aicr.FilesystemSource(dataDir)
+	} else if configured, ok := aicr.WrapConfig(cfg).RecipeSource(); ok {
+		// spec.recipe.data, derived through the facade so an SDK caller
+		// building a Client from the same document gets the same source.
+		slog.Info("initializing external data provider", "source", "spec.recipe.data")
+		source = configured
 	}
 	client, err := aicr.NewClient(
 		aicr.WithRecipeSource(source),
@@ -444,11 +445,17 @@ func embeddedClient() (*aicr.Client, error) {
 //
 //nolint:nilnil
 func loadCmdConfig(ctx context.Context, cmd *cli.Command) (*config.AICRConfig, error) {
-	src := cmd.String("config")
-	if src == "" {
-		return nil, nil
+	cfg, err := loadFacadeConfig(ctx, cmd)
+	if err != nil {
+		return nil, err
 	}
-	return config.Load(ctx, src)
+	// Unwrap rather than load again: aicr.LoadConfig is the single loader for
+	// the CLI, so there is no second path whose validation or error handling
+	// could drift from what an SDK consumer sees. Commands still holding the
+	// internal type are the ones whose spec sections the facade does not
+	// project yet (bundle, validate, snapshot); each converts here, not by
+	// loading independently.
+	return cfg.Unwrap(), nil
 }
 
 // stringFlagOrConfig returns the resolved value for a string CLI flag with
@@ -510,4 +517,33 @@ func durationFlagOrConfig(cmd *cli.Command, flagName string, fallback *time.Dura
 		slog.Info("CLI flag overriding config value", "flag", flagName, "config", *fallback, "override", v)
 	}
 	return v
+}
+
+// loadFacadeConfig reads --config and returns it as the facade *aicr.Config,
+// so commands derive their options through pkg/client/v1 rather than reaching
+// into pkg/config themselves. Returns a nil *aicr.Config when the flag is not
+// set; every derivation on it is nil-safe, so callers need no branch.
+//
+// The flag-over-config overlay stays in this package deliberately: it depends
+// on cmd.IsSet, which distinguishes "user passed the zero value" from "user
+// said nothing" — a distinction the facade's plain-struct options cannot make.
+//
+// (nil, nil) is the deliberate "config flag not set" signal, matching
+// loadCmdConfig; a sentinel error would force every caller into a useless
+// error-check branch when --config is simply absent.
+//
+//nolint:nilnil
+func loadFacadeConfig(ctx context.Context, cmd *cli.Command) (*aicr.Config, error) {
+	src := cmd.String("config")
+	if src == "" {
+		// (nil, nil) is the deliberate "flag not set" signal, matching
+		// loadCmdConfig. Every derivation on a nil *aicr.Config is nil-safe,
+		// so callers need no branch.
+		return nil, nil
+	}
+	// aicr.LoadConfig, not pkg/config.Load: routing through the facade is the
+	// point. A second loader path here would let validation or error handling
+	// drift between what the CLI sees and what an SDK consumer sees from the
+	// same document.
+	return aicr.LoadConfig(ctx, src)
 }

@@ -237,7 +237,7 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*recipe.RecipeResult, error) {
 	recipePath := cmd.String("recipe")
 	if recipePath != "" {
-		if cmd.IsSet(flagProfile) || cfg.Recipe().ProfileSelection() != "" {
+		if cmd.IsSet(flagProfile) || aicr.WrapConfig(cfg).RecipeProfile() != "" {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--profile/spec.recipe.profile selects during criteria resolution and cannot be combined with --recipe")
 		}
