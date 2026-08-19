@@ -350,6 +350,39 @@ spec:
 				"ghcr.io/example/null-tag",
 			},
 		},
+		{
+			// Bitnami-style and Helm-chart patterns split the image reference
+			// into separate repository, tag, and digest sibling fields. The
+			// digest is appended as @<digest> so the extracted reference is
+			// fully pinned and digest-pin tests see the correct form.
+			name: "operator image mapping with separate digest field produces tag@digest ref",
+			in: `spec:
+  db:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.4"
+      digest: sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad
+      pullPolicy: IfNotPresent
+`,
+			want: []string{
+				"docker.io/library/postgres:17.4@sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad",
+			},
+		},
+		{
+			// When an image already carries an inline @digest (e.g. from a
+			// scalar image field), a sibling digest field must not re-append.
+			name: "operator image mapping does not double-append digest when ref already has one",
+			in: `spec:
+  pinned:
+    image:
+      repository: ghcr.io/example/pinned
+      tag: v1
+      digest: sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b
+`,
+			want: []string{
+				"ghcr.io/example/pinned:v1@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -398,13 +431,6 @@ func TestExtractImagesFromYAML_InvalidStructuredImageDescriptor(t *testing.T) {
       repository: nvidia/foo
       tag: v1`,
 			wantField: "registry",
-		},
-		{
-			name: "digest member present",
-			descriptor: `repository: ghcr.io/example/pinned
-      tag: v1
-      digest: sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b`,
-			wantField: "digest",
 		},
 		{
 			name: "empty name",

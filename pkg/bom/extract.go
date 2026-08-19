@@ -206,23 +206,31 @@ func isStructuredImageKey(key string) bool {
 //	  repository: ghcr.io/kai-scheduler/kai-scheduler
 //	  tag: v0.14.1
 //
+// It also handles the digest-pinned form used by Helm charts that separate
+// repository, tag, and digest into sibling fields (e.g., Bitnami-style):
+//
+//	image:
+//	  repository: docker.io/library/postgres
+//	  tag: "17.4"
+//	  digest: sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad
+//
 // Some charts omit name because repository already carries the full image
 // path. In that form, repository becomes the image name before tag is
 // appended. A present name or repository must be a non-null, non-empty
 // scalar. A null or empty tag is the Helm idiom for "default to the chart
-// appVersion" and is treated like an absent tag. Only name, repository, and
-// tag are combined; a present registry or digest member is rejected because
-// dropping it would emit a reference that resolves to the wrong registry or
-// silently un-pins a digest. Other members (pullPolicy, pullSecrets, ...)
-// do not affect the reference identity and are ignored.
+// appVersion" and is treated like an absent tag. A present digest is appended
+// as @<digest> so the extracted reference is fully pinned. A present registry
+// member is rejected because dropping it would resolve to the wrong registry.
+// Other members (pullPolicy, pullSecrets, ...) do not affect reference
+// identity and are ignored.
 func imageReferenceFromMapping(n *yaml.Node) (string, error) {
-	var name, repository, tag string
+	var name, repository, tag, digest string
 	var namePresent bool
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		key, value := n.Content[i], n.Content[i+1]
 		switch key.Value {
-		case "name", imageRepositoryKey, imageTagKey:
-		case "registry", "digest":
+		case "name", imageRepositoryKey, imageTagKey, "digest":
+		case "registry":
 			return "", errors.Wrap(
 				errors.ErrCodeInvalidRequest,
 				"invalid image descriptor member",
@@ -230,7 +238,7 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 					field:  key.Value,
 					line:   key.Line,
 					column: key.Column,
-					reason: "is not combined into the extracted reference; fold it into repository or tag",
+					reason: "is not combined into the extracted reference; fold it into repository",
 				},
 			)
 		default:
@@ -264,6 +272,8 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 			repository = scalar
 		case imageTagKey:
 			tag = scalar
+		case "digest":
+			digest = scalar
 		}
 	}
 	if !namePresent {
@@ -276,7 +286,11 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 	if name == "" {
 		return "", nil
 	}
-	return combineCRDTriplet(name, repository, tag), nil
+	ref := combineCRDTriplet(name, repository, tag)
+	if digest != "" && !strings.Contains(ref, "@") {
+		ref += "@" + digest
+	}
+	return ref, nil
 }
 
 func nonNullImageMappingScalar(n *yaml.Node) (string, bool) {
