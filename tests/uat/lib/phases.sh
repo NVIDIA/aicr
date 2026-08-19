@@ -1315,42 +1315,14 @@ serve_debug() {
   } | tee serve-logs/"${SERVE_NAME}".log
 }
 
-phase_serve() {
-  # Deploy the served inference graph (Dynamo) — the intent=inference CUJ, the
-  # DC3 counterpart of phase_train. Mirrors the DynamoGraphDeployment in
-  # demos/cuj2-inference.md (demos/workloads/inference/vllm-agg.yaml): the KAI
-  # queue and a two-component (Frontend + decode Worker) graph serving an
-  # OpenAI-compatible endpoint. The worker requests its GPU as a scalar
-  # nvidia.com/gpu limit — the device-plugin production default (#1327).
-  #
-  # Tolerations are a portable SUPERSET of the taints across all UAT clusters
-  # (AWS and GKE GPU pools use different `dedicated` values, the AKS pool carries
-  # only nvidia.com/gpu; the DRA/gpu-operator adds nvidia.com/gpu). Tolerating a
-  # taint a node does not carry is a no-op, so one list schedules correctly on
-  # any of the clouds.
-  #
-  # Both components select the GPU pool (#1644). Left unselected, the Frontend
-  # landed on a CPU-pool node (e2-standard-4 / n2-standard-8) and wedged in
-  # ContainerCreating on the ~12GB vllm-runtime image, exceeding
-  # SERVE_READY_TIMEOUT_SECONDS: on 4-8 vCPUs with modest egress, both the
-  # download and the CPU-bound layer decompression are slow. The GPU pool's
-  # a3-megagpu-8g class pulls the same image in a fraction of the budget, which
-  # is what this selector buys. It therefore also needs the nvidia.com/gpu
-  # toleration (the AKS pool carries only that taint). Sharing the pool consumes
-  # no device: the Frontend declares no nvidia.com/gpu limit, so the device
-  # plugin never allocates one to it. This matches how the inference-perf
-  # validator places every component on the GPU cohort
-  # (validators/performance/inference_perf_constraint.go).
-  #
-  # This selects the POOL, not a node: the pool holds two GPU nodes and nothing
-  # constrains the two components to the same one, so they may be split. That is
-  # deliberate rather than an oversight — a split yields two pulls running in
-  # PARALLEL on two high-bandwidth nodes, so readiness waits out roughly one
-  # pull either way. Do not read the co-location as load-bearing; it is not, and
-  # there is no shared cache to inherit (the operator creates both components at
-  # once, so kubelet merely dedupes co-located pulls into one).
-  echo "::group::Deploy DynamoGraphDeployment (${SERVE_NAME} in ${SERVE_NAMESPACE})"
-  kubectl apply -f - <<EOF
+# serve_render_manifest prints the serve manifests — KAI Queue, Namespace, and
+# the DynamoGraphDeployment — to STDOUT and touches no cluster. It is split out
+# from phase_serve so the scheduling contract documented there is assertable
+# off-cluster: #1644 was a MISSING field (the Frontend had no nodeSelector), and
+# only a test that reads the rendered manifest can catch an absent field. See
+# TestServeGraphGPUPlacement in tests/uat/serve_manifest_test.go.
+serve_render_manifest() {
+  cat <<EOF
 apiVersion: scheduling.run.ai/v2
 kind: Queue
 metadata:
@@ -1422,6 +1394,44 @@ spec:
                 limits:
                   nvidia.com/gpu: 1
 EOF
+}
+
+phase_serve() {
+  # Deploy the served inference graph (Dynamo) — the intent=inference CUJ, the
+  # DC3 counterpart of phase_train. Mirrors the DynamoGraphDeployment in
+  # demos/cuj2-inference.md (demos/workloads/inference/vllm-agg.yaml): the KAI
+  # queue and a two-component (Frontend + decode Worker) graph serving an
+  # OpenAI-compatible endpoint. The worker requests its GPU as a scalar
+  # nvidia.com/gpu limit — the device-plugin production default (#1327).
+  #
+  # Tolerations are a portable SUPERSET of the taints across all UAT clusters
+  # (AWS and GKE GPU pools use different `dedicated` values, the AKS pool carries
+  # only nvidia.com/gpu; the DRA/gpu-operator adds nvidia.com/gpu). Tolerating a
+  # taint a node does not carry is a no-op, so one list schedules correctly on
+  # any of the clouds.
+  #
+  # Both components select the GPU pool (#1644). Left unselected, the Frontend
+  # landed on a CPU-pool node (e2-standard-4 / n2-standard-8) and wedged in
+  # ContainerCreating on the ~12GB vllm-runtime image, exceeding
+  # SERVE_READY_TIMEOUT_SECONDS: on 4-8 vCPUs with modest egress, both the
+  # download and the CPU-bound layer decompression are slow. The GPU pool's
+  # a3-megagpu-8g class pulls the same image in a fraction of the budget, which
+  # is what this selector buys. It therefore also needs the nvidia.com/gpu
+  # toleration (the AKS pool carries only that taint). Sharing the pool consumes
+  # no device: the Frontend declares no nvidia.com/gpu limit, so the device
+  # plugin never allocates one to it. This matches how the inference-perf
+  # validator places every component on the GPU cohort
+  # (validators/performance/inference_perf_constraint.go).
+  #
+  # This selects the POOL, not a node: the pool holds two GPU nodes and nothing
+  # constrains the two components to the same one, so they may be split. That is
+  # deliberate rather than an oversight — a split yields two pulls running in
+  # PARALLEL on two high-bandwidth nodes, so readiness waits out roughly one
+  # pull either way. Do not read the co-location as load-bearing; it is not, and
+  # there is no shared cache to inherit (the operator creates both components at
+  # once, so kubelet merely dedupes co-located pulls into one).
+  echo "::group::Deploy DynamoGraphDeployment (${SERVE_NAME} in ${SERVE_NAMESPACE})"
+  serve_render_manifest | kubectl apply -f -
   echo "::endgroup::"
 
   echo "::group::Wait for DynamoGraphDeployment readiness (timeout ${SERVE_READY_TIMEOUT_SECONDS}s)"
