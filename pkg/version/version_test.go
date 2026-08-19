@@ -890,12 +890,12 @@ func TestExtractGKEBuild(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			build, isGKE := extractGKEBuild(tt.extras)
+			build, isGKE := ExtractGKEBuild(tt.extras)
 			if build != tt.wantBuild {
-				t.Errorf("extractGKEBuild(%q) build = %d, want %d", tt.extras, build, tt.wantBuild)
+				t.Errorf("ExtractGKEBuild(%q) build = %d, want %d", tt.extras, build, tt.wantBuild)
 			}
 			if isGKE != tt.wantIsGKE {
-				t.Errorf("extractGKEBuild(%q) isGKE = %v, want %v", tt.extras, isGKE, tt.wantIsGKE)
+				t.Errorf("ExtractGKEBuild(%q) isGKE = %v, want %v", tt.extras, isGKE, tt.wantIsGKE)
 			}
 		})
 	}

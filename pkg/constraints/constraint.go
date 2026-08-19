@@ -369,6 +369,11 @@ func ParseCompoundConstraint(expr string) (*CompoundConstraint, error) {
 // error, the error is propagated immediately (fail-closed).
 func (cc *CompoundConstraint) Evaluate(actual string) (bool, error) {
 	for _, andGroup := range cc.Alternatives {
+		// An empty AND group (unreachable via ParseCompoundConstraint but possible
+		// under direct struct construction) must not fail open.
+		if len(andGroup) == 0 {
+			continue
+		}
 		groupPassed := true
 		for i := range andGroup {
 			passed, err := andGroup[i].Evaluate(actual)
