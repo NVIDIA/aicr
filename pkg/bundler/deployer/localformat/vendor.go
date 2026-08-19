@@ -42,6 +42,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -578,10 +579,19 @@ func disallowedIPReason(ip net.IP) string {
 // depending on the developer's system resolver or network reachability.
 var fetchIndexYAML = defaultFetchIndexYAML
 
-// defaultFetchIndexYAML performs the production HTTP GET. Every redirect
-// hop is passed back through checkEgressPolicy so a public repo cannot
-// redirect the index-fetch itself into the private range. Response body
-// is capped at defaults.HelmChartIndexBodyLimit.
+// fetchIndexYAMLAttempt is the single-attempt HTTP GET function, wrapped by
+// the retry logic in defaultFetchIndexYAML. Tests inject a canned function
+// to control retry behavior.
+var fetchIndexYAMLAttempt = doFetchIndexYAMLAttempt
+
+// defaultFetchIndexYAML performs the production HTTP GET with retries on
+// transient failures. Every redirect hop is passed back through
+// checkEgressPolicy so a public repo cannot redirect the index-fetch itself
+// into the private range. Response body is capped at
+// defaults.HelmChartIndexBodyLimit. Transient errors (network failures, 5xx,
+// 408, 429) are retried up to HelmChartIndexRetryBudget with exponential
+// backoff. Non-transient errors (404, 401/403, other 4xx) fail on the first
+// attempt. Policy-rejected redirects are never retried.
 func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error) {
 	// Fail-closed egress check on the initial URL. Idempotent: safe to
 	// re-run for URLs the caller already validated. Today the only
@@ -594,6 +604,84 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 	if err := checkFetchTargetURL(ctx, indexURL); err != nil {
 		return nil, err
 	}
+
+	var lastErr error
+	backoff := defaults.HelmChartIndexRetryInitialBackoff
+
+	for attempt := 1; attempt <= defaults.HelmChartIndexRetryBudget; attempt++ {
+		// Per-attempt timeout independent of parent context, so a slow
+		// upstream cannot outlive the fetch operation itself. The parent
+		// context governs cancellation.
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, defaults.HelmChartIndexPreCheckTimeout)
+
+		body, err := fetchIndexYAMLAttempt(attemptCtx, indexURL)
+		attemptCancel()
+
+		// Check parent context cancellation first.
+		if parentErr := ctx.Err(); parentErr != nil {
+			if stderrors.Is(parentErr, context.Canceled) {
+				return nil, errors.Wrap(errors.ErrCodeInternal,
+					"vendor-charts: index pre-check canceled", parentErr)
+			}
+			if stderrors.Is(parentErr, context.DeadlineExceeded) {
+				return nil, errors.Wrap(errors.ErrCodeTimeout,
+					"vendor-charts: index pre-check deadline exceeded", parentErr)
+			}
+			return nil, parentErr
+		}
+
+		// Success path.
+		if err == nil {
+			return body, nil
+		}
+
+		lastErr = err
+
+		// Determine if this error is retryable. Policy-rejected redirects
+		// (InvalidRequest code) and non-transient auth/validation errors must
+		// never be retried.
+		isRetryable := stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
+		if !isRetryable {
+			return nil, err
+		}
+
+		// Don't retry if we're at the budget limit.
+		if attempt == defaults.HelmChartIndexRetryBudget {
+			return nil, err
+		}
+
+		slog.WarnContext(ctx, "vendor-charts: index fetch retrying after transient error",
+			"attempt", attempt, "error", err)
+
+		// Sleep with exponential backoff, but honor parent context cancellation.
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			if stderrors.Is(ctx.Err(), context.Canceled) {
+				return nil, errors.Wrap(errors.ErrCodeInternal,
+					"vendor-charts: index pre-check canceled during backoff", ctx.Err())
+			}
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				"vendor-charts: index pre-check deadline exceeded during backoff", ctx.Err())
+		case <-timer.C:
+		}
+		backoff *= 2
+	}
+
+	// Should not reach here, but return the last error if we do.
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New(errors.ErrCodeInternal,
+		"vendor-charts: index pre-check exhausted retry budget without result")
+}
+
+// doFetchIndexYAMLAttempt performs a single HTTP GET attempt for the index.
+// Returns body on success. Returns a StructuredError with code indicating
+// retryability: ErrCodeUnavailable for transient errors, other codes for
+// permanent failures.
+func doFetchIndexYAMLAttempt(ctx context.Context, indexURL string) ([]byte, error) {
 	client := &http.Client{
 		Transport: defaults.NewHTTPTransport(),
 		Timeout:   defaults.HelmChartIndexPreCheckTimeout,

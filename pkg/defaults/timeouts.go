@@ -1340,6 +1340,16 @@ const (
 	// resolver caches and slow-start CDN edges without letting a stalled
 	// upstream tie up an aicrd request slot for minutes.
 	HelmChartIndexPreCheckTimeout = 30 * time.Second
+
+	// HelmChartIndexRetryBudget is the maximum number of index fetch
+	// attempts before failing permanently. Retryable errors are transport
+	// failures, connection resets, and 5xx / 429 responses from the upstream.
+	HelmChartIndexRetryBudget = 3
+
+	// HelmChartIndexRetryInitialBackoff is the wait between the first and
+	// second index fetch attempts. Subsequent backoffs scale by
+	// exponential factor 2: HelmChartIndexRetryInitialBackoff * 2^(attempt-1).
+	HelmChartIndexRetryInitialBackoff = 1 * time.Second
 )
 
 // OCI publication phase budgets. The whole-publish ceiling covers two source
