@@ -19,9 +19,6 @@ inputs:
   go_version:
     description: 'Go version to install (e.g., 1.25)'
     required: true
-  kind_node_image:
-    description: 'Pinned kindest/node image (e.g., kindest/node:v1.36.1); from .settings.yaml testing.kind_node_image'
-    required: true
   upload_artifacts:
     description: 'Whether to upload debug artifacts on failure (true/false)'
     required: false
@@ -46,33 +43,9 @@ runs:
     - name: Install E2E testing tools
       uses: ./.github/actions/install-e2e-tools
 
-    # cluster-create pins the Kind node image to inputs.kind_node_image (see
-    # Makefile's KIND_NODE_IMAGE), so that tag is a stable, deterministic cache
-    # key. Without this, every run re-pulls the 1GB+ image from Docker Hub.
-    # actions/cache saves the path automatically on a miss (post-job hook), so
-    # a fresh pin only pays the pull cost once, not on every subsequent run.
-    - name: Restore cached Kind node image
-      id: kind-node-image-cache
-      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
-      with:
-        path: /tmp/kind-node-image.tar
-        key: kind-node-image-${{ runner.os }}-${{ runner.arch }}-${{ inputs.kind_node_image }}
-
-    - name: Load cached Kind node image
-      if: steps.kind-node-image-cache.outputs.cache-hit == 'true'
-      shell: bash
-      run: docker load -i /tmp/kind-node-image.tar
-
     - name: Create Kind cluster
       shell: bash
       run: make cluster-create
-
-    - name: Save Kind node image to cache
-      if: steps.kind-node-image-cache.outputs.cache-hit != 'true'
-      shell: bash
-      env:
-        KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
-      run: docker save "${KIND_NODE_IMAGE}" -o /tmp/kind-node-image.tar
 
     - name: Deploy aicrd to Kind
       shell: bash

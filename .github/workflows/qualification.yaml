@@ -142,7 +142,6 @@ jobs:
         uses: ./.github/actions/e2e
         with:
           go_version: ${{ steps.versions.outputs.go }}
-          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
   security-scan:
     name: Security Scan
