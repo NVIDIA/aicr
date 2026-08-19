@@ -283,7 +283,7 @@ done
 
 # Cosign — the SBOM is on the per-platform child manifest
 platform="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
-AICR_CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr:${TAG}")
+AICR_CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr@${AICR_INDEX}")
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
