@@ -345,6 +345,13 @@ spec:
           value: ">= v25.10.0"
 ```
 
+Host-managed driver floors (GKE COS / A4X Max and similar platforms where
+`driver.enabled: false`) use a separate deployment constraint,
+`Deployment.gpu-driver.version` (e.g. `">= 580.95.05"`).
+`check-nvidia-smi` evaluates it against the nvidia-smi banner on each
+verified node; when the constraint is absent the check keeps its
+banner-presence behavior and does not invent a floor (#1995).
+
 For a query `{service: eks, accelerator: gb200, intent: training}`,
 the resolver returns three independent maximal leaves —
 `gb200-eks-training` (matched by explicit criteria), `gb200-any`

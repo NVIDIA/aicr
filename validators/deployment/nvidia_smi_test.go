@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
@@ -174,6 +175,157 @@ func TestVerifyNvidiaSMILogs(t *testing.T) {
 			}
 			if err.Error() != tt.wantErr {
 				t.Fatalf("verifyNvidiaSMILogs() error = %q, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseNvidiaSMIDriverVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		logs    string
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "legacy Driver Version field",
+			logs: "NVIDIA-SMI\nDriver Version: 570.86.15\nCUDA Version: 12.8\n",
+			want: "570.86.15",
+		},
+		{
+			name: "renamed KMD Version field",
+			logs: "NVIDIA-SMI\nKMD Version: 580.65.06\nCUDA UMD Version: 13.0\n",
+			want: "580.65.06",
+		},
+		{
+			name: "table layout with KMD Version",
+			logs: "| NVIDIA-SMI 610.43.02              KMD Version: 610.43.02     CUDA UMD Version: 13.3     |\n",
+			want: "610.43.02",
+		},
+		{
+			name: "case-insensitive legacy field",
+			logs: "DRIVER VERSION: 570.86.15\n",
+			want: "570.86.15",
+		},
+		{
+			name: "GKE A4X Max floor example",
+			logs: "Driver Version: 580.95.05\n",
+			want: "580.95.05",
+		},
+		{
+			name:    "banner present but no numeric version",
+			logs:    "Driver Version:\nCUDA Version: 12.8\n",
+			wantErr: true,
+		},
+		{
+			name:    "no driver banner at all",
+			logs:    "NVIDIA-SMI\nCUDA Version: 12.8\n",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseNvidiaSMIDriverVersion(tt.logs)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseNvidiaSMIDriverVersion() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseNvidiaSMIDriverVersion() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("parseNvidiaSMIDriverVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEnforceGPUDriverVersionFloor covers the #1995 host-driver floor: no
+// constraint is a no-op; a present constraint fails closed when the banner is
+// unreadable; pass/fail follow the numeric comparison.
+func TestEnforceGPUDriverVersionFloor(t *testing.T) {
+	t.Parallel()
+
+	const goodLogs = "NVIDIA-SMI\nDriver Version: 580.95.05\nCUDA Version: 12.8\n" + gpuCheckSuccessMsg
+	const lowLogs = "NVIDIA-SMI\nDriver Version: 570.86.15\nCUDA Version: 12.8\n" + gpuCheckSuccessMsg
+	const noVersionLogs = "NVIDIA-SMI\nDriver Version:\nCUDA Version: 12.8\n" + gpuCheckSuccessMsg
+
+	tests := []struct {
+		name       string
+		constraint string // empty = no constraint
+		logs       string
+		wantErrSub string // empty = want nil
+	}{
+		{
+			name: "no constraint is a no-op even with parseable version",
+			logs: goodLogs,
+		},
+		{
+			name:       "no constraint is a no-op even when version is unreadable",
+			logs:       noVersionLogs,
+			constraint: "",
+		},
+		{
+			name:       "satisfies floor",
+			constraint: ">= 580.95.05",
+			logs:       goodLogs,
+		},
+		{
+			name:       "below floor fails",
+			constraint: ">= 580.95.05",
+			logs:       lowLogs,
+			wantErrSub: "does not satisfy",
+		},
+		{
+			name:       "constraint present but unreadable banner fails closed",
+			constraint: ">= 580.95.05",
+			logs:       noVersionLogs,
+			wantErrSub: "could not parse the host driver version",
+		},
+		{
+			name:       "invalid constraint expression",
+			constraint: ">=",
+			logs:       goodLogs,
+			wantErrSub: "invalid Deployment.gpu-driver.version constraint",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := &validators.Context{
+				ValidationInput: &validatorv1.ValidationInput{
+					Config: validatorv1.ValidationConfig{},
+				},
+			}
+			if tt.constraint != "" {
+				ctx.ValidationInput.Config.Deployment = &validatorv1.ValidationPhase{
+					Constraints: []recipe.Constraint{{
+						Name:  gpuDriverVersionConstraint,
+						Value: tt.constraint,
+					}},
+				}
+			}
+
+			err := enforceGPUDriverVersionFloor(ctx, tt.logs, "gpu-node-1")
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("enforceGPUDriverVersionFloor() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("enforceGPUDriverVersionFloor() = nil, want error containing %q", tt.wantErrSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Errorf("enforceGPUDriverVersionFloor() error = %v, want it to contain %q", err, tt.wantErrSub)
 			}
 		})
 	}

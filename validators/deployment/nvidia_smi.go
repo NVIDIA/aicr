@@ -18,9 +18,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	podutil "github.com/NVIDIA/aicr/pkg/k8s/pod"
@@ -54,7 +56,24 @@ const (
 	skipReasonNoGPUNodes            = "no-gpu-nodes"             // cluster has no GPU nodes at all
 	skipReasonNoSchedulableGPUNodes = "no-schedulable-gpu-nodes" // GPU nodes exist but all cordoned/unschedulable
 	skipReasonNodesBusy             = "nodes-busy"               // schedulable GPU nodes exist but are busy with workloads
+
+	// gpuDriverVersionConstraint is the deployment-phase constraint name recipes
+	// use to declare a host-driver floor (issue #1995). Platforms with
+	// host-managed drivers (e.g. GKE A4X Max requiring R580.95.05+) cannot be
+	// gated by GPU Operator version alone when driver.enabled is false; this
+	// constraint is evaluated against the nvidia-smi banner on each verified
+	// node. Absent from the recipe, the check keeps its original banner-presence
+	// behavior and does not invent a floor.
+	gpuDriverVersionConstraint = "Deployment.gpu-driver.version"
 )
+
+// nvidiaSMIDriverVersionRE extracts the host driver / KMD version from an
+// nvidia-smi banner. Matches both legacy ("Driver Version:") and renamed
+// ("KMD Version:") fields, case-insensitively, including the table-row layout
+// where fields sit on one pipe-delimited line (issue #1667). Caps at three
+// numeric components — NVIDIA driver versions are Major.Minor.Patch.
+var nvidiaSMIDriverVersionRE = regexp.MustCompile(
+	`(?i)(?:driver|kmd)\s+version:\s*([0-9]+(?:\.[0-9]+){0,2})`)
 
 // gpuNodeCoverage partitions check-nvidia-smi's discovered GPU nodes into the
 // schedulable cohort actually validated and the cordoned cohort skipped. It
@@ -345,7 +364,10 @@ func verifySingleGPUNode(ctx *validators.Context, nodeName string) error {
 				nodeName, debugInfo, nvidiaSMILogContextLines, logSnippet), waitErr)
 	}
 
-	return verifyNvidiaSMILogs(podLogs, createdPod)
+	if err := verifyNvidiaSMILogs(podLogs, createdPod); err != nil {
+		return err
+	}
+	return enforceGPUDriverVersionFloor(ctx, podLogs, nodeName)
 }
 
 func getLogSnippet(logs string, maxLines int) string {
@@ -393,6 +415,66 @@ func verifyNvidiaSMILogs(podLogs string, pod *v1.Pod) error {
 				pod.Namespace, pod.Name, strings.Join(missing, "; ")))
 	}
 
+	return nil
+}
+
+// parseNvidiaSMIDriverVersion extracts the host driver version from nvidia-smi
+// banner output. Accepts legacy "Driver Version:" and renamed "KMD Version:"
+// fields (issue #1667), case-insensitively. Returns ErrCodeNotFound when no
+// parseable version is present so callers can fail closed when a recipe floor
+// requires one.
+func parseNvidiaSMIDriverVersion(podLogs string) (string, error) {
+	match := nvidiaSMIDriverVersionRE.FindStringSubmatch(podLogs)
+	if len(match) < 2 || match[1] == "" {
+		return "", errors.New(errors.ErrCodeNotFound,
+			"nvidia-smi output has no parseable Driver Version / KMD Version")
+	}
+	return match[1], nil
+}
+
+// enforceGPUDriverVersionFloor evaluates Deployment.gpu-driver.version against
+// the driver version parsed from nvidia-smi logs (issue #1995). No constraint
+// in the recipe is a no-op — the check must not invent a floor. A constraint
+// with an unreadable banner fails closed: a host-driver floor that cannot be
+// measured must not PASS.
+func enforceGPUDriverVersionFloor(ctx *validators.Context, podLogs, nodeName string) error {
+	constraintExpr, found := findDeploymentConstraint(ctx, gpuDriverVersionConstraint)
+	if !found {
+		return nil
+	}
+
+	version, err := parseNvidiaSMIDriverVersion(podLogs)
+	if err != nil {
+		// Fail closed with a contextual message: a declared floor that cannot
+		// be measured must not PASS. Keep ErrCodeNotFound so report consumers
+		// can distinguish "banner unreadable" from a numeric miss.
+		return errors.Wrap(errors.ErrCodeNotFound,
+			fmt.Sprintf("%s constraint %q is set but could not parse the host driver "+
+				"version from nvidia-smi on node %s",
+				gpuDriverVersionConstraint, constraintExpr, nodeName), err)
+	}
+
+	parsed, err := constraints.ParseConstraintExpression(constraintExpr)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s constraint", gpuDriverVersionConstraint), err)
+	}
+
+	passed, err := parsed.Evaluate(version)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("%s constraint evaluation failed on node %s",
+				gpuDriverVersionConstraint, nodeName), err)
+	}
+
+	fmt.Printf("  %s: host driver %s, constraint %s → %v\n",
+		nodeName, version, constraintExpr, passed)
+
+	if !passed {
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("host driver version %s on node %s does not satisfy %s %q",
+				version, nodeName, gpuDriverVersionConstraint, constraintExpr))
+	}
 	return nil
 }
 
