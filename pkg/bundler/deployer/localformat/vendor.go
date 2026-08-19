@@ -597,22 +597,21 @@ var newBackoffTimer = time.NewTimer
 // backoff. Non-transient errors (404, 401/403, other 4xx) fail on the first
 // attempt. Policy-rejected redirects are never retried.
 func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error) {
-	// Fail-closed egress check on the initial URL. Idempotent: safe to
-	// re-run for URLs the caller already validated. Today the only
-	// production caller (resolveAndValidateHTTPIndex) runs
-	// checkEgressPolicy(c.Repository) upstream and derives indexURL from
-	// the same host, so this call is a no-op in the happy path. It
-	// exists so a future refactor that reorders Pull() — or a new caller
-	// of defaultFetchIndexYAML that skips the upstream check — cannot
-	// silently open an SSRF hole here.
-	if err := checkFetchTargetURL(ctx, indexURL); err != nil {
-		return nil, err
-	}
-
 	var lastErr error
 	backoff := defaults.HelmChartIndexRetryInitialBackoff
 
 	for attempt := 1; attempt <= defaults.HelmChartIndexRetryBudget; attempt++ {
+		// Egress check before each attempt defends against DNS rebinding:
+		// an attacker cannot rebind the domain to a disallowed address on
+		// a retry after passing the initial check. Idempotent: safe to
+		// re-run for URLs the caller already validated. Today the only
+		// production caller (resolveAndValidateHTTPIndex) runs
+		// checkEgressPolicy(c.Repository) upstream and derives indexURL from
+		// the same host, so this call is a no-op in the happy path.
+		if err := checkFetchTargetURL(ctx, indexURL); err != nil {
+			return nil, err
+		}
+
 		// Per-attempt timeout independent of parent context, so a slow
 		// upstream cannot outlive the fetch operation itself. The parent
 		// context governs cancellation.
