@@ -694,13 +694,12 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run train "${TEST_CONFIG}"
 
-      # RE-ENABLED (#1644). It was disabled because the Frontend cold-pulled the
-      # ~12GB vllm-runtime image on a CPU-pool node and wedged in
-      # ContainerCreating past the readiness budget; phase_serve now selects the
-      # GPU pool for both graph components, whose a3-megagpu-8g class pulls that
-      # image in a fraction of the budget. GCP goes first because #1644 tracks
-      # the GKE x inference cell specifically; aws/azure stay commented until
-      # this lane demonstrates a served completion.
+      # Live in the GCP inference phase chain (#1644). Was disabled because the
+      # Frontend cold-pulled the ~12GB vllm-runtime image on a CPU-pool node and
+      # wedged in ContainerCreating past the readiness budget; phase_serve now
+      # selects the GPU pool for both graph components, whose a3-megagpu-8g class
+      # pulls that image in a fraction of the budget. AWS/Azure serve steps stay
+      # commented until this lane demonstrates a served completion.
       - name: UAT - serve (DynamoGraphDeployment + endpoint)
         id: serve
         if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'

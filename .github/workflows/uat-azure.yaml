@@ -797,18 +797,15 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/azure/run train "${TEST_CONFIG}"
 
-      # STILL DISABLED (step commented out below), but the root cause is now
-      # addressed: phase_serve selects the GPU pool for both graph components, so
-      # the Frontend no longer cold-pulls the ~12GB vllm-runtime image on a
-      # small CPU-pool node and wedges in ContainerCreating past the 30m
-      # readiness budget. uat-gcp.yaml re-enables its step first (#1644 tracks
-      # the GKE x inference cell); this one stays commented until that lane
-      # demonstrates a served completion — re-enable then, and restore the Serve
-      # summary row below to `${{ steps.serve.outcome }}`. Until then the
-      # inference STACK (dynamo + KAI scheduler + DRA driver) is still stood up
-      # and validated by prep/install/conformance/verify; only the
-      # served-workload run is skipped (the Serve summary row is a static
-      # `disabled`). Kept in lockstep with uat-gcp.yaml. Tracked by #1644.
+      # STILL DISABLED (step commented out below). phase_serve already selects the
+      # GPU pool for both graph components (#1644), so the Frontend no longer
+      # cold-pulls the ~12GB vllm-runtime image on a small CPU-pool node. Only
+      # uat-gcp.yaml re-enables the serve *step* for now (GKE x inference is what
+      # #1644 tracks); re-enable this one after that lane has a served completion,
+      # and restore the Serve summary row below to `${{ steps.serve.outcome }}`.
+      # Until then the inference STACK (dynamo + KAI scheduler + DRA driver) is
+      # still stood up and validated by prep/install/conformance/verify; only the
+      # served-workload run is skipped (Serve summary row is a static `disabled`).
       #
       # - name: UAT - serve (DynamoGraphDeployment + endpoint)
       #   id: serve

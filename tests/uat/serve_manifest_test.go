@@ -124,19 +124,22 @@ func TestServeGraphGPUPlacement(t *testing.T) {
 	})
 
 	// Guards the blast radius of the pin: the worker's GPU request is the reason
-	// the pool exists, and the placement edit sits directly above it.
+	// the pool exists, and the placement edit sits directly above it. Count
+	// claims across containers — two containers each declaring nvidia.com/gpu: 1
+	// would request two GPUs, not "exactly one".
 	t.Run("worker still requests exactly one GPU", func(t *testing.T) {
-		var found bool
+		claims := 0
 		for _, c := range worker.PodTemplate.Spec.Containers {
 			if q, ok := c.Resources.Limits[gpuResource]; ok {
-				found = true
+				claims++
 				if fmt.Sprint(q) != "1" {
 					t.Errorf("worker container %q %s limit = %v, want 1", c.Name, gpuResource, q)
 				}
 			}
 		}
-		if !found {
-			t.Errorf("no worker container requests %s; the served graph would run on CPU", gpuResource)
+		if claims != 1 {
+			t.Errorf("worker declares %d %s limit(s) across containers, want exactly 1",
+				claims, gpuResource)
 		}
 	})
 }
