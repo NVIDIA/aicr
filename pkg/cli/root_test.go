@@ -14,7 +14,14 @@
 
 package cli
 
-import "testing"
+import (
+	"context"
+	stderrors "errors"
+	"testing"
+	"time"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+)
 
 func TestRootCommand(t *testing.T) {
 	cmd := RootCommand()
@@ -52,6 +59,47 @@ func TestDefaultAgentImage(t *testing.T) {
 			got := defaultAgentImage()
 			if got != tt.expected {
 				t.Errorf("defaultAgentImage() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEmbeddedClientPreservesClientErrorCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		ctx      func() (context.Context, context.CancelFunc)
+		wantCode errors.ErrorCode
+	}{
+		{
+			name: "canceled context",
+			ctx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx, cancel
+			},
+			wantCode: errors.ErrCodeCanceled,
+		},
+		{
+			name: "expired deadline",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+			},
+			wantCode: errors.ErrCodeTimeout,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.ctx()
+			defer cancel()
+
+			client, err := embeddedClient(ctx)
+			if client != nil {
+				_ = client.Close()
+				t.Errorf("embeddedClient() client = %v, want nil", client)
+			}
+			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				t.Errorf("embeddedClient() error = %v, want code %s", err, tt.wantCode)
 			}
 		})
 	}

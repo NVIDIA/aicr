@@ -61,7 +61,7 @@ func runRecipeVerifyCatalogCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 	bundlePath := cmd.Args().First()
 
-	client, err := embeddedClient()
+	client, err := embeddedClient(ctx)
 	if err != nil {
 		return err
 	}

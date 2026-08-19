@@ -175,25 +175,48 @@ func TestNewClientRejectsMissingFilesystemDir(t *testing.T) {
 	}
 }
 
-func TestNewClientRejectsOCISource(t *testing.T) {
+func TestNewClientRejectsInvalidOCISourceConfiguration(t *testing.T) {
 	t.Parallel()
 
-	// OCI sources are reserved but not yet implemented by the facade;
-	// NewClient must refuse them with a clear error rather than
-	// silently falling through.
-	_, err := aicr.NewClient(
-		aicr.WithRecipeSource(aicr.OCISource("ghcr.io/nvidia/aicr-recipes", "v0.1.0")),
-	)
-	if err == nil {
-		t.Fatalf("expected NewClient to fail for OCI source (not yet implemented)")
+	tests := []struct {
+		name       string
+		repository string
+		selector   string
+	}{
+		{name: "empty repository", selector: "v1"},
+		{name: "tag selector", repository: "ghcr.io/nvidia/aicr-recipes", selector: "v1"},
+		{name: "invalid digest", repository: "ghcr.io/nvidia/aicr-recipes", selector: "sha256:short"},
+		{name: "ambiguous repository tag", repository: "ghcr.io/nvidia/aicr-recipes:v1", selector: "sha256:" + strings.Repeat("a", 64)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := aicr.NewClient(
+				aicr.WithRecipeSource(aicr.OCISource(tt.repository, tt.selector)),
+			)
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("NewClient() error = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
+func TestNewClientContextRejectsInvalidContext(t *testing.T) {
+	t.Parallel()
+
+	var nilContext context.Context
+	client, err := aicr.NewClientContext(nilContext,
+		aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if client != nil || !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("NewClientContext(nil) = (%v, %v), want nil ErrCodeInvalidRequest", client, err)
 	}
 
-	var se *aicrerrors.StructuredError
-	if !errors.As(err, &se) {
-		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
-	}
-	if se.Code != aicrerrors.ErrCodeUnavailable {
-		t.Errorf("expected ErrCodeUnavailable for OCI source, got %s", se.Code)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	client, err = aicr.NewClientContext(ctx,
+		aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if client != nil || !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeCanceled, "")) {
+		t.Fatalf("NewClientContext(canceled) = (%v, %v), want nil ErrCodeCanceled", client, err)
 	}
 }
 

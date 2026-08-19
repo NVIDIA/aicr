@@ -1379,3 +1379,44 @@ const (
 	// registry-push, and image-reference publication sequence.
 	OCIBundlePublishTimeout = 35 * time.Minute
 )
+
+// OCI recipe-source pull budgets and resource limits. Recipe catalogs are
+// small text trees; these ceilings leave substantial headroom while bounding
+// network, memory, and filesystem use by an untrusted registry artifact.
+const (
+	// OCIRecipePullTimeout bounds each OCI recipe-source phase independently,
+	// including staging and materialization. Callers that require one deadline
+	// for the complete operation must provide an outer context deadline.
+	OCIRecipePullTimeout = 5 * time.Minute
+
+	// OCIRecipePullAttemptTimeout bounds one registry graph-copy attempt.
+	OCIRecipePullAttemptTimeout = 90 * time.Second
+
+	// OCIRecipePullRetries is the total attempts, including the first.
+	OCIRecipePullRetries = 3
+
+	// OCIRecipePullBackoff is the initial exponential retry backoff.
+	OCIRecipePullBackoff = 1 * time.Second
+
+	// MaxOCIRecipeManifestBytes caps one fetched OCI manifest.
+	MaxOCIRecipeManifestBytes int64 = 1 * 1024 * 1024
+
+	// MaxOCIRecipeLayerBytes caps the compressed recipe layer.
+	MaxOCIRecipeLayerBytes int64 = 64 * 1024 * 1024
+
+	// MaxOCIRecipeDownloadBytes caps compressed artifact content per attempt.
+	MaxOCIRecipeDownloadBytes int64 = 64 * 1024 * 1024
+
+	// MaxOCIRecipeRetryTrafficBytes caps response traffic across all attempts.
+	MaxOCIRecipeRetryTrafficBytes int64 = OCIRecipePullRetries *
+		(MaxOCIRecipeManifestBytes + MaxOCIRecipeDownloadBytes + 1)
+
+	// MaxOCIRecipeExtractedBytes caps the complete expanded tar stream.
+	MaxOCIRecipeExtractedBytes int64 = 128 * 1024 * 1024
+
+	// MaxOCIRecipeFileBytes caps one materialized recipe file.
+	MaxOCIRecipeFileBytes int64 = MaxExternalDataFileBytes
+
+	// MaxOCIRecipeFiles caps all materialized filesystem nodes.
+	MaxOCIRecipeFiles = 4096
+)

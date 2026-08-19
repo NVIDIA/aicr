@@ -110,7 +110,7 @@ Use in shell scripts:
 			// registry; it now explicitly seeds its OWN provider via
 			// LoadCatalog before parsing criteria, fixing a latent ordering
 			// bug where the first parse could run against an empty registry.
-			client, err := recipeClientFromCmd(cmd, cfg)
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}
@@ -119,6 +119,7 @@ Use in shell scripts:
 			if err = client.LoadCatalog(ctx); err != nil {
 				return err
 			}
+			applyClientCriteriaStrictMode(cmd, cfg, client)
 
 			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
 			if err != nil {

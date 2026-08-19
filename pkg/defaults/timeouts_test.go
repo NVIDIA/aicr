@@ -322,3 +322,40 @@ func TestOCIBundlePublishTimeoutWorstCaseInvariant(t *testing.T) {
 		t.Fatalf("OCI whole-publish headroom = %v, want > 5m", headroom)
 	}
 }
+
+func TestOCIRecipePullBudgetInvariant(t *testing.T) {
+	worstCase := time.Duration(OCIRecipePullRetries) * OCIRecipePullAttemptTimeout
+	backoff := OCIRecipePullBackoff
+	for range OCIRecipePullRetries - 1 {
+		worstCase += backoff
+		backoff *= 2
+	}
+	if worstCase > OCIRecipePullTimeout {
+		t.Fatalf("OCI recipe pull retry budget %v exceeds whole-operation timeout %v",
+			worstCase, OCIRecipePullTimeout)
+	}
+}
+
+func TestOCIRecipeResourceLimitInvariants(t *testing.T) {
+	if MaxOCIRecipeManifestBytes <= 0 || MaxOCIRecipeLayerBytes <= 0 ||
+		MaxOCIRecipeDownloadBytes <= 0 || MaxOCIRecipeRetryTrafficBytes <= 0 ||
+		MaxOCIRecipeExtractedBytes <= 0 || MaxOCIRecipeFileBytes <= 0 ||
+		MaxOCIRecipeFiles <= 0 {
+
+		t.Fatal("all OCI recipe resource limits must be positive")
+	}
+	if MaxOCIRecipeLayerBytes > MaxOCIRecipeDownloadBytes {
+		t.Fatal("single-layer limit exceeds total-download limit")
+	}
+	if MaxOCIRecipeFileBytes != MaxExternalDataFileBytes ||
+		MaxOCIRecipeFileBytes > MaxOCIRecipeExtractedBytes {
+
+		t.Fatal("OCI recipe file limit must match the provider and fit extraction")
+	}
+	wantTraffic := int64(OCIRecipePullRetries) *
+		(MaxOCIRecipeManifestBytes + MaxOCIRecipeDownloadBytes + 1)
+	if MaxOCIRecipeRetryTrafficBytes != wantTraffic {
+		t.Fatalf("OCI recipe retry traffic limit = %d, want %d",
+			MaxOCIRecipeRetryTrafficBytes, wantTraffic)
+	}
+}
