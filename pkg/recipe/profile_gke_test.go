@@ -182,15 +182,22 @@ func TestGKEGpuStackClosureLockRejectsPolicyDivergence(t *testing.T) {
 	}
 	ctx := context.Background()
 
+	// Hydrate every component the lock covers — the profile's owned set
+	// plus its closure — rather than a hardcoded list, so adding a
+	// componentRef to the declaration (nvsentinel, #2181) cannot silently
+	// turn "clean candidate passes" into a missing-values failure.
 	hydrate := func(t *testing.T) map[string]map[string]any {
 		t.Helper()
 		candidate := make(map[string]map[string]any)
-		for _, component := range []string{"gpu-operator", allocpolicy.ComponentDRADriver} {
+		for component := range result.EffectiveLockSet() {
 			values, hErr := result.GetValuesForComponentWithContext(ctx, component)
 			if hErr != nil {
 				t.Fatalf("hydrate %s: %v", component, hErr)
 			}
 			candidate[component] = values
+		}
+		if len(candidate) == 0 {
+			t.Fatal("lock set is empty — every subtest below would be vacuous")
 		}
 		return candidate
 	}

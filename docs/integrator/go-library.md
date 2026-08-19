@@ -22,6 +22,44 @@ You _may_ also import `pkg/*` subpackages directly, but their APIs are
 not covered by the same stability guarantees — see the [public API
 surface](./public-api.md) for the details.
 
+## Runnable examples
+
+Each facade entry point below has a compiled counterpart in
+[`pkg/client/v1`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#pkg-examples).
+They are ordinary Go example functions, so `go test` builds them on every
+change — a facade change that breaks one of these fails in AICR's tree rather
+than in yours.
+
+| Example | Covers | Runs |
+|---|---|---|
+| `Example` | Quick start: client, resolve from criteria | yes |
+| `Example_errorCodes` | Matching structured error codes | yes |
+| `Example_bundleAndVerify` | Resolve → bundle → verify, hermetically | yes |
+| `Example_trustLevels` | The accepted trust levels, and their ordering trap | yes |
+| `Example_criteriaDimensions` | The coverage dimensions | yes |
+| `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order | no |
+| `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation | no |
+| `ExampleClient_LoadRecipe` | Reading a previously emitted recipe | no |
+| `ExampleClient_CollectSnapshot` | Capturing cluster state via the snapshotter Job | no |
+| `ExampleClient_ValidateState` | Selecting validation phases, and `--no-cluster` mode | no |
+| `ExampleClient_RecipeDigest` | The digest a CI staleness gate compares | no |
+| `ExampleClient_VerifyEvidence` | Evidence verification and exit classes | no |
+| `ExampleClient_VerifyCatalog` / `ExampleClient_SignCatalog` | Checking and producing the catalog signature | no |
+| `ExampleClient_PublishEvidence` | Signing and pushing an evidence bundle | no |
+| `ExampleVerifyBinaryAttestation` | Proving a binary came from NVIDIA CI | no |
+
+**What "runs" means, and what it does not.** Examples marked *yes* print an
+`Output:` block, so `go test` executes them and asserts the output. The rest
+are **compiled but not executed** — they need a cluster, a registry, a signing
+identity, or files that belong to your environment. Compilation still pins
+every signature, field name, and option they touch, so a renamed method or a
+dropped field breaks the build; it does not prove those flows behave
+correctly at runtime.
+
+The guarantee covers the examples, not this page. Prose here can still drift,
+and short illustrative snippets outside the table are not compiled — prefer
+copying from the examples, which are complete and known to build.
+
 ## Installing
 
 ```bash
@@ -168,9 +206,15 @@ capture instead of re-reading afterwards.
 snapCtx, cancelSnap := context.WithTimeout(context.Background(), 10*time.Minute)
 defer cancelSnap()
 snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
-	Kubeconfig:         "/path/to/target-kubeconfig",
+	Kubeconfig: "/path/to/target-kubeconfig",
+	// Namespace, Image, JobName, and ServiceAccountName are all required on
+	// the SDK path. Only Namespace is validated; the rest are copied straight
+	// into the Job and RBAC objects, so an empty value becomes an empty
+	// metadata.name or container image that the API server rejects. The CLI
+	// defaults them from its own flags, which the facade does not share.
 	Namespace:          "aicr-snapshot",
 	Image:              "ghcr.io/nvidia/aicr:v0.11.1",
+	JobName:            "aicr-snapshot",
 	ServiceAccountName: "aicr-agent",
 	Timeout:            5 * time.Minute,
 	Cleanup:            true,
@@ -906,7 +950,9 @@ concern the caller owns, so both can run unattended from a server.
 ## Errors
 
 All errors returned by the facade are `*pkg/errors.StructuredError`
-values carrying an `ErrorCode`. Use `errors.As` to inspect:
+values carrying an `ErrorCode`. Match on the code with `errors.Is` —
+`StructuredError.Is` reports a match when the target is a `StructuredError`
+with the same code, so this works through wrap chains:
 
 ```go
 import (
@@ -916,9 +962,25 @@ import (
 )
 
 _, err := client.ResolveRecipe(ctx, req)
-var se *aicrerrors.StructuredError
-if stderrors.As(err, &se) && se.Code == aicrerrors.ErrCodeInvalidRequest {
+switch {
+case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")):
 	// handle invalid input
+case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, "")):
+	// handle missing recipe
+}
+```
+
+Runnable version: [`Example_errorCodes`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#example-package-ErrorCodes).
+
+Reach for `errors.As` only when you need the error's *payload* rather than
+its class — `se.Context`, which carries structured detail such as a coverage
+failure's `uncovered` dimensions:
+
+```go
+var se *aicrerrors.StructuredError
+if stderrors.As(err, &se) {
+	uncovered := se.Context["uncovered"]
+	_ = uncovered
 }
 ```
 
@@ -965,6 +1027,38 @@ Per-operation caps:
 
 Passing a `nil` `context.Context` returns `ErrCodeInvalidRequest`. Use
 `context.Background()` (or a deadline-bounded child) for unbounded callers.
+
+## The integrator contract
+
+Four commitments, stated plainly, so you know what you are depending on.
+
+**Import `pkg/client/v1`. That is the contract.** Everything else under
+`pkg/*` stays importable, but only this package is compatibility-reviewed, and
+only its exported surface is checked by the API-diff gate on every PR. The
+[stability matrix](./public-api.md#stability-tiers) tiers each package;
+`Internal` packages will break you on upgrade.
+
+**When the facade is missing something, tell us instead of routing around
+it.** [Open an issue](https://github.com/NVIDIA/aicr/issues/new/choose)
+describing the capability. Reaching into an evolving subpackage works today
+and is the thing most likely to break you later, and we would rather extend
+the facade — that is how `LoadSnapshot`, `LoadConfig`, and the verification
+surface all arrived. Where this guide shows a deliberate escape hatch (the
+fingerprint step under [Criteria relaxation](#criteria-relaxation-on-the-snapshot-path)),
+it says so and explains the coupling you are accepting.
+
+**Breaking changes are detected, not merely intended.** `tools/api-diff`
+compares the facade and its transparent-alias targets against the last release
+on every PR; an incompatible change fails CI and requires a recorded, reviewed
+exception. That is a mechanical guarantee, not a policy promise — but note
+what it does *not* cover: behavior. A function keeping its signature while
+changing what it does passes the gate.
+
+**The examples are compiled.** Every entry in the [examples
+table](#runnable-examples) builds in AICR's own test suite, so a facade change
+that invalidates one fails here first. Scope that honestly: it covers those
+examples, not this page's prose or its shorter inline snippets, and for the
+majority it proves compilation rather than runtime behavior.
 
 ## Compatibility
 

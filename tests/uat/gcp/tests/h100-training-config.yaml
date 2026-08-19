@@ -58,13 +58,9 @@ spec:
       target: ./bundle
     deployment:
       deployer: helmfile
-      # NVSentinel remedy for the gke-default profile (GKE finalizes the
-      # driver via an init container of its kube-system DaemonSet, so no
-      # driver pod exists for the labeler to observe). Bundling without
-      # it is a blocking error (CheckNVSentinelDriverLabelDetectable /
-      # issue #2175).
-      set:
-        - nv-sentinel:labeler.assumeDriverInstalled=true
+      # No NVSentinel override: the gke-default gpuStack profile assigns
+      # labeler.assumeDriverInstalled itself (#2181), so this lane
+      # exercises the recipe supplying the remedy unaided.
     scheduling:
       acceleratedNodeSelector:
         nodeGroup: gpu-worker
