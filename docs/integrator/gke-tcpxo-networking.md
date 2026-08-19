@@ -60,12 +60,13 @@ AICR installs the TCPXO DaemonSets and detects the CRs; it does not provision an
 of this networking. These steps are a summary of the prerequisite AICR depends
 on, not a complete provisioning runbook — for the full procedure, including the
 per-VPC firewall rules and the supported GKE version floors, follow Google's
-[GPUDirect and multi-networking guide](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx).
+[GPUDirect and multi-networking guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx).
 
-Steps 1–3 without step 4 is the failure mode worth knowing: the VMs come up with
-all nine NICs attached and the AICR TCPXO DaemonSets roll out cleanly, but with
-no `Network` objects bound into the cluster no pod can reference a GPU NIC and
-TCPXO cannot function.
+Completing steps 1–3 without step 4 is the failure mode worth knowing: the VMs
+come up with all nine NICs attached (the node's primary interface plus the eight
+GPU NICs) and the AICR TCPXO DaemonSets roll out cleanly, but with no `Network`
+objects bound into the cluster no pod can reference a GPU NIC and TCPXO cannot
+function.
 
 ### Verifying
 

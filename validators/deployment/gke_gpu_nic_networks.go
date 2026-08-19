@@ -51,8 +51,8 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 	capability := validators.Capability{
 		Component: tcpxoComponent,
 		Subject:   "GKE Networks (networks.networking.gke.io)",
-		AbsentMsg: absentPrerequisiteMsg("the cluster does not serve networks.networking.gke.io at all, " +
-			"so it was created without --enable-multi-networking"),
+		AbsentMsg: absentPrerequisiteMsg("the cluster does not serve the networks.networking.gke.io " +
+			"API at all, so it has 0"),
 		InapplicableMsg: tcpxoComponent + " not declared in recipe and the cluster has no GKE Network " +
 			"API — cluster does not use GPUDirect TCPXO",
 	}
@@ -65,6 +65,7 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 	// error, which both false-fails an undeclared recipe and hides the missing
 	// prerequisite behind "failed to read" on a declared one.
 	if apierrors.IsNotFound(listErr) {
+		// present is unused here: Require consults it only when probeErr is nil.
 		return capability.Require(ctx, listErr, false)
 	}
 
@@ -110,9 +111,11 @@ func absentPrerequisiteMsg(detail string) string {
 	return fmt.Sprintf(
 		"recipe declares %s but %s GPU NIC networks — GPUDirect TCPXO requires one Network "+
 			"per GPU NIC, each bound to a GKENetworkParamSet and each with %q in its own "+
-			"metadata.name (the GKENetworkParamSet name is not matched). "+
-			"These are provisioned with the cluster, not by AICR, and multi-networking cannot be "+
-			"enabled after cluster creation. Verify with: kubectl get network.networking.gke.io "+
+			"metadata.name (this check counts Network names; it does not verify the "+
+			"GKENetworkParamSet binding or readiness). "+
+			"These are provisioned with the cluster, not by AICR, and multi-networking "+
+			"(--enable-multi-networking) cannot be enabled after cluster creation. "+
+			"Verify with: kubectl get network.networking.gke.io "+
 			"(see docs/integrator/gke-tcpxo-networking.md)",
 		tcpxoComponent, detail, gkenet.GPUNICNameSubstring)
 }

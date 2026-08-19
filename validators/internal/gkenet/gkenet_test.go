@@ -61,12 +61,11 @@ func prefixed(prefix string, count int) []string {
 	return names
 }
 
-// Note on sort coverage: DiscoverGPUNICNetworks sorts its result, and that
-// order is load-bearing (the performance validator maps it positionally onto
-// eth1..eth8). It is deliberately NOT asserted here — the fake dynamic client
-// returns List items already in name order, so a case that inserts names out of
-// order still passes with sort.Strings removed. Such a test would assert
-// nothing; covering the sort needs a fake that preserves insertion order.
+// Note on sort coverage: the table cases below cannot guard the sort, because
+// objects seeded into the fake's ObjectTracker come back already ordered by
+// name — such a case passes with sort.Strings removed. The ordering contract is
+// covered instead by TestDiscoverGPUNICNetworksSortsResult, which serves a
+// hand-built list through a reactor and so preserves insertion order.
 func TestDiscoverGPUNICNetworks(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -150,5 +149,45 @@ func TestDiscoverGPUNICNetworksReturnsRawError(t *testing.T) {
 	}
 	if !apierrors.IsForbidden(err) {
 		t.Errorf("error is no longer classifiable as Forbidden: %v", err)
+	}
+}
+
+// TestDiscoverGPUNICNetworksSortsResult guards the ordering contract. The sort
+// is load-bearing: the performance validator maps the result positionally onto
+// eth1..eth8, so an unsorted list would wire each GPU NIC to the wrong
+// interface.
+//
+// The reactor is what makes this coverable. Objects seeded into the fake's
+// ObjectTracker are returned sorted by name regardless of insertion order, so a
+// table case cannot distinguish sorted from unsorted output; a reactor returning
+// a hand-built list bypasses the tracker and is served verbatim. Deleting
+// sort.Strings from DiscoverGPUNICNetworks must fail this test.
+func TestDiscoverGPUNICNetworksSortsResult(t *testing.T) {
+	client := newFakeClient()
+	client.PrependReactor("list", "networks", func(k8stesting.Action) (bool, runtime.Object, error) {
+		list := &unstructured.UnstructuredList{Object: map[string]interface{}{
+			"apiVersion": "networking.gke.io/v1",
+			"kind":       "NetworkList",
+		}}
+		// Deliberately out of lexical order.
+		for _, name := range []string{"gpu-nic-2", "gpu-nic-0", "gpu-nic-1"} {
+			list.Items = append(list.Items, *testNetwork(name))
+		}
+		return true, list, nil
+	})
+
+	got, err := DiscoverGPUNICNetworks(context.Background(), client)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := []string{"gpu-nic-0", "gpu-nic-1", "gpu-nic-2"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v (result must be sorted)", got, want)
+		}
 	}
 }
