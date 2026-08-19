@@ -1,0 +1,65 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# k8s-aibom Health Check
+#
+# Validates the controller and its cluster-scoped configuration. AIBOM
+# resources are deliberately not required: a healthy label-gated installation
+# legitimately observes zero workloads until a namespace opts in.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: k8s-aibom-health-check
+spec:
+  timeouts:
+    assert: 2m
+  steps:
+    - name: validate-controller-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: k8s-aibom
+                namespace: k8s-aibom-system
+              # Four independent root-level expressions rather than one
+              # conjunction: each failure names the specific condition that
+              # was not met. Every status field read here is `omitempty` and
+              # therefore absent on a freshly created Deployment, so each
+              # defaults to zero — absence must fail, not compare as null.
+              #
+              # availableReplicas alone is not a rollout gate: mid-upgrade a
+              # Deployment can have availableReplicas == spec.replicas while
+              # the *old* ReplicaSet still owns every available pod. The
+              # updatedReplicas and observedGeneration terms are what make
+              # this assert describe the revision Helm just applied rather
+              # than the one it replaced.
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+    - name: validate-current-controller-configuration
+      try:
+        - assert:
+            resource:
+              apiVersion: aibom.k8saibom.dev/v1alpha1
+              kind: AIBOMControllerConfig
+              metadata:
+                name: default
+              # Both the top-level status and the Ready condition must refer
+              # to this exact generation. `contains` is a projection over all
+              # conditions, so additional condition types cannot disarm it.
+              (status.observedGeneration == metadata.generation): true
+              (contains((status.conditions || `[]`)[?type == 'Ready' && status == 'True'].observedGeneration, metadata.generation)): true

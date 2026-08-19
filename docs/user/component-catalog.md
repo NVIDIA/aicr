@@ -28,6 +28,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work zero-config. Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
+| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Registry-only: no stock recipe installs it. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a NATS-backed Kubernetes event plane for KV-cache events, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
@@ -286,6 +287,163 @@ AICR enforces and surfaces inference-gateway exposure in two places:
 
 - **Bundle-time private-by-default.** When a bundle includes `agentgateway` and `allowedSourceRanges` is empty/unset, `aicr bundle` injects the RFC1918 private ranges so the deployed gateway denies the public internet, and records a bundle note. An invalid value (a bare-string `--set`, a non-list, an unparseable CIDR, or a non-canonical CIDR such as `1.2.3.4/24` that Kubernetes' strict validation would reject at apply time) is rejected with `ErrCodeInvalidRequest`. A scoped list passes silently; an explicit any-source CIDR (`0.0.0.0/0` or `::/0`) passes with a loud warning as a deliberate opt-in. See [#1373](https://github.com/NVIDIA/aicr/issues/1373).
 - **Conformance check.** The `inference-gateway` conformance check (run during `aicr validate --phase conformance` on a live cluster) inspects the gateway's `LoadBalancer` Service and records its exposure as evidence — the source ranges if scoped, or an explicit "open to `0.0.0.0/0`" finding if not. Set `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true` on the validator environment to escalate an open gateway to a check **failure**.
+
+## k8s-aibom Runtime Inventory
+
+AICR qualifies k8s-aibom v1.2.0 as an optional Helm component. It is not in
+the base, a mixin, or any stock overlay. To enable it, add this reference to a
+custom or external overlay and keep that overlay's criteria as narrow as the
+intended rollout:
+
+```yaml
+spec:
+  componentRefs:
+    - name: k8s-aibom
+      type: Helm
+      valuesFile: components/k8s-aibom/values.yaml
+```
+
+A broad criteria overlay affects every matching recipe. In particular,
+`intent: any` is universal across intents; do not use it unless that injection
+is deliberate. The in-tree `recipes/overlays/monitoring-hpa.yaml` overlay shows
+that broad reach: its `criteria: intent: any` attaches to every matching intent.
+See [Recipe Development](../integrator/recipe-development.md) for external data
+and criteria composition.
+
+The qualified artifacts are source tag `v1.2.0` at commit
+`4aa7638b08ab9927bfa8df85c46c80234b9996f9`, OCI chart
+`oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.2.0`, and the controller
+image pinned by digest in the component values. Upstream documents Kubernetes
+1.27 through 1.35 support. AICR also observed the dedicated integration test
+passing on its Kind 1.36.1 node image; that is qualification evidence, not an
+extension of upstream's support statement.
+
+### Health and readiness
+
+The deployment-phase check requires the controller Deployment to have at least
+one desired replica and all desired replicas available. It also requires the
+cluster-scoped `AIBOMControllerConfig/default` to report a current
+`Ready=True` condition: both top-level status and the condition must have
+observed the object's current generation. Missing or stale resources fail
+closed. Zero `AIBOM` objects is healthy before any namespace opts in.
+
+`readiness.strictConfig` is enabled, so invalid new configuration cannot
+silently replace the controller's last-known-good configuration while the pod
+continues to report ready.
+
+### Security, privacy, and retention
+
+Namespace discovery requires the label
+`aibom.k8saibom.dev/enabled=true`. AICR does not apply it. No external sink,
+endpoint, credential, or Secret access is configured by default. BOMs up to
+262144 bytes are stored inline in `AIBOM.status`; larger output is summarized
+and marked truncated when no sink is configured. Inline status consumes etcd
+storage, so workload count and document size are part of the cluster control
+plane footprint. The controller runs non-root with a read-only root filesystem,
+RuntimeDefault seccomp, no privilege escalation, and no Linux capabilities.
+
+The namespace label limits which workloads produce AIBOMs, not informer read
+scope. The controller still reads workload and pod specifications
+cluster-wide—including image references, arguments, and inline environment
+values—into memory. With the default empty sink list that data does not leave
+the cluster, but cluster-wide visibility remains part of the privacy boundary.
+The controller is not read-only: its bounded RBAC permits writes to its own
+AIBOM API resources and required status subresources, configuration status,
+and Kubernetes Events. It has no Secret access while sinks are disabled.
+
+An AIBOM is owned by its top-level workload and is garbage-collected when that
+owner is deleted. Helm does not delete CRDs from a chart's `crds/` directory on
+uninstall; consequently AIBOM resources for owners that still exist may remain
+after controller removal. External sinks, if an operator configures one, have
+their own retention policy outside AICR.
+
+### Upgrade, uninstall, and troubleshooting
+
+Upgrade the component by qualifying a new chart and image together, then
+regenerate the custom recipe and bundle. Do not change only the controller
+image: chart, CRDs, status API, and image are one qualified set. Quiesce
+configuration changes during rollback and confirm that
+`AIBOMControllerConfig/default` returns to a current `Ready=True` state.
+
+**Apply CRDs before the bundle upgrade.** The chart ships its CRDs under
+`crds/`. Helm installs that directory on first install and never touches it
+again on upgrade, so a chart bump whose CRDs changed leaves the previous schema
+in place and the API server silently prunes the new controller's writes to
+added fields. Apply the CRDs from the exact qualified chart first, then
+upgrade:
+
+```bash
+helm show crds oci://ghcr.io/googlecloudplatform/charts/k8s-aibom \
+  --version <qualified-version> | kubectl apply --server-side -f -
+```
+
+Use `--server-side` because the CRDs exceed the annotation size limit that
+client-side apply depends on.
+
+Which deployers need that step differs, so check yours:
+
+| Deployer | CRD behavior on upgrade | Pre-upgrade step needed |
+|---|---|---|
+| `helm` | `helm upgrade` skips `crds/` | Yes |
+| `helmfile` | `helmfile apply` upgrades through Helm, so it also skips `crds/` | Yes |
+| `flux` | The generated `HelmRelease` sets no `spec.upgrade.crds`, and the helm-controller default is `Skip` | Yes |
+| `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
+
+Flux can be made to handle this itself by setting `spec.upgrade.crds:
+CreateReplace` on the `HelmRelease`, but AICR does not generate that field for
+any component today, and `CreateReplace` is a cluster-wide behavior change that
+should be decided per chart rather than assumed. Until then, treat Flux like
+`helm`.
+
+Uninstall in this order. Removing the component from the overlay and applying a
+regenerated bundle does **not** remove the previously installed release: the
+`helm` and `helmfile` deployers install releases by name, and a release the new
+bundle no longer mentions is simply left alone. Skipping the explicit uninstall
+leaves the controller running while the next step deletes the CRs and CRDs
+underneath it, so it reconciles against resources that are disappearing.
+
+1. Remove the component reference from the custom overlay and regenerate the
+   recipe and bundle.
+2. Uninstall the release with the deployer-appropriate procedure in
+   [Bundle Uninstall](cli-reference.md#bundle-uninstall) — `helm uninstall
+   k8s-aibom -n k8s-aibom-system` for the `helm` deployer, `helmfile destroy`
+   for Helmfile bundles, deleting the owning `Application` for Argo CD, and the
+   `HelmRelease` for Flux. Confirm the controller Deployment is gone before
+   continuing.
+3. Only then delete retained AIBOMs and, last, the CRDs.
+
+Deleting the CRDs cascades to every AIBOM stored cluster-wide, including any
+belonging to a namespace or release you did not intend to touch. Enumerate
+before deleting rather than passing `--all`:
+
+```bash
+# Review what exists and who owns it; delete only what this release should own.
+kubectl get aiboms.aibom.k8saibom.dev --all-namespaces \
+  -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,OWNER:.metadata.ownerReferences[0].name
+kubectl -n <namespace> delete aiboms.aibom.k8saibom.dev <name>
+
+# CRDs last, and only once no other release uses them — deletion removes every
+# stored custom resource of these kinds cluster-wide.
+kubectl delete crd \
+  aiboms.aibom.k8saibom.dev \
+  aibomcontrollerconfigs.aibom.k8saibom.dev
+```
+
+If health validation fails, inspect the Deployment and configuration before
+looking for AIBOMs:
+
+```bash
+kubectl rollout status deployment/k8s-aibom -n k8s-aibom-system
+kubectl get aibomcontrollerconfig default -o yaml
+kubectl logs deployment/k8s-aibom -n k8s-aibom-system
+```
+
+A current `Ready=False` or stale `observedGeneration` means the active
+configuration was not accepted. If the controller is healthy but produces no
+inventory, verify the namespace label and the workload kind. A truncated BOM
+with no sink is expected once its canonical document exceeds the inline
+threshold; configure retention and credentials explicitly before enabling an
+external sink.
 
 ## Adding Components
 

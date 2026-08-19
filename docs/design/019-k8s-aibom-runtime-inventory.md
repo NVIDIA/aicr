@@ -2,14 +2,37 @@
 
 ## Status
 
-**Proposed** — 2026-08-12.
+**Accepted** — 2026-08-19. Originally proposed 2026-08-12.
+
+The accepted implementation qualifies upstream v1.2.0 at source commit
+`4aa7638b08ab9927bfa8df85c46c80234b9996f9`, OCI chart digest
+`sha256:164ba4eeb8b2d3e817917cd3e312994030e4cda24046419d899fdcad4bcf6244`,
+and controller image digest
+`sha256:b5040d14a20b4e890956d5f47b78445dac6c871eb5799586d9011c48ce71c198`.
+The chart archive SHA-256 is
+`534d05b540bf82a0d8279e342a82606be187bca9480ff25e274d4f11bae00097`.
+Image provenance, image CycloneDX SBOM, and chart provenance verified against
+the tagged source, upstream release workflow, GitHub-hosted runner, Rekor
+record, and exact artifact subjects.
+
+The qualified operational envelope has a 60-second reconciliation/Kubernetes
+API deadline and a 30-second deadline per external sink. Webhook delivery makes
+at most four attempts with 250 ms, 1 second, and 3 second backoffs (3 second
+cap, 30 second total); GCS delivery makes at most four attempts within 30
+seconds. Sink fan-out is bounded and synchronous, with no asynchronous queue or
+overflow mode. The 1,000-workload qualification converged in 14 seconds,
+sampled 230.4 mCPU and 47.5 MiB during convergence, and measured quiet CPU
+mean/p95/max of 17.82/24.88/32.10 mCPU with memory
+47.98/48.98/48.98 MiB. These measurements support the accepted 50 mCPU/128 MiB
+requests and 1 CPU/256 MiB limits.
 
 ## Decision Summary
 
-AICR will admit
+AICR admits
 [`GoogleCloudPlatform/k8s-aibom`](https://github.com/GoogleCloudPlatform/k8s-aibom)
-as an optional, provider-neutral Helm component after one exact upstream release
-passes the packaging, security, lifecycle, and qualification gates in this ADR.
+as an optional, provider-neutral Helm component after the exact upstream
+v1.2.0 release passed the packaging, security, lifecycle, and qualification
+gates in this ADR.
 
 The first implementation is **registry-only**:
 
@@ -81,9 +104,9 @@ documents are written to a configured external sink or reported as truncated
 when no sink can retain them. The default configuration is namespace opt-in and
 has no external sink.
 
-This proposal was reviewed on 2026-08-12 against upstream commit
+The original proposal was reviewed on 2026-08-12 against upstream commit
 [`e752beb15c8eb0179bba4f3066c7b989c84da33e`](https://github.com/GoogleCloudPlatform/k8s-aibom/commit/e752beb15c8eb0179bba4f3066c7b989c84da33e).
-At that commit:
+At that pre-release commit:
 
 - the public API is `aibom.k8saibom.dev/v1alpha1` and explicitly experimental;
 - the repository has no source tag or GitHub release;
@@ -95,8 +118,9 @@ At that commit:
 - rendered RBAC contains duplicate rules and broader write permissions than the
   minimum intended ownership boundary.
 
-These are adoption blockers, not defects AICR will mask with a private chart or
-manifest copy.
+Those were adoption blockers, not defects AICR would mask with a private chart
+or manifest copy. Upstream v1.2.0 resolved them and supplied the coherent
+release qualified by this accepted decision.
 
 ### Existing integration discussion
 
@@ -137,9 +161,9 @@ values, health-check, scheduling, bundle, mirror, and documentation paths. It
 does not add a deployer, AICR controller adapter, component-specific Go package,
 or installation script.
 
-The final registry entry will use the exact repository, chart name, version,
-namespace, and value paths published by the qualified upstream release. The
-intended namespace is `k8s-aibom-system`, subject to verification against that
+The registry entry uses OCI repository
+`oci://ghcr.io/googlecloudplatform/charts`, chart `k8s-aibom`, version `1.2.0`,
+namespace `k8s-aibom-system`, and the public value paths published by that
 release.
 
 ### 2. Keep adoption registry-only
@@ -317,8 +341,8 @@ ADR-007 recipe evidence remains unchanged.
 
 ## Adoption Gates
 
-Registry implementation begins only after one exact upstream release passes all
-of the following gates.
+Registry implementation was admitted only after upstream v1.2.0 passed all of
+the following gates.
 
 ### Release and supply chain
 
@@ -423,7 +447,7 @@ of the following gates.
 
 ## Implementation Deliverables
 
-After the gates pass, the component PR includes:
+The accepted component implementation includes:
 
 - one registry entry with an immutable chart version;
 - minimal AICR values with the qualified image digest and secure defaults;
@@ -472,8 +496,8 @@ SBOM, provenance verification, rendered RBAC review, and commands executed.
 
 ### Negative
 
-- The integration cannot begin until upstream publishes qualified artifacts and
-  fixes chart lifecycle and RBAC blockers.
+- Future upgrades remain blocked until a new chart, image, CRD, API, SBOM, and
+  provenance set is requalified together.
 - Users must author or adopt an explicit custom recipe to enable the component.
 - Each adopted release adds chart, CRD, RBAC, health, mirror, BOM, and upgrade
   maintenance.
@@ -493,10 +517,11 @@ SBOM, provenance verification, rendered RBAC review, and commands executed.
 
 ### Add the component to stock recipes now
 
-**Rejected.** Upstream artifacts are not publishable inputs today, the API is
-experimental, and default installation would add CRDs, cluster-wide visibility,
-write RBAC, and an always-on controller. Bundle-time disablement would also
-diverge the deployment from the recipe's health contract.
+**Rejected.** At proposal time upstream artifacts were not publishable inputs,
+the API was experimental, and default installation would add CRDs, cluster-wide
+visibility, write RBAC, and an always-on controller. The qualified release does
+not change the registry-only selection decision. Bundle-time disablement would
+also diverge deployment from the recipe's health contract.
 
 ### Build or republish upstream artifacts from AICR
 

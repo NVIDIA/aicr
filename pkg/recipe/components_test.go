@@ -266,6 +266,63 @@ func TestComponentRegistry_NodeSchedulingPaths(t *testing.T) {
 	}
 }
 
+// TestComponentRegistry_K8sAIBOMContract pins the k8s-aibom registry
+// properties that encode *intent* — the ones a rename, a reshuffle, or a
+// well-meaning cleanup would silently break without any other test noticing.
+//
+// It deliberately does NOT restate the chart repository, chart name, version,
+// or namespace. Those are verbatim copies of recipes/registry.yaml with no
+// independent source of truth, so asserting them detects nothing and turns
+// every routine chart bump into a two-file edit. Version drift specifically is
+// already gated by TestCommittedBOMVersionsMatchRegistry, which compares the
+// registry pin against the committed BOM.
+func TestComponentRegistry_K8sAIBOMContract(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	component := registry.Get("k8s-aibom")
+	if component == nil {
+		t.Fatal("k8s-aibom not found in registry")
+	}
+
+	// The chart ships its CRDs under crds/ AND renders AIBOMControllerConfig
+	// from templates/, so helm-diff cannot resolve that CR on a fresh cluster.
+	// Losing this flag produces a Helmfile release without
+	// disableValidation: true, which fails only at deploy time on a clean
+	// cluster — far from the change that caused it.
+	if !component.HasSelfRefCRDs {
+		t.Error("hasSelfRefCRDs must be enabled: the chart renders a CR whose CRD it also ships")
+	}
+	// Renaming or dropping the check file turns the component's deployment
+	// gate into a no-op; the generic RequiresHealthCheck test proves *a* file
+	// resolves, this proves it is still the k8s-aibom one.
+	if component.HealthCheck.AssertFile != "checks/k8s-aibom/health-check.yaml" {
+		t.Errorf("health check = %q", component.HealthCheck.AssertFile)
+	}
+
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{name: "override keys", got: component.ValueOverrideKeys, want: []string{"k8saibom", "aibom"}},
+		{name: "system node selectors", got: component.GetSystemNodeSelectorPaths(), want: []string{"nodeSelector"}},
+		{name: "system tolerations", got: component.GetSystemTolerationPaths(), want: []string{"tolerations"}},
+		{name: "accelerated node selectors", got: component.GetAcceleratedNodeSelectorPaths(), want: nil},
+		{name: "accelerated tolerations", got: component.GetAcceleratedTolerationPaths(), want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !slices.Equal(tt.got, tt.want) {
+				t.Errorf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
 func TestComponentRegistry_SlinkySlurmOperator_NodeSchedulingPaths(t *testing.T) {
 	registry, err := GetComponentRegistry()
 	if err != nil {

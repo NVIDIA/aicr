@@ -1,0 +1,73 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# k8s-aibom Helm values
+# Optional runtime AI-workload inventory. Registry-only: no stock recipe
+# selects this component. The digest and defaults below were qualified as one
+# coherent v1.2.0 artifact set under ADR-019.
+
+image:
+  repository: ghcr.io/googlecloudplatform/k8s-aibom
+  tag: ""
+  digest: sha256:b5040d14a20b4e890956d5f47b78445dac6c871eb5799586d9011c48ce71c198
+
+# Make pod readiness reflect the current AIBOMControllerConfig status rather
+# than process liveness alone. Invalid current configuration must fail closed.
+readiness:
+  strictConfig: true
+
+# The empty discovery map retains upstream's label-gated namespace selector:
+# only namespaces labeled aibom.k8saibom.dev/enabled=true emit AIBOMs.
+# No external sink or credentials are configured by default.
+config:
+  discovery: {}
+  bomGeneration:
+    inlineThresholdBytes: 262144
+    staleThresholdReconciles: 3
+  sinks: []
+  logging:
+    level: info
+    format: json
+
+rbac:
+  sinkSecretAccess: false
+
+podSecurityContext:
+  fsGroup: 2000
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  allowPrivilegeEscalation: false
+
+# Measured at 0, 250, and 1,000 replicas-zero workloads. At 1,000 workloads,
+# the final v1.2.0 image converged in 14s and remained below 231m CPU / 49MiB.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 256Mi
+# System scheduling paths are declared in recipes/registry.yaml and injected
+# here by the bundler when the corresponding CLI flags are used.
+nodeSelector: {}
+tolerations: []

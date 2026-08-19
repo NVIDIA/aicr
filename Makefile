@@ -1068,6 +1068,10 @@ endif
 component-cleanup: ## Clean up component test resources (COMPONENT=cert-manager [DELETE_CLUSTER=true])
 	@COMPONENT=$${COMPONENT:-} DELETE_CLUSTER=$${DELETE_CLUSTER:-false} KEEP_CLUSTER=$${KEEP_CLUSTER:-false} bash tools/component-test/cleanup.sh
 
+.PHONY: k8s-aibom-test
+k8s-aibom-test: build ## Prove k8s-aibom AIBOM generation, reconciliation, and cleanup on Kind
+	@bash tools/k8s-aibom-test/run.sh
+
 # =============================================================================
 # Combined Development Targets
 # =============================================================================

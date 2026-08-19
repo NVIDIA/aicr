@@ -507,6 +507,30 @@ components:
         tolerationPaths:
           - tolerations
 
+  - name: k8s-aibom
+    displayName: k8s-aibom
+    valueOverrideKeys:
+      - k8saibom
+      - aibom
+    # The chart ships AIBOM / AIBOMControllerConfig CRDs under crds/ and
+    # renders AIBOMControllerConfig/default from templates/. helm-diff cannot
+    # resolve that CR on a fresh cluster before Helm installs the CRDs, so the
+    # Helmfile release must disable live REST-mapper validation.
+    hasSelfRefCRDs: true
+    healthCheck:
+      assertFile: checks/k8s-aibom/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/googlecloudplatform/charts
+      defaultChart: k8s-aibom
+      defaultVersion: "1.2.0"
+      defaultNamespace: k8s-aibom-system
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
   - name: kai-scheduler
     displayName: kai-scheduler
     valueOverrideKeys:
