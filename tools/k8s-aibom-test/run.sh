@@ -29,7 +29,7 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 # shellcheck source=../common
 . "${REPO_ROOT}/tools/common"
 
-has_tools go jq kubectl yq
+has_tools go jq kind kubectl yq
 
 COMPONENT=k8s-aibom
 FIXTURE_NS=aicr-aibom-test
@@ -151,8 +151,18 @@ capture_aibom() {
     [[ "${actual_sha}" == "${want_sha}" ]] \
         || fail "${label}: canonical BOM SHA mismatch: got ${actual_sha}, want ${want_sha}"
 
+    # Redirect the validator's stdout into the evidence dir. This function's
+    # stdout IS its return value — the caller reads it through command
+    # substitution — so anything the validator prints would be concatenated
+    # ahead of the hash. That is not cosmetic: the validator's banner embeds
+    # the component count, so the "digest change moved inputHash" assertion
+    # could be satisfied by a differing banner while inputHash never moved.
     GOFLAGS='-mod=vendor' go run "${SCRIPT_DIR}/validate-bom" "${bom_json}" \
-        || fail "${label}: AIBOM document failed CycloneDX validation"
+        >"${OUTPUT_DIR}/cyclonedx-${label}.txt" 2>&1 \
+        || {
+            cat "${OUTPUT_DIR}/cyclonedx-${label}.txt" >&2
+            fail "${label}: AIBOM document failed CycloneDX validation"
+        }
 
     jq -r '.status.inputHash' "${aibom_json}"
 }
@@ -161,12 +171,32 @@ capture_aibom() {
 # 1. Cluster, install, and the read-only health check — all delegated.
 # ---------------------------------------------------------------------------
 
-log_info "Ensuring the shared component-test Kind cluster"
+# Pin every kubectl, helm, and kind call in this run — and in the helper
+# scripts it invokes — to a private kubeconfig, BEFORE the helper runs.
+#
+# A one-time current-context check is not sufficient. The context is process-
+# external mutable state: ensure-cluster.sh calls `kubectl config use-context`
+# on the caller's shared kubeconfig, and any concurrent session that switches
+# context mid-run would silently redirect the node labeling, the Helm install
+# with its cluster-scoped CRDs and RBAC, the fixture apply, and the teardown
+# to whatever cluster is active at that instant. A private KUBECONFIG closes
+# the window for the whole run rather than at one instant, and satisfies
+# #2241's "touches no other cluster context" literally.
+#
+# Seeding matters: when the cluster already exists the private file must be
+# populated first or ensure-cluster.sh's `use-context` finds no such context.
+# When it does not exist, `kind create` writes into $KUBECONFIG itself.
+export KUBECONFIG="${OUTPUT_DIR}/kubeconfig"
+if kind get clusters 2>/dev/null | grep -qxF "${CLUSTER_NAME}"; then
+    kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" >/dev/null
+fi
+
+log_info "Ensuring the component-test Kind cluster (private kubeconfig: ${KUBECONFIG})"
 TIER=deploy bash "${REPO_ROOT}/tools/component-test/ensure-cluster.sh"
 
-# Arm teardown only now. Before this point nothing has been created, and the
-# active context may still be the caller's own cluster; a trap armed earlier
-# would delete a namespace and uninstall a release from it if setup failed.
+# Arm teardown only now. Before this point nothing has been created, and a trap
+# armed earlier would run its deletions against a cluster this script never
+# touched if setup failed.
 require_expected_context \
     || fail "expected context ${EXPECTED_CONTEXT} after ensure-cluster.sh, got $(kubectl config current-context 2>/dev/null || echo none)"
 trap cleanup EXIT

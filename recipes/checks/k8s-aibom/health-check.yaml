@@ -40,13 +40,30 @@ spec:
               # therefore absent on a freshly created Deployment, so each
               # defaults to zero — absence must fail, not compare as null.
               #
-              # availableReplicas alone is not a rollout gate: mid-upgrade a
-              # Deployment can have availableReplicas == spec.replicas while
-              # the *old* ReplicaSet still owns every available pod. The
-              # updatedReplicas and observedGeneration terms are what make
-              # this assert describe the revision Helm just applied rather
-              # than the one it replaced.
+              # These mirror Kubernetes' own DeploymentComplete predicate
+              # (updatedReplicas, replicas, availableReplicas, and
+              # observedGeneration all agreeing with spec.replicas), plus a
+              # desired-count floor so a scaled-to-zero Deployment cannot
+              # satisfy the check by having nothing to run.
+              #
+              # Each term is load-bearing and none subsumes another:
+              #
+              #   availableReplicas alone is not a rollout gate — mid-upgrade
+              #   it can equal spec.replicas while the OLD ReplicaSet still
+              #   owns every available pod.
+              #
+              #   updatedReplicas counts pods the NEW ReplicaSet created, not
+              #   pods that became ready, so it does not close that gap on its
+              #   own. With spec.replicas: 1 the default 25% maxUnavailable
+              #   rounds to 0, so a stalled upgrade holds the old pod alive and
+              #   reaches updatedReplicas=1, availableReplicas=1 (the old pod),
+              #   and a current observedGeneration — every other term passing.
+              #
+              #   status.replicas counts pods across EVERY ReplicaSet, so it is
+              #   the only term that sees the leftover second pod (2 != 1) and
+              #   fails that stall.
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true

@@ -30,6 +30,7 @@ import (
 // created Deployment is actually in, and it is the state the check's
 // `|| `0` defaults exist to handle.
 type deploymentStatus struct {
+	replicas           *int64
 	available          *int64
 	updated            *int64
 	observedGeneration *int64
@@ -54,7 +55,10 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 
 	// healthyDeployment is the steady state every case starts from: a
 	// single-replica rollout that has fully converged on generation 3.
-	healthyDeployment := deploymentStatus{available: new(int64(1)), updated: new(int64(1)), observedGeneration: new(int64(3))}
+	healthyDeployment := deploymentStatus{
+		replicas: new(int64(1)), available: new(int64(1)),
+		updated: new(int64(1)), observedGeneration: new(int64(3)),
+	}
 
 	tests := []struct {
 		name string
@@ -84,7 +88,7 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 		{
 			name:    "zero desired replicas fails closed",
 			desired: new(int64(0)), deploymentGen: 3,
-			status:        deploymentStatus{available: new(int64(0)), updated: new(int64(0)), observedGeneration: new(int64(3))},
+			status:        deploymentStatus{replicas: new(int64(0)), available: new(int64(0)), updated: new(int64(0)), observedGeneration: new(int64(3))},
 			configPresent: true,
 			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
 			wantOutput: "Deployment",
@@ -92,7 +96,7 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 		{
 			name:    "partial rollout fails closed",
 			desired: new(int64(2)), deploymentGen: 3,
-			status:        deploymentStatus{available: new(int64(1)), updated: new(int64(2)), observedGeneration: new(int64(3))},
+			status:        deploymentStatus{replicas: new(int64(2)), available: new(int64(1)), updated: new(int64(2)), observedGeneration: new(int64(3))},
 			configPresent: true,
 			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
 			wantOutput: "Deployment",
@@ -104,7 +108,7 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			// Without the updatedReplicas term this state reports healthy.
 			name:    "converged old ReplicaSet mid-upgrade fails closed",
 			desired: new(int64(2)), deploymentGen: 4,
-			status:        deploymentStatus{available: new(int64(2)), updated: new(int64(0)), observedGeneration: new(int64(4))},
+			status:        deploymentStatus{replicas: new(int64(2)), available: new(int64(2)), updated: new(int64(0)), observedGeneration: new(int64(4))},
 			configPresent: true,
 			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
 			wantOutput: "Deployment",
@@ -115,7 +119,7 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			// describes the previous generation.
 			name:    "unobserved Deployment generation fails closed",
 			desired: new(int64(1)), deploymentGen: 5,
-			status:        deploymentStatus{available: new(int64(1)), updated: new(int64(1)), observedGeneration: new(int64(4))},
+			status:        deploymentStatus{replicas: new(int64(1)), available: new(int64(1)), updated: new(int64(1)), observedGeneration: new(int64(4))},
 			configPresent: true,
 			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
 			wantOutput: "Deployment",
@@ -141,6 +145,24 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			status:             healthyDeployment,
 			configPresent:      true,
 			generation:         2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
+			wantOutput: "Deployment",
+		},
+		{
+			// The maxUnavailable=0 stall @yuanchen8911 described. spec.replicas
+			// is 1, so the default 25% maxUnavailable rounds to 0 and the old
+			// ReplicaSet's pod is held alive until the new one is ready. The
+			// new pod exists (updatedReplicas=1) but never becomes ready, while
+			// availableReplicas=1 is satisfied by the OLD pod. Only
+			// status.replicas — which counts pods across every ReplicaSet —
+			// reveals the second pod and the stalled rollout.
+			name:    "stalled rollout with the old ReplicaSet still counted fails closed",
+			desired: new(int64(1)), deploymentGen: 4,
+			status: deploymentStatus{
+				replicas: new(int64(2)), available: new(int64(1)),
+				updated: new(int64(1)), observedGeneration: new(int64(4)),
+			},
+			configPresent: true,
+			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
 			wantOutput: "Deployment",
 		},
 		{
@@ -192,6 +214,9 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 				deploymentSpec["replicas"] = *tt.desired
 			}
 			deploymentStatusObj := map[string]any{}
+			if tt.status.replicas != nil {
+				deploymentStatusObj["replicas"] = *tt.status.replicas
+			}
 			if tt.status.available != nil {
 				deploymentStatusObj["availableReplicas"] = *tt.status.available
 			}
