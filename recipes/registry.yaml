@@ -326,18 +326,18 @@ components:
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
-      # driver pod. Where the driver ships in the node image and no driver
-      # pod exists (AKS gpuStack=azure-managed, GKE COS
-      # gpuStack=gke-default, OKE), the label is never applied and
+      # driver pod. Where the driver ships in the node image (or the host)
+      # and no driver pod exists (AKS gpuStack=azure-managed, GKE COS
+      # gpuStack=gke-default, OKE, Kind), the label is never applied and
       # metadata-collector plus both syslog-health-monitor DaemonSets sit
       # at 0 desired pods — with no error and no event, while
       # gpu-health-monitor stays healthy on the DCGM label. The chart
       # automates the remedy via labeler.assumeDriverInstalled
       # (--assume-driver-installed, NVSentinel design 018's Manual
-      # Labeling Procedure). Those recipes now assign it themselves —
-      # from the gpuStack profile on AKS and GKE-COS, at overlay level on
-      # OKE (#2181) — so this gate is defense in depth rather than the
-      # primary mechanism; Kind still supplies it at bundle time. GKE
+      # Labeling Procedure). Every one of those recipes now assigns it
+      # itself — from the gpuStack profile on AKS and GKE-COS, at overlay
+      # level on OKE and Kind (#2181) — so this gate is defense in depth
+      # rather than the primary mechanism. GKE
       # gpuStack=driver-installer and AKS gpuStack=operator-managed
       # assign an explicit false: a driver pod exists there for the
       # labeler to detect. Issue #2175.
