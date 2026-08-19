@@ -206,9 +206,15 @@ capture instead of re-reading afterwards.
 snapCtx, cancelSnap := context.WithTimeout(context.Background(), 10*time.Minute)
 defer cancelSnap()
 snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
-	Kubeconfig:         "/path/to/target-kubeconfig",
+	Kubeconfig: "/path/to/target-kubeconfig",
+	// Namespace, Image, JobName, and ServiceAccountName are all required on
+	// the SDK path. Only Namespace is validated; the rest are copied straight
+	// into the Job and RBAC objects, so an empty value becomes an empty
+	// metadata.name or container image that the API server rejects. The CLI
+	// defaults them from its own flags, which the facade does not share.
 	Namespace:          "aicr-snapshot",
 	Image:              "ghcr.io/nvidia/aicr:v0.11.1",
+	JobName:            "aicr-snapshot",
 	ServiceAccountName: "aicr-agent",
 	Timeout:            5 * time.Minute,
 	Cleanup:            true,

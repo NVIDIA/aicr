@@ -165,15 +165,24 @@ func Example_committedConfig() {
 	fmt.Println(result.Name)
 }
 
-// Example_resolveFromSnapshot reproduces `aicr recipe --snapshot`: load a
-// previously captured snapshot, derive criteria from it, and resolve with the
-// relax-and-retry policy the CLI applies.
+// Example_resolveFromSnapshot approximates `aicr recipe --snapshot`: resolve
+// against a captured snapshot with the relax-and-retry policy the CLI applies.
 //
-// WithSnapshotCriteriaRelaxation names the dimensions the caller stated
-// EXPLICITLY; everything else is treated as derived and may be cleared if no
-// overlay distinguishes it. Here intent was typed by the user and the rest came
-// from the snapshot, so intent is protected and the rest are relaxable. Passing
-// no dimensions at all is the pure-fingerprint case: everything is relaxable.
+// # The facade does not derive criteria from the snapshot
+//
+// ResolveRecipeFromSnapshotWithOptions takes your Criteria verbatim and uses
+// the snapshot only to evaluate constraints and drive snapshot-aware
+// post-processing. Producing criteria from a snapshot's measurements is the
+// CLI's job, and there is no facade entry point for it yet — the integration
+// guide shows the pkg/fingerprint escape hatch and the coupling it costs.
+//
+// So SUPPLY every dimension yourself, then use WithSnapshotCriteriaRelaxation
+// to say which ones the user actually typed. Below, intent was typed and
+// service and accelerator were derived, so only those two may be relaxed.
+//
+// Relaxation is unreachable if you name every dimension you supplied: the
+// coverage post-condition only reports dimensions you SPECIFIED, and a
+// specified-and-stated dimension is never cleared.
 func Example_resolveFromSnapshot() {
 	ctx := context.Background()
 
@@ -191,7 +200,11 @@ func Example_resolveFromSnapshot() {
 		return
 	}
 
-	criteria := &aicr.Criteria{Intent: "training"} // the one value the user stated
+	criteria := &aicr.Criteria{
+		Service:     "eks",      // derived: read off the snapshot
+		Accelerator: "h100",     // derived
+		Intent:      "training", // stated: the user asked for this
+	}
 
 	result, err := client.ResolveRecipeFromSnapshotWithOptions(ctx, criteria, snap,
 		aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
@@ -200,8 +213,9 @@ func Example_resolveFromSnapshot() {
 		return
 	}
 
-	// Non-empty only when the first attempt failed coverage on derived
-	// dimensions and the retry succeeded: the recipe is broader than asked for.
+	// Non-empty only when the first attempt failed coverage on a derived
+	// dimension and the retry succeeded: the recipe is broader than asked for.
+	// Intent can never appear here — it was declared stated.
 	for _, dim := range result.RelaxedDimensions {
 		fmt.Printf("relaxed %s; resolved recipe is broader than requested\n", dim)
 	}
@@ -324,9 +338,8 @@ func ExampleClient_LoadRecipe() {
 	}
 	defer func() { _ = client.Close() }()
 
-	// A file path or a cm://namespace/name ConfigMap URI. Unlike
-	// LoadSnapshot, LoadRecipe does NOT accept an HTTP(S) URL. The kubeconfig
-	// argument is consulted only for the cm:// form.
+	// A local file path, an HTTP(S) URL, or a cm://namespace/name ConfigMap
+	// URI. The kubeconfig argument is consulted only for the cm:// form.
 	result, err := client.LoadRecipe(ctx, "recipe.yaml", "")
 	if err != nil {
 		log.Print(err)
@@ -338,6 +351,14 @@ func ExampleClient_LoadRecipe() {
 // ExampleClient_CollectSnapshot captures cluster state by deploying the
 // snapshotter Job, for callers that do not already have a snapshot file.
 // Requires a reachable cluster and RBAC to create the Job.
+//
+// # Image, JobName, and ServiceAccountName are required here
+//
+// DeployAndCollect validates only Namespace; the rest are copied straight into
+// the Job and RBAC objects. The CLI supplies defaults from its own flags,
+// which the facade does not share — so leaving these empty produces an empty
+// ServiceAccount name and an empty container image, and the API server rejects
+// the ServiceAccount before the Job is ever created. Set all three.
 func ExampleClient_CollectSnapshot() {
 	ctx := context.Background()
 
@@ -349,8 +370,11 @@ func ExampleClient_CollectSnapshot() {
 	defer func() { _ = client.Close() }()
 
 	snap, err := client.CollectSnapshot(ctx, &aicr.AgentConfig{
-		Namespace: "aicr-system",
-		Cleanup:   true,
+		Namespace:          "aicr-system",
+		Image:              "ghcr.io/nvidia/aicr:v0.19.0",
+		JobName:            "aicr",
+		ServiceAccountName: "aicr",
+		Cleanup:            true,
 	})
 	if err != nil {
 		log.Print(err)
@@ -464,11 +488,25 @@ func ExampleClient_VerifyCatalog() {
 
 // ExampleClient_SignCatalog signs a recipe catalog with keyless Sigstore.
 //
-// Signing is deliberately NOT bounded by a facade timeout: keyless OIDC can
-// block on a human completing a browser flow. It also rejects settings that
-// would produce a signature VerifyCatalog cannot check — a private Fulcio or
-// Rekor, a signing key, or a disabled transparency-log upload — rather than
-// letting the asymmetry surface later as an unverifiable artifact.
+// # This is a release-CI flow, not a local one
+//
+// VerifyCatalog pins the certificate identity to this repository's tag-release
+// workflow. A catalog signed anywhere else verifies against nothing, so this
+// is only useful from that workflow, with ambient credentials supplied.
+//
+// Leaving OIDCResolve zero-valued is the trap: SelectOIDCSource then falls
+// through to the interactive BROWSER flow, which blocks on a human and mints a
+// certificate issued by oauth2.sigstore.dev. SignCatalog succeeds and emits a
+// bundle VerifyCatalog rejects — it fails the issuer pin before identity
+// matching is even reached.
+//
+// SignCatalog does reject settings that break verifiability — a signing key, a
+// private Fulcio or Rekor, or a disabled transparency-log upload — but it does
+// NOT police the identity SOURCE, which is the asymmetry an SDK caller is most
+// likely to hit.
+//
+// Signing is also deliberately not bounded by a facade timeout, because keyless
+// OIDC can block on a human.
 func ExampleClient_SignCatalog() {
 	ctx := context.Background()
 
@@ -481,6 +519,12 @@ func ExampleClient_SignCatalog() {
 
 	signed, err := client.SignCatalog(ctx, aicr.CatalogSignOptions{
 		Output: "recipe-catalog.sigstore.json",
+		OIDCResolve: aicr.OIDCResolveOptions{
+			// Ambient workload credentials. Both must be set, or resolution
+			// falls through to the browser flow described above.
+			AmbientURL:   os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+			AmbientToken: os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+		},
 	})
 	if err != nil {
 		log.Print(err)
