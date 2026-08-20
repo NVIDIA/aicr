@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -47,9 +48,19 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
 	"sigs.k8s.io/yaml"
 )
+
+// jitterBackoff applies ±25% jitter to d to decorrelate retries.
+// Mirrors pkg/oci/push.go pattern for retry backoff scheduling.
+func jitterBackoff(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	// Range: [0.75*d, 1.25*d). rand/v2.Float64 is in [0.0, 1.0).
+	jitter := 0.75 + rand.Float64()*0.5 //nolint:gosec // non-cryptographic jitter
+	return time.Duration(float64(d) * jitter)
+}
 
 // safeChartNameRE bounds the recipe-supplied identifiers that flow into
 // `helm pull` as positional argv tokens. The leading character must be
@@ -642,7 +653,7 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 			slog.WarnContext(ctx, "vendor-charts: index fetch retrying after validation error",
 				"attempt", attempt, "error", err)
 			// Sleep with exponential backoff + jitter to decorrelate retries.
-			timer := newBackoffTimer(oci.JitterDuration(backoff))
+			timer := newBackoffTimer(jitterBackoff(backoff))
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -698,7 +709,7 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 			"attempt", attempt, "error", err)
 
 		// Sleep with exponential backoff + jitter, but honor parent context cancellation.
-		timer := newBackoffTimer(oci.JitterDuration(backoff))
+		timer := newBackoffTimer(jitterBackoff(backoff))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
