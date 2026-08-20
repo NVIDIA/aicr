@@ -99,7 +99,13 @@ runs:
         # aicrd only needs the cluster/registry - build and push it (replaces
         # Tilt custom_build) as soon as that's ready, not gated behind the
         # unrelated validator/CLI builds above.
-        wait $pid_cluster
+        #
+        # cluster-create's output was redirected to a file above so it
+        # wouldn't interleave with the concurrent builds; print it on
+        # failure too (not just success), since a failed `wait` here is the
+        # most common, most opaque failure on this step and would otherwise
+        # exit via the EXIT trap with zero diagnostic output.
+        wait $pid_cluster || { cat /tmp/cluster-create.log; exit 1; }
         cat /tmp/cluster-create.log
         KO_DOCKER_REPO=localhost:5001/aicrd ko build --bare --tags=tilt ./cmd/aicrd
 
@@ -199,6 +205,7 @@ runs:
       shell: bash
       run: |
         mkdir -p /tmp/debug-artifacts
+        cp /tmp/cluster-create.log /tmp/debug-artifacts/cluster-create.log 2>/dev/null || true
         kubectl get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
         kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
         kubectl logs -n aicr -l app.kubernetes.io/name=aicrd --tail=500 > /tmp/debug-artifacts/aicrd-logs.txt || true
