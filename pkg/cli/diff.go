@@ -106,7 +106,7 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 
 	slog.Debug("snapshot diff", slog.String("baseline", baselinePath), slog.String("target", targetPath))
 
-	client, err := embeddedClient()
+	client, err := embeddedClient(ctx)
 	if err != nil {
 		return err
 	}

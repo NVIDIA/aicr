@@ -575,7 +575,8 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			// The recipe source is irrelevant here — CollectSnapshot does not
 			// consult the Client's DataProvider — so the embedded source keeps
 			// construction free of cluster- or flag-dependent setup.
-			client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+			client, err := aicr.NewClientContext(
+				ctx, aicr.WithRecipeSource(aicr.EmbeddedSource()))
 			if err != nil {
 				return err
 			}

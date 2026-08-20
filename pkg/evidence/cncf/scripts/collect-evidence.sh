@@ -2542,8 +2542,20 @@ collect_operator() {
     EVIDENCE_FILE="${EVIDENCE_DIR}/robust-operator.md"
     log_info "Collecting Robust AI Operator evidence → ${EVIDENCE_FILE}"
 
-    # Detect which AI operator is present and route to the appropriate collector.
-    # Priority: Dynamo > NIM Operator > Kubeflow Trainer
+    # Detect which AI operator the recipe/bundle deployed and route to the
+    # appropriate collector. Priority: Dynamo > NIM Operator > Kubeflow Trainer.
+    #
+    # Each probe is pinned to the namespace the AICR recipe deploys that operator
+    # into (recipes/registry.yaml `defaultNamespace`); for Kubeflow Trainer that is
+    # `kubeflow`, the upstream chart's own default. This is deliberate and must not
+    # be relaxed into a cluster-wide search: the performance validator installs its
+    # own temporary Kubeflow Trainer into `kubeflow-system`
+    # (validators/performance/trainer_lifecycle.go) purely to run the NCCL
+    # benchmark, and tears it down again at the end of the run. That installation is
+    # scaffolding, not something the bundle deploys, so counting it here would make
+    # signed conformance evidence claim an operator the recipe never shipped.
+    # A SKIP while the validator's self-install happens to be live is the correct
+    # answer, not a false negative. See issue #2223.
     if kubectl get deploy -n dynamo-system dynamo-platform-dynamo-operator-controller-manager --no-headers 2>/dev/null | grep -q .; then
         collect_operator_dynamo
     elif kubectl get deploy -n nvidia-nim -l app.kubernetes.io/name=k8s-nim-operator --no-headers 2>/dev/null | grep -q .; then
@@ -2552,8 +2564,10 @@ collect_operator() {
         collect_operator_kubeflow
     else
         write_section_header "Robust AI Operator"
-        echo "**Result: SKIP (prerequisite absent)** — no supported Dynamo, NIM, or Kubeflow Trainer operator is installed." >> "${EVIDENCE_FILE}"
-        log_info "Robust operator evidence collection skipped — no supported operator found."
+        echo "**Result: SKIP (prerequisite absent)** — the recipe/bundle deployed no supported AI operator: no Dynamo operator in \`dynamo-system\`, no NIM operator in \`nvidia-nim\`, and no Kubeflow Trainer in \`kubeflow\`." >> "${EVIDENCE_FILE}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "A Kubeflow Trainer that the performance validator self-installed into \`kubeflow-system\` for the NCCL benchmark is deliberately not counted here: it is torn down at the end of the run and is not part of the deployed bundle." >> "${EVIDENCE_FILE}"
+        log_info "Robust operator evidence collection skipped — no supported operator deployed by the recipe/bundle."
         return
     fi
 }
