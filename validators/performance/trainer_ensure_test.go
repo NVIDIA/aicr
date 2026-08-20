@@ -469,3 +469,42 @@ func TestWaitForDeclaredTrainer_SlowProbeCannotOutrunTheDeadline(t *testing.T) {
 			"with the parent still live, which is a deployment that never completed", err)
 	}
 }
+
+// TestWaitForDeclaredTrainer_TransportErrorKeepsItsClassification pins the narrow
+// case where the rollout deadline and a real read failure land together.
+//
+// A read that starts before the deadline and fails for a genuine reason after it —
+// an apiserver 503 — must keep its transport classification. Reporting it as "the
+// installation did not become complete" would file a control-plane outage as a
+// customer deployment defect, and it is precisely when the apiserver is degraded
+// that the transport signal is worth the most.
+//
+// Expiry may win only for context-derived errors, which is what the stderrors.Is
+// guard on the probe-error branch enforces.
+func TestWaitForDeclaredTrainer_TransportErrorKeepsItsClassification(t *testing.T) {
+	oldTimeout, oldInterval := trainerInstallWaitTimeout, trainerInstallPollInterval
+	trainerInstallWaitTimeout = 20 * time.Millisecond
+	trainerInstallPollInterval = time.Millisecond
+	defer func() {
+		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
+	}()
+
+	client := newTrainerFakeClient()
+	client.PrependReactor("get", "customresourcedefinitions",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			// Outlive the allowance, then fail for a real reason rather than a
+			// context one: the deadline has passed by the time this returns.
+			time.Sleep(40 * time.Millisecond)
+			return true, nil, apierrors.NewServiceUnavailable("apiserver is having a bad day")
+		})
+
+	_, err := waitForDeclaredTrainer(context.Background(), client)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+		t.Errorf("transport failure reported as NotFound (%v); a degraded control plane "+
+			"is not a deployment that never completed, and swallowing that signal sends "+
+			"the operator to fix the wrong thing", err)
+	}
+}

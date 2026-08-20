@@ -628,8 +628,18 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 		// blind, so the verdict does not depend on where in the loop the clock ran out.
 		install, ok, err := isTrainerInstalled(pollCtx, dynamicClient)
 		if err != nil {
-			if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
-				return trainerInstall{}, verdict
+			// Let expiry win only for a context-derived error. A read that starts
+			// before the deadline and fails for a real reason after it — an apiserver
+			// 503, say — must keep its transport classification: reporting that as
+			// "the installation did not become complete" files a control-plane outage
+			// as a customer deployment defect, which is the same misclassification
+			// the NotFound/Unavailable distinction exists to prevent. It is also
+			// exactly when the apiserver is degraded that the transport signal is
+			// worth the most.
+			if errors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+				if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
+					return trainerInstall{}, verdict
+				}
 			}
 			return trainerInstall{}, aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
 				"failed to check Kubeflow Trainer installation")
@@ -644,6 +654,9 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 			if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
 				return trainerInstall{}, verdict
 			}
+			// unreachable: this case fires only once pollCtx is done, and
+			// classifyPollExpiry always returns non-nil then. Kept as a fail-loud
+			// invariant rather than a silent fallthrough.
 			return trainerInstall{}, aicrErrors.New(aicrErrors.ErrCodeInternal,
 				"Kubeflow Trainer wait ended without a verdict")
 		case <-time.After(trainerInstallPollInterval):
