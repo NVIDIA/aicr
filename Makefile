@@ -837,9 +837,7 @@ cluster-create: ## Creates local Kind cluster with registry
 		exit 1; \
 	fi
 	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE) (from .settings.yaml)"
-	@img="$(KIND_NODE_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img)' $(CTLPTL_CONFIG_FILE) > $(CTLPTL_CONFIG_FILE).generated
-	ctlptl apply -f $(CTLPTL_CONFIG_FILE).generated
-	@rm -f $(CTLPTL_CONFIG_FILE).generated
+	img="$(KIND_NODE_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
 	@echo "Waiting for nodes to be ready..."
 	@kubectl wait --for=condition=ready nodes --all --timeout=300s
 	@echo "Cluster created. Registry at localhost:$(REGISTRY_PORT)"

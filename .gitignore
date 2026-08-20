@@ -183,7 +183,3 @@ aicr-e2e.xml
 # Resolved MDX toolchain for tools/check-docs-mdx-parse. The manifest and
 # lockfile in tools/mdx/ ARE committed; only the installed tree is not.
 tools/mdx/node_modules/
-
-# cluster-create's yq-generated ctlptl config (injects the pinned Kind node
-# image from .settings.yaml into .ctlptl.yaml at apply time)
-.ctlptl.yaml.generated
