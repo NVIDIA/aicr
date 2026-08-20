@@ -1018,8 +1018,23 @@ func usesRegistryChart(ref recipe.ComponentRef, cfg *recipe.ComponentConfig) boo
 		return false
 	}
 	return ref.Source == cfg.Helm.DefaultRepository &&
-		ref.EffectiveChart() == cfg.Helm.DefaultChart &&
-		ref.Version == cfg.Helm.DefaultVersion
+		ref.EffectiveChart() == registryChartName(cfg.Helm.DefaultChart) &&
+		deployer.NormalizeVersion(ref.Version) == deployer.NormalizeVersion(cfg.Helm.DefaultVersion)
+}
+
+// registryChartName reduces a registry defaultChart to the form a resolved
+// ComponentRef actually carries.
+//
+// ApplyRegistryDefaults strips everything before the last "/" when defaulting
+// ref.Chart, so a registry entry like "gatekeeper/gatekeeper" resolves to
+// "gatekeeper". Comparing against the unstripped value silently fails for every
+// component whose defaultChart carries a repo-alias prefix, which is how
+// gatekeeper was enrolled in ownsCRDs and never emitted the policy.
+func registryChartName(defaultChart string) string {
+	if idx := strings.LastIndex(defaultChart, "/"); idx >= 0 {
+		return defaultChart[idx+1:]
+	}
+	return defaultChart
 }
 
 // ownsCRDs reports whether the named component may replace its CRDs on
