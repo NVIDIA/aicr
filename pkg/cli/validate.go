@@ -465,12 +465,12 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
-			Usage:    "Override GPU node selection for validation workloads (format: key=value, can be repeated). Replaces platform-specific selectors on inner workloads (e.g., NCCL benchmark pods). Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job.",
+			Usage:    "Override GPU node selection for the live snapshot agent (when --snapshot is omitted) and inner validation workloads (format: key=value, can be repeated). Replaces platform-specific selectors on inner workloads (e.g., NCCL benchmark pods). Does not affect the validator orchestrator Job.",
 			Category: catScheduling,
 		},
 		&cli.StringSliceFlag{
 			Name:     "toleration",
-			Usage:    "Override tolerations for validation workloads (format: key=value:effect, can be repeated). Replaces the default tolerate-all policy on inner workloads. Does not affect the validator orchestrator Job.",
+			Usage:    "Override tolerations for the live snapshot agent (when --snapshot is omitted) and inner validation workloads (format: key=value:effect, can be repeated). When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job.",
 			Category: catScheduling,
 		},
 		&cli.DurationFlag{

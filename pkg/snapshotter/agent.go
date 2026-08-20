@@ -68,7 +68,8 @@ type AgentConfig struct {
 	// NodeSelector for targeting specific nodes
 	NodeSelector map[string]string
 
-	// Tolerations for scheduling on tainted nodes
+	// Tolerations for scheduling on tainted nodes. Nil uses
+	// DefaultTolerations; a non-nil empty slice explicitly disables that default.
 	Tolerations []corev1.Toleration
 
 	// Timeout for waiting for Job completion
@@ -176,7 +177,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		Image:              config.Image,
 		ImagePullSecrets:   config.ImagePullSecrets,
 		NodeSelector:       config.NodeSelector,
-		Tolerations:        config.Tolerations,
+		Tolerations:        effectiveAgentTolerations(config.Tolerations),
 		Output:             agentOutput,
 		Debug:              config.Debug,
 		Privileged:         config.Privileged,
@@ -270,10 +271,11 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		msg := "job failed"
 		if autoInjectedGPUSelector {
 			msg = "job failed (auto-injected node selector nvidia.com/gpu.present=true — " +
-				"if no GPU nodes are schedulable, target a GPU node explicitly, e.g. " +
-				"--node-selector kubernetes.io/hostname=<gpu-node> " +
-				"(repeat the flag per key=value), or pass --require-gpu to schedule onto " +
-				"a node advertising the nvidia.com/gpu resource)"
+				"verify matching GPU nodes are Ready and schedulable; if tolerations were " +
+				"explicitly cleared or replaced, pass a matching --toleration " +
+				"key=value:effect. To override placement, pass --node-selector " +
+				"kubernetes.io/hostname=<gpu-node>; --require-gpu selects a node " +
+				"advertising the nvidia.com/gpu resource)"
 		}
 		// A wait that exceeded the deadline (pending pod, image pull, no schedulable
 		// node) is transient and retryable — classify it as ErrCodeTimeout rather
@@ -678,6 +680,15 @@ func DefaultTolerations() []corev1.Toleration {
 			Operator: corev1.TolerationOpExists,
 		},
 	}
+}
+
+// effectiveAgentTolerations applies the snapshot agent's scheduling default
+// without collapsing an explicit empty override into that default.
+func effectiveAgentTolerations(tolerations []corev1.Toleration) []corev1.Toleration {
+	if tolerations == nil {
+		return DefaultTolerations()
+	}
+	return tolerations
 }
 
 func validateTaintEffect(effect corev1.TaintEffect) error {

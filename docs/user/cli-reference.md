@@ -963,8 +963,8 @@ aicr validate [flags]
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Name for the validation Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for validation Job |
-| `--node-selector` | | string[] | | Override GPU node selection for validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
-| `--toleration` | | string[] | | Override tolerations for validation workloads. Replaces the default tolerate-all policy on inner workloads like NCCL benchmark pods and conformance test pods. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
+| `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
+| `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
 | `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
@@ -1209,7 +1209,7 @@ aicr validate --config validate-cluster-a.yaml
 aicr validate --config validate-cluster-b.yaml
 ```
 
-The `--node-selector` and `--toleration` flags control scheduling for the inner validation workloads (NCCL benchmark workers, conformance test pods), not the validator orchestrator Job. For when to use them with non-standard GPU labels or taints, see [Validation](validation.md#non-standard-gpu-labels-or-taints).
+The `--node-selector` and `--toleration` flags control scheduling for the inner validation workloads (NCCL benchmark workers, conformance test pods). When `--snapshot` is omitted, they also configure the preliminary live snapshot agent. They do not configure the validator orchestrator Job. For when to use them with non-standard GPU labels or taints, see [Validation](validation.md#non-standard-gpu-labels-or-taints).
 
 **Output Structure ([CTRF](https://ctrf.io/) JSON):**
 
