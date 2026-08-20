@@ -150,11 +150,23 @@ type ResolutionPolicy struct {
 **Merge semantics.** `RecipeMetadataSpec.Merge` composes the policy by
 whole-value replacement, not element union:
 
-| child `spec.resolution` | result |
-| --- | --- |
-| omitted (`nil`) | inherits the parent policy unchanged |
-| `strictDimensions: [os]` | replaces the inherited list with `[os]` |
-| `strictDimensions: []` | clears every inherited strict dimension |
+| child `spec.resolution` | `StrictDimensions` decodes to | result |
+| --- | --- | --- |
+| omitted | policy is `nil` | inherits the parent policy unchanged |
+| `{}` (block present, key absent) | `nil` slice | inherits the parent policy unchanged |
+| `strictDimensions: [os]` | `["os"]` | replaces the inherited list |
+| `strictDimensions: []` | empty non-`nil` slice | clears every inherited strict dimension |
+
+The middle two rows are the subtle pair. A `resolution:` block that declares
+no `strictDimensions` key declares nothing, so it overrides nothing; only an
+explicit `[]` clears. This keeps the "silence is safe" property one level
+down, where an author who adds a `resolution:` block for some future sibling
+field does not silently disarm the check.
+
+That distinction rests on `nil` versus empty-but-non-`nil` surviving
+deserialization, which is a property of the decoder rather than of the type.
+It is pinned by a round-trip test over the actual catalog decode path, not
+asserted structurally.
 
 Element union was rejected because it makes opting out impossible: a subtree
 could never drop a dimension its ancestor declared. Whole-value replacement
@@ -256,43 +268,71 @@ On the divergence catalog above, no applied overlay carries both `service`
 and `accelerator`, and supplying `os: ubuntu` would pull in
 `svc-accel-ubuntu`. `os` is strict, so resolution fails.
 
-**More than one strict dimension.** The embedded catalog declares a
-single-element list, but the field admits several, so the semantics are
-defined per *candidate overlay* rather than per dimension. For each overlay
-not currently applied, extend the query with that overlay's required values
-for dimensions that are (a) currently unstated and (b) strict. If the overlay
-becomes applied under that extension and needs nothing else, it is a
-candidate and resolution fails.
+**The rule, stated normatively.** Everything below is derived from this;
+where prose and this statement disagree, this statement governs.
 
-Stating it per candidate settles the any/all ambiguity without a separate
-rule. The extension is computed from what the query is *missing*, not from
-the candidate's full requirement list, so a candidate is reached whenever the
-strict dimensions it still needs are supplied. Dimensions the query already
-states correctly are not part of the extension and do not have to be
-re-supplied. Conversely, a candidate that conflicts with a stated dimension
-is never reachable, and one that additionally requires an *elective*
-dimension is never a candidate, which is what preserves the generic tier.
+Resolution fails when **both** hold:
 
-Worked example with `strictDimensions: [os, intent]`, for a candidate
-requiring `os: ubuntu` and `intent: training`. Every query below states
+1. **No applied overlay jointly carries every stated dimension.** This is the
+   escape hatch. It gates condition 2 entirely: if any applied overlay
+   already honors the whole stated combination, resolution succeeds no matter
+   what candidates exist.
+2. **At least one overlay is a candidate.**
+
+An overlay is a **candidate** when all of the following hold:
+
+- **(a)** it is not currently applied;
+- **(b)** it does not conflict with any dimension the query states;
+- **(c)** every requirement of it that the query does not already satisfy is
+  a **strict** dimension. An overlay with an *unstated elective* requirement
+  is not a candidate. An elective requirement the query already states
+  correctly does not disqualify it, because nothing is missing there;
+- **(d)** extending the query with its required values for those unsatisfied
+  strict dimensions applies it, with nothing further needed.
+
+Condition (c) is what preserves the generic tier: elective dimensions never
+create a demand, so omitting `--intent` cannot make a query fail. Condition
+(d) computes the extension from what the query is *missing*, not from the
+candidate's full requirement list, so already-stated dimensions are never
+re-demanded.
+
+The embedded catalog declares a single-element list, so conditions (c) and
+(d) collapse to the guard's behavior there. They matter only for catalogs
+declaring several strict dimensions.
+
+*Derived example 1.* `strictDimensions: [os, intent]`, candidate requires
+`os: ubuntu` and `intent: training`, condition 1 holds, every query states
 `service` and `accelerator`:
 
-| query also states | extension needed | fires |
+| query also states | unsatisfied | fires |
 | --- | --- | --- |
-| nothing | `os`, `intent` | yes, reporting both |
-| `intent: training` | `os` | yes, reporting `os` |
-| `os: ubuntu` | `intent` | yes, reporting `intent` |
-| `os: ubuntu`, `intent: training` | none, candidate already applied | no |
-| `intent: inference` | conflicts with the candidate | no |
+| nothing | `os`, `intent` (both strict) | yes, reporting both |
+| `intent: training` | `os` (strict) | yes, reporting `os` |
+| `os: ubuntu` | `intent` (strict) | yes, reporting `intent` |
+| `os: ubuntu`, `intent: training` | nothing; already applied, fails (a) | no |
+| `intent: inference` | conflicts, fails (b) | no |
 
-The second and third rows are the ones worth stating explicitly: partial
-progress toward a candidate does not excuse the remainder. A query that names
-`intent` still fails for the missing `os`, because the candidate's content is
-just as silently dropped either way.
+Rows two and three are worth stating explicitly: partial progress toward a
+candidate does not excuse the remainder, because the candidate's content is
+dropped just as silently either way.
 
-A candidate requiring `intent: training` plus `platform: kubeflow` never
-fires under this policy regardless of what is stated, because `platform` is
-elective.
+*Derived example 2,* condition (c), for a candidate requiring
+`intent: training` and `platform: kubeflow` with `strictDimensions: [intent]`:
+
+| query also states | unsatisfied | fires |
+| --- | --- | --- |
+| nothing | `intent` (strict), `platform` (**elective**) | no, fails (c) |
+| `platform: kubeflow` | `intent` (strict) only | yes, reporting `intent` |
+
+An elective requirement blocks a candidate only while it remains unstated.
+
+*Derived example 3,* condition 1, on the divergence catalog above. No
+applied overlay carries both `service` and `accelerator`, so condition 1
+holds; `svc-accel-ubuntu` satisfies (a) through (d) via `os: ubuntu`. Strict,
+so resolution fails. By contrast a query stating `service`, `accelerator` and
+`intent` that resolves through a single overlay carrying all three fails
+condition 1 and succeeds, even though an OS-gated leaf below it would enlarge
+the applied set. That gate is what preserves 13 of the 117 queries.
 
 `requireOSIfNeeded` and `availableOSForCriteria` are deleted, along with both
 call sites in `metadata_store.go`.
