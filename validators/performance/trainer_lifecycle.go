@@ -563,7 +563,12 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 	defer cancel()
 
 	for {
-		install, ok, err := isTrainerInstalled(pollCtx, dynamicClient)
+		// Probe with the parent context, not pollCtx: getTrainerObject checks
+		// ctx.Err() at the top of every read and returns Timeout, so a deadline
+		// landing mid-probe would surface as a bare timeout instead of the
+		// NotFound-plus-diagnosis this function exists to produce. Letting the
+		// select below own the deadline keeps the two conditions separable.
+		install, ok, err := isTrainerInstalled(ctx, dynamicClient)
 		if err != nil {
 			return trainerInstall{}, aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
 				"failed to check Kubeflow Trainer installation")
@@ -575,6 +580,16 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 
 		select {
 		case <-pollCtx.Done():
+			// pollCtx expires for two different reasons and they mean opposite
+			// things. A canceled parent means the run was aborted — catalog timeout,
+			// phase cancellation, the Job killed — and reporting that as a customer
+			// deployment defect is the same misclassification the NotFound code
+			// above exists to avoid, one level down.
+			if ctx.Err() != nil {
+				return trainerInstall{}, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+					"canceled while waiting for the recipe-declared Kubeflow Trainer", ctx.Err())
+			}
+
 			// ErrCodeNotFound, not Unavailable: the read succeeded and the answer was
 			// "not deployed". Unavailable is this package's code for a transport
 			// failure — see the decision table on validators.Require — and using it

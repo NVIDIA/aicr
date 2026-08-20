@@ -247,9 +247,9 @@ func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 // break it: a recipe that never claimed a Trainer must still reuse one that happens
 // to be present, exactly as before.
 //
-// The not-declared + missing row is deliberately absent: it reaches installTrainer,
-// which downloads a release archive, so it belongs in an integration test rather
-// than here.
+// The not-declared + missing row is deliberately absent rather than overlooked: it
+// reaches installTrainer, which downloads and kustomize-builds the upstream release
+// archive, so it is covered by e2e rather than being unit-testable here.
 func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -331,5 +331,34 @@ func withShortTrainerWait(t *testing.T) func() {
 	trainerInstallPollInterval = time.Millisecond
 	return func() {
 		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
+	}
+}
+
+// TestWaitForDeclaredTrainer_CanceledRunIsNotADeploymentDefect pins the distinction
+// the poll deadline and parent cancellation would otherwise blur.
+//
+// Both expire the poll context, but they mean opposite things: the deadline means
+// the delivered Trainer never became complete, which is the customer's deployment
+// defect this PR exists to surface; cancellation means the run was aborted — a
+// catalog timeout, a canceled phase, a killed Job — which is not. Reporting the
+// second as the first is the same misclassification that made ErrCodeUnavailable
+// wrong for the deadline case.
+func TestWaitForDeclaredTrainer_CanceledRunIsNotADeploymentDefect(t *testing.T) {
+	defer withShortTrainerWait(t)()
+	client := newTrainerFakeClient()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := waitForDeclaredTrainer(ctx, client)
+	if err == nil {
+		t.Fatal("expected an error when the run is canceled")
+	}
+	if stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+		t.Errorf("canceled run reported as NotFound (%v); an aborted run is not a "+
+			"failed deployment and must not be filed as one", err)
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+		t.Errorf("error code = %v, want ErrCodeTimeout", err)
 	}
 }
