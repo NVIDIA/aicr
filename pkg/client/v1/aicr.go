@@ -859,10 +859,14 @@ func recipeBuildOptions(opts ...RecipeResolveOption) (*recipeResolveConfig, []re
 	if err != nil {
 		return nil, nil, err
 	}
-	if cfg.accountingMode == nil {
-		return cfg, nil, nil
+	var buildOpts []recipe.BuildOption
+	if cfg.accountingMode != nil {
+		buildOpts = append(buildOpts, recipe.WithAccountingMode(*cfg.accountingMode))
 	}
-	return cfg, []recipe.BuildOption{recipe.WithAccountingMode(*cfg.accountingMode)}, nil
+	if cfg.runtimeInventoryMode != nil {
+		buildOpts = append(buildOpts, recipe.WithRuntimeInventoryMode(*cfg.runtimeInventoryMode))
+	}
+	return cfg, buildOpts, nil
 }
 
 func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, error) {

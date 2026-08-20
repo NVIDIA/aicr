@@ -459,6 +459,7 @@ Generate recipes using direct system parameters:
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or `gpuStack=driver-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -534,6 +535,7 @@ target-cluster conflict detection.
 | `--platform` | | string | Explicit platform/framework type, including slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |

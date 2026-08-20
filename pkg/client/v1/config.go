@@ -269,6 +269,22 @@ func (c *Config) RecipeAccountingMode() (string, bool, error) {
 	return string(mode), set, nil
 }
 
+// RecipeRuntimeInventoryMode returns
+// spec.recipe.configuration.runtimeInventory.mode and whether the document set
+// one. Same raw-accessor rationale as RecipeAccountingMode.
+//
+// Returns an error when the configured value is not a valid mode.
+func (c *Config) RecipeRuntimeInventoryMode() (string, bool, error) {
+	if c == nil || c.internal == nil {
+		return "", false, nil
+	}
+	mode, set, err := c.internal.Recipe().ResolveRuntimeInventoryMode()
+	if err != nil {
+		return "", false, err
+	}
+	return string(mode), set, nil
+}
+
 // SnapshotPath returns spec.recipe.input.snapshot, the snapshot a committed
 // config resolves against. Empty when unset; hand a non-empty value to
 // Client.LoadSnapshot.

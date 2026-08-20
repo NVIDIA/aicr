@@ -70,6 +70,16 @@ func ParseAccountingMode(value string) (AccountingMode, error) {
 // resolved recipe without participating in catalog matching.
 type RecipeConfiguration struct {
 	Slurm *SlurmConfiguration `json:"slurm,omitempty" yaml:"slurm,omitempty"`
+
+	// RuntimeInventory records the generation-time selection for the runtime
+	// AI inventory component. See runtimeinventory.go.
+	//
+	// This is the second entry here, and the pattern is one bespoke selection
+	// per optional component. That is deliberate for two (ADR-019 asks for
+	// this component specifically, and a generic per-component disable needs
+	// a policy for which components may be declined at all). If a third
+	// arrives, revisit rather than extending by reflex.
+	RuntimeInventory *RuntimeInventoryConfiguration `json:"runtimeInventory,omitempty" yaml:"runtimeInventory,omitempty"`
 }
 
 // SlurmConfiguration records Slurm-specific desired state.
@@ -86,7 +96,8 @@ type SlurmAccountingConfiguration struct {
 type BuildOption func(*buildConfig)
 
 type buildConfig struct {
-	accountingMode *AccountingMode
+	accountingMode       *AccountingMode
+	runtimeInventoryMode *RuntimeInventoryMode
 }
 
 // WithAccountingMode selects the Slurm accounting ownership mode for one
@@ -196,7 +207,15 @@ func validateAccountingProfileOwnership(result *RecipeResult, mode AccountingMod
 }
 
 func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
-	if result == nil || cfg == nil || cfg.accountingMode == nil {
+	if result == nil || cfg == nil {
+		return nil
+	}
+	if cfg.runtimeInventoryMode != nil {
+		if err := applyRuntimeInventoryMode(result, *cfg.runtimeInventoryMode); err != nil {
+			return err
+		}
+	}
+	if cfg.accountingMode == nil {
 		return nil
 	}
 

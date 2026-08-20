@@ -76,6 +76,14 @@ func recipeCmdFlags() []cli.Flag {
 			Usage:    fmt.Sprintf("Slurm accounting ownership mode (%s)", strings.Join(recipe.AccountingModes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.AccountingModes),
+		withCompletions(&cli.StringFlag{
+			Name: flagRuntimeInventory,
+			Usage: fmt.Sprintf(
+				"Runtime AI inventory (k8s-aibom) selection (%s). Recorded in the generated recipe; "+
+					"disabling removes the component and its health check",
+				strings.Join(recipe.RuntimeInventoryModes(), ", ")),
+			Category: catQueryParameters,
+		}, recipe.RuntimeInventoryModes),
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
@@ -149,7 +157,7 @@ Override snapshot-detected criteria:
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS,
-				flagPlatform, flagProfile, flagSlurmAccountingMode, "snapshot", "config", flagOutput,
+				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", flagOutput,
 				flagFormat); err != nil {
 				return err
 			}
