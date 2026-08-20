@@ -1809,7 +1809,7 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 			succeedAt:   100,
 			wantErr:     true,
 			wantCode:    errors.ErrCodeUnavailable,
-			wantAttempt: 1,
+			wantAttempt: 0,
 		},
 	}
 
