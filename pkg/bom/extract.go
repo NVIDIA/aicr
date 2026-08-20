@@ -35,6 +35,7 @@ const (
 	helmTemplatePlaceholder = "_aicr_helm_template_"
 	imageRepositoryKey      = "repository"
 	imageTagKey             = "tag"
+	imageDigestKey          = "digest"
 )
 
 var helmTemplateRE = regexp.MustCompile(`\{\{[^{}]*\}\}`)
@@ -231,7 +232,7 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		key, value := n.Content[i], n.Content[i+1]
 		switch key.Value {
-		case "name", imageRepositoryKey, imageTagKey, "digest":
+		case "name", imageRepositoryKey, imageTagKey, imageDigestKey:
 		case "registry":
 			return "", errors.Wrap(
 				errors.ErrCodeInvalidRequest,
@@ -249,7 +250,7 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 
 		scalar, ok := nonNullImageMappingScalar(value)
 		if !ok {
-			if (key.Value == imageTagKey || key.Value == "digest") && isNullOrEmptyScalar(value) {
+			if (key.Value == imageTagKey || key.Value == imageDigestKey) && isNullOrEmptyScalar(value) {
 				// tag: "" / tag: null — the Helm "use appVersion" idiom.
 				// digest: "" / digest: null — unpinned default in charts
 				// that optionally carry a digest pin.
@@ -275,7 +276,7 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 			repository = scalar
 		case imageTagKey:
 			tag = scalar
-		case "digest":
+		case imageDigestKey:
 			digest = scalar
 		}
 	}
