@@ -317,10 +317,17 @@ image pinned by digest in the component values. v1.3.0 is the API-graduation
 release: both `v1alpha1` and `v1beta1` are served and CRD storage is on
 `v1beta1`, while the chart still renders the `AIBOMControllerConfig` resource
 itself at `v1alpha1`. Upstream states Kubernetes support as a policy rather
-than a fixed range — stable APIs only, no known ceiling, tested floor 1.27 —
-backed by a version-matrix CI job. AICR also observed the dedicated
-integration test passing on its Kind 1.36.1 node image; that is qualification
-evidence, not an extension of upstream's support statement.
+than a fixed range: stable APIs only, no known version ceiling, tested floor
+1.27, backed by a weekly CI matrix. The authoritative statement is
+[upstream's compatibility policy](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/compatibility.md),
+which is linked rather than restated here so it cannot drift out of date on
+our side. That link deliberately tracks `main`: the point is the current
+policy, not a snapshot of it, which is the opposite of how this page cites
+qualified artifacts.
+
+AICR also observed the dedicated integration test passing on its Kind 1.36.1
+node image; that is qualification evidence, not an extension of upstream's
+support statement.
 
 ### Health and readiness
 
@@ -409,12 +416,28 @@ added fields. Apply the CRDs from the exact qualified chart first, then
 upgrade:
 
 ```bash
-helm show crds oci://ghcr.io/googlecloudplatform/charts/k8s-aibom \
-  --version <qualified-version> | kubectl apply --server-side -f -
+CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
+VERSION="1.3.0"   # replace with the version you are upgrading to
+
+helm show crds "${CHART}" --version "${VERSION}" \
+  | sed -n '/^---$/,$p' \
+  | kubectl apply --server-side --force-conflicts -f -
 ```
 
-Use `--server-side` because the CRDs exceed the annotation size limit that
-client-side apply depends on.
+Three details in that command are load-bearing, and the obvious shorter form
+fails on both counts:
+
+- **`sed -n '/^---$/,$p'`** drops `helm`'s progress output. For an OCI chart,
+  `helm show crds` writes `Pulled:` and `Digest:` lines to *stdout*, and those
+  two lines parse as a valid YAML mapping, so `kubectl` rejects the stream with
+  `error validating data: [apiVersion not set, kind not set]`.
+- **`--force-conflicts`** is required because Helm created these CRDs on
+  install and owns their fields. Without it, server-side apply refuses with a
+  field-manager conflict.
+- **`--server-side`** is required because the CRDs exceed the annotation size
+  limit that client-side apply depends on.
+
+Verified against a live GKE cluster across a 1.2.0 to 1.3.0 upgrade.
 
 Which deployers need that step differs, so check yours:
 
