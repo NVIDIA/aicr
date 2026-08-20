@@ -237,6 +237,11 @@ func TestParseNvidiaSMIDriverVersion(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "rejects version on the next line after the field",
+			logs:    "Driver Version:\n580.95.05\n",
+			wantErr: true,
+		},
+		{
 			name: "accepts table pipe immediately after version",
 			logs: "| Driver Version: 580.95.05| CUDA Version: 12.8 |\n",
 			want: "580.95.05",
@@ -292,6 +297,13 @@ func TestEnforceGPUDriverVersionFloor(t *testing.T) {
 			name:       "satisfies floor",
 			constraint: ">= 580.95.05",
 			logs:       goodLogs,
+		},
+		{
+			// Lexical string compare would fail here ('.100' < '.99'); the
+			// constraint evaluator must compare components numerically.
+			name:       "numeric order beats lexical order",
+			constraint: ">= 580.99.99",
+			logs:       "NVIDIA-SMI\nDriver Version: 580.100.0\nCUDA Version: 12.8\n" + gpuCheckSuccessMsg,
 		},
 		{
 			name:       "below floor fails",

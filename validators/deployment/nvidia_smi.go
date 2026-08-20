@@ -70,12 +70,14 @@ const (
 // nvidiaSMIDriverVersionRE extracts the host driver / KMD version from an
 // nvidia-smi banner. Matches both legacy ("Driver Version:") and renamed
 // ("KMD Version:") fields, case-insensitively, including the table-row layout
-// where fields sit on one pipe-delimited line (issue #1667). Caps at three
-// numeric components — NVIDIA driver versions are Major.Minor.Patch. Truncation
-// of a longer version (e.g. "580.95.05.1") is rejected in
-// parseNvidiaSMIDriverVersion: Go's RE2 engine has no negative lookahead.
+// where fields sit on one pipe-delimited line (issue #1667). After the colon,
+// only horizontal whitespace is allowed so a version on the next line is not
+// treated as the field's value. Caps at three numeric components — NVIDIA
+// driver versions are Major.Minor.Patch. Truncation of a longer version
+// (e.g. "580.95.05.1") is rejected in parseNvidiaSMIDriverVersion: Go's RE2
+// engine has no negative lookahead.
 var nvidiaSMIDriverVersionRE = regexp.MustCompile(
-	`(?i)(?:driver|kmd)\s+version:\s*([0-9]+(?:\.[0-9]+){0,2})`)
+	`(?i)(?:driver|kmd)\s+version:[ \t]*([0-9]+(?:\.[0-9]+){0,2})`)
 
 // gpuNodeCoverage partitions check-nvidia-smi's discovered GPU nodes into the
 // schedulable cohort actually validated and the cordoned cohort skipped. It
@@ -367,7 +369,8 @@ func verifySingleGPUNode(ctx *validators.Context, nodeName string) error {
 	}
 
 	if err := verifyNvidiaSMILogs(podLogs, createdPod); err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("nvidia-smi log verification failed on node %s", nodeName), err)
 	}
 	return enforceGPUDriverVersionFloor(ctx, podLogs, nodeName)
 }
