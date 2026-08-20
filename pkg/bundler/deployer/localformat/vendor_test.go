@@ -1796,6 +1796,21 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 			wantCode:    errors.ErrCodeInvalidRequest,
 			wantAttempt: 0,
 		},
+		{
+			name:        "transient validation error (DNS timeout) retries and succeeds",
+			errorType:   "validation-transient",
+			succeedAt:   2,
+			wantErr:     false,
+			wantAttempt: 1,
+		},
+		{
+			name:        "transient validation error exhausts budget",
+			errorType:   "validation-transient",
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeUnavailable,
+			wantAttempt: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1811,9 +1826,19 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 			validationAttempt := 0
 			checkFetchTargetURL = func(ctx context.Context, url string) error {
 				validationAttempt++
-				if tt.errorType == "validation" && validationAttempt < tt.succeedAt {
-					return errors.New(errors.ErrCodeInvalidRequest,
-						"egress policy rejected target URL")
+				switch tt.errorType {
+				case "validation":
+					if validationAttempt < tt.succeedAt {
+						return errors.New(errors.ErrCodeInvalidRequest,
+							"egress policy rejected target URL")
+					}
+				case "validation-transient":
+					if validationAttempt < tt.succeedAt {
+						return errors.PropagateOrWrap(
+							stderrors.New("DNS timeout during address resolution"),
+							errors.ErrCodeUnavailable,
+							"transient validation failure")
+					}
 				}
 				return nil
 			}

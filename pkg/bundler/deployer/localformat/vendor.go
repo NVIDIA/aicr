@@ -607,6 +607,20 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 		// context governs cancellation.
 		attemptCtx, attemptCancel := context.WithTimeout(ctx, defaults.HelmChartIndexPreCheckTimeout)
 
+		// Check parent context cancellation first.
+		if parentErr := ctx.Err(); parentErr != nil {
+			attemptCancel()
+			if stderrors.Is(parentErr, context.Canceled) {
+				return nil, errors.Wrap(errors.ErrCodeCanceled,
+					"vendor-charts: index pre-check canceled", parentErr)
+			}
+			if stderrors.Is(parentErr, context.DeadlineExceeded) {
+				return nil, errors.Wrap(errors.ErrCodeTimeout,
+					"vendor-charts: index pre-check deadline exceeded", parentErr)
+			}
+			return nil, parentErr
+		}
+
 		// Fail-closed egress check on every attempt. Defends against DNS
 		// rebinding: a malicious resolver could serve an allowed address on
 		// the first attempt, then rebind to a disallowed address on retries.
