@@ -63,6 +63,11 @@ runs:
         }
         trap cleanup_background_jobs EXIT
 
+        # This step folds what used to be two separate steps (Create Kind
+        # cluster / Deploy aicrd) into one, so GitHub's per-step red-X no
+        # longer says at a glance which phase failed. Group markers fold the
+        # log into the same phases instead.
+        echo "::group::cluster-and-builds"
         # cluster-create (~35s locally; Kind bring-up + registry) and the
         # host compiles below touch none of each other's inputs/outputs, so
         # launch everything in the background up front. Each later command
@@ -107,12 +112,17 @@ runs:
         # exit via the EXIT trap with zero diagnostic output.
         wait $pid_cluster || { cat /tmp/cluster-create.log; exit 1; }
         cat /tmp/cluster-create.log
+        echo "::endgroup::"
+
+        echo "::group::deploy-aicrd"
         KO_DOCKER_REPO=localhost:5001/aicrd ko build --bare --tags=tilt ./cmd/aicrd
 
         # Apply namespace first (must exist before deployment references it)
         kubectl apply -f tilt/k8s/namespace.yaml
         kubectl apply -f tilt/k8s/
+        echo "::endgroup::"
 
+        echo "::group::validator-images"
         # The validator images COPY the binaries built above, so wait for
         # those specifically (not pid_cli, which nothing here needs) before
         # building them.
@@ -154,7 +164,9 @@ runs:
         # pid_aicr would be silently masked whenever pid_validators succeeds.
         wait $pid_aicr
         wait $pid_validators
+        echo "::endgroup::"
 
+        echo "::group::rollout-and-verify"
         # Wait for deployment rollout (may already be ready)
         kubectl rollout status deployment/aicrd -n aicr --timeout=120s
 
@@ -164,6 +176,7 @@ runs:
         curl -sf http://localhost:5001/v2/aicr-validators/performance/tags/list
         curl -sf http://localhost:5001/v2/aicr-validators/conformance/tags/list
         curl -sf http://localhost:5001/v2/aicr-validators/aiperf-bench/tags/list
+        echo "::endgroup::"
 
         # Not needed by anything above, but its output (dist/e2e/aicr) is
         # used by a later step (AICR_BIN) - wait now so a build failure here
