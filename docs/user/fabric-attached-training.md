@@ -295,7 +295,9 @@ socket fallback:
 
 ```shell
 # Select workers by label rather than guessing the generated pod name.
-kubectl logs -n <namespace> -c node \
+# --tail=-1 is required: with a selector, kubectl defaults to the last 10 lines
+# and would omit the transport banner, which NCCL prints during init.
+kubectl logs -n <namespace> -c node --tail=-1 \
   -l jobset.sigs.k8s.io/jobset-name=<trainjob-name>,jobset.sigs.k8s.io/replicatedjob-name=node \
   | grep -i 'NCCL INFO.*Using network'
 ```
