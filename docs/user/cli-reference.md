@@ -1172,7 +1172,7 @@ spec:
       serviceAccountName: aicr
       nodeSelector:
         my-org/gpu-pool: "true"
-      tolerations:
+      tolerations:                         # [] clears the live snapshot agent's tolerate-all default
         - "gpu-type=h100:NoSchedule"
       requireGpu: true
     execution:

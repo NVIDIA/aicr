@@ -148,6 +148,32 @@ type AgentConfig struct {
 	Limits corev1.ResourceList
 }
 
+// buildAgentConfig projects snapshotter configuration onto the deployer's
+// Job configuration. Keep scheduling defaults at this projection boundary so
+// every snapshot-agent caller gets the same nil-versus-empty behavior.
+func buildAgentConfig(config *AgentConfig, agentOutput string) agent.Config {
+	return agent.Config{
+		Namespace:          config.Namespace,
+		ServiceAccountName: config.ServiceAccountName,
+		JobName:            config.JobName,
+		Image:              config.Image,
+		ImagePullSecrets:   config.ImagePullSecrets,
+		NodeSelector:       config.NodeSelector,
+		Tolerations:        effectiveAgentTolerations(config.Tolerations),
+		Output:             agentOutput,
+		Debug:              config.Debug,
+		Privileged:         config.Privileged,
+		RequireGPU:         config.RequireGPU,
+		RuntimeClassName:   config.RuntimeClassName,
+		MaxNodesPerEntry:   config.MaxNodesPerEntry,
+		OS:                 config.OS,
+		ClusterConfigPath:  config.ClusterConfigPath,
+		DiscoverNetwork:    config.DiscoverNetwork,
+		Requests:           config.Requests,
+		Limits:             config.Limits,
+	}
+}
+
 // deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
 // It creates the deployer, deploys RBAC and the Job, streams logs, waits for completion,
 // and retrieves the snapshot data from the result ConfigMap.
@@ -170,26 +196,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	// name the injected selector (TOCTOU: node may be cordoned after detection).
 	autoInjectedGPUSelector := maybeInjectGPUNodeSelector(ctx, clientset, config)
 
-	agentConfig := agent.Config{
-		Namespace:          config.Namespace,
-		ServiceAccountName: config.ServiceAccountName,
-		JobName:            config.JobName,
-		Image:              config.Image,
-		ImagePullSecrets:   config.ImagePullSecrets,
-		NodeSelector:       config.NodeSelector,
-		Tolerations:        effectiveAgentTolerations(config.Tolerations),
-		Output:             agentOutput,
-		Debug:              config.Debug,
-		Privileged:         config.Privileged,
-		RequireGPU:         config.RequireGPU,
-		RuntimeClassName:   config.RuntimeClassName,
-		MaxNodesPerEntry:   config.MaxNodesPerEntry,
-		OS:                 config.OS,
-		ClusterConfigPath:  config.ClusterConfigPath,
-		DiscoverNetwork:    config.DiscoverNetwork,
-		Requests:           config.Requests,
-		Limits:             config.Limits,
-	}
+	agentConfig := buildAgentConfig(config, agentOutput)
 
 	deployer := agent.NewDeployer(clientset, agentConfig)
 
@@ -268,6 +275,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 			fmt.Fprintln(logWriter(), logs)
 			fmt.Fprintln(logWriter(), "--- end logs ---")
 		}
+		isTransient := errors.IsTransient(waitErr)
 		msg := "job failed"
 		if autoInjectedGPUSelector {
 			msg = "job failed (auto-injected node selector nvidia.com/gpu.present=true — " +
@@ -276,11 +284,15 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 				"key=value:effect. To override placement, pass --node-selector " +
 				"kubernetes.io/hostname=<gpu-node>; --require-gpu selects a node " +
 				"advertising the nvidia.com/gpu resource)"
+		} else if isTransient {
+			msg = "job failed (verify target nodes are Ready and schedulable; if " +
+				"tolerations were explicitly cleared or replaced, pass a matching " +
+				"--toleration key=value:effect)"
 		}
 		// A wait that exceeded the deadline (pending pod, image pull, no schedulable
 		// node) is transient and retryable — classify it as ErrCodeTimeout rather
 		// than masking it as a deterministic ErrCodeInternal failure.
-		if errors.IsTransient(waitErr) {
+		if isTransient {
 			return nil, errors.Wrap(errors.ErrCodeTimeout, msg, waitErr)
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, msg, waitErr)

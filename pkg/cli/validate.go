@@ -135,7 +135,9 @@ func resolveValidateNodeSelector(cmd *cli.Command, resolved *config.ValidateReso
 // inference-perf that want to mirror the target node's taints by default
 // must distinguish "operator opted into tolerate-all" from "operator said
 // nothing". Returning nil here when neither CLI nor config set the field
-// keeps the env var unset, so the inner validator context sees nil.
+// keeps the env var unset, so the inner validator context sees nil. The live
+// snapshot path consumes that same nil as its signal to apply the agent's
+// tolerate-all default at the Job projection boundary.
 func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResolved) ([]corev1.Toleration, error) {
 	if cmd.IsSet("toleration") {
 		tols, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))

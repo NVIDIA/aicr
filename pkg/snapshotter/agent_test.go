@@ -52,7 +52,7 @@ func TestDefaultTolerations(t *testing.T) {
 	}
 }
 
-func TestEffectiveAgentTolerations(t *testing.T) {
+func TestBuildAgentConfigTolerations(t *testing.T) {
 	explicit := []corev1.Toleration{
 		{
 			Key:      "dedicated",
@@ -84,9 +84,9 @@ func TestEffectiveAgentTolerations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := effectiveAgentTolerations(tt.input)
+			got := buildAgentConfig(&AgentConfig{Tolerations: tt.input}, "snapshot.yaml").Tolerations
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("effectiveAgentTolerations() = %#v, want %#v", got, tt.want)
+				t.Errorf("buildAgentConfig().Tolerations = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
