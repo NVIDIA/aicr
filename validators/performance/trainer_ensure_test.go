@@ -507,4 +507,17 @@ func TestWaitForDeclaredTrainer_TransportErrorKeepsItsClassification(t *testing.
 			"is not a deployment that never completed, and swallowing that signal sends "+
 			"the operator to fix the wrong thing", err)
 	}
+	// Assert the code positively, not only that it is not NotFound: the negative alone
+	// would pass for any other verdict, including a total loss of classification.
+	//
+	// Note what this does and does not pin. errors.Is walks the chain and Wrap keeps its
+	// Cause, so this matches when Unavailable is anywhere in the chain — it catches the
+	// classification being dropped, not the outermost code being flattened while the
+	// inner error survives. Verified by control: replacing PropagateOrWrap with a plain
+	// Wrap to Internal still passes this. That is the same reach as the sibling
+	// TestEnsureTrainerInstalled_PreservesProbeErrorCode, and the convention in this
+	// file; pinning the outermost code would need a type assertion rather than errors.Is.
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+		t.Errorf("transport classification lost; want Unavailable, got: %v", err)
+	}
 }
