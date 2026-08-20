@@ -36,11 +36,10 @@ REGISTRY_NAME = ctlptl-registry
 
 # Kind node image (single source of truth: .settings.yaml testing.kind_node_image).
 # .ctlptl.yaml intentionally does not hardcode this — cluster-create injects it so
-# local dev and CI can never pin a second, drifting copy of the version.
+# local dev and CI can never pin a second, drifting copy of the version. No
+# hardcoded fallback here: cluster-create fails closed on an empty read
+# instead of silently degrading to a stale image (see its yq-missing check).
 KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/dev/null)
-ifeq ($(KIND_NODE_IMAGE),)
-KIND_NODE_IMAGE := kindest/node:v1.32.0
-endif
 
 # Default target
 all: help
@@ -830,6 +829,11 @@ cluster-create: ## Creates local Kind cluster with registry
 	@if ! command -v yq >/dev/null 2>&1; then \
 		echo "Error: yq is not installed."; \
 		echo "Install: brew install yq"; \
+		exit 1; \
+	fi
+	@if [ -z "$(KIND_NODE_IMAGE)" ]; then \
+		echo "Error: could not resolve testing.kind_node_image from .settings.yaml."; \
+		echo "Check the key exists and .settings.yaml is valid YAML."; \
 		exit 1; \
 	fi
 	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE) (from .settings.yaml)"
