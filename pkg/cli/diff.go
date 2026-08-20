@@ -24,8 +24,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/diff"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -122,13 +122,13 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// Unwrap to reach pkg/diff, which still takes the internal shape. This is
-	// the last direct hop left in this command; exposing diff on the facade
-	// (#2025) is what removes it, and it was deliberately sequenced after
-	// LoadSnapshot so it can take facade snapshots rather than paths.
-	result := diff.Snapshots(baseline.Unwrap(), target.Unwrap())
-	result.BaselineSource = baselinePath
-	result.TargetSource = targetPath
+	result, err := client.DiffSnapshots(ctx, baseline, target, aicr.SnapshotDiffOptions{
+		BaselineSource: baselinePath,
+		TargetSource:   targetPath,
+	})
+	if err != nil {
+		return err
+	}
 
 	slog.Info("snapshot diff complete",
 		slog.Int("added", result.Summary.Added),
@@ -154,7 +154,7 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 //
 // kubeconfig is propagated through to ConfigMap writers so multi-cluster
 // workflows write back to the same cluster the snapshots were read from.
-func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer.Format, kubeconfig string, result *diff.Result) (err error) {
+func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer.Format, kubeconfig string, result *aicr.SnapshotDiff) (err error) {
 	output := cmd.String("output")
 
 	// Use custom table writer for human-readable output
@@ -176,7 +176,7 @@ func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer
 			}()
 			w = f
 		}
-		return diff.WriteTable(w, result)
+		return aicr.WriteSnapshotDiffTable(w, result)
 	}
 
 	// JSON/YAML use standard serializer; thread kubeconfig so ConfigMap

@@ -39,6 +39,7 @@ than in yours.
 | `Example_criteriaDimensions` | The coverage dimensions | yes |
 | `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order | no |
 | `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation | no |
+| `ExampleClient_DiffSnapshots` | In-memory drift detection between two loaded snapshots | no |
 | `ExampleClient_LoadRecipe` | Reading a previously emitted recipe | no |
 | `ExampleClient_CollectSnapshot` | Capturing cluster state via the snapshotter Job | no |
 | `ExampleClient_ValidateState` | Selecting validation phases, and `--no-cluster` mode | no |
@@ -128,10 +129,10 @@ func main() {
 ## Snapshotting and validation
 
 Beyond recipe resolution, the facade exposes the rest of the
-Snapshot → Validate workflow. Both methods are stateless w.r.t. the
-Client's recipe source; they are surfaced through the Client only to
-keep the facade uniform and leave room for future per-Client
-telemetry hooks.
+Snapshot → Validate workflow, including comparison of two snapshots for
+configuration drift. These operations are stateless w.r.t. the Client's recipe
+source; they are surfaced through the Client to keep the facade uniform and
+leave room for future per-Client telemetry hooks.
 
 ### Loading a snapshot you already have
 
@@ -173,6 +174,46 @@ someone rewrote) need not be what this call parsed. When byte-for-byte
 identity with the loaded snapshot matters, such as hashing what you
 validated, capture the source contents yourself and load from that
 capture instead of re-reading afterwards.
+
+### Comparing snapshots for drift
+
+`DiffSnapshots` compares the measurement payloads already held by two facade
+snapshots. The comparison is in memory: it does not read a cluster or revisit
+the file, URL, or ConfigMap the snapshots came from.
+
+```go
+baseline, err := client.LoadSnapshot(ctx, "before.yaml", "")
+if err != nil {
+	log.Fatalf("load baseline: %v", err)
+}
+target, err := client.LoadSnapshot(ctx, "after.yaml", "")
+if err != nil {
+	log.Fatalf("load target: %v", err)
+}
+
+result, err := client.DiffSnapshots(ctx, baseline, target, aicr.SnapshotDiffOptions{
+	BaselineSource: "before.yaml",
+	TargetSource:   "after.yaml",
+})
+if err != nil {
+	log.Fatalf("diff snapshots: %v", err)
+}
+if result.HasDrift() {
+	log.Printf("detected %d change(s)", result.Summary.Total)
+}
+```
+
+Drift is returned as data, not as an error. `SnapshotDiff.Changes` preserves
+added, removed, and modified values, while `Summary` provides aggregate counts.
+The source labels are optional output metadata and do not affect comparison.
+Use `aicr.WriteSnapshotDiffTable` for the same human-readable table format as
+`aicr diff`; JSON and YAML serializers can consume the facade-owned result
+directly.
+
+Inputs must retain at least one typed measurement through `LoadSnapshot`,
+`CollectSnapshot`, or `WrapSnapshot`. A hand-constructed `&aicr.Snapshot{}` or
+a wrapped snapshot with no usable measurement is rejected instead of being
+reported as no drift.
 
 ### Capturing a snapshot from a live cluster
 
@@ -1069,6 +1110,8 @@ Per-operation caps:
   load whatever the source: a local file read, an HTTP(S) fetch, or a
   `cm://` ConfigMap read against the Kubernetes API. Distinct from
   `SnapshotOperationTimeout` below, which bounds deploying an agent Job.
+- `DiffSnapshots`: **no facade cap** — comparison is in memory and the caller's
+  context governs unchanged.
 - `CollectSnapshot`: caller-controlled via `AgentConfig.Timeout` (falling
   back to `defaults.SnapshotOperationTimeout` when unset), plus
   `defaults.SnapshotOperationGrace`. The grace exists because
