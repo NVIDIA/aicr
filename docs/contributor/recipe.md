@@ -351,8 +351,15 @@ Host-managed driver floors (GKE COS / A4X Max and similar platforms where
 `check-nvidia-smi` evaluates it against the nvidia-smi banner on each
 verified node; when the constraint is absent the check keeps its
 banner-presence behavior and does not invent a floor (#1995).
-When the constraint is set but no parseable numeric driver version is
-available, the check fails closed.
+When the constraint is set but the host driver cannot be measured —
+unreadable nvidia-smi banner, no GPU nodes, all GPU nodes cordoned, or
+GPU nodes busy with workloads — the check fails closed rather than
+Skip. Skip on those paths is preserved only when no floor is
+configured. The value must carry a comparison operator (`>=`, `>`,
+`<=`, `<`) to behave as a floor; a bare version is exact string match,
+so a newer driver would fail. The constraint name is an exact match;
+a typo silently disables the floor (shared with
+`Deployment.gpu-operator.version`).
 
 For a query `{service: eks, accelerator: gb200, intent: training}`,
 the resolver returns three independent maximal leaves —

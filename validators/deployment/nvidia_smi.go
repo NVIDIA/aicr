@@ -62,8 +62,12 @@ const (
 	// host-managed drivers (e.g. GKE A4X Max requiring R580.95.05+) cannot be
 	// gated by GPU Operator version alone when driver.enabled is false; this
 	// constraint is evaluated against the nvidia-smi banner on each verified
-	// node. Absent from the recipe, the check keeps its original banner-presence
-	// behavior and does not invent a floor.
+	// node. The value must carry a comparison operator (typically ">=") to
+	// behave as a floor; a bare version is exact string match. Absent from the
+	// recipe, the check keeps its original banner-presence behavior and does
+	// not invent a floor. When the constraint is set but no node can be
+	// measured (no GPU nodes, all cordoned, or busy), the check fails closed
+	// instead of Skip — a declared gate must not PASS unenforced.
 	gpuDriverVersionConstraint = "Deployment.gpu-driver.version"
 )
 
@@ -184,6 +188,10 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 				"recipe declares gpu-operator but the cluster has no GPU nodes to verify — "+
 					"check node provisioning, the GPU Operator rollout, or validator RBAC")
 		}
+		if err := failClosedIfUnmeasurableGPUDriverFloor(ctx,
+			"no GPU nodes found in the cluster"); err != nil {
+			return err
+		}
 		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNoGPUNodes))
 		return validators.Skip("no GPU nodes found in the cluster")
 	}
@@ -198,9 +206,13 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 		// probe error. There is nothing schedulable to verify, so Skip with a
 		// distinct, accurate code — never a false "no-gpu-nodes" in the signed
 		// evidence.
+		reason := fmt.Sprintf(
+			"all %d GPU node(s) are cordoned; nothing to verify", len(coverage.cordoned))
+		if err := failClosedIfUnmeasurableGPUDriverFloor(ctx, reason); err != nil {
+			return err
+		}
 		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNoSchedulableGPUNodes))
-		return validators.Skip(fmt.Sprintf(
-			"all %d GPU node(s) are cordoned; nothing to verify", len(coverage.cordoned)))
+		return validators.Skip(reason)
 	}
 
 	// Check if any nodes are busy.
@@ -231,11 +243,16 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 	if len(busyNodes) > 0 {
 		printLines(coverage.coverageLine(0))
 		if confirmedBusy {
-			// At least one node was CONFIRMED occupied: a legitimate
-			// scope-narrowing Skip. Sign nodes-busy so the signed evidence records
-			// the occupancy. Probe errors on other nodes are already logged above.
+			// At least one node was CONFIRMED occupied. Without a host-driver
+			// floor this is a legitimate scope-narrowing Skip. With a declared
+			// floor, occupancy is not a reason to leave the gate unevaluated
+			// (#1995): Skip is non-blocking, so a below-floor cluster would PASS.
+			reason := fmt.Sprintf("GPU nodes busy with existing workloads: %v", busyNodes)
+			if err := failClosedIfUnmeasurableGPUDriverFloor(ctx, reason); err != nil {
+				return err
+			}
 			emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNodesBusy))
-			return validators.Skip(fmt.Sprintf("GPU nodes busy with existing workloads: %v", busyNodes))
+			return validators.Skip(reason)
 		}
 		// #2122 fail-closed: every "busy" node was actually a busy-probe ERROR —
 		// the probe proved occupancy on no node. An infra error (RBAC denial,
@@ -304,6 +321,21 @@ func nvidiaSMICoverageExtra(validated, total int) map[string]string {
 // low-cardinality reason enum code.
 func nvidiaSMISkipExtra(reason string) map[string]string {
 	return map[string]string{"skipReason": reason}
+}
+
+// failClosedIfUnmeasurableGPUDriverFloor returns a blocking error when the
+// recipe declares Deployment.gpu-driver.version but check-nvidia-smi cannot
+// run per-node verification (no GPU nodes, all cordoned, or busy). Skip on
+// those paths is non-blocking; a declared floor that cannot be measured must
+// not PASS (#1995). No constraint keeps the existing Skip.
+func failClosedIfUnmeasurableGPUDriverFloor(ctx *validators.Context, reason string) error {
+	expr, found := findDeploymentConstraint(ctx, gpuDriverVersionConstraint)
+	if !found {
+		return nil
+	}
+	return errors.New(errors.ErrCodeNotFound,
+		fmt.Sprintf("%s %q is set but the host driver version could not be measured (%s)",
+			gpuDriverVersionConstraint, expr, reason))
 }
 
 // emitExtraOrWarn emits structured extra evidence, logging (never failing) on
@@ -446,12 +478,9 @@ func parseNvidiaSMIDriverVersion(podLogs string) (string, error) {
 		return "", errors.New(errors.ErrCodeNotFound,
 			"nvidia-smi driver version is not a three-component numeric field")
 	}
-	version := podLogs[loc[2]:loc[3]]
-	if version == "" {
-		return "", errors.New(errors.ErrCodeNotFound,
-			"nvidia-smi output has no parseable Driver Version / KMD Version")
-	}
-	return version, nil
+	// The capture is `[0-9]+(?:\.[0-9]+){0,2}` so loc[2]:loc[3] is never empty
+	// once FindStringSubmatchIndex returned a match.
+	return podLogs[loc[2]:loc[3]], nil
 }
 
 // driverVersionFieldTerminated reports whether the character after a captured
@@ -476,7 +505,9 @@ func driverVersionFieldTerminated(podLogs string, end int) bool {
 // the driver version parsed from nvidia-smi logs (issue #1995). No constraint
 // in the recipe is a no-op — the check must not invent a floor. A constraint
 // with an unreadable banner fails closed: a host-driver floor that cannot be
-// measured must not PASS.
+// measured must not PASS. Enumeration paths that would Skip (no GPU nodes,
+// all cordoned, busy) use failClosedIfUnmeasurableGPUDriverFloor for the
+// same contract before per-node verification runs.
 func enforceGPUDriverVersionFloor(ctx *validators.Context, podLogs, nodeName string) error {
 	constraintExpr, found := findDeploymentConstraint(ctx, gpuDriverVersionConstraint)
 	if !found {
@@ -502,9 +533,9 @@ func enforceGPUDriverVersionFloor(ctx *validators.Context, podLogs, nodeName str
 
 	passed, err := parsed.Evaluate(version)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 			fmt.Sprintf("%s constraint evaluation failed on node %s",
-				gpuDriverVersionConstraint, nodeName), err)
+				gpuDriverVersionConstraint, nodeName))
 	}
 
 	fmt.Printf("  %s: host driver %s, constraint %s → %v\n",

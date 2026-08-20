@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -305,6 +306,11 @@ func TestEnforceGPUDriverVersionFloor(t *testing.T) {
 			logs:       goodLogs,
 		},
 		{
+			name:       "satisfies floor from KMD Version banner",
+			constraint: ">= 580.95.05",
+			logs:       "NVIDIA-SMI\nKMD Version: 580.95.05\nCUDA UMD Version: 13.0\n" + gpuCheckSuccessMsg,
+		},
+		{
 			// Lexical string compare would fail here ('.100' < '.99'); the
 			// constraint evaluator must compare components numerically.
 			name:       "numeric order beats lexical order",
@@ -328,6 +334,14 @@ func TestEnforceGPUDriverVersionFloor(t *testing.T) {
 			constraint: ">=",
 			logs:       goodLogs,
 			wantErrSub: "invalid Deployment.gpu-driver.version constraint",
+		},
+		{
+			// Parses as >= with a non-version value; Evaluate returns
+			// ErrCodeInvalidRequest, which must not be recoded Internal.
+			name:       "unparseable floor value preserves InvalidRequest",
+			constraint: ">= not-a-version",
+			logs:       goodLogs,
+			wantErrSub: "[INVALID_REQUEST] cannot parse expected version",
 		},
 	}
 
@@ -607,6 +621,136 @@ func TestCheckNvidiaSMI_CordonedKeepsSkipEvenWhenDeclared(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "all 2 GPU node(s) are cordoned") {
 		t.Errorf("checkNvidiaSMI() error = %v, want the cordon skip reason", err)
+	}
+}
+
+// TestCheckNvidiaSMI_DeclaredFloorUnmeasurableFailsClosed proves #1995: a
+// declared Deployment.gpu-driver.version must not ride the non-blocking Skip
+// paths. Busy workloads and all-cordoned nodes are supported Skip reasons
+// only when no floor is configured.
+func TestCheckNvidiaSMI_DeclaredFloorUnmeasurableFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		nodes       []runtime.Object
+		busy        bool
+		wantErrSubs []string
+	}{
+		{
+			name:  "no GPU nodes with floor fails closed",
+			nodes: []runtime.Object{},
+			wantErrSubs: []string{
+				"[NOT_FOUND]",
+				gpuDriverVersionConstraint,
+				"could not be measured",
+				"no GPU nodes found in the cluster",
+			},
+		},
+		{
+			name: "all GPU nodes cordoned with floor fails closed",
+			nodes: []runtime.Object{
+				cordon(gpuNode("cordoned-1", 8, -1)),
+				cordon(gpuNode("cordoned-2", 8, -1)),
+			},
+			wantErrSubs: []string{
+				"[NOT_FOUND]",
+				gpuDriverVersionConstraint,
+				"could not be measured",
+				"all 2 GPU node(s) are cordoned",
+			},
+		},
+		{
+			name: "busy GPU node with floor fails closed",
+			nodes: []runtime.Object{
+				gpuNode("gpu-1", 8, -1),
+			},
+			busy: true,
+			wantErrSubs: []string{
+				"[NOT_FOUND]",
+				gpuDriverVersionConstraint,
+				"could not be measured",
+				"GPU nodes busy with existing workloads",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t, tt.nodes, nil, nil)
+			withGPUDriverFloor(ctx, ">= 580.95.05")
+			if tt.busy {
+				ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods",
+					gpuBusyPodsReactor())
+			}
+
+			err := checkNvidiaSMI(ctx)
+			if validators.IsSkip(err) {
+				t.Fatalf("checkNvidiaSMI() = skip (%v), want fail closed", err)
+			}
+			if err == nil {
+				t.Fatal("checkNvidiaSMI() = nil, want a blocking error")
+			}
+			for _, sub := range tt.wantErrSubs {
+				if !strings.Contains(err.Error(), sub) {
+					t.Errorf("checkNvidiaSMI() error = %v, want it to contain %q", err, sub)
+				}
+			}
+		})
+	}
+}
+
+// withGPUDriverFloor installs Deployment.gpu-driver.version on a test context.
+func withGPUDriverFloor(ctx *validators.Context, expr string) {
+	ctx.ValidationInput.Config.Deployment = &validatorv1.ValidationPhase{
+		Constraints: []recipe.Constraint{{
+			Name:  gpuDriverVersionConstraint,
+			Value: expr,
+		}},
+	}
+}
+
+// gpuBusyPodsReactor makes IsNodeGpuBusy report confirmed occupancy: a
+// running pod with a nvidia.com/gpu limit, regardless of field selector
+// (the fake clientset does not honor spec.nodeName).
+func gpuBusyPodsReactor() clienttesting.ReactionFunc {
+	qty := resource.MustParse("1")
+	return func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, &v1.PodList{Items: []v1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{Name: "gpu-workload", Namespace: "default"},
+			Spec: v1.PodSpec{
+				Containers: []v1.Container{{
+					Name: "work",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							v1.ResourceName(helper.GpuResourceName): qty,
+						},
+					},
+				}},
+			},
+			Status: v1.PodStatus{Phase: v1.PodRunning},
+		}}}, nil
+	}
+}
+
+// TestCheckNvidiaSMI_BusyWithoutFloorStillSkips preserves the pre-#1995 Skip
+// when occupancy is confirmed and no host-driver floor is declared.
+func TestCheckNvidiaSMI_BusyWithoutFloorStillSkips(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		gpuNode("gpu-1", 8, -1),
+	}, nil, nil)
+	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods", gpuBusyPodsReactor())
+
+	err := checkNvidiaSMI(ctx)
+	if !validators.IsSkip(err) {
+		t.Fatalf("checkNvidiaSMI() error = %v, want a skip when no floor is set", err)
+	}
+	if !strings.Contains(err.Error(), "GPU nodes busy with existing workloads") {
+		t.Errorf("checkNvidiaSMI() error = %v, want the busy skip reason", err)
 	}
 }
 
