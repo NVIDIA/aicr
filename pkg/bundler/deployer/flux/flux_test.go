@@ -3105,62 +3105,108 @@ func TestGenerate_SourceOnlyRefChartFallsBackToName(t *testing.T) {
 
 // TestGenerate_HelmReleaseCRDUpgradePolicyIsOptIn covers #2264.
 //
-// Helm installs a chart's crds/ directory on first install and never touches
-// it again on upgrade, and helm-controller's spec.upgrade.crds default of Skip
-// inherits that, so a chart bump whose CRDs changed runs a new controller
-// against the previous schema.
+// helm-controller's spec.upgrade.crds default of Skip means a chart bump whose
+// CRDs changed runs a new controller against the previous schema. The fix is
+// opt-in via the registry ownsCRDs flag, not a blanket default: an audit found
+// 15 components ship CRDs under crds/ and 11 share at least one with another
+// component. nfd, gpu-operator and kai-scheduler all appear together in
+// base.yaml and all ship the NodeFeature CRDs, so replacing unconditionally
+// would have several HelmReleases rewrite the same CRD every reconcile.
 //
-// The fix is opt-in rather than a blanket default. An audit found 15 registry
-// components ship CRDs under crds/ and 11 share at least one CRD with another
-// component -- nfd, gpu-operator and network-operator all ship the NodeFeature
-// CRDs, and nfd, gpu-operator and kai-scheduler all appear together in
-// base.yaml. Replacing unconditionally would have several HelmReleases rewrite
-// the same CRD on every reconcile. Skip is what prevents that today.
+// Three directions are asserted, and each fails for a different reason:
 //
-// So this asserts both directions: an owner emits the policy, and a sharer
-// must not. A test that only checked the positive case would pass for an
-// unconditional template, which is the bug this replaced.
+//	owner            -> emits the policy
+//	sharer           -> must not, because replacing would race another release
+//	coordinates moved -> must not, because ownsCRDs records an audit of the
+//	                    registry's pinned chart and a ref that overrides
+//	                    source/chart/version points somewhere unaudited
+//
+// A positive-only test would pass against an unconditional template, which is
+// the defect this replaced, so the negative cases are the load-bearing ones.
+//
+// NOTE ON COVERAGE: this exercises the sourceRef template only. An upstream
+// Helm component renders spec.chart.spec.sourceRef regardless of
+// OCISourceName; the chartRef template is reached by local, vendored and
+// manifest-backed components, and those carry no registry chart coordinates,
+// so they cannot satisfy usesRegistryChart and cannot emit the policy today.
+// Earlier revisions of this test claimed chartRef coverage by setting
+// OCISourceName on a normal Helm ref, which renders sourceRef and tested the
+// same path twice. Do not reintroduce that shape.
 func TestGenerate_HelmReleaseCRDUpgradePolicyIsOptIn(t *testing.T) {
+	registry, regErr := recipe.GetComponentRegistry()
+	if regErr != nil {
+		t.Fatalf("GetComponentRegistry: %v", regErr)
+	}
+
+	// refFor builds a ref at the component's exact registry coordinates, which
+	// is what a stock recipe resolves to.
+	refFor := func(t *testing.T, name string) recipe.ComponentRef {
+		t.Helper()
+		cfg := registry.Get(name)
+		if cfg == nil {
+			t.Fatalf("%s missing from registry", name)
+		}
+		return recipe.ComponentRef{
+			Name:      name,
+			Namespace: name,
+			Type:      recipe.ComponentTypeHelm,
+			Source:    cfg.Helm.DefaultRepository,
+			Chart:     cfg.Helm.DefaultChart,
+			Version:   cfg.Helm.DefaultVersion,
+		}
+	}
+
 	tests := []struct {
-		name          string
-		component     string
-		ociSourceName string
-		want          string
+		name      string
+		component string
+		mutate    func(*recipe.ComponentRef)
+		want      string
 	}{
-		// k8s-aibom is registry ownsCRDs: sole owner, no webhook conversion.
-		{name: "owner via sourceRef", component: "k8s-aibom", want: "CreateReplace"},
-		{name: "owner via chartRef", component: "k8s-aibom", ociSourceName: "aicr-bundle", want: "CreateReplace"},
-		// nfd shares the NodeFeature CRDs with gpu-operator and
-		// network-operator, so replacing would race them.
-		{name: "sharer via sourceRef", component: "nfd", want: ""},
-		{name: "sharer via chartRef", component: "nfd", ociSourceName: "aicr-bundle", want: ""},
+		{
+			// k8s-aibom is registry ownsCRDs: sole owner, no webhook conversion.
+			name: "owner at registry coordinates", component: "k8s-aibom", want: "CreateReplace",
+		},
+		{
+			// nfd shares the NodeFeature CRDs with gpu-operator and
+			// network-operator, all three of which co-exist in base.yaml.
+			name: "sharer", component: "nfd", want: "",
+		},
+		{
+			name: "owner with overridden version", component: "k8s-aibom",
+			mutate: func(r *recipe.ComponentRef) { r.Version = "1.2.0" }, want: "",
+		},
+		{
+			name: "owner with overridden chart", component: "k8s-aibom",
+			mutate: func(r *recipe.ComponentRef) { r.Chart = "some-fork" }, want: "",
+		},
+		{
+			name: "owner with overridden source", component: "k8s-aibom",
+			mutate: func(r *recipe.ComponentRef) { r.Source = "oci://example.invalid/charts" }, want: "",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
+			ref := refFor(t, tt.component)
+			if tt.mutate != nil {
+				tt.mutate(&ref)
+			}
 
 			recipeResult := &recipe.RecipeResult{}
 			recipeResult.Metadata.Version = testVersion
-			recipeResult.ComponentRefs = []recipe.ComponentRef{{
-				Name:      tt.component,
-				Namespace: tt.component,
-				Chart:     tt.component,
-				Version:   "1.0.0",
-				Type:      recipe.ComponentTypeHelm,
-				Source:    "oci://example.com/charts",
-			}}
+			recipeResult.ComponentRefs = []recipe.ComponentRef{ref}
 
 			g := &Generator{
 				RecipeResult:    recipeResult,
 				ComponentValues: map[string]map[string]any{tt.component: {}},
 				Version:         "v0.9.0",
-				OCISourceName:   tt.ociSourceName,
 			}
 			if _, err := g.Generate(context.Background(), outputDir); err != nil {
 				t.Fatalf("Generate() error = %v", err)
 			}
 
+			raw := readFile(t, filepath.Join(outputDir, tt.component, "helmrelease.yaml"))
 			var hr struct {
 				Spec struct {
 					Upgrade struct {
@@ -3168,11 +3214,9 @@ func TestGenerate_HelmReleaseCRDUpgradePolicyIsOptIn(t *testing.T) {
 					} `yaml:"upgrade"`
 				} `yaml:"spec"`
 			}
-			raw := readFile(t, filepath.Join(outputDir, tt.component, "helmrelease.yaml"))
 			if err := yaml.Unmarshal([]byte(raw), &hr); err != nil {
 				t.Fatalf("parse HelmRelease: %v", err)
 			}
-
 			if hr.Spec.Upgrade.CRDs != tt.want {
 				t.Errorf("spec.upgrade.crds = %q, want %q\n%s", hr.Spec.Upgrade.CRDs, tt.want, raw)
 			}

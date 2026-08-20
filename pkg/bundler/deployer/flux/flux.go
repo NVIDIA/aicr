@@ -263,7 +263,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	// Resolve which components solely own their CRDs, so their
 	// HelmRelease can replace CRDs on upgrade instead of skipping them.
-	if ownerErr := g.resolveCRDOwners(sortedRefs); ownerErr != nil {
+	if ownerErr := g.resolveCRDOwners(ctx, sortedRefs); ownerErr != nil {
 		return nil, ownerErr
 	}
 
@@ -974,7 +974,11 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, man
 // A registry failure is fatal rather than defaulting everything to false:
 // silently treating every component as "does not own its CRDs" would quietly
 // restore the stranded-CRD behavior this flag exists to fix.
-func (g *Generator) resolveCRDOwners(refs []recipe.ComponentRef) error {
+func (g *Generator) resolveCRDOwners(ctx context.Context, refs []recipe.ComponentRef) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.Wrap(errors.ErrCodeTimeout,
+			"context cancelled before resolving CRD upgrade policy", ctxErr)
+	}
 	registry, regErr := recipe.GetComponentRegistryFor(g.RecipeResult.DataProvider())
 	if regErr != nil {
 		return errors.PropagateOrWrap(regErr, errors.ErrCodeInternal,
@@ -982,12 +986,40 @@ func (g *Generator) resolveCRDOwners(refs []recipe.ComponentRef) error {
 	}
 	out := make(map[string]bool, len(refs))
 	for _, ref := range refs {
-		if cfg := registry.Get(ref.Name); cfg != nil && cfg.OwnsCRDs {
-			out[ref.Name] = true
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.Wrap(errors.ErrCodeTimeout,
+				"context cancelled while resolving CRD upgrade policy", ctxErr)
 		}
+		cfg := registry.Get(ref.Name)
+		if cfg == nil || !cfg.OwnsCRDs || !usesRegistryChart(ref, cfg) {
+			continue
+		}
+		out[ref.Name] = true
 	}
 	g.crdOwners = out
 	return nil
+}
+
+// usesRegistryChart reports whether a ref still points at the exact chart the
+// registry pins for its component.
+//
+// ownsCRDs records the result of an audit performed against that chart: that
+// the component solely owns every CRD it ships, and ships none using a webhook
+// conversion strategy. A recipe may override source, chart, or version on the
+// componentRef, and those overrides bypass registry defaulting entirely. The
+// audit says nothing about the chart they point at, so the flag must not carry
+// over to it — replacing CRDs from an unaudited chart is exactly the
+// destructive case the opt-in design exists to avoid.
+//
+// Fails closed: any mismatch, or a component with no Helm chart, keeps
+// helm-controller's Skip default.
+func usesRegistryChart(ref recipe.ComponentRef, cfg *recipe.ComponentConfig) bool {
+	if cfg.Helm.DefaultChart == "" {
+		return false
+	}
+	return ref.Source == cfg.Helm.DefaultRepository &&
+		ref.EffectiveChart() == cfg.Helm.DefaultChart &&
+		ref.Version == cfg.Helm.DefaultVersion
 }
 
 // ownsCRDs reports whether the named component may replace its CRDs on
