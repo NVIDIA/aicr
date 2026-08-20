@@ -269,7 +269,8 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (t
 	if !ok {
 		slog.Info("Kubeflow Trainer incomplete: admission webhook missing",
 			"configuration", trainerMutatingWebhookConfig, "webhook", trainerMutatingWebhookName)
-		return trainerInstall{Incomplete: "the validating admission webhook configuration is missing"}, false, nil
+		return trainerInstall{Incomplete: fmt.Sprintf(
+			"admission configuration %q is missing", trainerMutatingWebhookConfig)}, false, nil
 	}
 
 	// The controller Deployment is found by label: its name is release-derived on
@@ -313,12 +314,17 @@ func discoverTrainerInstall(ctx context.Context, dynamicClient dynamic.Interface
 	gvr schema.GroupVersionResource, configName, webhookName string) (trainerInstall, bool, error) {
 
 	obj, found, err := getTrainerObject(ctx, dynamicClient, gvr, "", configName)
-	if err != nil || !found {
-		if err == nil {
-			slog.Info("Kubeflow Trainer incomplete: admission configuration missing",
-				"configuration", configName)
-		}
+	if err != nil {
+		// A failed read is not evidence of absence. Propagate it so the caller
+		// classifies it as transport or timeout rather than as a deployment that
+		// never happened.
 		return trainerInstall{}, false, err
+	}
+	if !found {
+		slog.Info("Kubeflow Trainer incomplete: admission configuration missing",
+			"configuration", configName)
+		return trainerInstall{Incomplete: fmt.Sprintf(
+			"admission configuration %q is missing", configName)}, false, nil
 	}
 
 	entries, _, err := unstructured.NestedSlice(obj.Object, "webhooks")
@@ -346,7 +352,9 @@ func discoverTrainerInstall(ctx context.Context, dynamicClient dynamic.Interface
 
 	slog.Info("Kubeflow Trainer incomplete: admission webhook missing",
 		"configuration", configName, "webhook", webhookName)
-	return trainerInstall{Incomplete: "the validating admission webhook configuration is missing"}, false, nil
+	return trainerInstall{Incomplete: fmt.Sprintf(
+		"admission configuration %q exists but does not contain the %q webhook",
+		configName, webhookName)}, false, nil
 }
 
 // getTrainerObject fetches one object. NotFound reports found=false with no
@@ -537,6 +545,42 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 	return nil, awaitTrainerController(ctx, dynamicClient, install)
 }
 
+// classifyPollExpiry turns an expired poll context into the right verdict, or nil
+// when the poll context is still live and the caller should handle its own error.
+//
+// The two expiries mean opposite things. A canceled parent means the run was
+// aborted — catalog timeout, canceled phase, killed Job — which is not a customer
+// deployment defect. A local deadline means the delivered Trainer never became
+// complete, which is.
+//
+// Both paths route through here so the verdict does not depend on whether the clock
+// ran out during a probe or during a sleep: the same cluster state must not produce
+// two different codes.
+func classifyPollExpiry(ctx, pollCtx context.Context, last trainerInstall) error {
+	if ctx.Err() != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+			"canceled while waiting for the recipe-declared Kubeflow Trainer", ctx.Err())
+	}
+	if pollCtx.Err() == nil {
+		return nil
+	}
+
+	// ErrCodeNotFound, not Unavailable: the read succeeded and the answer was "not
+	// deployed". Unavailable is this package's code for a transport failure — see
+	// the decision table on validators.Require — and using it here would file a
+	// product defect alongside apiserver hiccups, telling whoever triages it to
+	// re-run rather than to fix their deployment.
+	reason := last.Incomplete
+	if reason == "" {
+		reason = "no complete installation was found"
+	}
+	return aicrErrors.New(aicrErrors.ErrCodeNotFound, fmt.Sprintf(
+		"the recipe declares the %s component but its Kubeflow Trainer installation "+
+			"did not become complete within %s: %s. The benchmark will not self-install "+
+			"over a delivered component that failed to deploy",
+		kubeflowTrainerComponent, trainerInstallWaitTimeout, reason))
+}
+
 // awaitTrainerController waits for a Trainer the benchmark does not own to finish
 // starting. The probe confirms every object exists; the controller may still be
 // rolling, and waiting is the alternative to reinstalling over a healthy Trainer.
@@ -573,13 +617,20 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 	defer cancel()
 
 	for {
-		// Probe with the parent context, not pollCtx: getTrainerObject checks
-		// ctx.Err() at the top of every read and returns Timeout, so a deadline
-		// landing mid-probe would surface as a bare timeout instead of the
-		// NotFound-plus-diagnosis this function exists to produce. Letting the
-		// select below own the deadline keeps the two conditions separable.
-		install, ok, err := isTrainerInstalled(ctx, dynamicClient)
+		// Probe under pollCtx so the rollout allowance actually bounds it. Each probe
+		// makes several sequential reads, each with its own DiagnosticTimeout, so a
+		// probe running on the parent context could cross the deadline and still
+		// report success — the allowance would bound only the sleeps.
+		//
+		// The cost is that getTrainerObject checks ctx.Err() at the top of every read
+		// and returns Timeout, so an expiring deadline surfaces here as a probe error
+		// rather than through the select. Classify it below instead of propagating it
+		// blind, so the verdict does not depend on where in the loop the clock ran out.
+		install, ok, err := isTrainerInstalled(pollCtx, dynamicClient)
 		if err != nil {
+			if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
+				return trainerInstall{}, verdict
+			}
 			return trainerInstall{}, aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
 				"failed to check Kubeflow Trainer installation")
 		}
@@ -590,30 +641,11 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 
 		select {
 		case <-pollCtx.Done():
-			// pollCtx expires for two different reasons and they mean opposite
-			// things. A canceled parent means the run was aborted — catalog timeout,
-			// phase cancellation, the Job killed — and reporting that as a customer
-			// deployment defect is the same misclassification the NotFound code
-			// above exists to avoid, one level down.
-			if ctx.Err() != nil {
-				return trainerInstall{}, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
-					"canceled while waiting for the recipe-declared Kubeflow Trainer", ctx.Err())
+			if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
+				return trainerInstall{}, verdict
 			}
-
-			// ErrCodeNotFound, not Unavailable: the read succeeded and the answer was
-			// "not deployed". Unavailable is this package's code for a transport
-			// failure — see the decision table on validators.Require — and using it
-			// here would file a product defect alongside apiserver hiccups, telling
-			// whoever triages it to re-run rather than to fix their deployment.
-			reason := last.Incomplete
-			if reason == "" {
-				reason = "no complete installation was found"
-			}
-			return trainerInstall{}, aicrErrors.New(aicrErrors.ErrCodeNotFound, fmt.Sprintf(
-				"the recipe declares the %s component but its Kubeflow Trainer installation "+
-					"did not become complete within %s: %s. The benchmark will not self-install "+
-					"over a delivered component that failed to deploy",
-				kubeflowTrainerComponent, trainerInstallWaitTimeout, reason))
+			return trainerInstall{}, aicrErrors.New(aicrErrors.ErrCodeInternal,
+				"Kubeflow Trainer wait ended without a verdict")
 		case <-time.After(trainerInstallPollInterval):
 		}
 	}

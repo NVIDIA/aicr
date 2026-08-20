@@ -431,3 +431,41 @@ func TestEnsureTrainerInstalled_DeclaredRolloutDoesNotFallThrough(t *testing.T) 
 			"does not cover the branch it claims to", probes)
 	}
 }
+
+// TestWaitForDeclaredTrainer_SlowProbeCannotOutrunTheDeadline pins the rollout
+// allowance as a bound on the whole wait, not just on the sleeps between probes.
+//
+// An earlier revision probed with the parent context so a deadline landing
+// mid-probe would not surface as a bare timeout. That fixed the classification and
+// removed the bound: each probe makes several sequential reads with their own
+// timeouts, so a slow probe could cross the allowance and still report success if
+// the installation happened to complete meanwhile. The probe runs under pollCtx
+// again, with the expiry classified rather than propagated blind.
+//
+// Here the first read sleeps past the allowance and the installation is complete
+// underneath, so a wait that respects its deadline must fail rather than succeed.
+func TestWaitForDeclaredTrainer_SlowProbeCannotOutrunTheDeadline(t *testing.T) {
+	oldTimeout, oldInterval := trainerInstallWaitTimeout, trainerInstallPollInterval
+	trainerInstallWaitTimeout = 20 * time.Millisecond
+	trainerInstallPollInterval = time.Millisecond
+	defer func() {
+		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
+	}()
+
+	client := newTrainerFakeClient(completeTrainerInstall()...)
+	client.PrependReactor("get", "customresourcedefinitions",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			time.Sleep(60 * time.Millisecond) // outlives the allowance
+			return false, nil, nil            // then let the complete install answer
+		})
+
+	_, err := waitForDeclaredTrainer(context.Background(), client)
+	if err == nil {
+		t.Fatal("wait returned success after its own deadline had passed; the rollout " +
+			"allowance must bound the probe, not only the sleeps between probes")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+		t.Errorf("error code = %v, want ErrCodeNotFound: the deadline expired locally "+
+			"with the parent still live, which is a deployment that never completed", err)
+	}
+}
