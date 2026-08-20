@@ -648,7 +648,18 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 		// just after the deadline, and taking ok on that read would let the wait
 		// outrun its own allowance — the bound has to cover the answer, not only
 		// the question.
-		if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
+		//
+		// Report why from *this* probe, not the previous one. When ok is true the
+		// installation is complete, so reusing last would blame a missing object the
+		// probe just found — sending an operator to look for something that is there,
+		// when the real finding is a rollout slower than its budget.
+		expired := last
+		if ok {
+			expired = trainerInstall{
+				Incomplete: "the installation became complete, but only after the allowance expired",
+			}
+		}
+		if verdict := classifyPollExpiry(ctx, pollCtx, expired); verdict != nil {
 			return trainerInstall{}, verdict
 		}
 		if ok {

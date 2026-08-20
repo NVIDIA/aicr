@@ -555,4 +555,13 @@ func TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline(t *testing.T
 		t.Errorf("error code = %v, want ErrCodeNotFound: the deadline expired locally "+
 			"with the parent still live", err)
 	}
+	// The reason must describe this probe, not the previous one. The installation is
+	// complete here, so blaming a missing object would point the operator at something
+	// that is present; the finding is a rollout slower than its budget.
+	if !strings.Contains(err.Error(), "only after the allowance expired") {
+		t.Errorf("reason contradicts the probe that just succeeded: %v", err)
+	}
+	if strings.Contains(err.Error(), "no complete installation was found") {
+		t.Errorf("reason claims nothing was found, but the probe returned complete: %v", err)
+	}
 }
