@@ -25,6 +25,77 @@ spec:
   timeouts:
     assert: 2m
   steps:
+    # Asserted before the workload steps so a stranded CRD is named as the
+    # cause rather than surfacing later as a confusing controller symptom.
+    #
+    # Helm and Helmfile skip a chart's crds/ directory on upgrade, and the
+    # HelmRelease AICR generates for Flux sets no spec.upgrade.crds, so the
+    # helm-controller default of Skip applies. (Flux itself can replace CRDs
+    # via spec.upgrade.crds: CreateReplace; AICR does not generate that field
+    # for any component today — see #2264. Argo CD applies CRDs as ordinary
+    # manifests each sync and is unaffected.) A cluster can therefore run a
+    # new controller against the previous CRD schema.
+    #
+    # VERSION-COUPLED BY CONSTRUCTION. Assert content is static YAML; there
+    # is no templating, so the expected version below is a literal tied to
+    # the chart version the registry pins for this component (1.2.0, whose
+    # CRDs declare only v1alpha1). A recipe that overrides `version` on the
+    # componentRef to a chart with a different storage version — 1.3.0 moves
+    # storage to v1beta1 — will fail this step even though the cluster is
+    # correct. That recipe must supply matching inline `healthCheckAsserts`
+    # on the componentRef, or set `healthCheckSkip: true`. Documented in
+    # docs/user/component-catalog.md. Flip this literal, do not generalize
+    # it, when the registry pin moves.
+    #
+    # WHAT THIS DOES AND DOES NOT ESTABLISH. It asserts that the deployed
+    # CRDs' storage-version contract matches the one the pinned chart
+    # declares. It is not provenance: it reads one field and cannot show the
+    # CRDs originated from that chart, and it cannot discriminate between
+    # chart versions that share a storage version. Charts 1.0.0, 1.1.0, and
+    # 1.2.0 all declare exactly v1alpha1 as storage, so CRDs from any of them
+    # satisfy this step identically.
+    #
+    # The practical consequence: this catches a stranded upgrade across a
+    # storage-version boundary — 1.2.0 to 1.3.0, the case that matters now —
+    # and does not catch a stranded upgrade within one, such as 1.0.0 to
+    # 1.2.0. That is the correct trade for a static assert; do not describe
+    # the step as proving more than it does.
+    #
+    # The controller's own readiness is a separate signal and not one AICR
+    # owns: upstream shipped a start-ordering race from v1.1.0 through v1.2.0
+    # that produced a false-Ready window in exactly this state, so a check
+    # that depended on their probe would have been silently wrong for two
+    # releases.
+    #
+    # Assert the storage version, NOT status.storedVersions. Immediately
+    # after a storage flip storedVersions legitimately contains both the old
+    # and new version until stored objects are rewritten, so asserting on it
+    # would fail every correctly-upgraded cluster. storedVersions gates a
+    # later v1alpha1 *removal*, not this.
+    #
+    # Both CRDs are asserted, in separate steps so a failure names which one
+    # is stranded, and so a partially applied CRD set cannot pass. That
+    # second assertion is load-bearing rather than symmetric: removing it
+    # lets the partial-apply case pass, which the tests in
+    # pkg/chainsaw/k8s_aibom_check_states_test.go demonstrate.
+    - name: validate-aibom-crd-storage-version
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: aiboms.aibom.k8saibom.dev
+              ((spec.versions[?storage == `true`].name | [0]) == 'v1alpha1'): true
+    - name: validate-aibomcontrollerconfig-crd-storage-version
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: aibomcontrollerconfigs.aibom.k8saibom.dev
+              ((spec.versions[?storage == `true`].name | [0]) == 'v1alpha1'): true
     - name: validate-controller-deployment
       try:
         - assert:

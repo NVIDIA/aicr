@@ -327,6 +327,38 @@ cluster-scoped `AIBOMControllerConfig/default` to report a current
 observed the object's current generation. Missing or stale resources fail
 closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
+The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
+`aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
+the chart version pinned in the registry. It matters
+because Helm and Helmfile skip a chart's `crds/` directory on upgrade, and the
+`HelmRelease` AICR generates for Flux leaves `spec.upgrade.crds` unset so the
+helm-controller default of `Skip` applies. A cluster can therefore run a new
+controller against the previous schema while the older version stays served
+and the controller keeps working.
+
+Both CRDs are asserted separately, so a failure names which one is stranded
+and a partially applied CRD set cannot pass. If this check fails after a chart
+bump, the pre-upgrade CRD step in
+[Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
+is the thing to run.
+
+The assertion establishes that the storage-version contract matches the pinned
+chart. It is not provenance: it reads one field, so it cannot show the CRDs
+originated from that chart, and it cannot tell apart chart versions that share
+a storage version. Charts 1.0.0, 1.1.0, and 1.2.0 all declare `v1alpha1` as
+storage. So the check catches a stranded upgrade that crosses a
+storage-version boundary, such as 1.2.0 to 1.3.0, and does not catch one
+within a boundary, such as 1.0.0 to 1.2.0.
+
+**Overriding the chart version requires overriding this assertion.** Assert
+content is static YAML with no templating, so the expected storage version is
+a literal tied to the registry's pinned chart. Chart 1.2.0 declares only
+`v1alpha1`; 1.3.0 adds `v1beta1` and moves storage to it. A recipe that sets
+`version` on the `k8s-aibom` componentRef to a chart with a different storage
+version will therefore fail this step even though the cluster is correct. Such
+a recipe must supply matching inline `healthCheckAsserts` on the componentRef,
+or set `healthCheckSkip: true` to drop the registry check entirely.
+
 `readiness.strictConfig` is enabled, so invalid new configuration cannot
 silently replace the controller's last-known-good configuration while the pod
 continues to report ready.

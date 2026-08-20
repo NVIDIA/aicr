@@ -74,6 +74,13 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 		observedGeneration int64
 		readyGeneration    int64
 		readyStatus        string
+		// CRD inputs. Empty storage version means the qualified default
+		// (v1alpha1, matching the pinned v1.2.0 chart), so existing cases
+		// describe a correctly-applied CRD set without restating it.
+		aibomCRDStorage  string
+		configCRDStorage string
+		omitAIBOMCRD     bool
+		omitConfigCRD    bool
 		// Expectations.
 		wantPass   bool
 		wantOutput string
@@ -201,6 +208,55 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "False",
 			wantOutput: "AIBOMControllerConfig",
 		},
+		{
+			// A cluster whose CRDs were replaced with a newer chart's while
+			// the recipe still pins 1.2.0. The controller keeps working —
+			// v1alpha1 stays served — so nothing else in this check notices.
+			//
+			// This state is also what a *legitimate* 1.3.0 pin looks like,
+			// which is the version-coupling the check documents: the expected
+			// version is a literal tied to the registry's pinned chart, so a
+			// recipe overriding `version` must supply matching inline
+			// healthCheckAsserts or set healthCheckSkip. The assertion cannot
+			// distinguish the two cases, and pinning the strict reading is
+			// the fail-closed direction.
+			name:    "aiboms CRD storage version drift fails closed",
+			desired: new(int64(1)), deploymentGen: 3, status: healthyDeployment,
+			configPresent: true,
+			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
+			aibomCRDStorage: "v1beta1",
+			wantOutput:      "aiboms.aibom.k8saibom.dev",
+		},
+		{
+			// The half-applied CRD set. Upstream's documented
+			// `helm show crds | kubectl apply` migration silently applied only
+			// one of the two CRDs, so this is an observed state rather than a
+			// hypothetical. It is also the case a single-CRD assertion would
+			// miss entirely: aiboms is correct, and only the configuration
+			// CRD moved.
+			name:    "partially applied CRD set fails closed",
+			desired: new(int64(1)), deploymentGen: 3, status: healthyDeployment,
+			configPresent: true,
+			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
+			configCRDStorage: "v1beta1",
+			wantOutput:       "aibomcontrollerconfigs.aibom.k8saibom.dev",
+		},
+		{
+			name:    "missing aiboms CRD fails closed",
+			desired: new(int64(1)), deploymentGen: 3, status: healthyDeployment,
+			configPresent: true,
+			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
+			omitAIBOMCRD: true,
+			wantOutput:   "aiboms.aibom.k8saibom.dev",
+		},
+		{
+			name:    "missing aibomcontrollerconfigs CRD fails closed",
+			desired: new(int64(1)), deploymentGen: 3, status: healthyDeployment,
+			configPresent: true,
+			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
+			omitConfigCRD: true,
+			wantOutput:    "aibomcontrollerconfigs.aibom.k8saibom.dev",
+		},
 	}
 
 	for _, tt := range tests {
@@ -208,6 +264,41 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			t.Parallel()
 
 			fetcher := newFakeFetcher()
+
+			// addCRD registers a CRD serving both versions with exactly one
+			// marked as storage, matching the shape the upstream chart ships.
+			// The non-storage version stays served, which is why a stranded
+			// CRD does not break the controller and why the storage-version
+			// assertion is the only thing that sees it.
+			addCRD := func(name, storageVersion string) {
+				versions := make([]any, 0, 2)
+				for _, v := range []string{"v1alpha1", "v1beta1"} {
+					versions = append(versions, map[string]any{
+						"name":    v,
+						"served":  true,
+						"storage": v == storageVersion,
+					})
+				}
+				fetcher.addGet("apiextensions.k8s.io/v1", "CustomResourceDefinition", "", name,
+					map[string]any{
+						"apiVersion": "apiextensions.k8s.io/v1",
+						"kind":       "CustomResourceDefinition",
+						"metadata":   map[string]any{"name": name},
+						"spec":       map[string]any{"versions": versions},
+					})
+			}
+			storageOrDefault := func(v string) string {
+				if v == "" {
+					return "v1alpha1"
+				}
+				return v
+			}
+			if !tt.omitAIBOMCRD {
+				addCRD("aiboms.aibom.k8saibom.dev", storageOrDefault(tt.aibomCRDStorage))
+			}
+			if !tt.omitConfigCRD {
+				addCRD("aibomcontrollerconfigs.aibom.k8saibom.dev", storageOrDefault(tt.configCRDStorage))
+			}
 
 			deploymentSpec := map[string]any{}
 			if !tt.omitDeploymentSpec {
