@@ -242,6 +242,12 @@ func TestParseNvidiaSMIDriverVersion(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// \s+ would let "Driver\nVersion:" match as the field label.
+			name:    "rejects newline between field words",
+			logs:    "Driver\nVersion: 580.95.05\n",
+			wantErr: true,
+		},
+		{
 			name: "accepts table pipe immediately after version",
 			logs: "| Driver Version: 580.95.05| CUDA Version: 12.8 |\n",
 			want: "580.95.05",

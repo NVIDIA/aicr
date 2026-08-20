@@ -70,14 +70,15 @@ const (
 // nvidiaSMIDriverVersionRE extracts the host driver / KMD version from an
 // nvidia-smi banner. Matches both legacy ("Driver Version:") and renamed
 // ("KMD Version:") fields, case-insensitively, including the table-row layout
-// where fields sit on one pipe-delimited line (issue #1667). After the colon,
-// only horizontal whitespace is allowed so a version on the next line is not
-// treated as the field's value. Caps at three numeric components — NVIDIA
-// driver versions are Major.Minor.Patch. Truncation of a longer version
+// where fields sit on one pipe-delimited line (issue #1667). Horizontal
+// whitespace only — both between the field words and after the colon — so a
+// split label ("Driver\nVersion:") or a version on the next line is not
+// treated as the field. Caps at three numeric components — NVIDIA driver
+// versions are Major.Minor.Patch. Truncation of a longer version
 // (e.g. "580.95.05.1") is rejected in parseNvidiaSMIDriverVersion: Go's RE2
 // engine has no negative lookahead.
 var nvidiaSMIDriverVersionRE = regexp.MustCompile(
-	`(?i)(?:driver|kmd)\s+version:[ \t]*([0-9]+(?:\.[0-9]+){0,2})`)
+	`(?i)(?:driver|kmd)[ \t]+version:[ \t]*([0-9]+(?:\.[0-9]+){0,2})`)
 
 // gpuNodeCoverage partitions check-nvidia-smi's discovered GPU nodes into the
 // schedulable cohort actually validated and the cordoned cohort skipped. It
