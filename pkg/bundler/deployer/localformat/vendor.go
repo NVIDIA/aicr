@@ -597,18 +597,6 @@ var newBackoffTimer = time.NewTimer
 // backoff. Non-transient errors (404, 401/403, other 4xx) fail on the first
 // attempt. Policy-rejected redirects are never retried.
 func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error) {
-	// Fail-closed egress check on the initial URL. Idempotent: safe to
-	// re-run for URLs the caller already validated. Today the only
-	// production caller (resolveAndValidateHTTPIndex) runs
-	// checkEgressPolicy(c.Repository) upstream and derives indexURL from
-	// the same host, so this call is a no-op in the happy path. It
-	// exists so a future refactor that reorders Pull() — or a new caller
-	// of defaultFetchIndexYAML that skips the upstream check — cannot
-	// silently open an SSRF hole here.
-	if err := checkFetchTargetURL(ctx, indexURL); err != nil {
-		return nil, err
-	}
-
 	var lastErr error
 	backoff := defaults.HelmChartIndexRetryInitialBackoff
 
@@ -617,6 +605,43 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 		// upstream cannot outlive the fetch operation itself. The parent
 		// context governs cancellation.
 		attemptCtx, attemptCancel := context.WithTimeout(ctx, defaults.HelmChartIndexPreCheckTimeout)
+
+		// Fail-closed egress check on every attempt. Defends against DNS
+		// rebinding: a malicious resolver could serve an allowed address on
+		// the first attempt, then rebind to a disallowed address on retries.
+		// Validation errors are routed through the retry classification logic:
+		// transient errors (timeouts, temporary DNS failures) are retried;
+		// policy rejections fail immediately.
+		if err := checkFetchTargetURL(attemptCtx, indexURL); err != nil {
+			attemptCancel()
+			lastErr = err
+			// Policy rejections (InvalidRequest) never retry.
+			isRetryable := stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
+			if !isRetryable {
+				return nil, err
+			}
+			// Don't retry if at budget limit.
+			if attempt == defaults.HelmChartIndexRetryBudget {
+				return nil, err
+			}
+			slog.WarnContext(ctx, "vendor-charts: index fetch retrying after validation error",
+				"attempt", attempt, "error", err)
+			// Sleep with exponential backoff.
+			timer := newBackoffTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				if stderrors.Is(ctx.Err(), context.Canceled) {
+					return nil, errors.Wrap(errors.ErrCodeCanceled,
+						"vendor-charts: index pre-check canceled during backoff", ctx.Err())
+				}
+				return nil, errors.Wrap(errors.ErrCodeTimeout,
+					"vendor-charts: index pre-check deadline exceeded during backoff", ctx.Err())
+			case <-timer.C:
+			}
+			backoff *= 2
+			continue
+		}
 
 		body, err := fetchIndexYAMLAttempt(attemptCtx, indexURL)
 		attemptCancel()

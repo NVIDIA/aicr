@@ -1788,6 +1788,14 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 			wantCode:    errors.ErrCodeUnavailable,
 			wantAttempt: defaults.HelmChartIndexRetryBudget,
 		},
+		{
+			name:        "validation error (policy rejection) never retried",
+			errorType:   "validation",
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeInvalidRequest,
+			wantAttempt: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1800,7 +1808,15 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 			// Stub egress check to avoid DNS resolution
 			origCheckTarget := checkFetchTargetURL
 			t.Cleanup(func() { checkFetchTargetURL = origCheckTarget })
-			checkFetchTargetURL = func(ctx context.Context, url string) error { return nil }
+			validationAttempt := 0
+			checkFetchTargetURL = func(ctx context.Context, url string) error {
+				validationAttempt++
+				if tt.errorType == "validation" && validationAttempt < tt.succeedAt {
+					return errors.New(errors.ErrCodeInvalidRequest,
+						"egress policy rejected target URL")
+				}
+				return nil
+			}
 
 			// Stub timer to avoid production sleep times
 			origTimer := newBackoffTimer
