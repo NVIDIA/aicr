@@ -669,6 +669,13 @@ const (
 	// controller-manager Deployment to have at least one ready replica after installation.
 	TrainerControllerReadyTimeout = 2 * time.Minute
 
+	// TrainerInstallPollInterval is the sleep between checks that a
+	// recipe-declared Kubeflow Trainer installation has become complete. The
+	// benchmark polls rather than failing on the first incomplete read, because a
+	// CRD that is present but not yet Established — or a controller Deployment
+	// that has not appeared — is an ordinary rollout state, not a failed deploy.
+	TrainerInstallPollInterval = 5 * time.Second
+
 	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
 	NCCLTrainJobTimeout = 30 * time.Minute
 

@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"strings"
 	"testing"
+	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -235,44 +236,100 @@ func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 	}
 }
 
-// TestEnsureTrainerInstalled_RecipeDeclaresButMissing verifies the benchmark fails
-// rather than self-installing when the recipe ships Kubeflow Trainer and no complete
-// installation is found.
+// TestEnsureTrainerInstalled_RecipeDrivenLifecycle covers the decision the recipe
+// now drives. The rows that matter are the two where the recipe declares the
+// component: a delivered installation is used as-is, and a missing one fails rather
+// than being installed over — which is the whole point, because self-installing
+// there would report a passing benchmark for a cluster whose delivered Trainer is
+// broken.
 //
-// This is the whole point of keying the decision on the recipe: installing an
-// ephemeral Trainer here would let the benchmark report a passing bandwidth result
-// for a cluster whose delivered Trainer is broken — the deployment failure the
-// recipe's own component promised would be masked by the validator working around
-// it.
-func TestEnsureTrainerInstalled_RecipeDeclaresButMissing(t *testing.T) {
-	// An empty cluster: nothing is installed, which is what a failed deployment of
-	// the kubeflow-trainer component looks like to the probe.
-	client := newTrainerFakeClient()
+// The not-declared + complete row is included because the guard could silently
+// break it: a recipe that never claimed a Trainer must still reuse one that happens
+// to be present, exactly as before.
+//
+// The not-declared + missing row is deliberately absent: it reaches installTrainer,
+// which downloads a release archive, so it belongs in an integration test rather
+// than here.
+func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
+	tests := []struct {
+		name            string
+		declared        bool
+		objects         []runtime.Object
+		wantErr         bool
+		wantErrCode     aicrErrors.ErrorCode
+		wantErrContains string
+	}{
+		{
+			name:     "declared and delivered: used as-is, never claimed for cleanup",
+			declared: true,
+			objects:  completeTrainerInstall(),
+		},
+		{
+			name:            "declared but missing: fails instead of installing over it",
+			declared:        true,
+			objects:         nil,
+			wantErr:         true,
+			wantErrCode:     aicrErrors.ErrCodeNotFound,
+			wantErrContains: kubeflowTrainerComponent,
+		},
+		{
+			name:     "not declared but present: reused, as before",
+			declared: false,
+			objects:  completeTrainerInstall(),
+		},
+		{
+			// Regression guard for a fall-through the linter caught once already:
+			// after the declared wait succeeds, the code must take the readiness
+			// path and stop, not continue into the install path and reinstall over
+			// a Trainer the recipe delivered.
+			name:     "declared and delivered: does not fall through to install",
+			declared: true,
+			objects:  completeTrainerInstall(),
+		},
+	}
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, nil, true)
-	if err == nil {
-		t.Fatal("expected an error when the recipe declares kubeflow-trainer but none is installed")
-	}
-	if len(refs) != 0 {
-		t.Errorf("refs = %d, want 0 (nothing may be installed on the failure path)", len(refs))
-	}
-	if !strings.Contains(err.Error(), kubeflowTrainerComponent) {
-		t.Errorf("error %q does not name the %s component, so an operator cannot tell which "+
-			"component failed to deploy", err, kubeflowTrainerComponent)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer withShortTrainerWait(t)()
+			client := newTrainerFakeClient(tt.objects...)
+
+			refs, err := ensureTrainerInstalled(context.Background(), client, nil, tt.declared)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			// Nothing is ever claimed for cleanup on these rows: a Trainer the
+			// benchmark did not install must not be deleted by it.
+			if len(refs) != 0 {
+				t.Errorf("refs = %d, want 0", len(refs))
+			}
+			if !tt.wantErr {
+				return
+			}
+			// NotFound, not Unavailable: the read succeeded and the answer was "not
+			// deployed". Unavailable is this package's code for a transport failure
+			// (see the decision table on validators.Require), and filing a product
+			// defect under it tells whoever triages the failure to re-run rather than
+			// to fix their deployment.
+			if !stderrors.Is(err, aicrErrors.New(tt.wantErrCode, "")) {
+				t.Errorf("error code = %v, want %s", err, tt.wantErrCode)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Errorf("error %q does not name %q, so an operator cannot tell which "+
+					"component failed to deploy", err, tt.wantErrContains)
+			}
+		})
 	}
 }
 
-// TestEnsureTrainerInstalled_RecipeDeclaresAndPresent verifies the delivered
-// installation is used as-is: it is not reinstalled, and it is not claimed for
-// cleanup, because the recipe owns it rather than the benchmark.
-func TestEnsureTrainerInstalled_RecipeDeclaresAndPresent(t *testing.T) {
-	client := newTrainerFakeClient(completeTrainerInstall()...)
-
-	refs, err := ensureTrainerInstalled(context.Background(), client, nil, true)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(refs) != 0 {
-		t.Errorf("refs = %d, want 0 (a recipe-delivered Trainer must never be claimed for cleanup)", len(refs))
+// withShortTrainerWait shrinks the recipe-declared rollout wait for the duration of
+// a test and restores it afterwards.
+func withShortTrainerWait(t *testing.T) func() {
+	t.Helper()
+	oldTimeout, oldInterval := trainerInstallWaitTimeout, trainerInstallPollInterval
+	trainerInstallWaitTimeout = 20 * time.Millisecond
+	trainerInstallPollInterval = time.Millisecond
+	return func() {
+		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
 	}
 }

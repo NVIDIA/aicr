@@ -481,8 +481,9 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// Ensure a usable Kubeflow Trainer. Whether an incomplete installation is a
 	// failure or something to install over is decided by the recipe, not by what
 	// happens to be on the cluster: a recipe that ships the component must have a
-	// working one, while a recipe that does not gets an ephemeral fixture. Anything
-	// we install is ours to clean up after the test completes.
+	// working one, while a recipe that does not reuses whatever is present and
+	// installs an ephemeral fixture only when nothing is. Anything we install is
+	// ours to clean up after the test completes.
 	recipeDeclaresTrainer := validators.RecipeDeclares(ctx, kubeflowTrainerComponent)
 	installedResources, err := ensureTrainerInstalled(ctx.Ctx, dynamicClient,
 		ctx.Clientset.Discovery(), recipeDeclaresTrainer)
