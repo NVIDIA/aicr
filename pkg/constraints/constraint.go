@@ -81,12 +81,18 @@ func ParseConstraintExpression(expr string) (*ParsedConstraint, error) {
 
 	pc := &ParsedConstraint{}
 
-	// Check for operators (longest first to avoid matching ">" when ">=" is intended)
-	operators := []Operator{OperatorGTE, OperatorLTE, OperatorNE, OperatorEQ, OperatorGT, OperatorLT}
+	// Check for operators (longest first to avoid matching ">" when ">=" is intended).
+	// A lone "=" is treated as an alias for "==" so the parse-time operator set
+	// agrees with isOperatorStart (which must include "=" to split "==" in AND clauses).
+	operators := []Operator{OperatorGTE, OperatorLTE, OperatorNE, OperatorEQ, OperatorGT, OperatorLT, "="}
 	for _, op := range operators {
 		if strings.HasPrefix(expr, string(op)) {
+			matchedPrefix := string(op) // preserve the matched length before aliasing
+			if op == "=" {
+				op = OperatorEQ // lone "=" is an alias for "=="
+			}
 			pc.Operator = op
-			pc.Value = strings.TrimSpace(strings.TrimPrefix(expr, string(op)))
+			pc.Value = strings.TrimSpace(strings.TrimPrefix(expr, matchedPrefix))
 			break
 		}
 	}
@@ -120,7 +126,7 @@ func ParseConstraintExpression(expr string) (*ParsedConstraint, error) {
 		pc.Operator == OperatorLTE || pc.Operator == OperatorLT
 	if isComparisonOp {
 		if parsed, err := version.ParseVersion(pc.Value); err == nil {
-			if strings.HasPrefix(strings.TrimPrefix(parsed.Extras, "-"), version.GKESuffixPrefix) {
+			if version.HasGKEPrefix(parsed.Extras) {
 				if _, ok := version.ExtractGKEBuild(parsed.Extras); !ok {
 					return nil, errors.New(errors.ErrCodeInvalidRequest,
 						fmt.Sprintf("constraint value %q has a malformed GKE build suffix (must be -gke.N with N >= 0)", pc.Value))
@@ -241,6 +247,9 @@ func (pc *ParsedConstraint) String() string {
 //	>= 1.34.3-gke.1318000 < 1.35.0 || >= 1.35.0-gke.2745000
 //
 // which the single-expression ParseConstraintExpression cannot represent.
+//
+// No overlay or mixin emits compound expressions yet; this is groundwork for
+// per-track GB300 GKE version floors. See #1985.
 type CompoundConstraint struct {
 	// Alternatives holds the OR clauses; each inner slice is an AND group.
 	Alternatives [][]ParsedConstraint

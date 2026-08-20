@@ -23,11 +23,10 @@ import (
 	pkgerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// GKESuffixPrefix is the bare prefix (without the leading dash) that identifies
-// GKE-specific build number extras. Full extras have the form "-gke.NNNNNN";
-// this constant is "gke." — callers must strip the leading "-" before using
-// it with strings.HasPrefix. Prefer ExtractGKEBuild for safe consumption.
-const GKESuffixPrefix = "gke."
+// gkeSuffixPrefix is the bare prefix that identifies GKE-specific build number
+// extras of the form "-gke.NNNNNN". Unexported: use HasGKESuffix or
+// ExtractGKEBuild for cross-package consumption.
+const gkeSuffixPrefix = "gke."
 
 // Error types for version parsing failures
 var (
@@ -189,10 +188,10 @@ func (v Version) Equals(other Version) bool {
 // (e.g. "-eks-3025e55", "-hotfix.20240322", "") return (0, false).
 func ExtractGKEBuild(extras string) (int64, bool) {
 	s := strings.TrimPrefix(extras, "-")
-	if !strings.HasPrefix(s, GKESuffixPrefix) {
+	if !strings.HasPrefix(s, gkeSuffixPrefix) {
 		return 0, false
 	}
-	numStr := s[len(GKESuffixPrefix):]
+	numStr := s[len(gkeSuffixPrefix):]
 	if numStr == "" {
 		return 0, false
 	}
@@ -201,6 +200,21 @@ func ExtractGKEBuild(extras string) (int64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// HasGKESuffix reports whether the Extras field carries a valid GKE build
+// suffix ("-gke.N" with N >= 0). Returns false for malformed or non-GKE extras.
+func HasGKESuffix(extras string) bool {
+	_, ok := ExtractGKEBuild(extras)
+	return ok
+}
+
+// HasGKEPrefix reports whether the Extras field begins with the "-gke." prefix,
+// regardless of whether the trailing build number is valid. Use this when you
+// need to distinguish "has a GKE prefix but invalid number" from "no GKE prefix
+// at all" (e.g. to reject malformed constraint values at parse time).
+func HasGKEPrefix(extras string) bool {
+	return strings.HasPrefix(strings.TrimPrefix(extras, "-"), gkeSuffixPrefix)
 }
 
 // Compare returns an integer comparing two versions:
