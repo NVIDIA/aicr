@@ -507,17 +507,52 @@ func TestWaitForDeclaredTrainer_TransportErrorKeepsItsClassification(t *testing.
 			"is not a deployment that never completed, and swallowing that signal sends "+
 			"the operator to fix the wrong thing", err)
 	}
-	// Assert the code positively, not only that it is not NotFound: the negative alone
-	// would pass for any other verdict, including a total loss of classification.
+	// Assert the code a consumer actually reads. ExitCodeFromError resolves the
+	// outermost StructuredError, so that is the value which reaches the exit status —
+	// errors.Is would match Unavailable anywhere in the chain and would still pass if
+	// the verdict were flattened to Internal, which is observable, not cosmetic.
 	//
-	// Note what this does and does not pin. errors.Is walks the chain and Wrap keeps its
-	// Cause, so this matches when Unavailable is anywhere in the chain — it catches the
-	// classification being dropped, not the outermost code being flattened while the
-	// inner error survives. Verified by control: replacing PropagateOrWrap with a plain
-	// Wrap to Internal still passes this. That is the same reach as the sibling
-	// TestEnsureTrainerInstalled_PreservesProbeErrorCode, and the convention in this
-	// file; pinning the outermost code would need a type assertion rather than errors.Is.
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
-		t.Errorf("transport classification lost; want Unavailable, got: %v", err)
+	// stderrors.As walks from the outermost and assigns the first match, which is the
+	// same resolution ExitCodeFromError performs. The pattern is already used for this
+	// purpose in pkg/chainsaw's tests.
+	var se *aicrErrors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeUnavailable {
+		t.Errorf("reported code = %v, want Unavailable: a degraded control plane must not "+
+			"reach the operator as a deployment that never completed", err)
+	}
+}
+
+// TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline covers the other
+// end of the probe from the slow-first-read case.
+//
+// Delaying the first read makes a later read notice expiry, so the err path catches
+// it. Delaying the *last* read does not: the probe returns ok, and accepting that
+// without rechecking would let a wait return success after its allowance had passed.
+// The bound has to cover the answer, not only the question.
+func TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline(t *testing.T) {
+	oldTimeout, oldInterval := trainerInstallWaitTimeout, trainerInstallPollInterval
+	trainerInstallWaitTimeout = 20 * time.Millisecond
+	trainerInstallPollInterval = time.Millisecond
+	defer func() {
+		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
+	}()
+
+	client := newTrainerFakeClient(completeTrainerInstall()...)
+	// The Service read is the probe's last step, so stalling it past the allowance
+	// makes the probe succeed with the deadline already gone.
+	client.PrependReactor("get", "services",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			time.Sleep(60 * time.Millisecond)
+			return false, nil, nil // then let the seeded complete install answer
+		})
+
+	_, err := waitForDeclaredTrainer(context.Background(), client)
+	if err == nil {
+		t.Fatal("wait returned success after its allowance had passed; expiry must be " +
+			"rechecked before accepting a probe's result, not only before issuing it")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+		t.Errorf("error code = %v, want ErrCodeNotFound: the deadline expired locally "+
+			"with the parent still live", err)
 	}
 }

@@ -644,6 +644,13 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 			return trainerInstall{}, aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
 				"failed to check Kubeflow Trainer installation")
 		}
+		// Recheck expiry before accepting success. The probe's last read can return
+		// just after the deadline, and taking ok on that read would let the wait
+		// outrun its own allowance — the bound has to cover the answer, not only
+		// the question.
+		if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
+			return trainerInstall{}, verdict
+		}
 		if ok {
 			return install, nil
 		}
