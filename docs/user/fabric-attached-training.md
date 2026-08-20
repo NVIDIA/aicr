@@ -47,8 +47,9 @@ namespace and reference it from `runtimeRef`.
 - four hostPath volumes, and `IPC_LOCK` on the worker
 - the NCCL configuration for your plugin release
 
-**The shape, abridged** — `"<...>"` marks a value you must fill in. Every key a
-workload needs is shown; this is not a working manifest:
+**A placement sketch** — `"<...>"` marks a value you must fill in. It shows
+where each piece goes; it is not a manifest, abridged or otherwise, and the
+authoritative field list is the integrator page linked below:
 
 ```yaml
 apiVersion: trainer.kubeflow.org/v1alpha1
@@ -106,12 +107,18 @@ spec:
     image: my-registry/my-trainer:latest
 ```
 
-**For a complete, working reference**, see the runtime AICR's own performance
-validator applies:
-[`validators/performance/testdata/h100/gke/runtime.yaml`](https://github.com/NVIDIA/aicr/blob/main/validators/performance/testdata/h100/gke/runtime.yaml).
-It is an MPI benchmark rather than a training job, so the launcher differs — but
-the fabric wiring is exactly what a workload needs, and it is kept current
-against the recipe.
+**The authoritative wiring** is
+[Workload Pod Configuration](../integrator/gke-tcpxo-networking.md#workload-pod-configuration-nri-profile)
+together with the version table in
+[NCCL Plugin Version Matching](../integrator/gke-tcpxo-networking.md#nccl-plugin-version-matching).
+Take the annotation, sidecar, volume and capability requirements from there.
+
+AICR's performance validator applies a runtime with the same wiring
+([`validators/performance/testdata/h100/gke/runtime.yaml`](https://github.com/NVIDIA/aicr/blob/main/validators/performance/testdata/h100/gke/runtime.yaml)),
+which is useful to read for shape. It is **not** a template to copy: it is an
+MPI benchmark rather than a training job, it carries validator-only
+placeholders substituted at apply time, and its own image pins are not
+guaranteed to match the pair the recipe currently ships.
 
 Two details are easy to miss because they are not in the pod spec:
 

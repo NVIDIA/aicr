@@ -196,15 +196,16 @@ Check what your cluster actually runs:
 
 ```shell
 kubectl get ds nccl-tcpxo-installer -n kube-system \
-  -o jsonpath='{.spec.template.spec.containers[?(@.name=="nccl-tcpxo-installer")].image}'
+  -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="nccl-tcpxo-installer")].image}'
 ```
 
 Then set your workload's `tcpxo-daemon` image to the daemon version paired with
 it, per [Google's release notes][tcpxo-releases].
 
-**Upgrade ordering is directional:** upgrade the plugin installer *before* the
-daemon. A plugin newer than its paired daemon is the supported transitional
-state; the reverse is not.
+**Upgrade in order:** upgrade the plugin installer first, then the workload's
+daemon. Google also advises that workloads should not be running while the
+installer is upgraded. This is a sequence, not a statement that a mismatched
+pair is supported to run.
 
 [tcpxo-releases]: https://github.com/GoogleCloudPlatform/container-engine-accelerators/blob/master/gpudirect-tcpxo/README.md
 
