@@ -111,6 +111,11 @@ const (
 	// overwriting a generically-named admission configuration another operator owns.
 	trainerWebhookSuffix = ".trainer.kubeflow.org"
 
+	// kubeflowTrainerComponent is the registry name of the Kubeflow Trainer
+	// component. A recipe declaring it is promising a Trainer installation, which
+	// is what ensureTrainerInstalled keys its behavior on.
+	kubeflowTrainerComponent = "kubeflow-trainer"
+
 	// jobSetCRDName identifies the JobSet dependency. TrainJobs run as JobSets, so
 	// a Trainer whose JobSet controller never becomes ready fails opaquely later.
 	jobSetCRDName = "jobsets.jobset.x-k8s.io"
@@ -431,8 +436,22 @@ func trainerResourceClient(dynamicClient dynamic.Interface,
 // and returns the resources it created, so the caller can delete them when the run
 // finishes. A complete pre-existing installation is left alone and reported as no
 // resources, so the benchmark never deletes a Trainer it does not own.
+//
+// recipeDeclaresTrainer says whether the recipe under validation ships Kubeflow
+// Trainer as a delivered component, and it decides what an incomplete installation
+// means:
+//
+//   - declared, and present: use the delivered installation.
+//   - declared, but missing or incomplete: fail. Self-installing here would mask a
+//     broken deployment of a component the recipe promised, and the benchmark would
+//     then report a passing result for a cluster that cannot run TrainJobs at all.
+//   - not declared: install an ephemeral fixture and tear it down, as before. The
+//     recipe never claimed a Trainer, so there is nothing to mask.
+//
+// This is deliberately keyed on the recipe rather than on live cluster state, so the
+// same recipe behaves the same way regardless of what happens to be installed.
 func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface,
-	discoveryClient discovery.DiscoveryInterface) ([]trainerResourceRef, error) {
+	discoveryClient discovery.DiscoveryInterface, recipeDeclaresTrainer bool) ([]trainerResourceRef, error) {
 
 	install, installed, err := isTrainerInstalled(ctx, dynamicClient)
 	if err != nil {
@@ -445,6 +464,17 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 	}
 
 	if !installed {
+		// The recipe ships Kubeflow Trainer, so a missing or incomplete installation
+		// is a deployment failure, not something to paper over. Installing our own
+		// here would produce a passing benchmark for a cluster whose delivered
+		// Trainer is broken.
+		if recipeDeclaresTrainer {
+			return nil, aicrErrors.New(aicrErrors.ErrCodeUnavailable, fmt.Sprintf(
+				"the recipe declares the %s component but no complete Kubeflow Trainer "+
+					"installation was found; the benchmark will not self-install over a "+
+					"delivered component that failed to deploy", kubeflowTrainerComponent))
+		}
+
 		// Before applying anything, check for a live installation somewhere else.
 		// Kustomize applies CRDs and RBAC before webhook configurations, so by the
 		// time the admission-config ownership guard could fire, a shared-name

@@ -33,7 +33,7 @@ import (
 func TestEnsureTrainerInstalled_CompleteInstallIsLeftAlone(t *testing.T) {
 	client := newTrainerFakeClient(completeTrainerInstall()...)
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, nil)
+	refs, err := ensureTrainerInstalled(context.Background(), client, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestEnsureTrainerInstalled_WaitsOnDiscoveredControllerName(t *testing.T) {
 		return false, nil, nil
 	})
 
-	refs, err := ensureTrainerInstalled(ctx, client, nil)
+	refs, err := ensureTrainerInstalled(ctx, client, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error waiting on the discovered controller %q (polled %v): %v",
 			releaseDerivedName, polled, err)
@@ -126,7 +126,7 @@ func TestEnsureTrainerInstalled_WaitsForPreexistingController(t *testing.T) {
 	})
 	defer cancel()
 
-	refs, err := ensureTrainerInstalled(ctx, client, nil)
+	refs, err := ensureTrainerInstalled(ctx, client, nil, false)
 	if err == nil {
 		t.Fatal("expected a not-ready pre-existing controller to fail, got nil error")
 	}
@@ -156,7 +156,7 @@ func TestEnsureTrainerInstalled_RefusesToInstallOverForeignNamespace(t *testing.
 			trainerValidatingWebhookName, "kubeflow"),
 	)
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, nil)
+	refs, err := ensureTrainerInstalled(context.Background(), client, nil, false)
 	if err == nil {
 		t.Fatal("expected the installer to refuse installing over an installation in another namespace")
 	}
@@ -180,7 +180,7 @@ func TestEnsureTrainerInstalled_PreservesProbeErrorCode(t *testing.T) {
 		return true, nil, apierrors.NewServiceUnavailable("apiserver is down")
 	})
 
-	_, err := ensureTrainerInstalled(context.Background(), client, nil)
+	_, err := ensureTrainerInstalled(context.Background(), client, nil, false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -232,5 +232,47 @@ func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 	got := foldCleanupError(nil, cleanupErr)
 	if !stderrors.Is(got, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
 		t.Errorf("cleanup error code was flattened: %v", got)
+	}
+}
+
+// TestEnsureTrainerInstalled_RecipeDeclaresButMissing verifies the benchmark fails
+// rather than self-installing when the recipe ships Kubeflow Trainer and no complete
+// installation is found.
+//
+// This is the whole point of keying the decision on the recipe: installing an
+// ephemeral Trainer here would let the benchmark report a passing bandwidth result
+// for a cluster whose delivered Trainer is broken — the deployment failure the
+// recipe's own component promised would be masked by the validator working around
+// it.
+func TestEnsureTrainerInstalled_RecipeDeclaresButMissing(t *testing.T) {
+	// An empty cluster: nothing is installed, which is what a failed deployment of
+	// the kubeflow-trainer component looks like to the probe.
+	client := newTrainerFakeClient()
+
+	refs, err := ensureTrainerInstalled(context.Background(), client, nil, true)
+	if err == nil {
+		t.Fatal("expected an error when the recipe declares kubeflow-trainer but none is installed")
+	}
+	if len(refs) != 0 {
+		t.Errorf("refs = %d, want 0 (nothing may be installed on the failure path)", len(refs))
+	}
+	if !strings.Contains(err.Error(), kubeflowTrainerComponent) {
+		t.Errorf("error %q does not name the %s component, so an operator cannot tell which "+
+			"component failed to deploy", err, kubeflowTrainerComponent)
+	}
+}
+
+// TestEnsureTrainerInstalled_RecipeDeclaresAndPresent verifies the delivered
+// installation is used as-is: it is not reinstalled, and it is not claimed for
+// cleanup, because the recipe owns it rather than the benchmark.
+func TestEnsureTrainerInstalled_RecipeDeclaresAndPresent(t *testing.T) {
+	client := newTrainerFakeClient(completeTrainerInstall()...)
+
+	refs, err := ensureTrainerInstalled(context.Background(), client, nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Errorf("refs = %d, want 0 (a recipe-delivered Trainer must never be claimed for cleanup)", len(refs))
 	}
 }
