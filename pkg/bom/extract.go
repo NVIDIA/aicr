@@ -287,10 +287,7 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 		return "", nil
 	}
 	ref := combineCRDTriplet(name, repository, tag)
-	if digest != "" && !strings.Contains(ref, "@") {
-		ref += "@" + digest
-	}
-	return ref, nil
+	return appendContainerSHA(ref, digest)
 }
 
 func nonNullImageMappingScalar(n *yaml.Node) (string, bool) {

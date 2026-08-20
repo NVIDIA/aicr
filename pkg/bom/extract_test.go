@@ -369,6 +369,22 @@ spec:
 			},
 		},
 		{
+			// The name-present branch combined with a sibling digest field
+			// must produce a fully-pinned reference.
+			name: "operator image mapping with name repository tag and digest produces pinned ref",
+			in: `spec:
+  binder:
+    image:
+      name: binder
+      repository: ghcr.io/kai
+      tag: v1
+      digest: sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b
+`,
+			want: []string{
+				"ghcr.io/kai/binder:v1@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b",
+			},
+		},
+		{
 			// When the repository already carries an inline @digest, the
 			// sibling digest field must not re-append a different digest.
 			// The inline digest is preserved and the sibling is ignored.
@@ -554,6 +570,64 @@ func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
 			_, err := ExtractImagesFromYAML([]byte(tt.in))
 			if err == nil {
 				t.Fatal("expected error for malformed containerSHA")
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestExtractImagesFromYAML_InvalidDigestInMapping exercises the fail-loud
+// guard for the structured image descriptor's `digest` field: any value that
+// does not match `^sha256:[a-f0-9]{64}$` must surface as an extraction error
+// so a typo, truncation, or bogus override cannot silently ship a malformed
+// ref into the BOM/PURL output.
+func TestExtractImagesFromYAML_InvalidDigestInMapping(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		wantSub string
+	}{
+		{
+			name: "non-sha256 prefix in digest field",
+			in: `spec:
+  db:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.4"
+      digest: notasha256
+`,
+			wantSub: `invalid containerSHA "notasha256"`,
+		},
+		{
+			name: "sha256 prefix but truncated hex in digest field",
+			in: `spec:
+  db:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.4"
+      digest: sha256:abc123
+`,
+			wantSub: `invalid containerSHA "sha256:abc123"`,
+		},
+		{
+			name: "uppercase hex in digest field",
+			in: `spec:
+  db:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.4"
+      digest: sha256:304AB813518754228F9F792F79D6DA36359B82D8ECF418096C636725F8C930AD
+`,
+			wantSub: `invalid containerSHA`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ExtractImagesFromYAML([]byte(tt.in))
+			if err == nil {
+				t.Fatal("expected error for malformed digest field")
 			}
 			if !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
