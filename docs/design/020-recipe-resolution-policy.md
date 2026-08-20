@@ -248,20 +248,34 @@ becomes applied under that extension and needs nothing else, it is a
 candidate and resolution fails.
 
 Stating it per candidate settles the any/all ambiguity without a separate
-rule. A candidate needing only `os` fires on `os` alone; a candidate needing
-both `os` and `intent` fires only when both are strict and both are unstated,
-and reports both together, because supplying either alone would not reach it.
-An overlay that additionally requires an *elective* dimension is never a
-candidate, which is what preserves the generic tier.
+rule. The extension is computed from what the query is *missing*, not from
+the candidate's full requirement list, so a candidate is reached whenever the
+strict dimensions it still needs are supplied. Dimensions the query already
+states correctly are not part of the extension and do not have to be
+re-supplied. Conversely, a candidate that conflicts with a stated dimension
+is never reachable, and one that additionally requires an *elective*
+dimension is never a candidate, which is what preserves the generic tier.
 
-Worked example with `strictDimensions: [os, intent]` and a query stating
-`service` and `accelerator` only:
+Worked example with `strictDimensions: [os, intent]`, for a candidate
+requiring `os: ubuntu` and `intent: training`. Every query below states
+`service` and `accelerator`:
 
-| candidate needs | strict? | fires |
+| query also states | extension needed | fires |
 | --- | --- | --- |
-| `os: ubuntu` | yes | yes, reporting `os` |
-| `os: ubuntu` + `intent: training` | both | yes, reporting `os` and `intent` |
-| `intent: training` + `platform: kubeflow` | `platform` is elective | no |
+| nothing | `os`, `intent` | yes, reporting both |
+| `intent: training` | `os` | yes, reporting `os` |
+| `os: ubuntu` | `intent` | yes, reporting `intent` |
+| `os: ubuntu`, `intent: training` | none, candidate already applied | no |
+| `intent: inference` | conflicts with the candidate | no |
+
+The second and third rows are the ones worth stating explicitly: partial
+progress toward a candidate does not excuse the remainder. A query that names
+`intent` still fails for the missing `os`, because the candidate's content is
+just as silently dropped either way.
+
+A candidate requiring `intent: training` plus `platform: kubeflow` never
+fires under this policy regardless of what is stated, because `platform` is
+elective.
 
 `requireOSIfNeeded` and `availableOSForCriteria` are deleted, along with both
 call sites in `metadata_store.go`.
