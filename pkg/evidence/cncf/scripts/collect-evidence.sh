@@ -2564,7 +2564,9 @@ collect_operator() {
         collect_operator_kubeflow
     else
         write_section_header "Robust AI Operator"
-        echo "**Result: SKIP (prerequisite absent)** — the recipe/bundle deployed no supported AI operator: no Dynamo operator in \`dynamo-system\`, no NIM operator in \`nvidia-nim\`, and no Kubeflow Trainer in \`kubeflow\`. A Kubeflow Trainer that the performance validator self-installed into \`kubeflow-system\` for the NCCL benchmark is deliberately not counted here — it is torn down at the end of the run and is not part of the deployed bundle." >> "${EVIDENCE_FILE}"
+        echo "**Result: SKIP (prerequisite absent)** — the recipe/bundle deployed no supported AI operator: no Dynamo operator in \`dynamo-system\`, no NIM operator in \`nvidia-nim\`, and no Kubeflow Trainer in \`kubeflow\`." >> "${EVIDENCE_FILE}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "A Kubeflow Trainer that the performance validator self-installed into \`kubeflow-system\` for the NCCL benchmark is deliberately not counted here: it is torn down at the end of the run and is not part of the deployed bundle." >> "${EVIDENCE_FILE}"
         log_info "Robust operator evidence collection skipped — no supported operator deployed by the recipe/bundle."
         return
     fi
