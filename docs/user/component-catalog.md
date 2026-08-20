@@ -340,12 +340,17 @@ closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
 The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
 `aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
-the chart version pinned in the registry. It matters
-because Helm and Helmfile skip a chart's `crds/` directory on upgrade, and the
-`HelmRelease` AICR generates for Flux leaves `spec.upgrade.crds` unset so the
-helm-controller default of `Skip` applies. A cluster can therefore run a new
+the chart version pinned in the registry. It matters because Helm and Helmfile
+skip a chart's `crds/` directory on upgrade, so a cluster can run a new
 controller against the previous schema while the older version stays served
 and the controller keeps working.
+
+Flux is the exception for this component: `k8s-aibom` is marked `ownsCRDs` in
+the registry, so its generated `HelmRelease` sets
+`spec.upgrade.crds: CreateReplace` and Flux applies the CRDs itself. Argo CD
+applies them as ordinary manifests each sync. The assertion is still worth
+making on every deployer, because it proves the deployed CRDs match the pinned
+chart rather than merely that some deployer was expected to update them.
 
 Both CRDs are asserted separately, so a failure names which one is stranded
 and a partially applied CRD set cannot pass. If this check fails after a chart
@@ -408,12 +413,15 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**Apply CRDs before the bundle upgrade.** The chart ships its CRDs under
-`crds/`. Helm installs that directory on first install and never touches it
-again on upgrade, so a chart bump whose CRDs changed leaves the previous schema
-in place and the API server silently prunes the new controller's writes to
-added fields. Apply the CRDs from the exact qualified chart first, then
-upgrade:
+**Apply CRDs before the bundle upgrade — `helm` and `helmfile` only.** The
+chart ships its CRDs under `crds/`. Helm installs that directory on first
+install and never touches it again on upgrade, so a chart bump whose CRDs
+changed leaves the previous schema in place and the API server silently prunes
+the new controller's writes to added fields.
+
+The `flux`, `argocd`, and `argocd-helm` bundles handle this themselves for this
+component and need no manual step; see the deployer table below. For `helm` and
+`helmfile`, apply the CRDs from the exact qualified chart first, then upgrade:
 
 ```bash
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
