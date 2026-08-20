@@ -231,6 +231,16 @@ func TestParseNvidiaSMIDriverVersion(t *testing.T) {
 			logs:    "Driver Version: 580.95.05.1\n",
 			wantErr: true,
 		},
+		{
+			name:    "rejects nonnumeric suffix after version",
+			logs:    "Driver Version: 580.95.05-rc1\n",
+			wantErr: true,
+		},
+		{
+			name: "accepts table pipe immediately after version",
+			logs: "| Driver Version: 580.95.05| CUDA Version: 12.8 |\n",
+			want: "580.95.05",
+		},
 	}
 
 	for _, tt := range tests {

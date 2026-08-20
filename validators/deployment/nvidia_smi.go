@@ -431,15 +431,16 @@ func parseNvidiaSMIDriverVersion(podLogs string) (string, error) {
 		return "", errors.New(errors.ErrCodeNotFound,
 			"nvidia-smi output has no parseable Driver Version / KMD Version")
 	}
-	// loc[2]:loc[3] is the version capture. A trailing '.' means a fourth
-	// numeric component was truncated (e.g. "580.95.05.1" → "580.95.05");
-	// reject so a floor cannot pass on a silently shortened value. RE2 has
-	// no (?!...) lookahead, so this check lives here rather than in the
-	// pattern (issue #1995).
+	// loc[2]:loc[3] is the version capture. The next byte must be a field
+	// terminator (EOF, whitespace, or '|'). A trailing '.' ("580.95.05.1")
+	// or suffix ("-rc1") would otherwise truncate to a three-component
+	// prefix that could falsely satisfy a floor. RE2 has no (?!...)
+	// lookahead, so this check lives here rather than in the pattern
+	// (issue #1995).
 	end := loc[3]
-	if end < len(podLogs) && podLogs[end] == '.' {
+	if !driverVersionFieldTerminated(podLogs, end) {
 		return "", errors.New(errors.ErrCodeNotFound,
-			"nvidia-smi driver version has more than three numeric components")
+			"nvidia-smi driver version is not a three-component numeric field")
 	}
 	version := podLogs[loc[2]:loc[3]]
 	if version == "" {
@@ -447,6 +448,24 @@ func parseNvidiaSMIDriverVersion(podLogs string) (string, error) {
 			"nvidia-smi output has no parseable Driver Version / KMD Version")
 	}
 	return version, nil
+}
+
+// driverVersionFieldTerminated reports whether the character after a captured
+// driver version is a valid field terminator. Real nvidia-smi banners follow
+// the version with EOF, whitespace, or a table pipe. Anything else is a
+// suffix that would silently truncate (".1", "-rc1", "foo") and must fail
+// closed — RE2 has no negative lookahead, so this lives here rather than in
+// nvidiaSMIDriverVersionRE.
+func driverVersionFieldTerminated(podLogs string, end int) bool {
+	if end >= len(podLogs) {
+		return true
+	}
+	switch podLogs[end] {
+	case '|', ' ', '\t', '\n', '\r':
+		return true
+	default:
+		return false
+	}
 }
 
 // enforceGPUDriverVersionFloor evaluates Deployment.gpu-driver.version against
