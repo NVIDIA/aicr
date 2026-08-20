@@ -45,7 +45,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
-| k8s-aibom | helm | k8s-aibom | 1.2.0 | 1 |
+| k8s-aibom | helm | k8s-aibom | 1.3.0 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -138,7 +138,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:6df9e8dd1eac389ebfef692c9648449adeb815d01e16e29cd6f3e50fe64ba9a6`
+- `ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -173,7 +173,7 @@ _No images extracted._
 
 ### k8s-aibom
 
-- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:b5040d14a20b4e890956d5f47b78445dac6c871eb5799586d9011c48ce71c198`
+- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d`
 
 ### k8s-ephemeral-storage-metrics
 

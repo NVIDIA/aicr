@@ -75,7 +75,7 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 		readyGeneration    int64
 		readyStatus        string
 		// CRD inputs. Empty storage version means the qualified default
-		// (v1alpha1, matching the pinned v1.2.0 chart), so existing cases
+		// (v1beta1, matching the pinned 1.3.0 chart), so existing cases
 		// describe a correctly-applied CRD set without restating it.
 		aibomCRDStorage  string
 		configCRDStorage string
@@ -209,36 +209,43 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			wantOutput: "AIBOMControllerConfig",
 		},
 		{
-			// A cluster whose CRDs were replaced with a newer chart's while
-			// the recipe still pins 1.2.0. The controller keeps working —
-			// v1alpha1 stays served — so nothing else in this check notices.
+			// The stranded-CRD case the check exists for: the registry now
+			// pins 1.3.0, but this cluster still carries CRDs from 1.2.0 or
+			// earlier, which serve only v1alpha1 and store it. Nothing else
+			// in this check notices, because the controller runs fine against
+			// a served version.
 			//
-			// This state is also what a *legitimate* 1.3.0 pin looks like,
-			// which is the version-coupling the check documents: the expected
-			// version is a literal tied to the registry's pinned chart, so a
-			// recipe overriding `version` must supply matching inline
-			// healthCheckAsserts or set healthCheckSkip. The assertion cannot
-			// distinguish the two cases, and pinning the strict reading is
-			// the fail-closed direction.
+			// This state is also what a *legitimate* pre-1.3.0 pin looks
+			// like, which is the version-coupling the check documents: the
+			// expected version is a literal tied to the registry's pinned
+			// chart, so a recipe overriding `version` must supply matching
+			// inline healthCheckAsserts or set healthCheckSkip. The assertion
+			// cannot distinguish the two cases, and pinning the strict
+			// reading is the fail-closed direction.
 			name:    "aiboms CRD storage version drift fails closed",
 			desired: new(int64(1)), deploymentGen: 3, status: healthyDeployment,
 			configPresent: true,
 			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
-			aibomCRDStorage: "v1beta1",
+			aibomCRDStorage: "v1alpha1",
 			wantOutput:      "aiboms.aibom.k8saibom.dev",
 		},
 		{
-			// The half-applied CRD set. Upstream's documented
-			// `helm show crds | kubectl apply` migration silently applied only
-			// one of the two CRDs, so this is an observed state rather than a
-			// hypothetical. It is also the case a single-CRD assertion would
-			// miss entirely: aiboms is correct, and only the configuration
-			// CRD moved.
+			// The half-applied CRD set: aiboms upgraded to the pinned chart
+			// while aibomcontrollerconfigs did not. Reachable by a hand-
+			// applied single file, an interrupted apply, or a deployer
+			// syncing a subset. (An earlier version of this comment blamed
+			// AICR's documented `helm show crds | kubectl apply` step; that
+			// was tested and is not affected — helm inserts separators
+			// between crds/ files and both CRDs apply.)
+			//
+			// This is the case a single-CRD assertion would miss entirely,
+			// which is what makes the second assertion load-bearing rather
+			// than symmetric.
 			name:    "partially applied CRD set fails closed",
 			desired: new(int64(1)), deploymentGen: 3, status: healthyDeployment,
 			configPresent: true,
 			generation:    2, observedGeneration: 2, readyGeneration: 2, readyStatus: "True",
-			configCRDStorage: "v1beta1",
+			configCRDStorage: "v1alpha1",
 			wantOutput:       "aibomcontrollerconfigs.aibom.k8saibom.dev",
 		},
 		{
@@ -265,14 +272,25 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 
 			fetcher := newFakeFetcher()
 
-			// addCRD registers a CRD serving both versions with exactly one
-			// marked as storage, matching the shape the upstream chart ships.
-			// The non-storage version stays served, which is why a stranded
-			// CRD does not break the controller and why the storage-version
-			// assertion is the only thing that sees it.
+			// addCRD registers a CRD in the shape the corresponding upstream
+			// chart actually ships, so a "stranded" case models a real
+			// pre-upgrade cluster rather than an invented hybrid:
+			//
+			//   v1beta1 storage -> chart 1.3.0: serves v1alpha1 and v1beta1,
+			//                      storage on v1beta1 (the current pin)
+			//   v1alpha1 storage -> chart 1.2.0 and earlier: serves only
+			//                       v1alpha1, storage on it
+			//
+			// The non-storage version staying served on 1.3.0 is why a
+			// stranded CRD does not break the controller, and why the
+			// storage-version assertion is the only thing that sees it.
 			addCRD := func(name, storageVersion string) {
-				versions := make([]any, 0, 2)
-				for _, v := range []string{"v1alpha1", "v1beta1"} {
+				served := []string{"v1alpha1", "v1beta1"}
+				if storageVersion == "v1alpha1" {
+					served = []string{"v1alpha1"}
+				}
+				versions := make([]any, 0, len(served))
+				for _, v := range served {
 					versions = append(versions, map[string]any{
 						"name":    v,
 						"served":  true,
@@ -289,7 +307,7 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			}
 			storageOrDefault := func(v string) string {
 				if v == "" {
-					return "v1alpha1"
+					return "v1beta1"
 				}
 				return v
 			}

@@ -662,6 +662,38 @@ Decision 4 is unchanged: chart, image, CRDs, and the public status contract
 remain one versioned set, so the graduation release requires full
 requalification rather than a version bump.
 
+### Requalified artifact set: v1.3.0, 2026-08-20
+
+That requalification was performed. The Status block above records what was
+accepted on 2026-08-19 and is left intact as the dated record; this is the
+set the registry now pins.
+
+| Item | Qualified value |
+|---|---|
+| Source tag | [`v1.3.0`](https://github.com/GoogleCloudPlatform/k8s-aibom/releases/tag/v1.3.0) at `30af41abbe0bed3c41a42289ccf294be8c4779bb` |
+| Image | `ghcr.io/googlecloudplatform/k8s-aibom@sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d` |
+| Chart | `oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.3.0` at `sha256:4ffa933e272a977e0b60f2eca1c4326176e6196e2ee69e1bf4f72c8b5a511c90` |
+| Attestations | Image SLSA provenance, image CycloneDX SBOM, and chart SLSA provenance all verify, bound to `refs/tags/v1.3.0`, source digest `30af41ab…`, and a GitHub-hosted runner |
+| API | `v1alpha1` and `v1beta1` both served; CRD storage on `v1beta1` |
+| Kubernetes support | Policy rather than fixed range: stable APIs only, no known ceiling, tested floor 1.27, backed by an upstream version-matrix CI job |
+
+Gate findings that changed AICR-visible behavior:
+
+- **Rendered RBAC is byte-identical to 1.2.0.** No permission change accompanies
+  the graduation.
+- **The rendered resource set is unchanged**, and the chart still renders
+  `AIBOMControllerConfig` at `aibom.k8saibom.dev/v1alpha1`. Only CRD *storage*
+  moved to `v1beta1`. The component health check reflects that asymmetry
+  deliberately, asserting `v1beta1` storage on both CRDs while continuing to
+  read the config resource at `v1alpha1`.
+- **The readiness fixes ship in the image, not the chart.** Probe configuration
+  renders identically across the two versions, so the corrected readiness
+  behavior is only obtained by re-pinning the image digest — which is the
+  substantive half of this requalification.
+
+The prior pin's supported-range statement is superseded by the upstream policy
+above; AICR documentation links that policy rather than restating a range.
+
 ## References
 
 - [k8s-aibom repository](https://github.com/GoogleCloudPlatform/k8s-aibom)

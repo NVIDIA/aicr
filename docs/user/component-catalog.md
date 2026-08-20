@@ -290,7 +290,7 @@ AICR enforces and surfaces inference-gateway exposure in two places:
 
 ## k8s-aibom Runtime Inventory
 
-AICR qualifies k8s-aibom v1.2.0 as an optional Helm component. It is not in
+AICR qualifies k8s-aibom v1.3.0 as an optional Helm component. It is not in
 the base, a mixin, or any stock overlay. To enable it, add this reference to a
 custom or external overlay and keep that overlay's criteria as narrow as the
 intended rollout:
@@ -310,13 +310,17 @@ that broad reach: its `criteria: intent: any` attaches to every matching intent.
 See [Recipe Development](../integrator/recipe-development.md) for external data
 and criteria composition.
 
-The qualified artifacts are source tag `v1.2.0` at commit
-`4aa7638b08ab9927bfa8df85c46c80234b9996f9`, OCI chart
-`oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.2.0`, and the controller
-image pinned by digest in the component values. Upstream documents Kubernetes
-1.27 through 1.35 support. AICR also observed the dedicated integration test
-passing on its Kind 1.36.1 node image; that is qualification evidence, not an
-extension of upstream's support statement.
+The qualified artifacts are source tag `v1.3.0` at commit
+`30af41abbe0bed3c41a42289ccf294be8c4779bb`, OCI chart
+`oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.3.0`, and the controller
+image pinned by digest in the component values. v1.3.0 is the API-graduation
+release: both `v1alpha1` and `v1beta1` are served and CRD storage is on
+`v1beta1`, while the chart still renders the `AIBOMControllerConfig` resource
+itself at `v1alpha1`. Upstream states Kubernetes support as a policy rather
+than a fixed range — stable APIs only, no known ceiling, tested floor 1.27 —
+backed by a version-matrix CI job. AICR also observed the dedicated
+integration test passing on its Kind 1.36.1 node image; that is qualification
+evidence, not an extension of upstream's support statement.
 
 ### Health and readiness
 
@@ -347,13 +351,13 @@ chart. It is not provenance: it reads one field, so it cannot show the CRDs
 originated from that chart, and it cannot tell apart chart versions that share
 a storage version. Charts 1.0.0, 1.1.0, and 1.2.0 all declare `v1alpha1` as
 storage. So the check catches a stranded upgrade that crosses a
-storage-version boundary, such as 1.2.0 to 1.3.0, and does not catch one
-within a boundary, such as 1.0.0 to 1.2.0.
+storage-version boundary, such as the 1.2.0 to 1.3.0 move this pin made, and
+does not catch one within a boundary, such as 1.0.0 to 1.2.0.
 
 **Overriding the chart version requires overriding this assertion.** Assert
 content is static YAML with no templating, so the expected storage version is
-a literal tied to the registry's pinned chart. Chart 1.2.0 declares only
-`v1alpha1`; 1.3.0 adds `v1beta1` and moves storage to it. A recipe that sets
+a literal tied to the registry's pinned chart, currently `v1beta1` for chart
+1.3.0. Charts 1.2.0 and earlier declare only `v1alpha1`. A recipe that sets
 `version` on the `k8s-aibom` componentRef to a chart with a different storage
 version will therefore fail this step even though the cluster is correct. Such
 a recipe must supply matching inline `healthCheckAsserts` on the componentRef,

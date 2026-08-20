@@ -38,12 +38,13 @@ spec:
     #
     # VERSION-COUPLED BY CONSTRUCTION. Assert content is static YAML; there
     # is no templating, so the expected version below is a literal tied to
-    # the chart version the registry pins for this component (1.2.0, whose
-    # CRDs declare only v1alpha1). A recipe that overrides `version` on the
-    # componentRef to a chart with a different storage version — 1.3.0 moves
-    # storage to v1beta1 — will fail this step even though the cluster is
-    # correct. That recipe must supply matching inline `healthCheckAsserts`
-    # on the componentRef, or set `healthCheckSkip: true`. Documented in
+    # the chart version the registry pins for this component (1.3.0, whose
+    # CRDs serve v1alpha1 and v1beta1 with storage on v1beta1). A recipe that
+    # overrides `version` on the componentRef to a chart with a different
+    # storage version — 1.2.0 and earlier store v1alpha1 — will fail this
+    # step even though the cluster is correct. That recipe must supply
+    # matching inline `healthCheckAsserts` on the componentRef, or set
+    # `healthCheckSkip: true`. Documented in
     # docs/user/component-catalog.md. Flip this literal, do not generalize
     # it, when the registry pin moves.
     #
@@ -53,19 +54,25 @@ spec:
     # CRDs originated from that chart, and it cannot discriminate between
     # chart versions that share a storage version. Charts 1.0.0, 1.1.0, and
     # 1.2.0 all declare exactly v1alpha1 as storage, so CRDs from any of them
-    # satisfy this step identically.
+    # would satisfy an equivalent v1alpha1 assertion identically.
     #
     # The practical consequence: this catches a stranded upgrade across a
-    # storage-version boundary — 1.2.0 to 1.3.0, the case that matters now —
+    # storage-version boundary — the 1.2.0 to 1.3.0 move this pin just made —
     # and does not catch a stranded upgrade within one, such as 1.0.0 to
     # 1.2.0. That is the correct trade for a static assert; do not describe
     # the step as proving more than it does.
+    #
+    # NOTE the asymmetry with the AIBOMControllerConfig step below, which
+    # still reads aibom.k8saibom.dev/v1alpha1. That is deliberate and
+    # verified against the rendered chart: 1.3.0 moves CRD *storage* to
+    # v1beta1 while still rendering the controller config CR itself at
+    # v1alpha1, and both versions stay served. Do not "fix" the two to match.
     #
     # The controller's own readiness is a separate signal and not one AICR
     # owns: upstream shipped a start-ordering race from v1.1.0 through v1.2.0
     # that produced a false-Ready window in exactly this state, so a check
     # that depended on their probe would have been silently wrong for two
-    # releases.
+    # releases. 1.3.0 fixes it, but the assertion stays independent of it.
     #
     # Assert the storage version, NOT status.storedVersions. Immediately
     # after a storage flip storedVersions legitimately contains both the old
@@ -86,7 +93,7 @@ spec:
               kind: CustomResourceDefinition
               metadata:
                 name: aiboms.aibom.k8saibom.dev
-              ((spec.versions[?storage == `true`].name | [0]) == 'v1alpha1'): true
+              ((spec.versions[?storage == `true`].name | [0]) == 'v1beta1'): true
     - name: validate-aibomcontrollerconfig-crd-storage-version
       try:
         - assert:
@@ -95,7 +102,7 @@ spec:
               kind: CustomResourceDefinition
               metadata:
                 name: aibomcontrollerconfigs.aibom.k8saibom.dev
-              ((spec.versions[?storage == `true`].name | [0]) == 'v1alpha1'): true
+              ((spec.versions[?storage == `true`].name | [0]) == 'v1beta1'): true
     - name: validate-controller-deployment
       try:
         - assert:
