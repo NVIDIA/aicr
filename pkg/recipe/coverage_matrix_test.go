@@ -152,7 +152,8 @@ func classify(ctx context.Context, t *testing.T, store *MetadataStore, q *Criter
 		return coverageClassification{Outcome: "success"}
 	}
 	msg := err.Error()
-	if strings.Contains(msg, "specify an OS") {
+	if strings.Contains(msg, "; specify ") {
+		// Joint-sufficiency failure (formerly the requireOSIfNeeded guard).
 		return coverageClassification{Outcome: "error", RequiresOS: true}
 	}
 	uncovered, completions := coverageDetailsFromError(err)
@@ -160,21 +161,6 @@ func classify(ctx context.Context, t *testing.T, store *MetadataStore, q *Criter
 		t.Fatalf("projection %q failed with unexpected error: %v", q.String(), err)
 	}
 	return coverageClassification{Outcome: "error", Uncovered: uncovered, ValidCompletions: completions}
-}
-
-func setCriteriaDimension(c *Criteria, name, value string) {
-	switch name {
-	case "service":
-		c.Service = CriteriaServiceType(value)
-	case "accelerator":
-		c.Accelerator = CriteriaAcceleratorType(value)
-	case "intent":
-		c.Intent = CriteriaIntentType(value)
-	case "os":
-		c.OS = CriteriaOSType(value)
-	case "platform":
-		c.Platform = CriteriaPlatformType(value)
-	}
 }
 
 // coverageDetailsFromError extracts the uncovered dimension names and their
