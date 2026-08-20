@@ -3207,18 +3207,40 @@ func TestGenerate_HelmReleaseCRDUpgradePolicyIsOptIn(t *testing.T) {
 			}
 
 			raw := readFile(t, filepath.Join(outputDir, tt.component, "helmrelease.yaml"))
-			var hr struct {
-				Spec struct {
-					Upgrade struct {
-						CRDs string `yaml:"crds"`
-					} `yaml:"upgrade"`
-				} `yaml:"spec"`
+
+			// Decoded as a map, not a typed struct: a struct field of type
+			// string cannot tell an absent `crds` key from one explicitly
+			// rendered as "", so a negative case would pass against a
+			// template that emits an empty value. Presence is the assertion.
+			var doc struct {
+				Spec map[string]any `yaml:"spec"`
 			}
-			if err := yaml.Unmarshal([]byte(raw), &hr); err != nil {
+			if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
 				t.Fatalf("parse HelmRelease: %v", err)
 			}
-			if hr.Spec.Upgrade.CRDs != tt.want {
-				t.Errorf("spec.upgrade.crds = %q, want %q\n%s", hr.Spec.Upgrade.CRDs, tt.want, raw)
+			upgrade, hasUpgrade := doc.Spec["upgrade"]
+
+			if tt.want == "" {
+				if hasUpgrade {
+					t.Errorf("spec.upgrade present (%v), want the key absent entirely\n%s",
+						upgrade, raw)
+				}
+				return
+			}
+
+			if !hasUpgrade {
+				t.Fatalf("spec.upgrade absent, want crds = %q\n%s", tt.want, raw)
+			}
+			upgradeMap, ok := upgrade.(map[string]any)
+			if !ok {
+				t.Fatalf("spec.upgrade is %T, want a mapping\n%s", upgrade, raw)
+			}
+			crds, hasCRDs := upgradeMap["crds"]
+			if !hasCRDs {
+				t.Fatalf("spec.upgrade.crds absent, want %q\n%s", tt.want, raw)
+			}
+			if crds != tt.want {
+				t.Errorf("spec.upgrade.crds = %v, want %q\n%s", crds, tt.want, raw)
 			}
 		})
 	}
