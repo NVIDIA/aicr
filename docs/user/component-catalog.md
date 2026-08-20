@@ -361,12 +361,24 @@ storage. So the check catches a stranded upgrade that crosses a
 storage-version boundary, such as the 1.2.0 to 1.3.0 move this pin made, and
 does not catch one within a boundary, such as 1.0.0 to 1.2.0.
 
-**Declining the component.** When a recipe declares `k8s-aibom`, generate with
-`--runtime-inventory disabled` to leave it out:
+**Declining the component.** No stock recipe declares `k8s-aibom` today, so the
+flag applies to a recipe that adds it through a custom overlay — the shape shown
+above. Point `--data` at the directory holding that overlay and generate with
+`--runtime-inventory disabled`:
 
 ```bash
 aicr recipe --service gke --accelerator h100 --os cos --intent inference \
-  --runtime-inventory disabled -o recipe.yaml
+  --data ./my-recipes --runtime-inventory disabled -o recipe.yaml
+```
+
+Passing the flag against a recipe that does not declare the component is an
+error, not a silent no-op:
+
+```console
+$ aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+    --runtime-inventory disabled
+[INVALID_REQUEST] runtime inventory mode "disabled" requires the recipe to
+declare component "k8s-aibom"; this recipe does not resolve it
 ```
 
 The selection is recorded in the emitted recipe as
@@ -378,9 +390,8 @@ way to decline the component: it changes neither the recipe nor its health
 checks, which is why [ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md)
 rejects it as a selection contract.
 
-Passing the flag on a recipe that does not declare the component is an error
-rather than a silent no-op, so a wrong `--service` or a typo surfaces instead
-of producing a recipe that claims a decision it never applied.
+A wrong `--service` or a typo therefore surfaces instead of producing a recipe
+that claims a decision it never applied.
 
 The same selection is available in an `AICRConfig` document as
 `spec.recipe.configuration.runtimeInventory.mode`.

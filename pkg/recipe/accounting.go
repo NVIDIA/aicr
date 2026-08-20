@@ -223,10 +223,16 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 	if err := validateAccountingProfileOwnership(result, mode); err != nil {
 		return err
 	}
-	result.Configuration = &RecipeConfiguration{
-		Slurm: &SlurmConfiguration{
-			Accounting: &SlurmAccountingConfiguration{Mode: mode},
-		},
+	// Update in place rather than assigning a fresh RecipeConfiguration:
+	// another selection may already have recorded its own section, and
+	// replacing the struct would silently discard it while leaving that
+	// selection's component overrides applied. A recipe that acts on a
+	// decision it no longer records is worse than one that never made it.
+	if result.Configuration == nil {
+		result.Configuration = &RecipeConfiguration{}
+	}
+	result.Configuration.Slurm = &SlurmConfiguration{
+		Accounting: &SlurmAccountingConfiguration{Mode: mode},
 	}
 	result.APIVersion = ConfiguredRecipeResultAPIVersion
 

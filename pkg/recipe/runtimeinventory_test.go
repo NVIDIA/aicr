@@ -170,3 +170,48 @@ func TestApplyBuildConfigRuntimeInventoryRejectsAbsentComponent(t *testing.T) {
 }
 
 func modePtr(m RuntimeInventoryMode) *RuntimeInventoryMode { return &m }
+
+// TestApplyBuildConfigPreservesBothConfigurations covers a regression found in
+// review: applyBuildConfig applies the runtime inventory selection first, and
+// the accounting path then assigned a fresh RecipeConfiguration, discarding it.
+//
+// The failure was silent and asymmetric. The component override survived on the
+// ref, so the component really was disabled, while the recipe no longer
+// recorded why — precisely the "recipe records the decision" contract ADR-019
+// requires. Both sections must survive a resolve that selects both.
+func TestApplyBuildConfigPreservesBothConfigurations(t *testing.T) {
+	t.Parallel()
+
+	result := runtimeInventoryTestResult()
+	// A Slurm recipe that also declares the runtime inventory component is the
+	// shape that reaches both paths: accounting requires platform=slurm, and
+	// the inventory selection requires the component to be declared.
+	result.ComponentRefs = append(result.ComponentRefs,
+		ComponentRef{Name: slinkySlurmComponentName, Type: ComponentTypeHelm, Namespace: "slurm"},
+		ComponentRef{Name: mariaDBOperatorCRDsComponentName, Type: ComponentTypeHelm, Namespace: "slurm"},
+		ComponentRef{Name: mariaDBOperatorComponentName, Type: ComponentTypeHelm, Namespace: "slurm"},
+		ComponentRef{Name: slurmAccountingMariaDBComponentName, Type: ComponentTypeHelm, Namespace: "slurm"},
+	)
+
+	accounting := AccountingModeDisabled
+	inventory := RuntimeInventoryDisabled
+	if err := applyBuildConfig(result, &buildConfig{
+		accountingMode:       &accounting,
+		runtimeInventoryMode: &inventory,
+	}); err != nil {
+		t.Fatalf("applyBuildConfig() error = %v", err)
+	}
+
+	if _, present := result.RuntimeInventoryMode(); !present {
+		t.Error("runtime inventory configuration was dropped when accounting was also selected")
+	}
+	if _, present := result.AccountingMode(); !present {
+		t.Error("accounting configuration missing")
+	}
+
+	// The component override must survive too, so the two records agree.
+	ref := result.GetComponentRef(runtimeInventoryComponentName)
+	if ref == nil || ref.IsEnabled() {
+		t.Error("runtime inventory component should be disabled")
+	}
+}
