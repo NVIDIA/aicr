@@ -48,6 +48,21 @@ runs:
       env:
         GOFLAGS: -mod=vendor
       run: |
+        # If any `wait` below fails, `set -e` (GitHub's default shell flags)
+        # exits this script immediately - any background job not yet reached
+        # by its own `wait` would otherwise keep running. Most consequential
+        # for pid_cluster specifically: the job's always()-run Cleanup step
+        # (`make cluster-delete`) could then race a still-in-flight
+        # `make cluster-create`. Kill whatever is still alive on any exit.
+        cleanup_background_jobs() {
+          local rc=$?
+          for pid in "$pid_cluster" "$pid_dep" "$pid_perf" "$pid_conf" "$pid_cli" "$pid_aicr" "$pid_validators"; do
+            [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null
+          done
+          exit "$rc"
+        }
+        trap cleanup_background_jobs EXIT
+
         # cluster-create (~35s locally; Kind bring-up + registry) and the
         # host compiles below touch none of each other's inputs/outputs, so
         # launch everything in the background up front. Each later command
@@ -58,6 +73,7 @@ runs:
         # four build PIDs before it, which measured ~19s slower in CI than
         # the original sequential script for no reason: nothing here reads
         # dist/validator/* or dist/e2e/aicr until the docker build step below.
+        pid_dep=""; pid_perf=""; pid_conf=""; pid_cli=""; pid_aicr=""; pid_validators=""
         make cluster-create > /tmp/cluster-create.log 2>&1 &
         pid_cluster=$!
 
