@@ -73,7 +73,7 @@ runs:
         # four build PIDs before it, which measured ~19s slower in CI than
         # the original sequential script for no reason: nothing here reads
         # dist/validator/* or dist/e2e/aicr until the docker build step below.
-        pid_dep=""; pid_perf=""; pid_conf=""; pid_cli=""; pid_aicr=""; pid_validators=""
+        pid_cluster=""; pid_dep=""; pid_perf=""; pid_conf=""; pid_cli=""; pid_aicr=""; pid_validators=""
         make cluster-create > /tmp/cluster-create.log 2>&1 &
         pid_cluster=$!
 
