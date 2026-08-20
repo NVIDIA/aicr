@@ -296,6 +296,7 @@ func TestOCIPhaseBudgetConstants(t *testing.T) {
 		{name: "registry attempt", got: RegistryPushTimeout, want: 7 * time.Minute},
 		{name: "image refs", got: OCIImageRefsWriteTimeout, want: 30 * time.Second},
 		{name: "whole publish", got: OCIBundlePublishTimeout, want: 35 * time.Minute},
+		{name: "recipe construction", got: OCIRecipeConstructionTimeout, want: 8 * time.Minute},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -324,15 +325,29 @@ func TestOCIBundlePublishTimeoutWorstCaseInvariant(t *testing.T) {
 }
 
 func TestOCIRecipePullBudgetInvariant(t *testing.T) {
+	const maximumJitterNumerator = 5
+	const maximumJitterDenominator = 4
+	const minimumMaterializationAndCatalogValidationHeadroom = 3 * time.Minute
+
 	worstCase := time.Duration(OCIRecipePullRetries) * OCIRecipePullAttemptTimeout
 	backoff := OCIRecipePullBackoff
 	for range OCIRecipePullRetries - 1 {
-		worstCase += backoff
+		worstCase += backoff * maximumJitterNumerator / maximumJitterDenominator
 		backoff *= 2
 	}
+	wantWorstCase := 4*time.Minute + 33*time.Second + 750*time.Millisecond
+	if worstCase != wantWorstCase {
+		t.Fatalf("OCI recipe maximum-jitter pull retry budget = %v, want exact %v",
+			worstCase, wantWorstCase)
+	}
 	if worstCase > OCIRecipePullTimeout {
-		t.Fatalf("OCI recipe pull retry budget %v exceeds whole-operation timeout %v",
+		t.Fatalf("OCI recipe pull retry budget %v exceeds per-phase timeout %v",
 			worstCase, OCIRecipePullTimeout)
+	}
+	headroom := OCIRecipeConstructionTimeout - worstCase
+	if headroom < minimumMaterializationAndCatalogValidationHeadroom {
+		t.Fatalf("OCI recipe materialization and catalog-validation headroom = %v, want >= %v",
+			headroom, minimumMaterializationAndCatalogValidationHeadroom)
 	}
 }
 

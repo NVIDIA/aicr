@@ -65,6 +65,7 @@ type ociAcceptanceConfig struct {
 	Registry        string   `json:"registry"`
 	Repository      string   `json:"repository"`
 	TempParent      string   `json:"tempParent"`
+	CAPEM           []byte   `json:"caPEM"`
 	FirstDigest     string   `json:"firstDigest"`
 	SecondDigest    string   `json:"secondDigest"`
 	FrozenTag       string   `json:"frozenTag"`
@@ -75,10 +76,10 @@ type ociAcceptanceConfig struct {
 }
 
 // TestOCIRecipeSourceAcceptance runs its real OCI client half in a fresh copy
-// of this race-instrumented test binary. The child starts with the generated CA
-// in SSL_CERT_FILE before crypto/x509 initializes its system pool. This keeps
-// the public NewClient path unchanged while the parent retains an in-memory
-// HTTPS registry and can inspect its request counts after the child exits.
+// of this race-instrumented test binary. The child installs the generated CA as
+// its fallback root before constructing a client. This keeps the public
+// NewClient path unchanged while the parent retains an in-memory HTTPS registry
+// and can inspect its request counts after the child exits.
 func TestOCIRecipeSourceAcceptance(t *testing.T) {
 	if os.Getenv(ociAcceptanceChildEnv) == "1" {
 		runOCIRecipeSourceAcceptanceChild(t)
@@ -136,6 +137,7 @@ func TestOCIRecipeSourceAcceptance(t *testing.T) {
 		Registry:        registry.host,
 		Repository:      repository,
 		TempParent:      tempParent,
+		CAPEM:           registry.caPEM,
 		FirstDigest:     first.Digest,
 		SecondDigest:    second.Digest,
 		FrozenTag:       "frozen",
@@ -165,7 +167,6 @@ func TestOCIRecipeSourceAcceptance(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		ociAcceptanceChildEnv+"=1",
 		ociAcceptanceConfigEnv+"="+configPath,
-		"SSL_CERT_FILE="+registry.caPath,
 		"NO_PROXY=127.0.0.1,localhost",
 		"no_proxy=127.0.0.1,localhost",
 		"HTTPS_PROXY=http://127.0.0.1:1",
@@ -213,6 +214,7 @@ func runOCIRecipeSourceAcceptanceChild(t *testing.T) {
 	if err := configFile.Close(); err != nil {
 		t.Fatalf("close acceptance config: %v", err)
 	}
+	installAcceptanceFallbackRoots(t, config.CAPEM)
 	repository := config.Registry + "/" + config.Repository
 
 	t.Run("immutable lifecycle and isolation", func(t *testing.T) {
@@ -347,6 +349,20 @@ func runOCIRecipeSourceAcceptanceChild(t *testing.T) {
 			assertAcceptanceParentEntries(t, config.TempParent, 1)
 		})
 	}
+}
+
+func installAcceptanceFallbackRoots(t *testing.T, caPEM []byte) {
+	t.Helper()
+	roots := x509.NewCertPool()
+	if ok := roots.AppendCertsFromPEM(caPEM); !ok {
+		t.Fatal("acceptance config does not contain a valid CA certificate")
+	}
+	godebug := os.Getenv("GODEBUG")
+	if godebug != "" {
+		godebug += ","
+	}
+	t.Setenv("GODEBUG", godebug+"x509usefallbackroots=1")
+	x509.SetFallbackRoots(roots)
 }
 
 func acceptanceRecipeRequest() aicr.RecipeRequest {
@@ -527,7 +543,7 @@ type registryUpload struct {
 type ociInMemoryRegistry struct {
 	t      *testing.T
 	host   string
-	caPath string
+	caPEM  []byte
 	server *httptest.Server
 
 	mu                sync.Mutex
@@ -573,8 +589,7 @@ func newOCIInMemoryRegistry(t *testing.T) *ociInMemoryRegistry {
 	server.StartTLS()
 	registry.server = server
 	registry.host = server.Listener.Addr().String()
-	registry.caPath = filepath.Join(t.TempDir(), "registry-ca.pem")
-	writeAcceptanceFile(t, registry.caPath, caPEM)
+	registry.caPEM = caPEM
 	t.Cleanup(server.Close)
 	return registry
 }

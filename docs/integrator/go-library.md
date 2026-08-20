@@ -402,8 +402,12 @@ func useOCIRecipes(ctx context.Context, repository, manifestDigest, tempDir stri
 ```
 
 `NewClient` remains a bounded compatibility wrapper. OCI construction
-never exceeds `defaults.OCIRecipePullTimeout`, while
-`NewClientContext` also honors any shorter caller deadline.
+never exceeds `defaults.OCIRecipeConstructionTimeout` (eight minutes), while
+`NewClientContext` also honors any shorter caller deadline. Registry staging
+and materialization each retain the five-minute
+`defaults.OCIRecipePullTimeout` phase ceiling; the larger construction
+envelope reserves more than three minutes for materialization and catalog
+validation after maximum-jitter pull retries.
 `Client.Close` waits for in-flight reads, evicts provider-scoped caches,
 and removes only the unique child workspace it owns.
 

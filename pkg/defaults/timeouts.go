@@ -1384,9 +1384,16 @@ const (
 // small text trees; these ceilings leave substantial headroom while bounding
 // network, memory, and filesystem use by an untrusted registry artifact.
 const (
+	// OCIRecipeConstructionTimeout bounds complete OCI recipe-source
+	// construction: staging, digest authorization, materialization, layered
+	// provider creation, and catalog validation. Eight minutes reserves more
+	// than three minutes for local materialization and validation after the
+	// maximum-jitter registry retry budget is exhausted.
+	OCIRecipeConstructionTimeout = 8 * time.Minute
+
 	// OCIRecipePullTimeout bounds each OCI recipe-source phase independently,
-	// including staging and materialization. Callers that require one deadline
-	// for the complete operation must provide an outer context deadline.
+	// including staging and materialization. It remains a per-phase ceiling;
+	// OCIRecipeConstructionTimeout is the separate complete-operation bound.
 	OCIRecipePullTimeout = 5 * time.Minute
 
 	// OCIRecipePullAttemptTimeout bounds one registry graph-copy attempt.

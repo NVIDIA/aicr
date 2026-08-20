@@ -75,7 +75,8 @@ var (
 
 // New stages, digest-authorizes, and materializes one OCI artifact, then
 // validates and exposes it as an overlay over embedded. One shared operation
-// deadline bounds every phase; nested low-level deadlines can only shorten it.
+// deadline bounded by defaults.OCIRecipeConstructionTimeout covers every
+// phase; nested low-level phase deadlines can only shorten it.
 func New(
 	ctx context.Context,
 	embedded *recipe.EmbeddedDataProvider,
@@ -102,7 +103,7 @@ func defaultDependencies() dependencies {
 			return recipe.NewLayeredDataProvider(embedded, config)
 		},
 		validateCatalog: validateCatalog,
-		timeout:         defaults.OCIRecipePullTimeout,
+		timeout:         defaults.OCIRecipeConstructionTimeout,
 	}
 }
 
@@ -198,7 +199,7 @@ func validateDependencies(deps dependencies) error {
 	}
 	if deps.timeout <= 0 {
 		return apperrors.New(apperrors.ErrCodeInternal,
-			"OCI recipe source operation timeout must be positive")
+			"OCI recipe source construction timeout must be positive")
 	}
 	return nil
 }

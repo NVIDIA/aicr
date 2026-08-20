@@ -260,24 +260,25 @@ func defaultClientDependencies() clientDependencies {
 // equivalents, and recipes must include a registry.yaml at the root.
 //
 // OCI sources require an immutable sha256 manifest digest. One
-// defaults.OCIRecipePullTimeout deadline bounds the complete OCI source
-// construction; nested registry deadlines can only shorten that shared budget.
+// defaults.OCIRecipeConstructionTimeout deadline bounds the complete OCI
+// source construction; nested per-phase pull deadlines can only shorten that
+// shared budget.
 func NewClient(opts ...Option) (*Client, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaults.OCIRecipePullTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.OCIRecipeConstructionTimeout)
 	defer cancel()
 	return newClientWithContextAndDependencies(ctx, defaultClientDependencies(), opts...)
 }
 
 // NewClientContext constructs a Client with the supplied functional options
 // and derives all OCI source I/O from ctx. The complete operation remains
-// bounded by defaults.OCIRecipePullTimeout when the caller provides a longer
-// deadline or no deadline.
+// bounded by defaults.OCIRecipeConstructionTimeout when the caller provides a
+// longer deadline or no deadline.
 func NewClientContext(ctx context.Context, opts ...Option) (*Client, error) {
 	if ctx == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"context is required for client construction")
 	}
-	ctx, cancel := context.WithTimeout(ctx, defaults.OCIRecipePullTimeout)
+	ctx, cancel := context.WithTimeout(ctx, defaults.OCIRecipeConstructionTimeout)
 	defer cancel()
 	return newClientWithContextAndDependencies(ctx, defaultClientDependencies(), opts...)
 }

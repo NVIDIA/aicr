@@ -130,6 +130,13 @@ func assertErrorCode(t *testing.T, err error, code apperrors.ErrorCode) {
 	}
 }
 
+func TestDefaultDependenciesUseConstructionTimeout(t *testing.T) {
+	if got := defaultDependencies().timeout; got != defaults.OCIRecipeConstructionTimeout {
+		t.Fatalf("default construction timeout = %v, want %v",
+			got, defaults.OCIRecipeConstructionTimeout)
+	}
+}
+
 func TestNewRejectsInvalidInputsAndDependencies(t *testing.T) {
 	embedded := testEmbeddedProvider()
 	artifact := &fakeStagedArtifact{}
