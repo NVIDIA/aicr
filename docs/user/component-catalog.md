@@ -327,6 +327,20 @@ cluster-scoped `AIBOMControllerConfig/default` to report a current
 observed the object's current generation. Missing or stale resources fail
 closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
+The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
+`aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version
+that the pinned chart ships. This is positive proof that the deployed CRDs
+match the recipe, not a breakage detector. It matters because Helm, Helmfile,
+and Flux never update an existing CRD on upgrade (only Argo CD applies them),
+so a cluster can otherwise run a new controller against the previous schema
+while the non-storage version stays served and the controller keeps working.
+
+Both CRDs are asserted separately, so a failure names which one is stranded
+and a partially applied CRD set cannot pass. If this check fails after a chart
+bump, the pre-upgrade CRD step in
+[Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
+is the thing to run.
+
 `readiness.strictConfig` is enabled, so invalid new configuration cannot
 silently replace the controller's last-known-good configuration while the pod
 continues to report ready.

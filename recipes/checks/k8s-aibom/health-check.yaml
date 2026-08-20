@@ -25,6 +25,50 @@ spec:
   timeouts:
     assert: 2m
   steps:
+    # Asserted before the workload steps so a stranded CRD is named as the
+    # cause rather than surfacing later as a confusing controller symptom.
+    #
+    # On Helm, Helmfile, and Flux an existing CRD is never updated on upgrade
+    # (only Argo CD applies them), so a cluster can run a new controller
+    # against the previous CRD schema. This assertion is the positive proof
+    # that the deployed CRDs are the ones the pinned chart ships — not a
+    # breakage detector. The controller's own readiness is a separate signal
+    # and not one AICR owns: upstream shipped a start-ordering race from
+    # v1.1.0 through v1.2.0 that produced a false-Ready window in exactly
+    # this state, so a check that depended on their probe would have been
+    # silently wrong for two releases.
+    #
+    # Assert the storage version, NOT status.storedVersions. Immediately
+    # after a storage flip storedVersions legitimately contains both the old
+    # and new version until stored objects are rewritten, so asserting on it
+    # would fail every correctly-upgraded cluster. storedVersions gates a
+    # later v1alpha1 *removal*, not this.
+    #
+    # Both CRDs are asserted, in separate steps so a failure names which one
+    # is stranded. This is not symmetry for its own sake: upstream's
+    # documented `helm show crds | kubectl apply` migration silently applied
+    # only one of the two CRDs (missing YAML document separators), so a
+    # half-applied CRD set is a state clusters actually reach, and it is
+    # silent. A single-CRD assertion would pass while the other resource
+    # still stored the old version.
+    - name: validate-aibom-crd-storage-version
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: aiboms.aibom.k8saibom.dev
+              ((spec.versions[?storage == `true`].name | [0]) == 'v1alpha1'): true
+    - name: validate-aibomcontrollerconfig-crd-storage-version
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: aibomcontrollerconfigs.aibom.k8saibom.dev
+              ((spec.versions[?storage == `true`].name | [0]) == 'v1alpha1'): true
     - name: validate-controller-deployment
       try:
         - assert:
