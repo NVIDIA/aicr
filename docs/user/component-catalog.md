@@ -445,14 +445,26 @@ Which deployers need that step differs, so check yours:
 |---|---|---|
 | `helm` | `helm upgrade` skips `crds/` | Yes |
 | `helmfile` | `helmfile apply` upgrades through Helm, so it also skips `crds/` | Yes |
-| `flux` | The generated `HelmRelease` sets no `spec.upgrade.crds`, and the helm-controller default is `Skip` | Yes |
+| `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
 
-Flux can be made to handle this itself by setting `spec.upgrade.crds:
-CreateReplace` on the `HelmRelease`, but AICR does not generate that field for
-any component today, and `CreateReplace` is a cluster-wide behavior change that
-should be decided per chart rather than assumed. Until then, treat Flux like
-`helm`.
+`ownsCRDs` is opt-in, and narrow on purpose. Of the 15 registry components
+that ship CRDs under `crds/`, 11 share at least one CRD with another
+component: `nfd`, `gpu-operator`, and `network-operator` all ship the
+NodeFeature CRDs, and `nfd`, `gpu-operator`, and `kai-scheduler` all appear
+together in `base.yaml`. If every release replaced CRDs on upgrade, two or
+three `HelmRelease` objects would rewrite the same CRD on every reconcile,
+each with the schema its own chart pins. The `Skip` default is what prevents
+that today, so it stays the default.
+
+A component qualifies only if it solely owns every CRD it ships and ships none
+using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
+injected at runtime. `kubeflow-trainer` is excluded for that second reason.
+Currently `gatekeeper`, `k8s-aibom`, and `nvsentinel` qualify.
+
+`helm` and `helmfile` always need the step, because skipping `crds/` on
+upgrade is Helm's own behavior rather than something the generated bundle can
+change.
 
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the

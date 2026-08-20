@@ -114,6 +114,12 @@ type Generator struct {
 	// RecipeResult contains the recipe metadata and component references.
 	RecipeResult *recipe.RecipeResult
 
+	// crdOwners maps component name -> registry ownsCRDs flag, resolved
+	// once per Generate. Components absent from the registry are absent
+	// here and default to false, which keeps helm-controller's Skip
+	// behavior — the conservative direction.
+	crdOwners map[string]bool
+
 	// ComponentValues maps component names to their values.
 	ComponentValues map[string]map[string]any
 
@@ -253,6 +259,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("unsafe component name: %q", ref.Name))
 		}
+	}
+
+	// Resolve which components solely own their CRDs, so their
+	// HelmRelease can replace CRDs on upgrade instead of skipping them.
+	if ownerErr := g.resolveCRDOwners(sortedRefs); ownerErr != nil {
+		return nil, ownerErr
 	}
 
 	if err := g.detectInjectedReleaseCollisions(sortedRefs); err != nil {
@@ -954,3 +966,30 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, man
 	}
 	return summaries
 }
+
+// resolveCRDOwners populates g.crdOwners from the registry in one round-trip.
+// Components missing from the registry are omitted and therefore read as
+// false, which keeps helm-controller's Skip default.
+//
+// A registry failure is fatal rather than defaulting everything to false:
+// silently treating every component as "does not own its CRDs" would quietly
+// restore the stranded-CRD behavior this flag exists to fix.
+func (g *Generator) resolveCRDOwners(refs []recipe.ComponentRef) error {
+	registry, regErr := recipe.GetComponentRegistryFor(g.RecipeResult.DataProvider())
+	if regErr != nil {
+		return errors.PropagateOrWrap(regErr, errors.ErrCodeInternal,
+			"failed to resolve component registry for CRD upgrade policy")
+	}
+	out := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		if cfg := registry.Get(ref.Name); cfg != nil && cfg.OwnsCRDs {
+			out[ref.Name] = true
+		}
+	}
+	g.crdOwners = out
+	return nil
+}
+
+// ownsCRDs reports whether the named component may replace its CRDs on
+// upgrade. Unknown components are false.
+func (g *Generator) ownsCRDs(name string) bool { return g.crdOwners[name] }
