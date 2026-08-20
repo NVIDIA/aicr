@@ -492,14 +492,44 @@ on any overlay are rejected at load time (`ErrCodeInvalidRequest`) to
 prevent silent match-all behaviour; operators must remove or zero that
 field before upgrading.
 
-**Composition with the OS guard.** `requireOSIfNeeded` (the joint
-service+accelerator OS gate) is a separate, pre-existing check and runs
-*first*, before the merge. It is **not subsumed** by the coverage
-post-condition: coverage is satisfied when service and accelerator are each
-honored by *some* overlay independently, while the OS guard demands *one*
-overlay carry both service and accelerator together before it will consider
-the OS-agnostic tier served. Both checks apply; a request can trip either
-one independently.
+**Joint sufficiency.** Per-dimension coverage is necessary but not
+sufficient. It is satisfied when `service` and `accelerator` are each honored
+by *some* overlay independently, even when no single overlay carries the
+combination and the combination's content lives only on an OS-gated leaf. The
+caller then receives a recipe that silently never applied it.
+`verifyCriteriaCoverage` therefore also enforces a second condition
+(issue #1782): resolution fails when **no applied overlay jointly carries
+every stated dimension** *and* stating a strict dimension would reach an
+overlay currently being skipped.
+
+Both halves matter. The first is the escape hatch that keeps the generic tier
+valid: `--service eks` resolves through `eks.yaml`, which carries the whole
+stated combination, and is never asked for an OS. The second is what detects
+the loss.
+
+`os` is the only **strict** dimension, and `coverage.go` records why. Every
+other dimension degrades to a smaller but coherent recipe when omitted: no
+`--platform` yields no Slurm or Kubeflow layer, no `--intent` yields untuned
+GPU Operator values. `os` decides whether the driver can be installed at all.
+On Ubuntu the GPU Operator installs it, so an OS-agnostic recipe is a real
+answer and `eks.yaml` carries no `os`; on COS the operator installs no driver
+and the device-plugin owner differs, which is why every `gke` overlay is
+OS-gated and no OS-agnostic GKE recipe exists to return. That is a property of
+installing NVIDIA drivers on Linux rather than of this catalog's shape, so it
+holds for external `--data` catalogs too.
+
+This condition replaced the `requireOSIfNeeded` guard, which ran before the
+merge and hardcoded three separate scopes: it only fired when `service` was
+stated, only compared `service`+`accelerator` regardless of what the caller
+asked for, and only ever demanded `os`. Only the last survives.
+`coverage_subsumption_test.go` keeps the retired guard as a test-only oracle
+and asserts over generated catalogs that every query it would have rejected is
+still rejected.
+
+A joint-sufficiency failure carries `details.strictDimensions`, **not**
+`details.uncovered`. The distinction is load-bearing: `pkg/client/v1`
+relaxation clears uncovered dimensions and retries, which here would discard
+the check and return the partial recipe that #1542 fixed.
 
 **Evaluator error classification is fail-closed.** During constraint
 evaluation on the snapshot-driven path, `ErrCodeNotFound` (the evaluator's
