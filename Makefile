@@ -829,6 +829,7 @@ cluster-create: ## Creates local Kind cluster with registry
 	@if ! command -v yq >/dev/null 2>&1; then \
 		echo "Error: yq is not installed."; \
 		echo "Install: brew install yq"; \
+		echo "     or: go install github.com/mikefarah/yq/v4@latest"; \
 		exit 1; \
 	fi
 	@if [ -z "$(KIND_NODE_IMAGE)" ]; then \
