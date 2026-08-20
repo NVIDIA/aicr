@@ -202,15 +202,17 @@ spec:
     args:
     - |
       NCCL_LIB_DIR=/usr/local/nvidia/lib64 . /usr/local/nvidia/lib64/nccl-env-profile.sh
-      torchrun --nnodes=$PET_NNODES --nproc-per-node=8 train.py
+      torchrun --nnodes=$PET_NNODES --nproc-per-node=$PET_NPROC_PER_NODE train.py
 ```
 
 **Do not set `resourcesPerNode` here.** On the pinned Kubeflow Trainer version
-a `resourcesPerNode` carrying limits or requests **replaces** the worker's
-entire resource requirements — so a job requesting only CPU or memory silently
-loses the runtime's `nvidia.com/gpu: 8`, and TCPXO stops working. Let the
-runtime own the resource shape. If you must set it, repeat *every* resource,
-including the GPU request.
+**any** non-nil `resourcesPerNode` — including an empty `{}`, or one carrying
+only `limits.cpu` — **replaces** the worker's entire resource requirements. A
+job that sets it to ask for memory silently loses the runtime's
+`nvidia.com/gpu: 8`, and TCPXO stops working.
+
+Let the runtime own the resource shape. If you must set `resourcesPerNode`,
+repeat *every* resource in it, including the GPU request.
 
 ## EKS — EFA
 
@@ -246,8 +248,9 @@ spec:
       value: /opt/amazon/ofi-nccl/lib:/opt/amazon/efa/lib:/usr/local/nvidia/lib64
 ```
 
-**Repeat the GPU request.** `resourcesPerNode` replaces the whole resource
-block, so listing EFA without `nvidia.com/gpu` yields a pod with no GPUs.
+**Repeat the GPU request.** Any non-nil `resourcesPerNode` replaces the whole
+resource block — it is not merged — so listing EFA without `nvidia.com/gpu`
+yields a pod with no GPUs.
 
 **Determine the EFA count from the node, not from a table.** It varies by
 instance type — 4 on p4d, 32 on p5, and on g7e by size, with some sizes having
@@ -281,7 +284,8 @@ always `1`:
       value: none
 ```
 
-The same GPU-request caveat applies.
+The same GPU-request caveat applies: any non-nil `resourcesPerNode` replaces
+the whole block, so `nvidia.com/gpu` must be repeated.
 
 ## Verifying the fabric is in use
 
