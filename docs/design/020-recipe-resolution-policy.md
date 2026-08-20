@@ -176,6 +176,28 @@ Note this is deliberately **not** "any non-`nil` policy replaces the parent".
 Replacement keys on the *list*, not on the policy pointer. Keying on the
 pointer would make `resolution: {}` clear an inherited list.
 
+**This requires a new merge clause; there is no last-wins path to reuse.**
+`RecipeMetadataSpec.Merge` has no generic replace behavior. Every field is
+bespoke: constraints merge by name, componentRefs merge by name and then
+field-by-field, validation merges per phase. `Resolution` must be added
+explicitly, inheriting when the child's `StrictDimensions` is `nil` and
+replacing when it is non-`nil`.
+
+Getting this wrong has a precedent in this exact file. The `#1000` note on
+`Merge` records that per-phase *pointer replace* was "the only list-shaped
+field with replace semantics, and it silently dropped inherited checks when a
+descendant declared its own phase block," and it was fixed to field-by-field
+merge. `StrictDimensions` is list-shaped, so an implementer who keys
+replacement on the `*ResolutionPolicy` pointer rather than on the slice
+recreates that bug: any overlay adding a `resolution:` block clears inherited
+strict dimensions for its whole subtree, and the split-overlay query succeeds
+again once `requireOSIfNeeded` is deleted.
+
+The mid-chain case is therefore pinned directly: a test asserts a descendant
+declaring `resolution: {}` still resolves to an ancestor's `[os]` through the
+merge fold. The decode round-trip and the chain-exhausted default are
+separately pinned and do not cover it.
+
 The walk stops at the first non-`nil` list rather than unioning, because
 element union makes opting out impossible: a subtree could never drop a
 dimension its ancestor declared. Stopping keeps the override total and
@@ -210,14 +232,28 @@ No dimension name appears in any Go type, function, or field. The only place
 `os` appears is catalog data.
 
 This follows the `spec.profile` precedent from
-[ADR-015](015-recipe-configuration-profiles.md): an overlay-scoped spec field
-resolved after composition and never copied into a hydrated `RecipeResult`.
+[ADR-015](015-recipe-configuration-profiles.md) for its **lifecycle only**: an
+overlay-scoped spec field, resolved after composition, never copied into a
+hydrated `RecipeResult`.
+
+The precedent stops there, and the difference matters to an implementer.
+`resolveProfileDeclaration` does not use `Merge` at all and *errors* when a
+resolved composition carries more than one declaration
+(`profile_resolution.go`), because a profile is single-declaration by design.
+The resolution policy requires the opposite: divergence is legal, several
+overlays may declare different lists, and candidates are evaluated
+independently against their own resolved list. Reusing
+`resolveProfileDeclaration`-shaped logic would import its
+multiple-declarations-is-an-error rule and break exactly the per-candidate
+independence this design rests on. Candidate evaluation against a
+not-applied overlay is likewise new machinery, not something `spec.profile`
+already does.
 
 ### Scope and inheritance
 
-The policy inherits through `spec.base` using the existing
-`resolveInheritanceChain` + `RecipeMetadataSpec.Merge` machinery (last wins),
-so a subtree can override it without touching embedded data:
+The policy inherits along the `spec.base` chain that
+`resolveInheritanceChain` already produces, so a subtree can override it
+without touching embedded data:
 
 ```yaml
 # a deliberately OS-agnostic subtree
