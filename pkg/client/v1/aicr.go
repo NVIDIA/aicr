@@ -152,9 +152,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/distribution/reference"
-	"github.com/opencontainers/go-digest"
-
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
@@ -368,10 +365,18 @@ func validateSourceConfiguration(c *Client) error {
 		return nil
 	}
 
-	if err := validateOCIRepository(c.source.registry); err != nil {
-		return err
+	pullOptions := oci.RecipePullOptions{
+		Repository: c.source.registry,
+		Selector:   c.source.selector,
 	}
-	digestSelector, err := validateOCISelector(c.source.selector)
+	if c.ociSource.tempDir != nil {
+		if *c.ociSource.tempDir == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"OCI source temporary-directory parent must be non-empty")
+		}
+		pullOptions.TempDir = *c.ociSource.tempDir
+	}
+	digestSelector, err := oci.ValidateRecipePullOptions(pullOptions)
 	if err != nil {
 		return err
 	}
@@ -387,65 +392,7 @@ func validateSourceConfiguration(c *Client) error {
 	return nil
 }
 
-func validateOCIRepository(repository string) error {
-	if repository == "" || strings.TrimSpace(repository) != repository {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"OCI recipe repository must be non-empty and contain no surrounding whitespace")
-	}
-	if strings.HasPrefix(repository, "oci://") {
-		repository = strings.TrimPrefix(repository, "oci://")
-	} else if strings.Contains(repository, "://") {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"OCI recipe repository supports only the optional oci:// scheme")
-	}
-
-	named, err := reference.ParseNormalizedNamed(repository)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid OCI recipe repository", err)
-	}
-	if !reference.IsNameOnly(named) {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"OCI recipe repository must not contain a tag or digest; pass it as the selector")
-	}
-	return nil
-}
-
-// validateOCISelector returns true when selector is an immutable sha256 digest.
-func validateOCISelector(selector string) (bool, error) {
-	if selector == "" || strings.TrimSpace(selector) != selector {
-		return false, errors.New(errors.ErrCodeInvalidRequest,
-			"OCI recipe selector is required and must contain no surrounding whitespace")
-	}
-	if strings.Contains(selector, ":") {
-		parsed := digest.Digest(selector)
-		if parsed.Algorithm() != digest.SHA256 {
-			return false, errors.New(errors.ErrCodeInvalidRequest,
-				"OCI recipe digest selector must use sha256")
-		}
-		if err := parsed.Validate(); err != nil {
-			return false, errors.Wrap(errors.ErrCodeInvalidRequest,
-				"invalid OCI recipe digest selector", err)
-		}
-		return true, nil
-	}
-
-	named, err := reference.WithName("example.invalid/aicr-recipes")
-	if err != nil {
-		return false, errors.Wrap(errors.ErrCodeInternal,
-			"construct OCI recipe selector validator", err)
-	}
-	if _, err := reference.WithTag(named, selector); err != nil {
-		return false, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"invalid OCI recipe tag selector", err)
-	}
-	return false, nil
-}
-
 func validateOCITempDir(parent string) error {
-	if parent == "" || strings.TrimSpace(parent) != parent {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"OCI source temporary-directory parent must be non-empty and contain no surrounding whitespace")
-	}
 	abs, err := filepath.Abs(parent)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest,
