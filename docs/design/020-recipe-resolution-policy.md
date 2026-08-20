@@ -77,7 +77,7 @@ fail.
 | --- | --- | --- |
 | Guard as-is vs. coverage alone | n/a | **0** projections where the guard is the only thing failing |
 | One overlay must carry *all* stated dimensions | 101 / 117 | 310 / 310 |
-| Joint maximality over *every* dimension | 101 / 117 | 310 / 310 |
+| Enlargement over *every* dimension (no strict list) | 101 / 117 | 310 / 310 |
 | **Joint sufficiency (this ADR)** | **117 / 117** | **310 / 310** |
 
 The Subsumption section below records the two further formulations that were
@@ -89,7 +89,7 @@ Two findings drive the decision:
   the guard that per-dimension coverage would not also reject. All 50
   `requiresOS: true` golden entries are GKE (29) or OKE (21).
 - **A purely structural rule cannot work.** Both "one overlay carries
-  everything" and unrestricted joint maximality break the same 16
+  everything" and unrestricted enlargement break the same 16
   currently-valid queries such as `service=eks accelerator=h100`, which
   legitimately resolve as `eks` + `h100-any` merged. They break because
   stating `intent` would unlock a richer joint match. Structurally that is
@@ -160,6 +160,23 @@ Element union was rejected because it makes opting out impossible: a subtree
 could never drop a dimension its ancestor declared. Whole-value replacement
 keeps the override total and legible in the file that performs it, and the
 three cases above are pinned by tests.
+
+**The root is defaulted, not inherited.** Inheritance alone cannot carry the
+policy, because `--data` supports wholesale same-path replacement of
+`overlays/base.yaml` (`docs/integrator/data-extension.md`). An external base
+becomes the parentless root (`store.Base` is `chain[0]`), so a `nil` policy
+there inherits from nothing. Left undefined, such a catalog would resolve to
+zero strict dimensions and the split-overlay query this ADR exists to reject
+would succeed again the moment `requireOSIfNeeded` is deleted.
+
+A `nil` policy **at the root** therefore defaults to `[os]` rather than to
+the empty list. Opting out stays possible and stays explicit: the root
+declares `strictDimensions: []`. Silence is safe; only a deliberate
+declaration removes the check.
+
+ADR-015 documents this same replacement hazard for `spec.profile`, so that
+precedent demonstrates the failure mode rather than immunizing against it.
+An external-base-replacement regression test pins the default.
 
 No dimension name appears in any Go type, function, or field. The only place
 `os` appears is catalog data.
@@ -288,11 +305,11 @@ measured and rejected for failing it:
 
 | Formulation | Successes preserved | Failures caught | Subsumes guard |
 | --- | --- | --- | --- |
-| Joint maximality over stated dimensions | 117 / 117 | 310 / 310 | **No** |
+| Stated-subset maximality | 117 / 117 | 310 / 310 | **No** |
 | Strictly richer match set (#1542's suggestion) | 104 / 117 | 310 / 310 | Yes |
 | **Joint sufficiency (this ADR)** | **117 / 117** | **310 / 310** | **Yes** |
 
-Joint maximality measured coverage of *stated* dimensions only, which makes
+Stated-subset maximality measured coverage of *stated* dimensions only, which makes
 an OS-gated overlay invisible whenever it adds content without covering more
 of what the caller asked for. Two catalog shapes escape it while the guard
 rejects them: an OS-only overlay carrying neither stated dimension, and an
@@ -312,55 +329,69 @@ than a restatement of it.
 
 ### Error surface
 
-Joint-sufficiency failures carry their own context key, **not** `uncovered`:
+**The requirement is presence, not value.** Joint sufficiency demands that a
+strict dimension be *stated*; it never demands a particular value. This is
+what the retired guard did too, whose message was `specify an OS (valid:
+ubuntu)`: a presence demand with an advisory hint. The payload is shaped to
+match, which is why it carries no value-combination structure.
+
+Failures carry their own context key, **not** `uncovered`:
 
 ```yaml
-details.strictDimensions: [
-  { dimension: "os",
-    validValues: ["ubuntu"],
-    wouldCover:  ["service", "accelerator"],
-    via:         "svc-accel-ubuntu" }
-]
+details.strictDimensions:
+  - dimension: os
+    validValues: [cos, ubuntu]   # advisory
+  - dimension: intent
+    validValues: [training]
 ```
 
-Two reasons. `uncovered` means "you stated it and nothing honored it", but
-here the dimension is *unstated*, so the shape does not fit. And
-`pkg/client/v1` relaxation clears `details.uncovered` dimensions and retries;
-routing joint failures there would let relaxation clear the check and return
-the partial recipe, reinstating #1542. A distinct key is fail-closed by
-default and needs no change to `relax.go`. That property is load-bearing
+The list is a conjunction at the top level: *state all of these*. It is the
+union of unstated strict dimensions across every firing candidate, not the
+minimum sufficient set. Reporting the minimum would force a second round trip
+whenever one candidate needs `os` and another needs `os` plus `intent`, since
+supplying `os` alone leaves the second candidate firing. The union converges
+in one.
+
+`uncovered` is the wrong key for two reasons. It means "you stated it and
+nothing honored it", but here the dimension is *unstated*, so the shape does
+not fit. And `pkg/client/v1` relaxation clears `details.uncovered` dimensions
+and retries; routing these there would let relaxation clear the check and
+return the partial recipe, reinstating #1542. A distinct key is fail-closed
+by default and needs no change to `relax.go`. That property is load-bearing
 rather than incidental, so it is pinned by a `pkg/client/v1` contract test
-asserting that a strict-dimension failure survives relaxation instead of
-degrading into a partial recipe.
+asserting a strict-dimension failure survives relaxation instead of degrading
+into a partial recipe.
 
 **The payload is a v1 contract, so it is specified, not left to the
 implementation.** Error `details` are API surface: they cross the HTTP
 boundary through `WriteErrorFromErr` and are consumed programmatically.
 
 - `dimension` is one of `CoverageDimensionNames()`. Exactly one entry per
-  distinct dimension set: a candidate requiring `os` alone and one requiring
-  `os` plus `intent` produce separate entries, never a merged one.
-- `validValues` are the values that would reach some candidate, deduplicated
-  and sorted lexically.
-- `wouldCover` lists the stated dimensions the candidate would carry, in
-  `coverageDimensions` order, deduplicated.
-- `via` names the contributing overlays, deduplicated and sorted lexically.
-  It is diagnostic. Overlay names are catalog-defined and an external `--data`
-  catalog may rename them, so callers must not key behavior on it.
-- Entries are ordered by `coverageDimensions` position, then by
-  `tupleKey`-style canonical rendering, so the same catalog and query always
-  produce byte-identical output. This is the existing determinism requirement
-  ("same inputs, same outputs, always"), which randomized Go map iteration
-  would otherwise violate.
+  dimension. Because the requirement is presence, there is no dimension-set
+  entry and no value tuple to encode.
+- `validValues` are **advisory**: the values that appear on some firing
+  candidate for that dimension, deduplicated and sorted lexically. They help
+  the caller choose. Supplying a value outside the list is legal, and is
+  handled by the ordinary completeness path rather than here.
+- Entries are ordered by `coverageDimensions` position, so the same catalog
+  and query always produce byte-identical output. This is the existing
+  determinism requirement ("same inputs, same outputs, always"), which
+  randomized Go map iteration would otherwise violate.
+- Contributing overlay names are **not** in the payload. They are
+  catalog-defined, an external `--data` catalog may rename them, and nothing
+  a caller does should depend on them. They are emitted to the debug log
+  instead, where diagnostics belong and no compatibility promise attaches.
+
+Because the entry shape is flat and value-free, the message template
+generalizes without a special case for the multi-dimension form:
+
+```text
+service 'eks' with accelerator 'h100' requires os (valid: cos, ubuntu)
+service 'eks' with accelerator 'h100' requires os (valid: cos, ubuntu), intent (valid: training)
+```
 
 The key is added to the error-response schema in `api/aicr/v1/server.yaml`
 alongside `uncovered` in the implementation PR.
-
-The message keeps the guard's actionable shape:
-
-```text
-service 'eks' with accelerator 'h100' requires os (valid: ubuntu)
-```
 
 ### Validation
 
@@ -387,7 +418,7 @@ inheritable spec field lets an external catalog declare the override on its
 own overlay and never touch embedded data. It also needs a new kind, a new
 loader, and cannot express per-subtree policy.
 
-**C. Joint maximality over every dimension (no strict list).** Genuinely
+**C. Enlargement over every dimension (no strict list).** Genuinely
 dimension-agnostic and needs no declaration, but flips 16 currently-valid
 queries into errors demanding `--intent`. That is a breaking behavior change
 at v1 freeze.
@@ -418,7 +449,9 @@ expressiveness with the opposite failure mode.
 - `TestBuildRecipeResult_GuardAndCoverageComposition` is retained and
   retargeted at the new rule. It remains the regression pin for the
   divergence.
-- Existing external `--data` catalogs need no change: they inherit
-  `strictDimensions: [os]` from the embedded base and keep exactly today's
-  behavior.
+- Existing external `--data` catalogs need no change. A catalog that layers
+  overlays on the embedded base inherits `strictDimensions: [os]` from it; a
+  catalog that *replaces* `overlays/base.yaml` gets `[os]` from the root
+  default. Either way today's behavior is preserved without an edit, and
+  removing the check requires declaring `strictDimensions: []`.
 - The v1 schema surface grows by one optional field.
