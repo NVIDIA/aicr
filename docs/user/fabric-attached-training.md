@@ -50,7 +50,8 @@ namespace and reference it from `runtimeRef`.
   annotations, on the pod template metadata
 - the `tcpxo-daemon` native sidecar, at the version paired with the plugin your
   cluster runs
-- four hostPath volumes, and `IPC_LOCK` on the worker
+- four hostPath volumes plus a memory-backed `dshm` at `/dev/shm`, and `IPC_LOCK`
+  on the worker
 - the NCCL configuration for your plugin release
 
 **A placement sketch** — `"<...>"` marks a value you must fill in. It shows
@@ -245,8 +246,20 @@ Also TrainJob-expressible. AICR fixes the resource name and the value is always
       value: none
 ```
 
-The same repeat-every-resource caveat applies. See
-[AKS GPU Setup](../integrator/aks-gpu-setup.md) for the cluster-side
+The same repeat-every-resource caveat applies.
+
+**`IPC_LOCK` is required here too, and allocating the RDMA device does not grant
+it.** NCCL's IB transport registers pinned (memlocked) buffers via ibverbs, and
+`IPC_LOCK` is what lifts `RLIMIT_MEMLOCK` — without it the job can fail *after*
+the device is allocated, which reads as an NCCL bug rather than a missing
+capability. Add it the same way as for EFA: a `runtimePatches` entry setting
+`securityContext` on the `node` container.
+
+**A memory-backed `/dev/shm` is also expected.** AICR's tested runtime mounts a
+`dshm` volume (`emptyDir: {medium: Memory}`) there; the default 64 MiB `/dev/shm`
+is small for multi-process NCCL.
+
+See [AKS GPU Setup](../integrator/aks-gpu-setup.md) for the cluster-side
 prerequisites.
 
 ## Verifying the fabric is in use
