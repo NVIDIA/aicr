@@ -237,10 +237,16 @@ func TestWithRuntimeInventoryModeOption(t *testing.T) {
 		t.Errorf("mode = %q, want %q", *cfg.runtimeInventoryMode, RuntimeInventoryDisabled)
 	}
 
-	// A nil option must be tolerated the way resolveBuildConfig expects.
+	// A nil option must be tolerated by the code that applies options, not
+	// merely be nil. Asserting the local variable is nil is a tautology and
+	// would still pass if resolveBuildConfig invoked it and panicked.
 	var nilOpt BuildOption
-	if nilOpt != nil {
-		t.Fatal("expected a nil BuildOption")
+	got, err := resolveBuildConfig(nil, nilOpt, WithRuntimeInventoryMode(RuntimeInventoryEnabled))
+	if err != nil {
+		t.Fatalf("resolveBuildConfig() with a nil option error = %v", err)
+	}
+	if got.runtimeInventoryMode == nil || *got.runtimeInventoryMode != RuntimeInventoryEnabled {
+		t.Errorf("a nil option interfered with the following option: %v", got.runtimeInventoryMode)
 	}
 }
 

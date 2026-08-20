@@ -2530,11 +2530,30 @@ func TestResolveRecipeRuntimeInventoryMode(t *testing.T) {
 		}
 	})
 
+	// Deliberately NOT the gke/h100/cos/inference combination. That is the
+	// recipe #2271 will eventually add k8s-aibom to, so a test asserting
+	// "this recipe does not declare the component" would silently invert into
+	// asserting the opposite once the overlay lands, still passing for the
+	// wrong reason. A training recipe is not the stock-adoption target.
 	criteria := &recipe.Criteria{
-		Service:     recipe.CriteriaServiceGKE,
+		Service:     recipe.CriteriaServiceEKS,
 		Accelerator: recipe.CriteriaAcceleratorH100,
-		Intent:      recipe.CriteriaIntentInference,
-		OS:          recipe.CriteriaOSCOS,
+		Intent:      recipe.CriteriaIntentTraining,
+		OS:          recipe.CriteriaOSUbuntu,
+	}
+
+	// Pin the precondition so this fails loudly rather than quietly changing
+	// meaning if the component is ever added to the recipe above.
+	baseline, baseErr := client.ResolveRecipeFromCriteriaWithOptions(
+		t.Context(), aicr.WrapCriteria(criteria))
+	if baseErr != nil {
+		t.Fatalf("baseline resolve error = %v", baseErr)
+	}
+	for _, ref := range baseline.Resolved().ComponentRefs {
+		if ref.Name == "k8s-aibom" {
+			t.Fatal("the chosen criteria now declare k8s-aibom; pick criteria that do not, " +
+				"or this test asserts the opposite of what it claims")
+		}
 	}
 
 	for _, tt := range []struct {

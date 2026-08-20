@@ -325,6 +325,13 @@ func TestRecipeAndQueryCommandsRejectInvalidRuntimeInventoryMode(t *testing.T) {
 			if err == nil {
 				t.Fatal("command error = nil, want rejection of an invalid runtime inventory mode")
 			}
+			// Assert the code, since that is what callers branch on; a text
+			// match alone would accept an unrelated error carrying similar
+			// wording. The message check stays to distinguish which
+			// invalid-request this is.
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
+			}
 			if !strings.Contains(err.Error(), "invalid runtime inventory mode") {
 				t.Fatalf("command error = %v, want an invalid-mode rejection", err)
 			}
@@ -343,6 +350,9 @@ func TestRecipeCommandRejectsRuntimeInventoryWithoutComponent(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("command error = nil, want rejection for a recipe that does not declare the component")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "requires the recipe to declare component") {
 		t.Fatalf("command error = %v, want the missing-component rejection", err)
