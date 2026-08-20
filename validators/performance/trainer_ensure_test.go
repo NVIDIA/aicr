@@ -320,7 +320,7 @@ func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 func withShortTrainerWait(t *testing.T) func() {
 	t.Helper()
 	oldTimeout, oldInterval := trainerInstallWaitTimeout, trainerInstallPollInterval
-	trainerInstallWaitTimeout = 20 * time.Millisecond
+	trainerInstallWaitTimeout = 200 * time.Millisecond
 	trainerInstallPollInterval = time.Millisecond
 	return func() {
 		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
@@ -333,15 +333,31 @@ func withShortTrainerWait(t *testing.T) func() {
 // Both expire the poll context, but they mean opposite things: the deadline means
 // the delivered Trainer never became complete, which is the customer's deployment
 // defect this PR exists to surface; cancellation means the run was aborted — a
-// catalog timeout, a canceled phase, a killed Job — which is not. Reporting the
-// second as the first is the same misclassification that made ErrCodeUnavailable
-// wrong for the deadline case.
+// catalog timeout, a canceled phase, a killed Job — which is not.
+//
+// The cancellation has to land *after* a probe completes, not before. Canceling up
+// front is caught by getTrainerObject's own ctx.Err() check on its first read, which
+// returns a "canceled before checking" Timeout through the err path — so the select,
+// and the guard being tested, are never reached. An earlier version of this test did
+// exactly that and passed with the guard deleted.
+//
+// The reactor below makes it deterministic: it cancels and returns NotFound on the
+// first CRD read, and a missing CRD makes isTrainerInstalled return immediately, so
+// that probe is the only one and the next stop is the select.
 func TestWaitForDeclaredTrainer_CanceledRunIsNotADeploymentDefect(t *testing.T) {
 	defer withShortTrainerWait(t)()
-	client := newTrainerFakeClient()
 
+	client := newTrainerFakeClient()
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
+
+	client.PrependReactor("get", "customresourcedefinitions",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			cancel()
+			return true, nil, apierrors.NewNotFound(
+				schema.GroupResource{Group: "apiextensions.k8s.io", Resource: "customresourcedefinitions"},
+				"trainjobs.trainer.kubeflow.org")
+		})
 
 	_, err := waitForDeclaredTrainer(ctx, client)
 	if err == nil {
@@ -353,6 +369,16 @@ func TestWaitForDeclaredTrainer_CanceledRunIsNotADeploymentDefect(t *testing.T) 
 	}
 	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
 		t.Errorf("error code = %v, want ErrCodeTimeout", err)
+	}
+	// Witness that the guard ran rather than getTrainerObject's own pre-read check.
+	// Without this the test passes on the probe-error path and would not notice the
+	// guard being removed — which is how the earlier version of it was vacuous.
+	if strings.Contains(err.Error(), "canceled before checking") {
+		t.Errorf("error %q came from getTrainerObject's pre-read check, not the "+
+			"cancellation guard in the select; this test is not exercising the guard", err)
+	}
+	if !strings.Contains(err.Error(), "canceled while waiting") {
+		t.Errorf("error %q is not the cancellation guard's message", err)
 	}
 }
 
@@ -387,9 +413,11 @@ func TestEnsureTrainerInstalled_DeclaredRolloutDoesNotFallThrough(t *testing.T) 
 		}
 	}
 
-	// A nil discovery client makes installTrainer panic or error immediately, so if
-	// the code falls through to the install path this test fails loudly rather than
-	// silently passing.
+	// A nil discovery client is not what catches a fall-through here: installTrainer
+	// fetches the release archive from GitHub before it touches discovery, so on a
+	// machine with egress a fall-through would download tens of megabytes first. The
+	// assertions below are what catch it — no error, no claimed resources, and a
+	// probe count proving the wait was entered.
 	refs, err := ensureTrainerInstalled(context.Background(), client, nil, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
