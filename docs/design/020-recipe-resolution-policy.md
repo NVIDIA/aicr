@@ -128,11 +128,13 @@ spec:
 // during overlay resolution. It inherits through spec.base like any other
 // spec field and is stripped from the hydrated RecipeResult.
 //
-// The field is a POINTER on RecipeMetadataSpec so that "absent" and
-// "explicitly empty" stay distinguishable: a nil *ResolutionPolicy inherits
-// the parent policy, while a non-nil policy replaces it outright. Collapsing
-// the two would let every overlay that omits the field silently clear the
-// base's list, which is precisely the fail-open this ADR exists to prevent.
+// The operative distinction is on StrictDimensions being nil or non-nil,
+// NOT on the *ResolutionPolicy pointer: `resolution:` present with no
+// `strictDimensions` key declares nothing and must behave exactly like an
+// omitted block. The field is a pointer only because that is the convention
+// for an optional spec block. Keying the semantics on the pointer instead
+// would let `resolution: {}` silently clear an inherited list, which is the
+// fail-open this ADR exists to prevent.
 type ResolutionPolicy struct {
     // StrictDimensions may not be silently generalized: if leaving one
     // unstated would cause resolution to skip an overlay that jointly
@@ -147,44 +149,58 @@ type ResolutionPolicy struct {
 }
 ```
 
-**Merge semantics.** `RecipeMetadataSpec.Merge` composes the policy by
-whole-value replacement, not element union:
+**Resolution semantics, stated as one rule.** The effective list is found by
+walking the inheritance chain from the overlay toward the root and taking the
+**nearest non-`nil` `StrictDimensions`**. If the entire chain is `nil`,
+including the root, the effective list is `[os]`.
 
-| child `spec.resolution` | `StrictDimensions` decodes to | result |
+That single rule covers every declaration form at every level, root included,
+with no separate root case to fall through:
+
+| declaration | `StrictDimensions` decodes to | effect |
 | --- | --- | --- |
-| omitted | policy is `nil` | inherits the parent policy unchanged |
-| `{}` (block present, key absent) | `nil` slice | inherits the parent policy unchanged |
-| `strictDimensions: [os]` | `["os"]` | replaces the inherited list |
-| `strictDimensions: []` | empty non-`nil` slice | clears every inherited strict dimension |
+| `resolution` omitted | policy `nil`, so slice `nil` | keep walking |
+| `resolution: {}` | `nil` slice | keep walking |
+| `strictDimensions: [os]` | `["os"]` | stop, use `[os]` |
+| `strictDimensions: []` | empty non-`nil` slice | stop, no strict dimensions |
+| nothing non-`nil` in the whole chain | n/a | default `[os]` |
 
-The middle two rows are the subtle pair. A `resolution:` block that declares
-no `strictDimensions` key declares nothing, so it overrides nothing; only an
-explicit `[]` clears. This keeps the "silence is safe" property one level
-down, where an author who adds a `resolution:` block for some future sibling
-field does not silently disarm the check.
+The first two rows are the subtle pair: a `resolution:` block declaring no
+`strictDimensions` key declares nothing, so it overrides nothing and does not
+terminate the walk. This keeps "silence is safe" at every level, including
+for an author who adds a `resolution:` block for some future sibling field.
+An explicit `[]` is the only opt-out, and it is the only `nil`-terminating
+form that yields no strict dimensions.
 
-That distinction rests on `nil` versus empty-but-non-`nil` surviving
-deserialization, which is a property of the decoder rather than of the type.
-It is pinned by a round-trip test over the actual catalog decode path, not
-asserted structurally.
+Note this is deliberately **not** "any non-`nil` policy replaces the parent".
+Replacement keys on the *list*, not on the policy pointer. Keying on the
+pointer would make `resolution: {}` clear an inherited list.
 
-Element union was rejected because it makes opting out impossible: a subtree
-could never drop a dimension its ancestor declared. Whole-value replacement
-keeps the override total and legible in the file that performs it, and the
-three cases above are pinned by tests.
+The walk stops at the first non-`nil` list rather than unioning, because
+element union makes opting out impossible: a subtree could never drop a
+dimension its ancestor declared. Stopping keeps the override total and
+legible in the file that performs it.
 
-**The root is defaulted, not inherited.** Inheritance alone cannot carry the
-policy, because `--data` supports wholesale same-path replacement of
+The `nil` versus empty-but-non-`nil` distinction rests on deserialization
+behavior, which is a property of the decoder rather than of the type. It is
+pinned by a round-trip test over the actual catalog decode path, not asserted
+structurally. Every row above is pinned by a test.
+
+**Why the chain-exhausted default exists.** Inheritance alone cannot carry
+the policy, because `--data` supports wholesale same-path replacement of
 `overlays/base.yaml` (`docs/integrator/data-extension.md`). An external base
-becomes the parentless root (`store.Base` is `chain[0]`), so a `nil` policy
-there inherits from nothing. Left undefined, such a catalog would resolve to
+becomes the parentless root (`store.Base` is `chain[0]`), so a `nil` list
+there has nothing left to inherit from. Left undefined, such a catalog would resolve to
 zero strict dimensions and the split-overlay query this ADR exists to reject
 would succeed again the moment `requireOSIfNeeded` is deleted.
 
-A `nil` policy **at the root** therefore defaults to `[os]` rather than to
-the empty list. Opting out stays possible and stays explicit: the root
-declares `strictDimensions: []`. Silence is safe; only a deliberate
-declaration removes the check.
+This is why the rule above defaults to `[os]` when the whole chain is `nil`
+rather than special-casing the root. A parentless root that omits
+`resolution`, and one that declares `resolution: {}`, both reach the end of
+the walk with no non-`nil` list and both get `[os]`. Opting out stays
+possible and stays explicit: the root declares `strictDimensions: []`.
+Silence is safe at every level; only a deliberate declaration removes the
+check.
 
 ADR-015 documents this same replacement hazard for `spec.profile`, so that
 precedent demonstrates the failure mode rather than immunizing against it.
