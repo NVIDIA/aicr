@@ -113,7 +113,8 @@ func (s *Snapshot) Unwrap() *snapshotter.Snapshot {
 // collection Job passed to Client.CollectSnapshot. Facade-owned;
 // field-for-field mirror of pkg/snapshotter.AgentConfig. Tolerations
 // keep k8s.io/api/core/v1.Toleration since kubernetes/api is itself
-// stable.
+// stable. Nil Tolerations use a tolerate-all default; a non-nil empty
+// slice explicitly disables that default.
 //
 // The mirror is enforced, not conventional: TestAgentConfigMirrorsInternal
 // fails when either struct gains, drops, or retypes a field, and every
