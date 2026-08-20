@@ -33,7 +33,6 @@ import (
 	oras "oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	storeoci "oras.land/oras-go/v2/content/oci"
-	"oras.land/oras-go/v2/errdef"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -148,7 +147,7 @@ func TestRootOCIStorePushValidatesDescriptorAndContent(t *testing.T) {
 	}
 }
 
-func TestRootOCIStoreExistingBlobMustVerifyBeforeAlreadyExists(t *testing.T) {
+func TestRootOCIStoreExistingBlobIsReusedOnlyAfterVerification(t *testing.T) {
 	t.Parallel()
 
 	layout, store := newRootOCIStoreForTest(t)
@@ -157,19 +156,28 @@ func TestRootOCIStoreExistingBlobMustVerifyBeforeAlreadyExists(t *testing.T) {
 	if err := store.Push(context.Background(), desc, bytes.NewReader(blob)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Push(context.Background(), desc, bytes.NewReader(blob)); !stderrors.Is(err, errdef.ErrAlreadyExists) {
-		t.Fatalf("second Push() error = %v, want ErrAlreadyExists", err)
+	unreadErr := stderrors.New("existing blob reader must remain unread")
+	if err := store.Push(context.Background(), desc, rootStoreFailingReader{err: unreadErr}); err != nil {
+		t.Fatalf("idempotent Push() error = %v", err)
 	}
 
+	conflicting := desc
+	conflicting.Size++
+	err := store.Push(context.Background(), conflicting, rootStoreFailingReader{err: unreadErr})
+	if err == nil || stderrors.Is(err, unreadErr) {
+		t.Fatalf("conflicting Push() error = %v, want existing blob verification failure", err)
+	}
+	assertErrorCode(t, err, apperrors.ErrCodeInternal)
+
 	blobName := rootStoreBlobPath(desc)
-	if err := layout.child.Chmod(blobName, 0o600); err != nil {
-		t.Fatal(err)
+	if chmodErr := layout.child.Chmod(blobName, 0o600); chmodErr != nil {
+		t.Fatal(chmodErr)
 	}
-	if err := layout.child.WriteFile(blobName, []byte("corrupt!"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := layout.child.WriteFile(blobName, []byte("corrupt!"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
-	err := store.Push(context.Background(), desc, bytes.NewReader(blob))
-	if err == nil || stderrors.Is(err, errdef.ErrAlreadyExists) {
+	err = store.Push(context.Background(), desc, rootStoreFailingReader{err: unreadErr})
+	if err == nil || stderrors.Is(err, unreadErr) {
 		t.Fatalf("Push() error = %v, want corrupt existing blob rejection", err)
 	}
 	assertErrorCode(t, err, apperrors.ErrCodeInternal)

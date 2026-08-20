@@ -17,7 +17,7 @@ in the [Go library integration guide](./go-library.md).
 
 | Package | Tier | Purpose |
 |---------|------|---------|
-| `github.com/NVIDIA/aicr/pkg/client/v1` | **Public (stable)** | Facade: `Client`, `NewClient`, request/result types, source constructors. |
+| `github.com/NVIDIA/aicr/pkg/client/v1` | **Public (stable)** | Facade: `Client`, `NewClient`, `NewClientContext`, request/result types, source constructors. |
 | `pkg/recipe` | Public (evolving) | Recipe resolution, criteria, overlay system, component registry. |
 | `pkg/bundler` | Public (evolving) | Per-component Helm/Kustomize bundle generation. |
 | `pkg/validator` | Public (evolving) | Constraint evaluation, three-phase validation (executed in order: Deployment, Conformance, Performance). |

@@ -168,7 +168,7 @@ Override snapshot-detected criteria:
 			// (--data / spec.recipe.data, else embedded). The Client owns its
 			// own DataProvider and per-provider criteria registry, replacing
 			// the old process-global data provider.
-			client, err := recipeClientFromCmd(cmd, cfg)
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}
@@ -183,20 +183,7 @@ Override snapshot-detected criteria:
 				return err
 			}
 
-			// Apply criteria-strict AFTER the catalog has loaded —
-			// LoadCatalog seeded the Client's registry from every overlay's
-			// spec.criteria; strict mode then hides external-origin entries
-			// from subsequent registry lookups.
-			//
-			// Three sources can enable strict mode (logical OR):
-			//   1. --criteria-strict CLI flag
-			//   2. spec.recipe.criteriaStrict in --config
-			//   3. AICR_CRITERIA_STRICT env var (honored at registry init)
-			// AICR_CRITERIA_STRICT is read when the registry is first
-			// constructed, so we only need to apply the flag + config here.
-			if cmd.Bool("criteria-strict") || aicr.WrapConfig(cfg).IsCriteriaStrict() {
-				client.CriteriaRegistry().SetStrict(true)
-			}
+			applyClientCriteriaStrictMode(cmd, cfg, client)
 
 			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
 			if err != nil {
@@ -258,6 +245,19 @@ Override snapshot-detected criteria:
 
 			return nil
 		},
+	}
+}
+
+// applyClientCriteriaStrictMode applies command and config strictness only
+// after LoadCatalog has seeded the Client's registry. Strict mode then hides
+// external-origin criteria values from every subsequent parse. The
+// AICR_CRITERIA_STRICT environment variable is already honored when the
+// registry is constructed, so only the flag and config need handling here.
+// Keep recipe and query on this shared path so both commands enforce the same
+// criteria policy for external filesystem and OCI catalogs.
+func applyClientCriteriaStrictMode(cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) {
+	if cmd.Bool("criteria-strict") || aicr.WrapConfig(cfg).IsCriteriaStrict() {
+		client.CriteriaRegistry().SetStrict(true)
 	}
 }
 

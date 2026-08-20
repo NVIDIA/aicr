@@ -16,11 +16,15 @@ package cli
 
 import (
 	"bytes"
+	stderrors "errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -187,4 +191,103 @@ func TestRecipeAndQueryCommandsRejectExplicitEmptySlurmAccountingMode(t *testing
 			}
 		})
 	}
+}
+
+func TestQueryCmdCriteriaStrictRejectsExternalCriteria(t *testing.T) {
+	t.Setenv("AICR_CRITERIA_STRICT", "")
+	dataDir := writeQueryExternalCriteriaCatalog(t)
+	configPath := filepath.Join(t.TempDir(), "aicr-config.yaml")
+	config := `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: query-strict-test
+spec:
+  recipe:
+    criteriaStrict: true
+`
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		extraArgs   []string
+		wantErrCode errors.ErrorCode
+		wantOutput  string
+	}{
+		{
+			name:       "non-strict query accepts external criterion",
+			wantOutput: "external-query-service",
+		},
+		{
+			name:        "CLI flag rejects external criterion",
+			extraArgs:   []string{"--criteria-strict"},
+			wantErrCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "config rejects external criterion",
+			extraArgs:   []string{"--config", configPath},
+			wantErrCode: errors.ErrCodeInvalidRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			parent := &cli.Command{
+				Name:     "aicr",
+				Commands: []*cli.Command{queryCmd()},
+				Writer:   &output,
+			}
+			args := []string{
+				"aicr", "query",
+				"--data", dataDir,
+				"--service", "external-query-service",
+				"--selector", "criteria.service",
+			}
+			args = append(args, tt.extraArgs...)
+			err := parent.Run(t.Context(), args)
+			if tt.wantErrCode != "" {
+				if !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+					t.Fatalf("query error = %v, want code %s", err, tt.wantErrCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("query error = %v", err)
+			}
+			if !strings.Contains(output.String(), tt.wantOutput) {
+				t.Fatalf("query output = %q, want %q", output.String(), tt.wantOutput)
+			}
+		})
+	}
+}
+
+func writeQueryExternalCriteriaCatalog(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	registry := `apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components: []
+`
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+	overlaysDir := filepath.Join(dir, "overlays")
+	if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
+		t.Fatalf("create overlays directory: %v", err)
+	}
+	overlay := `apiVersion: aicr.run/v1alpha2
+kind: RecipeMetadata
+metadata:
+  name: external-query
+spec:
+  criteria:
+    service: external-query-service
+  componentRefs: []
+`
+	if err := os.WriteFile(filepath.Join(overlaysDir, "external-query.yaml"), []byte(overlay), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	return dir
 }

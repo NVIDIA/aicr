@@ -85,7 +85,7 @@ func runEvidenceDigestCmd(ctx context.Context, cmd *cli.Command) error {
 			"--recipe is required: aicr evidence digest -r <recipe-or-overlay>")
 	}
 
-	client, err := embeddedClient()
+	client, err := embeddedClient(ctx)
 	if err != nil {
 		return err
 	}
