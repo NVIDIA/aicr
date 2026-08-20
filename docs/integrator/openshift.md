@@ -167,10 +167,10 @@ ocp-bundle/
 │   │   └── subscription.yaml
 │   ├── values.yaml
 │   └── install.sh
-├── 0XX-<operator>-ocp-olm-readiness/       # Readiness gate
+├── 0XX-<operator>-ocp-olm-readiness/       # Readiness gate (--readiness-hooks)
 │   ├── Chart.yaml
 │   ├── templates/
-│   │   └── check-job.yaml
+│   │   └── readiness.yaml                  # chainsaw Test → gate Job
 │   └── install.sh                          # runs with --wait --timeout
 ├── 0XX-<operator>-ocp/                     # Phase 2: Operator CR
 │   ├── Chart.yaml
