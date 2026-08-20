@@ -48,12 +48,16 @@ runs:
       env:
         GOFLAGS: -mod=vendor
       run: |
-        # cluster-create (~35s locally; Kind bring-up + registry) touches
-        # neither Go's build cache nor the registry that the host binaries
-        # below get pushed to, so start it in the background and overlap it
-        # with the CPU-bound compiles instead of waiting on it first. Every
-        # later step that DOES need the cluster/registry (ko build, docker
-        # push, kubectl) waits on $pid_cluster before running.
+        # cluster-create (~35s locally; Kind bring-up + registry) and the
+        # host compiles below touch none of each other's inputs/outputs, so
+        # launch everything in the background up front. Each later command
+        # waits only on the specific PID(s) its own inputs actually depend
+        # on: aicrd's ko build needs just the cluster/registry (not the
+        # validator/CLI binaries), so it must not be gated behind builds it
+        # doesn't read from - an earlier version of this step wait'ed on all
+        # four build PIDs before it, which measured ~19s slower in CI than
+        # the original sequential script for no reason: nothing here reads
+        # dist/validator/* or dist/e2e/aicr until the docker build step below.
         make cluster-create > /tmp/cluster-create.log 2>&1 &
         pid_cluster=$!
 
@@ -64,7 +68,9 @@ runs:
 
         # Compile validator binaries + the host aicr CLI on the runner (Go
         # build cache hit) while the cluster comes up. This is also much
-        # faster than building inside Docker (no cache sharing there).
+        # faster than building inside Docker (no cache sharing there). Go's
+        # build cache is safe for concurrent use by simultaneous go
+        # commands, including ko's own internal compile of aicrd below.
         CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment &
         pid_dep=$!
         CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance &
@@ -73,21 +79,24 @@ runs:
         pid_conf=$!
         go build -o dist/e2e/aicr ./cmd/aicr &
         pid_cli=$!
-        wait $pid_dep
-        wait $pid_perf
-        wait $pid_conf
-        wait $pid_cli
 
-        # Everything below needs the cluster (and its registry) up.
+        # aicrd only needs the cluster/registry - build and push it (replaces
+        # Tilt custom_build) as soon as that's ready, not gated behind the
+        # unrelated validator/CLI builds above.
         wait $pid_cluster
         cat /tmp/cluster-create.log
-
-        # Build and push aicrd image (replaces Tilt custom_build)
         KO_DOCKER_REPO=localhost:5001/aicrd ko build --bare --tags=tilt ./cmd/aicrd
 
         # Apply namespace first (must exist before deployment references it)
         kubectl apply -f tilt/k8s/namespace.yaml
         kubectl apply -f tilt/k8s/
+
+        # The validator images COPY the binaries built above, so wait for
+        # those specifically (not pid_cli, which nothing here needs) before
+        # building them.
+        wait $pid_dep
+        wait $pid_perf
+        wait $pid_conf
 
         # Build + push the remaining images. Validator binaries are already
         # compiled above; this is just the COPY-only image build + push.
@@ -129,6 +138,12 @@ runs:
         curl -sf http://localhost:5001/v2/aicr-validators/performance/tags/list
         curl -sf http://localhost:5001/v2/aicr-validators/conformance/tags/list
         curl -sf http://localhost:5001/v2/aicr-validators/aiperf-bench/tags/list
+
+        # Not needed by anything above, but its output (dist/e2e/aicr) is
+        # used by a later step (AICR_BIN) - wait now so a build failure here
+        # fails this step instead of surfacing as a confusing missing-binary
+        # error two steps later, and so the step's own exit code reflects it.
+        wait $pid_cli
 
     - name: Set up fake GPU environment
       shell: bash
