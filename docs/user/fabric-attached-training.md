@@ -15,9 +15,15 @@ assuming it.
 Kubeflow Trainer splits a workload across two objects, and the split decides
 where fabric wiring can live.
 
-A **TrainJob** can supply pod annotations and labels (`PodTemplatePatch.Metadata`),
-volumes (`PodSpecPatch.Volumes`), and per-container `env`, `volumeMounts` and
-`securityContext` (`ContainerPatch`).
+A **TrainJob** can supply pod annotations and labels (`PodTemplatePatch.Metadata`)
+and volumes (`PodSpecPatch.Volumes`) through `spec.runtimePatches`, plus
+`image`, `command`, `args`, `env` and `resourcesPerNode` for the trainer
+through `spec.trainer`.
+
+Note where worker **environment** goes: `ContainerPatch.env` is rejected for the
+`node`, `dataset-initializer` and `model-initializer` containers, so worker
+variables belong in `spec.trainer.env`, not in a runtime patch. `ContainerPatch`
+can still set `volumeMounts` and `securityContext` on `node`.
 
 A **TrainJob cannot add a container.** `ContainerPatch` carries only `name`,
 `env`, `volumeMounts` and `securityContext` — no `image`, no `command` — and the
@@ -79,7 +85,9 @@ spec:
                 nodeSelector: "<carry over from your bundle>"
                 tolerations: "<carry over from your bundle>"
                 initContainers:
-                - name: tcpxo-daemon     # native sidecar: restartPolicy: Always
+                - name: tcpxo-daemon
+                  restartPolicy: Always    # native sidecar — without this the
+                                           # pod stalls in initialization
                   image: "<registry>/tcpgpudmarxd-dev:<paired-with-your-plugin>"
                   args: "<see reference>"                 # + capabilities, volumeMounts
                 containers:
@@ -154,8 +162,9 @@ to list them; ask whoever provisions the cluster for the eight names, or for the
 
 ### Do not set `resourcesPerNode`
 
-Let the runtime own the resource shape. `resourcesPerNode` on a TrainJob is not
-merged into the runtime's — a value carrying `limits` or `requests` **replaces**
+Let the runtime own the resource shape. On the pinned Kubeflow Trainer
+**v2.2.0**, `resourcesPerNode` on a TrainJob is not merged into the runtime's —
+a value carrying `limits` or `requests` **replaces**
 the worker's resource requirements outright, so a job that sets it to ask for
 memory silently loses the runtime's `nvidia.com/gpu: 8` and TCPXO stops working.
 
@@ -186,11 +195,18 @@ spec:
     resourcesPerNode:
       limits:
         nvidia.com/gpu: 8
-        vpc.amazonaws.com/efa: 32    # per node — see below
+        vpc.amazonaws.com/efa: <EFA_COUNT>    # per node — read it, see below
       requests:
         nvidia.com/gpu: 8
-        vpc.amazonaws.com/efa: 32
+        vpc.amazonaws.com/efa: <EFA_COUNT>
 ```
+
+**`IPC_LOCK` and `FI_EFA_FORK_SAFE=1`.** `torch-distributed` grants neither —
+AICR's tested EFA runtime sets both. Add `FI_EFA_FORK_SAFE=1` alongside the
+other `FI_*` variables in `spec.trainer.env`, and `IPC_LOCK` via a
+`runtimePatches` entry setting `securityContext` on the `node` container
+(`securityContext` is patchable there even though `env` is not). Without
+`IPC_LOCK`, NCCL may fail to register pinned buffers.
 
 **An image carrying the EFA stack.** AICR installs the device plugin, which
 exposes the devices — it does not put `libfabric` or `aws-ofi-nccl` into your
@@ -238,7 +254,7 @@ prerequisites.
 Run a short job with `NCCL_DEBUG=INFO` and check which transport NCCL selected:
 
 ```shell
-kubectl logs <worker-pod> | grep -i 'NCCL INFO.*Using network'
+kubectl logs <worker-pod> -c node | grep -i 'NCCL INFO.*Using network'
 ```
 
 Expect the plugin name — `FasTrak` for TCPXO, `AWS Libfabric` for EFA, `IB` for
