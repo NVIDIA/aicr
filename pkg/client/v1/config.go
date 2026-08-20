@@ -236,6 +236,18 @@ func (c *Config) RecipeResolveOptions() ([]RecipeResolveOption, error) {
 	if set {
 		out = append(out, WithAccountingMode(string(mode)))
 	}
+
+	// Every generation-time selection must be projected here. This method is
+	// the canonical config-to-options conversion for SDK callers, so omitting
+	// one silently drops it for anyone who configures it in a document rather
+	// than through an option.
+	riMode, riSet, err := spec.ResolveRuntimeInventoryMode()
+	if err != nil {
+		return nil, err
+	}
+	if riSet {
+		out = append(out, WithRuntimeInventoryMode(string(riMode)))
+	}
 	return out, nil
 }
 

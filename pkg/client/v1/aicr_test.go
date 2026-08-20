@@ -2511,3 +2511,56 @@ func TestSnapshotUnwrapRoundTrips(t *testing.T) {
 		t.Errorf("WrapSnapshot() populated Raw (%d bytes); only CollectSnapshot sets it", len(wrapped.Raw))
 	}
 }
+
+// TestResolveRecipeRuntimeInventoryMode mirrors TestResolveRecipeAccountingMode
+// and exercises the facade option through a real resolve rather than asserting
+// the option value is non-nil.
+//
+// No stock recipe declares the component, so the observable outcome for a stock
+// resolve is the fail-closed rejection. That is the contract worth pinning: a
+// selection the recipe cannot honor must surface rather than be recorded.
+func TestResolveRecipeRuntimeInventoryMode(t *testing.T) {
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := client.Close(); closeErr != nil {
+			t.Errorf("Close() error = %v", closeErr)
+		}
+	})
+
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceGKE,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		Intent:      recipe.CriteriaIntentInference,
+		OS:          recipe.CriteriaOSCOS,
+	}
+
+	for _, tt := range []struct {
+		name    string
+		mode    string
+		wantErr bool
+	}{
+		{name: "invalid mode is rejected", mode: "off", wantErr: true},
+		{name: "empty mode is rejected", mode: "", wantErr: true},
+		{
+			// Valid value, but no stock recipe declares the component, so the
+			// build must refuse rather than record a mode it cannot apply.
+			name: "valid mode on a recipe without the component is rejected",
+			mode: "disabled", wantErr: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, resolveErr := client.ResolveRecipeFromCriteriaWithOptions(
+				t.Context(),
+				aicr.WrapCriteria(criteria),
+				aicr.WithRuntimeInventoryMode(tt.mode),
+			)
+			if (resolveErr != nil) != tt.wantErr {
+				t.Fatalf("ResolveRecipeFromCriteriaWithOptions() error = %v, wantErr %v",
+					resolveErr, tt.wantErr)
+			}
+		})
+	}
+}

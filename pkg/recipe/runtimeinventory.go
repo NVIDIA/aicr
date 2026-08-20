@@ -126,6 +126,25 @@ func applyRuntimeInventoryMode(result *RecipeResult, mode RuntimeInventoryMode) 
 	// separate bookkeeping. That is the half ADR-019 says a bundle-time
 	// override cannot deliver.
 	install := parsed == RuntimeInventoryEnabled
-	return setComponentOverride(result, runtimeInventoryComponentName,
-		map[string]any{componentInstallOverrideKey: install})
+	if err := setComponentOverride(result, runtimeInventoryComponentName,
+		map[string]any{componentInstallOverrideKey: install}); err != nil {
+		return err
+	}
+
+	// Confirm the selection actually took effect rather than trusting the key
+	// we just wrote. IsEnabled fails closed on either the `enabled` or the
+	// `install` override, so an overlay that already set `enabled: false`
+	// leaves the component disabled while this records mode: enabled — a
+	// recipe stating a decision it does not implement. Compare the resolved
+	// predicate, not the key.
+	ref := result.GetComponentRef(runtimeInventoryComponentName)
+	if ref.IsEnabled() != install {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("runtime inventory mode %q cannot be applied to component %q: "+
+				"another override in the resolved recipe holds it %s; "+
+				"remove that override or drop the mode",
+				parsed, runtimeInventoryComponentName,
+				map[bool]string{true: "enabled", false: "disabled"}[ref.IsEnabled()]))
+	}
+	return nil
 }

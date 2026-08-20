@@ -210,12 +210,20 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 	if result == nil || cfg == nil {
 		return nil
 	}
+	selected := false
 	if cfg.runtimeInventoryMode != nil {
 		if err := applyRuntimeInventoryMode(result, *cfg.runtimeInventoryMode); err != nil {
 			return err
 		}
+		selected = true
 	}
 	if cfg.accountingMode == nil {
+		// Deployment order still has to be refreshed: a selection that ran
+		// above may have disabled a component, and the accounting path's own
+		// recompute is not reached on this branch.
+		if selected {
+			return recomputeDeploymentOrder(result)
+		}
 		return nil
 	}
 
@@ -257,11 +265,23 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 			return err
 		}
 	}
-	accountingSpec := &RecipeMetadataSpec{ComponentRefs: result.ComponentRefs}
-	deploymentOrder, err := accountingSpec.TopologicalSort()
+	return recomputeDeploymentOrder(result)
+}
+
+// recomputeDeploymentOrder refreshes DeploymentOrder after a selection has
+// changed which components are enabled.
+//
+// TopologicalSort emits enabled components only, so a selection that disables
+// one without recomputing leaves the disabled component listed in the emitted
+// recipe's deploymentOrder. The bundler re-filters by IsEnabled, so nothing
+// mis-deploys, but the artifact contradicts itself and `aicr query --selector
+// deploymentOrder` reports a component the same document marks disabled.
+func recomputeDeploymentOrder(result *RecipeResult) error {
+	spec := &RecipeMetadataSpec{ComponentRefs: result.ComponentRefs}
+	deploymentOrder, err := spec.TopologicalSort()
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
-			"failed to recompute deployment order after applying Slurm accounting mode")
+			"failed to recompute deployment order after applying a build selection")
 	}
 	result.DeploymentOrder = deploymentOrder
 	return nil

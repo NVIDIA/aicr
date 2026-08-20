@@ -14,7 +14,11 @@
 
 package recipe
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 // runtimeInventoryTestResult is a minimal recipe that declares the runtime
 // inventory component alongside an unrelated one, so a case can tell "the
@@ -213,5 +217,98 @@ func TestApplyBuildConfigPreservesBothConfigurations(t *testing.T) {
 	ref := result.GetComponentRef(runtimeInventoryComponentName)
 	if ref == nil || ref.IsEnabled() {
 		t.Error("runtime inventory component should be disabled")
+	}
+}
+
+// TestWithRuntimeInventoryModeOption exercises the BuildOption constructor
+// rather than assembling buildConfig directly. Tests that reach past the
+// public option cannot catch a defect in the option itself, and the option is
+// the surface SDK callers actually use.
+func TestWithRuntimeInventoryModeOption(t *testing.T) {
+	t.Parallel()
+
+	cfg := &buildConfig{}
+	WithRuntimeInventoryMode(RuntimeInventoryDisabled)(cfg)
+
+	if cfg.runtimeInventoryMode == nil {
+		t.Fatal("WithRuntimeInventoryMode() left runtimeInventoryMode nil")
+	}
+	if *cfg.runtimeInventoryMode != RuntimeInventoryDisabled {
+		t.Errorf("mode = %q, want %q", *cfg.runtimeInventoryMode, RuntimeInventoryDisabled)
+	}
+
+	// A nil option must be tolerated the way resolveBuildConfig expects.
+	var nilOpt BuildOption
+	if nilOpt != nil {
+		t.Fatal("expected a nil BuildOption")
+	}
+}
+
+// TestApplyRuntimeInventoryRecomputesDeploymentOrder covers a defect found in
+// review: disabling the component left it listed in DeploymentOrder.
+//
+// TopologicalSort emits enabled components only, and the recompute used to sit
+// inside the accounting branch, which a runtime-inventory-only build never
+// reaches. The emitted recipe then contradicted itself — deploymentOrder named
+// a component the same document marked disabled. The bundler re-filters by
+// IsEnabled so nothing mis-deployed, but `aicr query --selector deploymentOrder`
+// reported it.
+func TestApplyRuntimeInventoryRecomputesDeploymentOrder(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name      string
+		mode      RuntimeInventoryMode
+		wantInOrd bool
+	}{
+		{name: "disabled drops it from deployment order", mode: RuntimeInventoryDisabled, wantInOrd: false},
+		{name: "enabled keeps it", mode: RuntimeInventoryEnabled, wantInOrd: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := runtimeInventoryTestResult()
+			result.DeploymentOrder = []string{"gpu-operator", runtimeInventoryComponentName}
+
+			if err := applyBuildConfig(result, &buildConfig{runtimeInventoryMode: &tt.mode}); err != nil {
+				t.Fatalf("applyBuildConfig() error = %v", err)
+			}
+
+			inOrder := slices.Contains(result.DeploymentOrder, runtimeInventoryComponentName)
+			if inOrder != tt.wantInOrd {
+				t.Errorf("%s in deploymentOrder = %v, want %v (order=%v)",
+					runtimeInventoryComponentName, inOrder, tt.wantInOrd, result.DeploymentOrder)
+			}
+
+			// The invariant that matters: deploymentOrder and IsEnabled agree.
+			for _, ref := range result.ComponentRefs {
+				listed := slices.Contains(result.DeploymentOrder, ref.Name)
+				if listed != ref.IsEnabled() {
+					t.Errorf("component %q: inDeploymentOrder=%v IsEnabled=%v; these must agree",
+						ref.Name, listed, ref.IsEnabled())
+				}
+			}
+		})
+	}
+}
+
+// TestApplyRuntimeInventoryRejectsIncoherentEnable covers a coherence gap found
+// in review: mode=enabled writes install:true, but IsEnabled fails closed on
+// either the `enabled` or the `install` key. An overlay that already set
+// `enabled: false` therefore leaves the component disabled while the recipe
+// records mode: enabled — stating a decision it does not implement.
+func TestApplyRuntimeInventoryRejectsIncoherentEnable(t *testing.T) {
+	t.Parallel()
+
+	result := runtimeInventoryTestResult()
+	ref := result.GetComponentRef(runtimeInventoryComponentName)
+	ref.Overrides = map[string]any{"enabled": false}
+
+	mode := RuntimeInventoryEnabled
+	err := applyBuildConfig(result, &buildConfig{runtimeInventoryMode: &mode})
+	if err == nil {
+		t.Fatal("applyBuildConfig() error = nil, want rejection of an enable the recipe cannot honor")
+	}
+	if !strings.Contains(err.Error(), "cannot be applied") {
+		t.Errorf("error = %v, want a coherence rejection", err)
 	}
 }
