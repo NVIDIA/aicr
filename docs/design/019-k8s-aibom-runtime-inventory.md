@@ -555,10 +555,11 @@ semantics.
 
 ## Follow-Up Decisions
 
-Four of the six requirements below are resolved by
-[Amendment: stock adoption on one GKE recipe](#amendment-stock-adoption-on-one-gke-recipe).
-The list is retained as originally written; the amendment records what changed
-and what remains open.
+Three of the six requirements below are resolved by
+[Amendment: stock adoption on one GKE recipe](#amendment-stock-adoption-on-one-gke-recipe);
+one remains open, and two are planned work tracked in the epic. The list is
+retained as originally written; the amendment records what changed, what
+remains open, and where the rest is tracked.
 
 Stock adoption requires a separate ADR or explicit amendment that defines:
 
@@ -590,7 +591,7 @@ graduated schema is byte-identical to `v1alpha1` and conversion strategy stays
 Those two steps instead gate a later, separate decision: **removing**
 `v1alpha1`. Upstream commits to that removal being its own announced release
 with a documented migration procedure, in
-[k8s-aibom design note 001](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/design/001-api-graduation-v1beta1.md).
+[k8s-aibom design note 001](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/ae3782d052ab8951bab0a273fbf642ecfadc8195/docs/design/001-api-graduation-v1beta1.md).
 
 AICR asserts the storage version in the component health check so a cluster
 whose CRD was never upgraded fails validation rather than passing quietly.
@@ -670,6 +671,6 @@ requalification rather than a version bump.
 - [AIBOM API at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/api/v1alpha1/aibom_types.go)
 - [AIBOMControllerConfig API at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/api/v1alpha1/aibomcontrollerconfig_types.go)
 - [Security model at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/docs/security-model.md)
-- [k8s-aibom design note 001: v1beta1 API graduation](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/design/001-api-graduation-v1beta1.md)
+- [k8s-aibom design note 001: v1beta1 API graduation, at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/ae3782d052ab8951bab0a273fbf642ecfadc8195/docs/design/001-api-graduation-v1beta1.md)
 - [ADR-006: Container Image Pinning Policy](006-image-pinning-policy.md)
 - [ADR-007: Verifiable Recipe Test Evidence](007-recipe-evidence.md)
