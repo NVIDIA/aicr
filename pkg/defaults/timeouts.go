@@ -1344,6 +1344,12 @@ const (
 	// HelmChartIndexRetryBudget is the maximum number of index fetch
 	// attempts before failing permanently. Retryable errors are transport
 	// failures, connection resets, and 5xx / 408 / 429 responses from the upstream.
+	//
+	// WARNING: Retry shares the parent timeout budget. On the HTTP server path,
+	// the pre-check shares the 60s BundleHandlerTimeout with the subsequent helm
+	// pull; a maxed-out pre-check (30s + 1s backoff + 29s) leaves ~0s for the
+	// chart download. Consider capping total pre-check wall-clock if upstream
+	// latency becomes a concern.
 	HelmChartIndexRetryBudget = 3
 
 	// HelmChartIndexRetryInitialBackoff is the wait between the first and

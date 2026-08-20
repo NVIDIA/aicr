@@ -47,6 +47,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/oci"
 	"sigs.k8s.io/yaml"
 )
 
@@ -626,8 +627,8 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 			}
 			slog.WarnContext(ctx, "vendor-charts: index fetch retrying after validation error",
 				"attempt", attempt, "error", err)
-			// Sleep with exponential backoff.
-			timer := newBackoffTimer(backoff)
+			// Sleep with exponential backoff + jitter to decorrelate retries.
+			timer := newBackoffTimer(oci.JitterDuration(backoff))
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -682,8 +683,8 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 		slog.WarnContext(ctx, "vendor-charts: index fetch retrying after transient error",
 			"attempt", attempt, "error", err)
 
-		// Sleep with exponential backoff, but honor parent context cancellation.
-		timer := newBackoffTimer(backoff)
+		// Sleep with exponential backoff + jitter, but honor parent context cancellation.
+		timer := newBackoffTimer(oci.JitterDuration(backoff))
 		select {
 		case <-ctx.Done():
 			timer.Stop()

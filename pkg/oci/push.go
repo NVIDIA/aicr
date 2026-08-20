@@ -770,7 +770,7 @@ func pushFrozenDescriptor(
 		if attempt == attempts {
 			break
 		}
-		timer := time.NewTimer(jitterDuration(backoff))
+		timer := time.NewTimer(JitterDuration(backoff))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -1317,7 +1317,7 @@ func copyWithRetryConfig(ctx context.Context, src oras.ReadOnlyTarget, srcRef st
 		slog.Warn("oci push retry", "attempt", attempt, "error", lastErr)
 
 		// Sleep with backoff, but honor context cancellation.
-		sleep := jitterDuration(backoff)
+		sleep := JitterDuration(backoff)
 		timer := time.NewTimer(sleep)
 		select {
 		case <-ctx.Done():
@@ -1379,8 +1379,8 @@ func isTransientPushError(err error) bool {
 	return apperrors.IsNetworkError(err)
 }
 
-// jitterDuration applies +/-25% jitter to d.
-func jitterDuration(d time.Duration) time.Duration {
+// JitterDuration applies +/-25% jitter to d to decorrelate retries.
+func JitterDuration(d time.Duration) time.Duration {
 	if d <= 0 {
 		return 0
 	}
