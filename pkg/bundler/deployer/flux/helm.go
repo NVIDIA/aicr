@@ -42,6 +42,9 @@ type HelmReleaseData struct {
 	DependsOn       []DependsOnRef
 	ValuesFrom      []ValuesFromRef // ConfigMap references for dynamic values
 	ValuesYAML      string          // Pre-rendered, indented YAML for spec.values
+	// UpgradeCRDs emits spec.upgrade.crds: CreateReplace. Set only for
+	// components the registry marks ownsCRDs. See NVIDIA/aicr#2264.
+	UpgradeCRDs bool
 }
 
 // ChartRefHelmReleaseData carries per-component data for the
@@ -56,6 +59,9 @@ type ChartRefHelmReleaseData struct {
 	DependsOn       []DependsOnRef
 	ValuesFrom      []ValuesFromRef // ConfigMap references for dynamic values
 	ValuesYAML      string          // Pre-rendered, indented YAML for spec.values
+	// UpgradeCRDs emits spec.upgrade.crds: CreateReplace. Set only for
+	// components the registry marks ownsCRDs. See NVIDIA/aicr#2264.
+	UpgradeCRDs bool
 }
 
 // ArtifactGeneratorData carries per-component data for the
@@ -176,6 +182,7 @@ func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir strin
 		Namespace:       g.resolveNamespace(),
 		TargetNamespace: ref.Namespace,
 		Chart:           chart,
+		UpgradeCRDs:     g.ownsCRDs(ref.Name),
 		Version:         version,
 		SourceKind:      "HelmRepository",
 		SourceName:      sName,
@@ -306,6 +313,7 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 		Namespace:       g.resolveNamespace(),
 		TargetNamespace: namespace,
 		Chart:           "./" + dirName,
+		UpgradeCRDs:     g.ownsCRDs(dirName),
 		SourceKind:      "GitRepository",
 		SourceName:      sName,
 		DependsOn:       dependsOn,
@@ -439,6 +447,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 		Namespace:       g.resolveNamespace(),
 		TargetNamespace: ref.Namespace,
 		Chart:           "./" + ref.Name,
+		UpgradeCRDs:     g.ownsCRDs(ref.Name),
 		SourceKind:      "GitRepository",
 		SourceName:      sName,
 		DependsOn:       dependsOn,
@@ -480,6 +489,7 @@ func (g *Generator) writeOCIArtifactPair(name, targetNamespace string,
 		Namespace:       g.resolveNamespace(),
 		TargetNamespace: targetNamespace,
 		ChartRefName:    agName,
+		UpgradeCRDs:     g.ownsCRDs(name),
 		DependsOn:       dependsOn,
 		ValuesFrom:      valuesFrom,
 		ValuesYAML:      valuesYAML,

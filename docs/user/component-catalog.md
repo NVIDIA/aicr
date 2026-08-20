@@ -340,12 +340,17 @@ closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
 The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
 `aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
-the chart version pinned in the registry. It matters
-because Helm and Helmfile skip a chart's `crds/` directory on upgrade, and the
-`HelmRelease` AICR generates for Flux leaves `spec.upgrade.crds` unset so the
-helm-controller default of `Skip` applies. A cluster can therefore run a new
+the chart version pinned in the registry. It matters because Helm and Helmfile
+skip a chart's `crds/` directory on upgrade, so a cluster can run a new
 controller against the previous schema while the older version stays served
 and the controller keeps working.
+
+Flux is the exception for this component: `k8s-aibom` is marked `ownsCRDs` in
+the registry, so its generated `HelmRelease` sets
+`spec.upgrade.crds: CreateReplace` and Flux applies the CRDs itself. Argo CD
+applies them as ordinary manifests each sync. The assertion is still worth
+making on every deployer, because it proves the deployed CRDs match the pinned
+chart rather than merely that some deployer was expected to update them.
 
 Both CRDs are asserted separately, so a failure names which one is stranded
 and a partially applied CRD set cannot pass. If this check fails after a chart
@@ -443,12 +448,15 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**Apply CRDs before the bundle upgrade.** The chart ships its CRDs under
-`crds/`. Helm installs that directory on first install and never touches it
-again on upgrade, so a chart bump whose CRDs changed leaves the previous schema
-in place and the API server silently prunes the new controller's writes to
-added fields. Apply the CRDs from the exact qualified chart first, then
-upgrade:
+**Apply CRDs before the bundle upgrade — `helm` and `helmfile` only.** The
+chart ships its CRDs under `crds/`. Helm installs that directory on first
+install and never touches it again on upgrade, so a chart bump whose CRDs
+changed leaves the previous schema in place and the API server silently prunes
+the new controller's writes to added fields.
+
+The `flux`, `argocd`, and `argocd-helm` bundles handle this themselves for this
+component and need no manual step; see the deployer table below. For `helm` and
+`helmfile`, apply the CRDs from the exact qualified chart first, then upgrade:
 
 ```bash
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
@@ -459,8 +467,9 @@ helm show crds "${CHART}" --version "${VERSION}" \
   | kubectl apply --server-side --force-conflicts -f -
 ```
 
-Three details in that command are load-bearing, and the obvious shorter form
-fails on both counts:
+Three details in that command are load-bearing. The obvious shorter form —
+piping `helm show crds` straight into `kubectl apply --server-side` — fails on
+the first two:
 
 - **`sed -n '/^---$/,$p'`** drops `helm`'s progress output. For an OCI chart,
   `helm show crds` writes `Pulled:` and `Digest:` lines to *stdout*, and those
@@ -480,14 +489,26 @@ Which deployers need that step differs, so check yours:
 |---|---|---|
 | `helm` | `helm upgrade` skips `crds/` | Yes |
 | `helmfile` | `helmfile apply` upgrades through Helm, so it also skips `crds/` | Yes |
-| `flux` | The generated `HelmRelease` sets no `spec.upgrade.crds`, and the helm-controller default is `Skip` | Yes |
+| `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
 
-Flux can be made to handle this itself by setting `spec.upgrade.crds:
-CreateReplace` on the `HelmRelease`, but AICR does not generate that field for
-any component today, and `CreateReplace` is a cluster-wide behavior change that
-should be decided per chart rather than assumed. Until then, treat Flux like
-`helm`.
+`ownsCRDs` is opt-in, and narrow on purpose. Of the 15 registry components
+that ship CRDs under `crds/`, 11 share at least one CRD with another
+component: `nfd`, `gpu-operator`, and `network-operator` all ship the
+NodeFeature CRDs, and `nfd`, `gpu-operator`, and `kai-scheduler` all appear
+together in `base.yaml`. If every release replaced CRDs on upgrade, two or
+three `HelmRelease` objects would rewrite the same CRD on every reconcile,
+each with the schema its own chart pins. The `Skip` default is what prevents
+that today, so it stays the default.
+
+A component qualifies only if it solely owns every CRD it ships and ships none
+using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
+injected at runtime. `kubeflow-trainer` is excluded for that second reason.
+Currently `gatekeeper`, `k8s-aibom`, and `nvsentinel` qualify.
+
+`helm` and `helmfile` always need the step, because skipping `crds/` on
+upgrade is Helm's own behavior rather than something the generated bundle can
+change.
 
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the
