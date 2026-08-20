@@ -229,6 +229,7 @@ func isStructuredImageKey(key string) bool {
 func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 	var name, repository, tag, digest string
 	var namePresent bool
+	var digestNode *yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		key, value := n.Content[i], n.Content[i+1]
 		switch key.Value {
@@ -278,6 +279,7 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 			tag = scalar
 		case imageDigestKey:
 			digest = scalar
+			digestNode = value
 		}
 	}
 	if !namePresent {
@@ -291,7 +293,22 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 		return "", nil
 	}
 	ref := combineCRDTriplet(name, repository, tag)
-	return appendContainerSHA(ref, digest)
+	if digest == "" || strings.Contains(ref, "@") {
+		return ref, nil
+	}
+	if !containerSHARE.MatchString(digest) {
+		return "", errors.Wrap(
+			errors.ErrCodeInvalidRequest,
+			"invalid image descriptor member",
+			&invalidStructuredImageDescriptorError{
+				field:  imageDigestKey,
+				line:   digestNode.Line,
+				column: digestNode.Column,
+				reason: fmt.Sprintf("must match sha256:<64 lowercase hex chars>, got %q", digest),
+			},
+		)
+	}
+	return ref + "@" + digest, nil
 }
 
 func nonNullImageMappingScalar(n *yaml.Node) (string, bool) {

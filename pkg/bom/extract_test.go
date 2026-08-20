@@ -602,9 +602,10 @@ func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
 
 // TestExtractImagesFromYAML_InvalidDigestInMapping exercises the fail-loud
 // guard for the structured image descriptor's `digest` field: any value that
-// does not match `^sha256:[a-f0-9]{64}$` must surface as an extraction error
-// so a typo, truncation, or bogus override cannot silently ship a malformed
-// ref into the BOM/PURL output.
+// does not match `^sha256:[a-f0-9]{64}$` must surface as an
+// invalidStructuredImageDescriptorError so mirror-discovery and BOM-generation
+// callers that gate on IsInvalidStructuredImageDescriptor fail closed rather
+// than warning-and-continuing with the image omitted.
 func TestExtractImagesFromYAML_InvalidDigestInMapping(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -620,7 +621,7 @@ func TestExtractImagesFromYAML_InvalidDigestInMapping(t *testing.T) {
       tag: "17.4"
       digest: notasha256
 `,
-			wantSub: `invalid containerSHA "notasha256"`,
+			wantSub: `field "digest"`,
 		},
 		{
 			name: "sha256 prefix but truncated hex in digest field",
@@ -631,7 +632,7 @@ func TestExtractImagesFromYAML_InvalidDigestInMapping(t *testing.T) {
       tag: "17.4"
       digest: sha256:abc123
 `,
-			wantSub: `invalid containerSHA "sha256:abc123"`,
+			wantSub: `field "digest"`,
 		},
 		{
 			name: "uppercase hex in digest field",
@@ -642,7 +643,7 @@ func TestExtractImagesFromYAML_InvalidDigestInMapping(t *testing.T) {
       tag: "17.4"
       digest: sha256:304AB813518754228F9F792F79D6DA36359B82D8ECF418096C636725F8C930AD
 `,
-			wantSub: `invalid containerSHA`,
+			wantSub: `field "digest"`,
 		},
 	}
 	for _, tt := range tests {
@@ -650,6 +651,9 @@ func TestExtractImagesFromYAML_InvalidDigestInMapping(t *testing.T) {
 			_, err := ExtractImagesFromYAML([]byte(tt.in))
 			if err == nil {
 				t.Fatal("expected error for malformed digest field")
+			}
+			if !IsInvalidStructuredImageDescriptor(err) {
+				t.Errorf("IsInvalidStructuredImageDescriptor(%v) = false, want true", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
