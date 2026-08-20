@@ -329,8 +329,7 @@ closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
 The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
 `aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
-the chart version pinned in the registry. This is positive proof that the
-deployed CRDs came from that chart, not a breakage detector. It matters
+the chart version pinned in the registry. It matters
 because Helm and Helmfile skip a chart's `crds/` directory on upgrade, and the
 `HelmRelease` AICR generates for Flux leaves `spec.upgrade.crds` unset so the
 helm-controller default of `Skip` applies. A cluster can therefore run a new
@@ -342,6 +341,14 @@ and a partially applied CRD set cannot pass. If this check fails after a chart
 bump, the pre-upgrade CRD step in
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
 is the thing to run.
+
+The assertion establishes that the storage-version contract matches the pinned
+chart. It is not provenance: it reads one field, so it cannot show the CRDs
+originated from that chart, and it cannot tell apart chart versions that share
+a storage version. Charts 1.0.0, 1.1.0, and 1.2.0 all declare `v1alpha1` as
+storage. So the check catches a stranded upgrade that crosses a
+storage-version boundary, such as 1.2.0 to 1.3.0, and does not catch one
+within a boundary, such as 1.0.0 to 1.2.0.
 
 **Overriding the chart version requires overriding this assertion.** Assert
 content is static YAML with no templating, so the expected storage version is
