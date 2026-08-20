@@ -312,3 +312,66 @@ func TestApplyRuntimeInventoryRejectsIncoherentEnable(t *testing.T) {
 		t.Errorf("error = %v, want a coherence rejection", err)
 	}
 }
+
+// TestDeepCopyPreservesRuntimeInventory covers a defect found in review:
+// RecipeResult.DeepCopy allocated a fresh RecipeConfiguration and cloned only
+// Slurm, so the runtime inventory record was dropped rather than aliased.
+//
+// Client.AdoptRecipe always deep-copies, so an adopted recipe kept the
+// component override the selection applied while losing the configuration that
+// explains it — a recipe acting on a decision it no longer records.
+func TestDeepCopyPreservesRuntimeInventory(t *testing.T) {
+	t.Parallel()
+
+	result := runtimeInventoryTestResult()
+	mode := RuntimeInventoryDisabled
+	if err := applyBuildConfig(result, &buildConfig{runtimeInventoryMode: &mode}); err != nil {
+		t.Fatalf("applyBuildConfig() error = %v", err)
+	}
+
+	clone := result.DeepCopy()
+	got, present := clone.RuntimeInventoryMode()
+	if !present {
+		t.Fatal("DeepCopy dropped configuration.runtimeInventory")
+	}
+	if got != RuntimeInventoryDisabled {
+		t.Errorf("cloned mode = %q, want %q", got, RuntimeInventoryDisabled)
+	}
+
+	// A copy, not an alias: mutating the clone must not reach the original.
+	clone.Configuration.RuntimeInventory.Mode = RuntimeInventoryEnabled
+	if orig, _ := result.RuntimeInventoryMode(); orig != RuntimeInventoryDisabled {
+		t.Errorf("original mode = %q after mutating the clone; the pointer is shared", orig)
+	}
+
+	// The sibling section must survive the same copy.
+	if clone.Configuration.Slurm != nil && result.Configuration.Slurm == nil {
+		t.Error("clone invented a Slurm section")
+	}
+}
+
+// TestQueryHydrationExposesRuntimeInventory covers the second half of the same
+// class: the recipe recorded the selection but `aicr query --selector
+// configuration.runtimeInventory.mode` returned NOT_FOUND, because hydration
+// projected only Configuration.Slurm.
+func TestQueryHydrationExposesRuntimeInventory(t *testing.T) {
+	t.Parallel()
+
+	result := runtimeInventoryTestResult()
+	mode := RuntimeInventoryDisabled
+	if err := applyBuildConfig(result, &buildConfig{runtimeInventoryMode: &mode}); err != nil {
+		t.Fatalf("applyBuildConfig() error = %v", err)
+	}
+
+	hydrated, err := HydrateResult(result)
+	if err != nil {
+		t.Fatalf("Hydrate() error = %v", err)
+	}
+	got, err := Select(hydrated, "configuration.runtimeInventory.mode")
+	if err != nil {
+		t.Fatalf("Select(configuration.runtimeInventory.mode) error = %v", err)
+	}
+	if got != string(RuntimeInventoryDisabled) {
+		t.Errorf("selector returned %v, want %q", got, RuntimeInventoryDisabled)
+	}
+}
