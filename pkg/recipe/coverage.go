@@ -482,12 +482,11 @@ func (s *MetadataStore) strictDimensionGaps(criteria *Criteria, applied []string
 		for _, value := range s.dimensionValues(dim) {
 			probe := *criteria
 			setCriteriaDimension(&probe, dim.name, value)
-			for _, match := range s.FindMatchingOverlays(&probe) {
-				for _, name := range s.inheritanceChainNames(match) {
-					if _, already := appliedSet[name]; !already {
-						reachable[value] = struct{}{}
-					}
-				}
+			// One overlay outside the applied set is enough to establish that
+			// this value reaches something currently being skipped; the rest
+			// of the matches and their chains cannot change the answer.
+			if s.reachesUnappliedOverlay(&probe, appliedSet) {
+				reachable[value] = struct{}{}
 			}
 		}
 		if len(reachable) == 0 {
@@ -504,6 +503,19 @@ func (s *MetadataStore) strictDimensionGaps(criteria *Criteria, applied []string
 		return nil
 	}
 	return gaps
+}
+
+// reachesUnappliedOverlay reports whether resolving probe would pull in any
+// overlay that is not already applied.
+func (s *MetadataStore) reachesUnappliedOverlay(probe *Criteria, applied map[string]struct{}) bool {
+	for _, match := range s.FindMatchingOverlays(probe) {
+		for _, name := range s.inheritanceChainNames(match) {
+			if _, already := applied[name]; !already {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // dimensionValues returns every value the catalog declares for a dimension,

@@ -124,7 +124,7 @@ func TestJointSufficiencySubsumesRetiredGuard(t *testing.T) {
 	base := &RecipeMetadata{}
 	base.Metadata.Name = testRecipeBase
 
-	checked, guardFired := 0, 0
+	guardFired := 0
 	// Catalogs of three overlays drawn from the shape space. Three is enough
 	// to express the split-coverage catalog (service alone, accelerator alone,
 	// both plus an os) that the guard was written for.
@@ -147,7 +147,6 @@ func TestJointSufficiencySubsumesRetiredGuard(t *testing.T) {
 						continue
 					}
 					guardFired++
-					checked++
 					if _, err := store.BuildRecipeResult(ctx, &query); err == nil {
 						t.Fatalf("SUBSUMPTION VIOLATED: retired guard rejected %s but resolution succeeded\n"+
 							"  catalog: %s | %s | %s",
@@ -160,5 +159,5 @@ func TestJointSufficiencySubsumesRetiredGuard(t *testing.T) {
 	if guardFired == 0 {
 		t.Fatal("generated no catalog where the retired guard fires; the test proves nothing")
 	}
-	t.Logf("subsumption held: retired guard fired on %d (catalog, query) pairs, all still rejected", checked)
+	t.Logf("subsumption held: retired guard fired on %d (catalog, query) pairs, all still rejected", guardFired)
 }
