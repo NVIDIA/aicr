@@ -210,8 +210,16 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 		},
 		{
 			// A cluster whose CRDs were replaced with a newer chart's while
-			// the recipe still pins v1.2.0. The controller keeps working —
+			// the recipe still pins 1.2.0. The controller keeps working —
 			// v1alpha1 stays served — so nothing else in this check notices.
+			//
+			// This state is also what a *legitimate* 1.3.0 pin looks like,
+			// which is the version-coupling the check documents: the expected
+			// version is a literal tied to the registry's pinned chart, so a
+			// recipe overriding `version` must supply matching inline
+			// healthCheckAsserts or set healthCheckSkip. The assertion cannot
+			// distinguish the two cases, and pinning the strict reading is
+			// the fail-closed direction.
 			name:    "aiboms CRD storage version drift fails closed",
 			desired: new(int64(1)), deploymentGen: 3, status: healthyDeployment,
 			configPresent: true,
