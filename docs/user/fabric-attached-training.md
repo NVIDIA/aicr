@@ -47,8 +47,8 @@ namespace and reference it from `runtimeRef`.
 - four hostPath volumes, and `IPC_LOCK` on the worker
 - the NCCL configuration for your plugin release
 
-**The shape, abridged** — commented-out lines mark what is elided. This shows
-where things go; it is not a working manifest:
+**The shape, abridged** — `"<...>"` marks a value you must fill in. Every key a
+workload needs is shown; this is not a working manifest:
 
 ```yaml
 apiVersion: trainer.kubeflow.org/v1alpha1
@@ -71,22 +71,24 @@ spec:
             template:
               metadata:
                 annotations:
-                  # devices.gke.io/container.tcpxo-daemon: <NRI device list>
+                  devices.gke.io/container.tcpxo-daemon: "<NRI device list — see reference>"
                   networking.gke.io/default-interface: eth0
-                  # networking.gke.io/interfaces: <YOUR 8 network names>
+                  networking.gke.io/interfaces: "<YOUR 8 network names — see below>"
               spec:
-                # nodeSelector / tolerations: carry over from your bundle
+                nodeSelector: "<carry over from your bundle>"
+                tolerations: "<carry over from your bundle>"
                 initContainers:
                 - name: tcpxo-daemon     # native sidecar: restartPolicy: Always
-                  image: <registry>/tcpgpudmarxd-dev:<paired-with-your-plugin>
-                  # + args, capabilities, volumeMounts
+                  image: "<registry>/tcpgpudmarxd-dev:<paired-with-your-plugin>"
+                  args: "<see reference>"                 # + capabilities, volumeMounts
                 containers:
                 - name: node
                   image: <your training image>
                   resources:
                     limits: {nvidia.com/gpu: 8}     # TCPXO needs all 8
-                  # + env, securityContext (IPC_LOCK), volumeMounts
-                # volumes: 4 hostPaths + dshm
+                  env: "<incl. NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY>"
+                  securityContext: "<IPC_LOCK>"          # + volumeMounts
+                volumes: "<4 hostPaths + dshm>"
 ```
 
 Then reference it from the TrainJob, which carries no fabric configuration at all:
@@ -165,19 +167,22 @@ carries **no `resources` block at all**, so `resourcesPerNode` is the only
 source of GPUs here — omitting `nvidia.com/gpu` yields a pod with none:
 
 ```yaml
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+spec:
   runtimeRef:
     name: torch-distributed
-    kind: ClusterTrainingRuntime     # note: cluster-scoped, unlike the GKE example
+    kind: ClusterTrainingRuntime     # cluster-scoped, unlike the GKE example
     apiGroup: trainer.kubeflow.org
   trainer:
     numNodes: 2                      # torch-distributed defaults to 1
     resourcesPerNode:
-        limits:
-          nvidia.com/gpu: 8
-          vpc.amazonaws.com/efa: 32   # per node — see below
-        requests:
-          nvidia.com/gpu: 8
-          vpc.amazonaws.com/efa: 32
+      limits:
+        nvidia.com/gpu: 8
+        vpc.amazonaws.com/efa: 32    # per node — see below
+      requests:
+        nvidia.com/gpu: 8
+        vpc.amazonaws.com/efa: 32
 ```
 
 **An image carrying the EFA stack.** AICR installs the device plugin, which
