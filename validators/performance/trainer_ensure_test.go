@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -277,15 +279,6 @@ func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 			declared: false,
 			objects:  completeTrainerInstall(),
 		},
-		{
-			// Regression guard for a fall-through the linter caught once already:
-			// after the declared wait succeeds, the code must take the readiness
-			// path and stop, not continue into the install path and reinstall over
-			// a Trainer the recipe delivered.
-			name:     "declared and delivered: does not fall through to install",
-			declared: true,
-			objects:  completeTrainerInstall(),
-		},
 	}
 
 	for _, tt := range tests {
@@ -360,5 +353,53 @@ func TestWaitForDeclaredTrainer_CanceledRunIsNotADeploymentDefect(t *testing.T) 
 	}
 	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
 		t.Errorf("error code = %v, want ErrCodeTimeout", err)
+	}
+}
+
+// TestEnsureTrainerInstalled_DeclaredRolloutDoesNotFallThrough pins the branch the
+// fall-through actually lived in.
+//
+// A table row seeded with completeTrainerInstall() cannot reach it: the first probe
+// in ensureTrainerInstalled succeeds, so waitForDeclaredTrainer is never entered and
+// the row exercises the same path as the one above it. The supported rollout state —
+// initially incomplete, complete on a later poll — is the one that enters the wait
+// and then must return rather than continuing into the install path.
+func TestEnsureTrainerInstalled_DeclaredRolloutDoesNotFallThrough(t *testing.T) {
+	defer withShortTrainerWait(t)()
+
+	client := newTrainerFakeClient()
+	var probes int32
+	// Report incomplete on the first probe and complete afterwards, which is what a
+	// chart still landing looks like. The reactor answers only the first read the
+	// probe makes; a NotFound there is enough to make the whole probe incomplete.
+	client.PrependReactor("get", "customresourcedefinitions",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			if atomic.AddInt32(&probes, 1) == 1 {
+				return true, nil, apierrors.NewNotFound(
+					schema.GroupResource{Group: "apiextensions.k8s.io", Resource: "customresourcedefinitions"},
+					"trainjobs.trainer.kubeflow.org")
+			}
+			return false, nil, nil // fall through to the tracker
+		})
+	for _, obj := range completeTrainerInstall() {
+		if err := client.Tracker().Add(obj); err != nil {
+			t.Fatalf("seeding fake: %v", err)
+		}
+	}
+
+	// A nil discovery client makes installTrainer panic or error immediately, so if
+	// the code falls through to the install path this test fails loudly rather than
+	// silently passing.
+	refs, err := ensureTrainerInstalled(context.Background(), client, nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Errorf("refs = %d, want 0: a Trainer the recipe delivered must never be "+
+			"claimed for cleanup, and a non-empty result means the install path ran", len(refs))
+	}
+	if atomic.LoadInt32(&probes) < 2 {
+		t.Errorf("probes = %d, want >= 2: the wait was never entered, so this test "+
+			"does not cover the branch it claims to", probes)
 	}
 }

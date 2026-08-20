@@ -250,8 +250,15 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (t
 	// makes this work for both the self-install overlay and the Helm chart.
 	install, found, err := discoverTrainerInstall(ctx, dynamicClient,
 		trainerValidatingWebhookGVR, trainerValidatingWebhookConfig, trainerValidatingWebhookName)
-	if err != nil || !found {
+	if err != nil {
 		return trainerInstall{}, false, err
+	}
+	if !found {
+		// Carry discovery's own reason out rather than flattening it to a bare
+		// false: it is the difference between "no admission configuration at all"
+		// and "the configuration is there but names no Service", and the operator
+		// needs to know which to fix.
+		return install, false, nil
 	}
 
 	ok, err := hasTrainerWebhook(ctx, dynamicClient,
@@ -456,8 +463,11 @@ func trainerResourceClient(dynamicClient dynamic.Interface,
 //   - not declared, and absent: install an ephemeral fixture and tear it down, as
 //     before. There is nothing to mask, because nothing was promised.
 //
-// This is deliberately keyed on the recipe rather than on live cluster state, so the
-// same recipe behaves the same way regardless of what happens to be installed.
+// This is deliberately keyed on the recipe rather than on live cluster state: what a
+// missing installation *means* is now a property of the recipe, not of whatever
+// happens to be on the cluster. Execution still differs across the undeclared rows —
+// a pre-existing Trainer is reused, an absent one is installed — which is why the
+// earlier "behaves identically regardless of live state" wording was withdrawn.
 func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface,
 	discoveryClient discovery.DiscoveryInterface, recipeDeclaresTrainer bool) ([]trainerResourceRef, error) {
 
