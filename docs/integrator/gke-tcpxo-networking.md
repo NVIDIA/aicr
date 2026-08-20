@@ -257,6 +257,8 @@ NRI profile (recommended, no `hostNetwork`):
 
 ```shell
 kubectl create ns nccl-test
+# Note: this manifest is pinned to the earlier v1.0.14 / v1.0.20 pair.
+# Update both images to your cluster's pair before applying.
 kubectl apply -f demos/workloads/training/gke-nccl-test-tcpxo.yaml -n nccl-test
 
 # Wait for pods to be 2/2 Running
