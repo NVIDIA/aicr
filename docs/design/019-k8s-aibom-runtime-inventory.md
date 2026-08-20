@@ -2,7 +2,11 @@
 
 ## Status
 
-**Accepted** — 2026-08-19. Originally proposed 2026-08-12.
+**Accepted** — 2026-08-19. Originally proposed 2026-08-12. Amended
+2026-08-19 to define what "non-alpha storage API" requires, to replace the
+preview-label concept with the registry-only boundary this ADR already
+establishes, and to name the single GKE recipe in scope for stock adoption.
+See [Amendment: stock adoption on one GKE recipe](#amendment-stock-adoption-on-one-gke-recipe).
 
 The accepted implementation qualifies upstream v1.2.0 at source commit
 `4aa7638b08ab9927bfa8df85c46c80234b9996f9`, OCI chart digest
@@ -551,6 +555,12 @@ semantics.
 
 ## Follow-Up Decisions
 
+Three of the six requirements below are resolved by
+[Amendment: stock adoption on one GKE recipe](#amendment-stock-adoption-on-one-gke-recipe);
+one remains open, and two are planned work tracked in the epic. The list is
+retained as originally written; the amendment records what changed, what
+remains open, and where the rest is tracked.
+
 Stock adoption requires a separate ADR or explicit amendment that defines:
 
 - the exact recipe families in scope;
@@ -564,6 +574,94 @@ Runtime-observation signing requires a separate evidence design as described in
 Decision 8. Neither follow-up is implied by registry qualification or elapsed
 time.
 
+## Amendment: stock adoption on one GKE recipe
+
+**2026-08-19.** Amends the Follow-Up Decisions above. Execution is tracked in
+[#2271](https://github.com/NVIDIA/aicr/issues/2271); this section records only
+the decisions that change what this ADR committed to.
+
+### A. "Non-alpha storage API" means the storage flip, not object migration
+
+The requirement is satisfied when the served CRD reports
+`spec.versions[?storage].name == 'v1beta1'`. Migrating existing stored objects
+and cleaning `status.storedVersions` are **not** required, because upstream's
+graduated schema is byte-identical to `v1alpha1` and conversion strategy stays
+`None`, so existing stored objects remain readable without rewrite.
+
+Those two steps instead gate a later, separate decision: **removing**
+`v1alpha1`. Upstream commits to that removal being its own announced release
+with a documented migration procedure, in
+[k8s-aibom design note 001](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/ae3782d052ab8951bab0a273fbf642ecfadc8195/docs/design/001-api-graduation-v1beta1.md).
+
+AICR asserts the storage version in the component health check so a cluster
+whose CRD was never upgraded fails validation rather than passing quietly.
+
+### B. No preview or maturity label; the registry boundary is the gate
+
+Cross-organization discussion proposed an "explicit preview label" on the
+registry entry as the carrier for adopting an alpha-API component. **AICR
+does not implement one.** Every entry in `recipes/registry.yaml` is assumed
+stable, and a preview-labeled entry would contradict that premise.
+
+Decision 2 above already supplies the needed mechanism, and this amendment
+makes its second-order meaning explicit:
+
+- **Registry presence** asserts the component is qualified and stable enough
+  to offer. It says nothing about default installation.
+- **Stock recipe presence** asserts AICR ships the component by default. This
+  is the assertion that requires the graduated API.
+
+Therefore stock-adoption preparation — design, selection semantics, and the
+managed-cluster demonstration — proceeds against the currently qualified
+v1.2.0, while **the overlay change adding the component to a stock recipe
+merges only after requalification against the graduation release**. The
+demonstration runs from a custom recipe or an unmerged branch, which proves
+the workflow without asserting stock stability.
+
+### C. Recipe in scope
+
+`h100-gke-cos-inference`, a single leaf overlay. Not a recipe family, not
+`gke-cos-inference`, not `gke-cos`, not a mixin, and not a shared base.
+Inference is chosen because an AI BOM inventories models and AI workloads, so
+a served model exercises the component's actual purpose. Substituting a
+different recipe requires amending this section.
+
+### D. User-demand case
+
+The demonstration itself. No external customer or partner is driving GKE
+adoption. The motivation is proving the workflow end to end on a managed
+cluster and establishing the pattern for later stock adoptions. This is
+recorded plainly rather than framed as customer demand, because the
+requirement exists to prevent adoption justified only by availability.
+
+### Still open: selection and opt-out semantics
+
+Unresolved and deliberately not decided here. `ComponentRef.IsEnabled()`
+already reads a recipe-recorded `enabled` override, which satisfies "recipe-
+recorded" and is not the bundle-time toggle Decision 2 rejects. What remains
+undecided is how a user generating from a stock recipe declines the
+component: by authoring a custom overlay using the existing mechanism, or by
+a generation-time flag that `aicr recipe` records into the emitted recipe.
+
+The second shape changes the CLI contract, so it is a decision rather than an
+implementation detail. It must be resolved before the overlay change in C
+merges, and whichever shape is chosen is recorded by amending this section.
+
+### Requirement status
+
+| Follow-Up requirement | Status |
+|---|---|
+| Exact recipe families in scope | Resolved — C |
+| Selection and opt-out semantics | **Open** — see above |
+| Non-alpha storage API and migration policy | Resolved — A |
+| Concrete user-demand case | Resolved — D |
+| Managed-cluster qualification and measured cost | Planned — [#2271](https://github.com/NVIDIA/aicr/issues/2271) |
+| Upgrade, rollback, uninstall, support evidence | Planned — [#2282](https://github.com/NVIDIA/aicr/issues/2282) |
+
+Decision 4 is unchanged: chart, image, CRDs, and the public status contract
+remain one versioned set, so the graduation release requires full
+requalification rather than a version bump.
+
 ## References
 
 - [k8s-aibom repository](https://github.com/GoogleCloudPlatform/k8s-aibom)
@@ -573,5 +671,6 @@ time.
 - [AIBOM API at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/api/v1alpha1/aibom_types.go)
 - [AIBOMControllerConfig API at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/api/v1alpha1/aibomcontrollerconfig_types.go)
 - [Security model at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/docs/security-model.md)
+- [k8s-aibom design note 001: v1beta1 API graduation, at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/ae3782d052ab8951bab0a273fbf642ecfadc8195/docs/design/001-api-graduation-v1beta1.md)
 - [ADR-006: Container Image Pinning Policy](006-image-pinning-policy.md)
 - [ADR-007: Verifiable Recipe Test Evidence](007-recipe-evidence.md)
