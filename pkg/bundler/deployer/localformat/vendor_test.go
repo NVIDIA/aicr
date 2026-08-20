@@ -1899,6 +1899,44 @@ func TestFetchIndexYAMLRetry(t *testing.T) {
 	}
 }
 
+// TestFetchIndexYAMLRetryEndToEnd drives defaultFetchIndexYAML against a real
+// httptest.Server so the production HTTP-status classifier in
+// doFetchIndexYAMLAttempt is exercised through the retry wrapper, rather than
+// the hand-rolled classifier the table test stubs in.
+func TestFetchIndexYAMLRetryEndToEnd(t *testing.T) {
+	origCheck := checkFetchTargetURL
+	checkFetchTargetURL = func(_ context.Context, _ string) error { return nil }
+	t.Cleanup(func() { checkFetchTargetURL = origCheck })
+
+	origTimer := newBackoffTimer
+	t.Cleanup(func() { newBackoffTimer = origTimer })
+	newBackoffTimer = func(time.Duration) *time.Timer {
+		return time.NewTimer(1 * time.Nanosecond)
+	}
+
+	var hits int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		if hits <= 2 {
+			http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = io.WriteString(w, "apiVersion: v1\nentries: {}\n")
+	}))
+	defer ts.Close()
+
+	body, err := defaultFetchIndexYAML(context.Background(), ts.URL+"/index.yaml")
+	if err != nil {
+		t.Fatalf("fetch after 503 retries: %v", err)
+	}
+	if !strings.Contains(string(body), "apiVersion") {
+		t.Errorf("body = %q, want to contain apiVersion", body)
+	}
+	if hits != 3 {
+		t.Errorf("server hits = %d, want 3 (two 503s then 200)", hits)
+	}
+}
+
 // TestFetchIndexYAMLContextCancellation verifies that context cancellation
 // during backoff is honored and does not continue retrying.
 func TestFetchIndexYAMLContextCancellation(t *testing.T) {

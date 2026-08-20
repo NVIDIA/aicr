@@ -51,6 +51,20 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// remapParentCtxErr converts a parent-context error into the matching
+// structured code. Returns nil when the parent context is still live, so
+// callers can fall through to their own error handling.
+func remapParentCtxErr(ctx context.Context, msg string) error {
+	parentErr := ctx.Err()
+	if parentErr == nil {
+		return nil
+	}
+	if stderrors.Is(parentErr, context.Canceled) {
+		return errors.Wrap(errors.ErrCodeCanceled, msg+" canceled", parentErr)
+	}
+	return errors.Wrap(errors.ErrCodeTimeout, msg+" deadline exceeded", parentErr)
+}
+
 // jitterBackoff applies ±25% jitter to d to decorrelate retries.
 // Mirrors pkg/oci/push.go pattern for retry backoff scheduling.
 func jitterBackoff(d time.Duration) time.Duration {
@@ -609,7 +623,6 @@ var newBackoffTimer = time.NewTimer
 // backoff. Non-transient errors (404, 401/403, other 4xx) fail on the first
 // attempt. Policy-rejected redirects are never retried.
 func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error) {
-	var lastErr error
 	backoff := defaults.HelmChartIndexRetryInitialBackoff
 
 	for attempt := 1; attempt <= defaults.HelmChartIndexRetryBudget; attempt++ {
@@ -619,39 +632,38 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 		attemptCtx, attemptCancel := context.WithTimeout(ctx, defaults.HelmChartIndexPreCheckTimeout)
 
 		// Check parent context cancellation first.
-		if parentErr := ctx.Err(); parentErr != nil {
+		if ctxErr := remapParentCtxErr(ctx, "vendor-charts: index pre-check"); ctxErr != nil {
 			attemptCancel()
-			if stderrors.Is(parentErr, context.Canceled) {
-				return nil, errors.Wrap(errors.ErrCodeCanceled,
-					"vendor-charts: index pre-check canceled", parentErr)
-			}
-			if stderrors.Is(parentErr, context.DeadlineExceeded) {
-				return nil, errors.Wrap(errors.ErrCodeTimeout,
-					"vendor-charts: index pre-check deadline exceeded", parentErr)
-			}
-			return nil, parentErr
+			return nil, ctxErr
 		}
 
 		// Fail-closed egress check on every attempt. Defends against DNS
-		// rebinding: a malicious resolver could serve an allowed address on
-		// the first attempt, then rebind to a disallowed address on retries.
+		// rebinding across attempts: a malicious resolver could serve an
+		// allowed address on the first attempt, then rebind to a disallowed
+		// address on retries. Note the intra-attempt resolve-then-dial TOCTOU
+		// documented at checkEgressPolicy remains — closing it requires
+		// pinning the validated IP into a custom DialContext.
 		// Validation errors are routed through the retry classification logic:
 		// transient errors (timeouts, temporary DNS failures) are retried;
 		// policy rejections fail immediately.
 		if err := checkFetchTargetURL(attemptCtx, indexURL); err != nil {
 			attemptCancel()
-			lastErr = err
 			// Policy rejections (InvalidRequest) never retry.
 			isRetryable := stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
 			if !isRetryable {
 				return nil, err
 			}
-			// Don't retry if at budget limit.
+			// Don't retry if at budget limit. Remap parent-context errors so a
+			// ctx-canceled lookupIP wrapped as Unavailable surfaces as
+			// Canceled/Timeout rather than a transient-looking failure.
 			if attempt == defaults.HelmChartIndexRetryBudget {
+				if ctxErr := remapParentCtxErr(ctx, "vendor-charts: index pre-check"); ctxErr != nil {
+					return nil, ctxErr
+				}
 				return nil, err
 			}
 			slog.WarnContext(ctx, "vendor-charts: index fetch retrying after validation error",
-				"attempt", attempt, "error", err)
+				"attempt", attempt, "of", defaults.HelmChartIndexRetryBudget, "error", err)
 			// Sleep with exponential backoff + jitter to decorrelate retries.
 			timer := newBackoffTimer(jitterBackoff(backoff))
 			select {
@@ -673,24 +685,14 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 		attemptCancel()
 
 		// Check parent context cancellation first.
-		if parentErr := ctx.Err(); parentErr != nil {
-			if stderrors.Is(parentErr, context.Canceled) {
-				return nil, errors.Wrap(errors.ErrCodeCanceled,
-					"vendor-charts: index pre-check canceled", parentErr)
-			}
-			if stderrors.Is(parentErr, context.DeadlineExceeded) {
-				return nil, errors.Wrap(errors.ErrCodeTimeout,
-					"vendor-charts: index pre-check deadline exceeded", parentErr)
-			}
-			return nil, parentErr
+		if ctxErr := remapParentCtxErr(ctx, "vendor-charts: index pre-check"); ctxErr != nil {
+			return nil, ctxErr
 		}
 
 		// Success path.
 		if err == nil {
 			return body, nil
 		}
-
-		lastErr = err
 
 		// Determine if this error is retryable. Policy-rejected redirects
 		// (InvalidRequest code) and non-transient auth/validation errors must
@@ -706,7 +708,8 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 		}
 
 		slog.WarnContext(ctx, "vendor-charts: index fetch retrying after transient error",
-			"attempt", attempt, "error", err)
+			"attempt", attempt, "of", defaults.HelmChartIndexRetryBudget,
+			"target", redactURL(indexURL), "error", err)
 
 		// Sleep with exponential backoff + jitter, but honor parent context cancellation.
 		timer := newBackoffTimer(jitterBackoff(backoff))
@@ -724,10 +727,7 @@ func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error)
 		backoff *= 2
 	}
 
-	// Should not reach here, but return the last error if we do.
-	if lastErr != nil {
-		return nil, lastErr
-	}
+	// Unreachable: the final attempt always returns from inside the loop.
 	return nil, errors.New(errors.ErrCodeInternal,
 		"vendor-charts: index pre-check exhausted retry budget without result")
 }
