@@ -369,6 +369,28 @@ spec:
 			},
 		},
 		{
+			// Charts that optionally carry a digest pin ship digest: "" or
+			// digest: null as a "not pinned" default. Treat like an absent
+			// digest rather than failing the whole survey.
+			name: "operator image mapping treats empty and null digest as absent",
+			in: `spec:
+  empty:
+    image:
+      repository: ghcr.io/example/unpinned
+      tag: v1
+      digest: ""
+  null:
+    image:
+      repository: ghcr.io/example/unpinned-null
+      tag: v1
+      digest:
+`,
+			want: []string{
+				"ghcr.io/example/unpinned-null:v1",
+				"ghcr.io/example/unpinned:v1",
+			},
+		},
+		{
 			// The name-present branch combined with a sibling digest field
 			// must produce a fully-pinned reference.
 			name: "operator image mapping with name repository tag and digest produces pinned ref",

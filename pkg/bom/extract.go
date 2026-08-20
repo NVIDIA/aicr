@@ -72,10 +72,12 @@ func stripHelmTemplates(data []byte) []byte {
 // mappings. Empty or null scalar `image:` values and values still containing an
 // unrendered Go template directive are skipped. A recognized structured
 // descriptor returns an invalid-request error when a present name or
-// repository field is null, empty, or non-scalar, when a tag field is
-// non-scalar, or when a registry or digest member is present (dropping either
-// would emit a wrong or un-pinned reference). A null or empty tag follows the
-// Helm appVersion idiom and is treated as absent.
+// repository field is null, empty, or non-scalar, when a tag or digest field
+// is non-scalar, or when a registry member is present (which cannot be folded
+// into the reference without losing information). A null or empty tag or digest
+// follows the Helm appVersion/unpinned idiom and is treated as absent. A
+// non-empty digest is validated as sha256:<64 lowercase hex chars> and folded
+// in as an @<digest> suffix.
 //
 // Helm template directives ({{ ... }}) are replaced with a placeholder before
 // parsing, so files mixing YAML with Helm templates (those under
@@ -247,10 +249,11 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 
 		scalar, ok := nonNullImageMappingScalar(value)
 		if !ok {
-			if key.Value == imageTagKey && isNullOrEmptyScalar(value) {
-				// tag: "" / tag: null — the Helm "use appVersion"
-				// idiom. Treat like an absent tag instead of failing
-				// the whole survey.
+			if (key.Value == imageTagKey || key.Value == "digest") && isNullOrEmptyScalar(value) {
+				// tag: "" / tag: null — the Helm "use appVersion" idiom.
+				// digest: "" / digest: null — unpinned default in charts
+				// that optionally carry a digest pin.
+				// Treat both as absent rather than failing the whole survey.
 				continue
 			}
 			return "", errors.Wrap(
