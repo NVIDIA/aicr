@@ -149,7 +149,11 @@ runs:
           docker push "localhost:5001/aicr-validators/aiperf-bench:latest"
         ) &
         pid_validators=$!
-        wait $pid_aicr $pid_validators
+        # Separate waits, not `wait $pid_aicr $pid_validators`: bash returns
+        # only the LAST pid's exit status from a combined wait, so a failed
+        # pid_aicr would be silently masked whenever pid_validators succeeds.
+        wait $pid_aicr
+        wait $pid_validators
 
         # Wait for deployment rollout (may already be ready)
         kubectl rollout status deployment/aicrd -n aicr --timeout=120s
