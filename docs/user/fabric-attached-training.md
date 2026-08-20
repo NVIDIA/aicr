@@ -37,14 +37,16 @@ That single limitation decides the rest:
 | EFA | EKS | no | your `TrainJob` |
 | InfiniBand / RDMA | AKS | no | your `TrainJob` |
 
-## GKE — GPUDirect TCPXO
+## GKE GPUDirect TCPXO
 
 TCPXO needs the `tcpxo-daemon` sidecar, so the wiring cannot live in a TrainJob.
 `TrainingRuntime` is an ordinary namespaced resource: author one in your
 namespace and reference it from `runtimeRef`.
 
-**What that runtime must carry**, all of it documented in
-[Workload Pod Configuration](../integrator/gke-tcpxo-networking.md#workload-pod-configuration-nri-profile):
+**What that runtime must carry.** The annotations and sidecar are specified in
+[Workload Pod Configuration](../integrator/gke-tcpxo-networking.md#workload-pod-configuration-nri-profile);
+the `dshm` volume, worker `IPC_LOCK`, daemon `args` and NCCL settings are not in
+that section — take them from AICR's validator runtime, cited below.
 
 - the `networking.gke.io/interfaces` and `devices.gke.io/container.tcpxo-daemon`
   annotations, on the pod template metadata
@@ -52,7 +54,11 @@ namespace and reference it from `runtimeRef`.
   cluster runs
 - four hostPath volumes plus a memory-backed `dshm` at `/dev/shm`, and `IPC_LOCK`
   on the worker
-- the NCCL configuration for your plugin release
+- the NCCL configuration for your plugin release. The ~40 `NCCL_FASTRAK_*`
+  tuning variables ship as `/usr/local/nvidia/lib64/nccl-env-profile.sh`, laid
+  down by the plugin installer and version-matched to it. Source that file in
+  your container's startup rather than transcribing the variables — a job that
+  skips it still attaches to the fabric, but runs well under its bandwidth
 
 **A placement sketch** — `"<...>"` marks a value you must fill in. It shows
 where each piece goes; it is not a manifest, abridged or otherwise, and the
@@ -81,7 +87,7 @@ spec:
                 annotations:
                   devices.gke.io/container.tcpxo-daemon: "<NRI device list — see reference>"
                   networking.gke.io/default-interface: eth0
-                  networking.gke.io/interfaces: "<YOUR 8 network names — see below>"
+                  networking.gke.io/interfaces: "<JSON array, 9 entries — see reference>"
               spec:
                 nodeSelector: "<carry over from your bundle>"
                 tolerations: "<carry over from your bundle>"
@@ -174,7 +180,7 @@ which prefers the TrainJob's value and can yield `PET_NPROC_PER_NODE=1`.
 
 If you must set it, repeat *every* resource in it, including the GPU request.
 
-## EKS — EFA
+## EKS EFA
 
 EFA needs no sidecar, so a TrainJob can attach to it against a generic runtime
 such as the `torch-distributed` runtime AICR ships. It needs three things:
@@ -196,10 +202,10 @@ spec:
     resourcesPerNode:
       limits:
         nvidia.com/gpu: 8
-        vpc.amazonaws.com/efa: <EFA_COUNT>    # per node — read it, see below
+        vpc.amazonaws.com/efa: "<EFA_COUNT>"    # per node — read it, see below
       requests:
         nvidia.com/gpu: 8
-        vpc.amazonaws.com/efa: <EFA_COUNT>
+        vpc.amazonaws.com/efa: "<EFA_COUNT>"
 ```
 
 **`IPC_LOCK` and `FI_EFA_FORK_SAFE=1`.** `torch-distributed` grants neither —
@@ -208,6 +214,11 @@ other `FI_*` variables in `spec.trainer.env`, and `IPC_LOCK` via a
 `runtimePatches` entry setting `securityContext` on the `node` container
 (`securityContext` is patchable there even though `env` is not). Without
 `IPC_LOCK`, NCCL may fail to register pinned buffers.
+
+**`NCCL_SOCKET_IFNAME=eth0`.** AICR's tested EFA and InfiniBand runtimes both pin
+this so NCCL's bootstrap uses the control interface. On a multi-NIC node — p5
+carries several EFA ENIs — NCCL may otherwise pick a secondary, non-routable NIC
+for rendezvous and hang during initialization, before any transport is chosen.
 
 **An image carrying the EFA stack.** AICR installs the device plugin, which
 exposes the devices — it does not put `libfabric` or `aws-ofi-nccl` into your
@@ -226,7 +237,7 @@ kubectl get nodes -l <your-gpu-pool-selector> \
   -o custom-columns='NODE:.metadata.name,EFA:.status.allocatable.vpc\.amazonaws\.com/efa'
 ```
 
-## AKS — InfiniBand / RDMA
+## AKS InfiniBand and RDMA
 
 Also TrainJob-expressible. AICR fixes the resource name and the value is always
 `1`:
@@ -255,6 +266,12 @@ the device is allocated, which reads as an NCCL bug rather than a missing
 capability. Add it the same way as for EFA: a `runtimePatches` entry setting
 `securityContext` on the `node` container.
 
+**An image carrying the IB verbs stack.** As with EFA, allocating the device is
+not enough: NCCL's IB transport dlopens `libibverbs` and the rest of rdma-core at
+runtime. An image without them logs `NET/IB : No device found` and falls back to
+sockets — the job still completes, just over TCP. Build from a base that carries
+rdma-core, or install it in the image.
+
 **A memory-backed `/dev/shm` is also expected.** AICR's tested runtime mounts a
 `dshm` volume (`emptyDir: {medium: Memory}`) there; the default 64 MiB `/dev/shm`
 is small for multi-process NCCL.
@@ -264,7 +281,10 @@ prerequisites.
 
 ## Verifying the fabric is in use
 
-Run a short job with `NCCL_DEBUG=INFO` and check which transport NCCL selected:
+Run a short job with `NCCL_DEBUG=INFO` and check which transport NCCL selected.
+Every runtime AICR ships sets `NCCL_DEBUG=WARN`, at which this line is
+suppressed — so grepping an ordinary run finds nothing, which is not evidence of
+socket fallback:
 
 ```shell
 kubectl logs <worker-pod> -c node | grep -i 'NCCL INFO.*Using network'
