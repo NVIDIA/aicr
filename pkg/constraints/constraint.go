@@ -126,7 +126,7 @@ func ParseConstraintExpression(expr string) (*ParsedConstraint, error) {
 		pc.Operator == OperatorLTE || pc.Operator == OperatorLT
 	if isComparisonOp {
 		if parsed, err := version.ParseVersion(pc.Value); err == nil {
-			if version.HasGKEPrefix(parsed.Extras) {
+			if version.HasRawGKESuffix(parsed.Extras) {
 				if _, ok := version.ExtractGKEBuild(parsed.Extras); !ok {
 					return nil, errors.New(errors.ErrCodeInvalidRequest,
 						fmt.Sprintf("constraint value %q has a malformed GKE build suffix (must be -gke.N with N >= 0)", pc.Value))

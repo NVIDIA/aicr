@@ -901,6 +901,32 @@ func TestExtractGKEBuild(t *testing.T) {
 	}
 }
 
+// TestHasRawGKESuffix verifies that HasRawGKESuffix returns true whenever the
+// -gke. prefix is present, regardless of build-number validity.
+func TestHasRawGKESuffix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		extras string
+		want   bool
+	}{
+		{"-gke.1318000", true},  // valid
+		{"-gke.-1", true},       // invalid build but prefix present
+		{"-gke.abc", true},      // invalid build but prefix present
+		{"-gke.", true},         // empty build but prefix present
+		{"-eks-3025e55", false}, // non-GKE
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.extras, func(t *testing.T) {
+			t.Parallel()
+			if got := HasRawGKESuffix(tt.extras); got != tt.want {
+				t.Errorf("HasRawGKESuffix(%q) = %v, want %v", tt.extras, got, tt.want)
+			}
+		})
+	}
+}
+
 // ExampleVersion_Compare demonstrates sorting versions
 func ExampleVersion_Compare() {
 	v1, _ := ParseVersion("1.2.0")

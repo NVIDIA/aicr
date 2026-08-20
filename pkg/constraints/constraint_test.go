@@ -40,6 +40,8 @@ func TestParseConstraintExpression(t *testing.T) {
 		{name: "less than", expression: "< 2.0", wantOp: OperatorLT, wantValue: "2.0"},
 		{name: "equal op", expression: "== ubuntu", wantOp: OperatorEQ, wantValue: "ubuntu"},
 		{name: "lone = is alias for ==", expression: "= ubuntu", wantOp: OperatorEQ, wantValue: "ubuntu"},
+		{name: "lone = no-space is alias for ==", expression: "=ubuntu", wantOp: OperatorEQ, wantValue: "ubuntu"},
+		{name: "lone = with empty value errors", expression: "=", expectError: true, wantErrCode: errors.ErrCodeInvalidRequest},
 		{name: "not equal", expression: "!= rhel", wantOp: OperatorNE, wantValue: "rhel"},
 
 		// Exact match (no operator)

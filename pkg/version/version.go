@@ -24,7 +24,7 @@ import (
 )
 
 // gkeSuffixPrefix is the bare prefix that identifies GKE-specific build number
-// extras of the form "-gke.NNNNNN". Unexported: use HasGKESuffix or
+// extras of the form "-gke.NNNNNN". Unexported: use HasRawGKESuffix or
 // ExtractGKEBuild for cross-package consumption.
 const gkeSuffixPrefix = "gke."
 
@@ -202,18 +202,12 @@ func ExtractGKEBuild(extras string) (int64, bool) {
 	return n, true
 }
 
-// HasGKESuffix reports whether the Extras field carries a valid GKE build
-// suffix ("-gke.N" with N >= 0). Returns false for malformed or non-GKE extras.
-func HasGKESuffix(extras string) bool {
-	_, ok := ExtractGKEBuild(extras)
-	return ok
-}
-
-// HasGKEPrefix reports whether the Extras field begins with the "-gke." prefix,
-// regardless of whether the trailing build number is valid. Use this when you
-// need to distinguish "has a GKE prefix but invalid number" from "no GKE prefix
-// at all" (e.g. to reject malformed constraint values at parse time).
-func HasGKEPrefix(extras string) bool {
+// HasRawGKESuffix reports whether the Extras field begins with the "-gke."
+// prefix, regardless of whether the trailing build number is valid. Use this
+// when you need to distinguish "has the GKE suffix leader but an invalid build
+// number" from "no GKE suffix at all" (e.g. to reject malformed constraint
+// values at parse time). For full validity checking combine with ExtractGKEBuild.
+func HasRawGKESuffix(extras string) bool {
 	return strings.HasPrefix(strings.TrimPrefix(extras, "-"), gkeSuffixPrefix)
 }
 
