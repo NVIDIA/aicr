@@ -432,8 +432,9 @@ helm show crds "${CHART}" --version "${VERSION}" \
   | kubectl apply --server-side --force-conflicts -f -
 ```
 
-Three details in that command are load-bearing, and the obvious shorter form
-fails on both counts:
+Three details in that command are load-bearing. The obvious shorter form —
+piping `helm show crds` straight into `kubectl apply --server-side` — fails on
+the first two:
 
 - **`sed -n '/^---$/,$p'`** drops `helm`'s progress output. For an OCI chart,
   `helm show crds` writes `Pulled:` and `Digest:` lines to *stdout*, and those
