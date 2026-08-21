@@ -165,7 +165,7 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	// Build ONE per-command Client bound to the resolved data source. Both
 	// recipe-resolution paths (--recipe load and criteria resolve) run through
 	// it, replacing the old process-global data provider.
-	client, err := recipeClientFromCmd(cmd, cfg)
+	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
 		return err
 	}

@@ -296,7 +296,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
-          cache: false
+          cache: true
       - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd  # v4.37.7
         with:
           languages: go
@@ -528,7 +528,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
-          cache: false
+          cache: true
       - name: Verify committed BOM versions and variants match the recipes
         env:
           GOFLAGS: -mod=vendor
@@ -579,7 +579,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
-          cache: false
+          cache: true
       - name: Verify committed tuning-status table is up to date
         env:
           GOFLAGS: -mod=vendor
@@ -661,7 +661,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
-          cache: false
+          cache: true
       - name: Verify committed coverage matrix is up to date
         env:
           GOFLAGS: -mod=vendor

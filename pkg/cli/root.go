@@ -385,7 +385,12 @@ func sanitizeCompletionArgs(args []string) []string {
 //
 // The "initializing external data provider" INFO log matches validate /
 // bundle / mirror so a `--data` invocation is auditable.
-func recipeClientFromCmd(cmd *cli.Command, cfg *config.AICRConfig) (*aicr.Client, error) {
+func recipeClientFromCmd(
+	ctx context.Context,
+	cmd *cli.Command,
+	cfg *config.AICRConfig,
+) (*aicr.Client, error) {
+
 	source := aicr.EmbeddedSource()
 	if dataDir := cmd.String("data"); dataDir != "" {
 		slog.Info("initializing external data provider", "directory", dataDir)
@@ -396,12 +401,13 @@ func recipeClientFromCmd(cmd *cli.Command, cfg *config.AICRConfig) (*aicr.Client
 		slog.Info("initializing external data provider", "source", "spec.recipe.data")
 		source = configured
 	}
-	client, err := aicr.NewClient(
+	client, err := aicr.NewClientContext(ctx,
 		aicr.WithRecipeSource(source),
 		aicr.WithVersion(version),
 	)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to initialize data provider")
 	}
 	return client, nil
 }
@@ -419,13 +425,14 @@ func recipeClientFromCmd(cmd *cli.Command, cfg *config.AICRConfig) (*aicr.Client
 // signed as a release asset.
 //
 // Callers MUST Close the returned Client (defer client.Close()).
-func embeddedClient() (*aicr.Client, error) {
-	client, err := aicr.NewClient(
+func embeddedClient(ctx context.Context) (*aicr.Client, error) {
+	client, err := aicr.NewClientContext(ctx,
 		aicr.WithRecipeSource(aicr.EmbeddedSource()),
 		aicr.WithVersion(version),
 	)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize aicr client", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to initialize aicr client")
 	}
 	return client, nil
 }

@@ -16,11 +16,15 @@ package cli
 
 import (
 	"bytes"
+	stderrors "errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -186,5 +190,171 @@ func TestRecipeAndQueryCommandsRejectExplicitEmptySlurmAccountingMode(t *testing
 					tt.name, err)
 			}
 		})
+	}
+}
+
+func TestQueryCmdCriteriaStrictRejectsExternalCriteria(t *testing.T) {
+	t.Setenv("AICR_CRITERIA_STRICT", "")
+	dataDir := writeQueryExternalCriteriaCatalog(t)
+	configPath := filepath.Join(t.TempDir(), "aicr-config.yaml")
+	config := `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: query-strict-test
+spec:
+  recipe:
+    criteriaStrict: true
+`
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		extraArgs   []string
+		wantErrCode errors.ErrorCode
+		wantOutput  string
+	}{
+		{
+			name:       "non-strict query accepts external criterion",
+			wantOutput: "external-query-service",
+		},
+		{
+			name:        "CLI flag rejects external criterion",
+			extraArgs:   []string{"--criteria-strict"},
+			wantErrCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "config rejects external criterion",
+			extraArgs:   []string{"--config", configPath},
+			wantErrCode: errors.ErrCodeInvalidRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			parent := &cli.Command{
+				Name:     "aicr",
+				Commands: []*cli.Command{queryCmd()},
+				Writer:   &output,
+			}
+			args := []string{
+				"aicr", "query",
+				"--data", dataDir,
+				"--service", "external-query-service",
+				"--selector", "criteria.service",
+			}
+			args = append(args, tt.extraArgs...)
+			err := parent.Run(t.Context(), args)
+			if tt.wantErrCode != "" {
+				if !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+					t.Fatalf("query error = %v, want code %s", err, tt.wantErrCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("query error = %v", err)
+			}
+			if !strings.Contains(output.String(), tt.wantOutput) {
+				t.Fatalf("query output = %q, want %q", output.String(), tt.wantOutput)
+			}
+		})
+	}
+}
+
+func writeQueryExternalCriteriaCatalog(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	registry := `apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components: []
+`
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+	overlaysDir := filepath.Join(dir, "overlays")
+	if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
+		t.Fatalf("create overlays directory: %v", err)
+	}
+	overlay := `apiVersion: aicr.run/v1alpha2
+kind: RecipeMetadata
+metadata:
+  name: external-query
+spec:
+  criteria:
+    service: external-query-service
+  componentRefs: []
+`
+	if err := os.WriteFile(filepath.Join(overlaysDir, "external-query.yaml"), []byte(overlay), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	return dir
+}
+
+// TestRecipeAndQueryCommandsRejectInvalidRuntimeInventoryMode exercises
+// runtimeInventoryResolveOptions' flag-set branch on both commands that expose
+// the flag.
+//
+// Without this the function is covered only by its "flag unset and no config"
+// fallthrough, which returns before touching the value — so a parse or wiring
+// defect in the branch operators actually use would not be observed.
+func TestRecipeAndQueryCommandsRejectInvalidRuntimeInventoryMode(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  func() *cli.Command
+		args []string
+	}{
+		{
+			name: "recipe",
+			cmd:  recipeCmd,
+			args: []string{"recipe", "--service", "eks", "--runtime-inventory", "off"},
+		},
+		{
+			name: "query",
+			cmd:  queryCmd,
+			args: []string{
+				"query", "--service", "eks", "--selector", "deploymentOrder",
+				"--runtime-inventory", "off",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd().Run(t.Context(), tt.args)
+			if err == nil {
+				t.Fatal("command error = nil, want rejection of an invalid runtime inventory mode")
+			}
+			// Assert the code, since that is what callers branch on; a text
+			// match alone would accept an unrelated error carrying similar
+			// wording. The message check stays to distinguish which
+			// invalid-request this is.
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), "invalid runtime inventory mode") {
+				t.Fatalf("command error = %v, want an invalid-mode rejection", err)
+			}
+		})
+	}
+}
+
+// TestRecipeCommandRejectsRuntimeInventoryWithoutComponent covers the flag-set
+// branch reaching a successful parse and then failing closed at build time,
+// which is the path an operator hits after a typo in --service.
+func TestRecipeCommandRejectsRuntimeInventoryWithoutComponent(t *testing.T) {
+	err := recipeCmd().Run(t.Context(), []string{
+		"recipe", "--service", "gke", "--accelerator", "h100",
+		"--os", "cos", "--intent", "inference",
+		"--runtime-inventory", "disabled",
+	})
+	if err == nil {
+		t.Fatal("command error = nil, want rejection for a recipe that does not declare the component")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "requires the recipe to declare component") {
+		t.Fatalf("command error = %v, want the missing-component rejection", err)
 	}
 }

@@ -555,9 +555,9 @@ semantics.
 
 ## Follow-Up Decisions
 
-Three of the six requirements below are resolved by
+Four of the six requirements below are resolved by
 [Amendment: stock adoption on one GKE recipe](#amendment-stock-adoption-on-one-gke-recipe);
-one remains open, and two are planned work tracked in the epic. The list is
+the remaining two are planned work tracked in the epic. The list is
 retained as originally written; the amendment records what changed, what
 remains open, and where the rest is tracked.
 
@@ -634,33 +634,90 @@ cluster and establishing the pattern for later stock adoptions. This is
 recorded plainly rather than framed as customer demand, because the
 requirement exists to prevent adoption justified only by availability.
 
-### Still open: selection and opt-out semantics
+### E. Selection and opt-out semantics
 
-Unresolved and deliberately not decided here. `ComponentRef.IsEnabled()`
-already reads a recipe-recorded `enabled` override, which satisfies "recipe-
-recorded" and is not the bundle-time toggle Decision 2 rejects. What remains
-undecided is how a user generating from a stock recipe declines the
-component: by authoring a custom overlay using the existing mechanism, or by
-a generation-time flag that `aicr recipe` records into the emitted recipe.
+Resolved 2026-08-20. A **generation-time flag recorded in the emitted recipe**,
+modelled on the existing `--slurm-accounting-mode` selection rather than
+invented:
 
-The second shape changes the CLI contract, so it is a decision rather than an
-implementation detail. It must be resolved before the overlay change in C
-merges, and whichever shape is chosen is recorded by amending this section.
+```bash
+aicr recipe ... --runtime-inventory disabled
+```
+
+The selection is recorded as `configuration.runtimeInventory.mode`, the recipe's
+`apiVersion` becomes `ConfiguredRecipeResultAPIVersion`, and the component's ref
+carries `install: false`. `ComponentRef.IsEnabled()` already reads that key, so
+the component leaves the resolved set, the bundle, and deployment validation.
+
+This satisfies Decision 2's specific objection. A bundle-time
+`--set k8s-aibom:enabled=false` was rejected because it changes neither the
+recipe nor its health checks; here both change, and the health-check half comes
+for free because the check lives on the component's own ref rather than on a
+sibling. That is simpler than the Slurm accounting precedent, which has to
+append and omit a check on a different component.
+
+Passing the flag on a recipe that does not declare the component is an error,
+not a silent no-op. Selecting a mode there is a mistake — wrong criteria, a
+typo, a recipe that never carried it — and succeeding quietly would record a
+decision the recipe cannot honor. The check runs before the configuration is
+written, so a rejected build leaves no partial record.
+
+The same selection is available in an `AICRConfig` document at
+`spec.recipe.configuration.runtimeInventory.mode`.
+
+**Scope boundary worth naming.** This is the second entry under
+`RecipeConfiguration`, and the pattern is one bespoke selection per optional
+component. That is deliberate: this ADR asks for this component specifically,
+and a generic per-component disable would need a policy for which components
+may be declined at all — nothing should let a recipe decline `gpu-operator`.
+A third entry is the signal to revisit rather than extend by reflex.
 
 ### Requirement status
 
 | Follow-Up requirement | Status |
 |---|---|
 | Exact recipe families in scope | Resolved — C |
-| Selection and opt-out semantics | **Open** — see above |
+| Selection and opt-out semantics | Resolved — E |
 | Non-alpha storage API and migration policy | Resolved — A |
 | Concrete user-demand case | Resolved — D |
-| Managed-cluster qualification and measured cost | Planned — [#2271](https://github.com/NVIDIA/aicr/issues/2271) |
-| Upgrade, rollback, uninstall, support evidence | Planned — [#2282](https://github.com/NVIDIA/aicr/issues/2282) |
+| Managed-cluster qualification and measured cost | Planned — [#2310](https://github.com/NVIDIA/aicr/issues/2310) |
+| Upgrade, rollback, uninstall, support evidence | Planned — [#2311](https://github.com/NVIDIA/aicr/issues/2311) |
 
 Decision 4 is unchanged: chart, image, CRDs, and the public status contract
 remain one versioned set, so the graduation release requires full
 requalification rather than a version bump.
+
+### Requalified artifact set: v1.3.0, 2026-08-20
+
+That requalification was performed. The Status block above records what was
+accepted on 2026-08-19 and is left intact as the dated record; this is the
+set the registry now pins.
+
+| Item | Qualified value |
+|---|---|
+| Source tag | [`v1.3.0`](https://github.com/GoogleCloudPlatform/k8s-aibom/releases/tag/v1.3.0) at `30af41abbe0bed3c41a42289ccf294be8c4779bb` |
+| Image | `ghcr.io/googlecloudplatform/k8s-aibom@sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d` |
+| Chart | `oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.3.0` at `sha256:4ffa933e272a977e0b60f2eca1c4326176e6196e2ee69e1bf4f72c8b5a511c90` |
+| Attestations | Image SLSA provenance, image CycloneDX SBOM, and chart SLSA provenance all verify, bound to `refs/tags/v1.3.0`, source digest `30af41ab…`, and a GitHub-hosted runner |
+| API | `v1alpha1` and `v1beta1` both served; CRD storage on `v1beta1` |
+| Kubernetes support | Policy rather than fixed range: stable APIs only, no known ceiling, tested floor 1.27, backed by an upstream version-matrix CI job |
+
+Gate findings that changed AICR-visible behavior:
+
+- **Rendered RBAC is byte-identical to 1.2.0.** No permission change accompanies
+  the graduation.
+- **The rendered resource set is unchanged**, and the chart still renders
+  `AIBOMControllerConfig` at `aibom.k8saibom.dev/v1alpha1`. Only CRD *storage*
+  moved to `v1beta1`. The component health check reflects that asymmetry
+  deliberately, asserting `v1beta1` storage on both CRDs while continuing to
+  read the config resource at `v1alpha1`.
+- **The readiness fixes ship in the image, not the chart.** Probe configuration
+  renders identically across the two versions, so the corrected readiness
+  behavior is only obtained by re-pinning the image digest — which is the
+  substantive half of this requalification.
+
+The prior pin's supported-range statement is superseded by the upstream policy
+above; AICR documentation links that policy rather than restating a range.
 
 ## References
 

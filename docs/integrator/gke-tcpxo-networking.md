@@ -132,7 +132,7 @@ spec:
   hostNetwork: false
   containers:
     - name: tcpxo-daemon
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.20
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
       securityContext:
         capabilities:
           add: [NET_ADMIN, NET_BIND_SERVICE]
@@ -175,18 +175,39 @@ Key properties:
 - NRI annotations inject GPU devices and multi-NIC interfaces
 - Requires NRI device injector DaemonSet deployed on GPU nodes
 
-See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example.
+Running a **Kubeflow TrainJob** rather than a bare Pod? A TrainJob cannot add
+the `tcpxo-daemon` sidecar, so the wiring must live in a `TrainingRuntime` — see
+[Attaching a Training Workload to the Cluster Fabric](../user/fabric-attached-training.md).
+
+See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example. (pinned to an earlier coupled pair, plugin `v1.0.14` with daemon `v1.0.20`)
 
 ## NCCL Plugin Version Matching
 
-The NCCL test container image must match the cluster's installed TCPXO plugin version. Check with:
+Google publishes the plugin installer and the `tcpxo-daemon` sidecar as a
+**coupled release pair**. Running a mismatched pair is unsupported. The pair
+AICR currently ships is:
+
+| Component | Image | Version |
+|---|---|---|
+| Plugin installer (DaemonSet, cluster-side) | `nccl-plugin-gpudirecttcpx-dev` | `v1.0.15` |
+| Sidecar (workload-side) | `tcpgpudmarxd-dev` | `v1.0.21` |
+
+Check what your cluster actually runs:
 
 ```shell
 kubectl get ds nccl-tcpxo-installer -n kube-system \
-  -o jsonpath='{.spec.template.spec.containers[?(@.name=="nccl-tcpxo-installer")].image}'
+  -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="nccl-tcpxo-installer")].image}'
 ```
 
-Update the `nccl-plugin-gpudirecttcpx-dev` image tag in your workload to match.
+Then set your workload's `tcpxo-daemon` image to the daemon version paired with
+it, per [Google's release notes][tcpxo-releases].
+
+**Upgrade in order:** upgrade the plugin installer first, then the workload's
+daemon. Google also advises that workloads should not be running while the
+installer is upgraded. This is a sequence, not a statement that a mismatched
+pair is supported to run.
+
+[tcpxo-releases]: https://github.com/GoogleCloudPlatform/container-engine-accelerators/blob/master/gpudirect-tcpxo/README.md
 
 ## Running the NCCL Benchmark
 
@@ -237,6 +258,8 @@ NRI profile (recommended, no `hostNetwork`):
 
 ```shell
 kubectl create ns nccl-test
+# Note: this manifest is pinned to the earlier v1.0.14 / v1.0.20 pair.
+# Update both images to your cluster's pair before applying.
 kubectl apply -f demos/workloads/training/gke-nccl-test-tcpxo.yaml -n nccl-test
 
 # Wait for pods to be 2/2 Running

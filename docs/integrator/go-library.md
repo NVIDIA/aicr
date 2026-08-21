@@ -346,20 +346,74 @@ are created. Other facade options
 
 ## Recipe sources
 
-AICR exposes one production recipe source today; pick it via
+AICR exposes three production recipe sources; pick one via
 `aicr.WithRecipeSource`:
 
 | Source | Constructor | Status |
 |--------|-------------|--------|
 | Embedded | `aicr.EmbeddedSource()` | Production. Uses only AICR's built-in recipe data with no external overlay. |
 | Local filesystem | `aicr.FilesystemSource(path)` | Production. Use a directory containing a `registry.yaml` (layered over the embedded recipe data). |
-| OCI registry | `aicr.OCISource(registry, tag)` | **Reserved — not yet implemented.** `NewClient` returns `ErrCodeUnavailable` when this source is selected. |
+| OCI registry | `aicr.OCISource(repository, digest)` | Production. Pulls one immutable, digest-pinned recipe catalog into a private per-Client workspace. |
 
 `EmbeddedSource` resolves against the recipe data compiled into the
 AICR binary — no filesystem path required. Use it when you want AICR's
 bundled recipe data and no local overrides. `FilesystemSource`
 layers an external directory over that same embedded data, so files in
 the directory override their embedded equivalents.
+
+### Digest-pinned OCI recipe sources
+
+`OCISource` keeps the repository and immutable selector separate. The
+repository may start with `oci://`, but must not contain a tag or digest.
+The selector must be a complete `sha256:<64-hex-character>` manifest
+digest obtained through trusted configuration; tags and implicit `latest`
+are rejected.
+
+The accepted artifact is one OCI image manifest with the AICR artifact type,
+the canonical empty config, and exactly one gzip-compressed layer. Downloads
+and extraction are bounded, content digests are checked while streaming, and
+archive traversal, links, devices, oversized content, and malformed catalogs
+fail closed before the provider is activated.
+
+OCI sources use credentials from the standard Docker configuration
+(`~/.docker/config.json` or `$DOCKER_CONFIG`) and may invoke the configured
+credential helper for the selected registry host.
+
+Use `NewClientContext` so caller cancellation and tighter deadlines
+propagate through registry authentication, download, extraction, and catalog
+validation:
+
+```go
+import (
+	"context"
+	"errors"
+
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+)
+
+func useOCIRecipes(ctx context.Context, repository, manifestDigest, tempDir string) (retErr error) {
+	client, err := aicr.NewClientContext(ctx,
+		aicr.WithRecipeSource(aicr.OCISource(repository, manifestDigest)),
+		aicr.WithOCISourceTempDir(tempDir),
+	)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, client.Close()) }()
+
+	return client.LoadCatalog(ctx)
+}
+```
+
+`NewClient` remains a bounded compatibility wrapper. OCI construction
+never exceeds `defaults.OCIRecipeConstructionTimeout` (eight minutes), while
+`NewClientContext` also honors any shorter caller deadline. Registry staging
+and materialization each retain the five-minute
+`defaults.OCIRecipePullTimeout` phase ceiling; the larger construction
+envelope reserves more than three minutes for materialization and catalog
+validation after maximum-jitter pull retries.
+`Client.Close` waits for in-flight reads, evicts provider-scoped caches,
+and removes only the unique child workspace it owns.
 
 ## Client options
 
@@ -391,6 +445,11 @@ client, err := aicr.NewClient(
   It returns `nil` when none are set — `WithAllowLists` treats a `nil`
   `AllowLists` as allow-all, so the result is always safe to pass straight
   to `WithAllowLists`.
+- **`WithOCISourceTempDir(parent string)`** selects an existing writable
+  parent for an OCI-backed Client's private workspace. It is rejected for
+  embedded and filesystem sources. Budget capacity for up to a 64 MiB staged
+  compressed layer plus a 128 MiB extracted tree, along with filesystem and
+  manifest overhead.
 
 `AllowLists` is a facade-owned struct whose `Accelerators`, `Services`,
 `Intents`, and `OSTypes` fields are plain `[]string` slices, so callers
@@ -630,42 +689,52 @@ tooling, so the CLI and an embedding runtime agree on the settings by
 construction rather than by convention.
 
 ```go
-cfg, err := aicr.LoadConfig(ctx, "aicr-config.yaml")   // path or HTTP(S) URL
-if err != nil {
-	log.Fatal(err)
-}
+import (
+	"context"
+	"errors"
 
-// spec.recipe.data decides how the Client is constructed.
-source := aicr.EmbeddedSource()
-if configured, ok := cfg.RecipeSource(); ok {
-	source = configured
-}
-client, err := aicr.NewClient(aicr.WithRecipeSource(source))
-if err != nil {
-	log.Fatal(err)
-}
-defer client.Close()
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+)
 
-// REQUIRED before deriving criteria: loading the catalog is what seeds this
-// Client's registry with the values its overlays contribute. Skip it and a
-// value defined only by spec.recipe.data is still unknown, so the derivation
-// below rejects it.
-if err = client.LoadCatalog(ctx); err != nil {
-	log.Fatal(err)
-}
+func resolveCommittedConfig(ctx context.Context) (retErr error) {
+	cfg, err := aicr.LoadConfig(ctx, "aicr-config.yaml") // path or HTTP(S) URL
+	if err != nil {
+		return err
+	}
 
-// spec.recipe.criteria, parsed against this Client's registry so a value
-// contributed by a --data overlay validates against the same catalog.
-criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())
-if err != nil {
-	log.Fatal(err)
-}
-opts, err := cfg.RecipeResolveOptions()   // spec.recipe.profile + accounting mode
-if err != nil {
-	log.Fatal(err)
-}
+	// spec.recipe.data decides how the Client is constructed.
+	source := aicr.EmbeddedSource()
+	if configured, ok := cfg.RecipeSource(); ok {
+		source = configured
+	}
+	client, err := aicr.NewClientContext(ctx, aicr.WithRecipeSource(source))
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, client.Close()) }()
 
-result, err := client.ResolveRecipeFromCriteriaWithOptions(ctx, criteria, opts...)
+	// REQUIRED before deriving criteria: loading the catalog is what seeds this
+	// Client's registry with the values its overlays contribute. Skip it and a
+	// value defined only by spec.recipe.data is still unknown, so the derivation
+	// below rejects it.
+	if err = client.LoadCatalog(ctx); err != nil {
+		return err
+	}
+
+	// spec.recipe.criteria, parsed against this Client's registry so a value
+	// contributed by a --data overlay validates against the same catalog.
+	criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())
+	if err != nil {
+		return err
+	}
+	opts, err := cfg.RecipeResolveOptions() // profile + accounting + runtime inventory
+	if err != nil {
+		return err
+	}
+
+	_, retErr = client.ResolveRecipeFromCriteriaWithOptions(ctx, criteria, opts...)
+	return retErr
+}
 ```
 
 **Config derives options; it never applies them.** A `Config` does not attach
@@ -706,8 +775,8 @@ derive step rather than the load step.
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
-| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode` |
-| `RecipeProfile()` / `RecipeAccountingMode()` | the same two, raw, for callers applying their own precedence first |
+| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
+| `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` | the same three, raw, for callers applying their own precedence first |
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 

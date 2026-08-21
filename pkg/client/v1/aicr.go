@@ -63,7 +63,7 @@
 //     built by NVIDIA CI.
 //
 // All facade types (Snapshot, AgentConfig, Criteria, RecipeRequest,
-// RecipeResult, ComponentBundle, ComponentRef, PhaseResult, AllowLists)
+// RecipeResult, ComponentBundle, ComponentRef, PhaseResult, and AllowLists)
 // are facade-owned structs translated to and from the upstream pkg/*
 // shapes, so internal field renames don't churn external callers.
 //
@@ -84,7 +84,11 @@
 //	if err != nil {
 //	    return err
 //	}
-//	defer client.Close()
+//	defer func() {
+//	    if closeErr := client.Close(); closeErr != nil {
+//	        slog.Error("failed to close AICR client", "error", closeErr)
+//	    }
+//	}()
 //
 //	result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
 //	    Service:     "eks",
@@ -110,8 +114,8 @@
 // # Concurrency and Client lifecycle
 //
 // Each Client owns its own DataProvider and per-DataProvider cached
-// metadata store and component registry. Multiple Clients constructed
-// from different sources can resolve recipes concurrently without
+// metadata store, component registry, and criteria registry. Multiple Clients
+// constructed from different sources can resolve recipes concurrently without
 // clobbering each other — a property multi-tenant consumers (e.g., a
 // controller managing one Client per per-tenant configuration) rely
 // on. This is a v0.12+ guarantee; earlier facade builds mutated a
@@ -129,8 +133,8 @@
 //
 // **Call Close when done.** When a Client is no longer needed
 // (cache eviction, controller shutdown), call Close to drop its
-// metadata store and component registry from the recipe package's
-// internal caches. Without this, memory grows monotonically with
+// metadata store, component registry, and criteria registry from the recipe
+// package's internal caches. Without this, memory grows monotonically with
 // the number of unique DataProviders ever observed.
 //
 // See docs/integrator/go-library.md for the integration guide.
@@ -138,9 +142,12 @@ package aicr
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -150,7 +157,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/ocisource"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -159,11 +168,9 @@ import (
 )
 
 // Compile-time assertion that *Client satisfies io.Closer. Anchoring the
-// Close() error signature against the standard interface documents why the
-// method returns an error even though the current implementation can't fail
-// — composite cleanup chains (errgroup.Go with deferred Close, defer-with-
-// error patterns) rely on io.Closer's shape, and future cleanup steps may
-// legitimately fail (e.g., flushing a metrics buffer on Close).
+// Close() error signature against the standard interface documents its
+// checked teardown contract. OCI-backed Clients own a private materialized
+// workspace whose removal can fail and must be reported to the caller.
 var _ io.Closer = (*Client)(nil)
 
 // Client is the single entry point for external Go consumers.
@@ -196,28 +203,96 @@ type Client struct {
 	// change after construction, so it doesn't need locking.
 	allowLists *AllowLists
 
+	// ociSource captures source-only workspace settings.
+	// Options are recorded independently of source so their order is
+	// irrelevant; NewClient rejects them when the final source is not OCI.
+	ociSource ociSourceConfig
+
 	// inflight tracks in-flight cache-using operations so Close
 	// can drain them before evicting the per-Client metadata-store
-	// and component-registry caches. Without this, a ResolveRecipe
-	// goroutine that releases mu before calling LoadMetadataStoreFor
+	// component-registry, and criteria-registry caches. Without this, a
+	// ResolveRecipe goroutine that releases mu before calling LoadMetadataStoreFor
 	// can repopulate storeCache[dp] AFTER Close already evicted it
 	// — violating the "Close frees this Client's caches" guarantee.
 	// Each entry point Add(1)s under RLock (so Close's Wait can see
 	// the increment) and Done()s on return; Close marks the Client
 	// closed under write-lock, releases, then Wait()s.
 	inflight sync.WaitGroup
+
+	// closeOnce serializes teardown and publishes closeErr to every concurrent
+	// or repeated caller only after teardown has completed. Reading closeErr
+	// after sync.Once.Do returns is synchronized by Once's completion edge.
+	closeOnce sync.Once
+	closeErr  error
 }
 
-// NewClient constructs a Client with the supplied functional options.
+type clientDependencies struct {
+	newOCIProvider func(
+		context.Context,
+		*recipe.EmbeddedDataProvider,
+		ocisource.Config,
+	) (recipe.DataProvider, error)
+}
+
+func defaultClientDependencies() clientDependencies {
+	return clientDependencies{
+		newOCIProvider: func(
+			ctx context.Context,
+			embedded *recipe.EmbeddedDataProvider,
+			config ocisource.Config,
+		) (recipe.DataProvider, error) {
+
+			return ocisource.New(ctx, embedded, config)
+		},
+	}
+}
+
+// NewClient constructs a Client with the supplied functional options. OCI
+// source construction uses a bounded compatibility context; callers that need
+// cancellation or a tighter deadline should use NewClientContext.
 // Callers must provide a recipe source via WithRecipeSource.
 //
 // For FilesystemSource, the external directory is layered OVER the
 // embedded recipe data — files in the directory override embedded
 // equivalents, and recipes must include a registry.yaml at the root.
 //
-// OCI sources are not yet wired through to the loader and return an
-// ErrCodeUnavailable error from NewClient until that gap is closed.
+// OCI sources require an immutable sha256 manifest digest. One
+// defaults.OCIRecipeConstructionTimeout deadline bounds the complete OCI
+// source construction; nested per-phase pull deadlines can only shorten that
+// shared budget.
 func NewClient(opts ...Option) (*Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.OCIRecipeConstructionTimeout)
+	defer cancel()
+	return newClientWithContextAndDependencies(ctx, defaultClientDependencies(), opts...)
+}
+
+// NewClientContext constructs a Client with the supplied functional options
+// and derives all OCI source I/O from ctx. The complete operation remains
+// bounded by defaults.OCIRecipeConstructionTimeout when the caller provides a
+// longer deadline or no deadline.
+func NewClientContext(ctx context.Context, opts ...Option) (*Client, error) {
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"context is required for client construction")
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaults.OCIRecipeConstructionTimeout)
+	defer cancel()
+	return newClientWithContextAndDependencies(ctx, defaultClientDependencies(), opts...)
+}
+
+func newClientWithContextAndDependencies(
+	ctx context.Context,
+	deps clientDependencies,
+	opts ...Option,
+) (*Client, error) {
+
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"context is required for client construction")
+	}
+	if err := clientConstructionContextError(ctx); err != nil {
+		return nil, err
+	}
 	c := &Client{}
 
 	for _, opt := range opts {
@@ -236,10 +311,16 @@ func NewClient(opts ...Option) (*Client, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"recipe source is required — pass WithRecipeSource")
 	}
+	if err := validateSourceConfiguration(c); err != nil {
+		return nil, err
+	}
 
-	dp, err := buildDataProvider(c.source)
+	dp, err := buildDataProvider(ctx, c.source, c.ociSource, deps)
 	if err != nil {
 		return nil, err
+	}
+	if err = clientConstructionContextError(ctx); err != nil {
+		return nil, joinDataProviderCleanup(err, dp)
 	}
 
 	// Bind the Builder to this Client's own DataProvider via
@@ -272,31 +353,98 @@ func NewClient(opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// Close releases this Client's cached metadata store and component
-// registry from the recipe package's internal caches. Call when a
-// Client is no longer needed (cache eviction in a higher-level
+// validateSourceConfiguration validates the order-independent combination of
+// recipe-source and source-only options before any provider or registry I/O.
+func validateSourceConfiguration(c *Client) error {
+	hasOCIOptions := c.ociSource.tempDir != nil
+	if c.source.kind != sourceKindOCI {
+		if hasOCIOptions {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"OCI source options require WithRecipeSource(OCISource(...))")
+		}
+		return nil
+	}
+
+	pullOptions := oci.RecipePullOptions{
+		Repository: c.source.registry,
+		Selector:   c.source.selector,
+	}
+	if c.ociSource.tempDir != nil {
+		if *c.ociSource.tempDir == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"OCI source temporary-directory parent must be non-empty")
+		}
+		pullOptions.TempDir = *c.ociSource.tempDir
+	}
+	digestSelector, err := oci.ValidateRecipePullOptions(pullOptions)
+	if err != nil {
+		return err
+	}
+	if !digestSelector {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"OCI recipe source requires a sha256 manifest digest selector")
+	}
+	if c.ociSource.tempDir != nil {
+		if err := validateOCITempDir(*c.ociSource.tempDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOCITempDir(parent string) error {
+	abs, err := filepath.Abs(parent)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"resolve OCI source temporary-directory parent", err)
+	}
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"inspect OCI source temporary-directory parent", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"OCI source temporary-directory parent must be an existing real directory")
+	}
+	if info.Mode().Perm()&0o222 == 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"OCI source temporary-directory parent must be writable")
+	}
+	return nil
+}
+
+// Close releases this Client's cached metadata store, component registry,
+// and criteria registry from the recipe package's internal caches. Call when
+// a Client is no longer needed (cache eviction in a higher-level
 // memoiser, controller shutdown) to prevent unbounded memory
 // growth — the recipe package keys its caches on DataProvider
 // identity and does not auto-evict, so a process that observes many
 // distinct recipe sources over time would otherwise grow memory
 // monotonically.
 //
-// Safe to call on a nil receiver and safe to call multiple times
-// (subsequent calls are no-ops). Always returns nil; the signature
-// matches io.Closer so this can stand in for io.Closer in
-// composite cleanup chains.
+// Safe to call on a nil receiver and safe to call concurrently or multiple
+// times. Every non-nil caller waits for the same teardown and receives the
+// same cached cleanup result. OCI-backed Clients remove only the private child
+// workspace they own; a removal failure is returned with its structured code.
 func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
+	c.closeOnce.Do(func() {
+		c.closeErr = c.close()
+	})
+	return c.closeErr
+}
+
+func (c *Client) close() error {
 	c.mu.Lock()
 	dp := c.dp
 	c.dp = nil
 	c.builder = nil
 	c.mu.Unlock()
 
-	// Drain in-flight ResolveRecipe / BundleComponents /
-	// CollectSnapshot / ValidateState calls before evicting. Each
+	// Drain in-flight cache-using calls before evicting. Each
 	// entry point Add(1)s under the read lock; because Close
 	// acquires the write lock, any in-flight increment is visible
 	// here. New callers arriving after the write-lock release see
@@ -306,15 +454,20 @@ func (c *Client) Close() error {
 	// calls below — silently leaking cache entries after Close.
 	c.inflight.Wait()
 
-	// Evict outside the lock — these touch the recipe package's
-	// own caches and don't need our mu held. dp may be nil if
-	// Close was already called or the Client was never fully
-	// constructed; the recipe Evict helpers no-op on nil.
+	// Evict every cache before closing the provider: an OCI provider removes
+	// its private workspace during Close, so no cache may retain materialized
+	// catalog state past that ownership boundary.
 	if dp != nil {
 		recipe.EvictCachedStore(dp)
 		recipe.EvictCachedRegistry(dp)
+		recipe.EvictCachedCriteriaRegistry(dp)
 	}
-	return nil
+	closer, ok := dp.(io.Closer)
+	if !ok {
+		return nil
+	}
+	return errors.PropagateOrWrap(closer.Close(), errors.ErrCodeInternal,
+		"failed to close recipe data provider")
 }
 
 // LoadCatalog eagerly loads (and caches) this Client's metadata store,
@@ -452,17 +605,39 @@ func (c *Client) ListCatalog(ctx context.Context, filter *Criteria) ([]CatalogEn
 // is seeded from the provider's overlays before parsing.
 //
 // Returns the registry for this Client's provider via
-// recipe.GetCriteriaRegistryFor. On a nil Client this returns a fresh
-// ephemeral registry so callers can defensively call without nil-checking,
-// matching the lenient nil behavior of the other accessors.
+// recipe.GetCriteriaRegistryFor. On a nil or closed Client this returns a
+// fresh ephemeral registry so callers can defensively call without
+// nil-checking, matching the existing lenient accessor behavior.
 func (c *Client) CriteriaRegistry() *CriteriaRegistry {
+	return c.criteriaRegistry(recipe.GetCriteriaRegistryFor)
+}
+
+// criteriaRegistry isolates the cache getter so the Close lifecycle can be
+// tested with a deterministically blocked cache access.
+func (c *Client) criteriaRegistry(
+	getRegistry func(recipe.DataProvider) *recipe.CriteriaRegistry,
+) *CriteriaRegistry {
+
 	if c == nil {
 		return recipe.NewCriteriaRegistry()
 	}
+
+	// Join the same operation-vs-Close protocol as every other cache-using
+	// entry point. The increment must happen under the read lock so Close
+	// either observes this operation and drains it before eviction, or marks
+	// the Client closed before this operation can begin. Call the cache getter
+	// after releasing the lock so callbacks cannot deadlock with Close.
 	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return recipe.NewCriteriaRegistry()
+	}
 	dp := c.dp
+	c.inflight.Add(1)
 	c.mu.RUnlock()
-	return recipe.GetCriteriaRegistryFor(dp)
+	defer c.inflight.Done()
+
+	return getRegistry(dp)
 }
 
 // assertOwns rejects RecipeResults that were not produced by this Client.
@@ -631,10 +806,14 @@ func recipeBuildOptions(opts ...RecipeResolveOption) (*recipeResolveConfig, []re
 	if err != nil {
 		return nil, nil, err
 	}
-	if cfg.accountingMode == nil {
-		return cfg, nil, nil
+	var buildOpts []recipe.BuildOption
+	if cfg.accountingMode != nil {
+		buildOpts = append(buildOpts, recipe.WithAccountingMode(*cfg.accountingMode))
 	}
-	return cfg, []recipe.BuildOption{recipe.WithAccountingMode(*cfg.accountingMode)}, nil
+	if cfg.runtimeInventoryMode != nil {
+		buildOpts = append(buildOpts, recipe.WithRuntimeInventoryMode(*cfg.runtimeInventoryMode))
+	}
+	return cfg, buildOpts, nil
 }
 
 func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, error) {
@@ -953,8 +1132,15 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 // FilesystemSource: layered provider over the embedded data and the
 // external directory.
 //
-// OCISource: not yet supported. Returns ErrCodeUnavailable.
-func buildDataProvider(s recipeSource) (recipe.DataProvider, error) {
+// OCISource: digest-authorized and materialized into an owned private
+// workspace before the provider is returned.
+func buildDataProvider(
+	ctx context.Context,
+	s recipeSource,
+	sourceConfig ociSourceConfig,
+	deps clientDependencies,
+) (recipe.DataProvider, error) {
+
 	switch s.kind {
 	case sourceKindUnset:
 		// Unreachable: NewClient rejects sourceKindUnset before calling
@@ -973,17 +1159,67 @@ func buildDataProvider(s recipeSource) (recipe.DataProvider, error) {
 	case sourceKindEmbedded:
 		return recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "."), nil
 	case sourceKindOCI:
-		return nil, errors.NewWithContext(
-			errors.ErrCodeUnavailable,
-			"OCI recipe sources are not yet supported by the facade — use FilesystemSource for now",
-			map[string]any{
-				"registry": s.registry,
-				"tag":      s.tag,
-			},
-		)
+		return buildOCIDataProvider(ctx, s, sourceConfig, deps)
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "unknown recipe source kind")
 	}
+}
+
+func buildOCIDataProvider(
+	ctx context.Context,
+	s recipeSource,
+	sourceConfig ociSourceConfig,
+	deps clientDependencies,
+) (recipe.DataProvider, error) {
+
+	if deps.newOCIProvider == nil {
+		return nil, errors.New(errors.ErrCodeInternal,
+			"OCI recipe provider constructor is unavailable")
+	}
+	config := ocisource.Config{
+		PullOptions: oci.RecipePullOptions{
+			Repository: s.registry,
+			Selector:   s.selector,
+		},
+	}
+	if sourceConfig.tempDir != nil {
+		config.PullOptions.TempDir = *sourceConfig.tempDir
+	}
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	provider, err := deps.newOCIProvider(ctx, embedded, config)
+	if err != nil {
+		return nil, joinDataProviderCleanup(err, provider)
+	}
+	if provider == nil {
+		return nil, errors.New(errors.ErrCodeInternal,
+			"OCI recipe provider constructor returned an incomplete provider")
+	}
+	return provider, nil
+}
+
+func clientConstructionContextError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		if stderrors.Is(err, context.Canceled) {
+			return errors.Wrap(errors.ErrCodeCanceled, "client construction canceled", err)
+		}
+		return errors.Wrap(errors.ErrCodeTimeout, "client construction timed out", err)
+	}
+	return nil
+}
+
+func joinDataProviderCleanup(primary error, provider recipe.DataProvider) error {
+	closer, ok := provider.(io.Closer)
+	if !ok {
+		return primary
+	}
+	cleanupErr := closer.Close()
+	if cleanupErr == nil {
+		return primary
+	}
+	return stderrors.Join(primary, errors.PropagateOrWrap(
+		cleanupErr, errors.ErrCodeInternal,
+		"failed to clean up OCI recipe data provider after construction failure"))
 }
 
 // criteriaFromRequest translates a facade RecipeRequest into AICR's

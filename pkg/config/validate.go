@@ -131,6 +131,9 @@ func (r *RecipeSpec) validate() error {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"invalid spec.recipe.profile")
 	}
+	if _, _, err := r.ResolveRuntimeInventoryMode(); err != nil {
+		return err
+	}
 	if _, _, err := r.ResolveAccountingMode(); err != nil {
 		return err
 	}

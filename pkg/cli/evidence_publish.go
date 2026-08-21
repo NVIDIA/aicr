@@ -130,7 +130,7 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	client, err := embeddedClient()
+	client, err := embeddedClient(ctx)
 	if err != nil {
 		return err
 	}

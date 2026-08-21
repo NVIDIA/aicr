@@ -316,7 +316,12 @@ func TestEnforceAllowLists(t *testing.T) {
 // the embedded-only path the REST server and the no-`--data` CLI
 // case both need (built-in recipe data, no external overlay).
 func TestEmbeddedSourceBuildsBareProvider(t *testing.T) {
-	dp, err := buildDataProvider(recipeSource{kind: sourceKindEmbedded})
+	dp, err := buildDataProvider(
+		t.Context(),
+		recipeSource{kind: sourceKindEmbedded},
+		ociSourceConfig{},
+		defaultClientDependencies(),
+	)
 	if err != nil {
 		t.Fatalf("buildDataProvider(embedded): %v", err)
 	}
