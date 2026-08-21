@@ -357,7 +357,7 @@ func podWithForgedLabel(uid types.UID) corev1.Pod {
 	return corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
-				"batch.kubernetes.io/controller-uid": string(uid),
+				batchv1.ControllerUidLabel: string(uid),
 			},
 		},
 	}
@@ -366,20 +366,25 @@ func podWithForgedLabel(uid types.UID) corev1.Pod {
 func TestOwnedByJob(t *testing.T) {
 	const want = types.UID("job-uid-1")
 	tests := []struct {
-		name string
-		pod  corev1.Pod
-		ok   bool
+		name   string
+		pod    corev1.Pod
+		jobUID types.UID
+		ok     bool
 	}{
-		{"controller job matching uid", podWithOwner("Job", want, true), true},
-		{"controller job wrong uid", podWithOwner("Job", types.UID("other"), true), false},
-		{"non-controller ref", podWithOwner("Job", want, false), false},
-		{"wrong kind", podWithOwner("ReplicaSet", want, true), false},
-		{"no owner refs", corev1.Pod{}, false},
-		{"forged label only", podWithForgedLabel(want), false},
+		{"controller job matching uid", podWithOwner(kindJob, want, true), want, true},
+		{"controller job wrong uid", podWithOwner(kindJob, types.UID("other"), true), want, false},
+		{"non-controller ref", podWithOwner(kindJob, want, false), want, false},
+		{"wrong kind", podWithOwner("ReplicaSet", want, true), want, false},
+		{"no owner refs", corev1.Pod{}, want, false},
+		{"forged label only", podWithForgedLabel(want), want, false},
+		// jobUID == "" must fail closed even when the pod's own ownerRef UID
+		// also happens to be "" — ownership is never establishable from a
+		// zero Job UID, regardless of what the pod carries.
+		{"zero jobUID never matches, even a zero-UID owner ref", podWithOwner(kindJob, "", true), "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ownedByJob(&tt.pod, want); got != tt.ok {
+			if got := ownedByJob(&tt.pod, tt.jobUID); got != tt.ok {
 				t.Errorf("ownedByJob() = %v, want %v", got, tt.ok)
 			}
 		})
@@ -394,11 +399,11 @@ func TestPickLivePod(t *testing.T) {
 	older := metav1.NewTime(time.Unix(1000, 0))
 	younger := metav1.NewTime(time.Unix(2000, 0))
 
-	ownedOlder := podWithOwner("Job", jobUID, true)
+	ownedOlder := podWithOwner(kindJob, jobUID, true)
 	ownedOlder.Name = "owned-older"
 	ownedOlder.CreationTimestamp = older
 
-	ownedYounger := podWithOwner("Job", jobUID, true)
+	ownedYounger := podWithOwner(kindJob, jobUID, true)
 	ownedYounger.Name = "owned-younger"
 	ownedYounger.CreationTimestamp = younger
 
@@ -406,13 +411,13 @@ func TestPickLivePod(t *testing.T) {
 	unowned.Name = "unowned-forged"
 	unowned.CreationTimestamp = younger // younger than both owned pods
 
-	deleting := podWithOwner("Job", jobUID, true)
+	deleting := podWithOwner(kindJob, jobUID, true)
 	deleting.Name = "deleting"
 	deleting.CreationTimestamp = younger
 	now := metav1.Now()
 	deleting.DeletionTimestamp = &now
 
-	failed := podWithOwner("Job", jobUID, true)
+	failed := podWithOwner(kindJob, jobUID, true)
 	failed.Name = "failed"
 	failed.CreationTimestamp = younger
 	failed.Status.Phase = corev1.PodFailed

@@ -146,12 +146,19 @@ func (d *Deployer) podLabelSelector() string {
 // Pod labels are writable by anything that can update pods in the
 // namespace, so the controlling ownerReference — not
 // batch.kubernetes.io/controller-uid — is what authorizes selection.
-// jobUID must be non-zero; callers fall back to label-only narrowing (see
-// pickLivePod) instead of passing the zero UID here.
+// Callers fall back to label-only narrowing (see pickLivePod) instead of
+// calling this with the zero UID; the guard below is defense-in-depth so
+// the predicate itself fails closed if ever called standalone.
 func ownedByJob(pod *corev1.Pod, jobUID types.UID) bool {
+	if jobUID == "" {
+		// A zero Job UID means ownership is not yet establishable — fail
+		// closed rather than risk matching a pod whose own ownerRef UID
+		// happens to also be empty.
+		return false
+	}
 	for i := range pod.OwnerReferences {
 		ref := &pod.OwnerReferences[i]
-		if ref.Kind == "Job" && ref.UID == jobUID && ref.Controller != nil && *ref.Controller {
+		if ref.Kind == kindJob && ref.UID == jobUID && ref.Controller != nil && *ref.Controller {
 			return true
 		}
 	}
