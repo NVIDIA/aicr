@@ -26,10 +26,9 @@ import (
 // Standard Kubernetes recommended labels applied to all agent-managed
 // resources. Centralized here so selectors and resource templates stay in sync.
 const (
-	labelAppName       = "app.kubernetes.io/name"
-	labelAppManagedBy  = "app.kubernetes.io/managed-by"
-	appName            = "aicr"
-	agentLabelSelector = labelAppName + "=" + appName
+	labelAppName      = "app.kubernetes.io/name"
+	labelAppManagedBy = "app.kubernetes.io/managed-by"
+	appName           = "aicr"
 )
 
 // Kind labels recorded in Deployer.created for each run-owned object type.

@@ -1149,7 +1149,8 @@ func TestDeployer_WaitForPodReady(t *testing.T) {
 			Name:      "aicr-xyz",
 			Namespace: "test-namespace",
 			Labels: map[string]string{
-				"app.kubernetes.io/name": "aicr",
+				labels.Name:  labels.ValueAICR,
+				labels.RunID: "",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -1203,7 +1204,8 @@ func TestDeployer_WaitForPodReady_PodFailed(t *testing.T) {
 			Name:      "aicr-xyz",
 			Namespace: "test-namespace",
 			Labels: map[string]string{
-				"app.kubernetes.io/name": "aicr",
+				labels.Name:  labels.ValueAICR,
+				labels.RunID: "",
 			},
 		},
 		Status: corev1.PodStatus{

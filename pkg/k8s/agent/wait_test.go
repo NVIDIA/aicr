@@ -21,10 +21,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -265,7 +267,7 @@ func TestDeployer_WaitForPodReady_Extended(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-pod",
 				Namespace: ns,
-				Labels:    map[string]string{"app.kubernetes.io/name": "aicr"},
+				Labels:    map[string]string{labels.Name: labels.ValueAICR, labels.RunID: ""},
 			},
 			Status: corev1.PodStatus{
 				Phase: corev1.PodRunning,
@@ -295,7 +297,7 @@ func TestDeployer_WaitForPodReady_Extended(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-pod",
 				Namespace: ns,
-				Labels:    map[string]string{"app.kubernetes.io/name": "aicr"},
+				Labels:    map[string]string{labels.Name: labels.ValueAICR, labels.RunID: ""},
 			},
 			Status: corev1.PodStatus{
 				Phase:   corev1.PodFailed,
@@ -327,4 +329,148 @@ func TestDeployer_WaitForPodReady_Extended(t *testing.T) {
 			t.Fatal("expected error for timeout")
 		}
 	})
+}
+
+// podWithOwner returns a Pod whose sole OwnerReference is of the given kind,
+// uid, and controller flag. Used to exercise ownedByJob's ownership checks
+// in isolation from label-based pod selection.
+func podWithOwner(kind string, uid types.UID, controller bool) corev1.Pod {
+	return corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind:       kind,
+					UID:        uid,
+					Controller: &controller,
+				},
+			},
+		},
+	}
+}
+
+// podWithForgedLabel returns a Pod with no OwnerReferences but a
+// batch.kubernetes.io/controller-uid label set to uid — the label any
+// client that can update pods in the namespace could set directly, unlike
+// the controller-managed OwnerReferences. ownedByJob must not be fooled by
+// it.
+func podWithForgedLabel(uid types.UID) corev1.Pod {
+	return corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				"batch.kubernetes.io/controller-uid": string(uid),
+			},
+		},
+	}
+}
+
+func TestOwnedByJob(t *testing.T) {
+	const want = types.UID("job-uid-1")
+	tests := []struct {
+		name string
+		pod  corev1.Pod
+		ok   bool
+	}{
+		{"controller job matching uid", podWithOwner("Job", want, true), true},
+		{"controller job wrong uid", podWithOwner("Job", types.UID("other"), true), false},
+		{"non-controller ref", podWithOwner("Job", want, false), false},
+		{"wrong kind", podWithOwner("ReplicaSet", want, true), false},
+		{"no owner refs", corev1.Pod{}, false},
+		{"forged label only", podWithForgedLabel(want), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ownedByJob(&tt.pod, want); got != tt.ok {
+				t.Errorf("ownedByJob() = %v, want %v", got, tt.ok)
+			}
+		})
+	}
+}
+
+// TestPickLivePod exercises the jobUID-gated ownership filtering pickLivePod
+// applies on top of the existing DeletionTimestamp/Failed-phase filtering.
+func TestPickLivePod(t *testing.T) {
+	const jobUID = types.UID("job-uid-1")
+
+	older := metav1.NewTime(time.Unix(1000, 0))
+	younger := metav1.NewTime(time.Unix(2000, 0))
+
+	ownedOlder := podWithOwner("Job", jobUID, true)
+	ownedOlder.Name = "owned-older"
+	ownedOlder.CreationTimestamp = older
+
+	ownedYounger := podWithOwner("Job", jobUID, true)
+	ownedYounger.Name = "owned-younger"
+	ownedYounger.CreationTimestamp = younger
+
+	unowned := podWithForgedLabel(jobUID) // forged label, no real ownerRef
+	unowned.Name = "unowned-forged"
+	unowned.CreationTimestamp = younger // younger than both owned pods
+
+	deleting := podWithOwner("Job", jobUID, true)
+	deleting.Name = "deleting"
+	deleting.CreationTimestamp = younger
+	now := metav1.Now()
+	deleting.DeletionTimestamp = &now
+
+	failed := podWithOwner("Job", jobUID, true)
+	failed.Name = "failed"
+	failed.CreationTimestamp = younger
+	failed.Status.Phase = corev1.PodFailed
+
+	tests := []struct {
+		name    string
+		pods    []corev1.Pod
+		jobUID  types.UID
+		wantPod string
+	}{
+		{
+			name:    "zero jobUID falls back to youngest live pod regardless of ownership",
+			pods:    []corev1.Pod{ownedOlder, unowned},
+			jobUID:  "",
+			wantPod: "unowned-forged",
+		},
+		{
+			name:    "known jobUID rejects unowned pod even if younger",
+			pods:    []corev1.Pod{ownedOlder, unowned},
+			jobUID:  jobUID,
+			wantPod: "owned-older",
+		},
+		{
+			name:    "known jobUID picks youngest among owned pods",
+			pods:    []corev1.Pod{ownedOlder, ownedYounger},
+			jobUID:  jobUID,
+			wantPod: "owned-younger",
+		},
+		{
+			name:    "known jobUID with only unowned pods returns none",
+			pods:    []corev1.Pod{unowned},
+			jobUID:  jobUID,
+			wantPod: "",
+		},
+		{
+			name:    "deleting owned pod is skipped",
+			pods:    []corev1.Pod{deleting, ownedOlder},
+			jobUID:  jobUID,
+			wantPod: "owned-older",
+		},
+		{
+			name:    "failed owned pod is skipped",
+			pods:    []corev1.Pod{failed, ownedOlder},
+			jobUID:  jobUID,
+			wantPod: "owned-older",
+		},
+		{
+			name:    "no pods",
+			pods:    nil,
+			jobUID:  jobUID,
+			wantPod: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pickLivePod(tt.pods, tt.jobUID); got != tt.wantPod {
+				t.Errorf("pickLivePod() = %q, want %q", got, tt.wantPod)
+			}
+		})
+	}
 }

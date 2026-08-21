@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,7 +30,7 @@ import (
 
 // waitForJobCompletion waits for the Job to complete successfully or fail.
 func (d *Deployer) waitForJobCompletion(ctx context.Context, timeout time.Duration) error {
-	return pod.WaitForJobCompletion(ctx, d.clientset, d.config.Namespace, d.config.JobName, timeout)
+	return pod.WaitForJobCompletion(ctx, d.clientset, d.config.Namespace, d.jobName(), timeout)
 }
 
 // getSnapshotFromConfigMap retrieves the snapshot data from ConfigMap.
@@ -132,28 +133,60 @@ func (d *Deployer) WaitForPodReady(ctx context.Context, timeout time.Duration) e
 	return pod.WaitForPodReady(ctx, d.clientset, d.config.Namespace, podName, remainingTimeout)
 }
 
+// podLabelSelector returns the List/Watch label selector for this run's
+// agent pod: app name plus RunID. This only narrows the candidate set —
+// pod labels, including a forged aicr.run/run-id, are writable by anything
+// that can update pods in the namespace. ownedByJob (applied by pickLivePod
+// and the watch loop in findOrWatchPodName) is what authorizes selection.
+func (d *Deployer) podLabelSelector() string {
+	return fmt.Sprintf("%s=%s,%s=%s", labels.Name, labels.ValueAICR, labels.RunID, d.config.RunID)
+}
+
+// ownedByJob reports whether pod is controlled by the Job with jobUID.
+// Pod labels are writable by anything that can update pods in the
+// namespace, so the controlling ownerReference — not
+// batch.kubernetes.io/controller-uid — is what authorizes selection.
+// jobUID must be non-zero; callers fall back to label-only narrowing (see
+// pickLivePod) instead of passing the zero UID here.
+func ownedByJob(pod *corev1.Pod, jobUID types.UID) bool {
+	for i := range pod.OwnerReferences {
+		ref := &pod.OwnerReferences[i]
+		if ref.Kind == "Job" && ref.UID == jobUID && ref.Controller != nil && *ref.Controller {
+			return true
+		}
+	}
+	return false
+}
+
 // findPodName finds the pod name by label selector for this Job.
 // One-shot: returns ErrCodeNotFound if no pod is currently labeled.
 // Skips pods that are being deleted or have already failed so an
 // orphaned pod from a prior run is not selected.
 func (d *Deployer) findPodName(ctx context.Context) (string, error) {
 	pods, err := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: agentLabelSelector,
+		LabelSelector: d.podLabelSelector(),
 	})
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
 	}
 
-	name := pickLivePod(pods.Items)
+	name := pickLivePod(pods.Items, d.jobUID())
 	if name == "" {
-		return "", errors.New(errors.ErrCodeNotFound, fmt.Sprintf("no Pods found for Job %s", d.config.JobName))
+		return "", errors.New(errors.ErrCodeNotFound, fmt.Sprintf("no Pods found for Job %s", d.jobName()))
 	}
 	return name, nil
 }
 
 // pickLivePod returns the name of the youngest pod that is neither being
-// deleted nor in a Failed phase. Returns "" if no usable pod exists.
-func pickLivePod(pods []corev1.Pod) string {
+// deleted nor in a Failed phase. When jobUID is non-zero, a pod must also be
+// owned by that Job (see ownedByJob) — the label selector used to build the
+// candidate list only narrows it; the controlling ownerReference is what
+// authorizes selection. When jobUID is the zero UID (the Job hasn't been
+// recorded yet — WaitForPodReady's watch can start before Deploy returns),
+// ownership is not checked here; callers re-check on every call since
+// d.jobUID() is queried live, not cached. Returns "" if no usable pod
+// exists.
+func pickLivePod(pods []corev1.Pod, jobUID types.UID) string {
 	var best *corev1.Pod
 	for i := range pods {
 		p := &pods[i]
@@ -161,6 +194,9 @@ func pickLivePod(pods []corev1.Pod) string {
 			continue
 		}
 		if p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if jobUID != "" && !ownedByJob(p, jobUID) {
 			continue
 		}
 		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {
@@ -177,18 +213,19 @@ func pickLivePod(pods []corev1.Pod) string {
 // (List), return immediately; otherwise watch for an Added event until ctx is
 // canceled.
 func (d *Deployer) findOrWatchPodName(ctx context.Context) (string, error) {
+	selector := d.podLabelSelector()
 	pods, err := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: agentLabelSelector,
+		LabelSelector: selector,
 	})
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
 	}
-	if name := pickLivePod(pods.Items); name != "" {
+	if name := pickLivePod(pods.Items, d.jobUID()); name != "" {
 		return name, nil
 	}
 
 	watcher, err := d.clientset.CoreV1().Pods(d.config.Namespace).Watch(ctx, metav1.ListOptions{
-		LabelSelector:   agentLabelSelector,
+		LabelSelector:   selector,
 		ResourceVersion: pods.ResourceVersion,
 	})
 	if err != nil {
@@ -206,12 +243,12 @@ func (d *Deployer) findOrWatchPodName(ctx context.Context) (string, error) {
 				// close watch channels without the pod actually failing to
 				// appear. Re-List before declaring failure.
 				pods, listErr := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
-					LabelSelector: agentLabelSelector,
+					LabelSelector: selector,
 				})
 				if listErr != nil {
 					return "", errors.Wrap(errors.ErrCodeUnavailable, "Pod watch channel closed and re-List failed", listErr)
 				}
-				if name := pickLivePod(pods.Items); name != "" {
+				if name := pickLivePod(pods.Items, d.jobUID()); name != "" {
 					return name, nil
 				}
 				return "", errors.New(errors.ErrCodeUnavailable, "Pod watch channel closed before pod observed")
@@ -221,6 +258,12 @@ func (d *Deployer) findOrWatchPodName(ctx context.Context) (string, error) {
 				continue
 			}
 			if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodFailed {
+				continue
+			}
+			// jobUID is re-queried per event (not cached at loop entry) so a
+			// Job UID recorded by Deploy after this watch started is
+			// honored on the very next event.
+			if jobUID := d.jobUID(); jobUID != "" && !ownedByJob(p, jobUID) {
 				continue
 			}
 			return p.Name, nil
