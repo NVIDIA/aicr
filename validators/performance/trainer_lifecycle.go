@@ -32,8 +32,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -66,6 +68,11 @@ const (
 
 	// trainerControllerDeployment is the Deployment name for the Trainer controller-manager.
 	trainerControllerDeployment = "kubeflow-trainer-controller-manager"
+
+	// jobSetControllerDeployment is the JobSet controller-manager Deployment name
+	// emitted by this package's kustomize overlay (see jobSetNameLabel for why
+	// the Helm chart's release-derived name doesn't apply here).
+	jobSetControllerDeployment = "jobset-controller-manager"
 
 	// trainerControllerService is the Service fronting the controller-manager's
 	// webhook port. Without it the admission webhooks have no endpoints and every
@@ -158,6 +165,57 @@ const (
 	// prefix is sufficient to make the controller pullable.
 	jobSetPromotedImageRepo = "registry.k8s.io/jobset/jobset"
 )
+
+// controllerTolerateAll lets a Trainer/JobSet controller-manager Deployment
+// schedule on any node pool, regardless of taints. Built through
+// component.TolerationsToPodSpec, the same converter used for Helm-values
+// toleration overrides, so there is one canonical place that knows the
+// toleration-to-map shape.
+var controllerTolerateAll = tolerationsToAnySlice(
+	component.TolerationsToPodSpec([]corev1.Toleration{{Operator: corev1.TolerationOpExists}}),
+)
+
+// tolerationsToAnySlice widens []map[string]any to []any: unstructured pod
+// specs (podSpec["tolerations"]) must hold []any, not []map[string]any, to
+// match how NestedSlice reads and how JSON round-tripping serializes it.
+func tolerationsToAnySlice(tolerations []map[string]any) []any {
+	result := make([]any, len(tolerations))
+	for i, t := range tolerations {
+		result[i] = t
+	}
+	return result
+}
+
+// applyControllerTolerations stamps controllerTolerateAll onto the Trainer and
+// JobSet controller-manager Deployments' pod template, unless one already
+// declares tolerations. Scoped to those two names so an unrelated Deployment
+// in the manifest set never gets a blanket toleration it didn't ask for.
+func applyControllerTolerations(obj *unstructured.Unstructured) error {
+	if obj.GroupVersionKind().Kind != "Deployment" {
+		return nil
+	}
+	switch obj.GetName() {
+	case trainerControllerDeployment, jobSetControllerDeployment:
+	default:
+		return nil
+	}
+
+	if existing, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "tolerations"); err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("failed to read tolerations from Deployment %q", obj.GetName()), err)
+	} else if found && len(existing) > 0 {
+		return nil
+	}
+
+	podSpec, found := nestedMap(obj.Object, "spec", "template", "spec")
+	if !found {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("pod spec not found in Deployment %q", obj.GetName()))
+	}
+	podSpec["tolerations"] = controllerTolerateAll
+	slog.Info("Applying blanket toleration to controller Deployment", "name", obj.GetName())
+	return nil
+}
 
 // GVRs for the objects the Trainer lifecycle probes and waits on.
 var (
@@ -806,6 +864,9 @@ func decodeTrainerObjects(resources []*resource.Resource) ([]*unstructured.Unstr
 		}
 		if obj.GroupVersionKind().Kind == "" {
 			continue
+		}
+		if tolErr := applyControllerTolerations(obj); tolErr != nil {
+			return nil, tolErr
 		}
 		objs = append(objs, obj)
 	}

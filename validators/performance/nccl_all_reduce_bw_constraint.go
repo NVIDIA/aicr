@@ -1451,7 +1451,7 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 			tolList := make([]any, 0, len(tolerations))
 			for _, t := range tolerations {
 				tolMap := map[string]any{
-					"operator": string(t.Operator),
+					keyOperator: string(t.Operator),
 				}
 				if t.Key != "" {
 					tolMap["key"] = t.Key
@@ -1479,7 +1479,7 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 	return unstructured.SetNestedSlice(obj.Object, replicatedJobs, "spec", "template", "spec", "replicatedJobs")
 }
 
-// nestedMap navigates a chain of string keys through nested map[string]interface{} values.
+// nestedMap navigates a chain of string keys through nested map[string]any values.
 // Returns the target map and true if found, nil and false otherwise.
 func nestedMap(m map[string]any, keys ...string) (map[string]any, bool) {
 	current := m
