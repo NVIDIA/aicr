@@ -113,7 +113,8 @@ func (s *Snapshot) Unwrap() *snapshotter.Snapshot {
 // collection Job passed to Client.CollectSnapshot. Facade-owned;
 // field-for-field mirror of pkg/snapshotter.AgentConfig. Tolerations
 // keep k8s.io/api/core/v1.Toleration since kubernetes/api is itself
-// stable.
+// stable. Nil Tolerations use a tolerate-all default; a non-nil empty
+// slice explicitly disables that default.
 //
 // The mirror is enforced, not conventional: TestAgentConfigMirrorsInternal
 // fails when either struct gains, drops, or retypes a field, and every
@@ -326,8 +327,9 @@ type RecipeRequest struct {
 type RecipeResolveOption func(*recipeResolveConfig)
 
 type recipeResolveConfig struct {
-	profile        string
-	accountingMode *recipe.AccountingMode
+	profile              string
+	accountingMode       *recipe.AccountingMode
+	runtimeInventoryMode *recipe.RuntimeInventoryMode
 
 	// relaxDerived records that WithSnapshotCriteriaRelaxation was passed.
 	// Kept separate from stated because an empty stated set is meaningful
@@ -371,6 +373,26 @@ func WithAccountingMode(mode string) RecipeResolveOption {
 			return
 		}
 		cfg.accountingMode = &parsed
+	}
+}
+
+// WithRuntimeInventoryMode selects whether the runtime AI inventory component
+// is installed by a criteria- or snapshot-based resolve call. It is valid only
+// when the resolved recipe declares that component; an empty or invalid mode is
+// rejected when the resolve call runs. Omit this option to keep the recipe's
+// own declaration.
+//
+// Unlike a bundle-time value override, the selection is recorded in the emitted
+// recipe and removes the component's health check along with the component,
+// which is the contract ADR-019 requires for stock adoption.
+func WithRuntimeInventoryMode(mode string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseRuntimeInventoryMode(mode)
+		if err != nil {
+			cfg.recordOptErr(err)
+			return
+		}
+		cfg.runtimeInventoryMode = &parsed
 	}
 }
 

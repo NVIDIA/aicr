@@ -171,11 +171,10 @@ Leaves that need topology-aware scheduling can optionally add `slinky-topograph`
     - slinky-slurm-operator-crds
     - slinky-slurm   # deploy after Slurm so Helm already owns config-extra
   overrides:
-    global:
-      provider:
-        name: gcp      # cloud provider: gcp | aws | oci | nebius | …
-      engine:
-        name: slinky   # scheduler consumer: slinky | slurm | k8s | graph
+    provider:
+      name: gcp      # cloud provider: gcp | aws | oci | nebius | …
+    engine:
+      name: slinky   # scheduler consumer: slinky | slurm | k8s | graph
 
 - name: slinky-slurm
   type: Helm
@@ -205,9 +204,8 @@ For cloud providers (gcp, aws, oci, nebius, …), `slinky-topograph` requires IA
 
 ```yaml
 overrides:
-  global:
-    provider:
-      name: gcp
+  provider:
+    name: gcp
   serviceAccount:
     annotations:
       iam.gke.io/gcp-service-account: <sa-name>@<project-id>.iam.gserviceaccount.com

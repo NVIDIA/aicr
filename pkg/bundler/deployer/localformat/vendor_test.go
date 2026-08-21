@@ -17,6 +17,7 @@ package localformat
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -983,7 +985,9 @@ func TestDefaultFetchIndexYAML(t *testing.T) {
 			http.Error(w, "boom", http.StatusInternalServerError)
 		}))
 		defer ts.Close()
-		_, err := defaultFetchIndexYAML(context.Background(), ts.URL+"/index.yaml")
+		// Use doFetchIndexYAMLAttempt directly to test status classification
+		// without triggering retry logic.
+		_, err := doFetchIndexYAMLAttempt(context.Background(), ts.URL+"/index.yaml")
 		if err == nil {
 			t.Fatal("expected error for 500")
 		}
@@ -1494,7 +1498,9 @@ func TestDefaultFetchIndexYAML_4xx(t *testing.T) {
 				http.Error(w, "boom", tt.status)
 			}))
 			defer ts.Close()
-			_, err := defaultFetchIndexYAML(context.Background(), ts.URL+"/index.yaml")
+			// Use doFetchIndexYAMLAttempt directly to test status classification
+			// without triggering retry logic.
+			_, err := doFetchIndexYAMLAttempt(context.Background(), ts.URL+"/index.yaml")
 			if err == nil {
 				t.Fatalf("expected error for HTTP %d", tt.status)
 			}
@@ -1692,4 +1698,300 @@ func TestVendorErrorPathsRedactCredentials(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFetchIndexYAMLRetry verifies the retry policy for transient failures.
+// Transient errors (transport failures, 5xx, 408, 429) retry up to the budget;
+// permanent errors (404, 401/403, other 4xx) fail on first attempt; policy
+// rejections are never retried.
+func TestFetchIndexYAMLRetry(t *testing.T) {
+	tests := []struct {
+		name        string
+		errorType   string
+		statusCode  int
+		succeedAt   int
+		wantErr     bool
+		wantCode    errors.ErrorCode
+		wantAttempt int
+	}{
+		{
+			name:        "transport error retries and succeeds",
+			errorType:   "transport",
+			succeedAt:   2,
+			wantErr:     false,
+			wantAttempt: 2,
+		},
+		{
+			name:        "503 retries and succeeds",
+			errorType:   "status",
+			statusCode:  http.StatusServiceUnavailable,
+			succeedAt:   2,
+			wantErr:     false,
+			wantAttempt: 2,
+		},
+		{
+			name:        "429 retries and succeeds",
+			errorType:   "status",
+			statusCode:  http.StatusTooManyRequests,
+			succeedAt:   2,
+			wantErr:     false,
+			wantAttempt: 2,
+		},
+		{
+			name:        "408 retries and succeeds",
+			errorType:   "status",
+			statusCode:  http.StatusRequestTimeout,
+			succeedAt:   2,
+			wantErr:     false,
+			wantAttempt: 2,
+		},
+		{
+			name:        "404 never retried",
+			errorType:   "status",
+			statusCode:  http.StatusNotFound,
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeNotFound,
+			wantAttempt: 1,
+		},
+		{
+			name:        "401 never retried",
+			errorType:   "status",
+			statusCode:  http.StatusUnauthorized,
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeUnauthorized,
+			wantAttempt: 1,
+		},
+		{
+			name:        "403 never retried",
+			errorType:   "status",
+			statusCode:  http.StatusForbidden,
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeUnauthorized,
+			wantAttempt: 1,
+		},
+		{
+			name:        "policy rejection never retried",
+			errorType:   "policy",
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeInvalidRequest,
+			wantAttempt: 1,
+		},
+		{
+			name:        "transient error exhausts budget",
+			errorType:   "transport",
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeUnavailable,
+			wantAttempt: defaults.HelmChartIndexRetryBudget,
+		},
+		{
+			name:        "validation error (policy rejection) never retried",
+			errorType:   "validation",
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeInvalidRequest,
+			wantAttempt: 0,
+		},
+		{
+			name:        "transient validation error (DNS timeout) retries and succeeds",
+			errorType:   "validation-transient",
+			succeedAt:   2,
+			wantErr:     false,
+			wantAttempt: 1,
+		},
+		{
+			name:        "transient validation error exhausts budget",
+			errorType:   "validation-transient",
+			succeedAt:   100,
+			wantErr:     true,
+			wantCode:    errors.ErrCodeUnavailable,
+			wantAttempt: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attempt := 0
+			// Mock the per-attempt fetch function to control success/failure
+			origAttempt := fetchIndexYAMLAttempt
+			t.Cleanup(func() { fetchIndexYAMLAttempt = origAttempt })
+
+			// Stub egress check to avoid DNS resolution
+			origCheckTarget := checkFetchTargetURL
+			t.Cleanup(func() { checkFetchTargetURL = origCheckTarget })
+			validationAttempt := 0
+			checkFetchTargetURL = func(ctx context.Context, url string) error {
+				validationAttempt++
+				switch tt.errorType {
+				case "validation":
+					if validationAttempt < tt.succeedAt {
+						return errors.New(errors.ErrCodeInvalidRequest,
+							"egress policy rejected target URL")
+					}
+				case "validation-transient":
+					if validationAttempt < tt.succeedAt {
+						return errors.PropagateOrWrap(
+							stderrors.New("DNS timeout during address resolution"),
+							errors.ErrCodeUnavailable,
+							"transient validation failure")
+					}
+				}
+				return nil
+			}
+
+			// Stub timer to avoid production sleep times
+			origTimer := newBackoffTimer
+			t.Cleanup(func() { newBackoffTimer = origTimer })
+			newBackoffTimer = func(d time.Duration) *time.Timer {
+				// Return a timer that fires immediately
+				return time.NewTimer(1 * time.Nanosecond)
+			}
+
+			fetchIndexYAMLAttempt = func(ctx context.Context, indexURL string) ([]byte, error) {
+				attempt++
+				if attempt < tt.succeedAt {
+					switch tt.errorType {
+					case "transport":
+						return nil, errors.PropagateOrWrap(
+							stderrors.New("read: connection reset by peer"),
+							errors.ErrCodeUnavailable,
+							"index fetch failed")
+					case "status":
+						// Simulate what doFetchIndexYAMLAttempt does: parse HTTP status
+						code := errors.ErrCodeUnavailable
+						switch tt.statusCode {
+						case http.StatusNotFound:
+							code = errors.ErrCodeNotFound
+						case http.StatusUnauthorized, http.StatusForbidden:
+							code = errors.ErrCodeUnauthorized
+						}
+						return nil, errors.New(code,
+							fmt.Sprintf("vendor-charts: index pre-check GET https://example.com/index.yaml returned HTTP %d", tt.statusCode))
+					case "policy":
+						return nil, errors.New(errors.ErrCodeInvalidRequest,
+							"egress policy rejected redirect target")
+					}
+				}
+				return []byte("index-yaml"), nil
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			_, err := defaultFetchIndexYAML(ctx, "https://example.com/index.yaml")
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("wantErr=%v, got err=%v", tt.wantErr, err)
+			}
+			if tt.wantErr && err != nil {
+				if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+					t.Errorf("wantCode=%s, got error %v", tt.wantCode, err)
+				}
+			}
+			if attempt != tt.wantAttempt {
+				t.Errorf("wantAttempt=%d, got attempt=%d", tt.wantAttempt, attempt)
+			}
+		})
+	}
+}
+
+// TestFetchIndexYAMLRetryEndToEnd drives defaultFetchIndexYAML against a real
+// httptest.Server so the production HTTP-status classifier in
+// doFetchIndexYAMLAttempt is exercised through the retry wrapper, rather than
+// the hand-rolled classifier the table test stubs in.
+func TestFetchIndexYAMLRetryEndToEnd(t *testing.T) {
+	origCheck := checkFetchTargetURL
+	checkFetchTargetURL = func(_ context.Context, _ string) error { return nil }
+	t.Cleanup(func() { checkFetchTargetURL = origCheck })
+
+	origTimer := newBackoffTimer
+	t.Cleanup(func() { newBackoffTimer = origTimer })
+	newBackoffTimer = func(time.Duration) *time.Timer {
+		return time.NewTimer(1 * time.Nanosecond)
+	}
+
+	var hits int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		if hits <= 2 {
+			http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = io.WriteString(w, "apiVersion: v1\nentries: {}\n")
+	}))
+	defer ts.Close()
+
+	body, err := defaultFetchIndexYAML(context.Background(), ts.URL+"/index.yaml")
+	if err != nil {
+		t.Fatalf("fetch after 503 retries: %v", err)
+	}
+	if !strings.Contains(string(body), "apiVersion") {
+		t.Errorf("body = %q, want to contain apiVersion", body)
+	}
+	if hits != 3 {
+		t.Errorf("server hits = %d, want 3 (two 503s then 200)", hits)
+	}
+}
+
+// TestFetchIndexYAMLContextCancellation verifies that context cancellation
+// during backoff is honored and does not continue retrying.
+func TestFetchIndexYAMLContextCancellation(t *testing.T) {
+	t.Run("context canceled during backoff", func(t *testing.T) {
+		attempt := 0
+		origAttempt := fetchIndexYAMLAttempt
+		t.Cleanup(func() { fetchIndexYAMLAttempt = origAttempt })
+
+		// Stub egress check to avoid DNS resolution
+		origCheckTarget := checkFetchTargetURL
+		t.Cleanup(func() { checkFetchTargetURL = origCheckTarget })
+		checkFetchTargetURL = func(ctx context.Context, url string) error { return nil }
+
+		// Signal when backoff begins so we can cancel deterministically
+		backoffStarted := make(chan struct{})
+		origTimer := newBackoffTimer
+		t.Cleanup(func() { newBackoffTimer = origTimer })
+		newBackoffTimer = func(d time.Duration) *time.Timer {
+			// Signal that backoff has begun, then return a long timer
+			// so cancellation can interrupt it
+			close(backoffStarted)
+			return time.NewTimer(10 * time.Second)
+		}
+
+		fetchIndexYAMLAttempt = func(ctx context.Context, indexURL string) ([]byte, error) {
+			attempt++
+			if attempt == 1 {
+				// Return transient error to trigger backoff
+				return nil, errors.New(errors.ErrCodeUnavailable, "transient error")
+			}
+			// If we get here, context should have been canceled during backoff
+			// and we should not have made a second attempt
+			t.Error("unexpected second attempt after context cancellation")
+			return nil, stderrors.New("should not reach here")
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		// Cancel after backoff begins to ensure cancellation happens during sleep
+		go func() {
+			<-backoffStarted // Wait for backoff to start
+			cancel()
+		}()
+
+		_, err := defaultFetchIndexYAML(ctx, "https://example.com/index.yaml")
+		if err == nil {
+			t.Error("expected error from canceled context")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+			t.Errorf("expected ErrCodeCanceled, got error %v", err)
+		}
+		if !stderrors.Is(ctx.Err(), context.Canceled) {
+			t.Errorf("context should be canceled, got %v", ctx.Err())
+		}
+		if attempt != 1 {
+			t.Errorf("expected exactly 1 attempt before cancellation, got %d", attempt)
+		}
+	})
 }

@@ -96,7 +96,7 @@ Use in shell scripts:
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform",
-				flagProfile, flagSlurmAccountingMode, "snapshot", "config", "format", "selector"); err != nil {
+				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 
@@ -110,7 +110,7 @@ Use in shell scripts:
 			// registry; it now explicitly seeds its OWN provider via
 			// LoadCatalog before parsing criteria, fixing a latent ordering
 			// bug where the first parse could run against an empty registry.
-			client, err := recipeClientFromCmd(cmd, cfg)
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}
@@ -119,6 +119,7 @@ Use in shell scripts:
 			if err = client.LoadCatalog(ctx); err != nil {
 				return err
 			}
+			applyClientCriteriaStrictMode(cmd, cfg, client)
 
 			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
 			if err != nil {
@@ -163,7 +164,7 @@ Use in shell scripts:
 func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
 	reg := client.CriteriaRegistry()
 	profile := stringFlagOrConfig(cmd, flagProfile, aicr.WrapConfig(cfg).RecipeProfile())
-	resolveOpts, err := accountingResolveOptions(cmd, cfg)
+	resolveOpts, err := buildSelectionResolveOptions(cmd, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -260,6 +261,45 @@ func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.
 		return nil, err
 	}
 	return []aicr.RecipeResolveOption{aicr.WithAccountingMode(value)}, nil
+}
+
+// runtimeInventoryResolveOptions turns the --runtime-inventory flag, or the
+// equivalent AICRConfig field, into a resolve option. Mirrors
+// accountingResolveOptions: the flag wins, the config file is the fallback,
+// and an absent selection leaves the recipe's own declaration alone.
+func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+	value := cmd.String(flagRuntimeInventory)
+	if !cmd.IsSet(flagRuntimeInventory) {
+		if cfg == nil {
+			return nil, nil
+		}
+		mode, present, err := aicr.WrapConfig(cfg).RecipeRuntimeInventoryMode()
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, nil
+		}
+		value = mode
+	}
+	if _, err := recipe.ParseRuntimeInventoryMode(value); err != nil {
+		return nil, err
+	}
+	return []aicr.RecipeResolveOption{aicr.WithRuntimeInventoryMode(value)}, nil
+}
+
+// buildSelectionResolveOptions gathers every generation-time selection into one
+// option slice, so callers cannot wire one and forget the other.
+func buildSelectionResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+	opts, err := accountingResolveOptions(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	riOpts, err := runtimeInventoryResolveOptions(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return append(opts, riOpts...), nil
 }
 
 // statedDimensions converts the touched set into the argument

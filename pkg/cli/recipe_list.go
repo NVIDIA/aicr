@@ -128,7 +128,7 @@ Include overlays from an external data directory:
 				return err
 			}
 
-			client, err := recipeClientFromCmd(cmd, nil)
+			client, err := recipeClientFromCmd(ctx, cmd, nil)
 			if err != nil {
 				return err
 			}

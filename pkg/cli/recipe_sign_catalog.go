@@ -83,7 +83,7 @@ func runRecipeSignCatalogCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	client, err := embeddedClient()
+	client, err := embeddedClient(ctx)
 	if err != nil {
 		return err
 	}

@@ -82,36 +82,36 @@ spec:
         - slinky-slurm-operator
         - slinky-slurm-operator-crds
         - slinky-slurm
-      preManifestFiles:
-        - components/slinky-topograph/manifests/kind-test-model.yaml
       overrides:
-        global:
-          provider:
-            name: test
-            params:
-              modelFileName: /etc/topograph/models/kind-slinky.yaml
-          engine:
-            name: slinky
-        # Disable the node-data-broker in the kind environment.
-        node-data-broker:
+        provider:
+          name: test
+          params:
+            # Bare filename only: the v1.0.0 test provider's model loader
+            # resolves this against topograph's embedded tests/models/*.yaml
+            # (compiled into the binary) and rejects any path component —
+            # a mounted ConfigMap file cannot be referenced this way. Use one
+            # of topograph's built-in fixtures (tests/models/small-tree.yaml
+            # upstream) instead of a custom mounted model.
+            modelFileName: small-tree.yaml
+        engine:
+          name: slinky
+        # Disable the node-data-broker in the kind environment. nodeObserver
+        # automatically skips waiting on it when nodeDataBroker.enabled is false.
+        nodeDataBroker:
           enabled: false
-        node-observer:
-          topograph:
-            nodeDataBroker:
-              enabled: false
-        volumes:
-          - name: test-model
-            configMap:
-              name: slinky-topograph-test-model
-        volumeMounts:
-          - name: test-model
-            mountPath: /etc/topograph/models
-            readOnly: true
       # Inline override of the registry assertFile (checks/slinky-topograph/
       # health-check.yaml): this leaf disables node-data-broker, so the
-      # DaemonSet step must not run, and the test provider's mounted
-      # kind-slinky.yaml model (references the real slinky-0 node) makes
-      # the exact topology.conf content assertable.
+      # DaemonSet step must not run, and the exact topology.conf content
+      # below pins the small-tree.yaml fixture's own shape — it does NOT
+      # validate resolution of the leaf's real one-replica worker
+      # (slinky-0). Topograph's test provider always returns its fixture
+      # data as a ready-made instance map, and when the engine already has
+      # a non-empty instance map it uses that as-is instead of resolving
+      # real pod/node names — so the real slinky-0 pod is never looked up
+      # here. Node names (I21, I22, I25, I34-I36) are the fixture's
+      # instance IDs; cluset compacts them to I[21-22,25] and I[34-36].
+      # Switch order (S2 before S3) is deterministic (sorted breadth-first
+      # traversal of the fixture tree).
       healthCheckAsserts: |
         apiVersion: chainsaw.kyverno.io/v1alpha1
         kind: Test
@@ -211,7 +211,9 @@ spec:
                         namespace: slurm
                       data:
                         topology.conf: |
-                          SwitchName=SW1 Nodes=slinky-0
+                          SwitchName=S1 Switches=S[2-3]
+                          SwitchName=S2 Nodes=I[21-22,25]
+                          SwitchName=S3 Nodes=I[34-36]
 
     - name: slinky-slurm
       type: Helm

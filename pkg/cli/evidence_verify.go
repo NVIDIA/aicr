@@ -127,7 +127,7 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) (err error) {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}
 
-	client, clientErr := embeddedClient()
+	client, clientErr := embeddedClient(ctx)
 	if clientErr != nil {
 		return clientErr
 	}

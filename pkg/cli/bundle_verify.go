@@ -190,7 +190,7 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 			"--insecure-ignore-tlog requires --key: offline verification is key-based (verify a bundle signed with `bundle --signing-key ... --tlog-upload=false`)")
 	}
 
-	client, err := embeddedClient()
+	client, err := embeddedClient(ctx)
 	if err != nil {
 		return err
 	}

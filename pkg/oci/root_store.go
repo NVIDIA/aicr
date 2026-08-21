@@ -212,7 +212,7 @@ func (s *rootOCIStore) Push(ctx context.Context, desc ociv1.Descriptor, reader i
 	}
 	blobName := rootStoreBlobPath(desc)
 	if _, err := s.deps.lstat(s.root, blobName); err == nil {
-		return s.verifyAlreadyExists(ctx, desc)
+		return s.verifyBlob(ctx, desc)
 	} else if !stderrors.Is(err, fs.ErrNotExist) {
 		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to inspect local OCI blob", err)
 	}
@@ -244,7 +244,7 @@ func (s *rootOCIStore) Push(ctx context.Context, desc ociv1.Descriptor, reader i
 			if cleanupErr != nil {
 				return cleanupErr
 			}
-			return s.verifyAlreadyExists(ctx, desc)
+			return s.verifyBlob(ctx, desc)
 		}
 		return stderrors.Join(
 			apperrors.Wrap(apperrors.ErrCodeInternal, "failed to promote local OCI blob", err),
@@ -310,13 +310,6 @@ func (s *rootOCIStore) validateDescriptor(desc ociv1.Descriptor) error {
 		return apperrors.Wrap(apperrors.ErrCodeInternal, "local OCI descriptor digest is invalid", err)
 	}
 	return nil
-}
-
-func (s *rootOCIStore) verifyAlreadyExists(ctx context.Context, desc ociv1.Descriptor) error {
-	if err := s.verifyBlob(ctx, desc); err != nil {
-		return err
-	}
-	return apperrors.Wrap(apperrors.ErrCodeInternal, "local OCI blob already exists", errdef.ErrAlreadyExists)
 }
 
 func (s *rootOCIStore) verifyBlob(ctx context.Context, desc ociv1.Descriptor) error {

@@ -273,11 +273,22 @@ fi
 log_info "Recipe:"
 cat "${WORK_DIR}/recipe.yaml"
 
+# Optional extra bundle flags, word-split from the caller's environment.
+# Components whose bundle contract needs scheduling, storage, or override
+# inputs (tools/k8s-aibom-test passes --system-node-selector /
+# --system-node-toleration) supply them here instead of reimplementing the
+# recipe -> bundle -> deploy flow. Unset means no extra flags, so every
+# existing caller is unaffected.
+read -r -a bundle_extra_args <<<"${BUNDLE_EXTRA_ARGS:-}"
+
 # Generate bundle
 log_info "Generating bundle..."
+# ${arr[@]+"${arr[@]}"} is the set -u safe empty-array expansion; a bare
+# "${arr[@]}" is an unbound-variable error under the Bash 3.x on macOS.
 if ! "$AICR_BIN" bundle \
     --recipe "${WORK_DIR}/recipe.yaml" \
-    --output "${WORK_DIR}/bundle" 2>&1; then
+    --output "${WORK_DIR}/bundle" \
+    ${bundle_extra_args[@]+"${bundle_extra_args[@]}"} 2>&1; then
     log_error "Bundle generation failed"
     exit 1
 fi

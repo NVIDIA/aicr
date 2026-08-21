@@ -60,10 +60,19 @@ validators:
     env: []
   - name: check-nvidia-smi
     phase: deployment
-    description: "Verify nvidia-smi works on all schedulable GPU nodes (cordoned nodes are disclosed, not silently skipped)"
+    description: >-
+      Verify nvidia-smi on schedulable GPU nodes; enforce
+      Deployment.gpu-driver.version when set (unmeasurable floor blocks)
     image: ghcr.io/nvidia/aicr-validators/deployment:latest
     timeout: 10m
     args: ["check-nvidia-smi"]
+    env: []
+  - name: gke-gpu-nic-networks
+    phase: deployment
+    description: "Verify the GKE cluster has the GPU NIC networks GPUDirect TCPXO requires (skipped unless the recipe declares gke-nccl-tcpxo)"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 2m
+    args: ["gke-gpu-nic-networks"]
     env: []
   # Performance phase
   #

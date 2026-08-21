@@ -22,6 +22,44 @@ You _may_ also import `pkg/*` subpackages directly, but their APIs are
 not covered by the same stability guarantees — see the [public API
 surface](./public-api.md) for the details.
 
+## Runnable examples
+
+Each facade entry point below has a compiled counterpart in
+[`pkg/client/v1`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#pkg-examples).
+They are ordinary Go example functions, so `go test` builds them on every
+change — a facade change that breaks one of these fails in AICR's tree rather
+than in yours.
+
+| Example | Covers | Runs |
+|---|---|---|
+| `Example` | Quick start: client, resolve from criteria | yes |
+| `Example_errorCodes` | Matching structured error codes | yes |
+| `Example_bundleAndVerify` | Resolve → bundle → verify, hermetically | yes |
+| `Example_trustLevels` | The accepted trust levels, and their ordering trap | yes |
+| `Example_criteriaDimensions` | The coverage dimensions | yes |
+| `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order | no |
+| `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation | no |
+| `ExampleClient_LoadRecipe` | Reading a previously emitted recipe | no |
+| `ExampleClient_CollectSnapshot` | Capturing cluster state via the snapshotter Job | no |
+| `ExampleClient_ValidateState` | Selecting validation phases, and `--no-cluster` mode | no |
+| `ExampleClient_RecipeDigest` | The digest a CI staleness gate compares | no |
+| `ExampleClient_VerifyEvidence` | Evidence verification and exit classes | no |
+| `ExampleClient_VerifyCatalog` / `ExampleClient_SignCatalog` | Checking and producing the catalog signature | no |
+| `ExampleClient_PublishEvidence` | Signing and pushing an evidence bundle | no |
+| `ExampleVerifyBinaryAttestation` | Proving a binary came from NVIDIA CI | no |
+
+**What "runs" means, and what it does not.** Examples marked *yes* print an
+`Output:` block, so `go test` executes them and asserts the output. The rest
+are **compiled but not executed** — they need a cluster, a registry, a signing
+identity, or files that belong to your environment. Compilation still pins
+every signature, field name, and option they touch, so a renamed method or a
+dropped field breaks the build; it does not prove those flows behave
+correctly at runtime.
+
+The guarantee covers the examples, not this page. Prose here can still drift,
+and short illustrative snippets outside the table are not compiled — prefer
+copying from the examples, which are complete and known to build.
+
 ## Installing
 
 ```bash
@@ -168,9 +206,15 @@ capture instead of re-reading afterwards.
 snapCtx, cancelSnap := context.WithTimeout(context.Background(), 10*time.Minute)
 defer cancelSnap()
 snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
-	Kubeconfig:         "/path/to/target-kubeconfig",
+	Kubeconfig: "/path/to/target-kubeconfig",
+	// Namespace, Image, JobName, and ServiceAccountName are all required on
+	// the SDK path. Only Namespace is validated; the rest are copied straight
+	// into the Job and RBAC objects, so an empty value becomes an empty
+	// metadata.name or container image that the API server rejects. The CLI
+	// defaults them from its own flags, which the facade does not share.
 	Namespace:          "aicr-snapshot",
 	Image:              "ghcr.io/nvidia/aicr:v0.11.1",
+	JobName:            "aicr-snapshot",
 	ServiceAccountName: "aicr-agent",
 	Timeout:            5 * time.Minute,
 	Cleanup:            true,
@@ -302,20 +346,70 @@ are created. Other facade options
 
 ## Recipe sources
 
-AICR exposes one production recipe source today; pick it via
+AICR exposes three production recipe sources; pick one via
 `aicr.WithRecipeSource`:
 
 | Source | Constructor | Status |
 |--------|-------------|--------|
 | Embedded | `aicr.EmbeddedSource()` | Production. Uses only AICR's built-in recipe data with no external overlay. |
 | Local filesystem | `aicr.FilesystemSource(path)` | Production. Use a directory containing a `registry.yaml` (layered over the embedded recipe data). |
-| OCI registry | `aicr.OCISource(registry, tag)` | **Reserved — not yet implemented.** `NewClient` returns `ErrCodeUnavailable` when this source is selected. |
+| OCI registry | `aicr.OCISource(repository, digest)` | Production. Pulls one immutable, digest-pinned recipe catalog into a private per-Client workspace. |
 
 `EmbeddedSource` resolves against the recipe data compiled into the
 AICR binary — no filesystem path required. Use it when you want AICR's
 bundled recipe data and no local overrides. `FilesystemSource`
 layers an external directory over that same embedded data, so files in
 the directory override their embedded equivalents.
+
+### Digest-pinned OCI recipe sources
+
+`OCISource` keeps the repository and immutable selector separate. The
+repository may start with `oci://`, but must not contain a tag or digest.
+The selector must be a complete `sha256:<64-hex-character>` manifest
+digest obtained through trusted configuration; tags and implicit `latest`
+are rejected.
+
+The accepted artifact is one OCI image manifest with the AICR artifact type,
+the canonical empty config, and exactly one gzip-compressed layer. Downloads
+and extraction are bounded, content digests are checked while streaming, and
+archive traversal, links, devices, oversized content, and malformed catalogs
+fail closed before the provider is activated.
+
+Use `NewClientContext` so caller cancellation and tighter deadlines
+propagate through registry authentication, download, extraction, and catalog
+validation:
+
+```go
+import (
+	"context"
+	"errors"
+
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+)
+
+func useOCIRecipes(ctx context.Context, repository, manifestDigest, tempDir string) (retErr error) {
+	client, err := aicr.NewClientContext(ctx,
+		aicr.WithRecipeSource(aicr.OCISource(repository, manifestDigest)),
+		aicr.WithOCISourceTempDir(tempDir),
+	)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, client.Close()) }()
+
+	return client.LoadCatalog(ctx)
+}
+```
+
+`NewClient` remains a bounded compatibility wrapper. OCI construction
+never exceeds `defaults.OCIRecipeConstructionTimeout` (eight minutes), while
+`NewClientContext` also honors any shorter caller deadline. Registry staging
+and materialization each retain the five-minute
+`defaults.OCIRecipePullTimeout` phase ceiling; the larger construction
+envelope reserves more than three minutes for materialization and catalog
+validation after maximum-jitter pull retries.
+`Client.Close` waits for in-flight reads, evicts provider-scoped caches,
+and removes only the unique child workspace it owns.
 
 ## Client options
 
@@ -347,6 +441,9 @@ client, err := aicr.NewClient(
   It returns `nil` when none are set — `WithAllowLists` treats a `nil`
   `AllowLists` as allow-all, so the result is always safe to pass straight
   to `WithAllowLists`.
+- **`WithOCISourceTempDir(parent string)`** selects an existing writable
+  parent for an OCI-backed Client's private workspace. It is rejected for
+  embedded and filesystem sources.
 
 `AllowLists` is a facade-owned struct whose `Accelerators`, `Services`,
 `Intents`, and `OSTypes` fields are plain `[]string` slices, so callers
@@ -586,42 +683,52 @@ tooling, so the CLI and an embedding runtime agree on the settings by
 construction rather than by convention.
 
 ```go
-cfg, err := aicr.LoadConfig(ctx, "aicr-config.yaml")   // path or HTTP(S) URL
-if err != nil {
-	log.Fatal(err)
-}
+import (
+	"context"
+	"errors"
 
-// spec.recipe.data decides how the Client is constructed.
-source := aicr.EmbeddedSource()
-if configured, ok := cfg.RecipeSource(); ok {
-	source = configured
-}
-client, err := aicr.NewClient(aicr.WithRecipeSource(source))
-if err != nil {
-	log.Fatal(err)
-}
-defer client.Close()
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+)
 
-// REQUIRED before deriving criteria: loading the catalog is what seeds this
-// Client's registry with the values its overlays contribute. Skip it and a
-// value defined only by spec.recipe.data is still unknown, so the derivation
-// below rejects it.
-if err = client.LoadCatalog(ctx); err != nil {
-	log.Fatal(err)
-}
+func resolveCommittedConfig(ctx context.Context) (retErr error) {
+	cfg, err := aicr.LoadConfig(ctx, "aicr-config.yaml") // path or HTTP(S) URL
+	if err != nil {
+		return err
+	}
 
-// spec.recipe.criteria, parsed against this Client's registry so a value
-// contributed by a --data overlay validates against the same catalog.
-criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())
-if err != nil {
-	log.Fatal(err)
-}
-opts, err := cfg.RecipeResolveOptions()   // spec.recipe.profile + accounting mode
-if err != nil {
-	log.Fatal(err)
-}
+	// spec.recipe.data decides how the Client is constructed.
+	source := aicr.EmbeddedSource()
+	if configured, ok := cfg.RecipeSource(); ok {
+		source = configured
+	}
+	client, err := aicr.NewClientContext(ctx, aicr.WithRecipeSource(source))
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, client.Close()) }()
 
-result, err := client.ResolveRecipeFromCriteriaWithOptions(ctx, criteria, opts...)
+	// REQUIRED before deriving criteria: loading the catalog is what seeds this
+	// Client's registry with the values its overlays contribute. Skip it and a
+	// value defined only by spec.recipe.data is still unknown, so the derivation
+	// below rejects it.
+	if err = client.LoadCatalog(ctx); err != nil {
+		return err
+	}
+
+	// spec.recipe.criteria, parsed against this Client's registry so a value
+	// contributed by a --data overlay validates against the same catalog.
+	criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())
+	if err != nil {
+		return err
+	}
+	opts, err := cfg.RecipeResolveOptions() // profile + accounting + runtime inventory
+	if err != nil {
+		return err
+	}
+
+	_, retErr = client.ResolveRecipeFromCriteriaWithOptions(ctx, criteria, opts...)
+	return retErr
+}
 ```
 
 **Config derives options; it never applies them.** A `Config` does not attach
@@ -662,8 +769,8 @@ derive step rather than the load step.
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
-| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode` |
-| `RecipeProfile()` / `RecipeAccountingMode()` | the same two, raw, for callers applying their own precedence first |
+| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
+| `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` | the same three, raw, for callers applying their own precedence first |
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
@@ -906,7 +1013,9 @@ concern the caller owns, so both can run unattended from a server.
 ## Errors
 
 All errors returned by the facade are `*pkg/errors.StructuredError`
-values carrying an `ErrorCode`. Use `errors.As` to inspect:
+values carrying an `ErrorCode`. Match on the code with `errors.Is` —
+`StructuredError.Is` reports a match when the target is a `StructuredError`
+with the same code, so this works through wrap chains:
 
 ```go
 import (
@@ -916,9 +1025,25 @@ import (
 )
 
 _, err := client.ResolveRecipe(ctx, req)
-var se *aicrerrors.StructuredError
-if stderrors.As(err, &se) && se.Code == aicrerrors.ErrCodeInvalidRequest {
+switch {
+case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")):
 	// handle invalid input
+case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, "")):
+	// handle missing recipe
+}
+```
+
+Runnable version: [`Example_errorCodes`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#example-package-ErrorCodes).
+
+Reach for `errors.As` only when you need the error's *payload* rather than
+its class — `se.Context`, which carries structured detail such as a coverage
+failure's `uncovered` dimensions:
+
+```go
+var se *aicrerrors.StructuredError
+if stderrors.As(err, &se) {
+	uncovered := se.Context["uncovered"]
+	_ = uncovered
 }
 ```
 
@@ -965,6 +1090,38 @@ Per-operation caps:
 
 Passing a `nil` `context.Context` returns `ErrCodeInvalidRequest`. Use
 `context.Background()` (or a deadline-bounded child) for unbounded callers.
+
+## The integrator contract
+
+Four commitments, stated plainly, so you know what you are depending on.
+
+**Import `pkg/client/v1`. That is the contract.** Everything else under
+`pkg/*` stays importable, but only this package is compatibility-reviewed, and
+only its exported surface is checked by the API-diff gate on every PR. The
+[stability matrix](./public-api.md#stability-tiers) tiers each package;
+`Internal` packages will break you on upgrade.
+
+**When the facade is missing something, tell us instead of routing around
+it.** [Open an issue](https://github.com/NVIDIA/aicr/issues/new/choose)
+describing the capability. Reaching into an evolving subpackage works today
+and is the thing most likely to break you later, and we would rather extend
+the facade — that is how `LoadSnapshot`, `LoadConfig`, and the verification
+surface all arrived. Where this guide shows a deliberate escape hatch (the
+fingerprint step under [Criteria relaxation](#criteria-relaxation-on-the-snapshot-path)),
+it says so and explains the coupling you are accepting.
+
+**Breaking changes are detected, not merely intended.** `tools/api-diff`
+compares the facade and its transparent-alias targets against the last release
+on every PR; an incompatible change fails CI and requires a recorded, reviewed
+exception. That is a mechanical guarantee, not a policy promise — but note
+what it does *not* cover: behavior. A function keeping its signature while
+changing what it does passes the gate.
+
+**The examples are compiled.** Every entry in the [examples
+table](#runnable-examples) builds in AICR's own test suite, so a facade change
+that invalidates one fails here first. Scope that honestly: it covers those
+examples, not this page's prose or its shorter inline snippets, and for the
+majority it proves compilation rather than runtime behavior.
 
 ## Compatibility
 

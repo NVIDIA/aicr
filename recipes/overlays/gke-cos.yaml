@@ -64,6 +64,30 @@ spec:
   # DaemonSet the driver-installer value is named after) is deliberately
   # NOT declared: it lands together with its
   # durable distinguishing signal (ADR-015 Deferred Decision 5).
+  #
+  # nvsentinel.labeler.assumeDriverInstalled is owned per value because driver
+  # evidence differs between them (#2181). The NVSentinel labeler infers driver
+  # presence by watching for a driver pod. Under gke-default the driver ships
+  # with the node image and no such pod exists, so without this
+  # nvsentinel.dgxc.nvidia.com/driver.installed is never applied and
+  # metadata-collector plus both syslog-health-monitor DaemonSets sit at zero
+  # desired pods — silently, with no error and no event (#2175). Under
+  # driver-installer, Google's standalone nvidia-driver-installer DaemonSet
+  # supplies a driver pod the labeler already detects, so the value is an
+  # explicit false rather than left unset: assuming a preinstalled driver there
+  # would label GPU nodes before the driver is actually ready.
+  #
+  # metadata-collector.runtimeClassName is deliberately NOT set here. Neither
+  # value retargets gpu-operator's operator.runtimeClass, so both it and
+  # metadata-collector's runtimeClassName keep the shared chart default
+  # nvidia — the two already agree and there is nothing to select. (Unlike
+  # AKS azure-managed, which retargets it to nvidia-container-runtime and so
+  # must own both names.)
+  #
+  # Naming nvsentinel in the declaration also makes its presence
+  # profile-owned, so it cannot be disabled or filtered out of a profiled
+  # GKE-COS bundle. That is intended: NVSentinel is a required component for
+  # these deployments (#2181).
   profile:
     name: gpuStack
     description: >-
@@ -91,6 +115,9 @@ spec:
             overrides:
               devicePlugin:
                 enabled: true
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: false}
         constraints:
           - name: NodeTopology.gpu-nodes.label
             value: gke-no-default-nvidia-gpu-device-plugin=true
@@ -125,6 +152,9 @@ spec:
             overrides:
               devicePlugin:
                 enabled: false
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: true}
         constraints:
           - name: NodeTopology.gpu-nodes.label
             value: "!gke-no-default-nvidia-gpu-device-plugin"

@@ -1,0 +1,112 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NIM Service — credential-free inference via a Hugging Face model.
+# Serves an ungated Hugging Face model through NIM without any NGC credential:
+# no NGC_API_KEY and no registry pull secret.
+#
+# How it avoids credentials:
+#   - NIM_MODEL_NAME uses an hf:// URI, which puts the operator on its Hugging
+#     Face path. There it marks NGC_API_KEY optional and injects HF_TOKEN from
+#     the same authSecret, so the secret need not carry an NGC key at all.
+#   - This repository (nim/meta/llama-3.1-8b-instruct) serves anonymous
+#     registry tokens, so no pullSecrets are required. Availability is
+#     per-repository, not namespace-wide: verify any other image before
+#     assuming it pulls anonymously. The generic Multi-LLM image
+#     nvcr.io/nim/nvidia/llm-nim is gated and does need a pull secret.
+#
+# spec.authSecret is required by the NIMService schema, so the secret must
+# exist and must contain an HF_TOKEN key. An empty value is sufficient for an
+# ungated model; a gated Hugging Face repository needs a real token.
+#
+# Off-label combination: this is a Llama-specific NIM image serving a Hugging
+# Face model it was not built for. The image keeps its own profile identity
+# (logs report model_tag meta/llama-3.1-8b-instruct) while vLLM serves the
+# downloaded Hugging Face weights. It works, but it is not the image's
+# advertised use, and "verified" below means the service loads and returns a
+# completion -- a liveness check. An off-label pairing can still apply the
+# wrong chat template or tokenizer and degrade output quality silently, so
+# spot-check generations before relying on this for anything but a smoke
+# test. The
+# image intended for arbitrary hf:// models is nvcr.io/nim/nvidia/llm-nim,
+# which is a gated repository and therefore needs an NGC pull secret --
+# choosing it trades the credential-free property for a supported pairing.
+# Pin the tag (not latest) so the pairing you validated is the one you ship.
+# The hf:// capability is version-dependent: 2.0.10 honours it, while 2.0.9
+# ignores NIM_MODEL_NAME, falls back to its own NGC profile, and fails with an
+# authentication error. Re-verify before moving this pin.
+#
+# Prerequisites:
+#   - k8s-nim-operator deployed (via AICR NIM recipe); no credential needed
+#
+# Setup:
+#   kubectl create ns nim-workload
+#   kubectl create secret generic hf-secret \
+#     --from-literal=HF_TOKEN="" -n nim-workload
+#
+# Deploy:
+#   kubectl apply -f nimservice-hf-nocred.yaml
+#
+# Test:
+#   kubectl port-forward svc/qwen3-nocred 8000:8000 -n nim-workload
+#   curl http://localhost:8000/v1/models
+#   curl http://localhost:8000/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"Hello!"}],"max_tokens":30}'
+#
+# Node scheduling below targets an AKS GPU pool. Adjust nodeSelector and
+# tolerations for other platforms (EKS/GKE use different pool labels and taints).
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nim-workload
+---
+apiVersion: apps.nvidia.com/v1alpha1
+kind: NIMService
+metadata:
+  name: qwen3-nocred
+  namespace: nim-workload
+spec:
+  # Required by the schema. Holds only HF_TOKEN — no NGC_API_KEY.
+  authSecret: hf-secret
+  image:
+    repository: nvcr.io/nim/meta/llama-3.1-8b-instruct
+    tag: "2.0.10"
+    pullPolicy: IfNotPresent
+    # No pullSecrets: this repository serves anonymous registry tokens.
+  env:
+    - name: NIM_MODEL_NAME
+      value: hf://Qwen/Qwen3-0.6B
+    - name: NIM_SERVED_MODEL_NAME
+      value: Qwen/Qwen3-0.6B
+  storage:
+    emptyDir:
+      sizeLimit: 60Gi
+  replicas: 1
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+  nodeSelector:
+    # Replace gpuworker1 with your own GPU pool's agentpool label.
+    agentpool: gpuworker1
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Equal
+      value: present
+      effect: NoSchedule
+  expose:
+    service:
+      type: ClusterIP
+      port: 8000

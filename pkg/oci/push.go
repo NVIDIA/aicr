@@ -1379,7 +1379,7 @@ func isTransientPushError(err error) bool {
 	return apperrors.IsNetworkError(err)
 }
 
-// jitterDuration applies +/-25% jitter to d.
+// jitterDuration applies +/-25% jitter to d to decorrelate retries.
 func jitterDuration(d time.Duration) time.Duration {
 	if d <= 0 {
 		return 0

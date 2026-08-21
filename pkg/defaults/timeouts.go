@@ -1340,6 +1340,22 @@ const (
 	// resolver caches and slow-start CDN edges without letting a stalled
 	// upstream tie up an aicrd request slot for minutes.
 	HelmChartIndexPreCheckTimeout = 30 * time.Second
+
+	// HelmChartIndexRetryBudget is the maximum number of index fetch
+	// attempts before failing permanently. Retryable errors are transport
+	// failures, connection resets, and 5xx / 408 / 429 responses from the upstream.
+	//
+	// WARNING: Retry shares the parent timeout budget. On the HTTP server path,
+	// the pre-check shares the 60s BundleHandlerTimeout with the subsequent helm
+	// pull; a maxed-out pre-check (30s + 1s backoff + 29s) leaves ~0s for the
+	// chart download. Consider capping total pre-check wall-clock if upstream
+	// latency becomes a concern.
+	HelmChartIndexRetryBudget = 3
+
+	// HelmChartIndexRetryInitialBackoff is the wait between the first and
+	// second index fetch attempts. Subsequent backoffs scale by
+	// exponential factor 2: HelmChartIndexRetryInitialBackoff * 2^(attempt-1).
+	HelmChartIndexRetryInitialBackoff = 1 * time.Second
 )
 
 // OCI publication phase budgets. The whole-publish ceiling covers two source
@@ -1378,4 +1394,52 @@ const (
 	// OCIBundlePublishTimeout bounds the complete verify, stage, package,
 	// registry-push, and image-reference publication sequence.
 	OCIBundlePublishTimeout = 35 * time.Minute
+)
+
+// OCI recipe-source pull budgets and resource limits. Recipe catalogs are
+// small text trees; these ceilings leave substantial headroom while bounding
+// network, memory, and filesystem use by an untrusted registry artifact.
+const (
+	// OCIRecipeConstructionTimeout bounds complete OCI recipe-source
+	// construction: staging, digest authorization, materialization, layered
+	// provider creation, and catalog validation. Eight minutes reserves more
+	// than three minutes for local materialization and validation after the
+	// maximum-jitter registry retry budget is exhausted.
+	OCIRecipeConstructionTimeout = 8 * time.Minute
+
+	// OCIRecipePullTimeout bounds each OCI recipe-source phase independently,
+	// including staging and materialization. It remains a per-phase ceiling;
+	// OCIRecipeConstructionTimeout is the separate complete-operation bound.
+	OCIRecipePullTimeout = 5 * time.Minute
+
+	// OCIRecipePullAttemptTimeout bounds one registry graph-copy attempt.
+	OCIRecipePullAttemptTimeout = 90 * time.Second
+
+	// OCIRecipePullRetries is the total attempts, including the first.
+	OCIRecipePullRetries = 3
+
+	// OCIRecipePullBackoff is the initial exponential retry backoff.
+	OCIRecipePullBackoff = 1 * time.Second
+
+	// MaxOCIRecipeManifestBytes caps one fetched OCI manifest.
+	MaxOCIRecipeManifestBytes int64 = 1 * 1024 * 1024
+
+	// MaxOCIRecipeLayerBytes caps the compressed recipe layer.
+	MaxOCIRecipeLayerBytes int64 = 64 * 1024 * 1024
+
+	// MaxOCIRecipeDownloadBytes caps compressed artifact content per attempt.
+	MaxOCIRecipeDownloadBytes int64 = 64 * 1024 * 1024
+
+	// MaxOCIRecipeRetryTrafficBytes caps response traffic across all attempts.
+	MaxOCIRecipeRetryTrafficBytes int64 = OCIRecipePullRetries *
+		(MaxOCIRecipeManifestBytes + MaxOCIRecipeDownloadBytes + 1)
+
+	// MaxOCIRecipeExtractedBytes caps the complete expanded tar stream.
+	MaxOCIRecipeExtractedBytes int64 = 128 * 1024 * 1024
+
+	// MaxOCIRecipeFileBytes caps one materialized recipe file.
+	MaxOCIRecipeFileBytes int64 = MaxExternalDataFileBytes
+
+	// MaxOCIRecipeFiles caps all materialized filesystem nodes.
+	MaxOCIRecipeFiles = 4096
 )

@@ -1089,7 +1089,7 @@ func runBundleCmdWithDependencies(
 	// otherwise. The Client owns its DataProvider — LoadRecipe and
 	// MakeBundle thread it through, replacing the old process-global
 	// data provider.
-	client, err := recipeClientFromCmd(cmd, cfg)
+	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
 		return err
 	}

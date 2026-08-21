@@ -28,6 +28,8 @@ navigation:
         path: user/cli-reference.md
       - page: Generating Bundles
         path: user/bundling.md
+      - page: Fabric-Attached Training
+        path: user/fabric-attached-training.md
       - page: CLI Configuration File
         path: user/cli-config.md
       - page: Artifact Verification
