@@ -342,14 +342,21 @@ func TestRecipeAndQueryCommandsRejectInvalidRuntimeInventoryMode(t *testing.T) {
 // TestRecipeCommandRejectsRuntimeInventoryWithoutComponent covers the flag-set
 // branch reaching a successful parse and then failing closed at build time,
 // which is the path an operator hits after a typo in --service.
+//
+// The criteria must name a recipe that does not declare k8s-aibom. Inference on
+// gke/h100/cos is the stock-adoption target under ADR-019's amendment and now
+// declares it, so this asserts against a training recipe instead. Mirrors the
+// same precondition in pkg/client/v1's TestResolveRecipeRuntimeInventoryMode.
 func TestRecipeCommandRejectsRuntimeInventoryWithoutComponent(t *testing.T) {
 	err := recipeCmd().Run(t.Context(), []string{
 		"recipe", "--service", "gke", "--accelerator", "h100",
-		"--os", "cos", "--intent", "inference",
+		"--os", "cos", "--intent", "training",
 		"--runtime-inventory", "disabled",
 	})
 	if err == nil {
-		t.Fatal("command error = nil, want rejection for a recipe that does not declare the component")
+		t.Fatal("command error = nil, want rejection for a recipe that does not declare " +
+			"the component; if these criteria now declare k8s-aibom, pick criteria that " +
+			"do not rather than relaxing this assertion")
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 		t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
