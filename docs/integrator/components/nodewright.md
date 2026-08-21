@@ -2,7 +2,7 @@
 
 Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/skyhook-crd.yaml) that define one or more nodewright packages to deploy. These packages were selected to provide two main functions:
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
-2. Be able to install all of the necessary software to bring a vanilla kubernetes node to the AICR spec.
+2. Be able to install all of the necessary software to bring a vanilla Kubernetes node to the AICR spec.
 
 ## References
 

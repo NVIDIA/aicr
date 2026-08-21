@@ -15,7 +15,7 @@ overview, see the [repository README](https://github.com/NVIDIA/aicr).
 | If you are a... | Start here |
 |-----------------|-----------|
 | **User** — operator deploying AICR to provision or validate a cluster | [User Guide](user/index.md) |
-| **Integrator** — engineer embedding AICR in a CI/CD pipeline, GitOps flow, or larger platform | [Integrator Guide](integrator/automation.md) |
+| **Integrator** — engineer embedding AICR in a CI/CD pipeline, GitOps flow, or larger platform | [Integrator Guide](integrator/index.md) |
 | **Contributor** — developer extending AICR or shipping recipes | [Contributor Guide](contributor/index.md) |
 
 ### User Guide

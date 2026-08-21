@@ -315,6 +315,10 @@ By contributor task:
 - **Publishing the evidence dashboard to GitHub Pages (GP5)** → [evidence-dashboard-publish.md](evidence-dashboard-publish.md)
 - **Maintaining recipes and cutting releases** → [maintaining.md](maintaining.md)
 - **Writing or running tests (unit, chainsaw, KWOK, e2e)** → [tests.md](tests.md)
+- **Requesting a real-hardware UAT run or adding a reservation** → [uat.md](uat.md)
+- **Signing with Rekor v2** → [rekor-v2-signing.md](rekor-v2-signing.md)
+- **Allowlisting registry egress for CI and air-gapped builds** → [registry-egress.md](registry-egress.md)
+- **Investigating inference-perf run-to-run fluctuation** → [inference-perf-fluctuation.md](inference-perf-fluctuation.md)
 - **Using the project's Claude skills (snapshot analysis, docs audit, demos, decks, OpenVEX, release notes)** → [skills.md](skills.md)
 
 By reference:

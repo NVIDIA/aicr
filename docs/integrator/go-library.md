@@ -213,7 +213,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	// metadata.name or container image that the API server rejects. The CLI
 	// defaults them from its own flags, which the facade does not share.
 	Namespace:          "aicr-snapshot",
-	Image:              "ghcr.io/nvidia/aicr:v0.11.1",
+	Image:              "ghcr.io/nvidia/aicr:v0.19.0",
 	JobName:            "aicr-snapshot",
 	ServiceAccountName: "aicr-agent",
 	Timeout:            5 * time.Minute,
