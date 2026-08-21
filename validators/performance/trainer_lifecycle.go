@@ -111,6 +111,11 @@ const (
 	// overwriting a generically-named admission configuration another operator owns.
 	trainerWebhookSuffix = ".trainer.kubeflow.org"
 
+	// kubeflowTrainerComponent is the registry name of the Kubeflow Trainer
+	// component. A recipe declaring it is promising a Trainer installation, which
+	// is what ensureTrainerInstalled keys its behavior on.
+	kubeflowTrainerComponent = "kubeflow-trainer"
+
 	// jobSetCRDName identifies the JobSet dependency. TrainJobs run as JobSets, so
 	// a Trainer whose JobSet controller never becomes ready fails opaquely later.
 	jobSetCRDName = "jobsets.jobset.x-k8s.io"
@@ -185,6 +190,12 @@ type trainerInstall struct {
 	Namespace  string
 	Service    string
 	Deployment string
+
+	// Incomplete records which specific object was missing when the probe
+	// reported the installation as incomplete. The probe already determines this
+	// to log it; carrying it out makes the resulting failure self-diagnosing
+	// rather than sending an operator to the logs to find out what to fix.
+	Incomplete string
 }
 
 // trainerResourceRef identifies a Kubernetes resource applied during Trainer installation,
@@ -226,11 +237,11 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (t
 		}
 		if !found {
 			slog.Info("Kubeflow Trainer incomplete: CRD missing", "crd", crd)
-			return trainerInstall{}, false, nil
+			return trainerInstall{Incomplete: fmt.Sprintf("CRD %s is missing", crd)}, false, nil
 		}
 		if !isCRDEstablished(obj) {
 			slog.Info("Kubeflow Trainer incomplete: CRD not established", "crd", crd)
-			return trainerInstall{}, false, nil
+			return trainerInstall{Incomplete: fmt.Sprintf("CRD %s is not established", crd)}, false, nil
 		}
 	}
 
@@ -239,19 +250,30 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (t
 	// makes this work for both the self-install overlay and the Helm chart.
 	install, found, err := discoverTrainerInstall(ctx, dynamicClient,
 		trainerValidatingWebhookGVR, trainerValidatingWebhookConfig, trainerValidatingWebhookName)
-	if err != nil || !found {
+	if err != nil {
 		return trainerInstall{}, false, err
 	}
+	if !found {
+		// Carry discovery's own reason out rather than flattening it to a bare
+		// false: it is the difference between "no admission configuration at all"
+		// and "the configuration is there but names no Service", and the operator
+		// needs to know which to fix.
+		return install, false, nil
+	}
 
-	ok, err := hasTrainerWebhook(ctx, dynamicClient,
+	reason, ok, err := hasTrainerWebhook(ctx, dynamicClient,
 		trainerMutatingWebhookGVR, trainerMutatingWebhookConfig, trainerMutatingWebhookName)
 	if err != nil {
 		return trainerInstall{}, false, err
 	}
 	if !ok {
-		slog.Info("Kubeflow Trainer incomplete: admission webhook missing",
-			"configuration", trainerMutatingWebhookConfig, "webhook", trainerMutatingWebhookName)
-		return trainerInstall{}, false, nil
+		// Carry the specific reason out rather than reporting every failure as a
+		// missing configuration: "create it" and "something else owns this name"
+		// are different jobs for whoever reads the verdict.
+		slog.Info("Kubeflow Trainer incomplete: mutating admission webhook unusable",
+			"configuration", trainerMutatingWebhookConfig, "webhook", trainerMutatingWebhookName,
+			"reason", reason)
+		return trainerInstall{Incomplete: reason}, false, nil
 	}
 
 	// The controller Deployment is found by label: its name is release-derived on
@@ -264,7 +286,7 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (t
 	if !found {
 		slog.Info("Kubeflow Trainer incomplete: controller Deployment missing",
 			"namespace", install.Namespace)
-		return trainerInstall{}, false, nil
+		return trainerInstall{Incomplete: "the controller Deployment was not found"}, false, nil
 	}
 	install.Deployment = controller
 
@@ -274,7 +296,7 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (t
 	} else if !found {
 		slog.Info("Kubeflow Trainer incomplete: controller Service missing",
 			"namespace", install.Namespace, "name", install.Service)
-		return trainerInstall{}, false, nil
+		return trainerInstall{Incomplete: "the controller Service was not found"}, false, nil
 	}
 
 	slog.Info("Kubeflow Trainer installation is complete",
@@ -295,12 +317,17 @@ func discoverTrainerInstall(ctx context.Context, dynamicClient dynamic.Interface
 	gvr schema.GroupVersionResource, configName, webhookName string) (trainerInstall, bool, error) {
 
 	obj, found, err := getTrainerObject(ctx, dynamicClient, gvr, "", configName)
-	if err != nil || !found {
-		if err == nil {
-			slog.Info("Kubeflow Trainer incomplete: admission configuration missing",
-				"configuration", configName)
-		}
+	if err != nil {
+		// A failed read is not evidence of absence. Propagate it so the caller
+		// classifies it as transport or timeout rather than as a deployment that
+		// never happened.
 		return trainerInstall{}, false, err
+	}
+	if !found {
+		slog.Info("Kubeflow Trainer incomplete: admission configuration missing",
+			"configuration", configName)
+		return trainerInstall{Incomplete: fmt.Sprintf(
+			"admission configuration %q is missing", configName)}, false, nil
 	}
 
 	entries, _, err := unstructured.NestedSlice(obj.Object, "webhooks")
@@ -321,14 +348,16 @@ func discoverTrainerInstall(ctx context.Context, dynamicClient dynamic.Interface
 			// rather than guessing a namespace and reinstalling on top of it.
 			slog.Info("Kubeflow Trainer webhook has no Service reference; cannot locate the installation",
 				"configuration", configName, "webhook", webhookName)
-			return trainerInstall{}, false, nil
+			return trainerInstall{Incomplete: "the admission webhook has no Service reference, so the installation namespace cannot be located"}, false, nil
 		}
 		return trainerInstall{Namespace: namespace, Service: service}, true, nil
 	}
 
 	slog.Info("Kubeflow Trainer incomplete: admission webhook missing",
 		"configuration", configName, "webhook", webhookName)
-	return trainerInstall{}, false, nil
+	return trainerInstall{Incomplete: fmt.Sprintf(
+		"admission configuration %q exists but does not contain the %q webhook",
+		configName, webhookName)}, false, nil
 }
 
 // getTrainerObject fetches one object. NotFound reports found=false with no
@@ -392,17 +421,28 @@ func trainerAPIErrorCode(err error) aicrErrors.ErrorCode {
 // serves the given Trainer webhook. The name check matters because the upstream
 // manifests use generic, unprefixed configuration names that another operator on
 // the cluster may already own.
+//
+// When the answer is no it returns the reason, because the two ways to get there
+// need different remedies: a configuration that is absent has to be created, while
+// one that exists but serves someone else's webhook has to be reconciled with
+// whatever already owns that name. Reporting both as "missing" — which is what
+// flattening this to a bare false did — sends an operator to create an object that
+// is already on the cluster. The validating-webhook path in discoverTrainerInstall
+// draws the same distinction.
 func hasTrainerWebhook(ctx context.Context, dynamicClient dynamic.Interface,
-	gvr schema.GroupVersionResource, configName, webhookName string) (bool, error) {
+	gvr schema.GroupVersionResource, configName, webhookName string) (string, bool, error) {
 
 	obj, found, err := getTrainerObject(ctx, dynamicClient, gvr, "", configName)
-	if err != nil || !found {
-		return false, err
+	if err != nil {
+		return "", false, err
+	}
+	if !found {
+		return fmt.Sprintf("admission configuration %q is missing", configName), false, nil
 	}
 
 	entries, _, err := unstructured.NestedSlice(obj.Object, "webhooks")
 	if err != nil {
-		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 			fmt.Sprintf("failed to read webhooks from %s %q", gvr.Resource, configName), err)
 	}
 	for _, e := range entries {
@@ -411,10 +451,11 @@ func hasTrainerWebhook(ctx context.Context, dynamicClient dynamic.Interface,
 			continue
 		}
 		if entry[keyName] == webhookName {
-			return true, nil
+			return "", true, nil
 		}
 	}
-	return false, nil
+	return fmt.Sprintf("admission configuration %q exists but does not contain the %q webhook",
+		configName, webhookName), false, nil
 }
 
 // trainerResourceClient returns the namespaced or cluster-scoped client for gvr.
@@ -431,8 +472,27 @@ func trainerResourceClient(dynamicClient dynamic.Interface,
 // and returns the resources it created, so the caller can delete them when the run
 // finishes. A complete pre-existing installation is left alone and reported as no
 // resources, so the benchmark never deletes a Trainer it does not own.
+//
+// recipeDeclaresTrainer says whether the recipe under validation ships Kubeflow
+// Trainer as a delivered component, and it decides what an incomplete installation
+// means:
+//
+//   - declared, and present: use the delivered installation.
+//   - declared, but missing or incomplete: fail. Self-installing here would mask a
+//     broken deployment of a component the recipe promised, and the benchmark would
+//     then report a passing result for a cluster that cannot run TrainJobs at all.
+//   - not declared, and present: reuse it, unchanged. The recipe never claimed a
+//     Trainer, so a pre-existing one is not evidence of anything to report.
+//   - not declared, and absent: install an ephemeral fixture and tear it down, as
+//     before. There is nothing to mask, because nothing was promised.
+//
+// This is deliberately keyed on the recipe rather than on live cluster state: what a
+// missing installation *means* is now a property of the recipe, not of whatever
+// happens to be on the cluster. Execution still differs across the undeclared rows —
+// a pre-existing Trainer is reused, an absent one is installed — which is why the
+// earlier "behaves identically regardless of live state" wording was withdrawn.
 func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface,
-	discoveryClient discovery.DiscoveryInterface) ([]trainerResourceRef, error) {
+	discoveryClient discovery.DiscoveryInterface, recipeDeclaresTrainer bool) ([]trainerResourceRef, error) {
 
 	install, installed, err := isTrainerInstalled(ctx, dynamicClient)
 	if err != nil {
@@ -445,6 +505,29 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 	}
 
 	if !installed {
+		// The recipe ships Kubeflow Trainer, so a missing or incomplete installation
+		// is a deployment failure, not something to paper over. Installing our own
+		// here would produce a passing benchmark for a cluster whose delivered
+		// Trainer is broken.
+		//
+		// But isTrainerInstalled is an existence probe, not a readiness probe: it
+		// reports incomplete for a CRD that is present but not yet Established, or a
+		// controller Deployment that has not appeared yet. Both are ordinary rollout
+		// states on the bundle-deploy-validate path. Poll before declaring failure,
+		// so a validate that starts while the chart is still landing waits it out
+		// rather than reporting a deployment that has not failed.
+		if recipeDeclaresTrainer {
+			declared, waitErr := waitForDeclaredTrainer(ctx, dynamicClient)
+			if waitErr != nil {
+				return nil, waitErr
+			}
+			// The delivered installation finished rolling out. Fall through to the
+			// same readiness wait a pre-existing installation gets, and claim no
+			// resources: the recipe owns this Trainer, not the benchmark.
+			install = declared
+			return nil, awaitTrainerController(ctx, dynamicClient, install)
+		}
+
 		// Before applying anything, check for a live installation somewhere else.
 		// Kustomize applies CRDs and RBAC before webhook configurations, so by the
 		// time the admission-config ownership guard could fire, a shared-name
@@ -474,15 +557,177 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 		return created, nil
 	}
 
-	// The probe confirms every object exists; the controller may still be rolling.
-	// Wait for it here rather than reinstalling over a healthy Trainer we do not own.
+	return nil, awaitTrainerController(ctx, dynamicClient, install)
+}
+
+// classifyPollExpiry turns an expired poll context into the right verdict, or nil
+// when the poll context is still live and the caller should handle its own error.
+//
+// The two expiries mean opposite things. A canceled parent means the run was
+// aborted — catalog timeout, canceled phase, killed Job — which is not a customer
+// deployment defect. A local deadline means the delivered Trainer never became
+// complete, which is.
+//
+// Both paths route through here so the verdict does not depend on whether the clock
+// ran out during a probe or during a sleep: the same cluster state must not produce
+// two different codes.
+//
+// observed carries a concrete incomplete observation — a probe that succeeded and
+// named the object that is not there — and it is what separates the two failing
+// codes. NotFound may only be synthesized from such an observation. Deriving it from
+// an empty one would report a degraded or slow apiserver, where every probe attempt
+// was a read timeout and nothing was ever read, as a customer deployment defect; and
+// it would report a probe that found the installation complete as one that found
+// nothing. With no observation to stand on, the honest verdict is the timeout that
+// actually happened. The allowance is enforced either way — only the classification
+// differs.
+//
+// unobserved is the reason to report in that case.
+func classifyPollExpiry(ctx, pollCtx context.Context, observed trainerInstall, unobserved string) error {
+	if ctx.Err() != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+			"canceled while waiting for the recipe-declared Kubeflow Trainer", ctx.Err())
+	}
+	if pollCtx.Err() == nil {
+		return nil
+	}
+
+	verdict := fmt.Sprintf(
+		"the recipe declares the %s component but its Kubeflow Trainer installation "+
+			"did not become complete within %s: %%s. The benchmark will not self-install "+
+			"over a delivered component that failed to deploy",
+		kubeflowTrainerComponent, trainerInstallWaitTimeout)
+
+	if observed.Incomplete == "" {
+		if unobserved == "" {
+			unobserved = "the allowance expired before any probe could tell"
+		}
+		return aicrErrors.New(aicrErrors.ErrCodeTimeout, fmt.Sprintf(verdict, unobserved))
+	}
+
+	// ErrCodeNotFound, not Unavailable: the read succeeded and the answer was "not
+	// deployed". Unavailable is this package's code for a transport failure — see
+	// the decision table on validators.Require — and using it here would file a
+	// product defect alongside apiserver hiccups, telling whoever triages it to
+	// re-run rather than to fix their deployment.
+	return aicrErrors.New(aicrErrors.ErrCodeNotFound, fmt.Sprintf(verdict, observed.Incomplete))
+}
+
+// awaitTrainerController waits for a Trainer the benchmark does not own to finish
+// starting. The probe confirms every object exists; the controller may still be
+// rolling, and waiting is the alternative to reinstalling over a healthy Trainer.
+func awaitTrainerController(ctx context.Context, dynamicClient dynamic.Interface, install trainerInstall) error {
 	slog.Info("Kubeflow Trainer already installed, waiting for controller readiness",
 		"namespace", install.Namespace, "deployment", install.Deployment)
 	if readyErr := waitForTrainerReady(ctx, dynamicClient, install.Namespace, install.Deployment); readyErr != nil {
-		return nil, aicrErrors.PropagateOrWrap(readyErr, aicrErrors.ErrCodeTimeout,
+		return aicrErrors.PropagateOrWrap(readyErr, aicrErrors.ErrCodeTimeout,
 			"pre-existing Kubeflow Trainer controller is not ready")
 	}
-	return nil, nil
+	return nil
+}
+
+// trainerInstallWaitTimeout and trainerInstallPollInterval bound the wait for a
+// recipe-declared Trainer to finish rolling out. They are variables rather than
+// constants only so tests can exercise the timeout path without waiting for it.
+var (
+	trainerInstallWaitTimeout  = defaults.TrainerControllerReadyTimeout
+	trainerInstallPollInterval = defaults.TrainerInstallPollInterval
+)
+
+// waitForDeclaredTrainer polls until a recipe-declared Kubeflow Trainer reports a
+// complete installation, or fails with the specific object that never appeared.
+//
+// The distinction it draws is the point of the recipe-driven lifecycle: an
+// installation that is still rolling out is not a failed one, but an installation
+// that never completes is — and the benchmark must not install its own Trainer over
+// a delivered component, because that would report a passing result for a cluster
+// whose Trainer is broken.
+func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface) (trainerInstall, error) {
+	var last trainerInstall
+
+	pollCtx, cancel := context.WithTimeout(ctx, trainerInstallWaitTimeout)
+	defer cancel()
+
+	for {
+		// Probe under pollCtx so the rollout allowance actually bounds it. Each probe
+		// makes several sequential reads, each with its own DiagnosticTimeout, so a
+		// probe running on the parent context could cross the deadline and still
+		// report success — the allowance would bound only the sleeps.
+		//
+		// The cost is that getTrainerObject checks ctx.Err() at the top of every read
+		// and returns Timeout, so an expiring deadline surfaces here as a probe error
+		// rather than through the select. Classify it below instead of propagating it
+		// blind, so the verdict does not depend on where in the loop the clock ran out.
+		install, ok, err := isTrainerInstalled(pollCtx, dynamicClient)
+		if err != nil {
+			// Let expiry win only for a context-derived error. A read that starts
+			// before the deadline and fails for a real reason after it — an apiserver
+			// 503, say — must keep its transport classification: reporting that as
+			// "the installation did not become complete" files a control-plane outage
+			// as a customer deployment defect, which is the same misclassification
+			// the NotFound/Unavailable distinction exists to prevent. It is also
+			// exactly when the apiserver is degraded that the transport signal is
+			// worth the most.
+			if errors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+				// last is the newest concrete observation, and it is the zero value
+				// until some probe completes. When every attempt was cut short by the
+				// deadline there is nothing on the cluster to point at, so this stays
+				// a timeout rather than becoming a deployment defect.
+				if verdict := classifyPollExpiry(ctx, pollCtx, last,
+					"no probe completed before the allowance expired"); verdict != nil {
+					return trainerInstall{}, verdict
+				}
+			}
+			return trainerInstall{}, aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
+				"failed to check Kubeflow Trainer installation")
+		}
+		// Recheck expiry before accepting success. The probe's last read can return
+		// just after the deadline, and taking ok on that read would let the wait
+		// outrun its own allowance — the bound has to cover the answer, not only
+		// the question.
+		//
+		// Report why from *this* probe, not the previous one. When ok is true the
+		// installation is complete, so reusing last would blame a missing object the
+		// probe just found — sending an operator to look for something that is there,
+		// when the real finding is a rollout slower than its budget. When ok is false
+		// the current probe's own finding is the specific object still missing, which
+		// the previous iteration's result would replace with a staler one — or, on the
+		// first probe, with the zero value's generic fallback.
+		//
+		// The complete case claims only what was observed. The wait never measures when
+		// the installation became complete, only when it saw that it was, so wording it
+		// as a transition would assert a time nobody read.
+		//
+		// A complete probe is not an incomplete observation, so it is reported as the
+		// timeout it is: the installation is there, and the only finding is a rollout
+		// or a read slower than the budget.
+		observed, unobserved := install, ""
+		if ok {
+			observed = trainerInstall{}
+			unobserved = "the installation was observed complete only after the allowance expired"
+		}
+		if verdict := classifyPollExpiry(ctx, pollCtx, observed, unobserved); verdict != nil {
+			return trainerInstall{}, verdict
+		}
+		if ok {
+			return install, nil
+		}
+		last = install
+
+		select {
+		case <-pollCtx.Done():
+			if verdict := classifyPollExpiry(ctx, pollCtx, last,
+				"no probe completed before the allowance expired"); verdict != nil {
+				return trainerInstall{}, verdict
+			}
+			// unreachable: this case fires only once pollCtx is done, and
+			// classifyPollExpiry always returns non-nil then. Kept as a fail-loud
+			// invariant rather than a silent fallthrough.
+			return trainerInstall{}, aicrErrors.New(aicrErrors.ErrCodeInternal,
+				"Kubeflow Trainer wait ended without a verdict")
+		case <-time.After(trainerInstallPollInterval):
+		}
+	}
 }
 
 // foldCleanupError decides the check's verdict when teardown fails. A cleanup

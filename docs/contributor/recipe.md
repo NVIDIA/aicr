@@ -261,8 +261,13 @@ profile-owned values. Bundle and mirror compare final candidate state with the
 hydrated recipe before creating output. Exact, ancestor, or descendant dynamic
 paths reject unconditionally; static writes reject only when the effective
 three-state observation (present bytes, absent, or blocked) diverges.
-Argocd-helm emits the corresponding structural template-time guard. Other
-deployers have no supported install-time value surface.
+That bundle-time rejection is the whole enforcement for `helm`, `flux`, and
+`helmfile`, whose install-time surface is closed — only the paths `--dynamic`
+declares. The `argocd-helm` deployer additionally emits a structural
+template-time guard, because it exposes component values through the parent
+chart's `.Values`, an open-ended surface the bundle-time gate cannot
+enumerate. Plain `argocd` rejects `--dynamic` and has no install-time value
+surface.
 
 Unprofiled compositions retain the legacy apiVersion and byte shape.
 Generation-side driver auto-detection skips a path owned by the selected

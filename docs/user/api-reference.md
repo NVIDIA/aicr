@@ -602,7 +602,7 @@ legacy shape.
 
 #### Components
 
-These are the recipe **components** in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml) — the names the `bundlers` query parameter accepts (a request may only name components the recipe declares). The registry is the authoritative source — see the [component catalog](component-catalog.md) for the full, current list with detailed descriptions. The table below is illustrative of commonly used components:
+These are the recipe **components** in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml) — the names the `bundlers` query parameter accepts (a request may only name components the recipe declares). The registry is the authoritative source — see the [component catalog](component-catalog.md) for detailed descriptions, pinned versions, and per-component caveats.
 
 | Component | Description |
 |-----------|-------------|
@@ -611,19 +611,25 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `aws-ebs-csi-driver` | Amazon EBS CSI driver (EKS) |
 | `aws-efa` | AWS Elastic Fabric Adapter device plugin (EKS) |
 | `cert-manager` | TLS certificate management |
+| `cert-manager-ocp` | cert-manager variant for OpenShift (OCP) |
+| `cert-manager-ocp-olm` | cert-manager for OpenShift via Operator Lifecycle Manager (OLM) |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `gatekeeper` | OPA Gatekeeper policy controller |
-| `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
+| `gke-nccl-tcpxo` | NCCL TCPXO network plugin for optimized collective communication (GKE) |
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
 | `gpu-operator-ocp` | GPU Operator variant for OpenShift (OCP) |
 | `gpu-operator-ocp-olm` | GPU Operator for OpenShift via Operator Lifecycle Manager (OLM) |
 | `grove` | Dynamo pod lifecycle management |
+| `k8s-aibom` | Optional runtime AI workload inventory — namespace-scoped CycloneDX ML-BOM resources |
 | `k8s-ephemeral-storage-metrics` | Ephemeral storage usage metrics |
 | `k8s-nim-operator` | NVIDIA NIM Operator for inference microservice deployments |
+| `k8s-nim-operator-ocp` | NIM Operator variant for OpenShift (OCP) |
 | `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
 | `kube-prometheus-stack` | Prometheus, Grafana, Alertmanager monitoring stack |
 | `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
+| `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
+| `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
 | `network-operator-ocp` | Network Operator variant for OpenShift (OCP) |
 | `network-operator-ocp-olm` | Network Operator for OpenShift via Operator Lifecycle Manager (OLM) |
@@ -633,14 +639,15 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `nodewright-customizations` | Environment-specific node tuning profiles |
 | `nodewright-operator` | OS-level node tuning and kernel configuration |
 | `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
+| `nvidia-dra-driver-gpu-ocp` | DRA GPU driver variant for OpenShift (OCP) |
 | `nvsentinel` | GPU health monitoring and automated remediation |
 | `prometheus-adapter` | Custom metrics for HPA scaling |
+| `prometheus-adapter-ocp` | Prometheus Adapter variant for OpenShift (OCP) |
 | `prometheus-operator-crds` | CRDs for the prometheus-operator (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc.) |
 | `slinky-slurm` | Slinky-managed Slurm cluster instance (Controller, LoginSet, NodeSet, RestApi); reconciled by `slinky-slurm-operator` |
 | `slinky-slurm-operator` | SchedMD Slinky Slurm operator and admission webhook |
 | `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
-| `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
-| `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
+| `slinky-topograph` | Generates Slurm `topology.conf` from cloud topology APIs for topology-aware Slinky placement |
 | `slurm-accounting-mariadb` | Installation-managed MariaDB instance and Secret generation contract for Slurm accounting; installed only for AICR-provided Slurm accounting |
 
 **Examples:**

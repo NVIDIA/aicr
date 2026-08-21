@@ -1168,7 +1168,7 @@ spec:
       snapshot: ./snapshot.yaml          # optional; omit to capture live
     agent:                               # only used when input.snapshot is empty
       namespace: aicr-validation
-      image: ghcr.io/nvidia/aicr:v0.1.0
+      image: ghcr.io/nvidia/aicr:v0.19.0
       imagePullSecrets: [registry-secret]
       jobName: aicr-validate
       serviceAccountName: aicr
@@ -1517,7 +1517,7 @@ CLI flags always override values loaded from `--config`. For slice/map flags (`-
 
 The `--accelerated-node-selector` and `--accelerated-node-toleration` flags control scheduling for GPU-specific components:
 
-| Flag | GPU Daemonsets | NFD Workers |
+| Flag | GPU DaemonSets | NFD Workers |
 |------|---------------|-------------|
 | `--accelerated-node-selector` | Applied (restricts to GPU nodes) | **Not applied** (NFD runs on all nodes) |
 | `--accelerated-node-toleration` | Applied | Applied |
@@ -2732,7 +2732,7 @@ while `Prune=false` prevents pruning during manual or automated sync after a PVC
 disappears from the desired manifests. StatefulSet-created claims are not
 rendered as Application resources and normally remain.
 
-See [ArgoCD app deletion docs](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/)
+See [Argo CD app deletion docs](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/)
 for finalizer behavior, cascade modes, and selective deletion.
 
 ##### argocd-helm

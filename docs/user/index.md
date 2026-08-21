@@ -19,6 +19,7 @@ This section is for users who:
 | [CLI Reference](cli-reference.md) | Complete command reference with examples for all CLI operations |
 | [CLI Configuration File](cli-config.md) | The complete `AICRConfig` schema for `--config` on snapshot, recipe, bundle, validate, and verify |
 | [Generating Bundles](bundling.md) | Task-oriented how-to: deployers, value overrides, node scheduling, offline/vendored charts, readiness gates |
+| [Fabric-Attached Training](fabric-attached-training.md) | What your workload must declare to use the high-speed fabric an AICR recipe delivers |
 | [Artifact Verification](artifact-verification.md) | Verify bundles and recipe-evidence: trust levels, public-trust, KMS/PEM keys, offline, and CI gating |
 | [API Reference](api-reference.md) | REST API quick start and endpoint documentation |
 | [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
