@@ -15,7 +15,8 @@
 # k8s-aibom Helm values
 # Optional runtime AI-workload inventory. Registry-only: no stock recipe
 # selects this component. The digest and defaults below were qualified as one
-# coherent v1.2.0 artifact set under ADR-019.
+# coherent v1.3.0 artifact set under ADR-019, re-pinned from v1.2.0 when
+# upstream graduated the API to v1beta1.
 
 image:
   repository: ghcr.io/googlecloudplatform/k8s-aibom
@@ -58,8 +59,10 @@ securityContext:
   runAsUser: 65532
   allowPrivilegeEscalation: false
 
-# Measured at 0, 250, and 1,000 replicas-zero workloads. At 1,000 workloads,
-# the final v1.2.0 image converged in 14s and remained below 231m CPU / 49MiB.
+# Envelope measured on GKE with the qualified v1.3.0 image (#2310), at 0, 251,
+# and 1,001 workloads, each a Deployment with replicas set to zero. At 1,001
+# workloads memory reached 67-69MiB and steady-state CPU was 1-2m, both well
+# inside the requests below. Convergence completed within 10s.
 resources:
   requests:
     cpu: 50m
