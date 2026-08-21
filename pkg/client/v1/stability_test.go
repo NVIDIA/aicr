@@ -37,7 +37,10 @@ import (
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	bundlerresult "github.com/NVIDIA/aicr/pkg/bundler/result"
+	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	appconfig "github.com/NVIDIA/aicr/pkg/config"
+	evverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -76,12 +79,29 @@ func TestStability_RecipeResolution(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot, ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshotWithOptions)
 	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.RecipeResult, error)]((*aicr.Client).LoadRecipe)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.AgentConfig) (*aicr.Snapshot, error)]((*aicr.Client).CollectSnapshot)
+	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.Snapshot, error)]((*aicr.Client).LoadSnapshot)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithProfile)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithAccountingMode)
+	requireSignature[func(...aicr.CriteriaDimension) aicr.RecipeResolveOption](aicr.WithSnapshotCriteriaRelaxation)
+	requireSignature[func() []aicr.CriteriaDimension](aicr.AllCriteriaDimensions)
 
 	_ = []aicr.RecipeResolveOption{
 		aicr.WithProfile("profile"),
 		aicr.WithAccountingMode("disabled"),
+		// Both the no-argument form (every dimension derived, all relaxable)
+		// and the narrowing form are part of the contract.
+		aicr.WithSnapshotCriteriaRelaxation(),
+		aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionOS),
+	}
+
+	// The dimension vocabulary is public API: callers name these constants to
+	// declare what they stated, so renaming or dropping one breaks them.
+	_ = []aicr.CriteriaDimension{
+		aicr.DimensionService,
+		aicr.DimensionAccelerator,
+		aicr.DimensionIntent,
+		aicr.DimensionOS,
+		aicr.DimensionPlatform,
 	}
 }
 
@@ -97,6 +117,7 @@ func TestStability_RecipeResult(t *testing.T) {
 	_ = r.Version
 	_ = r.Components
 	_ = r.SelectedProfile
+	_ = r.RelaxedDimensions
 	requireSignature[func(*aicr.RecipeResult) *recipe.RecipeResult]((*aicr.RecipeResult).Resolved)
 	_ = r.Resolved()
 }
@@ -190,6 +211,8 @@ func TestStability_ClientOptions(t *testing.T) {
 	requireSignature[func() aicr.RecipeSourceOption](aicr.EmbeddedSource)
 	requireSignature[func(string) aicr.RecipeSourceOption](aicr.FilesystemSource)
 	requireSignature[func(string, string) aicr.RecipeSourceOption](aicr.OCISource)
+	requireSignature[func(context.Context, ...aicr.Option) (*aicr.Client, error)](aicr.NewClientContext)
+	requireSignature[func(string) aicr.Option](aicr.WithOCISourceTempDir)
 	requireSignature[func() (*aicr.AllowLists, error)](aicr.ParseAllowListsFromEnv)
 
 	_ = []aicr.Option{
@@ -198,6 +221,7 @@ func TestStability_ClientOptions(t *testing.T) {
 		aicr.WithRecipeSource(aicr.EmbeddedSource()),
 		aicr.WithRecipeSource(aicr.FilesystemSource("/x")),
 		aicr.WithRecipeSource(aicr.OCISource("reg", "tag")),
+		aicr.WithOCISourceTempDir("/tmp"),
 	}
 }
 
@@ -248,6 +272,7 @@ func TestStability_Translations(t *testing.T) {
 	requireSignature[func(*recipe.Criteria) *aicr.Criteria](aicr.WrapCriteria)
 	requireSignature[func(*recipe.AllowLists) *aicr.AllowLists](aicr.WrapAllowLists)
 	requireSignature[func(*aicr.AllowLists) *recipe.AllowLists](aicr.ToInternalAllowLists)
+	requireSignature[func(*aicr.Criteria) *recipe.Criteria](aicr.ToInternalCriteria)
 }
 
 // TestStability_HealthAndEvidence pins the health and evidence surfaces.
@@ -257,6 +282,120 @@ func TestStability_HealthAndEvidence(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria) (*health.Report, error)]((*aicr.Client).ComputeHealth)
 	requireSignature[func(*aicr.Client, []*aicr.PhaseResult) *ctrf.Report]((*aicr.Client).MergeReports)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, []*aicr.PhaseResult, aicr.EvidenceOptions) error]((*aicr.Client).EmitRecipeEvidence)
+}
+
+// TestStability_Verification pins the consumer-side verification surface: the
+// four Client-bound entry points, the stateless primitives, the option and
+// result shapes, and the re-exported verdict constants a CI gate branches on.
+func TestStability_Verification(t *testing.T) {
+	t.Parallel()
+
+	requireSignature[func(*aicr.Client, context.Context, string, aicr.BundleVerifyOptions) (*aicr.BundleVerification, error)]((*aicr.Client).VerifyBundle)
+	requireSignature[func(*aicr.Client, context.Context, aicr.EvidenceVerifyOptions) (*aicr.EvidenceVerification, error)]((*aicr.Client).VerifyEvidence)
+	requireSignature[func(*aicr.Client, context.Context, string, aicr.CatalogVerifyOptions) (*aicr.CatalogVerification, error)]((*aicr.Client).VerifyCatalog)
+	requireSignature[func(*aicr.Client, context.Context, aicr.RecipeDigestOptions) (string, error)]((*aicr.Client).RecipeDigest)
+
+	requireSignature[func(context.Context, aicr.BinaryAttestationVerifyOptions) (string, error)](aicr.VerifyBinaryAttestation)
+	requireSignature[func(string) error](aicr.ValidateIdentityPattern)
+	requireSignature[func() []string](aicr.TrustLevels)
+	requireSignature[func(*aicr.EvidenceVerification) ([]byte, error)](aicr.RenderEvidenceJSON)
+	requireSignature[func(*aicr.EvidenceVerification) string](aicr.RenderEvidenceMarkdown)
+
+	var bv aicr.BundleVerifyOptions
+	_ = bv.CertificateIdentityRegexp
+	_ = bv.Key
+	_ = bv.TrustRoot
+	_ = bv.MinTrustLevel
+	_ = bv.RequireCreator
+	_ = bv.CLIVersionConstraint
+	_ = bv.IgnoreTLog
+
+	var verification aicr.BundleVerification
+	_ = verification.Report
+	_ = verification.PolicyFailure
+
+	var ev aicr.EvidenceVerifyOptions
+	_ = ev.Input
+	_ = ev.BundleRef
+	_ = ev.ExpectedIssuer
+	_ = ev.ExpectedIdentityRegexp
+	_ = ev.PlainHTTP
+	_ = ev.InsecureTLS
+	_ = ev.AllowUnpinnedTag
+
+	_ = aicr.CatalogVerifyOptions{}.CertificateIdentityRegexp
+	_ = aicr.CatalogVerification{}.Identity
+	_ = aicr.CatalogVerification{}.Digest
+
+	var rd aicr.RecipeDigestOptions
+	_ = rd.Path
+	_ = rd.Kubeconfig
+	_ = rd.Profile
+
+	var ba aicr.BinaryAttestationVerifyOptions
+	_ = ba.Attestation
+	_ = ba.BinaryDigest
+	_ = ba.IdentityRegexp
+
+	const (
+		_ string = aicr.TrustedIdentityPattern
+		_ string = aicr.EvidenceCauseCanceled
+		_ int    = aicr.EvidenceExitValidPassed
+		_ int    = aicr.EvidenceExitValidPhaseFailures
+		_ int    = aicr.EvidenceExitInvalid
+		_ int    = aicr.EvidenceExitIncomplete
+	)
+
+	// Transparent aliases over the two report trees. Same contract as the
+	// aliases in TestStability_TypesAndAliases: keeping them assignable
+	// from external code is part of the promise.
+	//nolint:staticcheck // QF1011: explicit types pin the aliases' target types.
+	var (
+		_ *bundleverifier.VerifyResult = (*aicr.BundleVerifyReport)(nil)
+		_ *evverifier.VerifyResult     = (*aicr.EvidenceVerification)(nil)
+	)
+}
+
+// TestStability_Signing pins the producer-side supply-chain surface.
+func TestStability_Signing(t *testing.T) {
+	t.Parallel()
+
+	requireSignature[func(*aicr.Client, context.Context, aicr.EvidencePublishOptions) error]((*aicr.Client).PublishEvidence)
+	requireSignature[func(*aicr.Client, context.Context, aicr.CatalogSignOptions) (*aicr.CatalogSignResult, error)]((*aicr.Client).SignCatalog)
+
+	var ep aicr.EvidencePublishOptions
+	_ = ep.BundleDir
+	_ = ep.Push
+	_ = ep.PlainHTTP
+	_ = ep.InsecureTLS
+	_ = ep.NoSign
+	_ = ep.OIDCResolve
+
+	var cs aicr.CatalogSignOptions
+	_ = cs.Output
+	_ = cs.OIDCResolve
+
+	_ = aicr.CatalogSignResult{}.Digest
+	_ = aicr.CatalogSignResult{}.BundleJSON
+}
+
+// TestStability_Config pins the AICRConfig binding: loading, the bridge from
+// an externally-parsed document, and the per-section derivations.
+func TestStability_Config(t *testing.T) {
+	t.Parallel()
+
+	requireSignature[func(context.Context, string) (*aicr.Config, error)](aicr.LoadConfig)
+	requireSignature[func(*appconfig.AICRConfig) *aicr.Config](aicr.WrapConfig)
+	requireSignature[func(*aicr.Config) *appconfig.AICRConfig]((*aicr.Config).Unwrap)
+
+	requireSignature[func(*aicr.Config) (aicr.BundleVerifyOptions, error)]((*aicr.Config).BundleVerifyOptions)
+	requireSignature[func(*aicr.Config) string]((*aicr.Config).RecipeProfile)
+	requireSignature[func(*aicr.Config) (string, bool, error)]((*aicr.Config).RecipeAccountingMode)
+	requireSignature[func(*aicr.Config) (aicr.RecipeSourceOption, bool)]((*aicr.Config).RecipeSource)
+	requireSignature[func(*aicr.Config, *aicr.CriteriaRegistry) (*aicr.Criteria, error)]((*aicr.Config).RecipeCriteria)
+	requireSignature[func(*aicr.Config) ([]aicr.RecipeResolveOption, error)]((*aicr.Config).RecipeResolveOptions)
+	requireSignature[func(*aicr.Config) string]((*aicr.Config).SnapshotPath)
+	requireSignature[func(*aicr.Config) bool]((*aicr.Config).IsCriteriaStrict)
 }
 
 // TestStability_Query pins the package-level query selector, in both its

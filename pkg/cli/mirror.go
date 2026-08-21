@@ -165,7 +165,7 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	// Build ONE per-command Client bound to the resolved data source. Both
 	// recipe-resolution paths (--recipe load and criteria resolve) run through
 	// it, replacing the old process-global data provider.
-	client, err := recipeClientFromCmd(cmd, cfg)
+	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*recipe.RecipeResult, error) {
 	recipePath := cmd.String("recipe")
 	if recipePath != "" {
-		if cmd.IsSet(flagProfile) || cfg.Recipe().ProfileSelection() != "" {
+		if cmd.IsSet(flagProfile) || aicr.WrapConfig(cfg).RecipeProfile() != "" {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--profile/spec.recipe.profile selects during criteria resolution and cannot be combined with --recipe")
 		}

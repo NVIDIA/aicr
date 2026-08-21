@@ -301,6 +301,8 @@ components:
           --accelerated-node-toleration nvidia.com/gpu:NoSchedule."
 
   - name: nvsentinel
+    # Sole owner of its CRDs and no webhook conversion (audited, #2264).
+    ownsCRDs: true
     displayName: nvsentinel
     valueOverrideKeys:
       - nv-sentinel
@@ -326,17 +328,21 @@ components:
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
-      # driver pod. Where the driver ships in the node image and no driver
-      # pod exists (AKS gpuStack=azure-managed, GKE COS
-      # gpuStack=gke-default, OKE), the label is never applied and
+      # driver pod. Where the driver ships in the node image (or the host)
+      # and no driver pod exists (AKS gpuStack=azure-managed, GKE COS
+      # gpuStack=gke-default, OKE, Kind), the label is never applied and
       # metadata-collector plus both syslog-health-monitor DaemonSets sit
       # at 0 desired pods — with no error and no event, while
       # gpu-health-monitor stays healthy on the DCGM label. The chart
       # automates the remedy via labeler.assumeDriverInstalled
       # (--assume-driver-installed, NVSentinel design 018's Manual
-      # Labeling Procedure). GKE gpuStack=driver-installer is exempt:
-      # Google's standalone nvidia-driver-installer DaemonSet supplies a
-      # driver pod the labeler detects. Issue #2175.
+      # Labeling Procedure). Every one of those recipes now assigns it
+      # itself — from the gpuStack profile on AKS and GKE-COS, at overlay
+      # level on OKE and Kind (#2181) — so this gate is defense in depth
+      # rather than the primary mechanism. GKE
+      # gpuStack=driver-installer and AKS gpuStack=operator-managed
+      # assign an explicit false: a driver pod exists there for the
+      # labeler to detect. Issue #2175.
       - function: CheckNVSentinelDriverLabelDetectable
         severity: error
       # Blocking: metadata-collector sets runtimeClassName (chart default
@@ -348,8 +354,9 @@ components:
       # admission (FailedCreate on the DaemonSet; no pod object is ever
       # created). Value comparison on the resolved values, either side
       # unset treated as the shared chart default, so it passes wherever
-      # operator.runtimeClass keeps its default. Remedy: --set
-      # nv-sentinel:metadata-collector.runtimeClassName=<operator class>.
+      # operator.runtimeClass keeps its default. The AKS gpuStack profile
+      # owns both names in the same value (#2181), so they agree by
+      # construction and this gate is defense in depth.
       # Distinct from and additive to the driver-label gate above: the
       # label gets the collector scheduled, the runtime class gets its
       # pods admitted. Issue #2176.
@@ -495,6 +502,32 @@ components:
       defaultChart: k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics
       defaultVersion: "1.19.2"
       defaultNamespace: monitoring
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
+  - name: k8s-aibom
+    # Sole owner of its CRDs and no webhook conversion (audited, #2264).
+    ownsCRDs: true
+    displayName: k8s-aibom
+    valueOverrideKeys:
+      - k8saibom
+      - aibom
+    # The chart ships AIBOM / AIBOMControllerConfig CRDs under crds/ and
+    # renders AIBOMControllerConfig/default from templates/. helm-diff cannot
+    # resolve that CR on a fresh cluster before Helm installs the CRDs, so the
+    # Helmfile release must disable live REST-mapper validation.
+    hasSelfRefCRDs: true
+    healthCheck:
+      assertFile: checks/k8s-aibom/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/googlecloudplatform/charts
+      defaultChart: k8s-aibom
+      defaultVersion: "1.3.0"
+      defaultNamespace: k8s-aibom-system
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -859,26 +892,28 @@ components:
     helm:
       defaultRepository: https://nvidia.github.io/topograph
       defaultChart: topograph/topograph
-      defaultVersion: "0.5.0"
+      defaultVersion: "1.0.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - nodeSelector
-          - node-observer.nodeSelector
+          - nodeObserver.nodeSelector
         tolerationPaths:
           - tolerations
-          - node-observer.tolerations
+          - nodeObserver.tolerations
       accelerated:
         nodeSelectorPaths:
-          # node-observer.topograph.trigger.nodeSelector is a watch filter —
+          # nodeObserver.topograph.trigger.nodeSelector is a watch filter —
           # it narrows which node-change events trigger topology regeneration.
-          - node-observer.topograph.trigger.nodeSelector
-          - node-data-broker.nodeSelector
+          - nodeObserver.topograph.trigger.nodeSelector
+          - nodeDataBroker.nodeSelector
         tolerationPaths:
-          - node-data-broker.tolerations
+          - nodeDataBroker.tolerations
 
   - name: gatekeeper
+    # Sole owner of its CRDs and no webhook conversion (audited, #2264).
+    ownsCRDs: true
     displayName: Gatekeeper
     valueOverrideKeys:
       - gatekeeper

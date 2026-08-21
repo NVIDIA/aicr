@@ -396,6 +396,24 @@ discarded at merge — only the title and trailers reach `main`. Write the body 
 your reviewers, and put anything that needs to outlive the PR in the PR title and
 description.
 
+**PR titles are linted.** Because the title becomes the whole commit message on
+`main` and cannot be corrected after merge, CI checks it against Conventional
+Commits format:
+
+```text
+type: subject            # scope optional
+type(scope): subject
+type!: subject           # "!" marks a breaking change
+type(scope)!: subject
+```
+
+Valid types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`,
+`revert`, `style`, `test`. A malformed title fails the check; editing the title
+re-runs it automatically, so no new commit is needed. Titles over 70 characters
+produce a warning but do not block: dependency-bot titles embed pseudo-versions
+that cannot be shortened. Titles of 70 characters or fewer pass without a
+warning.
+
 ### Code Style
 
 - Follow existing patterns in the codebase

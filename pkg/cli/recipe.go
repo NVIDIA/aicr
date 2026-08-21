@@ -22,6 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -75,6 +76,14 @@ func recipeCmdFlags() []cli.Flag {
 			Usage:    fmt.Sprintf("Slurm accounting ownership mode (%s)", strings.Join(recipe.AccountingModes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.AccountingModes),
+		withCompletions(&cli.StringFlag{
+			Name: flagRuntimeInventory,
+			Usage: fmt.Sprintf(
+				"Runtime AI inventory (k8s-aibom) selection (%s). Recorded in the generated recipe; "+
+					"disabling removes the component and its health check",
+				strings.Join(recipe.RuntimeInventoryModes(), ", ")),
+			Category: catQueryParameters,
+		}, recipe.RuntimeInventoryModes),
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
@@ -148,7 +157,7 @@ Override snapshot-detected criteria:
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS,
-				flagPlatform, flagProfile, flagSlurmAccountingMode, "snapshot", "config", flagOutput,
+				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", flagOutput,
 				flagFormat); err != nil {
 				return err
 			}
@@ -167,7 +176,7 @@ Override snapshot-detected criteria:
 			// (--data / spec.recipe.data, else embedded). The Client owns its
 			// own DataProvider and per-provider criteria registry, replacing
 			// the old process-global data provider.
-			client, err := recipeClientFromCmd(cmd, cfg)
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}
@@ -182,20 +191,7 @@ Override snapshot-detected criteria:
 				return err
 			}
 
-			// Apply criteria-strict AFTER the catalog has loaded —
-			// LoadCatalog seeded the Client's registry from every overlay's
-			// spec.criteria; strict mode then hides external-origin entries
-			// from subsequent registry lookups.
-			//
-			// Three sources can enable strict mode (logical OR):
-			//   1. --criteria-strict CLI flag
-			//   2. spec.recipe.criteriaStrict in --config
-			//   3. AICR_CRITERIA_STRICT env var (honored at registry init)
-			// AICR_CRITERIA_STRICT is read when the registry is first
-			// constructed, so we only need to apply the flag + config here.
-			if cmd.Bool("criteria-strict") || cfg.Recipe().IsCriteriaStrict() {
-				client.CriteriaRegistry().SetStrict(true)
-			}
+			applyClientCriteriaStrictMode(cmd, cfg, client)
 
 			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
 			if err != nil {
@@ -260,6 +256,19 @@ Override snapshot-detected criteria:
 	}
 }
 
+// applyClientCriteriaStrictMode applies command and config strictness only
+// after LoadCatalog has seeded the Client's registry. Strict mode then hides
+// external-origin criteria values from every subsequent parse. The
+// AICR_CRITERIA_STRICT environment variable is already honored when the
+// registry is constructed, so only the flag and config need handling here.
+// Keep recipe and query on this shared path so both commands enforce the same
+// criteria policy for external filesystem and OCI catalogs.
+func applyClientCriteriaStrictMode(cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) {
+	if cmd.Bool("criteria-strict") || aicr.WrapConfig(cfg).IsCriteriaStrict() {
+		client.CriteriaRegistry().SetStrict(true)
+	}
+}
+
 // recipeOutputPath returns the recipe output destination, with the CLI flag
 // overriding spec.recipe.output.path.
 func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
@@ -300,35 +309,38 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 // user-stated rather than snapshot-derived. Callers not tracking that
 // distinction (e.g. the no-snapshot criteria path) may pass nil; marks are
 // then no-ops.
-func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry, touched map[string]bool) error {
-	resolved, err := cfg.Recipe().ResolveCriteriaWithRegistry(reg)
+func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry, touched map[aicr.CriteriaDimension]bool) error {
+	derived, err := aicr.WrapConfig(cfg).RecipeCriteria(reg)
 	if err != nil {
 		return err
 	}
+	// Back to the internal shape: the merge below assigns into a
+	// *recipe.Criteria whose fields are enum types, not strings.
+	resolved := aicr.ToInternalCriteria(derived)
 	if resolved.Service != "" {
 		logCriteriaOverride(flagService, string(criteria.Service), string(resolved.Service))
 		criteria.Service = resolved.Service
-		markCriteriaTouched(touched, coverageDimService)
+		markCriteriaTouched(touched, aicr.DimensionService)
 	}
 	if resolved.Accelerator != "" {
 		logCriteriaOverride(flagAccelerator, string(criteria.Accelerator), string(resolved.Accelerator))
 		criteria.Accelerator = resolved.Accelerator
-		markCriteriaTouched(touched, coverageDimAccelerator)
+		markCriteriaTouched(touched, aicr.DimensionAccelerator)
 	}
 	if resolved.Intent != "" {
 		logCriteriaOverride(flagIntent, string(criteria.Intent), string(resolved.Intent))
 		criteria.Intent = resolved.Intent
-		markCriteriaTouched(touched, coverageDimIntent)
+		markCriteriaTouched(touched, aicr.DimensionIntent)
 	}
 	if resolved.OS != "" {
 		logCriteriaOverride(flagOS, string(criteria.OS), string(resolved.OS))
 		criteria.OS = resolved.OS
-		markCriteriaTouched(touched, coverageDimOS)
+		markCriteriaTouched(touched, aicr.DimensionOS)
 	}
 	if resolved.Platform != "" {
 		logCriteriaOverride(flagPlatform, string(criteria.Platform), string(resolved.Platform))
 		criteria.Platform = resolved.Platform
-		markCriteriaTouched(touched, coverageDimPlatform)
+		markCriteriaTouched(touched, aicr.DimensionPlatform)
 	}
 	if resolved.Nodes > 0 {
 		if criteria.Nodes > 0 && criteria.Nodes != resolved.Nodes {
@@ -344,7 +356,7 @@ func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, 
 // flag (as opposed to snapshot/fingerprint derivation). touched may be nil
 // for callers that don't need the distinction (e.g. the no-snapshot criteria
 // path); marking is then a no-op.
-func markCriteriaTouched(touched map[string]bool, dim string) {
+func markCriteriaTouched(touched map[aicr.CriteriaDimension]bool, dim aicr.CriteriaDimension) {
 	if touched != nil {
 		touched[dim] = true
 	}
@@ -383,7 +395,7 @@ func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig, reg
 // touched records which of the 5 coverage dimensions this call set from a CLI
 // flag — see applyCriteriaFromConfig. Callers not tracking that distinction
 // may pass nil.
-func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *recipe.CriteriaRegistry, touched map[string]bool) error {
+func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *recipe.CriteriaRegistry, touched map[aicr.CriteriaDimension]bool) error {
 	if s := cmd.String(flagService); s != "" {
 		parsed, err := reg.ParseService(s)
 		if err != nil {
@@ -396,7 +408,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.Service = parsed
-		markCriteriaTouched(touched, coverageDimService)
+		markCriteriaTouched(touched, aicr.DimensionService)
 	}
 	if s := cmd.String(flagAccelerator); s != "" {
 		parsed, err := reg.ParseAccelerator(s)
@@ -410,7 +422,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.Accelerator = parsed
-		markCriteriaTouched(touched, coverageDimAccelerator)
+		markCriteriaTouched(touched, aicr.DimensionAccelerator)
 	}
 	if s := cmd.String(flagIntent); s != "" {
 		parsed, err := reg.ParseIntent(s)
@@ -424,7 +436,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.Intent = parsed
-		markCriteriaTouched(touched, coverageDimIntent)
+		markCriteriaTouched(touched, aicr.DimensionIntent)
 	}
 	if s := cmd.String(flagOS); s != "" {
 		parsed, err := reg.ParseOS(s)
@@ -438,7 +450,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.OS = parsed
-		markCriteriaTouched(touched, coverageDimOS)
+		markCriteriaTouched(touched, aicr.DimensionOS)
 	}
 	if s := cmd.String(flagPlatform); s != "" {
 		parsed, err := reg.ParsePlatform(s)
@@ -452,7 +464,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *re
 				"override", parsed)
 		}
 		criteria.Platform = parsed
-		markCriteriaTouched(touched, coverageDimPlatform)
+		markCriteriaTouched(touched, aicr.DimensionPlatform)
 	}
 	if n := cmd.Int("nodes"); n > 0 {
 		if criteria.Nodes > 0 && criteria.Nodes != n {

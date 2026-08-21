@@ -102,6 +102,14 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 			}
 			configuration["slurm"] = slurm
 		}
+		// Every section of RecipeConfiguration must be projected here or the
+		// decision is invisible to `aicr query --selector` and absent from
+		// hydrated output, even though the recipe records it.
+		if result.Configuration.RuntimeInventory != nil {
+			configuration["runtimeInventory"] = map[string]any{
+				"mode": string(result.Configuration.RuntimeInventory.Mode),
+			}
+		}
 		hydrated["configuration"] = configuration
 	}
 

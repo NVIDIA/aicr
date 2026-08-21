@@ -110,6 +110,10 @@ if [[ "$1" == "run" && "$2" == "./tools/api-diff-closure" ]]; then
             echo "api-diff-closure: inspect exported alias github.com/NVIDIA/aicr/pkg/client/v1.BundleConfig: generic target alias instantiated as github.com/NVIDIA/aicr/pkg/bundler/config.Config[int] cannot be scoped safely; generic target aliases must forward every type parameter unchanged with identical constraints (concrete, transformed, and narrowed instantiations are unsupported)" >&2
             exit 42
         fi
+        # api-diff compares this output against an LC_ALL=C-sorted contract
+        # without re-sorting, mirroring the real closure tool's sorted output.
+        # Keep every line below in sorted order or the contract check fails for
+        # the wrong reason.
         cat <<'ALIASES'
 BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output
 BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester
@@ -119,7 +123,9 @@ ALIASES
         else
             echo 'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config'
         fi
+        echo 'BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult'
         echo 'CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry'
+        echo 'EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult'
         if [[ "${ALIAS_MAPPING_SCENARIO:-correct}" == "extra-generic" ]]; then
             echo 'GenericAlias|github.com/NVIDIA/aicr/pkg/bundler/result|Result'
         fi
@@ -729,6 +735,8 @@ else
             "${internal_fixture}/pkg/bundler/attestation" \
             "${internal_fixture}/pkg/bundler/config" \
             "${internal_fixture}/pkg/bundler/result" \
+            "${internal_fixture}/pkg/bundler/verifier" \
+            "${internal_fixture}/pkg/evidence/verifier" \
             "${internal_fixture}/pkg/recipe" \
             "${internal_fixture}/internal/sdkcontract"
         cp "${API_DIFF}" "${internal_fixture}/tools/api-diff"
@@ -754,6 +762,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
+	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -762,6 +772,18 @@ type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions
 type BundleArtifact = result.Output
 type CriteriaRegistry = recipe.CriteriaRegistry
+type BundleVerifyReport = bundlerverifier.VerifyResult
+type EvidenceVerification = evidenceverifier.VerifyResult
+EOF
+        cat >"${internal_fixture}/pkg/bundler/verifier/verifier.go" <<'EOF'
+package verifier
+
+type VerifyResult struct{}
+EOF
+        cat >"${internal_fixture}/pkg/evidence/verifier/verifier.go" <<'EOF'
+package verifier
+
+type VerifyResult struct{}
 EOF
         cat >"${internal_fixture}/pkg/bundler/attestation/attestation.go" <<'EOF'
 package attestation
@@ -848,6 +870,8 @@ else
             "${deleted_target_fixture}/pkg/bundler/attestation" \
             "${deleted_target_fixture}/pkg/bundler/config" \
             "${deleted_target_fixture}/pkg/bundler/result" \
+            "${deleted_target_fixture}/pkg/bundler/verifier" \
+            "${deleted_target_fixture}/pkg/evidence/verifier" \
             "${deleted_target_fixture}/pkg/legacyconfig" \
             "${deleted_target_fixture}/pkg/recipe"
         cp "${API_DIFF}" "${deleted_target_fixture}/tools/api-diff"
@@ -873,6 +897,8 @@ package v1
 import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
+	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/legacyconfig"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -882,6 +908,18 @@ type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions
 type BundleArtifact = result.Output
 type CriteriaRegistry = recipe.CriteriaRegistry
+type BundleVerifyReport = bundlerverifier.VerifyResult
+type EvidenceVerification = evidenceverifier.VerifyResult
+EOF
+        cat >"${deleted_target_fixture}/pkg/bundler/verifier/verifier.go" <<'EOF'
+package verifier
+
+type VerifyResult struct{}
+EOF
+        cat >"${deleted_target_fixture}/pkg/evidence/verifier/verifier.go" <<'EOF'
+package verifier
+
+type VerifyResult struct{}
 EOF
         cat >"${deleted_target_fixture}/pkg/bundler/attestation/attestation.go" <<'EOF'
 package attestation
@@ -927,6 +965,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
+	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -935,6 +975,8 @@ type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions
 type BundleArtifact = result.Output
 type CriteriaRegistry = recipe.CriteriaRegistry
+type BundleVerifyReport = bundlerverifier.VerifyResult
+type EvidenceVerification = evidenceverifier.VerifyResult
 EOF
         rm "${deleted_target_fixture}/pkg/legacyconfig/config.go"
     ); then

@@ -1,0 +1,7 @@
+# Required by LayeredDataProvider: an external data directory must carry a
+# registry.yaml, merged with the embedded one by component name.
+#
+# This fixture contributes no components. It exists so the overlay beside it
+# can register a criteria value the EMBEDDED catalog does not know, which is
+# the condition that made config-driven external catalogs unusable.
+components: []

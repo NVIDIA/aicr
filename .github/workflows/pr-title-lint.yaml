@@ -1,0 +1,140 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The repo merges with squash_merge_commit_title: PR_TITLE and
+# squash_merge_commit_message: BLANK, so the PR title plus trailers is the
+# entire commit that lands on main -- branch commit bodies are discarded.
+# The title is the only durable record of a change in `git log`, and it
+# cannot be corrected after merge.
+#
+# WHY THIS IS A SEPARATE WORKFLOW AND NOT A merge-gate.yaml JOB
+#
+# A title can change without the head SHA changing, so the check must
+# subscribe to the `edited` event. merge-gate.yaml deliberately does not:
+# adding `edited` there would re-run the entire gate -- tests, e2e, scans --
+# on every title or body edit.
+#
+# Living inside merge-gate would therefore leave a bypass: gate passes on a
+# valid title, the author edits it to something invalid, no workflow runs
+# because `edited` is not subscribed, and the stale green gate still points
+# at the unchanged SHA. It would also break external contributors, who
+# cannot use "Re-run failed jobs" without repository write access.
+#
+# REQUIRED SETUP: because merge-gate's `gate` job is otherwise the only
+# required status check, this workflow's `Check PR Title` must be added to
+# the main branch ruleset's required status checks. Until an admin does
+# that, this check reports but does not block.
+
+name: PR Title Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+
+  title:
+    name: Check PR Title
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: 5
+    steps:
+      - name: Validate Conventional Commit format
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            // Types observed across merged history: fix, chore, docs, feat,
+            // ci, test, refactor. build/perf/style/revert are permitted as
+            // standard Conventional Commits types not yet used here.
+            const TYPES = [
+              'build', 'chore', 'ci', 'docs', 'feat', 'fix',
+              'perf', 'refactor', 'revert', 'style', 'test',
+            ];
+
+            // type(scope)!: subject -- scope and the breaking-change "!" are
+            // both optional; the subject must contain a non-whitespace
+            // character -- `.+` alone would accept "fix:   ", which under
+            // squash_merge_commit_message: BLANK lands on main as an
+            // effectively empty commit message. Scope allows mixed
+            // case: Conventional Commits does not define a lowercase-only
+            // scope grammar, and fix(GB200): / fix(H100): / feat(API): are
+            // all plausible here.
+            const PATTERN = new RegExp(
+              `^(${TYPES.join('|')})(\\([a-zA-Z0-9][a-zA-Z0-9._/-]*\\))?(!)?: +\\S.*$`
+            );
+
+            // Advisory only. CONTRIBUTING.md asks for titles under this
+            // length, but ~12% of merged titles exceed it and renovate
+            // titles embed Go pseudo-versions that cannot be shortened.
+            // Failing on length would break dependency automation for a
+            // style preference, so this warns instead.
+            const SOFT_MAX = 70;
+
+            // Read the current title rather than the event payload: a
+            // maintainer re-running this job after an edit would otherwise
+            // re-check the stale payload value.
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+            const title = pr.title;
+
+            // The title is attacker-influenced: anyone opening a PR chooses
+            // it. core.summary.addRaw does not escape, so HTML-escape before
+            // embedding, and wrap in <code> rather than a markdown code span
+            // so a title containing backticks renders literally.
+            const esc = (v) => v
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+
+            if (!PATTERN.test(title)) {
+              core.summary.addHeading('PR title does not follow Conventional Commits', 3);
+              core.summary.addRaw(
+                'The repo squash-merges with `squash_merge_commit_message: BLANK`, so this ' +
+                'title becomes the entire commit message on `main` and cannot be fixed after merge.\n\n'
+              );
+              core.summary.addRaw(`Received: <code>${esc(title)}</code>\n\n`);
+              core.summary.addRaw(
+                'Expected one of: `type: subject`, `type(scope): subject`, ' +
+                '`type!: subject`, `type(scope)!: subject` ("!" marks a breaking change)\n\n'
+              );
+              core.summary.addRaw(`Valid types: ${TYPES.map((t) => `\`${t}\``).join(', ')}\n\n`);
+              core.summary.addRaw('Examples: `fix(bundler): reject conflicting gpu-operator variants`, `docs: add ADR-019`\n\n');
+              core.summary.addRaw('Editing the title re-runs this check automatically -- no new commit needed.\n');
+              await core.summary.write();
+              core.setFailed(`PR title does not match Conventional Commits format: "${title}"`);
+              return;
+            }
+
+            if (title.length > SOFT_MAX) {
+              core.warning(
+                `PR title is ${title.length} characters; CONTRIBUTING.md asks for ${SOFT_MAX} or fewer. ` +
+                'Not blocking, but this is the whole commit message on `main`.'
+              );
+            }
+
+            core.info(`PR title OK (${title.length} chars): ${title}`);

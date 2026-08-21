@@ -9,6 +9,13 @@ verification.
 For a quick trust overview and how to report a vulnerability, see the
 top-level [`SECURITY.md`](../../SECURITY.md).
 
+Everything below drives verification from the shell. To do the same
+from Go — verifying bundles, evidence, the recipe catalog, and the
+`aicr` binary itself — see
+[Verifying artifacts](./go-library.md#verifying-artifacts) in the Go
+library guide. The two paths run the same verification code, so a CI
+gate written either way reaches the same verdict.
+
 ## Prerequisites and Setup
 
 Verification uses [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/),

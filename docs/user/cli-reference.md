@@ -319,7 +319,7 @@ aicr recipe [flags]
 
 **Modes:**
 
-`aicr recipe` resolves a recipe from **criteria** — `service`, `accelerator`, `os`, `intent`, `platform`, `nodes`. You can supply those criteria three ways, composed with the precedence **CLI flags > `--config` file > `--snapshot`**:
+`aicr recipe` resolves a recipe from **criteria** — `service`, `accelerator`, `os`, `intent`, `platform`. (`nodes` is accepted but is advisory metadata — it does not select or filter overlays.) You can supply those criteria three ways, composed with the precedence **CLI flags > `--config` file > `--snapshot`**:
 
 - **Snapshot** (`--snapshot`) — criteria are auto-detected from a captured cluster snapshot: accelerator from the `nvidia.com/gpu.product` GFD label (primary — cluster-wide, so it surfaces heterogeneous clusters) or the per-node PCI device ID (fallback — maps the device ID to a SKU, e.g. `h100`, with no driver or GFD label required); service from the node's cloud-provider ID; OS from the node's OS release; node count from cluster topology. Use this when you already have a running cluster: you don't hand-specify the hardware, AICR reads it. (A detected SKU fills `criteria.accelerator` only when it's in the supported accelerator set; an unsupported GPU is recorded descriptively but not as a recipe criterion.) On the snapshot path AICR also reads the sampled GPU node's `driver-loaded` reading; on unprofiled/legacy compositions whose resolved values already carry the coordinated preinstalled-driver configuration, it injects `gpu-operator.overrides.driver.enabled=false` into the resolved recipe, while on a profiled AKS composition the snapshot only *qualifies* the explicit-or-default `gpuStack` selection — the injector skips profile-owned paths and never mutates them; the inverse mismatch — a preinstalled-driver overlay resolved against a snapshot with *no* driver loaded — is handled per family: on profiled AKS it either fails closed at the profile constraint (pools not reading `Install`) or records `gpuDriverState: absent` for the bundle-time gate whose remedy is pool repair/recreation + recapture + `--profile`; on non-profiled families and legacy artifacts it warns with the bundle-time override set. See [Component Catalog › GPU Operator Driver Auto-Detect](component-catalog.md#gpu-operator-driver-auto-detect) for the gate, warnings, and the pre-deploy-snapshot requirement.
 - **Config file** (`--config`) — criteria (and bundle settings) from an `AICRConfig` document; good for reproducible, version-controlled workflows.
@@ -459,6 +459,7 @@ Generate recipes using direct system parameters:
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or `gpuStack=driver-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -534,6 +535,7 @@ target-cluster conflict detection.
 | `--platform` | | string | Explicit platform/framework type, including slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
@@ -782,7 +784,7 @@ aicr recipe verify-catalog <bundle-path> [flags]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--identity-pattern` | string | | Override the NVIDIA CI certificate identity regexp. Must contain `NVIDIA/aicr` — overrides that drop the repo prefix are rejected. Also reads `AICR_CATALOG_IDENTITY_PATTERN`. |
+| `--identity-pattern` | string | | Override the NVIDIA CI certificate identity regexp. Must *begin with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed; `github\.com` also accepted) and must not use top-level alternation, so the pattern stays confined to the repository. Put any alternatives after the prefix, e.g. `.../aicr/\.github/workflows/(on-tag\|release)\.yaml@.*`. Also reads `AICR_CATALOG_IDENTITY_PATTERN`. |
 
 **Examples:**
 
@@ -963,8 +965,8 @@ aicr validate [flags]
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Name for the validation Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for validation Job |
-| `--node-selector` | | string[] | | Override GPU node selection for validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
-| `--toleration` | | string[] | | Override tolerations for validation workloads. Replaces the default tolerate-all policy on inner workloads like NCCL benchmark pods and conformance test pods. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
+| `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
+| `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
 | `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
@@ -1172,7 +1174,7 @@ spec:
       serviceAccountName: aicr
       nodeSelector:
         my-org/gpu-pool: "true"
-      tolerations:
+      tolerations:                         # [] clears the live snapshot agent's tolerate-all default
         - "gpu-type=h100:NoSchedule"
       requireGpu: true
     execution:
@@ -1209,7 +1211,7 @@ aicr validate --config validate-cluster-a.yaml
 aicr validate --config validate-cluster-b.yaml
 ```
 
-The `--node-selector` and `--toleration` flags control scheduling for the inner validation workloads (NCCL benchmark workers, conformance test pods), not the validator orchestrator Job. For when to use them with non-standard GPU labels or taints, see [Validation](validation.md#non-standard-gpu-labels-or-taints).
+The `--node-selector` and `--toleration` flags control scheduling for the inner validation workloads (NCCL benchmark workers, conformance test pods). When `--snapshot` is omitted, they also configure the preliminary live snapshot agent. They do not configure the validator orchestrator Job. For when to use them with non-standard GPU labels or taints, see [Validation](validation.md#non-standard-gpu-labels-or-taints).
 
 **Output Structure ([CTRF](https://ctrf.io/) JSON):**
 

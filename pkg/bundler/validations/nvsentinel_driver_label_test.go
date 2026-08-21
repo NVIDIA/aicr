@@ -641,12 +641,15 @@ func TestNVSentinelDriverLabelPlatformMatrix(t *testing.T) {
 		wantBlocked bool
 	}{
 		{
-			name: "AKS azure-managed (default)",
+			// The azure-managed profile value now assigns
+			// labeler.assumeDriverInstalled=true itself (#2181), so the
+			// default AKS recipe bundles clean with no override.
+			name: "AKS azure-managed (default, profile supplies the value)",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceAKS, Accelerator: recipe.CriteriaAcceleratorH100,
 				OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
 			},
-			wantBlocked: true,
+			wantBlocked: false,
 		},
 		{
 			name: "AKS operator-managed",
@@ -658,23 +661,27 @@ func TestNVSentinelDriverLabelPlatformMatrix(t *testing.T) {
 			wantBlocked: false,
 		},
 		{
-			name: "AKS azure-managed with the documented remedy applied",
+			// Control against a vacuous pass on the row above: overriding
+			// the profile-supplied value back to false must still block.
+			// (Bundle generation rejects this override earlier still, at
+			// the profile lock — this row pins the gate itself.)
+			name: "AKS azure-managed with the profile value overridden to false",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceAKS, Accelerator: recipe.CriteriaAcceleratorH100,
 				OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
 			},
 			overrides: map[string]map[string]string{
-				"nv-sentinel": {"labeler.assumeDriverInstalled": "true"},
+				"nv-sentinel": {"labeler.assumeDriverInstalled": "false"},
 			},
-			wantBlocked: false,
+			wantBlocked: true,
 		},
 		{
-			name: "GKE COS gke-default (default)",
+			name: "GKE COS gke-default (default, profile supplies the value)",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
 				OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining,
 			},
-			wantBlocked: true,
+			wantBlocked: false,
 		},
 		{
 			name: "GKE COS driver-installer",
@@ -686,12 +693,15 @@ func TestNVSentinelDriverLabelPlatformMatrix(t *testing.T) {
 			wantBlocked: false,
 		},
 		{
-			name: "OKE default",
+			// OKE has no gpuStack profile, so its value is set at overlay
+			// level instead (#2181). The gate is satisfied identically;
+			// what differs is that the value is not profile-locked.
+			name: "OKE default (overlay supplies the value)",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceOKE, Accelerator: recipe.CriteriaAcceleratorA100,
 				OS: recipe.CriteriaOSOracleLinux, Intent: recipe.CriteriaIntentTraining,
 			},
-			wantBlocked: true,
+			wantBlocked: false,
 		},
 		{
 			name: "OKE with the documented GPU-Operator-managed override",
@@ -708,31 +718,35 @@ func TestNVSentinelDriverLabelPlatformMatrix(t *testing.T) {
 			wantBlocked: false,
 		},
 		{
-			name: "Kind (host-installed driver, no driver pod) → blocked",
+			// The kind overlay supplies the value at overlay level (#2181),
+			// which is what lets Client.BundleComponents — a nil-config path
+			// with no --set channel — resolve a Kind recipe at all.
+			name: "Kind (host-installed driver, overlay supplies the value)",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceKind, Accelerator: recipe.CriteriaAcceleratorH100,
 				Intent: recipe.CriteriaIntentTraining,
 			},
-			wantBlocked: true,
+			wantBlocked: false,
 		},
 		{
-			name: "Kind with the documented remedy (as the CI caller passes it) → passes",
+			// Control against a vacuous pass on the row above.
+			name: "Kind with the overlay value overridden to false → blocked",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceKind, Accelerator: recipe.CriteriaAcceleratorH100,
 				Intent: recipe.CriteriaIntentTraining,
 			},
 			overrides: map[string]map[string]string{
-				"nv-sentinel": {"labeler.assumeDriverInstalled": "true"},
+				"nv-sentinel": {"labeler.assumeDriverInstalled": "false"},
 			},
-			wantBlocked: false,
+			wantBlocked: true,
 		},
 		{
-			name: "Kind inference (host-installed driver) → blocked",
+			name: "Kind inference (host-installed driver, overlay supplies the value)",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceKind, Accelerator: recipe.CriteriaAcceleratorH100,
 				Intent: recipe.CriteriaIntentInference,
 			},
-			wantBlocked: true,
+			wantBlocked: false,
 		},
 		{
 			name: "EKS (GPU Operator installs the driver)",
@@ -829,12 +843,15 @@ func TestHelmTruthy(t *testing.T) {
 	}
 }
 
-// TestCheckNVSentinelDriverLabelDetectable_NilConfigSkips pins the
+// TestCheckNVSentinelDriverLabelDetectable_NilConfigRuns pins the
 // values-only SDK path (Client.BundleComponents passes a nil bundler
-// config). That call produces no deployable artifact and cannot express
-// the gate's only remedy, a --set flag, so the gate must not fire there
-// and strand every affected recipe.
-func TestCheckNVSentinelDriverLabelDetectable_NilConfigSkips(t *testing.T) {
+// config). The gate used to no-op there because its only remedy was a
+// --set flag that path cannot express. Since #2181 the recipes carry
+// labeler.assumeDriverInstalled for every supported configuration that
+// needs it, so the gate is satisfiable from resolved values alone and
+// must verify this path like any other — a values-only caller may not
+// receive values the bundle path would refuse to render.
+func TestCheckNVSentinelDriverLabelDetectable_NilConfigRuns(t *testing.T) {
 	t.Parallel()
 
 	rr := &recipe.RecipeResult{
@@ -845,17 +862,34 @@ func TestCheckNVSentinelDriverLabelDetectable_NilConfigSkips(t *testing.T) {
 		},
 	}
 
-	// Control: the same recipe with a non-nil config IS blocked, so a
-	// pass below cannot be mistaken for the gate simply never firing.
+	// A recipe missing the value is blocked whether or not a config is
+	// supplied — the nil-config exemption is gone.
 	msgs, errs := CheckNVSentinelDriverLabelDetectable(
 		t.Context(), nvsentinelComponent, rr, config.NewConfig(), nil)
 	if len(errs) != 0 || len(msgs) != 1 {
-		t.Fatalf("control: msgs = %v, errs = %v; want exactly one blocking message", msgs, errs)
+		t.Fatalf("non-nil config: msgs = %v, errs = %v; want exactly one blocking message", msgs, errs)
 	}
 
 	msgs, errs = CheckNVSentinelDriverLabelDetectable(t.Context(), nvsentinelComponent, rr, nil, nil)
+	if len(errs) != 0 || len(msgs) != 1 {
+		t.Fatalf("nil config: msgs = %v, errs = %v; want exactly one blocking message", msgs, errs)
+	}
+
+	// Control against a gate that blocks unconditionally: a recipe that
+	// supplies the value itself passes on the same nil-config path. This
+	// is the shape #2181 gives every supported AKS/GKE-COS/OKE recipe.
+	supplied := &recipe.RecipeResult{
+		Criteria: &recipe.Criteria{Service: recipe.CriteriaServiceAKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: nvsentinelComponent, Overrides: map[string]any{
+				"labeler": map[string]any{"assumeDriverInstalled": true},
+			}},
+			{Name: "gpu-operator", Overrides: map[string]any{"driver": map[string]any{"enabled": false}}},
+		},
+	}
+	msgs, errs = CheckNVSentinelDriverLabelDetectable(t.Context(), nvsentinelComponent, supplied, nil, nil)
 	if len(errs) != 0 || len(msgs) != 0 {
-		t.Fatalf("nil config: msgs = %v, errs = %v; want the gate skipped", msgs, errs)
+		t.Fatalf("nil config with the value supplied: msgs = %v, errs = %v; want it to pass", msgs, errs)
 	}
 }
 

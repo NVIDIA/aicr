@@ -26,9 +26,14 @@ import (
 // coverageDimension names one criteria dimension subject to the coverage
 // post-condition and knows how to read its value from a Criteria.
 //
-// nodes is deliberately absent: no overlay gates on nodes, so covering it
-// would reject every --nodes query. It remains a matching dimension but
-// carries no coverage guarantee (issue #1542, design 4.3).
+// nodes is deliberately absent: no overlay in the embedded catalog gates on
+// nodes, so it does not participate in overlay selection or coverage.
+// nodes IS included in Criteria.Specificity() so that nodes-only CLI queries
+// pass the minimum-specificity guard — but it is NOT in Criteria.Matches(),
+// so it never filters overlays. External --data catalogs with criteria.nodes
+// set on any overlay are rejected at load time (ErrCodeInvalidRequest) to
+// prevent silent match-all behavior; operators must remove or zero
+// criteria.nodes before upgrading. See issue #1781 (design 4.3, #1542).
 type coverageDimension struct {
 	name  string
 	value func(*Criteria) string
@@ -41,6 +46,23 @@ var coverageDimensions = []coverageDimension{
 	{"intent", func(c *Criteria) string { return string(c.Intent) }},
 	{"os", func(c *Criteria) string { return string(c.OS) }},
 	{"platform", func(c *Criteria) string { return string(c.Platform) }},
+}
+
+// CoverageDimensionNames returns the criteria dimension names subject to the
+// coverage post-condition, in canonical (coverageDimensions) order.
+//
+// These are the exact strings that appear as the "dimension" key of each
+// details.uncovered entry on a coverage failure, so a caller acting on that
+// error — clearing the reported dimensions and retrying, as
+// pkg/client/v1's snapshot-criteria relaxation does — can pin its own
+// dimension vocabulary against this list rather than hand-copying it.
+// nodes is absent for the reason given on coverageDimension.
+func CoverageDimensionNames() []string {
+	names := make([]string, 0, len(coverageDimensions))
+	for _, dim := range coverageDimensions {
+		names = append(names, dim.name)
+	}
+	return names
 }
 
 // isSpecifiedCriteriaValue reports whether a criteria field value is
@@ -211,12 +233,20 @@ func (s *MetadataStore) verifyCriteriaCoverage(criteria *Criteria, appliedOverla
 	for _, dimName := range uncovered {
 		want := criteriaDimensionValue(criteria, dimName)
 		tuples := s.completionTuplesFor(criteria, dimName, want)
-		onlyExcluded := len(tuples) == 0 && s.excludedOverlayProvides(dimName, want, excluded)
+		// constraintExcluded distinguishes WHY the dimension is uncovered: an
+		// overlay carrying it exists but the observed cluster failed its
+		// constraints, versus no overlay states it at all. Callers that relax
+		// uncovered dimensions and retry (pkg/client/v1) must not relax the
+		// former — doing so converts "your cluster fails this overlay's
+		// requirements" into a broader recipe that silently succeeds.
+		constraintExcluded := s.excludedOverlayProvides(dimName, want, excluded)
+		onlyExcluded := len(tuples) == 0 && constraintExcluded
 		clauses = append(clauses, completionClause(criteria, dimName, want, tuples, onlyExcluded))
 		entries = append(entries, map[string]any{
-			"dimension":        dimName,
-			"requestedValue":   want,
-			"validCompletions": tuples,
+			"dimension":          dimName,
+			"requestedValue":     want,
+			"validCompletions":   tuples,
+			"constraintExcluded": constraintExcluded,
 		})
 	}
 

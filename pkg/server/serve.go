@@ -152,10 +152,22 @@ func Serve() error {
 	// Setup bundle handler backed by the same aicr.Client facade. server.go
 	// no longer constructs a bundler.Bundler (or a recipe.Builder) directly —
 	// the Client owns both, completing #1077 acceptance criterion #2.
-	bh := newBundleHandler(client, allowLists, signing)
+	// Vendor-charts is a network-egress surface; an operator opts in via
+	// defaults.EnvAllowVendorCharts. Off by default (see issue #2118). Read
+	// through the parsed config so parseConfig() remains the single site
+	// that consults the environment for this flag.
+	cfg := parseConfig()
+	if cfg.AllowVendorCharts {
+		slog.Info("bundle vendor-charts enabled — server will perform helm pull against request-supplied URLs")
+	}
+	bh := newBundleHandler(client, allowLists, signing, cfg.AllowVendorCharts)
 
-	// Create and run server
+	// Create and run server. withConfig hands the pre-parsed cfg to New so
+	// the environment is not consulted a second time on the New() -> parseConfig()
+	// path; every field above (Address, Port, etc.) is what parseConfig()
+	// resolved once, right here.
 	s := New(
+		withConfig(cfg),
 		WithName(name),
 		WithVersion(version),
 		WithHandler(newRoutes(h, bh)),

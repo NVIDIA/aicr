@@ -10,6 +10,15 @@ spec:
   targetNamespace: {{ .TargetNamespace }}
   install:
     createNamespace: true
+{{- if .UpgradeCRDs }}
+  # This component solely owns the CRDs it ships (registry: ownsCRDs), so
+  # replacing them on upgrade cannot race another release. Without this,
+  # helm-controller's spec.upgrade.crds default of Skip leaves the schema
+  # installed on day one in place while a new controller runs against it.
+  # Components that share CRDs deliberately omit this. See NVIDIA/aicr#2264.
+  upgrade:
+    crds: CreateReplace
+{{- end }}
   chartRef:
     kind: ExternalArtifact
     name: {{ .ChartRefName }}

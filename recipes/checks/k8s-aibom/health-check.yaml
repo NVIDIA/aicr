@@ -1,0 +1,160 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# k8s-aibom Health Check
+#
+# Validates the controller and its cluster-scoped configuration. AIBOM
+# resources are deliberately not required: a healthy label-gated installation
+# legitimately observes zero workloads until a namespace opts in.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: k8s-aibom-health-check
+spec:
+  timeouts:
+    assert: 2m
+  steps:
+    # Asserted before the workload steps so a stranded CRD is named as the
+    # cause rather than surfacing later as a confusing controller symptom.
+    #
+    # Helm and Helmfile skip a chart's crds/ directory on upgrade, and the
+    # HelmRelease AICR generates for Flux sets no spec.upgrade.crds, so the
+    # helm-controller default of Skip applies. (Flux itself can replace CRDs
+    # via spec.upgrade.crds: CreateReplace; AICR does not generate that field
+    # for any component today — see #2264. Argo CD applies CRDs as ordinary
+    # manifests each sync and is unaffected.) A cluster can therefore run a
+    # new controller against the previous CRD schema.
+    #
+    # VERSION-COUPLED BY CONSTRUCTION. Assert content is static YAML; there
+    # is no templating, so the expected version below is a literal tied to
+    # the chart version the registry pins for this component (1.3.0, whose
+    # CRDs serve v1alpha1 and v1beta1 with storage on v1beta1). A recipe that
+    # overrides `version` on the componentRef to a chart with a different
+    # storage version — 1.2.0 and earlier store v1alpha1 — will fail this
+    # step even though the cluster is correct. That recipe must supply
+    # matching inline `healthCheckAsserts` on the componentRef, or set
+    # `healthCheckSkip: true`. Documented in
+    # docs/user/component-catalog.md. Flip this literal, do not generalize
+    # it, when the registry pin moves.
+    #
+    # WHAT THIS DOES AND DOES NOT ESTABLISH. It asserts that the deployed
+    # CRDs' storage-version contract matches the one the pinned chart
+    # declares. It is not provenance: it reads one field and cannot show the
+    # CRDs originated from that chart, and it cannot discriminate between
+    # chart versions that share a storage version. Charts 1.0.0, 1.1.0, and
+    # 1.2.0 all declare exactly v1alpha1 as storage, so CRDs from any of them
+    # would satisfy an equivalent v1alpha1 assertion identically.
+    #
+    # The practical consequence: this catches a stranded upgrade across a
+    # storage-version boundary — the 1.2.0 to 1.3.0 move this pin just made —
+    # and does not catch a stranded upgrade within one, such as 1.0.0 to
+    # 1.2.0. That is the correct trade for a static assert; do not describe
+    # the step as proving more than it does.
+    #
+    # NOTE the asymmetry with the AIBOMControllerConfig step below, which
+    # still reads aibom.k8saibom.dev/v1alpha1. That is deliberate and
+    # verified against the rendered chart: 1.3.0 moves CRD *storage* to
+    # v1beta1 while still rendering the controller config CR itself at
+    # v1alpha1, and both versions stay served. Do not "fix" the two to match.
+    #
+    # The controller's own readiness is a separate signal and not one AICR
+    # owns: upstream shipped a start-ordering race from v1.1.0 through v1.2.0
+    # that produced a false-Ready window in exactly this state, so a check
+    # that depended on their probe would have been silently wrong for two
+    # releases. 1.3.0 fixes it, but the assertion stays independent of it.
+    #
+    # Assert the storage version, NOT status.storedVersions. Immediately
+    # after a storage flip storedVersions legitimately contains both the old
+    # and new version until stored objects are rewritten, so asserting on it
+    # would fail every correctly-upgraded cluster. storedVersions gates a
+    # later v1alpha1 *removal*, not this.
+    #
+    # Both CRDs are asserted, in separate steps so a failure names which one
+    # is stranded, and so a partially applied CRD set cannot pass. That
+    # second assertion is load-bearing rather than symmetric: removing it
+    # lets the partial-apply case pass, which the tests in
+    # pkg/chainsaw/k8s_aibom_check_states_test.go demonstrate.
+    - name: validate-aibom-crd-storage-version
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: aiboms.aibom.k8saibom.dev
+              ((spec.versions[?storage == `true`].name | [0]) == 'v1beta1'): true
+    - name: validate-aibomcontrollerconfig-crd-storage-version
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: aibomcontrollerconfigs.aibom.k8saibom.dev
+              ((spec.versions[?storage == `true`].name | [0]) == 'v1beta1'): true
+    - name: validate-controller-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: k8s-aibom
+                namespace: k8s-aibom-system
+              # Four independent root-level expressions rather than one
+              # conjunction: each failure names the specific condition that
+              # was not met. Every status field read here is `omitempty` and
+              # therefore absent on a freshly created Deployment, so each
+              # defaults to zero — absence must fail, not compare as null.
+              #
+              # These mirror Kubernetes' own DeploymentComplete predicate
+              # (updatedReplicas, replicas, availableReplicas, and
+              # observedGeneration all agreeing with spec.replicas), plus a
+              # desired-count floor so a scaled-to-zero Deployment cannot
+              # satisfy the check by having nothing to run.
+              #
+              # Each term is load-bearing and none subsumes another:
+              #
+              #   availableReplicas alone is not a rollout gate — mid-upgrade
+              #   it can equal spec.replicas while the OLD ReplicaSet still
+              #   owns every available pod.
+              #
+              #   updatedReplicas counts pods the NEW ReplicaSet created, not
+              #   pods that became ready, so it does not close that gap on its
+              #   own. With spec.replicas: 1 the default 25% maxUnavailable
+              #   rounds to 0, so a stalled upgrade holds the old pod alive and
+              #   reaches updatedReplicas=1, availableReplicas=1 (the old pod),
+              #   and a current observedGeneration — every other term passing.
+              #
+              #   status.replicas counts pods across EVERY ReplicaSet, so it is
+              #   the only term that sees the leftover second pod (2 != 1) and
+              #   fails that stall.
+              ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+    - name: validate-current-controller-configuration
+      try:
+        - assert:
+            resource:
+              apiVersion: aibom.k8saibom.dev/v1alpha1
+              kind: AIBOMControllerConfig
+              metadata:
+                name: default
+              # Both the top-level status and the Ready condition must refer
+              # to this exact generation. `contains` is a projection over all
+              # conditions, so additional condition types cannot disarm it.
+              (status.observedGeneration == metadata.generation): true
+              (contains((status.conditions || `[]`)[?type == 'Ready' && status == 'True'].observedGeneration, metadata.generation)): true

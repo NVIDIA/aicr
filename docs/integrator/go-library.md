@@ -22,6 +22,44 @@ You _may_ also import `pkg/*` subpackages directly, but their APIs are
 not covered by the same stability guarantees — see the [public API
 surface](./public-api.md) for the details.
 
+## Runnable examples
+
+Each facade entry point below has a compiled counterpart in
+[`pkg/client/v1`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#pkg-examples).
+They are ordinary Go example functions, so `go test` builds them on every
+change — a facade change that breaks one of these fails in AICR's tree rather
+than in yours.
+
+| Example | Covers | Runs |
+|---|---|---|
+| `Example` | Quick start: client, resolve from criteria | yes |
+| `Example_errorCodes` | Matching structured error codes | yes |
+| `Example_bundleAndVerify` | Resolve → bundle → verify, hermetically | yes |
+| `Example_trustLevels` | The accepted trust levels, and their ordering trap | yes |
+| `Example_criteriaDimensions` | The coverage dimensions | yes |
+| `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order | no |
+| `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation | no |
+| `ExampleClient_LoadRecipe` | Reading a previously emitted recipe | no |
+| `ExampleClient_CollectSnapshot` | Capturing cluster state via the snapshotter Job | no |
+| `ExampleClient_ValidateState` | Selecting validation phases, and `--no-cluster` mode | no |
+| `ExampleClient_RecipeDigest` | The digest a CI staleness gate compares | no |
+| `ExampleClient_VerifyEvidence` | Evidence verification and exit classes | no |
+| `ExampleClient_VerifyCatalog` / `ExampleClient_SignCatalog` | Checking and producing the catalog signature | no |
+| `ExampleClient_PublishEvidence` | Signing and pushing an evidence bundle | no |
+| `ExampleVerifyBinaryAttestation` | Proving a binary came from NVIDIA CI | no |
+
+**What "runs" means, and what it does not.** Examples marked *yes* print an
+`Output:` block, so `go test` executes them and asserts the output. The rest
+are **compiled but not executed** — they need a cluster, a registry, a signing
+identity, or files that belong to your environment. Compilation still pins
+every signature, field name, and option they touch, so a renamed method or a
+dropped field breaks the build; it does not prove those flows behave
+correctly at runtime.
+
+The guarantee covers the examples, not this page. Prose here can still drift,
+and short illustrative snippets outside the table are not compiled — prefer
+copying from the examples, which are complete and known to build.
+
 ## Installing
 
 ```bash
@@ -95,6 +133,49 @@ Client's recipe source; they are surfaced through the Client only to
 keep the facade uniform and leave room for future per-Client
 telemetry hooks.
 
+### Loading a snapshot you already have
+
+Most integrations do not capture a snapshot inline. One pipeline stage
+records cluster state, a later stage resolves or validates against it —
+or the snapshot is committed and replayed. `LoadSnapshot` is the entry
+point for that case, and needs no cluster for a local file or an
+HTTP(S) URL:
+
+```go
+snap, err := client.LoadSnapshot(ctx, "./snapshot.yaml", "")
+if err != nil {
+	log.Fatalf("load snapshot: %v", err)
+}
+
+results, err := client.ValidateState(ctx, recipe, snap,
+	aicr.WithValidationNoCluster(true))
+```
+
+`path` takes a local file, an HTTP(S) URL, or a `cm://namespace/name`
+ConfigMap URI; the `kubeconfig` argument resolves the `cm://` form and
+is ignored for the other two.
+
+**It fails closed on a document that is not a snapshot** — a wrong
+`kind` (an `AICRConfig`, say) or an `apiVersion` this build does not
+understand. That gate matters more than it looks: snapshot
+deserialization is non-strict, so without it a typo'd path would decode
+into an empty `Snapshot`, derive `criteria(any)`, and silently resolve
+the generic fallback recipe with exit 0. Empty `kind` and `apiVersion`
+are tolerated for snapshots that predate those fields.
+
+`Snapshot.Raw` is **not** populated by `LoadSnapshot` — only
+`CollectSnapshot` sets it. The source you loaded from is already the
+durable artifact.
+
+If you need the bytes, you can read the source again — but that returns
+its **current** contents, which for a URL or a ConfigMap (or a file
+someone rewrote) need not be what this call parsed. When byte-for-byte
+identity with the loaded snapshot matters, such as hashing what you
+validated, capture the source contents yourself and load from that
+capture instead of re-reading afterwards.
+
+### Capturing a snapshot from a live cluster
+
 ```go
 // CollectSnapshot deploys a snapshotter Job to the target cluster and
 // returns the resulting Snapshot. cfg is a facade-owned struct that
@@ -125,9 +206,15 @@ telemetry hooks.
 snapCtx, cancelSnap := context.WithTimeout(context.Background(), 10*time.Minute)
 defer cancelSnap()
 snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
-	Kubeconfig:         "/path/to/target-kubeconfig",
+	Kubeconfig: "/path/to/target-kubeconfig",
+	// Namespace, Image, JobName, and ServiceAccountName are all required on
+	// the SDK path. Only Namespace is validated; the rest are copied straight
+	// into the Job and RBAC objects, so an empty value becomes an empty
+	// metadata.name or container image that the API server rejects. The CLI
+	// defaults them from its own flags, which the facade does not share.
 	Namespace:          "aicr-snapshot",
 	Image:              "ghcr.io/nvidia/aicr:v0.11.1",
+	JobName:            "aicr-snapshot",
 	ServiceAccountName: "aicr-agent",
 	Timeout:            5 * time.Minute,
 	Cleanup:            true,
@@ -259,20 +346,70 @@ are created. Other facade options
 
 ## Recipe sources
 
-AICR exposes one production recipe source today; pick it via
+AICR exposes three production recipe sources; pick one via
 `aicr.WithRecipeSource`:
 
 | Source | Constructor | Status |
 |--------|-------------|--------|
 | Embedded | `aicr.EmbeddedSource()` | Production. Uses only AICR's built-in recipe data with no external overlay. |
 | Local filesystem | `aicr.FilesystemSource(path)` | Production. Use a directory containing a `registry.yaml` (layered over the embedded recipe data). |
-| OCI registry | `aicr.OCISource(registry, tag)` | **Reserved — not yet implemented.** `NewClient` returns `ErrCodeUnavailable` when this source is selected. |
+| OCI registry | `aicr.OCISource(repository, digest)` | Production. Pulls one immutable, digest-pinned recipe catalog into a private per-Client workspace. |
 
 `EmbeddedSource` resolves against the recipe data compiled into the
 AICR binary — no filesystem path required. Use it when you want AICR's
 bundled recipe data and no local overrides. `FilesystemSource`
 layers an external directory over that same embedded data, so files in
 the directory override their embedded equivalents.
+
+### Digest-pinned OCI recipe sources
+
+`OCISource` keeps the repository and immutable selector separate. The
+repository may start with `oci://`, but must not contain a tag or digest.
+The selector must be a complete `sha256:<64-hex-character>` manifest
+digest obtained through trusted configuration; tags and implicit `latest`
+are rejected.
+
+The accepted artifact is one OCI image manifest with the AICR artifact type,
+the canonical empty config, and exactly one gzip-compressed layer. Downloads
+and extraction are bounded, content digests are checked while streaming, and
+archive traversal, links, devices, oversized content, and malformed catalogs
+fail closed before the provider is activated.
+
+Use `NewClientContext` so caller cancellation and tighter deadlines
+propagate through registry authentication, download, extraction, and catalog
+validation:
+
+```go
+import (
+	"context"
+	"errors"
+
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+)
+
+func useOCIRecipes(ctx context.Context, repository, manifestDigest, tempDir string) (retErr error) {
+	client, err := aicr.NewClientContext(ctx,
+		aicr.WithRecipeSource(aicr.OCISource(repository, manifestDigest)),
+		aicr.WithOCISourceTempDir(tempDir),
+	)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, client.Close()) }()
+
+	return client.LoadCatalog(ctx)
+}
+```
+
+`NewClient` remains a bounded compatibility wrapper. OCI construction
+never exceeds `defaults.OCIRecipeConstructionTimeout` (eight minutes), while
+`NewClientContext` also honors any shorter caller deadline. Registry staging
+and materialization each retain the five-minute
+`defaults.OCIRecipePullTimeout` phase ceiling; the larger construction
+envelope reserves more than three minutes for materialization and catalog
+validation after maximum-jitter pull retries.
+`Client.Close` waits for in-flight reads, evicts provider-scoped caches,
+and removes only the unique child workspace it owns.
 
 ## Client options
 
@@ -304,6 +441,9 @@ client, err := aicr.NewClient(
   It returns `nil` when none are set — `WithAllowLists` treats a `nil`
   `AllowLists` as allow-all, so the result is always safe to pass straight
   to `WithAllowLists`.
+- **`WithOCISourceTempDir(parent string)`** selects an existing writable
+  parent for an OCI-backed Client's private workspace. It is rejected for
+  embedded and filesystem sources.
 
 `AllowLists` is a facade-owned struct whose `Accelerators`, `Services`,
 `Intents`, and `OSTypes` fields are plain `[]string` slices, so callers
@@ -355,12 +495,104 @@ For a per-resolution Slurm accounting mode, use
 `aicr.WithAccountingMode("customer-managed")`. The original criteria and
 snapshot method signatures remain unchanged for source compatibility.
 
+### Criteria relaxation on the snapshot path
+
+A snapshot resolve is strict by default — every criteria dimension you state
+must be honored by an applied overlay, or resolution fails with
+`ErrCodeInvalidRequest` and a `details.uncovered` payload.
+
+That is right for criteria a user typed, but wrong for criteria you *derived*
+from the snapshot fingerprint. An overlay tree can be deliberately agnostic to
+a dimension (Kind's overlays state no `os`) while the fingerprint still detects
+a concrete value on the node — nothing in the recipe distinguishes it, so
+failing there rejects a legitimate query.
+
+Pass `aicr.WithSnapshotCriteriaRelaxation` and name the dimensions **you
+received explicitly**. Anything else is treated as derived, and a coverage
+failure limited to derived dimensions is retried once with those cleared:
+
+```go
+import (
+    aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+
+    // Deriving criteria from a snapshot has no facade-owned helper yet, so
+    // this step reaches past the stable surface — see the caveat below.
+    "github.com/NVIDIA/aicr/pkg/fingerprint" // Internal
+    "github.com/NVIDIA/aicr/pkg/recipe"      // Public (evolving)
+)
+
+criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).
+    ToCriteria(client.CriteriaRegistry())
+criteria.Intent = recipe.CriteriaIntentTraining // the user asked for this one
+
+result, err := client.ResolveRecipeFromSnapshotWithOptions(
+    ctx, aicr.WrapCriteria(criteria), snap,
+    aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
+if err != nil {
+    log.Fatalf("resolve: %v", err)
+}
+for _, dim := range result.RelaxedDimensions {
+    log.Printf("resolved recipe is broader than requested: %s was relaxed", dim)
+}
+```
+
+> **The fingerprint step is an escape hatch, not stable API.** `pkg/fingerprint`
+> is [Internal](public-api.md#stability-tiers) and may change without notice;
+> `pkg/recipe` is Public (evolving) and may change in a minor bump. Only the
+> `aicr.*` calls above carry the facade's compatibility guarantee. Pin the AICR
+> version and re-audit this block on upgrade, or derive criteria yourself and
+> hand the facade an `*aicr.Criteria`. If you need this without the coupling,
+> say so on [#2016](https://github.com/NVIDIA/aicr/issues/2016) — a facade-owned
+> snapshot-to-criteria helper is the obvious gap it exposes.
+
+Relaxation is deliberately narrow. Three cases propagate the original coverage
+error rather than retrying:
+
+- **A dimension you named.** Relaxing a value the caller asked for would
+  silently resolve a different recipe than requested.
+- **A constraint-excluded dimension.** An overlay carrying it exists, but the
+  observed cluster failed its constraints — a Kubernetes version below the
+  overlay's floor, say. Relaxing there converts "your cluster does not meet
+  this overlay's requirements" into a broader recipe that resolves cleanly,
+  discarding the finding you most need.
+- **A relaxation that would leave no stated coverage dimension.** Such criteria
+  match every overlay and resolve the generic fallback recipe at exit 0 — the
+  fail-open the pre-resolution specificity guard exists to prevent (#1888).
+  Note this is not the same as "criteria is empty": a fingerprint-derived
+  `nodes` value survives the clear, but no overlay gates on `nodes`, so it
+  selects nothing.
+
+The distinction in the second case is *why* the dimension is uncovered: no
+overlay states it at all (safe to relax — nothing in the recipe distinguishes
+the value) versus an overlay states it but was constraint-excluded (not safe).
+The resolver reports which, per dimension, in the coverage error's
+`details.uncovered[].constraintExcluded`.
+
+Two more properties:
+
+- **Passing no dimensions is meaningful,** not a no-op: it means every
+  dimension was derived and all are relaxable. That is the common case for a
+  pure fingerprint query. Presence of the option is what enables the policy, so
+  omitting it entirely is how you keep strict behavior.
+- **It is snapshot-only.** On `ResolveRecipeFromCriteria` there is no
+  fingerprint, so the option is rejected with `ErrCodeInvalidRequest` rather
+  than ignored.
+
+Both attempts share the call's timeout budget, and relaxation happens at most
+once.
+
 The returned `*RecipeResult` carries:
 
 - `Name`, `Version`, `TranslatedAt` — stable identity
 - `Components` — `[]ComponentRef` (Name, Kind, Version, Source, Chart, Namespace)
 - `SelectedProfile` — selected name/value and declaration-wide `OwnedPaths`;
   nil for legacy recipes
+- `RelaxedDimensions` — criteria dimensions cleared by
+  `WithSnapshotCriteriaRelaxation`. Non-empty only when the first attempt failed
+  coverage on derived dimensions **and** the retry succeeded. Every other
+  outcome — option not passed, first attempt succeeded, relaxation refused, or
+  the retry itself failed — yields either an empty slice or `nil, error` with no
+  `RecipeResult` at all, so this field is never the way to detect a failure
 - `Resolved()` — the upstream `*pkg/recipe.RecipeResult` for callers that
   need constraints, deployment order, validation config, or metadata
   (e.g., evidence emission). Do not mutate; do not retain past the
@@ -443,10 +675,347 @@ generated from an externally-decoded recipe reloadable by the file loader. The
 caller's own `RecipeResult` is never mutated, and `APIVersion` is validated but
 never rewritten.
 
+## Using a committed AICRConfig
+
+A team that has standardized on an `AICRConfig` — the version-controlled
+document `aicr --config` reads — can consume the same file from their own
+tooling, so the CLI and an embedding runtime agree on the settings by
+construction rather than by convention.
+
+```go
+import (
+	"context"
+	"errors"
+
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+)
+
+func resolveCommittedConfig(ctx context.Context) (retErr error) {
+	cfg, err := aicr.LoadConfig(ctx, "aicr-config.yaml") // path or HTTP(S) URL
+	if err != nil {
+		return err
+	}
+
+	// spec.recipe.data decides how the Client is constructed.
+	source := aicr.EmbeddedSource()
+	if configured, ok := cfg.RecipeSource(); ok {
+		source = configured
+	}
+	client, err := aicr.NewClientContext(ctx, aicr.WithRecipeSource(source))
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, client.Close()) }()
+
+	// REQUIRED before deriving criteria: loading the catalog is what seeds this
+	// Client's registry with the values its overlays contribute. Skip it and a
+	// value defined only by spec.recipe.data is still unknown, so the derivation
+	// below rejects it.
+	if err = client.LoadCatalog(ctx); err != nil {
+		return err
+	}
+
+	// spec.recipe.criteria, parsed against this Client's registry so a value
+	// contributed by a --data overlay validates against the same catalog.
+	criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())
+	if err != nil {
+		return err
+	}
+	opts, err := cfg.RecipeResolveOptions() // profile + accounting + runtime inventory
+	if err != nil {
+		return err
+	}
+
+	_, retErr = client.ResolveRecipeFromCriteriaWithOptions(ctx, criteria, opts...)
+	return retErr
+}
+```
+
+**Config derives options; it never applies them.** A `Config` does not attach
+to a `Client` and is never consulted implicitly. Each method returns a
+populated value you may then override:
+
+```go
+verifyOpts, err := cfg.BundleVerifyOptions()   // from spec.verify
+verifyOpts.MinTrustLevel = "verified"          // caller wins, visibly
+v, err := client.VerifyBundle(ctx, "./bundle", verifyOpts)
+```
+
+That is deliberate rather than incidental. The facade's options are plain
+structs, so a field left at its zero value is indistinguishable from one set
+to the zero value on purpose — there is no equivalent of the CLI's
+`cmd.IsSet`. An implicit merge would have to guess, and would silently hand
+the config's value back to a caller who deliberately cleared a setting.
+Deriving keeps precedence to one readable line at the call site.
+
+It also mirrors what the CLI does: build options from config, then let an
+explicitly-set flag win. The flag half necessarily stays in `pkg/cli`, the
+only layer that knows a flag was set.
+
+**Every method is nil-safe.** A nil `*Config` — what you get when no document
+was supplied — returns zero values rather than panicking, so derivations can
+run unconditionally.
+
+**Criteria values are validated at `RecipeCriteria`, not at `LoadConfig`.**
+Whether a value is legal depends on the `CriteriaRegistry`, which is
+per-`DataProvider` — so a value your own catalog contributes is unknown until
+that provider is built and its catalog loaded. That is why the order in the
+example above matters: load, construct, `LoadCatalog`, *then* derive criteria.
+Loading checks structure only; a value in no catalog still fails, at the
+derive step rather than the load step.
+
+| Method | Reads |
+|---|---|
+| `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
+| `RecipeSource()` | `spec.recipe.data` |
+| `RecipeCriteria(reg)` | `spec.recipe.criteria` |
+| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
+| `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` | the same three, raw, for callers applying their own precedence first |
+| `SnapshotPath()` | `spec.recipe.input.snapshot` |
+| `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
+
+`spec.bundle`, `spec.validate`, and `spec.snapshot` are not yet projected;
+`Unwrap()` reaches the raw document meanwhile. Needing it is worth reporting —
+it means a derivation is missing, and `pkg/config` carries no stability
+guarantee.
+
+One asymmetry worth knowing: `IgnoreTLog` has no config counterpart, so
+`BundleVerifyOptions()` always leaves it false. It weakens the trust floor by
+dropping the transparency-log requirement, and keeping it command-line-only
+means a checked-in file can never silently disable that check.
+
+## Verifying artifacts
+
+Every artifact AICR produces can be checked back through the same facade,
+so an integrator never has to reach into `pkg/bundler/verifier`,
+`pkg/evidence/verifier`, or `pkg/recipe/catalog` to establish trust.
+
+### Verifying a bundle
+
+`VerifyBundle` checks a bundle's checksums and attestation chain, then
+evaluates the policy assertions you supply:
+
+```go
+verification, err := client.VerifyBundle(ctx, "./my-bundle", aicr.BundleVerifyOptions{
+	MinTrustLevel:  "verified",
+	RequireCreator: "release@nvidia.com",
+})
+if err != nil {
+	log.Fatal(err) // could not verify: missing bundle, bad trust root, bad options
+}
+if verification.PolicyFailure != "" {
+	log.Fatalf("policy not met: %s", verification.PolicyFailure)
+}
+if len(verification.Report.Errors) > 0 {
+	log.Fatalf("verification failed: %v", verification.Report.Errors)
+}
+log.Printf("trust level %s, created by %s",
+	verification.Report.TrustLevel, verification.Report.BundleCreator)
+```
+
+A failed policy is **data, not an error**: the call still returns the
+full `Report` so you can log or render why the bundle fell short. A
+non-nil error means verification could not run at all.
+
+`MinTrustLevel` is the one field whose empty value is not "no
+constraint". Leaving it empty means `"max"` — auto-detect the highest
+level this bundle could achieve and require it. Naming a level
+explicitly (`aicr.TrustLevels()` returns the valid values) can *lower*
+the floor as readily as raise it.
+
+Verification is offline: the chain resolves against the locally cached
+or embedded Sigstore trusted root. The one network path is a KMS URI in
+`Key`, which makes a live `GetPublicKey` call.
+
+`BundleVerifyOptions` mirrors the [`spec.verify`](../user/cli-config.md#specverify)
+section of an `AICRConfig` field-for-field — the first three fields come from
+`spec.verify.trust`, the next three from `spec.verify.policy` — so a
+team that has standardized on a committed policy can populate this
+struct without a translation table. `IgnoreTLog` deliberately has no
+config counterpart: it drops the transparency-log requirement, and
+keeping it out of the schema means a checked-in file can never silently
+disable that check.
+
+### Verifying evidence
+
+`VerifyEvidence` checks a recipe-evidence bundle's signature and hash
+chain. The input is auto-detected as a pointer file, an OCI reference,
+or an unpacked directory:
+
+```go
+result, err := client.VerifyEvidence(ctx, aicr.EvidenceVerifyOptions{
+	Input: "recipes/evidence/h100-eks-training/eks/sha256-abc.yaml",
+})
+if err != nil {
+	log.Fatal(err) // verification could not be attempted
+}
+
+switch result.Exit {
+case aicr.EvidenceExitValidPassed:
+	log.Printf("valid: %s", result.RecipeName)
+case aicr.EvidenceExitValidPhaseFailures:
+	log.Printf("evidence sound, but recorded phases failed")
+case aicr.EvidenceExitInvalid:
+	log.Fatalf("bundle invalid")
+case aicr.EvidenceExitIncomplete:
+	if result.FailureCause != nil && result.FailureCause.Class == aicr.EvidenceCauseCanceled {
+		log.Fatalf("run canceled before a verdict")
+	}
+	log.Fatalf("could not read the bundle (storage or registry fault)")
+}
+
+fmt.Print(aicr.RenderEvidenceMarkdown(result))
+```
+
+An invalid bundle is a verdict, not an error — branch on `Exit`. The
+`EvidenceExitIncomplete` case is the one worth handling separately: it
+means "we could not check this", which is different from "we checked it
+and it failed".
+
+Pair it with `RecipeDigest` to detect evidence that has gone stale
+against the recipe on your branch:
+
+```go
+current, err := client.RecipeDigest(ctx, aicr.RecipeDigestOptions{
+	Path: "recipes/overlays/h100-eks-training.yaml",
+})
+if err != nil {
+	log.Fatal(err)
+}
+if result.Predicate.Recipe.Digest != current {
+	log.Fatal("evidence is stale: the recipe changed since it was signed")
+}
+```
+
+### Verifying the recipe catalog
+
+`VerifyCatalog` recomputes the deterministic digest over the Client's
+recipe catalog and verifies it against the Sigstore bundle shipped as
+the `recipe-catalog.sigstore.json` release asset:
+
+```go
+catalog, err := client.VerifyCatalog(ctx, "./recipe-catalog.sigstore.json",
+	aicr.CatalogVerifyOptions{})
+if err != nil {
+	log.Fatalf("catalog verification failed: %v", err)
+}
+log.Printf("catalog sha256:%s signed by %s", catalog.Digest, catalog.Identity)
+```
+
+The digest is computed over **this Client's** `DataProvider`, not the
+process-wide embedded catalog. A Client built on `EmbeddedSource()`
+verifies the catalog NVIDIA signed. A Client whose source layers
+external data over the embedded tree is verifying different content, so
+verification will not match the released signature — that is the
+correct answer to "is the catalog I am resolving against the signed
+one", not a bug.
+
+### Verifying the binary
+
+`VerifyBinaryAttestation` proves an `aicr` binary was built by NVIDIA
+CI. It is package-level rather than a `Client` method because it
+involves no recipe catalog and no configurable policy:
+
+```go
+identity, err := aicr.VerifyBinaryAttestation(ctx, aicr.BinaryAttestationVerifyOptions{
+	Attestation:  attestationBytes, // raw Sigstore bundle
+	BinaryDigest: rawSHA256,        // raw bytes, not hex
+})
+```
+
+Passing bytes rather than a path is deliberate: it lets you verify the
+exact content you are about to use, with no verify-then-reread window.
+Override the pinned identity with `IdentityRegexp` (defaults to
+`aicr.TrustedIdentityPattern`); `aicr.ValidateIdentityPattern`
+pre-validates operator-supplied input against the same rule the verify
+entry points apply internally.
+
+An override must be *confined* to the NVIDIA repository, not merely
+mention it. Two rules enforce that, and they are load-bearing together:
+the pattern must **begin with** `https://github.com/NVIDIA/aicr/` (a
+leading `^` is allowed, and `github\.com` is accepted too), and it must
+not use **top-level alternation**. Both exist because the identity
+matcher pins only the OIDC issuer beyond this pattern, so a widened
+pattern silently degrades the gate to "any GitHub Actions workflow in
+any repository" rather than failing visibly.
+
+```go
+// Rejected: begins with the prefix, but the second branch matches
+// anything — only one branch of an alternation has to match.
+aicr.ValidateIdentityPattern(`^https://github\.com/NVIDIA/aicr/.*|.*$`)
+
+// Rejected: the alternation is nested in a group, so the pattern no
+// longer begins with the prefix and one branch escapes the repository.
+aicr.ValidateIdentityPattern(
+	`(https://github.com/NVIDIA/aicr/.*|https://github.com/attacker/x/.*)`)
+
+// Accepted: alternatives sit AFTER the prefix, so every branch is
+// already behind the pin.
+aicr.ValidateIdentityPattern(
+	`^https://github\.com/NVIDIA/aicr/\.github/workflows/(on-tag|release)\.yaml@.*`)
+```
+
+## Signing artifacts
+
+The producing half of the supply chain is on the facade too.
+`EmitRecipeEvidence` builds a bundle from a completed validation run;
+`PublishEvidence` signs and pushes one that already exists on disk:
+
+```go
+err := client.PublishEvidence(ctx, aicr.EvidencePublishOptions{
+	BundleDir: "./out",
+	Push:      "ghcr.io/myorg/aicr-evidence",
+})
+```
+
+Splitting emit from publish lets the cluster-bound step run where the
+cluster is reachable and the Sigstore-bound step run where Fulcio and
+Rekor are. The result is content-identical to the one-shot path.
+
+`SignCatalog` is the counterpart to `VerifyCatalog`, signing this
+Client's catalog and returning the serialized Sigstore bundle.
+
+**`SignCatalog` rejects the signing modes it can tell `VerifyCatalog`
+will not verify** — with one documented exception, below. Verification
+checks against the public-good Sigstore root, requires a
+transparency-log entry, and accepts keyless GitHub OIDC certificates
+only, so these four `OIDCResolve` settings are rejected with
+`ErrCodeInvalidRequest` before any signing work runs:
+
+| Setting | Why it is rejected |
+|---|---|
+| `SigningKey` | A key-signed catalog has no verification path at all. |
+| `FulcioURL` | A private CA's certificate does not chain to the public-good root. |
+| `RekorURL` | A private log's entries do not verify against the public-good root either. A public-good v1 URL would verify, but the two are indistinguishable from the URL alone, so this fails closed. |
+| `DisableTLogUpload` | Verification requires a transparency-log entry. |
+
+The point of the guard is that you should not be able to sign a catalog
+successfully and then discover the documented counterpart refuses it;
+if private catalog signing is ever needed, both halves move together.
+
+**The exception: `SigningConfigPath` is not validated.** It passes
+through because the release path requires it, and a Sigstore signing
+config can itself name a private Fulcio or Rekor — so a signing config
+*can* still produce a catalog `VerifyCatalog` rejects. Treat the guard
+as covering the four settings above, not as a guarantee about every
+input. Each rejected setting exists *only* to depart from the
+public-good defaults, which is what makes rejecting it unambiguous; a
+signing config does not, and rejecting it would break the release.
+Validating the loaded config against the public-good endpoints is the
+principled fix if this exception ever bites.
+
+Neither signing method imposes a facade timeout, unlike their
+verification counterparts: keyless OIDC can block on a human completing
+a browser or device-code flow. Pass a context with a deadline for
+unattended use. Neither prompts — interactive signing disclosure is a UI
+concern the caller owns, so both can run unattended from a server.
+
 ## Errors
 
 All errors returned by the facade are `*pkg/errors.StructuredError`
-values carrying an `ErrorCode`. Use `errors.As` to inspect:
+values carrying an `ErrorCode`. Match on the code with `errors.Is` —
+`StructuredError.Is` reports a match when the target is a `StructuredError`
+with the same code, so this works through wrap chains:
 
 ```go
 import (
@@ -456,25 +1025,50 @@ import (
 )
 
 _, err := client.ResolveRecipe(ctx, req)
-var se *aicrerrors.StructuredError
-if stderrors.As(err, &se) && se.Code == aicrerrors.ErrCodeInvalidRequest {
+switch {
+case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")):
 	// handle invalid input
+case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, "")):
+	// handle missing recipe
+}
+```
+
+Runnable version: [`Example_errorCodes`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#example-package-ErrorCodes).
+
+Reach for `errors.As` only when you need the error's *payload* rather than
+its class — `se.Context`, which carries structured detail such as a coverage
+failure's `uncovered` dimensions:
+
+```go
+var se *aicrerrors.StructuredError
+if stderrors.As(err, &se) {
+	uncovered := se.Context["uncovered"]
+	_ = uncovered
 }
 ```
 
 ## Context handling
 
 `ResolveRecipe` (and every other context-aware facade method) honours
-context cancellation. Each facade entry point unconditionally wraps the
-caller's context with `context.WithTimeout` against its per-operation
-cap. The effective deadline is the smaller of the caller's deadline
-and the facade cap, per `context.WithTimeout` semantics — a caller
-passing a tighter deadline keeps it; a caller passing
-`context.Background()` gets the facade cap.
+context cancellation. Capped entry points wrap the caller's context
+with `context.WithTimeout` against their per-operation cap; the
+effective deadline is then the smaller of the caller's deadline and the
+facade cap, per `context.WithTimeout` semantics — a caller passing a
+tighter deadline keeps it; a caller passing `context.Background()` gets
+the facade cap.
+
+Not every entry point is capped. `PublishEvidence` and `SignCatalog`
+never are, and `MakeBundle` is not when `BundleOptions.Timeout` is `0`
+(its default). Those run under the caller's context unchanged, so a
+caller passing `context.Background()` gets no deadline at all.
 
 Per-operation caps:
 
 - `ResolveRecipe` / `BundleComponents`: `defaults.RecipeOperationTimeout`
+- `LoadSnapshot`: `defaults.SnapshotLoadTimeout` — bounds the whole
+  load whatever the source: a local file read, an HTTP(S) fetch, or a
+  `cm://` ConfigMap read against the Kubernetes API. Distinct from
+  `SnapshotOperationTimeout` below, which bounds deploying an agent Job.
 - `CollectSnapshot`: caller-controlled via `AgentConfig.Timeout` (falling
   back to `defaults.SnapshotOperationTimeout` when unset), plus
   `defaults.SnapshotOperationGrace`. The grace exists because
@@ -482,6 +1076,12 @@ Per-operation caps:
   result retrieval sit outside it, so a bare cap would silently shrink the
   completion budget you asked for.
 - `ValidateState`: `defaults.ValidationOperationTimeout`
+- `VerifyBundle` / `VerifyEvidence` / `VerifyCatalog` / `RecipeDigest`:
+  `defaults.VerifyOperationTimeout`
+- `PublishEvidence` / `SignCatalog`: **no facade cap** — the caller's
+  context governs unchanged. Keyless OIDC can block on a human
+  completing a browser or device-code flow, so a fixed cap would cut
+  short a run that legitimately waits.
 - `MakeBundle`: opt-in via `BundleOptions.Timeout`. When unset (`0`) the
   caller's context governs unchanged — large bundles, `--vendor-charts`,
   and attestation/signing can exceed any fixed cap. The REST `/v1/bundle`
@@ -490,6 +1090,38 @@ Per-operation caps:
 
 Passing a `nil` `context.Context` returns `ErrCodeInvalidRequest`. Use
 `context.Background()` (or a deadline-bounded child) for unbounded callers.
+
+## The integrator contract
+
+Four commitments, stated plainly, so you know what you are depending on.
+
+**Import `pkg/client/v1`. That is the contract.** Everything else under
+`pkg/*` stays importable, but only this package is compatibility-reviewed, and
+only its exported surface is checked by the API-diff gate on every PR. The
+[stability matrix](./public-api.md#stability-tiers) tiers each package;
+`Internal` packages will break you on upgrade.
+
+**When the facade is missing something, tell us instead of routing around
+it.** [Open an issue](https://github.com/NVIDIA/aicr/issues/new/choose)
+describing the capability. Reaching into an evolving subpackage works today
+and is the thing most likely to break you later, and we would rather extend
+the facade — that is how `LoadSnapshot`, `LoadConfig`, and the verification
+surface all arrived. Where this guide shows a deliberate escape hatch (the
+fingerprint step under [Criteria relaxation](#criteria-relaxation-on-the-snapshot-path)),
+it says so and explains the coupling you are accepting.
+
+**Breaking changes are detected, not merely intended.** `tools/api-diff`
+compares the facade and its transparent-alias targets against the last release
+on every PR; an incompatible change fails CI and requires a recorded, reviewed
+exception. That is a mechanical guarantee, not a policy promise — but note
+what it does *not* cover: behavior. A function keeping its signature while
+changing what it does passes the gate.
+
+**The examples are compiled.** Every entry in the [examples
+table](#runnable-examples) builds in AICR's own test suite, so a facade change
+that invalidates one fails here first. Scope that honestly: it covers those
+examples, not this page's prose or its shorter inline snippets, and for the
+majority it proves compilation rather than runtime behavior.
 
 ## Compatibility
 

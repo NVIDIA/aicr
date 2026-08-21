@@ -135,7 +135,9 @@ func resolveValidateNodeSelector(cmd *cli.Command, resolved *config.ValidateReso
 // inference-perf that want to mirror the target node's taints by default
 // must distinguish "operator opted into tolerate-all" from "operator said
 // nothing". Returning nil here when neither CLI nor config set the field
-// keeps the env var unset, so the inner validator context sees nil.
+// keeps the env var unset, so the inner validator context sees nil. The live
+// snapshot path consumes that same nil as its signal to apply the agent's
+// tolerate-all default at the Job projection boundary.
 func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResolved) ([]corev1.Toleration, error) {
 	if cmd.IsSet("toleration") {
 		tols, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
@@ -185,7 +187,7 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 // uses, rather than a second hand-rolled snapshotter.AgentConfig, so the facade
 // mirror is exercised here too. Output is left empty: validate consumes the
 // snapshot in memory and never writes it out.
-func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *validateAgentConfig) (*snapshotter.Snapshot, error) {
+func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *validateAgentConfig) (*aicr.Snapshot, error) {
 	snap, err := client.CollectSnapshot(ctx, cfg.toAgentConfig())
 	if err != nil {
 		// PropagateOrWrap: a structured error (e.g. ErrCodeInvalidRequest
@@ -193,7 +195,11 @@ func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *val
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to capture snapshot")
 	}
 
-	return snap.Unwrap(), nil
+	// Returned in the facade shape rather than unwrapped: both snapshot
+	// sources in this command now produce *aicr.Snapshot, so nothing
+	// downstream has to convert. Unwrapping here and re-wrapping at the
+	// ValidateState call also discarded Snapshot.Raw.
+	return snap, nil
 }
 
 // validationConfig holds all parameters for a validation run.
@@ -245,7 +251,7 @@ func runValidation(
 	ctx context.Context,
 	client *aicr.Client,
 	rec *aicr.RecipeResult,
-	snap *snapshotter.Snapshot,
+	snap *aicr.Snapshot,
 	cfg validationConfig,
 ) error {
 
@@ -302,7 +308,7 @@ func runValidation(
 		opts = append(opts, aicr.WithValidationPhases(facadePhases...))
 	}
 
-	results, err := client.ValidateState(ctx, rec, aicr.WrapSnapshot(snap), opts...)
+	results, err := client.ValidateState(ctx, rec, snap, opts...)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "validation failed")
 	}
@@ -461,12 +467,12 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
-			Usage:    "Override GPU node selection for validation workloads (format: key=value, can be repeated). Replaces platform-specific selectors on inner workloads (e.g., NCCL benchmark pods). Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job.",
+			Usage:    "Override GPU node selection for the live snapshot agent (when --snapshot is omitted) and inner validation workloads (format: key=value, can be repeated). Replaces platform-specific selectors on inner workloads (e.g., NCCL benchmark pods). Does not affect the validator orchestrator Job.",
 			Category: catScheduling,
 		},
 		&cli.StringSliceFlag{
 			Name:     "toleration",
-			Usage:    "Override tolerations for validation workloads (format: key=value:effect, can be repeated). Replaces the default tolerate-all policy on inner workloads. Does not affect the validator orchestrator Job.",
+			Usage:    "Override tolerations for the live snapshot agent (when --snapshot is omitted) and inner validation workloads (format: key=value:effect, can be repeated). When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job.",
 			Category: catScheduling,
 		},
 		&cli.DurationFlag{
@@ -786,7 +792,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// handle to the same directory (dataDir) so SLSA / conformance
 			// evidence resolves files against the command's source rather
 			// than the package global.
-			client, err := recipeClientFromCmd(cmd, cfg)
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
 			}
@@ -799,7 +805,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				return err
 			}
 
-			var snap *snapshotter.Snapshot
+			var snap *aicr.Snapshot
 
 			// --no-cluster means "do not touch the cluster". The agent-deploy
 			// branch below contradicts that (it creates a Job and captures a
@@ -813,7 +819,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			if snapshotFilePath != "" {
 				slog.Info("loading snapshot", "uri", snapshotFilePath)
-				snap, err = snapshotter.LoadFromFileWithKubeconfig(ctx, snapshotFilePath, kubeconfig)
+				snap, err = client.LoadSnapshot(ctx, snapshotFilePath, kubeconfig)
 				if err != nil {
 					return err
 				}
@@ -833,7 +839,10 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// binary, and the snapshot-producing binary report different
 			// release versions. Mixed-version artifacts can cause confusing
 			// validation failures; this does not fail the command.
-			warnVersionSkew(version, rec.Resolved().Metadata.Version, snap.Metadata["version"])
+			// Unwrap for the snapshot's producer version: Metadata is not
+			// projected onto the facade Snapshot, which carries only the
+			// fields the resolve and validate paths consume.
+			warnVersionSkew(version, rec.Resolved().Metadata.Version, snap.Unwrap().Metadata["version"])
 
 			// Warn when a requested phase has no checks defined in the recipe.
 			// The helper reads the full recipe's Validation section, which the
@@ -885,7 +894,7 @@ func resolveCNCFAllocationPolicy(ctx context.Context, cmd *cli.Command, cfg *con
 		return "", nil
 	}
 
-	client, err := recipeClientFromCmd(cmd, cfg)
+	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
 		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
 	}

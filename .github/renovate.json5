@@ -319,6 +319,16 @@
       },
     },
 
+    // ---- helm-diff bumps refresh per-arch SHA256 checksums via post-upgrade script ----
+    {
+      matchDepNames: ["databus23/helm-diff"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-helm-diff-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
     // ---- aiperf-bench base image is capped below python 3.14 ----
     // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
     // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage

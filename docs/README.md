@@ -90,7 +90,7 @@ Reference for the terms used across the docs site.
 |------|------------|
 | **Snapshot** | Captured state of a target system (OS, kernel, Kubernetes, GPU, SystemD). Produced by `aicr snapshot` or the in-cluster snapshot Job. |
 | **Recipe** | Resolved configuration spec — component refs, constraints, deployment order — produced by `aicr recipe` from criteria or from a snapshot. |
-| **Criteria** | Query parameters that select a recipe: `service`, `accelerator`, `intent`, `os`, `platform`, `nodes`. |
+| **Criteria** | Query parameters that select a recipe: `service`, `accelerator`, `intent`, `os`, `platform`. `nodes` is carried as advisory metadata and does not filter overlays. |
 | **Overlay** | A recipe metadata file (`kind: RecipeMetadata`) under `recipes/overlays/` matched by criteria. Composes via single-parent inheritance (`spec.base`). |
 | **Mixin** | A composable fragment (`kind: RecipeMixin`) under `recipes/mixins/` carrying only `constraints` and `componentRefs`, referenced via `spec.mixins`. |
 | **Bundle** | Deployment artifacts emitted by `aicr bundle`: Helm values, manifests, install scripts, checksums. |

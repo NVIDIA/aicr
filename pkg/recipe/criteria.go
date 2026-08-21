@@ -439,17 +439,14 @@ func (c *Criteria) Matches(other *Criteria) bool {
 		return false
 	}
 
-	// Nodes: 0 means any - apply same asymmetric logic
-	// Query 0 (any) → only match if recipe is also 0 (generic)
-	// Recipe 0 (any) → match any query value
-	if other.Nodes == 0 && c.Nodes != 0 {
-		// Query is generic but recipe is specific - no match
-		return false
-	}
-	if other.Nodes != 0 && c.Nodes != 0 && c.Nodes != other.Nodes {
-		// Both specific but different values - no match
-		return false
-	}
+	// Nodes is metadata-only: no overlay in the embedded catalog gates on
+	// nodes, so it does not participate in overlay selection. A --nodes query
+	// matches any overlay regardless of its nodes value. External --data
+	// catalogs with criteria.nodes set on any overlay are rejected at load time
+	// (ErrCodeInvalidRequest) before Matches() is ever called on them, so the
+	// value never influences overlay selection in practice. Nodes does still
+	// contribute to Specificity() so that nodes-only CLI queries pass the
+	// minimum-specificity guard. See issue #1781 (design 4.3 follow-up #1542).
 
 	return true
 }
@@ -557,6 +554,11 @@ func (c *Criteria) Specificity() int {
 	if c.Platform != CriteriaPlatformAny && c.Platform != "" {
 		score++
 	}
+	// Nodes participates in Specificity so that a nodes-only query (e.g.
+	// `aicr recipe --nodes 8`) passes the CLI guard that requires
+	// Specificity() > 0.  No overlay in the embedded catalog gates on nodes,
+	// so this score point never influences overlay tiebreaking in practice.
+	// Nodes does NOT participate in Matches(); see #1781.
 	if c.Nodes != 0 {
 		score++
 	}

@@ -20,9 +20,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	recipecat "github.com/NVIDIA/aicr/pkg/recipe/catalog"
 )
 
 func recipeVerifyCatalogCmd() *cli.Command {
@@ -62,9 +61,13 @@ func runRecipeVerifyCatalogCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 	bundlePath := cmd.Args().First()
 
-	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	client, err := embeddedClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
 
-	result, err := recipecat.Verify(ctx, bundlePath, provider, recipecat.VerifyOptions{
+	result, err := client.VerifyCatalog(ctx, bundlePath, aicr.CatalogVerifyOptions{
 		CertificateIdentityRegexp: cmd.String("identity-pattern"),
 	})
 	if err != nil {

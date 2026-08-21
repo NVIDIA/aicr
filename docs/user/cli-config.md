@@ -201,7 +201,7 @@ spec:
       requireCreator: ci@myorg.example.com
       cliVersionConstraint: ">= 0.16.0"
     trust:                           # material verification runs against
-      certificateIdentityRegexp: ""  # must contain NVIDIA/aicr when set
+      certificateIdentityRegexp: ""  # when set, must BEGIN with https://github.com/NVIDIA/aicr/
       key: ""                        # KMS URI or local PEM public-key path
       trustRoot: ""                  # private Sigstore trusted_root.json
 ```
@@ -303,7 +303,7 @@ checked after verification runs, `trust` holds the material it verifies against.
 | `policy.minTrustLevel` | string | `unknown` \| `unverified` \| `attested` \| `verified`, or `max` (the CLI default) to auto-detect the highest level the bundle can reach |
 | `policy.requireCreator` | string | Pins the OIDC identity in the bundle attestation's signing certificate |
 | `policy.cliVersionConstraint` | string | Constrains the `aicr` version in the attestation predicate; supports `>=`, `>`, `<=`, `<`, `==`, `!=`, and a bare version means `>=` |
-| `trust.certificateIdentityRegexp` | string | Certificate identity pattern for binary attestation verification; must contain `NVIDIA/aicr` |
+| `trust.certificateIdentityRegexp` | string | Certificate identity pattern for binary attestation verification; must *begin with* `https://github.com/NVIDIA/aicr/` (leading `^` allowed) and must not use top-level alternation, so it stays confined to the repository |
 | `trust.key` | string | KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`) or local PEM public-key path; the verify counterpart to `spec.bundle.attestation.signingKey` |
 | `trust.trustRoot` | string | Path to a private Sigstore `trusted_root.json`, additive to the built-in public-good root |
 

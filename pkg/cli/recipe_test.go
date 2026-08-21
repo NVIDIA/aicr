@@ -16,14 +16,17 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -695,6 +698,29 @@ func TestRecipeCmd_NoCriteriaValidation(t *testing.T) {
 	}
 }
 
+// TestRecipeCmd_NodesCriteriaPassesGuard is a regression test for issue #1781.
+// Removing nodes from Criteria.Matches() must not also remove it from
+// Specificity() — a nodes-only query (aicr recipe --nodes N) must pass the
+// minimum-specificity guard and proceed to recipe resolution, not be rejected
+// with "no criteria provided". Since nodes is excluded from Matches(), a
+// nodes-only query may match a base/generic overlay and succeed (err==nil),
+// or it may fail for an unrelated reason — but it must never fail with the
+// no-criteria guard message.
+func TestRecipeCmd_NodesCriteriaPassesGuard(t *testing.T) {
+	// Note: --no-cluster is NOT passed here. That flag exists only on
+	// `aicr validate`, not `aicr recipe`. The recipe command is already
+	// offline (reads inputs only; never deploys to a cluster), so no
+	// isolation flag is needed or available.
+	err := recipeCmd().Run(context.Background(), []string{"recipe", "--nodes", "8"})
+	// Whatever the outcome, "no criteria provided" must not appear — that would
+	// mean the Specificity()==0 guard fired, which is the regression this test
+	// prevents. If nodes were removed from Specificity(), this assertion would
+	// fail with exactly that message.
+	if err != nil && strings.Contains(err.Error(), "no criteria provided") {
+		t.Errorf("--nodes 8 triggered the minimum-specificity guard; Nodes must remain in Specificity(): %v", err)
+	}
+}
+
 // TestRecipeCmd_UnusableSnapshotRejected covers issue #1888: a snapshot that
 // passes the loader's structural gate but whose measurements identify no
 // criteria dimension must fail closed with INVALID_REQUEST, not silently emit
@@ -825,7 +851,7 @@ func TestRecipeClientFromCmd_EmptyPath(t *testing.T) {
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client, err := recipeClientFromCmd(cmd, nil)
+			client, err := recipeClientFromCmd(ctx, cmd, nil)
 			if err != nil {
 				return err
 			}
@@ -846,7 +872,7 @@ func TestRecipeClientFromCmd_InvalidPath(t *testing.T) {
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client, err := recipeClientFromCmd(cmd, nil)
+			client, err := recipeClientFromCmd(ctx, cmd, nil)
 			if err == nil {
 				_ = client.Close()
 			}
@@ -872,7 +898,7 @@ func TestRecipeClientFromCmd_MissingRegistry(t *testing.T) {
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client, err := recipeClientFromCmd(cmd, nil)
+			client, err := recipeClientFromCmd(ctx, cmd, nil)
 			if err == nil {
 				_ = client.Close()
 			}
@@ -886,6 +912,69 @@ func TestRecipeClientFromCmd_MissingRegistry(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "registry.yaml") {
 		t.Errorf("error should mention registry.yaml, got: %v", err)
+	}
+}
+
+func TestRecipeClientFromCmd_PreservesClientErrorCode(t *testing.T) {
+	missingRegistryDir := t.TempDir()
+
+	tests := []struct {
+		name     string
+		ctx      func() (context.Context, context.CancelFunc)
+		args     []string
+		wantCode errors.ErrorCode
+	}{
+		{
+			name: "canceled context",
+			ctx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx, cancel
+			},
+			args:     []string{"test"},
+			wantCode: errors.ErrCodeCanceled,
+		},
+		{
+			name: "expired deadline",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+			},
+			args:     []string{"test"},
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name: "invalid recipe source",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return t.Context(), func() {}
+			},
+			args:     []string{"test", "--data", missingRegistryDir},
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testCmd := &cli.Command{
+				Name: "test",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "data"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					client, err := recipeClientFromCmd(ctx, cmd, nil)
+					if err == nil {
+						_ = client.Close()
+					}
+					return err
+				},
+			}
+
+			ctx, cancel := tt.ctx()
+			defer cancel()
+			err := testCmd.Run(ctx, tt.args)
+			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				t.Errorf("recipeClientFromCmd() error = %v, want code %s", err, tt.wantCode)
+			}
+		})
 	}
 }
 

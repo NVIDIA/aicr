@@ -1,0 +1,672 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package aicr_test
+
+import (
+	"context"
+	stderrors "errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+)
+
+// writeConfig writes an AICRConfig document to a temp file and returns its path.
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "aicr-config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+// The fixtures are per-section on purpose. spec.recipe.criteria and
+// spec.recipe.input.snapshot are mutually exclusive, and a document must
+// carry at least one section — so a single "everything" fixture is not a
+// valid AICRConfig. Splitting them also exercises the case a team actually
+// hits: a document that configures some sections and not others.
+
+const recipeConfig = `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  recipe:
+    data: /etc/aicr/recipes
+    profile: gpuStack=operator-managed
+    criteriaStrict: true
+    criteria:
+      service: eks
+      accelerator: h100
+      intent: training
+      os: ubuntu
+      platform: kubeflow
+      nodes: 8
+`
+
+const snapshotInputConfig = `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  recipe:
+    input:
+      snapshot: ./snapshot.yaml
+`
+
+const verifyConfig = `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  verify:
+    policy:
+      minTrustLevel: verified
+      requireCreator: ci@example.com
+      cliVersionConstraint: ">= 0.16.0"
+    trust:
+      certificateIdentityRegexp: ^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*
+      key: awskms://alias/aicr
+      trustRoot: ./trusted_root.json
+`
+
+// TestLoadConfig_DerivesVerifyOptions pins the one-to-one mapping between
+// spec.verify and BundleVerifyOptions. That alignment is the whole reason this
+// derivation is a copy rather than a translation table, so a drift on either
+// side should fail here.
+func TestLoadConfig_DerivesVerifyOptions(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, verifyConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	opts, err := cfg.BundleVerifyOptions()
+	if err != nil {
+		t.Fatalf("BundleVerifyOptions: %v", err)
+	}
+
+	tests := []struct {
+		field string
+		got   string
+		want  string
+	}{
+		{"MinTrustLevel", opts.MinTrustLevel, "verified"},
+		{"RequireCreator", opts.RequireCreator, "ci@example.com"},
+		{"CLIVersionConstraint", opts.CLIVersionConstraint, ">= 0.16.0"},
+		{"Key", opts.Key, "awskms://alias/aicr"},
+		{"TrustRoot", opts.TrustRoot, "./trusted_root.json"},
+		{"CertificateIdentityRegexp", opts.CertificateIdentityRegexp, aicr.TrustedIdentityPattern},
+	}
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("%s = %q, want %q", tt.field, tt.got, tt.want)
+		}
+	}
+
+	// IgnoreTLog has no config counterpart by design: a checked-in file must
+	// not be able to drop the transparency-log requirement.
+	if opts.IgnoreTLog {
+		t.Error("IgnoreTLog = true; it must not be settable from a config document")
+	}
+}
+
+// TestLoadConfig_DerivesRecipeInputs covers the spec.recipe derivations.
+func TestLoadConfig_DerivesRecipeInputs(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, recipeConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	source, ok := cfg.RecipeSource()
+	if !ok {
+		t.Error("RecipeSource reported unset, but spec.recipe.data is populated")
+	}
+	// The source is opaque by design; proving it is usable matters more than
+	// inspecting it, since NewClient is its only consumer.
+	if _, err = aicr.NewClient(aicr.WithRecipeSource(source)); err == nil {
+		t.Error("expected NewClient to reject a nonexistent data directory")
+	}
+
+	if !cfg.IsCriteriaStrict() {
+		t.Error("IsCriteriaStrict = false, want true")
+	}
+
+	criteria, err := cfg.RecipeCriteria(nil)
+	if err != nil {
+		t.Fatalf("RecipeCriteria: %v", err)
+	}
+	if criteria == nil {
+		t.Fatal("RecipeCriteria returned nil on a nil error")
+	}
+	for _, tt := range []struct{ field, got, want string }{
+		{"Service", criteria.Service, "eks"},
+		{"Accelerator", criteria.Accelerator, "h100"},
+		{"Intent", criteria.Intent, "training"},
+		{"OS", criteria.OS, "ubuntu"},
+		{"Platform", criteria.Platform, "kubeflow"},
+	} {
+		if tt.got != tt.want {
+			t.Errorf("Criteria.%s = %q, want %q", tt.field, tt.got, tt.want)
+		}
+	}
+	if criteria.Nodes != 8 {
+		t.Errorf("Criteria.Nodes = %d, want 8", criteria.Nodes)
+	}
+
+	opts, err := cfg.RecipeResolveOptions()
+	if err != nil {
+		t.Fatalf("RecipeResolveOptions: %v", err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("RecipeResolveOptions = %d options, want 1 (profile only; no accounting mode set)", len(opts))
+	}
+}
+
+// TestConfig_NilSafe is the contract the CLI depends on: --config is optional,
+// so every derivation runs unconditionally and must return zero values rather
+// than panicking when no document was supplied.
+func TestConfig_NilSafe(t *testing.T) {
+	t.Parallel()
+
+	var cfg *aicr.Config
+
+	if got := cfg.Unwrap(); got != nil {
+		t.Errorf("Unwrap = %v, want nil", got)
+	}
+	if got := cfg.SnapshotPath(); got != "" {
+		t.Errorf("SnapshotPath = %q, want empty", got)
+	}
+	if cfg.IsCriteriaStrict() {
+		t.Error("IsCriteriaStrict = true, want false")
+	}
+	if _, ok := cfg.RecipeSource(); ok {
+		t.Error("RecipeSource reported set on a nil Config")
+	}
+
+	verifyOpts, err := cfg.BundleVerifyOptions()
+	if err != nil {
+		t.Errorf("BundleVerifyOptions: %v", err)
+	}
+	if verifyOpts != (aicr.BundleVerifyOptions{}) {
+		t.Errorf("BundleVerifyOptions = %+v, want zero value", verifyOpts)
+	}
+
+	resolveOpts, err := cfg.RecipeResolveOptions()
+	if err != nil {
+		t.Errorf("RecipeResolveOptions: %v", err)
+	}
+	if len(resolveOpts) != 0 {
+		t.Errorf("RecipeResolveOptions = %d options, want 0", len(resolveOpts))
+	}
+
+	criteria, err := cfg.RecipeCriteria(nil)
+	if err != nil {
+		t.Errorf("RecipeCriteria: %v", err)
+	}
+	if criteria == nil {
+		t.Error("RecipeCriteria returned nil; callers append to it unconditionally")
+	}
+}
+
+// TestConfig_SectionAbsentDerivesZero covers the realistic case: a document
+// that configures one section and not another. Deriving from the absent
+// section must yield zero values rather than erroring, since the CLI derives
+// both unconditionally regardless of what the document happens to set.
+func TestConfig_SectionAbsentDerivesZero(t *testing.T) {
+	t.Parallel()
+
+	t.Run("recipe-only config derives empty verify options", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, recipeConfig))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		opts, err := cfg.BundleVerifyOptions()
+		if err != nil {
+			t.Fatalf("BundleVerifyOptions: %v", err)
+		}
+		if opts != (aicr.BundleVerifyOptions{}) {
+			t.Errorf("BundleVerifyOptions = %+v, want zero value", opts)
+		}
+	})
+
+	t.Run("verify-only config derives empty recipe inputs", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, verifyConfig))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if _, ok := cfg.RecipeSource(); ok {
+			t.Error("RecipeSource reported set for a verify-only document")
+		}
+		if got := cfg.SnapshotPath(); got != "" {
+			t.Errorf("SnapshotPath = %q, want empty", got)
+		}
+		opts, err := cfg.RecipeResolveOptions()
+		if err != nil {
+			t.Fatalf("RecipeResolveOptions: %v", err)
+		}
+		if len(opts) != 0 {
+			t.Errorf("RecipeResolveOptions = %d options, want 0", len(opts))
+		}
+	})
+
+	t.Run("snapshot input is read from spec.recipe.input", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, snapshotInputConfig))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if got := cfg.SnapshotPath(); got != "./snapshot.yaml" {
+			t.Errorf("SnapshotPath = %q, want ./snapshot.yaml", got)
+		}
+	})
+}
+
+// TestLoadConfig_Guards covers the pre-work rejections and confirms loader
+// error codes survive rather than being flattened — the code is how a caller
+// tells "no such file" from "this file is malformed".
+func TestLoadConfig_Guards(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil context", func(t *testing.T) {
+		t.Parallel()
+		//nolint:staticcheck // SA1012: deliberately passing nil to test the guard.
+		_, err := aicr.LoadConfig(nil, "aicr-config.yaml")
+		wantInvalidRequest(t, err)
+	})
+
+	t.Run("empty source", func(t *testing.T) {
+		t.Parallel()
+		_, err := aicr.LoadConfig(context.Background(), "")
+		wantInvalidRequest(t, err)
+	})
+
+	t.Run("structurally malformed document is rejected", func(t *testing.T) {
+		t.Parallel()
+		// Negative nodes, not a bogus criteria VALUE: membership is checked
+		// at consumption against the provider registry, so an unknown value
+		// loads cleanly by design (see
+		// TestLoadConfig_ExternalCatalogCriteria). A negative count is
+		// registry-independent and still fails here.
+		_, err := aicr.LoadConfig(context.Background(), writeConfig(t,
+			"apiVersion: aicr.run/v1alpha2\nkind: AICRConfig\nmetadata:\n  name: t\nspec:\n  recipe:\n    criteria:\n      nodes: -1\n"))
+		if err == nil {
+			t.Fatal("expected an error for a negative node count")
+		}
+		// Assert the CODE, not just failure: the code is how a caller tells a
+		// malformed document from an unreachable one, and a regression that
+		// flattened it to Internal would still satisfy a non-nil check.
+		wantInvalidRequest(t, err)
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		t.Parallel()
+		_, err := aicr.LoadConfig(context.Background(), filepath.Join(t.TempDir(), "absent.yaml"))
+		if err == nil {
+			t.Fatal("expected an error for a missing config file")
+		}
+		var se *aicrerrors.StructuredError
+		if !stderrors.As(err, &se) || se.Code != aicrerrors.ErrCodeNotFound {
+			t.Errorf("error = %v, want code %v", err, aicrerrors.ErrCodeNotFound)
+		}
+	})
+}
+
+// TestWrapConfig covers the bridge for callers already holding a parsed
+// document from pkg/config.
+func TestWrapConfig(t *testing.T) {
+	t.Parallel()
+
+	if got := aicr.WrapConfig(nil); got != nil {
+		t.Errorf("WrapConfig(nil) = %v, want nil", got)
+	}
+
+	loaded, err := aicr.LoadConfig(context.Background(), writeConfig(t, snapshotInputConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	rewrapped := aicr.WrapConfig(loaded.Unwrap())
+	if rewrapped == nil {
+		t.Fatal("WrapConfig returned nil for a non-nil document")
+	}
+	if got := rewrapped.SnapshotPath(); got != "./snapshot.yaml" {
+		t.Errorf("SnapshotPath after rewrap = %q, want ./snapshot.yaml", got)
+	}
+}
+
+const accountingConfig = `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  recipe:
+    profile: gpuStack=operator-managed
+    configuration:
+      slurm:
+        accounting:
+          mode: disabled
+`
+
+// TestConfig_RawAccessors covers the raw spec.recipe reads that exist for
+// callers applying their own precedence before building options — the CLI
+// overlaying an explicitly-set flag being the motivating case.
+//
+// They are deliberately redundant with RecipeResolveOptions, so this also
+// asserts the two agree: a value readable raw must be the value folded into
+// the options form.
+func TestConfig_RawAccessors(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, accountingConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if got := cfg.RecipeProfile(); got != "gpuStack=operator-managed" {
+		t.Errorf("RecipeProfile = %q, want gpuStack=operator-managed", got)
+	}
+
+	mode, set, err := cfg.RecipeAccountingMode()
+	if err != nil {
+		t.Fatalf("RecipeAccountingMode: %v", err)
+	}
+	if !set {
+		t.Error("RecipeAccountingMode reported unset, but the document configures one")
+	}
+	if mode != "disabled" {
+		t.Errorf("RecipeAccountingMode = %q, want disabled", mode)
+	}
+
+	// Both values present means the options form must carry both.
+	opts, err := cfg.RecipeResolveOptions()
+	if err != nil {
+		t.Fatalf("RecipeResolveOptions: %v", err)
+	}
+	if len(opts) != 2 {
+		t.Errorf("RecipeResolveOptions = %d options, want 2 (profile + accounting mode)", len(opts))
+	}
+}
+
+// TestConfig_RawAccessorsNilSafe extends the nil-Config contract to the raw
+// accessors. The CLI calls them unconditionally, before it knows whether
+// --config was supplied.
+func TestConfig_RawAccessorsNilSafe(t *testing.T) {
+	t.Parallel()
+
+	var cfg *aicr.Config
+
+	if got := cfg.RecipeProfile(); got != "" {
+		t.Errorf("RecipeProfile = %q, want empty", got)
+	}
+	mode, set, err := cfg.RecipeAccountingMode()
+	if err != nil {
+		t.Errorf("RecipeAccountingMode: %v", err)
+	}
+	if set || mode != "" {
+		t.Errorf("RecipeAccountingMode = (%q, %v), want (\"\", false)", mode, set)
+	}
+}
+
+// TestConfig_UnsetAccountingModeIsNotAnError separates "not configured" from
+// "configured badly": a document with no accounting section reports unset
+// rather than erroring, so a caller can append the options unconditionally.
+func TestConfig_UnsetAccountingModeIsNotAnError(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, recipeConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	mode, set, err := cfg.RecipeAccountingMode()
+	if err != nil {
+		t.Fatalf("RecipeAccountingMode: %v", err)
+	}
+	if set || mode != "" {
+		t.Errorf("RecipeAccountingMode = (%q, %v), want (\"\", false)", mode, set)
+	}
+}
+
+// TestToInternalCriteria covers the facade-to-internal bridge, the counterpart
+// to WrapCriteria. A caller that derived criteria from a config but must hand
+// them to a pkg/recipe API needs a supported way across rather than
+// reconstructing the enum-typed fields by hand.
+func TestToInternalCriteria(t *testing.T) {
+	t.Parallel()
+
+	if got := aicr.ToInternalCriteria(nil); got != nil {
+		t.Errorf("ToInternalCriteria(nil) = %v, want nil", got)
+	}
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, recipeConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	derived, err := cfg.RecipeCriteria(nil)
+	if err != nil {
+		t.Fatalf("RecipeCriteria: %v", err)
+	}
+
+	internal := aicr.ToInternalCriteria(derived)
+	if internal == nil {
+		t.Fatal("ToInternalCriteria returned nil for a populated Criteria")
+	}
+	// Round-tripping must preserve the values: the enum types are what the
+	// conversion exists for, so a silent drop would be invisible to a caller
+	// until resolution picked the wrong overlay.
+	if string(internal.Service) != derived.Service {
+		t.Errorf("Service = %q, want %q", internal.Service, derived.Service)
+	}
+	if string(internal.Accelerator) != derived.Accelerator {
+		t.Errorf("Accelerator = %q, want %q", internal.Accelerator, derived.Accelerator)
+	}
+	if string(internal.Intent) != derived.Intent {
+		t.Errorf("Intent = %q, want %q", internal.Intent, derived.Intent)
+	}
+	if string(internal.OS) != derived.OS {
+		t.Errorf("OS = %q, want %q", internal.OS, derived.OS)
+	}
+	if string(internal.Platform) != derived.Platform {
+		t.Errorf("Platform = %q, want %q", internal.Platform, derived.Platform)
+	}
+	if internal.Nodes != derived.Nodes {
+		t.Errorf("Nodes = %d, want %d", internal.Nodes, derived.Nodes)
+	}
+}
+
+// TestLoadConfig_ExternalCatalogCriteria is the regression test for the
+// external-catalog blocker: a config naming a criteria value that exists only
+// in an external overlay could not be loaded at all.
+//
+// config.Load validated criteria against a nil registry — the EMBEDDED catalog
+// — before spec.recipe.data could construct the provider whose registry
+// defines the value. LoadConfig failed with "invalid service type", which made
+// the documented provider-aware RecipeCriteria(client.CriteriaRegistry()) path
+// unreachable: you could never get past loading to build the Client.
+//
+// Exercises the whole chain rather than the fix in isolation, because each hop
+// is where it previously broke:
+//
+//	LoadConfig -> RecipeSource -> NewClient -> LoadCatalog -> RecipeCriteria
+func TestLoadConfig_ExternalCatalogCriteria(t *testing.T) {
+	t.Parallel()
+
+	dataDir, err := filepath.Abs("testdata/external-catalog")
+	if err != nil {
+		t.Fatalf("resolve fixture path: %v", err)
+	}
+	cfgPath := writeConfig(t, `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: external
+spec:
+  recipe:
+    data: `+dataDir+`
+    criteria:
+      service: ncp-review
+      accelerator: h100
+      intent: training
+      os: ubuntu
+`)
+
+	// 1. Load must not reject a value the embedded catalog does not know.
+	cfg, err := aicr.LoadConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig rejected an external-catalog value: %v", err)
+	}
+
+	// 2. The document decides the recipe source.
+	source, ok := cfg.RecipeSource()
+	if !ok {
+		t.Fatal("RecipeSource reported unset, but spec.recipe.data is populated")
+	}
+	client, err := aicr.NewClient(aicr.WithRecipeSource(source))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	// 3. Loading the catalog seeds this provider's registry with the
+	//    overlay-contributed value.
+	if err = client.LoadCatalog(context.Background()); err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+
+	// 4. Now the value parses, because the registry finally knows it.
+	//
+	// Strict mode is explicitly disabled first, and that is the point rather
+	// than a workaround: strict mode exists to hide registry entries
+	// contributed by an external overlay, so an external value is legal only
+	// when it is off. The suite runs with AICR_CRITERIA_STRICT=1, which seeds
+	// every registry strict — without this the test would assert the opposite
+	// of what strict mode is for. The strict half is asserted below.
+	reg := client.CriteriaRegistry()
+	reg.SetStrict(false)
+
+	criteria, err := cfg.RecipeCriteria(reg)
+	if err != nil {
+		t.Fatalf("RecipeCriteria against the provider registry: %v", err)
+	}
+	if criteria.Service != "ncp-review" {
+		t.Errorf("Service = %q, want ncp-review", criteria.Service)
+	}
+
+	// Strict mode must still reject it: the value is real but externally
+	// contributed, which is exactly what strict mode fences off.
+	reg.SetStrict(true)
+	if _, err = cfg.RecipeCriteria(reg); err == nil {
+		t.Error("strict mode accepted an externally-contributed criteria value")
+	}
+}
+
+// TestLoadConfig_ExternalCatalogCriteriaStillFailsClosed is the other half:
+// deferring membership must not mean accepting anything. A value in no
+// catalog — embedded or external — still fails, just at consumption rather
+// than at load.
+func TestLoadConfig_ExternalCatalogCriteriaStillFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	dataDir, err := filepath.Abs("testdata/external-catalog")
+	if err != nil {
+		t.Fatalf("resolve fixture path: %v", err)
+	}
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: external
+spec:
+  recipe:
+    data: `+dataDir+`
+    criteria:
+      service: not-in-any-catalog
+`))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err = client.LoadCatalog(context.Background()); err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+
+	if _, err = cfg.RecipeCriteria(client.CriteriaRegistry()); err == nil {
+		t.Error("RecipeCriteria accepted a value in no catalog; deferral must not mean silent acceptance")
+	}
+}
+
+const runtimeInventoryConfig = `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  recipe:
+    configuration:
+      runtimeInventory:
+        mode: disabled
+`
+
+// TestConfig_RuntimeInventoryMode covers the raw accessor and, more
+// importantly, that RecipeResolveOptions projects the selection.
+//
+// The projection is the defect this guards. RecipeResolveOptions is the
+// canonical config-to-options conversion for SDK callers, so a selection
+// readable through the raw accessor but missing from the options form is
+// silently dropped for anyone who configures it in a document rather than
+// passing an option — with no error to notice.
+func TestConfig_RuntimeInventoryMode(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, runtimeInventoryConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	mode, set, err := cfg.RecipeRuntimeInventoryMode()
+	if err != nil {
+		t.Fatalf("RecipeRuntimeInventoryMode: %v", err)
+	}
+	if !set {
+		t.Fatal("RecipeRuntimeInventoryMode reported unset, but the document configures one")
+	}
+	if mode != "disabled" {
+		t.Errorf("RecipeRuntimeInventoryMode = %q, want disabled", mode)
+	}
+
+	opts, err := cfg.RecipeResolveOptions()
+	if err != nil {
+		t.Fatalf("RecipeResolveOptions: %v", err)
+	}
+	if len(opts) == 0 {
+		t.Fatal("RecipeResolveOptions returned no options; the runtime inventory selection was dropped")
+	}
+
+	// A nil Config must stay quiet rather than panic, matching the sibling
+	// accessors.
+	var nilCfg *aicr.Config
+	if _, set, err := nilCfg.RecipeRuntimeInventoryMode(); err != nil || set {
+		t.Errorf("nil Config: set=%v err=%v, want false/nil", set, err)
+	}
+}

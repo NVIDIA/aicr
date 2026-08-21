@@ -43,9 +43,37 @@ spec:
   # gpuoperator:toolkit.enabled=true --set gpuoperator:operator.runtimeClass=
   # nvidia --set dradriver:nvidiaDriverRoot=/run/nvidia/driver): the mode is
   # selected once at recipe generation (--profile gpuStack=...), recorded in
-  # metadata.selectedProfile, and the four paths below become profile-owned —
+  # metadata.selectedProfile, and the paths below become profile-owned —
   # a bundle-time --set diverging from the selected value is rejected instead
   # of silently producing the unqualified hybrid (#1757).
+  #
+  # nvsentinel is owned here too, for two paths that both follow from who
+  # installs the driver (#2181):
+  #
+  #   labeler.assumeDriverInstalled — the labeler infers driver presence by
+  #     watching for a driver pod. Under azure-managed the node image supplies
+  #     the driver and no such pod exists, so without this
+  #     nvsentinel.dgxc.nvidia.com/driver.installed is never applied and
+  #     metadata-collector plus both syslog-health-monitor DaemonSets sit at
+  #     zero desired pods — silently, with no error and no event (#2175).
+  #     Under operator-managed the operator's driver pod is the evidence, so
+  #     the value is an explicit false rather than left unset: assuming a
+  #     preinstalled driver there would label GPU nodes before the driver is
+  #     actually ready.
+  #
+  #   metadata-collector.runtimeClassName — metadata-collector requests the
+  #     NVIDIA RuntimeClass by name, and the ClusterPolicy controller names
+  #     that object after gpu-operator's operator.runtimeClass above. Under
+  #     azure-managed that is nvidia-container-runtime, not the chart default
+  #     nvidia, so left unset the API server rejects every metadata-collector
+  #     pod at admission with `RuntimeClass "nvidia" not found` (#2176).
+  #     Owning both names in the same profile value keeps them consistent by
+  #     construction.
+  #
+  # Naming nvsentinel in the declaration also makes its presence
+  # profile-owned, so it cannot be disabled or filtered out of a profiled AKS
+  # bundle. That is intended: NVSentinel is a required component for these
+  # deployments (#2181).
   #
   # Each value carries the ADR-required distinguishing constraint over the
   # K8s.aks-gpu-pools.gpu-driver snapshot reading — the projection of every
@@ -72,6 +100,10 @@ spec:
           - name: nvidia-dra-driver-gpu
             overrides:
               nvidiaDriverRoot: /
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: true}
+              metadata-collector: {runtimeClassName: nvidia-container-runtime}
         constraints:
           - name: K8s.aks-gpu-pools.gpu-driver
             value: Install
@@ -88,6 +120,10 @@ spec:
           - name: nvidia-dra-driver-gpu
             overrides:
               nvidiaDriverRoot: /run/nvidia/driver
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: false}
+              metadata-collector: {runtimeClassName: nvidia}
         constraints:
           - name: K8s.aks-gpu-pools.gpu-driver
             value: None

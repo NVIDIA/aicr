@@ -213,7 +213,6 @@ aicr bundle \
   --accelerated-node-selector nodeGroup=gpu-worker \
   --accelerated-node-toleration dedicated=gpu-workload:NoSchedule \
   --storage-class <storage-class> \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
   --set slinkyslurm:nodesets.slinky.replicas=2 \
   --set-json 'slinkyslurm:controller.podSpec={"nodeSelector":{"nodeGroup":"cpu-worker"}}' \
   --set-json 'slinkyslurm:restapi.podSpec={"nodeSelector":{"nodeGroup":"cpu-worker"}}' \
@@ -237,8 +236,6 @@ aicr bundle \
   --system-node-toleration CriticalAddonsOnly=true:NoSchedule \
   --accelerated-node-selector agentpool=gpuworker1 \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
-  --set nv-sentinel:metadata-collector.runtimeClassName=nvidia-container-runtime \
   --set slinkyslurm:nodesets.slinky.replicas=2 \
   --set-json 'slinkyslurm:controller.podSpec={"nodeSelector":{"agentpool":"cpuworker1"}}' \
   --set-json 'slinkyslurm:restapi.podSpec={"nodeSelector":{"agentpool":"cpuworker1"}}' \
@@ -256,14 +253,13 @@ No GPU pools or taints; omit accelerated flags unless your Kind config adds them
 aicr bundle \
   --recipe recipe.yaml \
   --deployer helm \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
   --output bundle
 ```
 
-> The `nv-sentinel` flag is required on Kind too — the driver (when
-> present at all) is host-installed, so no driver pod is observable by
-> the NVSentinel labeler. On GKE COS and AKS above the equivalent flags
-> are already in the commands; see
+> No `nv-sentinel` flag is needed on any of these platforms. The driver is
+> host-installed on Kind (and node-image-installed on GKE COS and AKS
+> above), so no driver pod is observable by the NVSentinel labeler — and
+> the recipes now assign `labeler.assumeDriverInstalled` themselves. See
 > [NVSentinel on provider-installed-driver platforms](../docs/user/component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
 
 For automated no-GPU checks, see `make kwok-e2e` / `make check-health COMPONENT=slinky-slurm` in the repo Makefile.

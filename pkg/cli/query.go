@@ -17,7 +17,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -30,7 +29,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 func queryCmdFlags() []cli.Flag {
@@ -98,7 +96,7 @@ Use in shell scripts:
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform",
-				flagProfile, flagSlurmAccountingMode, "snapshot", "config", "format", "selector"); err != nil {
+				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 
@@ -112,7 +110,7 @@ Use in shell scripts:
 			// registry; it now explicitly seeds its OWN provider via
 			// LoadCatalog before parsing criteria, fixing a latent ordering
 			// bug where the first parse could run against an empty registry.
-			client, err := recipeClientFromCmd(cmd, cfg)
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}
@@ -121,6 +119,7 @@ Use in shell scripts:
 			if err = client.LoadCatalog(ctx); err != nil {
 				return err
 			}
+			applyClientCriteriaStrictMode(cmd, cfg, client)
 
 			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
 			if err != nil {
@@ -164,8 +163,8 @@ Use in shell scripts:
 // is seeded.
 func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
 	reg := client.CriteriaRegistry()
-	profile := stringFlagOrConfig(cmd, flagProfile, cfg.Recipe().ProfileSelection())
-	resolveOpts, err := accountingResolveOptions(cmd, cfg)
+	profile := stringFlagOrConfig(cmd, flagProfile, aicr.WrapConfig(cfg).RecipeProfile())
+	resolveOpts, err := buildSelectionResolveOptions(cmd, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -173,20 +172,24 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		resolveOpts = append(resolveOpts, aicr.WithProfile(profile))
 	}
 
-	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.Recipe().SnapshotPath())
+	snapFilePath := stringFlagOrConfig(cmd, "snapshot", aicr.WrapConfig(cfg).SnapshotPath())
 
 	if snapFilePath != "" {
 		slog.Info("loading snapshot from", "uri", snapFilePath)
-		snap, loadErr := snapshotter.LoadFromFileWithKubeconfig(ctx, snapFilePath, cmd.String("kubeconfig"))
+		snap, loadErr := client.LoadSnapshot(ctx, snapFilePath, cmd.String("kubeconfig"))
 		if loadErr != nil {
 			return nil, loadErr
 		}
 
 		// touched records which of the 5 coverage dimensions were explicitly
 		// user-stated (config or CLI flag) rather than derived from the
-		// snapshot fingerprint below — see relaxSnapshotDerivedCoverage.
-		touched := map[string]bool{}
-		criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria(reg)
+		// snapshot fingerprint below. Everything unmarked is fair game for the
+		// facade's relax-and-retry — see aicr.WithSnapshotCriteriaRelaxation.
+		touched := map[aicr.CriteriaDimension]bool{}
+		// Unwrap to reach the measurements: fingerprinting still reads the
+		// internal shape. The resolve calls below take the facade snapshot
+		// directly.
+		criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).ToCriteria(reg)
 		if applyErr := applyCriteriaFromConfig(criteria, cfg, reg, touched); applyErr != nil {
 			return nil, applyErr
 		}
@@ -214,20 +217,15 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		// ResolveRecipeFromSnapshot builds the constraint evaluator
 		// internally (constraints.Evaluate against snap), mirroring the
 		// pre-facade BuildFromCriteriaWithEvaluator path.
-		result, resolveErr := client.ResolveRecipeFromSnapshotWithOptions(
-			ctx, aicr.WrapCriteria(criteria), aicr.WrapSnapshot(snap), resolveOpts...)
-		if resolveErr == nil {
-			return result, nil
-		}
-
-		relaxed, ok := relaxSnapshotDerivedCoverage(resolveErr, criteria, touched)
-		if !ok {
-			return nil, resolveErr
-		}
-
-		slog.Info("retrying recipe resolution with snapshot-derived criteria relaxed", "criteria", relaxed.String())
+		//
+		// The relax-and-retry for fingerprint-derived criteria lives in the
+		// facade (issue #2027). This layer's only remaining job is declaring
+		// which dimensions the user stated — the one fact the facade cannot
+		// infer, because only the CLI knows a flag was set.
+		resolveOpts = append(resolveOpts,
+			aicr.WithSnapshotCriteriaRelaxation(statedDimensions(touched)...))
 		return client.ResolveRecipeFromSnapshotWithOptions(
-			ctx, aicr.WrapCriteria(relaxed), aicr.WrapSnapshot(snap), resolveOpts...)
+			ctx, aicr.WrapCriteria(criteria), snap, resolveOpts...)
 	}
 
 	criteria, err := mergeCriteriaFromCmdAndConfig(cmd, cfg, reg)
@@ -250,14 +248,14 @@ func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.
 		if cfg == nil {
 			return nil, nil
 		}
-		mode, present, err := cfg.Spec.Recipe.ResolveAccountingMode()
+		mode, present, err := aicr.WrapConfig(cfg).RecipeAccountingMode()
 		if err != nil {
 			return nil, err
 		}
 		if !present {
 			return nil, nil
 		}
-		value = string(mode)
+		value = mode
 	}
 	if _, err := recipe.ParseAccountingMode(value); err != nil {
 		return nil, err
@@ -265,132 +263,57 @@ func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.
 	return []aicr.RecipeResolveOption{aicr.WithAccountingMode(value)}, nil
 }
 
-// relaxSnapshotDerivedCoverage inspects a recipe-resolution error for the
-// criteria-coverage post-condition (issue #1542, pkg/recipe/coverage.go) and,
-// when EVERY uncovered dimension was derived from the snapshot fingerprint
-// (i.e. absent from touched — not stated via --config or a CLI flag), clears
-// those dimensions back to unstated on a copy of criteria and returns it for
-// a single retry.
-//
-// Design rationale: the recipe engine stays strict (pkg/recipe never
-// relaxes), but a Kind-style overlay tree can be deliberately OS-agnostic
-// while the snapshot fingerprint still detects a concrete os value on the
-// node — no recipe content distinguishes that detected value, so failing the
-// build on it would reject a legitimate query. Dimensions the caller
-// explicitly stated are never relaxed: if any uncovered dimension was
-// user-stated, ok is false and the caller must propagate err unchanged.
-func relaxSnapshotDerivedCoverage(err error, criteria *recipe.Criteria, touched map[string]bool) (relaxed *recipe.Criteria, ok bool) {
-	uncovered := uncoveredCoverageDimensions(err)
-	if len(uncovered) == 0 {
-		return nil, false
+// runtimeInventoryResolveOptions turns the --runtime-inventory flag, or the
+// equivalent AICRConfig field, into a resolve option. Mirrors
+// accountingResolveOptions: the flag wins, the config file is the fallback,
+// and an absent selection leaves the recipe's own declaration alone.
+func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+	value := cmd.String(flagRuntimeInventory)
+	if !cmd.IsSet(flagRuntimeInventory) {
+		if cfg == nil {
+			return nil, nil
+		}
+		mode, present, err := aicr.WrapConfig(cfg).RecipeRuntimeInventoryMode()
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, nil
+		}
+		value = mode
 	}
-	for _, dim := range uncovered {
+	if _, err := recipe.ParseRuntimeInventoryMode(value); err != nil {
+		return nil, err
+	}
+	return []aicr.RecipeResolveOption{aicr.WithRuntimeInventoryMode(value)}, nil
+}
+
+// buildSelectionResolveOptions gathers every generation-time selection into one
+// option slice, so callers cannot wire one and forget the other.
+func buildSelectionResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+	opts, err := accountingResolveOptions(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	riOpts, err := runtimeInventoryResolveOptions(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return append(opts, riOpts...), nil
+}
+
+// statedDimensions converts the touched set into the argument
+// aicr.WithSnapshotCriteriaRelaxation expects: the dimensions the user stated
+// explicitly, which the facade must never relax. Order is canonical so the
+// option argument is stable across runs (Go map iteration is randomized).
+func statedDimensions(touched map[aicr.CriteriaDimension]bool) []aicr.CriteriaDimension {
+	stated := make([]aicr.CriteriaDimension, 0, len(touched))
+	for _, dim := range aicr.AllCriteriaDimensions() {
 		if touched[dim] {
-			return nil, false
+			stated = append(stated, dim)
 		}
 	}
-
-	next := *criteria
-	for _, dim := range uncovered {
-		detected := criteriaDimensionValue(&next, dim)
-		clearCriteriaDimension(&next, dim)
-		slog.Warn("relaxing snapshot-detected criteria dimension: no recipe content distinguishes it",
-			"dimension", dim, "detectedValue", detected)
-	}
-	return &next, true
-}
-
-// uncoveredCoverageDimensions extracts the uncovered dimension names from a
-// recipe-resolution error, or nil when err does not carry the
-// criteria-coverage post-condition failure (pkg/recipe/coverage.go's
-// verifyCriteriaCoverage builds ErrCodeInvalidRequest with a
-// Context["uncovered"] []map[string]any, each entry keyed by "dimension").
-//
-// Every StructuredError in the wrap chain is inspected rather than only the
-// outermost one, so an intermediate wrap added between the builder and this
-// caller cannot silently disable snapshot relaxation. The coverage error is
-// identified by its own node's code and context, regardless of outer
-// decoration.
-func uncoveredCoverageDimensions(err error) []string {
-	for cur := err; cur != nil; {
-		var se *errors.StructuredError
-		if !stderrors.As(cur, &se) {
-			return nil
-		}
-		if se.Code == errors.ErrCodeInvalidRequest {
-			if names := uncoveredDimensionNames(se.Context["uncovered"]); len(names) > 0 {
-				return names
-			}
-		}
-		cur = se.Unwrap()
-	}
-	return nil
-}
-
-// uncoveredDimensionNames pulls the "dimension" names out of a coverage
-// error's uncovered payload. It accepts both the in-process shape built by
-// verifyCriteriaCoverage ([]map[string]any) and the decoded-JSON shape
-// ([]any of map[string]any) so a marshaling boundary cannot silently
-// disable relaxation.
-func uncoveredDimensionNames(raw any) []string {
-	var entries []map[string]any
-	switch v := raw.(type) {
-	case []map[string]any:
-		entries = v
-	case []any:
-		for _, e := range v {
-			if m, ok := e.(map[string]any); ok {
-				entries = append(entries, m)
-			}
-		}
-	default:
-		return nil
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if name, ok := e["dimension"].(string); ok {
-			names = append(names, name)
-		}
-	}
-	if len(names) == 0 {
-		return nil
-	}
-	return names
-}
-
-// criteriaDimensionValue reads one of the 5 coverage dimensions by name.
-func criteriaDimensionValue(c *recipe.Criteria, dim string) string {
-	switch dim {
-	case coverageDimService:
-		return string(c.Service)
-	case coverageDimAccelerator:
-		return string(c.Accelerator)
-	case coverageDimIntent:
-		return string(c.Intent)
-	case coverageDimOS:
-		return string(c.OS)
-	case coverageDimPlatform:
-		return string(c.Platform)
-	default:
-		return ""
-	}
-}
-
-// clearCriteriaDimension resets one of the 5 coverage dimensions to unstated
-// ("any"), by name.
-func clearCriteriaDimension(c *recipe.Criteria, dim string) {
-	switch dim {
-	case coverageDimService:
-		c.Service = recipe.CriteriaServiceAny
-	case coverageDimAccelerator:
-		c.Accelerator = recipe.CriteriaAcceleratorAny
-	case coverageDimIntent:
-		c.Intent = recipe.CriteriaIntentAny
-	case coverageDimOS:
-		c.OS = recipe.CriteriaOSAny
-	case coverageDimPlatform:
-		c.Platform = recipe.CriteriaPlatformAny
-	}
+	return stated
 }
 
 // writeQueryResult formats and writes the selected value to w.

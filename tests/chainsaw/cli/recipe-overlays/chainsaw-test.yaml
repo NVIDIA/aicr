@@ -71,31 +71,14 @@ spec:
                 echo "=== ${basename}: recipe (service=${service:-default} accel=${accelerator} os=${os_val} intent=${intent} platform=${platform:-none}) ==="
                 ${AICR_BIN} recipe ${flags} -o "${test_dir}/recipe.yaml" || { echo "FAIL: recipe generation for ${basename}" >&2; exit 1; }
 
-                # NVSentinel driver-label flag, required wherever the NVIDIA
-                # driver ships in the node image so no driver pod exists for
-                # the labeler to observe: AKS (default azure-managed profile),
-                # GKE COS (default gke-default profile), and OKE. Bundling
-                # those without it trips the blocking
-                # CheckNVSentinelDriverLabelDetectable validation (issue
-                # #2175). Deliberately NOT passed blanket: where the GPU
-                # Operator installs the driver the flag would skip driver-pod
-                # detection and mask an unloaded driver, so setting it there
-                # would bake a wrong value into the smoke-tested bundles.
-                # AKS azure-managed additionally retargets
-                # operator.runtimeClass to nvidia-container-runtime, so
-                # metadata-collector's default runtimeClassName=nvidia would
-                # be rejected at admission — the blocking
-                # CheckNVSentinelRuntimeClassCoherence validation (issue
-                # #2176) requires the second remedy there. Only AKS: every
-                # other overlay keeps operator.runtimeClass at the shared
-                # chart default nvidia.
-                sentinel_flags=""
-                case "${service}:${os_val}" in
-                  aks:*)
-                    sentinel_flags="--set nv-sentinel:labeler.assumeDriverInstalled=true --set nv-sentinel:metadata-collector.runtimeClassName=nvidia-container-runtime" ;;
-                  oke:*|gke:cos)
-                    sentinel_flags="--set nv-sentinel:labeler.assumeDriverInstalled=true" ;;
-                esac
+                # No NVSentinel flags: the recipes assign
+                # labeler.assumeDriverInstalled and, on AKS,
+                # metadata-collector.runtimeClassName themselves — from the
+                # gpuStack profile on AKS and GKE-COS, at overlay level on
+                # OKE (#2181). Bundling below therefore exercises the
+                # recipes satisfying both blocking NVSentinel validations
+                # (issues #2175 and #2176) unaided, which is the property
+                # this smoke test should be protecting.
 
                 # Generate bundle. Pass a keyed accelerated-node toleration:
                 # harmless for most overlays, but required on AKS, where the
@@ -105,8 +88,7 @@ spec:
                 # interrupt packages; see NVIDIA/nodewright#296).
                 echo "=== ${basename}: bundle ==="
                 ${AICR_BIN} bundle -r "${test_dir}/recipe.yaml" -o "${test_dir}/bundle" \
-                  --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
-                  ${sentinel_flags} || \
+                  --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" || \
                   { echo "FAIL: bundle generation for ${basename}" >&2; exit 1; }
 
                 # Verify bundle structure

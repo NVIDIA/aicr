@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -327,6 +328,19 @@ func (r *HTTPReader) ReadWithContext(ctx context.Context, url string) ([]byte, e
 
 	resp, err := r.Client.Do(req) //nolint:gosec // G704 -- URL is validated by http.NewRequestWithContext
 	if err != nil {
+		// A deliberate abort must not look like a retryable transport fault.
+		// Client.Do wraps the context error in a *url.Error, so the coded
+		// error would otherwise be ErrCodeUnavailable over a still-visible
+		// context.Canceled — transient by errors.IsTransient either way.
+		//
+		// Deadlines route through the same helper so the whole package agrees
+		// on one mapping: abort -> ErrCodeCanceled, deadline -> ErrCodeTimeout.
+		// Both remain transient-classified apart from the abort, so retry
+		// behavior for a genuine timeout is unchanged; what changes is that
+		// the code now says which of the two happened.
+		if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
+			return nil, abortError(err, fmt.Sprintf("http request for url %s", url))
+		}
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, fmt.Sprintf("http request failed for url %s", url), err)
 	}
 	defer resp.Body.Close()
@@ -339,6 +353,11 @@ func (r *HTTPReader) ReadWithContext(ctx context.Context, url string) ([]byte, e
 	limited := io.LimitReader(resp.Body, defaults.HTTPResponseBodyLimit+1)
 	data, err := io.ReadAll(limited)
 	if err != nil {
+		// A context error mid-body is an abort or a deadline, not an
+		// internal fault.
+		if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
+			return nil, abortError(err, fmt.Sprintf("http body read for url %s", url))
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read response body", err)
 	}
 	if int64(len(data)) > defaults.HTTPResponseBodyLimit {

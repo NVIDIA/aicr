@@ -22,10 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	recipecat "github.com/NVIDIA/aicr/pkg/recipe/catalog"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 )
 
 func recipeSignCatalogCmd() *cli.Command {
@@ -57,16 +54,13 @@ Keyless OIDC signing uses the same precedence chain as 'aicr bundle --attest':
 				Usage:   "Use OAuth 2.0 device authorization grant for OIDC.",
 				Sources: cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 			},
-			&cli.StringFlag{
-				Name:    flagFulcioURL,
-				Usage:   "Override the Fulcio CA URL (defaults to public-good).",
-				Sources: cli.EnvVars("AICR_FULCIO_URL"),
-			},
-			&cli.StringFlag{
-				Name:    flagRekorURL,
-				Usage:   "Sign to Rekor v1 at this URL instead of the Rekor v2 default (e.g. a private v1 instance, or the public-good v1 URL).",
-				Sources: cli.EnvVars("AICR_REKOR_URL"),
-			},
+			// No --fulcio-url or --rekor-url counterpart to `bundle --attest`.
+			// The catalog signature is verified by `recipe verify-catalog`
+			// against the public-good Sigstore root only, so a private CA or a
+			// private transparency log could only produce an artifact nothing
+			// can verify. Client.SignCatalog rejects both settings for the
+			// same reason. Signing targets the Rekor v2 default, or whatever
+			// --signing-config names.
 			&cli.StringFlag{
 				Name:    flagSigningConfig,
 				Usage:   "Path to a Sigstore signing config JSON to sign with, instead of the default Rekor v2 config (advanced).",
@@ -80,45 +74,37 @@ Keyless OIDC signing uses the same precedence chain as 'aicr bundle --attest':
 func runRecipeSignCatalogCmd(ctx context.Context, cmd *cli.Command) error {
 	output := cmd.String("output")
 
-	rekorURL := cmd.String(flagRekorURL)
 	signingConfig := cmd.String(flagSigningConfig)
-	// Shared with bundle --attest: derive the Rekor v2 default and enforce the
-	// --rekor-url / --signing-config exclusivity in one place.
-	useV2, err := signingTargetFromFlags(rekorURL, signingConfig)
+	// Shared with bundle --attest. There is no --rekor-url here, so the
+	// exclusivity arm never fires; the call is kept so the Rekor v2 default is
+	// derived in exactly one place rather than duplicated.
+	useV2, err := signingTargetFromFlags("", signingConfig)
 	if err != nil {
 		return err
 	}
 
-	attester, err := attestation.ResolveAttesterLazy(ctx, attestation.ResolveOptions{
-		Attest:              true,
-		IdentityToken:       cmd.String(flagIdentityToken),
-		AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
-		AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
-		DeviceFlow:          cmd.Bool(flagOIDCDeviceFlow),
-		FulcioURL:           cmd.String(flagFulcioURL),
-		RekorURL:            rekorURL,
-		SigningConfigPath:   signingConfig,
-		UseTUFSigningConfig: useV2,
-		PromptWriter:        os.Stderr,
-	})
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeUnauthorized, "could not resolve OIDC attester")
-	}
-
-	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-
-	result, err := recipecat.Sign(ctx, provider, recipecat.SignOptions{
-		Attester:    attester,
-		Output:      output,
-		ToolVersion: version,
-	})
+	client, err := embeddedClient(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = client.Close() }()
 
-	if result.BundleJSON == nil {
-		return errors.New(errors.ErrCodeInternal,
-			"attester produced no bundle (is OIDC token available?)")
+	// The facade sets Attest, resolves the attester lazily, stamps
+	// ToolVersion from the Client's version, and rejects a nil bundle.
+	result, err := client.SignCatalog(ctx, aicr.CatalogSignOptions{
+		Output: output,
+		OIDCResolve: aicr.OIDCResolveOptions{
+			IdentityToken:       cmd.String(flagIdentityToken),
+			AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+			AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+			DeviceFlow:          cmd.Bool(flagOIDCDeviceFlow),
+			SigningConfigPath:   signingConfig,
+			UseTUFSigningConfig: useV2,
+			PromptWriter:        os.Stderr,
+		},
+	})
+	if err != nil {
+		return err
 	}
 
 	slog.Info("catalog signed", "digest", result.Digest, "output", output)

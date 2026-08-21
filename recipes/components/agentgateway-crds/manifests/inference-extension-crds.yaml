@@ -12,9 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Gateway API Inference Extension CRDs (v1.3.0)
-# Source: https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/v1.3.0/manifests.yaml
+# Gateway API Inference Extension CRDs (v1.5.0)
+# Source: https://github.com/kubernetes-sigs/gateway-api-inference-extension/tree/v1.5.0/config/crd/bases
 # Required by agentgateway for InferencePool and InferenceObjective resources.
+#
+# DIVERGENCE FROM UPSTREAM v1.5.0: this bundle also retains
+# inferencepools.inference.networking.x-k8s.io (v1alpha2), which upstream
+# removed. Deleting it garbage-collects every v1alpha2 InferencePool
+# cluster-wide, and the stable v1 CRD is a different API group with an
+# incompatible schema, so the API server cannot convert those objects.
+#
+# The stanza is deprecated (see deprecationWarning below) and carries Helm and
+# Argo CD retention guards. Do NOT remove it without shipping, in the same
+# release, a preflight that fails closed when any v1alpha2 InferencePool still
+# exists: the guards are read off the LIVE cluster object, so a cluster that
+# skipped the deprecation window never received them and would still be pruned.
+#
+# Deprecation window, removal gates, and migration steps: see #2214.
 #
 # These CRDs are not included in the agentgateway-crds Helm chart and must
 # be installed separately. Vendored here for fully automated deployment.
@@ -24,7 +38,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    inference.networking.k8s.io/bundle-version: v1.3.0
+    inference.networking.k8s.io/bundle-version: v1.5.0
   name: inferencemodelrewrites.inference.networking.x-k8s.io
 spec:
   group: inference.networking.x-k8s.io
@@ -260,7 +274,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    inference.networking.k8s.io/bundle-version: v1.3.0
+    inference.networking.k8s.io/bundle-version: v1.5.0
   name: inferenceobjectives.inference.networking.x-k8s.io
 spec:
   group: inference.networking.x-k8s.io
@@ -353,7 +367,7 @@ spec:
                   Fairness is only enforced and tracked between requests of the same priority.
 
                   Example: requests with Priority 10 will always be served before
-                  requests with Priority of 0 (the value used if Priority is unset or no InfereneceObjective is specified).
+                  requests with Priority of 0 (the value used if Priority is unset or no InferenceObjective is specified).
                   Similarly requests with a Priority of -10 will always be served after requests with Priority of 0.
                 type: integer
             required:
@@ -451,7 +465,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    inference.networking.k8s.io/bundle-version: v1.3.0
+    inference.networking.k8s.io/bundle-version: v1.5.0
   name: inferencepoolimports.inference.networking.x-k8s.io
 spec:
   group: inference.networking.x-k8s.io
@@ -783,7 +797,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/1173
-    inference.networking.k8s.io/bundle-version: v1.3.0
+    inference.networking.k8s.io/bundle-version: v1.5.0
   name: inferencepools.inference.networking.k8s.io
 spec:
   group: inference.networking.k8s.io
@@ -822,6 +836,20 @@ spec:
           spec:
             description: Spec defines the desired state of the InferencePool.
             properties:
+              appProtocol:
+                default: http
+                description: |-
+                  AppProtocol describes the application protocol for all the target ports.
+
+                  If unspecified, the protocol defaults to HTTP/1.1.
+
+                  Supported values include:
+                  * "http": HTTP/1.1. This is the default.
+                  * "kubernetes.io/h2c": HTTP/2 over cleartext.
+                enum:
+                - http
+                - kubernetes.io/h2c
+                type: string
               endpointPickerRef:
                 description: |-
                   EndpointPickerRef is a reference to the Endpoint Picker extension and its
@@ -1144,6 +1172,10 @@ metadata:
   annotations:
     api-approved.kubernetes.io: unapproved, experimental-only
     inference.networking.k8s.io/bundle-version: v1.3.0
+    # Retention guards. Must be applied while the CRD is still in the bundle:
+    # both are read off the live object at prune time (see header).
+    helm.sh/resource-policy: "keep"
+    argocd.argoproj.io/sync-options: "Delete=false,Prune=false"
   name: inferencepools.inference.networking.x-k8s.io
 spec:
   group: inference.networking.x-k8s.io
@@ -1156,7 +1188,11 @@ spec:
     singular: inferencepool
   scope: Namespaced
   versions:
-  - name: v1alpha2
+  - deprecated: true
+    deprecationWarning: inference.networking.x-k8s.io/v1alpha2 InferencePool is deprecated;
+      migrate to inference.networking.k8s.io/v1 InferencePool. Retained for a transition
+      window and removed in a future AICR release. See NVIDIA/aicr#2214.
+    name: v1alpha2
     schema:
       openAPIV3Schema:
         description: InferencePool is the Schema for the InferencePools API.

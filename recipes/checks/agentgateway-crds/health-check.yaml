@@ -150,6 +150,8 @@ spec:
               status:
                 (conditions[?type == 'Established']):
                   - status: "True"
+        # Deprecated v1alpha2 InferencePool, retained for a transition window
+        # (see the manifest header). Still installed, so still asserted.
         - assert:
             resource:
               apiVersion: apiextensions.k8s.io/v1

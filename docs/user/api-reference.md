@@ -133,16 +133,16 @@ Generate an optimized configuration recipe based on environment parameters.
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `any` |
 | `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `runai`, `slurm`, `any` |
-| `nodes` | integer | 0 | GPU node count (0 = any) |
+| `nodes` | integer | 0 | GPU node count hint (0 = unspecified). Advisory metadata — does not select or filter overlays. |
 
 **Examples:**
 
 ```shell
-# Minimal request
-curl "http://localhost:8080/v1/recipe"
-
-# Specify accelerator
+# Minimal request — at least one criteria dimension is required
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
+
+# Specify accelerator with service
+curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100"
 
 # Full specification
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8"
@@ -226,8 +226,9 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 ```
 
 **Error Responses:**
+- `400 Bad Request` - No criteria provided: at least one of `service`, `accelerator`, `intent`, `os`, `platform`, or `nodes` must be non-zero. An empty request returns `"no criteria provided: specify at least one of service, accelerator, intent, os, platform, nodes"`. This guard applies to `GET /v1/recipe`, `POST /v1/recipe`, `GET /v1/query`, and `POST /v1/query`.
 - `400 Bad Request` - Invalid criteria format, missing required fields, or invalid enum values
-- `400 Bad Request` - A stated criteria dimension is not honored by any applicable recipe overlay (uncovered dimension). This applies to both `GET /v1/recipe` and `POST /v1/recipe`: every dimension you state (`service`, `accelerator`, `intent`, `os`, `platform`) must be matched by at least one applied overlay, or the request fails instead of silently returning a recipe that ignores it. `nodes` is exempt — it is advisory and never required to be covered. The response's `details.uncovered` array names the offending dimension(s), the requested value, and any `validCompletions` (additional criteria that would make the request coverable). Snapshot-driven resolution (CLI `--snapshot` / Go SDK) may additionally attach `excludedOverlays` and `constraintWarnings` to the error; the HTTP API resolves from criteria only and never emits those two fields.
+- `400 Bad Request` - A stated criteria dimension is not honored by any applicable recipe overlay (uncovered dimension). This applies to `GET /v1/recipe`, `POST /v1/recipe`, `GET /v1/query`, and `POST /v1/query`: every dimension you state (`service`, `accelerator`, `intent`, `os`, `platform`) must be matched by at least one applied overlay, or the request fails instead of silently returning a recipe that ignores it. `nodes` is exempt — it is advisory and never required to be covered. The response's `details.uncovered` array names the offending dimension(s), the requested value, and any `validCompletions` (additional criteria that would make the request coverable). Snapshot-driven resolution (CLI `--snapshot` / Go SDK) may additionally attach `excludedOverlays` and `constraintWarnings` to the error; the HTTP API resolves from criteria only and never emits those two fields.
 - `405 Method Not Allowed` - Only GET and POST are supported
 
 **Uncovered-Dimension Error Example:**
@@ -348,9 +349,9 @@ All GET /v1/recipe parameters are supported, plus:
 
 **Error Responses:**
 
-Omitting `selector` returns `400 Bad Request` with code `INVALID_REQUEST`. An explicitly empty `selector=` remains valid and returns the entire hydrated recipe.
-
-`GET /v1/query` and `POST /v1/query` resolve a recipe through the same engine as `/v1/recipe`, so a stated criteria dimension not honored by any applicable overlay fails the same way: `400 Bad Request` with the `details.uncovered` array described in the [POST /v1/recipe error responses](#post-v1recipe) above.
+- `400 Bad Request` - No criteria provided: at least one criteria dimension (`service`, `accelerator`, `intent`, `os`, `platform`, or `nodes`) must be non-zero. Returns `"no criteria provided: specify at least one of service, accelerator, intent, os, platform, nodes"`. See the [POST /v1/recipe error responses](#post-v1recipe) entry for full details.
+- `400 Bad Request` - Omitting `selector` returns `INVALID_REQUEST`. An explicitly empty `selector=` remains valid and returns the entire hydrated recipe.
+- `400 Bad Request` - A stated criteria dimension not honored by any applicable overlay (uncovered dimension) — same `details.uncovered` shape as described in the [POST /v1/recipe error responses](#post-v1recipe) above.
 
 **Examples:**
 
@@ -397,6 +398,10 @@ curl -X POST "http://localhost:8080/v1/query" \
 ```
 
 The response format matches `GET /v1/query`: scalar values are returned as plain JSON values; maps and lists are returned as JSON objects/arrays.
+
+**Error Responses:**
+
+Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query) section above. The no-criteria and uncovered-dimension 400 cases apply. Note: unlike `GET /v1/query`, omitting `selector` from the POST body returns the entire hydrated recipe rather than a 400 (use `/v2/query` if you need the selector to be required).
 
 ---
 
@@ -546,7 +551,7 @@ Generate deployment bundles from a recipe.
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
-| `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH` and registry credentials configured for any private upstream repos (`HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` for HTTP(S); docker config for OCI). If prerequisites are missing the request fails with a structured error code (`SERVICE_UNAVAILABLE` / HTTP 503 for missing helm, `UNAUTHORIZED` / HTTP 401 for credentials). |
+| `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH`. **The server-side vendor path is opt-in and off by default** — the operator must set `AICR_ALLOW_VENDOR_CHARTS=true`, otherwise `vendor-charts=true` returns `400 vendor-charts is not enabled on this server`. Even when enabled, repository hosts that resolve to loopback, link-local, private, or cloud-metadata IPs are rejected with `400 INVALID_REQUEST`, and vendored artifacts are capped at 64 MiB. **Private HTTP(S) repository credentials:** the aicrd pre-check sends `HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` (as HTTP Basic auth) ONLY when `AICR_HELM_REPOSITORY_HOST` is set to that repository's exact host, the request scheme is `https`, and the request host matches (case-insensitive). All three conditions must hold — an operator setting only the username/password env vars will get no credentials attached, preventing a caller-supplied `Repository` URL from harvesting the operator's helm credentials. (Note: the upstream `helm pull --repo` subprocess does not itself read these env vars — private HTTP repos require a prior `helm repo add --username --password` in the aicrd image or an SDK-based puller.) OCI credentials flow through the standard docker config (`~/.docker/config.json` or `$DOCKER_CONFIG`), exactly like `helm pull oci://...`. If prerequisites are missing the request fails with a structured error code (`SERVICE_UNAVAILABLE` / HTTP 503 for missing helm). The index pre-check surfaces upstream HTTP status by class: `404` → `NOT_FOUND` / HTTP 404, `401`/`403` → `UNAUTHORIZED` / HTTP 401, `408`/`429` → `SERVICE_UNAVAILABLE` / HTTP 503 (retryable), other `4xx` → `INVALID_REQUEST` / HTTP 400, `5xx` → `SERVICE_UNAVAILABLE` / HTTP 503. |
 | `serial` | bool | false | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `deployer=argocd`, `argocd-helm`, `flux`, and `helmfile` (`helm` is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply order. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. |
 | `deployer` | string | helm | Deployment method: `helm`, `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=flux`; ignored by `deployer=argocd-helm`) |
@@ -805,7 +810,7 @@ certificate from Fulcio using its own OIDC identity. Operator setup for Mode B:
 | `AICR_SIGNING_CONFIG_PATH` | A, B | Sigstore SigningConfig JSON for Rekor v2 targeting. |
 | `AICR_TLOG_UPLOAD` | A | Set `false` to skip the Rekor upload for air-gapped KMS signing. KMS-only; keyless always uploads. |
 | `AICR_BINARY_ATTESTATION_FILE` | A, B | Absolute path to the aicrd binary attestation. Unset defaults to the conventional `<executable>-attestation.sigstore.json` next to the running binary. Set it when the attestation ships elsewhere in the image, e.g. a ko build stages assets under `KO_DATA_PATH` (`/var/run/ko/aicrd-attestation.sigstore.json`) rather than next to the binary. |
-| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | A, B | Certificate-identity pattern the server pins its own binary attestation to. Unset uses the release-workflow default (`on-tag.yaml`). A custom value MUST still contain `NVIDIA/aicr` so it stays pinned to the NVIDIA org; it retargets which NVIDIA workflow attested the binary (e.g. an e2e workflow), not the org, and a value that is not so pinned fails startup. Mirrors the CLI's `--certificate-identity-regexp`. |
+| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | A, B | Certificate-identity pattern the server pins its own binary attestation to. Unset uses the release-workflow default (`on-tag.yaml`). A custom value MUST begin with `https://github.com/NVIDIA/aicr/` (leading `^` allowed) and must not use top-level alternation, so it stays confined to the NVIDIA repository; it retargets which NVIDIA workflow attested the binary (e.g. an e2e workflow), not the org, and a value that is not so pinned fails startup. Mirrors the CLI's `--certificate-identity-regexp`. |
 
 Setting both `AICR_SIGNING_KEY` and the keyless variables is ambiguous and the
 server refuses to start.

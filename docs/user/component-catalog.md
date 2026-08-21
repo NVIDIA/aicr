@@ -21,19 +21,20 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **gatekeeper** | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
 | **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. | [Nodewright](https://github.com/nvidia/nodewright) |
 | **nodewright-customizations** | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
-| **nvsentinel** | GPU health monitoring and automated remediation. Detects GPU errors and can cordon or drain affected nodes. On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, pass `--set nv-sentinel:labeler.assumeDriverInstalled=true` — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
+| **nvsentinel** | GPU health monitoring and automated remediation. Detects GPU errors and can cordon or drain affected nodes. On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work zero-config. Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
+| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Registry-only: no stock recipe installs it. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a NATS-backed Kubernetes event plane for KV-cache events, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
-| **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
+| **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
 | **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
 | **mariadb-operator-crds** | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
@@ -42,7 +43,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **slinky-slurm-operator-crds** | Custom Resource Definitions for the SchedMD Slinky Slurm operator. Installs the `slinky.slurm.net` CRDs (Controller, NodeSet, LoginSet, Accounting, RestApi, Token). Installed separately to support CRD lifecycle management. | [Slinky Slurm Operator](https://github.com/SlinkyProject/slurm-operator) |
 | **slinky-slurm-operator** | SchedMD Slinky Slurm operator and admission webhook. Manages the lifecycle of Slurm clusters declared via Slinky CRs (Controller, NodeSet, LoginSet, Accounting, RestApi, Token). AICR's system node-selector and toleration bundle flags apply to both deployments; affinity remains available through component values or typed overrides. | [Slinky Slurm Operator](https://github.com/SlinkyProject/slurm-operator) |
 | **slinky-slurm** | Slinky-managed Slurm cluster instance: Controller (slurmctld) + LoginSet (sackd/sshd) + NodeSet (slurmd) + RestApi (slurmrestd), with SlurmDBD derived from the recipe's typed accounting mode. Reconciled by `slinky-slurm-operator`. See [Slurm Accounting](slinky-slurm-accounting.md), [Slurm Enroot Configuration](slinky-slurm-enroot.md), and [Slurm Shared Storage](slinky-slurm-storage.md). | [Slinky Slurm Cluster Chart](https://github.com/SlinkyProject/slurm-operator/tree/main/helm/slurm) |
-| **slinky-topograph** | Slinky/Slurm-scoped instance of Topograph — queries cloud provider topology APIs (GCP, AWS, OCI …) to generate Slurm `topology.conf`, enabling topology-aware placement decisions in the Slinky-managed scheduler. **Not installed by default**; leaf overlays opt in by adding an explicit `componentRef` entry for `slinky-topograph` — the `componentRef` is what schedules the release; `dependencyRefs` alone does not install anything. That `componentRef` declares `slinky-slurm` as a `dependencyRef` to deploy **after** it: `slinky-slurm` renders and owns the `slinky-slurm-config-extra` ConfigMap (from its `configFiles`, mounted into slurmctld via the Controller CR's `configFileRefs`), and Topograph patches only that ConfigMap's `topology.conf` key on each sync, preserving the chart-owned `cgroup.conf`/`gres.conf` keys — Helm has to own the ConfigMap first. `TopologyPlugin: topology/tree` is set per-leaf via `slinky-slurm`'s `controller.extraConfMap`. Includes the `node-observer` sub-chart, which watches the topograph API pod and regenerates topology on restarts or selected node/pod changes. Requires cloud provider IAM access (e.g. GCP `roles/compute.viewer` for Workload Identity). | [Topograph](https://github.com/NVIDIA/topograph) |
+| **slinky-topograph** | Slinky/Slurm-scoped instance of Topograph — queries cloud provider topology APIs (GCP, AWS, OCI …) to generate Slurm `topology.conf`, enabling topology-aware placement decisions in the Slinky-managed scheduler. **Not installed by default**; leaf overlays opt in by adding an explicit `componentRef` entry for `slinky-topograph` — the `componentRef` is what schedules the release; `dependencyRefs` alone does not install anything. That `componentRef` declares `slinky-slurm` as a `dependencyRef` to deploy **after** it: `slinky-slurm` renders and owns the `slinky-slurm-config-extra` ConfigMap (from its `configFiles`, mounted into slurmctld via the Controller CR's `configFileRefs`), and Topograph patches only that ConfigMap's `topology.conf` key on each sync, preserving the chart-owned `cgroup.conf`/`gres.conf` keys — Helm has to own the ConfigMap first. `TopologyPlugin: topology/tree` is set per-leaf via `slinky-slurm`'s `controller.extraConfMap`. Includes the `node-observer` component, which watches the topograph API pod and regenerates topology on restarts or selected node/pod changes. Requires cloud provider IAM access (e.g. GCP `roles/compute.viewer` for Workload Identity). | [Topograph](https://github.com/NVIDIA/topograph) |
 | **nfd-ocp-olm** | OLM installer for Node Feature Discovery on OpenShift. Creates the OperatorGroup and Subscription resources that install NFD via the Operator Lifecycle Manager. Paired with `nfd-ocp`. OCP-specific. | [Node Feature Discovery (Certified)](https://catalog.redhat.com/software/container-stacks/detail/5ec53e8c110f56bd24f5f8db) |
 | **nfd-ocp** | Node Feature Discovery CR for OpenShift. Configures NFD's operand (worker, topology updater) via a NodeFeatureDiscovery custom resource. Deployed after `nfd-ocp-olm`. OCP-specific. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
 | **gpu-operator-ocp-olm** | OLM installer for the GPU Operator on OpenShift. Creates the OperatorGroup and Subscription resources that install the certified GPU Operator via the Operator Lifecycle Manager. Paired with `gpu-operator-ocp`. OCP-specific. | [NVIDIA GPU Operator (Certified)](https://catalog.redhat.com/software/container-stacks/detail/5e7b210b8a3c1e00013d636d) |
@@ -132,23 +133,33 @@ See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/
 
 ## NVSentinel on Provider-Installed-Driver Platforms
 
+The recipes configure NVSentinel for you on every platform that needs it. This section explains what they set and why, so the values are recognizable in a generated bundle and the failure signatures are diagnosable if they ever reappear.
+
 **Symptom.** NVSentinel's `metadata-collector` and both `syslog-health-monitor` DaemonSets report **0 desired pods** and never schedule, while everything else looks fine ([#2175](https://github.com/NVIDIA/aicr/issues/2175)).
 
 This is easy to miss. A DaemonSet whose node selector matches no node is not unhealthy — it reports no error and emits no event — and `gpu-health-monitor` keeps running normally because it selects on the DCGM label instead. The stack presents as fully rolled out.
 
-**Cause.** Those three DaemonSets select on the node label `nvsentinel.dgxc.nvidia.com/driver.installed`, which the NVSentinel labeler applies by watching for a GPU driver pod. Where the driver ships in the node image and no driver pod exists, the labeler never applies the label:
+**Cause.** Those three DaemonSets select on the node label `nvsentinel.dgxc.nvidia.com/driver.installed`, which the NVSentinel labeler applies by watching for a GPU driver pod. Where the driver ships in the node image and no driver pod exists, the labeler never applies the label — so `labeler.assumeDriverInstalled` must be set to skip driver-pod detection and label GPU nodes unconditionally.
 
-| Platform | GPU Operator installs driver | Driver pod the labeler can observe | Affected |
+The recipes now carry that value wherever it is needed ([#2181](https://github.com/NVIDIA/aicr/issues/2181)):
+
+| Platform | Driver pod the labeler can observe | `labeler.assumeDriverInstalled` | Supplied by |
 |---|---|---|---|
-| AKS `gpuStack=azure-managed` (default) | no | none — driver is in the node image | **yes** |
-| AKS `gpuStack=operator-managed` | yes | the operator's driver pod | no |
-| GKE COS `gpuStack=gke-default` (default) | no | none the labeler can observe — the driver is finalized by an init container of GKE's kube-system DaemonSet | **yes** |
-| GKE COS `gpuStack=driver-installer` | no | Google's standalone `nvidia-driver-installer` DaemonSet | no |
-| OKE | no | none — driver is in the node image | **yes** |
-| Kind (nvkind) | no | none — driver is host-installed | **yes** |
-| EKS | yes | the operator's driver pod | no |
+| AKS `gpuStack=azure-managed` (default) | none — driver is in the node image | `true` | the `gpuStack` profile |
+| AKS `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
+| GKE COS `gpuStack=gke-default` (default) | none the labeler can observe — the driver is finalized by an init container of GKE's kube-system DaemonSet | `true` | the `gpuStack` profile |
+| GKE COS `gpuStack=driver-installer` | Google's standalone `nvidia-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
+| OKE | none — driver is in the node image | `true` | the overlay (OKE has no profile) |
+| EKS | the operator's driver pod | unset (chart default `false`) | — |
+| Kind (nvkind) | none — driver is host-installed | `true` | the overlay (Kind has no profile) |
 
-**Remedy.** Pass the labeler's assume-driver-installed flag at bundle generation:
+The explicit `false` on the operator-managed variants is deliberate rather than redundant: it keeps the path profile-owned, so it cannot be flipped into an unsafe hybrid later. Do **not** assume a preinstalled driver where the GPU Operator installs one — skipping detection there would keep the label applied across an unloaded or unhealthy driver.
+
+**NVSentinel is mandatory on the profiled families.** Because the AKS and GKE-COS `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as OKE and EKS.
+
+Only AKS and GKE-COS get the install-time profile lock; OKE and Kind set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
+
+If you do need to set it yourself on an unlisted platform, it is an ordinary override:
 
 ```shell
 aicr bundle -r recipe.yaml \
@@ -156,25 +167,82 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-The flag renders the labeler's `--assume-driver-installed` argument, which labels all GPU nodes unconditionally and skips driver-pod detection. That is the chart-level automation of the Manual Labeling Procedure documented in NVSentinel design 018. Upstream has since settled the design question: the flag is the recommended, permanent mechanism for host-installed drivers — no automatic detection fallback will be added ([NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583)). Do **not** set it where the GPU Operator installs the driver: skipping detection there would keep the label applied across an unloaded or unhealthy driver.
+The value renders the labeler's `--assume-driver-installed` argument. That is the chart-level automation of the Manual Labeling Procedure documented in NVSentinel design 018. Upstream has settled the design question: it is the recommended, permanent mechanism for host-installed drivers — no automatic detection fallback will be added ([NVIDIA/NVSentinel#1583](https://github.com/NVIDIA/NVSentinel/issues/1583)).
 
 **Do not label the nodes by hand.** `kubectl label node <node> nvsentinel.dgxc.nvidia.com/driver.installed=true` takes effect immediately — the DaemonSets roll out — and then silently reverts. With no driver pod to observe, the labeler computes an empty desired value and removes the label on its next reconcile. Because upstream design 018 documents manual labeling as the procedure for this case, an operator following it will see it work and later find the DaemonSets back at 0 desired.
 
-**`aicr bundle` now rejects the configuration.** A recipe that includes nvsentinel with no driver pod for the labeler to observe and without `labeler.assumeDriverInstalled` fails bundle generation with a blocking error (`CheckNVSentinelDriverLabelDetectable`) naming the remedy above, so the silent half-rollout cannot ship. The GKE `driver-installer` value is exempt — Google's installer DaemonSet supplies a driver pod the labeler detects.
+**`aicr bundle` rejects a configuration that would reintroduce the gap.** A recipe that includes nvsentinel with no observable driver pod and without `labeler.assumeDriverInstalled` fails bundle generation with a blocking error (`CheckNVSentinelDriverLabelDetectable`). On the profiled families the value is also profile-owned, so a `--set` diverging from the selected `gpuStack` value is rejected before the gate even runs.
 
-**A second, distinct failure on AKS `azure-managed`: RuntimeClass mismatch.** The metadata-collector DaemonSet sets `runtimeClassName: nvidia` (its chart default), but the AKS `azure-managed` profile retargets `operator.runtimeClass` to `nvidia-container-runtime`, so the GPU Operator never creates a RuntimeClass named `nvidia` and the API server rejects every metadata-collector pod at admission (`pod rejected: RuntimeClass "nvidia" not found` — [#2176](https://github.com/NVIDIA/aicr/issues/2176)). The two signatures differ: the label gap above shows **0 DESIRED** pods (never scheduled, no error, no event); the RuntimeClass mismatch shows **N desired / 0 CREATED** with a `FailedCreate` event on the DaemonSet and no pod object to describe. Both must be fixed for metadata-collector to become ready, composed in one bundle invocation:
+One exception, for completeness: the gate is silent if you disable *both* label consumers (`--set nv-sentinel:global.metadataCollector.enabled=false` **and** `--set nv-sentinel:global.syslogHealthMonitor.enabled=false`). Nothing then reads the label, so there is no gap to reintroduce. Disabling only one still requires the value, and no recipe disables either — both default to enabled, and the gate fails closed when it cannot prove otherwise. Everything above therefore applies to every shipped configuration.
+
+**A second, distinct failure on AKS `azure-managed`: RuntimeClass mismatch.** The metadata-collector DaemonSet requests a RuntimeClass by name, and the GPU Operator's ClusterPolicy controller names that object after `operator.runtimeClass`. The AKS `azure-managed` profile retargets it to `nvidia-container-runtime`, so a metadata-collector left on its chart default `nvidia` finds no such RuntimeClass and the API server rejects every pod at admission (`pod rejected: RuntimeClass "nvidia" not found` — [#2176](https://github.com/NVIDIA/aicr/issues/2176)).
+
+The two signatures differ: the label gap above shows **0 DESIRED** pods (never scheduled, no error, no event); the RuntimeClass mismatch shows **N desired / 0 CREATED** with a `FailedCreate` event on the DaemonSet and no pod object to describe.
+
+The AKS `gpuStack` profile now owns both names — `gpu-operator.operator.runtimeClass` and `nvsentinel.metadata-collector.runtimeClassName` — in the same profile value, so they agree by construction under either value and no override is needed:
+
+| AKS profile value | `operator.runtimeClass` | `metadata-collector.runtimeClassName` |
+|---|---|---|
+| `azure-managed` (default) | `nvidia-container-runtime` | `nvidia-container-runtime` |
+| `operator-managed` | `nvidia` | `nvidia` |
+
+Every other platform leaves `operator.runtimeClass` at the shared chart default `nvidia`, so neither side needs a value. `CheckNVSentinelRuntimeClassCoherence` still compares the two resolved names as defense in depth, treating either side unset as `nvidia`.
+
+An AKS bundle therefore needs no NVSentinel overrides at all — only the keyed toleration AKS requires independently of NVSentinel (bundling an AKS recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration`):
 
 ```shell
 aicr bundle -r recipe.yaml \
   --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
-  --set nv-sentinel:labeler.assumeDriverInstalled=true \
-  --set nv-sentinel:metadata-collector.runtimeClassName=nvidia-container-runtime \
   -o ./bundles
 ```
 
-(The keyed toleration is required on AKS independently of NVSentinel — bundling an AKS recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration` — and is harmless elsewhere.)
+See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) for the per-profile guidance.
 
-`aicr bundle` rejects the mismatch too (`CheckNVSentinelRuntimeClassCoherence`): it compares the two resolved names, treating either side unset as the shared chart default `nvidia`, so it passes wherever the recipes leave `operator.runtimeClass` at its default (EKS, GKE, OKE, AKS `operator-managed` — omit the override there) and fails AKS `azure-managed` until the override is passed. See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) for the per-profile guidance.
+## NIM Workload Credentials
+
+AICR installs the **k8s-nim-operator** only. It does not create a `NIMService` and does not create credentials — deploying a workload is an operator step, and there are two ways to supply the model.
+
+Whichever path you take, `spec.authSecret` is required by the `NIMService` schema and must name an existing secret in the workload's namespace. `spec.image.pullSecrets` is optional; the image block requires only `repository` and `tag`.
+
+### NGC path
+
+Model artifacts come from NGC, so the secret must carry a valid `NGC_API_KEY`:
+
+```bash
+kubectl create secret generic ngc-api-secret \
+  --from-literal=NGC_API_KEY="$NGC_API_KEY" -n nim-workload
+```
+
+Add a `docker-registry` secret and reference it from `image.pullSecrets` when the image lives in a private or authenticated registry path. See `demos/workloads/inference/nimservice-llama-3-2-1b.yaml` for a complete example.
+
+### Credential-free path (Hugging Face)
+
+Setting `NIM_MODEL_NAME` to an `hf://` URI puts the operator on its Hugging Face path, where it marks `NGC_API_KEY` optional and injects `HF_TOKEN` from the same `authSecret`. With an ungated Hugging Face model and a NIM image that pulls anonymously, no NGC credential is needed anywhere:
+
+```bash
+kubectl create secret generic hf-secret --from-literal=HF_TOKEN="" -n nim-workload
+```
+
+```yaml
+spec:
+  authSecret: hf-secret                                  # holds only HF_TOKEN
+  image:
+    repository: nvcr.io/nim/meta/llama-3.1-8b-instruct   # pulls anonymously; no pullSecrets
+    tag: "2.0.10"                                        # pin a version; avoid the mutable latest
+  env:
+    - name: NIM_MODEL_NAME
+      value: hf://Qwen/Qwen3-0.6B                        # ungated model
+    - name: NIM_SERVED_MODEL_NAME
+      value: Qwen/Qwen3-0.6B                             # the OpenAI-API `model` id
+```
+
+The `HF_TOKEN` key must exist in the secret — that reference is not optional — but an empty value is sufficient for an ungated model. A gated Hugging Face repository needs a real token here.
+
+Model-specific NIM repositories (for example `nim/meta/llama-3.1-8b-instruct`) serve anonymous registry tokens; the generic Multi-LLM image `nim/nvidia/llm-nim` does not and requires a pull secret.
+
+Note that pairing a model-specific image with an unrelated `hf://` model is off-label: the container runs its own profile against the downloaded weights. It works, but `nim/nvidia/llm-nim` is the image intended for arbitrary Hugging Face models — and because that repository is gated, choosing it trades the credential-free property for a supported pairing. Pin an image tag rather than `latest` so the pairing you validated is the one you ship.
+
+See `demos/workloads/inference/nimservice-hf-nocred.yaml` for a complete example.
 
 ## Inference Gateway Network Exposure
 
@@ -219,6 +287,278 @@ AICR enforces and surfaces inference-gateway exposure in two places:
 
 - **Bundle-time private-by-default.** When a bundle includes `agentgateway` and `allowedSourceRanges` is empty/unset, `aicr bundle` injects the RFC1918 private ranges so the deployed gateway denies the public internet, and records a bundle note. An invalid value (a bare-string `--set`, a non-list, an unparseable CIDR, or a non-canonical CIDR such as `1.2.3.4/24` that Kubernetes' strict validation would reject at apply time) is rejected with `ErrCodeInvalidRequest`. A scoped list passes silently; an explicit any-source CIDR (`0.0.0.0/0` or `::/0`) passes with a loud warning as a deliberate opt-in. See [#1373](https://github.com/NVIDIA/aicr/issues/1373).
 - **Conformance check.** The `inference-gateway` conformance check (run during `aicr validate --phase conformance` on a live cluster) inspects the gateway's `LoadBalancer` Service and records its exposure as evidence — the source ranges if scoped, or an explicit "open to `0.0.0.0/0`" finding if not. Set `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true` on the validator environment to escalate an open gateway to a check **failure**.
+
+## k8s-aibom Runtime Inventory
+
+AICR qualifies k8s-aibom v1.3.0 as an optional Helm component. It is not in
+the base, a mixin, or any stock overlay. To enable it, add this reference to a
+custom or external overlay and keep that overlay's criteria as narrow as the
+intended rollout:
+
+```yaml
+spec:
+  componentRefs:
+    - name: k8s-aibom
+      type: Helm
+      valuesFile: components/k8s-aibom/values.yaml
+```
+
+A broad criteria overlay affects every matching recipe. In particular,
+`intent: any` is universal across intents; do not use it unless that injection
+is deliberate. The in-tree `recipes/overlays/monitoring-hpa.yaml` overlay shows
+that broad reach: its `criteria: intent: any` attaches to every matching intent.
+See [Recipe Development](../integrator/recipe-development.md) for external data
+and criteria composition.
+
+The qualified artifacts are source tag `v1.3.0` at commit
+`30af41abbe0bed3c41a42289ccf294be8c4779bb`, OCI chart
+`oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.3.0`, and the controller
+image pinned by digest in the component values. v1.3.0 is the API-graduation
+release: both `v1alpha1` and `v1beta1` are served and CRD storage is on
+`v1beta1`, while the chart still renders the `AIBOMControllerConfig` resource
+itself at `v1alpha1`. Upstream states Kubernetes support as a policy rather
+than a fixed range: stable APIs only, no known version ceiling, tested floor
+1.27, backed by a weekly CI matrix. The authoritative statement is
+[upstream's compatibility policy](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/compatibility.md),
+which is linked rather than restated here so it cannot drift out of date on
+our side. That link deliberately tracks `main`: the point is the current
+policy, not a snapshot of it, which is the opposite of how this page cites
+qualified artifacts.
+
+AICR also observed the dedicated integration test passing on its Kind 1.36.1
+node image; that is qualification evidence, not an extension of upstream's
+support statement.
+
+### Health and readiness
+
+The deployment-phase check requires the controller Deployment to have at least
+one desired replica and all desired replicas available. It also requires the
+cluster-scoped `AIBOMControllerConfig/default` to report a current
+`Ready=True` condition: both top-level status and the condition must have
+observed the object's current generation. Missing or stale resources fail
+closed. Zero `AIBOM` objects is healthy before any namespace opts in.
+
+The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
+`aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
+the chart version pinned in the registry. It matters because Helm and Helmfile
+skip a chart's `crds/` directory on upgrade, so a cluster can run a new
+controller against the previous schema while the older version stays served
+and the controller keeps working.
+
+Flux is the exception for this component: `k8s-aibom` is marked `ownsCRDs` in
+the registry, so its generated `HelmRelease` sets
+`spec.upgrade.crds: CreateReplace` and Flux applies the CRDs itself. Argo CD
+applies them as ordinary manifests each sync. The assertion is still worth
+making on every deployer, because it proves the deployed CRDs match the pinned
+chart rather than merely that some deployer was expected to update them.
+
+Both CRDs are asserted separately, so a failure names which one is stranded
+and a partially applied CRD set cannot pass. If this check fails after a chart
+bump, the pre-upgrade CRD step in
+[Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
+is the thing to run.
+
+The assertion establishes that the storage-version contract matches the pinned
+chart. It is not provenance: it reads one field, so it cannot show the CRDs
+originated from that chart, and it cannot tell apart chart versions that share
+a storage version. Charts 1.0.0, 1.1.0, and 1.2.0 all declare `v1alpha1` as
+storage. So the check catches a stranded upgrade that crosses a
+storage-version boundary, such as the 1.2.0 to 1.3.0 move this pin made, and
+does not catch one within a boundary, such as 1.0.0 to 1.2.0.
+
+**Declining the component.** No stock recipe declares `k8s-aibom` today, so the
+flag applies to a recipe that adds it through a custom overlay — the shape shown
+above. Point `--data` at the directory holding that overlay and generate with
+`--runtime-inventory disabled`:
+
+```bash
+aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+  --data ./my-recipes --runtime-inventory disabled -o recipe.yaml
+```
+
+Passing the flag against a recipe that does not declare the component is an
+error, not a silent no-op:
+
+```console
+$ aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+    --runtime-inventory disabled
+[INVALID_REQUEST] runtime inventory mode "disabled" requires the recipe to
+declare component "k8s-aibom"; this recipe does not resolve it
+```
+
+The selection is recorded in the emitted recipe as
+`configuration.runtimeInventory.mode`, and the component's ref carries
+`install: false`, so the component and its health check are both absent from
+the bundle and from deployment validation. A bundle-time
+`--set k8s-aibom:enabled=false` is **not** equivalent and is not a supported
+way to decline the component: it changes neither the recipe nor its health
+checks, which is why [ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md)
+rejects it as a selection contract.
+
+A wrong `--service` or a typo therefore surfaces instead of producing a recipe
+that claims a decision it never applied.
+
+The same selection is available in an `AICRConfig` document as
+`spec.recipe.configuration.runtimeInventory.mode`.
+
+**Overriding the chart version requires overriding this assertion.** Assert
+content is static YAML with no templating, so the expected storage version is
+a literal tied to the registry's pinned chart, currently `v1beta1` for chart
+1.3.0. Charts 1.2.0 and earlier declare only `v1alpha1`. A recipe that sets
+`version` on the `k8s-aibom` componentRef to a chart with a different storage
+version will therefore fail this step even though the cluster is correct. Such
+a recipe must supply matching inline `healthCheckAsserts` on the componentRef,
+or set `healthCheckSkip: true` to drop the registry check entirely.
+
+`readiness.strictConfig` is enabled, so invalid new configuration cannot
+silently replace the controller's last-known-good configuration while the pod
+continues to report ready.
+
+### Security, privacy, and retention
+
+Namespace discovery requires the label
+`aibom.k8saibom.dev/enabled=true`. AICR does not apply it. No external sink,
+endpoint, credential, or Secret access is configured by default. BOMs up to
+262144 bytes are stored inline in `AIBOM.status`; larger output is summarized
+and marked truncated when no sink is configured. Inline status consumes etcd
+storage, so workload count and document size are part of the cluster control
+plane footprint. The controller runs non-root with a read-only root filesystem,
+RuntimeDefault seccomp, no privilege escalation, and no Linux capabilities.
+
+The namespace label limits which workloads produce AIBOMs, not informer read
+scope. The controller still reads workload and pod specifications
+cluster-wide—including image references, arguments, and inline environment
+values—into memory. With the default empty sink list that data does not leave
+the cluster, but cluster-wide visibility remains part of the privacy boundary.
+The controller is not read-only: its bounded RBAC permits writes to its own
+AIBOM API resources and required status subresources, configuration status,
+and Kubernetes Events. It has no Secret access while sinks are disabled.
+
+An AIBOM is owned by its top-level workload and is garbage-collected when that
+owner is deleted. Helm does not delete CRDs from a chart's `crds/` directory on
+uninstall; consequently AIBOM resources for owners that still exist may remain
+after controller removal. External sinks, if an operator configures one, have
+their own retention policy outside AICR.
+
+### Upgrade, uninstall, and troubleshooting
+
+Upgrade the component by qualifying a new chart and image together, then
+regenerate the custom recipe and bundle. Do not change only the controller
+image: chart, CRDs, status API, and image are one qualified set. Quiesce
+configuration changes during rollback and confirm that
+`AIBOMControllerConfig/default` returns to a current `Ready=True` state.
+
+**Apply CRDs before the bundle upgrade — `helm` and `helmfile` only.** The
+chart ships its CRDs under `crds/`. Helm installs that directory on first
+install and never touches it again on upgrade, so a chart bump whose CRDs
+changed leaves the previous schema in place and the API server silently prunes
+the new controller's writes to added fields.
+
+The `flux`, `argocd`, and `argocd-helm` bundles handle this themselves for this
+component and need no manual step; see the deployer table below. For `helm` and
+`helmfile`, apply the CRDs from the exact qualified chart first, then upgrade:
+
+```bash
+CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
+VERSION="1.3.0"   # replace with the version you are upgrading to
+
+helm show crds "${CHART}" --version "${VERSION}" \
+  | sed -n '/^---$/,$p' \
+  | kubectl apply --server-side --force-conflicts -f -
+```
+
+Three details in that command are load-bearing. The obvious shorter form —
+piping `helm show crds` straight into `kubectl apply --server-side` — fails on
+the first two:
+
+- **`sed -n '/^---$/,$p'`** drops `helm`'s progress output. For an OCI chart,
+  `helm show crds` writes `Pulled:` and `Digest:` lines to *stdout*, and those
+  two lines parse as a valid YAML mapping, so `kubectl` rejects the stream with
+  `error validating data: [apiVersion not set, kind not set]`.
+- **`--force-conflicts`** is required because Helm created these CRDs on
+  install and owns their fields. Without it, server-side apply refuses with a
+  field-manager conflict.
+- **`--server-side`** is required because the CRDs exceed the annotation size
+  limit that client-side apply depends on.
+
+Verified against a live GKE cluster across a 1.2.0 to 1.3.0 upgrade.
+
+Which deployers need that step differs, so check yours:
+
+| Deployer | CRD behavior on upgrade | Pre-upgrade step needed |
+|---|---|---|
+| `helm` | `helm upgrade` skips `crds/` | Yes |
+| `helmfile` | `helmfile apply` upgrades through Helm, so it also skips `crds/` | Yes |
+| `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
+| `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
+
+`ownsCRDs` is opt-in, and narrow on purpose. Of the 15 registry components
+that ship CRDs under `crds/`, 11 share at least one CRD with another
+component: `nfd`, `gpu-operator`, and `network-operator` all ship the
+NodeFeature CRDs, and `nfd`, `gpu-operator`, and `kai-scheduler` all appear
+together in `base.yaml`. If every release replaced CRDs on upgrade, two or
+three `HelmRelease` objects would rewrite the same CRD on every reconcile,
+each with the schema its own chart pins. The `Skip` default is what prevents
+that today, so it stays the default.
+
+A component qualifies only if it solely owns every CRD it ships and ships none
+using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
+injected at runtime. `kubeflow-trainer` is excluded for that second reason.
+Currently `gatekeeper`, `k8s-aibom`, and `nvsentinel` qualify.
+
+`helm` and `helmfile` always need the step, because skipping `crds/` on
+upgrade is Helm's own behavior rather than something the generated bundle can
+change.
+
+Uninstall in this order. Removing the component from the overlay and applying a
+regenerated bundle does **not** remove the previously installed release: the
+`helm` and `helmfile` deployers install releases by name, and a release the new
+bundle no longer mentions is simply left alone. Skipping the explicit uninstall
+leaves the controller running while the next step deletes the CRs and CRDs
+underneath it, so it reconciles against resources that are disappearing.
+
+1. Remove the component reference from the custom overlay and regenerate the
+   recipe and bundle.
+2. Uninstall the release with the deployer-appropriate procedure in
+   [Bundle Uninstall](cli-reference.md#bundle-uninstall) — `helm uninstall
+   k8s-aibom -n k8s-aibom-system` for the `helm` deployer, `helmfile destroy`
+   for Helmfile bundles, deleting the owning `Application` for Argo CD, and the
+   `HelmRelease` for Flux. Confirm the controller Deployment is gone before
+   continuing.
+3. Only then delete retained AIBOMs and, last, the CRDs.
+
+Deleting the CRDs cascades to every AIBOM stored cluster-wide, including any
+belonging to a namespace or release you did not intend to touch. Enumerate
+before deleting rather than passing `--all`:
+
+```bash
+# Review what exists and who owns it; delete only what this release should own.
+kubectl get aiboms.aibom.k8saibom.dev --all-namespaces \
+  -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,OWNER:.metadata.ownerReferences[0].name
+kubectl -n <namespace> delete aiboms.aibom.k8saibom.dev <name>
+
+# CRDs last, and only once no other release uses them — deletion removes every
+# stored custom resource of these kinds cluster-wide.
+kubectl delete crd \
+  aiboms.aibom.k8saibom.dev \
+  aibomcontrollerconfigs.aibom.k8saibom.dev
+```
+
+If health validation fails, inspect the Deployment and configuration before
+looking for AIBOMs:
+
+```bash
+kubectl rollout status deployment/k8s-aibom -n k8s-aibom-system
+kubectl get aibomcontrollerconfig default -o yaml
+kubectl logs deployment/k8s-aibom -n k8s-aibom-system
+```
+
+A current `Ready=False` or stale `observedGeneration` means the active
+configuration was not accepted. If the controller is healthy but produces no
+inventory, verify the namespace label and the workload kind. A truncated BOM
+with no sink is expected once its canonical document exceeds the inline
+threshold; configure retention and credentials explicitly before enabling an
+external sink.
 
 ## Adding Components
 

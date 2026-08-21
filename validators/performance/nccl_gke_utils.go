@@ -15,16 +15,8 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"sort"
 	"strings"
-
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 )
 
 // gkeAcceleratorLabel is set by GKE node-pool spec on every accelerator node
@@ -32,35 +24,6 @@ import (
 // a3-highgpu-1g). Read off the target node to pin NCCL workers to the SKU
 // the test was sized against, without hardcoding any single shape.
 const gkeAcceleratorLabel = "cloud.google.com/gke-accelerator"
-
-// discoverGKEGPUNICNetworks lists networks.networking.gke.io and returns
-// GPU NIC network names (those containing "gpu-nic"), sorted alphabetically.
-// GKE clusters provision these with cluster-specific prefixes (e.g.,
-// "aicr-demo2-gpu-nic-0"); the names cannot be hardcoded.
-func discoverGKEGPUNICNetworks(ctx context.Context, dynamicClient dynamic.Interface) ([]string, error) {
-	networkGVR := schema.GroupVersionResource{
-		Group: "networking.gke.io", Version: "v1", Resource: "networks",
-	}
-
-	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
-	defer cancel()
-
-	networks, err := dynamicClient.Resource(networkGVR).List(listCtx, metav1.ListOptions{})
-	if err != nil {
-		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list GKE networks", err)
-	}
-
-	var gpuNICs []string
-	for _, n := range networks.Items {
-		name := n.GetName()
-		if strings.Contains(name, "gpu-nic") {
-			gpuNICs = append(gpuNICs, name)
-		}
-	}
-
-	sort.Strings(gpuNICs)
-	return gpuNICs, nil
-}
 
 // buildGKENetworkInterfacesAnnotation builds the networking.gke.io/interfaces
 // annotation value from discovered GPU NIC network names.

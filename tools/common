@@ -106,3 +106,25 @@ go_binary_module_version() {
 
     printf '%s\n' "${module_version}"
 }
+
+# Print the SHA-256 of a file as a bare lowercase hex digest.
+# Bridges GNU coreutils (sha256sum) and the BSD/macOS shasum, so callers do
+# not each reimplement the probe.
+sha256_file() {
+    local path="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "${path}" | awk '{print $1}'
+    else
+        shasum -a 256 "${path}" | awk '{print $1}'
+    fi
+}
+
+# Decode base64 from stdin. GNU coreutils uses --decode; the BSD/macOS build
+# uses -D. Probing with an empty input avoids branching on uname.
+decode_base64() {
+    if base64 --decode </dev/null >/dev/null 2>&1; then
+        base64 --decode
+    else
+        base64 -D
+    fi
+}

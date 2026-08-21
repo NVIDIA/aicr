@@ -101,6 +101,21 @@ const (
 	// are implemented).
 	RecipeOperationTimeout = 30 * time.Second
 
+	// SnapshotLoadTimeout is the upper bound for a single
+	// Client.LoadSnapshot call, and bounds the whole load whatever the
+	// source: a local file read, an HTTP(S) fetch, or a
+	// cm://namespace/name ConfigMap read against the Kubernetes API.
+	//
+	// Matches RecipeOperationTimeout, which bounds Client.LoadRecipe over
+	// the same cm:// resolution path against the Kubernetes API. Named
+	// separately because a snapshot load is not a recipe operation and
+	// should not silently inherit a change made for recipe resolution.
+	//
+	// Distinct from SnapshotOperationTimeout below, which bounds
+	// CollectSnapshot — deploying an agent Job and waiting for it, an
+	// operation orders of magnitude longer than reading a file.
+	SnapshotLoadTimeout = 30 * time.Second
+
 	// SnapshotOperationTimeout is the facade-level upper bound for
 	// Client.CollectSnapshot when neither the caller's context nor
 	// AgentConfig.Timeout supplies one. Matches CLISnapshotTimeout so
@@ -136,6 +151,33 @@ const (
 	// catalog-vs-facade relationship is asserted in
 	// pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
+
+	// VerifyOperationTimeout is the facade-level upper bound for a single
+	// Client.VerifyBundle, Client.VerifyEvidence, Client.VerifyCatalog, or
+	// Client.RecipeDigest call.
+	//
+	// It is an UNCONDITIONAL ceiling, not a fallback for deadline-less
+	// callers: those methods always wrap the caller's context, and
+	// context.WithTimeout takes the smaller of the two. A caller that
+	// deliberately allows 20 minutes for a slow OCI pull is still capped
+	// here. The trade is deliberate — an unbounded verify can hang a
+	// controller reconcile — but it has one sharp edge worth knowing, called
+	// out on Client.VerifyEvidence: a cap breach surfaces as an error, not as
+	// the Incomplete verdict a CI gate uses to tell "could not check this"
+	// from "checked it and it failed".
+	//
+	// Bundle and catalog verification are offline (locally cached or embedded
+	// Sigstore trusted root), so their own work is sub-second; the budget
+	// exists for the two paths that do reach the network — a KMS key URI in
+	// BundleVerifyOptions.Key still makes a live GetPublicKey call, and
+	// VerifyEvidence pulls an OCI artifact when its input is a pointer or a
+	// registry reference.
+	//
+	// Deliberately NOT applied to Client.PublishEvidence or
+	// Client.SignCatalog: keyless signing can block on a human completing a
+	// browser or device-code OIDC flow, so a fixed cap there would cut short
+	// an interactive run that works today.
+	VerifyOperationTimeout = 5 * time.Minute
 )
 
 // Health computation timeouts.
@@ -917,6 +959,66 @@ const (
 	// EnvServerShutdownTimeoutSeconds is the environment variable that
 	// overrides ServerShutdownTimeout (value parsed as seconds).
 	EnvServerShutdownTimeoutSeconds = "SHUTDOWN_TIMEOUT_SECONDS"
+
+	// ServerDefaultBindAddress is the default listen address for aicrd.
+	// Empty means bind every interface — required for Kubernetes deployment
+	// because kubelet probes (livenessProbe/readinessProbe httpGet) dial
+	// the pod IP directly, kube-proxy routes Service traffic to the pod IP,
+	// and Cloud Run / Fargate style runtimes route inbound requests to the
+	// container's advertised interface. A loopback-only default would
+	// CrashLoop every in-tree Deployment because probes cannot reach a
+	// service bound to 127.0.0.1. Operators who need a tighter bind on a
+	// bare-host or sidecar deployment set EnvServerAddress explicitly.
+	// The SSRF hardening for /v1/bundle?vendor-charts=true does not rely
+	// on the bind address; the opt-in gate + egress policy + index
+	// pre-check + artifact cap are the acute controls (see issue #2118).
+	ServerDefaultBindAddress = ""
+
+	// EnvServerAddress overrides ServerDefaultBindAddress. Both "unset"
+	// and "set to empty string" resolve to the same all-interfaces bind
+	// — parseConfig uses os.LookupEnv (not os.Getenv) so the two cases
+	// are distinguishable at parse time, but the resulting cfg.Address
+	// is the same empty string in either case. Set to "127.0.0.1" for a
+	// loopback-only bind on a sidecar/bare-host deployment, or to a
+	// specific interface to constrain listener binding. Any pod-network
+	// deployment should leave this unset (or empty) so kubelet probes
+	// and kube-proxy can reach the container.
+	EnvServerAddress = "AICR_SERVER_ADDRESS"
+
+	// EnvAllowVendorCharts opts the server into honoring vendor-charts=true
+	// on bundle requests. Off by default because vendor-charts drives
+	// server-side helm pull against a caller-supplied URL — see the SSRF
+	// egress-policy check in pkg/bundler/deployer/localformat.vendor.go.
+	// Even with the egress-policy filter and artifact size cap, an operator
+	// must explicitly acknowledge the network egress this endpoint performs.
+	// Parsed by strconv.ParseBool — accepts 1/t/T/TRUE/true/True to enable
+	// (and 0/f/F/FALSE/false/False to disable). Any other value (including
+	// "yes", "on", or a typo) fails closed to disabled with a WARN log.
+	EnvAllowVendorCharts = "AICR_ALLOW_VENDOR_CHARTS"
+
+	// EnvHelmRepositoryHost names the single repository host the vendor
+	// path is allowed to send EnvHelmRepositoryUsername /
+	// EnvHelmRepositoryPassword to during the index.yaml pre-check.
+	// Unset (default) suppresses credentials even when the username env
+	// is set, so a caller-supplied Repository URL cannot steer operator
+	// credentials at an attacker-controlled host. Credentials are also
+	// only attached over HTTPS; a scheme mismatch or host mismatch
+	// suppresses them silently. Go's http.Client strips Authorization on
+	// cross-origin redirects automatically, so this env var is the
+	// initial-URL gate.
+	EnvHelmRepositoryHost = "AICR_HELM_REPOSITORY_HOST"
+
+	// EnvHelmRepositoryUsername / EnvHelmRepositoryPassword are the
+	// commonly-documented Helm repository-auth env vars. The upstream
+	// helm CLI does NOT read these for `helm pull --repo <url>` — the
+	// subprocess sends no Authorization header regardless. They are
+	// consumed only by the vendor path's own index.yaml pre-check when
+	// EnvHelmRepositoryHost gates the attachment (see attachHelmBasicAuth
+	// in pkg/bundler/deployer/localformat/vendor.go). Named here as
+	// constants so the raw string literals do not drift between the
+	// production call site, the attachment gate, and the test coverage.
+	EnvHelmRepositoryUsername = "HELM_REPOSITORY_USERNAME"
+	EnvHelmRepositoryPassword = "HELM_REPOSITORY_PASSWORD"
 )
 
 // Server-side bundle-signing configuration (see docs/plans/2026-07-20-server-bundle-attestation-design.md).
@@ -1205,6 +1307,55 @@ const (
 	// repo-index downloads on cold starts can extend the wall time well
 	// beyond the default HTTPClientTimeout.
 	HelmChartPullTimeout = 5 * time.Minute
+
+	// HelmChartArtifactLimit caps the size of a single vendored chart .tgz.
+	// Real charts on the AICR registry are single-digit MB; the cap sits well
+	// above headroom for future growth (multi-arch bundles, embedded CRDs)
+	// while still bounding server memory. An attacker who can steer the
+	// vendor path at a large blob is otherwise limited only by disk and
+	// HelmChartPullTimeout — see localformat.(*CLIChartPuller).Pull.
+	HelmChartArtifactLimit int64 = 64 * 1024 * 1024 // 64 MiB
+
+	// HelmChartIndexBodyLimit caps the response body for a repository
+	// index.yaml pre-fetch (used by the vendor path to validate every
+	// declared chart tarball URL against the egress policy before invoking
+	// helm). Real indexes range from ~50 KB (single-chart repos) to ~450 KB
+	// (charts.jetstack.io); mega-repos with tens of thousands of charts can
+	// hit tens of MB. 32 MiB gives multi-decade growth headroom for real
+	// repos while bounding memory against a hostile index-of-the-index-of.
+	HelmChartIndexBodyLimit int64 = 32 * 1024 * 1024 // 32 MiB
+
+	// HelmChartIndexMaxRedirects bounds how many HTTP redirect hops the
+	// vendor pre-check will follow when fetching a repository's index.yaml.
+	// helm's own default is 10; matching it avoids rejecting legitimate
+	// charts served behind CDN chains while still bounding both time and
+	// the CheckRedirect callback fanout.
+	HelmChartIndexMaxRedirects = 10
+
+	// HelmChartIndexPreCheckTimeout bounds the pre-check GET of a
+	// repository's index.yaml. Sized for a small YAML fetch through a
+	// CDN or geographically distant registry, not a large tarball —
+	// HelmChartPullTimeout (5 minutes) is the wrong ceiling here. Real
+	// indexes come back in well under a second; the buffer covers cold
+	// resolver caches and slow-start CDN edges without letting a stalled
+	// upstream tie up an aicrd request slot for minutes.
+	HelmChartIndexPreCheckTimeout = 30 * time.Second
+
+	// HelmChartIndexRetryBudget is the maximum number of index fetch
+	// attempts before failing permanently. Retryable errors are transport
+	// failures, connection resets, and 5xx / 408 / 429 responses from the upstream.
+	//
+	// WARNING: Retry shares the parent timeout budget. On the HTTP server path,
+	// the pre-check shares the 60s BundleHandlerTimeout with the subsequent helm
+	// pull; a maxed-out pre-check (30s + 1s backoff + 29s) leaves ~0s for the
+	// chart download. Consider capping total pre-check wall-clock if upstream
+	// latency becomes a concern.
+	HelmChartIndexRetryBudget = 3
+
+	// HelmChartIndexRetryInitialBackoff is the wait between the first and
+	// second index fetch attempts. Subsequent backoffs scale by
+	// exponential factor 2: HelmChartIndexRetryInitialBackoff * 2^(attempt-1).
+	HelmChartIndexRetryInitialBackoff = 1 * time.Second
 )
 
 // OCI publication phase budgets. The whole-publish ceiling covers two source
@@ -1243,4 +1394,52 @@ const (
 	// OCIBundlePublishTimeout bounds the complete verify, stage, package,
 	// registry-push, and image-reference publication sequence.
 	OCIBundlePublishTimeout = 35 * time.Minute
+)
+
+// OCI recipe-source pull budgets and resource limits. Recipe catalogs are
+// small text trees; these ceilings leave substantial headroom while bounding
+// network, memory, and filesystem use by an untrusted registry artifact.
+const (
+	// OCIRecipeConstructionTimeout bounds complete OCI recipe-source
+	// construction: staging, digest authorization, materialization, layered
+	// provider creation, and catalog validation. Eight minutes reserves more
+	// than three minutes for local materialization and validation after the
+	// maximum-jitter registry retry budget is exhausted.
+	OCIRecipeConstructionTimeout = 8 * time.Minute
+
+	// OCIRecipePullTimeout bounds each OCI recipe-source phase independently,
+	// including staging and materialization. It remains a per-phase ceiling;
+	// OCIRecipeConstructionTimeout is the separate complete-operation bound.
+	OCIRecipePullTimeout = 5 * time.Minute
+
+	// OCIRecipePullAttemptTimeout bounds one registry graph-copy attempt.
+	OCIRecipePullAttemptTimeout = 90 * time.Second
+
+	// OCIRecipePullRetries is the total attempts, including the first.
+	OCIRecipePullRetries = 3
+
+	// OCIRecipePullBackoff is the initial exponential retry backoff.
+	OCIRecipePullBackoff = 1 * time.Second
+
+	// MaxOCIRecipeManifestBytes caps one fetched OCI manifest.
+	MaxOCIRecipeManifestBytes int64 = 1 * 1024 * 1024
+
+	// MaxOCIRecipeLayerBytes caps the compressed recipe layer.
+	MaxOCIRecipeLayerBytes int64 = 64 * 1024 * 1024
+
+	// MaxOCIRecipeDownloadBytes caps compressed artifact content per attempt.
+	MaxOCIRecipeDownloadBytes int64 = 64 * 1024 * 1024
+
+	// MaxOCIRecipeRetryTrafficBytes caps response traffic across all attempts.
+	MaxOCIRecipeRetryTrafficBytes int64 = OCIRecipePullRetries *
+		(MaxOCIRecipeManifestBytes + MaxOCIRecipeDownloadBytes + 1)
+
+	// MaxOCIRecipeExtractedBytes caps the complete expanded tar stream.
+	MaxOCIRecipeExtractedBytes int64 = 128 * 1024 * 1024
+
+	// MaxOCIRecipeFileBytes caps one materialized recipe file.
+	MaxOCIRecipeFileBytes int64 = MaxExternalDataFileBytes
+
+	// MaxOCIRecipeFiles caps all materialized filesystem nodes.
+	MaxOCIRecipeFiles = 4096
 )

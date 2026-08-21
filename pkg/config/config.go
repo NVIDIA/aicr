@@ -127,6 +127,15 @@ type RecipeSpec struct {
 // participate in recipe catalog matching.
 type RecipeConfigurationSpec struct {
 	Slurm *SlurmConfigurationSpec `yaml:"slurm,omitempty" json:"slurm,omitempty"`
+
+	// RuntimeInventory selects whether the runtime AI inventory component
+	// (k8s-aibom) is installed. Mirrors the --runtime-inventory flag.
+	RuntimeInventory *RuntimeInventorySpec `yaml:"runtimeInventory,omitempty" json:"runtimeInventory,omitempty"`
+}
+
+// RuntimeInventorySpec contains the runtime AI inventory selection.
+type RuntimeInventorySpec struct {
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 // SlurmConfigurationSpec contains Slurm-specific desired-state inputs.
@@ -423,7 +432,9 @@ type VerifyPolicySpec struct {
 // key material is ever part of the schema.
 type VerifyTrustSpec struct {
 	// CertificateIdentityRegexp overrides the certificate identity pattern
-	// used for binary attestation verification. Must contain "NVIDIA/aicr".
+	// used for binary attestation verification. Must BEGIN with
+	// "https://github.com/NVIDIA/aicr/" (a leading "^" is allowed) and must
+	// not use top-level alternation, so it stays confined to the repository.
 	CertificateIdentityRegexp string `yaml:"certificateIdentityRegexp,omitempty" json:"certificateIdentityRegexp,omitempty"`
 
 	// Key is a KMS key URI (awskms:// | gcpkms:// | azurekms:// |
