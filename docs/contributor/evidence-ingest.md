@@ -87,6 +87,13 @@ evidence:
   (`bundle_ref` set) on `main` or a `release/*` ref; a feature-branch UAT
   run or a push-triggered community/partner ingest never reaches TestGrid.
 
+TestGrid treats the dispatch as a hint, not as proof of provenance. Before it
+exchanges GCP credentials, it independently pulls the immutable bundle and
+re-verifies the signature against the GitHub Actions issuer and the NVIDIA UAT
+workflow identity, restricted to `main` and `release/*`. Manual UAT backfills
+take the same path; unsigned, feature-branch, non-NVIDIA-registry, or
+unexpected-signer bundles fail closed.
+
 Both dispatches run `needs: publish`, so they inherit the
 `produced == 'true'` gate — a no-op ingest (allowlist-only change, deleted
 pointer) never fires either.

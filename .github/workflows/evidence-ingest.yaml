@@ -299,7 +299,6 @@ jobs:
             if gh workflow run testgrid-publish.yml \
               --repo "${REPO}" --ref main \
               -f bundle_ref="${BUNDLE_REF}" \
-              -f source_class=uat \
               -f environment=prod; then
               echo "dispatched TestGrid Publish on main"
               exit 0

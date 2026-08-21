@@ -22,12 +22,11 @@
 # until the prod WIF pool/SA exist (see aicr-testgrid Terraform apply).
 #
 # Pipeline:
-#   1. Accept the verified, digest-pinned OCI bundle ref from evidence ingest
-#   2. Validate the bundle ref format
+#   1. Accept and validate the digest-pinned OCI bundle ref
+#   2. Authenticate to GHCR and verify the signature, issuer, and UAT identity
 #   3. Authenticate to GCP via WIF (publish SA, groups/ prefix write-only)
-#   4. Log in to GHCR to pull the evidence OCI bundle
-#   5. Build testgrid-publish from source
-#   6. Pull the OCI bundle and write started/junit/finished to GCS
+#   4. Build testgrid-publish from source
+#   5. Pull the same immutable bundle and write started/junit/finished to GCS
 #
 # Auth:
 #   WIF pool:  aicr-testgrid[-<env>]-github   (aicr-testgrid Terraform)
@@ -57,20 +56,13 @@ on:
   # Evidence ingest explicitly dispatches this workflow with the verified,
   # digest-pinned bundle ref. workflow_dispatch is an allowed GITHUB_TOKEN
   # recursion exception, unlike workflow_run chains from bot-dispatched UAT.
-  # Manual dispatch uses the same input for testing and backfills.
+  # Manual dispatch supports NVIDIA UAT backfills through the same verification.
   workflow_dispatch:
     inputs:
       bundle_ref:
-        description: "OCI bundle ref (ghcr.io/<org>/...@sha256:...)"
+        description: "NVIDIA UAT OCI bundle ref (ghcr.io/nvidia/...@sha256:...)"
         type: string
         required: true
-      source_class:
-        description: "Source class"
-        type: choice
-        default: "uat"
-        options:
-          - uat
-          - community
       environment:
         description: "Target environment"
         type: choice
@@ -103,7 +95,11 @@ jobs:
       id-token: write  # required for WIF token exchange
 
     env:
-      TG_SOURCE_CLASS: ${{ inputs.source_class || 'uat' }}
+      # Production is stricter than staging ingest: only main/release UAT signers.
+      FIRST_PARTY_ISSUER: 'https://token.actions.githubusercontent.com'
+      FIRST_PARTY_IDENTITY: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp|azure|kind)\.yaml@refs/heads/(main|release/.+)$'
+      TRUSTED_REGISTRIES: 'ghcr.io/nvidia'
+      TG_SOURCE_CLASS: uat
 
     steps:
       - name: Checkout
@@ -161,10 +157,8 @@ jobs:
           BUNDLE_REF: ${{ inputs.bundle_ref }}
         run: |
           set -euo pipefail
-          # Validate format: ghcr.io/<org>/...@sha256:<64 hex chars>
-          # Namespace is intentionally NOT restricted to nvidia/ — community
-          # bundles (source_class=community) are hosted under contributor
-          # namespaces, e.g. ghcr.io/yuanchen8911/aicr-evidence.
+          # This production path accepts only NVIDIA UAT bundle repositories;
+          # the provenance verification below independently pins the signer.
           #
           # Uses bash's [[ =~ ]] (whole-string match, POSIX ERE) rather than
           # `echo | grep -qE`, which is line-based: a value containing an
@@ -173,22 +167,38 @@ jobs:
           # reaches `echo >> GITHUB_OUTPUT` below and injects a second,
           # attacker-controlled output key. [[ =~ ]] anchors ^ and $ to the
           # start/end of the whole variable, so an embedded newline fails.
-          if [[ ! "${BUNDLE_REF}" =~ ^ghcr\.io/[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::BUNDLE_REF '${BUNDLE_REF}' does not match expected format ghcr.io/<org>/...@sha256:<64hex>"
+          if [[ ! "${BUNDLE_REF}" =~ ^ghcr\.io/nvidia/[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::BUNDLE_REF '${BUNDLE_REF}' does not match expected format ghcr.io/nvidia/...@sha256:<64hex>"
             exit 1
           fi
           echo "bundle_ref=${BUNDLE_REF}" >> "${GITHUB_OUTPUT}"
           echo "Resolved bundle: ${BUNDLE_REF}"
 
-      # Authenticate to GCP via WIF using the testgrid publish SA.
-      # This SA has objectCreator on gs://aicr-testgrid[-<env>]/groups/ only.
-      #
-      # No `if: steps.bundle.outputs.skip != 'true'` guard here (or on the
-      # steps below): unlike the old workflow_run-triggered pointer lookup,
-      # which had a legitimate "no evidence produced" skip path, "Resolve
-      # bundle ref" above validates a required workflow_dispatch input and
-      # exits 1 on failure — a failed resolve already halts the job before
-      # these steps run, so there is no skip state left to guard against.
+      # Authenticate to GHCR and verify provenance before exchanging GCP
+      # credentials. The verifier rejects unsigned bundles and pins both the
+      # Fulcio issuer and the exact NVIDIA UAT workflow identity family.
+      - name: Login to GHCR
+        uses: ./.github/actions/ghcr-login
+
+      - name: Build evidence verifier
+        run: |
+          set -euo pipefail
+          GOFLAGS="-mod=vendor" go build \
+            -o /tmp/evidence-project ./tools/evidence-project
+
+      - name: Verify evidence provenance
+        env:
+          BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
+        run: |
+          set -euo pipefail
+          /tmp/evidence-project \
+            -in "${BUNDLE_REF}" \
+            -out /tmp/testgrid-verified-evidence \
+            --expected-issuer "${FIRST_PARTY_ISSUER}" \
+            --expected-identity-regexp "${FIRST_PARTY_IDENTITY}" \
+            --trusted-registry "${TRUSTED_REGISTRIES}"
+
+      # Exchange GCP credentials only after provenance verification succeeds.
       - name: Authenticate to GCP
         id: gcp-auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
@@ -198,11 +208,6 @@ jobs:
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
-
-      # Authenticate to GHCR so testgrid-publish can pull the evidence OCI
-      # bundle. The packages: read permission above gates the token scope.
-      - name: Login to GHCR
-        uses: ./.github/actions/ghcr-login
 
       # Always build from source — ensures the binary matches the current
       # commit and avoids integrity risks from downloading a release artifact
