@@ -57,14 +57,19 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 		opts         []recipe.BuildOption
 		wantDeclared bool
 		wantEnabled  bool
-		// wantMode is the selection the emitted recipe must record. Empty
-		// means nothing should be recorded, which is the case for every
-		// build that does not pass the flag. Asserted separately from
-		// IsEnabled because a regression that declines the component while
-		// dropping the recorded decision would otherwise pass: ADR-019
-		// section E requires the recipe to carry the decision, not just its
-		// effect.
-		wantMode recipe.RuntimeInventoryMode
+		// wantRecorded and wantMode are asserted separately, against
+		// RuntimeInventoryMode()'s two return values. Comparing the mode
+		// alone would collapse two distinct states into "": no configuration
+		// recorded at all, which is correct for a build that does not pass
+		// the flag, and a configuration that is present but carries an empty
+		// mode, which is invalid. A regression producing the latter must not
+		// pass as the former.
+		//
+		// Asserted at all because ADR-019 section E requires the recipe to
+		// carry the decision, not just its effect, so a build that declines
+		// the component while dropping the record is still a regression.
+		wantRecorded bool
+		wantMode     recipe.RuntimeInventoryMode
 	}{
 		{
 			name:         "target stock recipe declares and enables the component",
@@ -88,6 +93,7 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			opts:         []recipe.BuildOption{recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryDisabled)},
 			wantDeclared: true,
 			wantEnabled:  false,
+			wantRecorded: true,
 			wantMode:     recipe.RuntimeInventoryDisabled,
 		},
 		{
@@ -111,9 +117,10 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 				t.Fatalf("BuildFromCriteria() error = %v", err)
 			}
 
-			var gotMode recipe.RuntimeInventoryMode
-			if result.Configuration != nil && result.Configuration.RuntimeInventory != nil {
-				gotMode = result.Configuration.RuntimeInventory.Mode
+			gotMode, gotRecorded := result.RuntimeInventoryMode()
+			if gotRecorded != tt.wantRecorded {
+				t.Errorf("RuntimeInventoryMode() recorded = %v, want %v: an absent configuration and a present-but-empty one must not be conflated",
+					gotRecorded, tt.wantRecorded)
 			}
 			if gotMode != tt.wantMode {
 				t.Errorf("configuration.runtimeInventory.mode = %q, want %q: the recipe must record the decision, not just its effect",
