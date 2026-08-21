@@ -17,7 +17,9 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -717,6 +719,62 @@ func TestTrainerResourceRefString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.ref.String(); got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsTrainerInstalled_MutatingConfigReasonsAreDistinct pins the two shapes of a
+// missing mutating webhook apart.
+//
+// "The configuration does not exist" and "the configuration exists but does not
+// serve our webhook" need different remedies, and flattening both to the first tells
+// an operator to create an object that is already on the cluster — which, on the
+// generic upstream configuration names another operator may own, is the shape most
+// likely to be hit. The validating-webhook discovery path already keeps them apart;
+// this is the same contract on the mutating one.
+func TestIsTrainerInstalled_MutatingConfigReasonsAreDistinct(t *testing.T) {
+	tests := []struct {
+		name         string
+		objs         []runtime.Object
+		wantContains string
+		wantAbsent   string
+	}{
+		{
+			name: "configuration absent",
+			objs: withoutObject(completeTrainerInstall(), dropByName(trainerMutatingWebhookConfig)),
+			wantContains: fmt.Sprintf("admission configuration %q is missing",
+				trainerMutatingWebhookConfig),
+		},
+		{
+			name: "configuration present but serving another operator's webhook",
+			objs: append(
+				withoutObject(completeTrainerInstall(), dropByName(trainerMutatingWebhookConfig)),
+				webhookConfig("MutatingWebhookConfiguration", trainerMutatingWebhookConfig,
+					"defaulter.other.example.com"),
+			),
+			wantContains: fmt.Sprintf("exists but does not contain the %q webhook",
+				trainerMutatingWebhookName),
+			wantAbsent: fmt.Sprintf("admission configuration %q is missing",
+				trainerMutatingWebhookConfig),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			install, installed, err := isTrainerInstalled(context.Background(), newTrainerFakeClient(tt.objs...))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if installed {
+				t.Fatal("incomplete Trainer installation reported as installed")
+			}
+			if !strings.Contains(install.Incomplete, tt.wantContains) {
+				t.Errorf("reason = %q, want it to contain %q", install.Incomplete, tt.wantContains)
+			}
+			if tt.wantAbsent != "" && strings.Contains(install.Incomplete, tt.wantAbsent) {
+				t.Errorf("reason %q tells the operator to create a configuration that "+
+					"already exists", install.Incomplete)
 			}
 		})
 	}

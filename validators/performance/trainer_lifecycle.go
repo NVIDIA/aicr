@@ -261,16 +261,19 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (t
 		return install, false, nil
 	}
 
-	ok, err := hasTrainerWebhook(ctx, dynamicClient,
+	reason, ok, err := hasTrainerWebhook(ctx, dynamicClient,
 		trainerMutatingWebhookGVR, trainerMutatingWebhookConfig, trainerMutatingWebhookName)
 	if err != nil {
 		return trainerInstall{}, false, err
 	}
 	if !ok {
-		slog.Info("Kubeflow Trainer incomplete: admission webhook missing",
-			"configuration", trainerMutatingWebhookConfig, "webhook", trainerMutatingWebhookName)
-		return trainerInstall{Incomplete: fmt.Sprintf(
-			"admission configuration %q is missing", trainerMutatingWebhookConfig)}, false, nil
+		// Carry the specific reason out rather than reporting every failure as a
+		// missing configuration: "create it" and "something else owns this name"
+		// are different jobs for whoever reads the verdict.
+		slog.Info("Kubeflow Trainer incomplete: mutating admission webhook unusable",
+			"configuration", trainerMutatingWebhookConfig, "webhook", trainerMutatingWebhookName,
+			"reason", reason)
+		return trainerInstall{Incomplete: reason}, false, nil
 	}
 
 	// The controller Deployment is found by label: its name is release-derived on
@@ -418,17 +421,28 @@ func trainerAPIErrorCode(err error) aicrErrors.ErrorCode {
 // serves the given Trainer webhook. The name check matters because the upstream
 // manifests use generic, unprefixed configuration names that another operator on
 // the cluster may already own.
+//
+// When the answer is no it returns the reason, because the two ways to get there
+// need different remedies: a configuration that is absent has to be created, while
+// one that exists but serves someone else's webhook has to be reconciled with
+// whatever already owns that name. Reporting both as "missing" — which is what
+// flattening this to a bare false did — sends an operator to create an object that
+// is already on the cluster. The validating-webhook path in discoverTrainerInstall
+// draws the same distinction.
 func hasTrainerWebhook(ctx context.Context, dynamicClient dynamic.Interface,
-	gvr schema.GroupVersionResource, configName, webhookName string) (bool, error) {
+	gvr schema.GroupVersionResource, configName, webhookName string) (string, bool, error) {
 
 	obj, found, err := getTrainerObject(ctx, dynamicClient, gvr, "", configName)
-	if err != nil || !found {
-		return false, err
+	if err != nil {
+		return "", false, err
+	}
+	if !found {
+		return fmt.Sprintf("admission configuration %q is missing", configName), false, nil
 	}
 
 	entries, _, err := unstructured.NestedSlice(obj.Object, "webhooks")
 	if err != nil {
-		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 			fmt.Sprintf("failed to read webhooks from %s %q", gvr.Resource, configName), err)
 	}
 	for _, e := range entries {
@@ -437,10 +451,11 @@ func hasTrainerWebhook(ctx context.Context, dynamicClient dynamic.Interface,
 			continue
 		}
 		if entry[keyName] == webhookName {
-			return true, nil
+			return "", true, nil
 		}
 	}
-	return false, nil
+	return fmt.Sprintf("admission configuration %q exists but does not contain the %q webhook",
+		configName, webhookName), false, nil
 }
 
 // trainerResourceClient returns the namespaced or cluster-scoped client for gvr.
@@ -556,7 +571,19 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 // Both paths route through here so the verdict does not depend on whether the clock
 // ran out during a probe or during a sleep: the same cluster state must not produce
 // two different codes.
-func classifyPollExpiry(ctx, pollCtx context.Context, last trainerInstall) error {
+//
+// observed carries a concrete incomplete observation — a probe that succeeded and
+// named the object that is not there — and it is what separates the two failing
+// codes. NotFound may only be synthesized from such an observation. Deriving it from
+// an empty one would report a degraded or slow apiserver, where every probe attempt
+// was a read timeout and nothing was ever read, as a customer deployment defect; and
+// it would report a probe that found the installation complete as one that found
+// nothing. With no observation to stand on, the honest verdict is the timeout that
+// actually happened. The allowance is enforced either way — only the classification
+// differs.
+//
+// unobserved is the reason to report in that case.
+func classifyPollExpiry(ctx, pollCtx context.Context, observed trainerInstall, unobserved string) error {
 	if ctx.Err() != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
 			"canceled while waiting for the recipe-declared Kubeflow Trainer", ctx.Err())
@@ -565,20 +592,25 @@ func classifyPollExpiry(ctx, pollCtx context.Context, last trainerInstall) error
 		return nil
 	}
 
+	verdict := fmt.Sprintf(
+		"the recipe declares the %s component but its Kubeflow Trainer installation "+
+			"did not become complete within %s: %%s. The benchmark will not self-install "+
+			"over a delivered component that failed to deploy",
+		kubeflowTrainerComponent, trainerInstallWaitTimeout)
+
+	if observed.Incomplete == "" {
+		if unobserved == "" {
+			unobserved = "the allowance expired before any probe could tell"
+		}
+		return aicrErrors.New(aicrErrors.ErrCodeTimeout, fmt.Sprintf(verdict, unobserved))
+	}
+
 	// ErrCodeNotFound, not Unavailable: the read succeeded and the answer was "not
 	// deployed". Unavailable is this package's code for a transport failure — see
 	// the decision table on validators.Require — and using it here would file a
 	// product defect alongside apiserver hiccups, telling whoever triages it to
 	// re-run rather than to fix their deployment.
-	reason := last.Incomplete
-	if reason == "" {
-		reason = "no complete installation was found"
-	}
-	return aicrErrors.New(aicrErrors.ErrCodeNotFound, fmt.Sprintf(
-		"the recipe declares the %s component but its Kubeflow Trainer installation "+
-			"did not become complete within %s: %s. The benchmark will not self-install "+
-			"over a delivered component that failed to deploy",
-		kubeflowTrainerComponent, trainerInstallWaitTimeout, reason))
+	return aicrErrors.New(aicrErrors.ErrCodeNotFound, fmt.Sprintf(verdict, observed.Incomplete))
 }
 
 // awaitTrainerController waits for a Trainer the benchmark does not own to finish
@@ -637,7 +669,12 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 			// exactly when the apiserver is degraded that the transport signal is
 			// worth the most.
 			if errors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
-				if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
+				// last is the newest concrete observation, and it is the zero value
+				// until some probe completes. When every attempt was cut short by the
+				// deadline there is nothing on the cluster to point at, so this stays
+				// a timeout rather than becoming a deployment defect.
+				if verdict := classifyPollExpiry(ctx, pollCtx, last,
+					"no probe completed before the allowance expired"); verdict != nil {
 					return trainerInstall{}, verdict
 				}
 			}
@@ -660,13 +697,16 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 		// The complete case claims only what was observed. The wait never measures when
 		// the installation became complete, only when it saw that it was, so wording it
 		// as a transition would assert a time nobody read.
-		expired := install
+		//
+		// A complete probe is not an incomplete observation, so it is reported as the
+		// timeout it is: the installation is there, and the only finding is a rollout
+		// or a read slower than the budget.
+		observed, unobserved := install, ""
 		if ok {
-			expired = trainerInstall{
-				Incomplete: "the installation was observed complete only after the allowance expired",
-			}
+			observed = trainerInstall{}
+			unobserved = "the installation was observed complete only after the allowance expired"
 		}
-		if verdict := classifyPollExpiry(ctx, pollCtx, expired); verdict != nil {
+		if verdict := classifyPollExpiry(ctx, pollCtx, observed, unobserved); verdict != nil {
 			return trainerInstall{}, verdict
 		}
 		if ok {
@@ -676,7 +716,8 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 
 		select {
 		case <-pollCtx.Done():
-			if verdict := classifyPollExpiry(ctx, pollCtx, last); verdict != nil {
+			if verdict := classifyPollExpiry(ctx, pollCtx, last,
+				"no probe completed before the allowance expired"); verdict != nil {
 				return trainerInstall{}, verdict
 			}
 			// unreachable: this case fires only once pollCtx is done, and

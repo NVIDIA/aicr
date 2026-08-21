@@ -464,9 +464,17 @@ func TestWaitForDeclaredTrainer_SlowProbeCannotOutrunTheDeadline(t *testing.T) {
 		t.Fatal("wait returned success after its own deadline had passed; the rollout " +
 			"allowance must bound the probe, not only the sleeps between probes")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
-		t.Errorf("error code = %v, want ErrCodeNotFound: the deadline expired locally "+
-			"with the parent still live, which is a deployment that never completed", err)
+	// Timeout, not NotFound. The allowance is still enforced — the wait fails — but
+	// nothing here was ever read as missing: the installation underneath is complete
+	// and the only thing that went wrong is a read slower than the budget. Filing
+	// that as NotFound would send an operator to fix a deployment that is fine.
+	if stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+		t.Errorf("slow read reported as NotFound (%v); no probe observed anything "+
+			"incomplete, so there is no deployment defect to file", err)
+	}
+	var se *aicrErrors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
+		t.Errorf("reported code = %v, want Timeout", err)
 	}
 }
 
@@ -551,9 +559,15 @@ func TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline(t *testing.T
 		t.Fatal("wait returned success after its allowance had passed; expiry must be " +
 			"rechecked before accepting a probe's result, not only before issuing it")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
-		t.Errorf("error code = %v, want ErrCodeNotFound: the deadline expired locally "+
-			"with the parent still live", err)
+	// The probe returned complete, so no incomplete installation was ever observed:
+	// the verdict is the timeout that happened, not a deployment defect.
+	if stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+		t.Errorf("late success reported as NotFound (%v); the probe found the "+
+			"installation complete, so nothing was missing", err)
+	}
+	var se *aicrErrors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
+		t.Errorf("reported code = %v, want Timeout", err)
 	}
 	// The reason must describe this probe, not the previous one. The installation is
 	// complete here, so blaming a missing object would point the operator at something
@@ -648,5 +662,51 @@ func TestWaitForDeclaredTrainer_LateSuccessClaimsOnlyWhatWasObserved(t *testing.
 	}
 	if !strings.Contains(err.Error(), "observed complete only after the allowance expired") {
 		t.Errorf("reason does not state what was actually observed: %v", err)
+	}
+}
+
+// TestWaitForDeclaredTrainer_ReadTimeoutsAloneAreNotADeploymentDefect pins the case
+// where the allowance runs out without any probe ever reaching a conclusion.
+//
+// Every read the probe issues is cut short by the poll deadline, so no probe ever
+// observes an incomplete installation — there is nothing on the cluster the wait can
+// point at. Synthesizing NotFound from that empty observation would file a degraded
+// or slow apiserver as a customer deployment defect, which is the same
+// misclassification the NotFound/Unavailable split exists to prevent. With no
+// observation to stand on, the honest verdict is the timeout that actually happened.
+func TestWaitForDeclaredTrainer_ReadTimeoutsAloneAreNotADeploymentDefect(t *testing.T) {
+	oldTimeout, oldInterval := trainerInstallWaitTimeout, trainerInstallPollInterval
+	trainerInstallWaitTimeout = 20 * time.Millisecond
+	trainerInstallPollInterval = time.Millisecond
+	defer func() {
+		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
+	}()
+
+	// Seed only the first CRD the probe reads, and stall that read past the
+	// allowance. The read itself succeeds, so the probe learns nothing incomplete;
+	// the deadline is already gone by the time the second read is issued, and
+	// getTrainerObject's pre-read check turns it into a Timeout. That is the only
+	// thing the wait ever hears back.
+	client := newTrainerFakeClient(establishedCRD(trainerCRDTrainJobs))
+	client.PrependReactor("get", "customresourcedefinitions",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			time.Sleep(60 * time.Millisecond) // outlives the allowance
+			return false, nil, nil            // then let the tracker answer
+		})
+
+	_, err := waitForDeclaredTrainer(context.Background(), client)
+	if err == nil {
+		t.Fatal("wait returned success after its allowance had passed")
+	}
+	if stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+		t.Errorf("read timeouts reported as NotFound (%v); no probe ever observed an "+
+			"incomplete installation, so there is no deployment defect to file", err)
+	}
+	var se *aicrErrors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != aicrErrors.ErrCodeTimeout {
+		t.Errorf("reported code = %v, want Timeout", err)
+	}
+	if strings.Contains(err.Error(), "no complete installation was found") {
+		t.Errorf("verdict claims nothing was found, but nothing was ever read: %v", err)
 	}
 }
