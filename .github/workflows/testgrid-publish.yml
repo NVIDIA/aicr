@@ -14,16 +14,16 @@
 
 # TestGrid Publish (TG5)
 #
-# Publishes verified UAT evidence bundles to the AICR TestGrid dashboard.
-# Evidence ingest dispatches this workflow only after conformance produced and
-# verified a digest-pinned bundle.
+# Publishes verified evidence bundles to the AICR TestGrid dashboard. Evidence
+# ingest dispatches first-party UAT bundles automatically; manual dispatch supports
+# allowlisted community and partner backfills through the same trust policy.
 #
 # Disabled by default — gated on vars.TESTGRID_PUBLISH_ENABLED == 'true' —
 # until the prod WIF pool/SA exist (see aicr-testgrid Terraform apply).
 #
 # Pipeline:
 #   1. Accept and validate the digest-pinned OCI bundle ref
-#   2. Authenticate to GHCR and verify the signature, issuer, and UAT identity
+#   2. Authenticate to GHCR and verify signature + checked-in signer policy
 #   3. Authenticate to GCP via WIF (publish SA, groups/ prefix write-only)
 #   4. Build testgrid-publish from source
 #   5. Pull the same immutable bundle and write started/junit/finished to GCS
@@ -53,14 +53,14 @@ permissions:
   contents: read
 
 on:
-  # Evidence ingest explicitly dispatches this workflow with the verified,
-  # digest-pinned bundle ref. workflow_dispatch is an allowed GITHUB_TOKEN
+  # Evidence ingest explicitly dispatches this workflow with a verified,
+  # digest-pinned UAT bundle ref. workflow_dispatch is an allowed GITHUB_TOKEN
   # recursion exception, unlike workflow_run chains from bot-dispatched UAT.
-  # Manual dispatch supports NVIDIA UAT backfills through the same verification.
+  # Manual dispatch supports backfills, but never supplies trust classification.
   workflow_dispatch:
     inputs:
       bundle_ref:
-        description: "NVIDIA UAT OCI bundle ref (ghcr.io/nvidia/...@sha256:...)"
+        description: "Allowlisted evidence OCI bundle ref (ghcr.io/<org>/...@sha256:...)"
         type: string
         required: true
       environment:
@@ -73,7 +73,8 @@ on:
 
 concurrency:
   # Serialize publishes for the same environment and bundle while one is in
-  # flight. The publisher's create-only writes guard against later duplicates.
+  # flight. Durable overwrite rejection comes from the publish SA's create-only
+  # IAM grant; it does not make a partially completed upload safely retryable.
   group: testgrid-publish-${{ format('{0}-{1}', inputs.environment, inputs.bundle_ref) }}
   cancel-in-progress: false  # never cancel an in-flight GCS write
 
@@ -95,11 +96,11 @@ jobs:
       id-token: write  # required for WIF token exchange
 
     env:
-      # Production is stricter than staging ingest: only main/release UAT signers.
+      # First-party TestGrid policy is stricter than staging evidence ingest:
+      # only main/release UAT identities qualify as source_class=uat.
       FIRST_PARTY_ISSUER: 'https://token.actions.githubusercontent.com'
       FIRST_PARTY_IDENTITY: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp|azure|kind)\.yaml@refs/heads/(main|release/.+)$'
-      TRUSTED_REGISTRIES: 'ghcr.io/nvidia'
-      TG_SOURCE_CLASS: uat
+      TRUSTED_REGISTRIES: ${{ vars.EVIDENCE_TRUSTED_REGISTRIES || 'ghcr.io/nvidia' }}
 
     steps:
       - name: Checkout
@@ -142,6 +143,11 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
 
+      - name: Set up YAML tooling
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_yq: 'true'
+          yq_version: ${{ steps.versions.outputs.yq }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
@@ -157,8 +163,8 @@ jobs:
           BUNDLE_REF: ${{ inputs.bundle_ref }}
         run: |
           set -euo pipefail
-          # This production path accepts only NVIDIA UAT bundle repositories;
-          # the provenance verification below independently pins the signer.
+          # Network pulls are separately restricted by TRUSTED_REGISTRIES, and
+          # signer trust is derived from verified certificate claims below.
           #
           # Uses bash's [[ =~ ]] (whole-string match, POSIX ERE) rather than
           # `echo | grep -qE`, which is line-based: a value containing an
@@ -167,16 +173,66 @@ jobs:
           # reaches `echo >> GITHUB_OUTPUT` below and injects a second,
           # attacker-controlled output key. [[ =~ ]] anchors ^ and $ to the
           # start/end of the whole variable, so an embedded newline fails.
-          if [[ ! "${BUNDLE_REF}" =~ ^ghcr\.io/nvidia/[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::BUNDLE_REF '${BUNDLE_REF}' does not match expected format ghcr.io/nvidia/...@sha256:<64hex>"
+          if [[ ! "${BUNDLE_REF}" =~ ^ghcr\.io/[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::BUNDLE_REF '${BUNDLE_REF}' does not match expected format ghcr.io/<org>/...@sha256:<64hex>"
             exit 1
           fi
           echo "bundle_ref=${BUNDLE_REF}" >> "${GITHUB_OUTPUT}"
           echo "Resolved bundle: ${BUNDLE_REF}"
 
+      # Community/partner evidence must have a reviewed pointer on main. Its
+      # claimed signer is escaped into an exact regexp and then cross-checked
+      # against the verified Fulcio certificate by evidence-project. A bundle
+      # with no pointer gets only the narrow first-party UAT policy.
+      - name: Resolve signer policy
+        id: policy
+        env:
+          BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
+        run: |
+          set -euo pipefail
+          escape_regexp() {
+            printf '%s' "$1" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g'
+          }
+
+          matches=()
+          while IFS= read -r -d '' pointer; do
+            OCI="$(yq -r '.attestations[0].bundle.oci // ""' "${pointer}")"
+            DIGEST="$(yq -r '.attestations[0].bundle.digest // ""' "${pointer}")"
+            if [[ -n "${OCI}" && -n "${DIGEST}" && "${OCI}@${DIGEST}" == "${BUNDLE_REF}" ]]; then
+              matches+=("${pointer}")
+            fi
+          done < <(find recipes/evidence -type f -name '*.yaml' \
+            ! -name allowlist.yaml -print0)
+
+          if [[ "${#matches[@]}" -gt 1 ]]; then
+            echo "::error::bundle ref matches multiple checked-in evidence pointers"
+            exit 1
+          fi
+          if [[ "${#matches[@]}" -eq 1 ]]; then
+            POINTER="${matches[0]}"
+            EXPECTED_ISSUER="$(yq -r '.attestations[0].signer.issuer // ""' "${POINTER}")"
+            IDENTITY="$(yq -r '.attestations[0].signer.identity // ""' "${POINTER}")"
+            if [[ -z "${EXPECTED_ISSUER}" || -z "${IDENTITY}" ]] ||
+               [[ "${EXPECTED_ISSUER}" == *$'\n'* || "${EXPECTED_ISSUER}" == *$'\r'* ]] ||
+               [[ "${IDENTITY}" == *$'\n'* || "${IDENTITY}" == *$'\r'* ]]; then
+              echo "::error::checked-in pointer has an invalid signer claim"
+              exit 1
+            fi
+            EXPECTED_IDENTITY_REGEXP="^$(escape_regexp "${IDENTITY}")$"
+            echo "Using checked-in signer policy from ${POINTER}"
+          else
+            EXPECTED_ISSUER="${FIRST_PARTY_ISSUER}"
+            EXPECTED_IDENTITY_REGEXP="${FIRST_PARTY_IDENTITY}"
+            echo "No checked-in pointer; requiring first-party UAT signer policy"
+          fi
+          {
+            echo "expected_issuer=${EXPECTED_ISSUER}"
+            echo "expected_identity_regexp=${EXPECTED_IDENTITY_REGEXP}"
+          } >> "${GITHUB_OUTPUT}"
+
       # Authenticate to GHCR and verify provenance before exchanging GCP
-      # credentials. The verifier rejects unsigned bundles and pins both the
-      # Fulcio issuer and the exact NVIDIA UAT workflow identity family.
+      # credentials. evidence-project rejects unsigned/invalid bundles, then the
+      # policy step admits only a signer matched by the checked-in allowlist.
       - name: Login to GHCR
         uses: ./.github/actions/ghcr-login
 
@@ -189,14 +245,58 @@ jobs:
       - name: Verify evidence provenance
         env:
           BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
+          EXPECTED_ISSUER: ${{ steps.policy.outputs.expected_issuer }}
+          EXPECTED_IDENTITY_REGEXP: ${{ steps.policy.outputs.expected_identity_regexp }}
         run: |
           set -euo pipefail
           /tmp/evidence-project \
             -in "${BUNDLE_REF}" \
             -out /tmp/testgrid-verified-evidence \
-            --expected-issuer "${FIRST_PARTY_ISSUER}" \
-            --expected-identity-regexp "${FIRST_PARTY_IDENTITY}" \
+            --expected-issuer "${EXPECTED_ISSUER}" \
+            --expected-identity-regexp "${EXPECTED_IDENTITY_REGEXP}" \
+            --allowlist recipes/evidence/allowlist.yaml \
             --trusted-registry "${TRUSTED_REGISTRIES}"
+
+      - name: Derive source class from verified signer
+        id: source
+        run: |
+          set -euo pipefail
+          mapfile -d '' META_FILES < <(
+            find /tmp/testgrid-verified-evidence -type f -name meta.json -print0
+          )
+          if [[ "${#META_FILES[@]}" -ne 1 ]]; then
+            echo "::error::expected exactly one verified meta.json, found ${#META_FILES[@]}"
+            exit 1
+          fi
+
+          META="${META_FILES[0]}"
+          ALLOWLISTED="$(jq -r '.signer.allowlisted' "${META}")"
+          CLASS="$(jq -r '.signer.class' "${META}")"
+          ISSUER="$(jq -r '.signer.issuer' "${META}")"
+          IDENTITY="$(jq -r '.signer.identity' "${META}")"
+          if [[ "${ALLOWLISTED}" != "true" ]]; then
+            echo "::error::verified signer is not allowlisted"
+            exit 1
+          fi
+
+          case "${CLASS}" in
+            first-party)
+              if [[ "${ISSUER}" != "${FIRST_PARTY_ISSUER}" ]] ||
+                 [[ ! "${IDENTITY}" =~ ${FIRST_PARTY_IDENTITY} ]]; then
+                echo "::error::first-party signer is not an allowed main/release UAT identity"
+                exit 1
+              fi
+              SOURCE_CLASS=uat
+              ;;
+            community|partner)
+              SOURCE_CLASS=community
+              ;;
+            *)
+              echo "::error::unsupported verified signer class '${CLASS}'"
+              exit 1
+              ;;
+          esac
+          echo "source_class=${SOURCE_CLASS}" >> "${GITHUB_OUTPUT}"
 
       # Exchange GCP credentials only after provenance verification succeeds.
       - name: Authenticate to GCP
@@ -225,6 +325,7 @@ jobs:
         env:
           BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
           TG_BUCKET: ${{ steps.gcp.outputs.bucket }}
+          TG_SOURCE_CLASS: ${{ steps.source.outputs.source_class }}
         run: |
           set -euo pipefail
           /tmp/testgrid-publish \

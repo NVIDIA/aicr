@@ -84,15 +84,23 @@ evidence:
   re-render the static evidence dashboard.
 - `testgrid-publish.yml` (TG5), passing the same verified, digest-pinned
   `bundle_ref` this ingest consumed — but only for the first-party UAT path
-  (`bundle_ref` set) on `main` or a `release/*` ref; a feature-branch UAT
-  run or a push-triggered community/partner ingest never reaches TestGrid.
+  (`bundle_ref` set) on `main` or a `release/*` ref. A feature-branch UAT or a
+  push-triggered community/partner ingest does not dispatch TestGrid
+  automatically; an allowlisted external bundle can be backfilled manually.
 
-TestGrid treats the dispatch as a hint, not as proof of provenance. Before it
-exchanges GCP credentials, it independently pulls the immutable bundle and
-re-verifies the signature against the GitHub Actions issuer and the NVIDIA UAT
-workflow identity, restricted to `main` and `release/*`. Manual UAT backfills
-take the same path; unsigned, feature-branch, non-NVIDIA-registry, or
-unexpected-signer bundles fail closed.
+TestGrid treats every dispatch as a hint, not as proof of provenance. Before it
+exchanges GCP credentials, it independently pulls the immutable bundle, verifies
+its signature, and derives trust from the checked-in signer allowlist:
+
+- a verified NVIDIA UAT identity on `main` or `release/*` becomes
+  `source_class=uat`;
+- a verified, allowlisted community or partner identity becomes
+  `source_class=community`; and
+- unsigned, unallowlisted, untrusted-registry, feature-branch first-party, or
+  unexpected-class bundles fail closed.
+
+The workflow has no caller-controlled source-class input, so a manual backfill
+cannot promote external evidence to first-party UAT.
 
 Both dispatches run `needs: publish`, so they inherit the
 `produced == 'true'` gate — a no-op ingest (allowlist-only change, deleted
