@@ -34,6 +34,13 @@ CTLPTL_CONFIG_FILE = .ctlptl.yaml
 REGISTRY_PORT = 5001
 REGISTRY_NAME = ctlptl-registry
 
+# Kind node image (single source of truth: .settings.yaml testing.kind_node_image).
+# .ctlptl.yaml intentionally does not hardcode this — cluster-create injects it so
+# local dev and CI can never pin a second, drifting copy of the version. No
+# hardcoded fallback here: cluster-create fails closed on an empty read
+# instead of silently degrading to a stale image (see its yq-missing check).
+KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/dev/null)
+
 # Default target
 all: help
 
@@ -819,7 +826,19 @@ cluster-create: ## Creates local Kind cluster with registry
 		echo "     or: go install sigs.k8s.io/kind@latest"; \
 		exit 1; \
 	fi
-	ctlptl apply -f $(CTLPTL_CONFIG_FILE)
+	@if ! command -v yq >/dev/null 2>&1; then \
+		echo "Error: yq is not installed."; \
+		echo "Install: brew install yq"; \
+		echo "     or: go install github.com/mikefarah/yq/v4@latest"; \
+		exit 1; \
+	fi
+	@if [ -z "$(KIND_NODE_IMAGE)" ]; then \
+		echo "Error: could not resolve testing.kind_node_image from .settings.yaml."; \
+		echo "Check the key exists and .settings.yaml is valid YAML."; \
+		exit 1; \
+	fi
+	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE) (from .settings.yaml)"
+	img="$(KIND_NODE_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
 	@echo "Waiting for nodes to be ready..."
 	@kubectl wait --for=condition=ready nodes --all --timeout=300s
 	@echo "Cluster created. Registry at localhost:$(REGISTRY_PORT)"
@@ -853,10 +872,6 @@ cluster-status: ## Shows cluster and registry status
 KWOK_VERSION ?= $(shell yq -r '.testing_tools.kwok' .settings.yaml 2>/dev/null)
 ifeq ($(KWOK_VERSION),)
 KWOK_VERSION := v0.7.0
-endif
-KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/dev/null)
-ifeq ($(KIND_NODE_IMAGE),)
-KIND_NODE_IMAGE := kindest/node:v1.32.0
 endif
 CTLPTL_KWOK_CONFIG_FILE := .ctlptl-kwok.yaml
 

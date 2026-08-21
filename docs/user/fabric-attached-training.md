@@ -255,7 +255,14 @@ Also TrainJob-expressible. AICR fixes the resource name and the value is always
       value: "0"
     - name: NCCL_NET_PLUGIN
       value: none
+    - name: NCCL_SOCKET_IFNAME
+      value: eth0
 ```
+
+`NCCL_SOCKET_IFNAME` pins NCCL's bootstrap and out-of-band traffic to the
+primary interface. AICR's tested AKS runtime sets it, as does the EKS one — on
+a multi-NIC node, leaving NCCL to guess can send rendezvous traffic down an
+interface that cannot carry it.
 
 The same repeat-every-resource caveat applies.
 
@@ -287,7 +294,12 @@ suppressed — so grepping an ordinary run finds nothing, which is not evidence 
 socket fallback:
 
 ```shell
-kubectl logs <worker-pod> -c node | grep -i 'NCCL INFO.*Using network'
+# Select workers by label rather than guessing the generated pod name.
+# --tail=-1 is required: with a selector, kubectl defaults to the last 10 lines
+# and would omit the transport banner, which NCCL prints during init.
+kubectl logs -n <namespace> -c node --tail=-1 \
+  -l jobset.sigs.k8s.io/jobset-name=<trainjob-name>,jobset.sigs.k8s.io/replicatedjob-name=node \
+  | grep -i 'NCCL INFO.*Using network'
 ```
 
 Expect the plugin name — `FasTrak` for TCPXO, `AWS Libfabric` for EFA, `IB` for
