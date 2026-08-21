@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -182,8 +183,8 @@ func TestStrictGapErrorRendering(t *testing.T) {
 		name         string
 		gaps         []strictGap
 		excluded     []ExcludedOverlay
+		warnings     []ConstraintWarning
 		wantContains []string
-		wantExcluded bool
 	}{
 		{
 			name:         "single value",
@@ -208,17 +209,26 @@ func TestStrictGapErrorRendering(t *testing.T) {
 			// a failing constraint. The demand still stands, but the caller
 			// needs the exclusion context or they will state the os and only
 			// then meet the real failure.
-			name:         "constraint exclusions are attached",
-			gaps:         []strictGap{{dimension: string(FieldOS), validValues: []string{"ubuntu"}}},
-			excluded:     []ExcludedOverlay{{Name: "h100-eks-ubuntu-training"}},
+			name: "constraint context is attached",
+			gaps: []strictGap{{dimension: string(FieldOS), validValues: []string{"ubuntu"}}},
+			excluded: []ExcludedOverlay{{
+				Name:   "h100-eks-ubuntu-training",
+				Reason: ExcludedOverlayReasonConstraintFailed,
+			}},
+			warnings: []ConstraintWarning{{
+				Overlay:    "h100-eks-ubuntu-training",
+				Constraint: "K8s.server.version",
+				Expected:   ">= 1.34",
+				Actual:     "1.30",
+				Reason:     "constraint not satisfied",
+			}},
 			wantContains: []string{"specify os (valid: ubuntu)"},
-			wantExcluded: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := strictGapError(criteria, tt.gaps, tt.excluded, nil)
+			err := strictGapError(criteria, tt.gaps, tt.excluded, tt.warnings)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("message = %q, want it to contain %q", err.Error(), want)
@@ -232,9 +242,51 @@ func TestStrictGapErrorRendering(t *testing.T) {
 			if se.Context["uncovered"] != nil {
 				t.Error("strict-gap failure must not populate `uncovered`; relaxation would clear it")
 			}
-			if (se.Context["excludedOverlays"] != nil) != tt.wantExcluded {
-				t.Errorf("excludedOverlays present = %v, want %v",
-					se.Context["excludedOverlays"] != nil, tt.wantExcluded)
+
+			// Assert the whole strictDimensions payload, not just the keys: a
+			// caller reconstructing a retry query reads validValues, so a
+			// regression that dropped or reordered them would otherwise pass.
+			entries, ok := se.Context["strictDimensions"].([]map[string]any)
+			if !ok {
+				t.Fatalf("strictDimensions = %#v, want []map[string]any", se.Context["strictDimensions"])
+			}
+			if len(entries) != len(tt.gaps) {
+				t.Fatalf("strictDimensions has %d entries, want %d", len(entries), len(tt.gaps))
+			}
+			for i, gap := range tt.gaps {
+				if entries[i]["dimension"] != gap.dimension {
+					t.Errorf("entry %d dimension = %v, want %v", i, entries[i]["dimension"], gap.dimension)
+				}
+				values, ok := entries[i]["validValues"].([]string)
+				if !ok {
+					t.Errorf("entry %d validValues = %#v, want []string", i, entries[i]["validValues"])
+					continue
+				}
+				if !equalStrings(values, gap.validValues) {
+					t.Errorf("entry %d validValues = %v, want %v", i, values, gap.validValues)
+				}
+			}
+
+			// excludedOverlays / constraintWarnings are attached verbatim, and
+			// absent rather than empty when there is nothing to report.
+			if tt.excluded == nil {
+				if se.Context["excludedOverlays"] != nil {
+					t.Errorf("excludedOverlays = %#v, want absent", se.Context["excludedOverlays"])
+				}
+			} else if got, ok := se.Context["excludedOverlays"].([]ExcludedOverlay); !ok {
+				t.Errorf("excludedOverlays = %#v, want []ExcludedOverlay", se.Context["excludedOverlays"])
+			} else if !reflect.DeepEqual(got, tt.excluded) {
+				t.Errorf("excludedOverlays = %+v, want %+v", got, tt.excluded)
+			}
+
+			if tt.warnings == nil {
+				if se.Context["constraintWarnings"] != nil {
+					t.Errorf("constraintWarnings = %#v, want absent", se.Context["constraintWarnings"])
+				}
+			} else if got, ok := se.Context["constraintWarnings"].([]ConstraintWarning); !ok {
+				t.Errorf("constraintWarnings = %#v, want []ConstraintWarning", se.Context["constraintWarnings"])
+			} else if !reflect.DeepEqual(got, tt.warnings) {
+				t.Errorf("constraintWarnings = %+v, want %+v", got, tt.warnings)
 			}
 
 			// The golden matrix classifies via this extraction, so exercise it
