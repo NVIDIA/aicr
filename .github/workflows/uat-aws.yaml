@@ -68,6 +68,14 @@ on:
         description: 'Skip UAT test execution (manual runs only; the nightly batch always tests).'
         type: boolean
         default: false
+      deployer:
+        # helmfile = <accelerator>-<intent>-config.yaml (the existing
+        # filename shape every cell has always used). argocd = insert
+        # -argocd before -config.yaml (e.g. h100-training-argocd-config.yaml).
+        # See issue #2194.
+        description: 'Deployer variant.'
+        type: string
+        default: helmfile
 
 permissions:
   contents: read
@@ -88,17 +96,28 @@ jobs:
     if: always() && github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     # Budget = uncapped non-UAT steps (build, validator image push, EKS
-    # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 90
-    # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
-    # = up to 190) + ~8 failure-path debug collection (Collect cluster debug
-    # bundle) + the always()-run Destroy Cluster teardown. Only one of
-    # train/serve runs per intent, so the budget counts the larger (serve).
-    # Teardown = up to 3 retries × ~18m real destroy = up to ~54m. The teardown
-    # MUST fit in this budget: a job-level timeout cancels pending always()
-    # steps, so an undersized cap would skip teardown and leak the GPU node /
-    # capacity reservation even after a LATE failure. ~30 setup + 190 UAT + ~8
-    # debug = 228, + ~54 teardown = 282, so 300 leaves the teardown clear
-    # headroom on a worst-case run.
+    # provisioning, evidence upload ~30m) + UAT phase steps + ~8 failure-path
+    # debug collection + the always()-run Destroy Cluster teardown (up to 3
+    # retries × ~18m real destroy = up to ~54m). The teardown MUST fit in this
+    # cap: a job-level timeout cancels pending always() steps, so an undersized
+    # cap would skip teardown and leak the GPU node / capacity reservation
+    # even after a LATE failure. Only one of train/serve runs per intent, so
+    # the UAT phase-step count uses the larger.
+    #
+    # UAT-phase-step budgets by (deployer, intent), using the current
+    # timeout-minutes on each step below:
+    #   helmfile+training:  prep 15 + install  90 + validate 40 + train 25 + verify 5 = 175
+    #   helmfile+inference: prep 15 + install  90 + validate 40 + serve 40 + verify 5 = 190
+    #   argocd+training:    prep 15 + install 110 + validate 40 + train 25 + verify 5 = 195   (issue #2194, aws-h100 only)
+    #   argocd+inference:   not shipped today; would be 15 + 110 + 40 + 40 + 5 = 210          (needs cap bump below)
+    #
+    # Total = ~30 setup + <UAT> + ~8 debug + ~54 teardown. On today's
+    # worst-case (argocd+training or helmfile+inference), ~30 + max(195,190)
+    # + ~8 + ~54 = ~287, so 300 leaves ~13m of teardown headroom.
+    # NOTE: the "not shipped today" argocd+inference row would push total to
+    # ~302, over the cap. If a future PR wires the argocd variant for the
+    # inference cell (or re-enables phase_serve alongside argocd), raise this
+    # to ~330 in the same PR.
     timeout-minutes: 300
     permissions:
       contents: read
@@ -139,10 +158,19 @@ jobs:
         && format('aicr-uat-day-{0}-{1}-{2}', inputs.slug, inputs.slot, github.run_id)
         || format('aicr-uat-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
-      # The AICRConfig is selected by accelerator + intent
-      # (<accelerator>-<intent>-config.yaml); both intents drive the same
-      # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
-      TEST_CONFIG: ${{ inputs.test_config_dir }}/${{ inputs.accelerator }}-${{ inputs.intent }}-config.yaml
+      # The AICRConfig is selected by accelerator + intent + deployer:
+      #   deployer=helmfile → <accelerator>-<intent>-config.yaml (the default;
+      #                       backwards-compatible with every existing cell)
+      #   deployer=X (X!=helmfile) → <accelerator>-<intent>-X-config.yaml
+      #                              (e.g. deployer=argocd → h100-training-argocd-config.yaml, issue #2194)
+      # Both variants drive the same cluster-config (GPU pool from the
+      # reservation, system/CPU pools dynamic). The step-level check below asserts
+      # the resolved file exists so an unwired deployer variant fails early
+      # (before any provisioning) rather than deep in phase_prep.
+      TEST_CONFIG: >-
+        ${{ inputs.test_config_dir }}/${{ inputs.accelerator }}-${{ inputs.intent }}${{
+          inputs.deployer != 'helmfile' && format('-{0}', inputs.deployer) || ''
+        }}-config.yaml
       # v0.4.27 — required for node-group taints in the cluster-config schema
       # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
       # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
@@ -190,6 +218,7 @@ jobs:
           LIFECYCLE: ${{ inputs.lifecycle }}
           SLUG: ${{ inputs.slug }}
           SLOT: ${{ inputs.slot }}
+          DEPLOYER: ${{ inputs.deployer }}
         run: |
           set -euo pipefail
           case "${INTENT}" in
@@ -233,6 +262,15 @@ jobs:
             echo "::error::${CLUSTER_CONFIG} has no .deployment.tenancy"; exit 1
           fi
           echo "AWS_ACCOUNT_ID=${TENANCY}" >> "${GITHUB_ENV}"
+          # Validate deployer after the account export (which teardown depends on).
+          # workflow_dispatch constrains this to a choice, but workflow_call passes
+          # free strings, so a typo from a caller must surface as a clear error here
+          # rather than as a missing test-config file below or a mysterious dispatch
+          # deep in phases.sh. Allowlist mirrors uat-run.yaml's choice input.
+          case "${DEPLOYER}" in
+            helmfile|argocd) ;;
+            *) echo "::error::unsupported deployer '${DEPLOYER}' (want helmfile|argocd)"; exit 1 ;;
+          esac
           # The test config only matters for the run phases (nightly / daytime-up
           # provision+deploy). daytime-down just tears the held cluster down and
           # never reads it, so skip the existence check there — a missing sibling
@@ -685,21 +723,36 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-UAT-AICR-Install
 
-      - name: UAT - install (helmfile apply)
+      - name: UAT - install (helmfile apply or argocd sync)
         id: install
         if: steps.prep.outcome == 'success'
-        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS, 20m) + the post-install
-        # readiness gate, which runs `aicr validate --phase deployment` until it
-        # passes READINESS_CONSECUTIVE_PASSES times (up to READINESS_TIMEOUT_SECONDS,
-        # 60m, spanning nodewright tuning + reboots, which can run past 30m on a
-        # cold GPU node). Sized to exceed one helmfile attempt + the full gate
-        # window (20 + 60 = 80, + margin) so the gate's own fail-closed path runs
-        # before GitHub Actions kills the step.
-        timeout-minutes: 90
+        # Step-level timeout must fit the LARGER of the two deployer branches,
+        # because both dispatch from `./run install` and share this cap:
+        #   helmfile: HELMFILE_TIMEOUT_SECONDS 20m + gate 60m = 80m
+        #   argocd:   helm-install 5m + apply+sync 30m + root-grace 2m + gate 60m = 97m
+        # ARGOCD_HELM_TIMEOUT_SECONDS + ARGOCD_SYNC_TIMEOUT_SECONDS +
+        # ARGOCD_ROOT_APP_GRACE_SECONDS + READINESS_TIMEOUT_SECONDS in
+        # tests/uat/lib/phases.sh drive the argocd side. Sized at 110m so the
+        # argocd fail-closed paths (each shared-budget retry loop's `::error::`)
+        # run before GitHub Actions kills the step. The gate's own fail-closed
+        # path still fires within budget on both branches.
+        timeout-minutes: 110
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
+          # Consumed only by the argocd deployer branch (install_argocd in
+          # tests/uat/lib/phases.sh), which provisions an in-cluster ghcr.io
+          # repo-creds Secret so Argo CD's repo-server can pull the bundle
+          # pushed by phase_prep. GITHUB_ACTOR is auto-injected by the
+          # Actions runtime; GITHUB_TOKEN is not, so pass it explicitly.
+          # The token is scoped to `packages: write` at the job level (see
+          # permissions block above), which is exactly what the Secret
+          # needs. Set the token ONLY for the argocd branch so helmfile's
+          # kubectl/aicr/chart-hook children don't inherit it in-env;
+          # install_argocd's `:?` guard fires on the empty default, which
+          # is what we want if a caller misconfigures the deployer input.
+          GITHUB_TOKEN: ${{ inputs.deployer == 'argocd' && github.token || '' }}
         run: ./tests/uat/aws/run install "${TEST_CONFIG}"
 
       # Runs ALL validate phases (deployment + conformance + performance), not
@@ -883,12 +936,20 @@ jobs:
           SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
           SUMMARY_INTENT: ${{ inputs.intent }}
           SUMMARY_LIFECYCLE: ${{ inputs.lifecycle }}
+          SUMMARY_DEPLOYER: ${{ inputs.deployer }}
         run: |
           {
             echo "## UAT Results (AWS)"
             echo ""
             printf '**Reservation:** `%s` · **Intent:** `%s` · **Lifecycle:** `%s`\n' \
               "$SUMMARY_RESERVATION" "$SUMMARY_INTENT" "$SUMMARY_LIFECYCLE"
+            # Render the deployer only when it deviates from the default
+            # (helmfile), so existing cells' summaries are unchanged and
+            # only argocd cells surface the extra line — makes it easy to
+            # spot which lane a run was in from the Test Summary alone.
+            if [[ "$SUMMARY_DEPLOYER" != "" && "$SUMMARY_DEPLOYER" != "helmfile" ]]; then
+              printf '**Deployer:** `%s`\n' "$SUMMARY_DEPLOYER"
+            fi
             printf '**Cluster:** `%s`\n' "$DEPLOYMENT_ID"
             printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
             echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"

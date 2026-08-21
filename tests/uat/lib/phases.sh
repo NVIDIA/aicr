@@ -70,6 +70,24 @@ TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
 # (tests/uat/kind/run) overrides to 1.
 TRAINJOB_NUM_NODES="${TRAINJOB_NUM_NODES:-2}"
 HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
+# ArgoCD deployer knobs (see install_argocd). ARGOCD_HELM_TIMEOUT_SECONDS
+# bounds the `helm upgrade --install` of the argo-cd chart itself;
+# ARGOCD_SYNC_TIMEOUT_SECONDS bounds the wait for every Application to
+# reach a terminal-pass state. Both are shared wall-clock budgets, matching
+# the discipline HELMFILE_TIMEOUT_SECONDS uses for the helmfile lane.
+# ARGOCD_ROOT_APP_GRACE_SECONDS gives Argo CD a short window to reify the
+# root `nvidia-stack` Application after `kubectl apply` -- a missing root
+# after the grace means the apply silently produced no Application (RBAC
+# collision, CRD not yet Established, etc.) and we should fail closed.
+ARGOCD_HELM_TIMEOUT_SECONDS="${ARGOCD_HELM_TIMEOUT_SECONDS:-300}" # 5 min
+ARGOCD_SYNC_TIMEOUT_SECONDS="${ARGOCD_SYNC_TIMEOUT_SECONDS:-1800}" # 30 min
+ARGOCD_ROOT_APP_GRACE_SECONDS="${ARGOCD_ROOT_APP_GRACE_SECONDS:-120}"
+# Prefix for the OCI target `aicr bundle --output` pushes to and the
+# `--repo` baseURL baked into every Application. The path is under
+# ghcr.io/nvidia (workflow already grants `packages: write` for evidence
+# push) in a distinct namespace so bundle artifacts don't collide with
+# signed evidence. See phase_prep's argocd branch.
+ARGOCD_OCI_PREFIX="${ARGOCD_OCI_PREFIX:-oci://ghcr.io/nvidia/aicr-bundle-scratch}"
 # Budget for the post-install readiness gate (see phase_install), which runs
 # `aicr validate --phase deployment` until it passes READINESS_CONSECUTIVE_PASSES
 # times in a row. This is the gate window ONLY -- it is entered AFTER helmfile
@@ -390,12 +408,75 @@ phase_prep() {
   echo "::endgroup::"
 
   echo "::group::Generate bundle"
-  "${AICR_BIN}" bundle --config "${config}"
-  test -f bundle/helmfile.yaml || {
-    echo "expected bundle/helmfile.yaml (deployer: helmfile) — got:" >&2
-    ls -la bundle >&2 || true
-    exit 1
-  }
+  # The bundle shape (and how it is delivered to the cluster) is deployer-
+  # specific: helmfile emits bundle/helmfile.yaml consumed off the local
+  # filesystem; argocd emits bundle/app-of-apps.yaml AND pushes the same
+  # content to an OCI registry so Argo CD's repo-server can pull it. Read
+  # the deployer straight from the AICRConfig -- keeping selection in the
+  # test-config (not a workflow env var) means the artifact under review
+  # is self-describing.
+  local deployer
+  deployer="$(yq -r '.spec.bundle.deployment.deployer // "helmfile"' "${config}")"
+  case "${deployer}" in
+    helmfile)
+      "${AICR_BIN}" bundle --config "${config}"
+      test -f bundle/helmfile.yaml || {
+        echo "expected bundle/helmfile.yaml (deployer: helmfile) — got:" >&2
+        ls -la bundle >&2 || true
+        exit 1
+      }
+      ;;
+    argocd)
+      # --output pushes bundle content to OCI; --repo sets the source.repoURL
+      # baked into the rendered nvidia-stack Application. Both flags override
+      # the config's spec.bundle.output.target (pkg/cli/bundle.go:583-604)
+      # so the AICRConfig stays deployer-neutral.
+      #
+      # URL shape (matches KWOK argocd-oci precedent at
+      # kwok/scripts/validate-scheduling.sh:951+):
+      #   oci_repo   = <prefix>/<recipe-slug>               (per-recipe, no tag)
+      #   oci_target = <prefix>/<recipe-slug>:run-<RUN_ID>  (same repo, with tag)
+      # `aicr bundle` renders root Application spec.source.repoURL=<oci_repo>
+      # and targetRevision=<tag>, so Argo CD pulls from oci_target — the same
+      # URL we pushed to. Passing a bare-prefix --repo (without the slug)
+      # would leave Argo CD chasing a non-existent artifact at
+      # oci://<prefix>:main — verified locally with `aicr bundle --deployer
+      # argocd` inspection during Tier 1 validation of issue #2194.
+      #
+      # RUN_ID isolates concurrent runs on the same recipe. Argo CD prefix-
+      # matches repo-creds (util/db/repository_secrets.go:
+      # getRepositoryCredentialIndex → HasPrefix), so a single Secret at
+      # ARGOCD_OCI_PREFIX covers every <recipe-slug> pushed under that
+      # prefix — provisioned once by install_argocd.
+      #
+      # Retention follow-up (#2194): this pushes a new run-tagged artifact
+      # every dispatch, and there is no cleanup on the successful path. Left
+      # deferred while this cell is manual-dispatch-only (accumulation rate
+      # low, cost bounded); to be addressed at nightly enrollment by EITHER
+      # a workflow teardown step that `gh api DELETE`s the tag it stashed as
+      # a job output, OR an org-level retention policy on
+      # ghcr.io/nvidia/aicr-bundle-scratch. The `-scratch` namespace name
+      # already signals ephemeral intent to any operator inspecting GHCR.
+      local bundle_slug oci_repo oci_target
+      bundle_slug="$(yq -r '.metadata.name' "${config}")"
+      oci_repo="${ARGOCD_OCI_PREFIX}/${bundle_slug}"
+      oci_target="${oci_repo}:run-${RUN_ID}"
+      echo "argocd bundle push target: ${oci_target}"
+      echo "argocd Application source.repoURL: ${oci_repo}"
+      "${AICR_BIN}" bundle --config "${config}" \
+        --output "${oci_target}" \
+        --repo "${oci_repo}"
+      test -f bundle/app-of-apps.yaml || {
+        echo "expected bundle/app-of-apps.yaml (deployer: argocd) — got:" >&2
+        ls -la bundle >&2 || true
+        exit 1
+      }
+      ;;
+    *)
+      echo "::error::unsupported deployer: ${deployer} (supported: helmfile, argocd)" >&2
+      exit 1
+      ;;
+  esac
   echo "::endgroup::"
 }
 
@@ -434,6 +515,30 @@ uat_helm_diff_platform() {
 }
 
 phase_install() {
+  # Dispatch to the deployer-specific install body. The readiness gate below
+  # is deployer-agnostic (it validates deployed cluster state, not the
+  # deployment mechanism) so it stays in phase_install; only the "get the
+  # stack onto the cluster" step differs.
+  local deployer
+  deployer="$(yq -r '.spec.bundle.deployment.deployer // "helmfile"' "${config}")"
+  case "${deployer}" in
+    helmfile) install_helmfile ;;
+    argocd)   install_argocd ;;
+    *)
+      echo "::error::unsupported deployer: ${deployer} (supported: helmfile, argocd)" >&2
+      exit 1
+      ;;
+  esac
+
+  echo "::group::Cluster state post-install"
+  kubectl get nodes -o wide
+  kubectl get pods -A | grep -Ev '\s+Running\s+|\s+Completed\s+' || true
+  echo "::endgroup::"
+
+  install_readiness_gate
+}
+
+install_helmfile() {
   command -v helmfile >/dev/null || { echo "helmfile not on PATH" >&2; exit 1; }
   command -v helm     >/dev/null || { echo "helm not on PATH"     >&2; exit 1; }
   command -v curl     >/dev/null || { echo "curl not on PATH"     >&2; exit 1; }
@@ -631,12 +736,269 @@ phase_install() {
     echo "::error::helmfile apply failed after 3 attempts" >&2
     exit 1
   fi
+}
 
-  echo "::group::Cluster state post-install"
-  kubectl get nodes -o wide
-  kubectl get pods -A | grep -Ev '\s+Running\s+|\s+Completed\s+' || true
+install_argocd() {
+  command -v helm    >/dev/null || { echo "helm not on PATH" >&2; exit 1; }
+  command -v kubectl >/dev/null || { echo "kubectl not on PATH" >&2; exit 1; }
+
+  local SCRIPT_DIR
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local REPO_ROOT="${SCRIPT_DIR}/../../.."
+  local ARGOCD_CHART_VERSION
+  ARGOCD_CHART_VERSION="$(yq -r '.testing_tools.argocd_chart' "${REPO_ROOT}/.settings.yaml")"
+
+  echo "::group::Install Argo CD (chart ${ARGOCD_CHART_VERSION})"
+  # KWOK precedent (kwok/scripts/install-infra.sh:install_argocd) — same
+  # chart, same namespace/release. `helm upgrade --install` is idempotent
+  # so a re-run (or a cluster that already has Argo CD baked in) converges
+  # cleanly. `--wait --timeout` blocks until argocd-server + application-
+  # controller are Ready so downstream steps (repo-creds, apply) don't
+  # race a partially-rolled-out install.
+  helm repo add argo https://argoproj.github.io/argo-helm --force-update >/dev/null 2>&1 || true
+  # Every fail-closed path in this function emits `::error::` and closes the
+  # ::group:: before exiting so a triager gets a breadcrumb + no dangling
+  # log group. `set -euo pipefail` would otherwise abort here silently.
+  if ! helm repo update argo >/dev/null; then
+    echo "::error::helm repo update argo failed" >&2
+    echo "::endgroup::"
+    exit 1
+  fi
+  if ! helm upgrade --install argocd argo/argo-cd \
+      --namespace argocd --create-namespace \
+      --version "${ARGOCD_CHART_VERSION}" \
+      --wait --timeout "${ARGOCD_HELM_TIMEOUT_SECONDS}s"; then
+    echo "::error::Argo CD helm install failed" >&2
+    kubectl -n argocd get pods || true
+    echo "::endgroup::"
+    exit 1
+  fi
+  # CRD race guard — applications.argoproj.io must be Established before we
+  # apply the app-of-apps, else kubectl apply races the CRD controller.
+  if ! kubectl wait --for=condition=Established \
+      crd/applications.argoproj.io --timeout=120s; then
+    echo "::error::applications.argoproj.io CRD did not reach Established within 120s" >&2
+    kubectl describe crd applications.argoproj.io 2>&1 | head -60 >&2 || true
+    echo "::endgroup::"
+    exit 1
+  fi
   echo "::endgroup::"
 
+  # Start the shared ARGOCD_SYNC_TIMEOUT_SECONDS wall clock HERE, before the
+  # repo-creds Secret apply, so a hung apiserver on any single step (Secret
+  # apply, app-of-apps apply, root-app grace, terminal-pass poll) draws from
+  # the same 30m budget install_helmfile enforces with its own shared clock.
+  # Without this, a stalled Secret apply would burn indefinite time before
+  # the downstream retry loop even started measuring.
+  local argocd_deadline=$(( SECONDS + ARGOCD_SYNC_TIMEOUT_SECONDS ))
+  local secret_remaining
+
+  echo "::group::Provision ghcr.io repo-creds Secret (prefix match)"
+  # Argo CD prefix-matches repo-creds against Application source URLs
+  # (util/db/repository_secrets.go::getRepositoryCredentialIndex → HasPrefix),
+  # so ONE Secret annotated argocd.argoproj.io/secret-type=repo-creds at
+  # url=ARGOCD_OCI_PREFIX covers every recipe pushed under that prefix.
+  # GITHUB_TOKEN + GITHUB_ACTOR are provided by the UAT workflow env
+  # (packages: write is already declared on every uat-*.yaml job).
+  : "${GITHUB_TOKEN:?GITHUB_TOKEN required for ghcr.io pull creds}"
+  : "${GITHUB_ACTOR:?GITHUB_ACTOR required for ghcr.io pull creds}"
+  # Field shape mirrors kwok/scripts/install-infra.sh:apply_repo_secret
+  # for chart 9.5.x / Argo CD v3.x — type: oci is the direct OCI credential
+  # kind (chart 7.x needed type: helm + enableOCI=true; superfluous here
+  # and dropped to avoid confusion). username/password are the only fields
+  # KWOK omits, because its in-cluster registry is unauthenticated HTTP;
+  # ghcr.io is HTTPS + auth, so we supply the GITHUB_ACTOR/GITHUB_TOKEN
+  # already scoped to `packages: write` on every UAT job. The whole apply is
+  # bounded by the remaining shared budget so a hung apiserver cannot outlast
+  # the sync-wait window; clamp >= 1 for the `timeout 0 == no timeout`
+  # boundary condition install_helmfile guards the same way.
+  #
+  # `kubectl create ... --from-literal | kubectl label --local | kubectl apply`
+  # carries the token/actor as argv, never through a YAML parser -- defense-in-
+  # depth against any future GH-token/actor value with YAML-breaking bytes
+  # (safe by construction today, but the belt-and-suspenders is cheap).
+  secret_remaining=$(( argocd_deadline - SECONDS ))
+  (( secret_remaining < 1 )) && secret_remaining=1
+  if ! kubectl create secret generic aicr-oci-repo-creds \
+      --namespace argocd \
+      --from-literal=type=oci \
+      --from-literal="url=${ARGOCD_OCI_PREFIX}" \
+      --from-literal="username=${GITHUB_ACTOR}" \
+      --from-literal="password=${GITHUB_TOKEN}" \
+      --dry-run=client -o yaml \
+    | kubectl label --local -f - argocd.argoproj.io/secret-type=repo-creds -o yaml \
+    | timeout "${secret_remaining}" kubectl apply -f -
+  then
+    echo "::error::repo-creds Secret apply failed (timeout ${secret_remaining}s of ${ARGOCD_SYNC_TIMEOUT_SECONDS}s shared budget)" >&2
+    echo "::endgroup::"
+    exit 1
+  fi
+  echo "::endgroup::"
+
+  # Retry `kubectl apply -f bundle/app-of-apps.yaml` on transient apiserver
+  # errors, mirroring install_helmfile's shared-budget discipline. In practice
+  # `kubectl apply` on a single manifest almost never needs the retry, but the
+  # shared-budget shape keeps the two branches behaviorally symmetric and
+  # bounds the install step's worst-case wall clock the same way.
+  #
+  # Each attempt is capped at the remaining shared ARGOCD_SYNC_TIMEOUT_SECONDS
+  # budget with `timeout`, and the deadline is re-checked BEFORE each attempt
+  # so a stalled apiserver cannot spend the whole 30m budget on kubectl apply
+  # and starve the downstream sync-wait. Clamp `remaining` to >= 1 for the
+  # same reason install_helmfile does: `timeout 0` means "no timeout".
+  local applied=false apply_remaining apply_nap
+  for attempt in 1 2 3; do
+    if (( SECONDS >= argocd_deadline )); then
+      echo "argocd shared ${ARGOCD_SYNC_TIMEOUT_SECONDS}s budget exhausted after attempt $(( attempt - 1 )); not starting attempt ${attempt}"
+      break
+    fi
+    apply_remaining=$(( argocd_deadline - SECONDS ))
+    (( apply_remaining < 1 )) && apply_remaining=1
+    echo "::group::kubectl apply app-of-apps (attempt ${attempt}/3, timeout ${apply_remaining}s of ${ARGOCD_SYNC_TIMEOUT_SECONDS}s shared budget)"
+    if timeout "${apply_remaining}" kubectl apply -f bundle/app-of-apps.yaml; then
+      applied=true
+      echo "::endgroup::"
+      break
+    fi
+    echo "::endgroup::"
+    # Cap the retry delay to remaining shared budget so `sleep 15` near the
+    # deadline can't overrun it — same discipline as the root-app and sync-
+    # wait loops. Positive-only guard so the loop exits cleanly at budget=0.
+    if (( attempt < 3 )); then
+      apply_nap=15
+      apply_remaining=$(( argocd_deadline - SECONDS ))
+      (( apply_nap > apply_remaining )) && apply_nap=${apply_remaining}
+      if (( apply_nap > 0 )); then
+        echo "waiting ${apply_nap}s before retry"
+        sleep "${apply_nap}"
+      fi
+    fi
+  done
+  if [[ "${applied}" != "true" ]]; then
+    echo "::error::kubectl apply app-of-apps.yaml failed after 3 attempts (or budget exhausted)" >&2
+    exit 1
+  fi
+
+  echo "::group::Wait for root Application '${ARGOCD_ROOT_APP:-nvidia-stack}' to be reified"
+  # A missing root after the grace window means the apply silently produced
+  # no Application (RBAC race, CRD version skew, malformed manifest). Fail
+  # closed rather than time out downstream on an empty controller queue.
+  # Cap the root-app grace at the shared argocd_deadline so this loop can
+  # never run past the ARGOCD_SYNC_TIMEOUT_SECONDS budget that spans the
+  # whole install path (Secret apply + apply retries + this grace + sync
+  # poll). Without the cap, an upstream step that spent most of the shared
+  # budget could still let the root-app grace add its full 2m on top.
+  # `root_grace_effective` is the actual window this loop ran under (nominal
+  # OR shorter if the shared cap fired) — used by the failure diagnostic
+  # below so a budget-starved run doesn't look like a 120s hang.
+  local root_deadline=$(( SECONDS + ARGOCD_ROOT_APP_GRACE_SECONDS ))
+  (( root_deadline > argocd_deadline )) && root_deadline=${argocd_deadline}
+  local root_grace_effective=$(( root_deadline - SECONDS ))
+  local root_app="${ARGOCD_ROOT_APP:-nvidia-stack}"
+  local root_ready=false root_remaining root_nap
+  while (( SECONDS < root_deadline )); do
+    # Bound each kubectl by remaining budget so a hung apiserver cannot burn
+    # the whole grace window on one call. Clamp to >= 1 (same rationale as
+    # install_helmfile: `timeout 0` means no timeout).
+    root_remaining=$(( root_deadline - SECONDS ))
+    (( root_remaining < 1 )) && root_remaining=1
+    if timeout "${root_remaining}" kubectl -n argocd get application "${root_app}" >/dev/null 2>&1; then
+      root_ready=true
+      break
+    fi
+    # Cap the sleep to remaining budget so we do not overrun the deadline
+    # waiting between polls.
+    root_nap=5
+    root_remaining=$(( root_deadline - SECONDS ))
+    (( root_nap > root_remaining )) && root_nap=${root_remaining}
+    (( root_nap > 0 )) && sleep "${root_nap}"
+  done
+  if [[ "${root_ready}" != "true" ]]; then
+    if (( root_grace_effective < ARGOCD_ROOT_APP_GRACE_SECONDS )); then
+      echo "::error::root Application '${root_app}' not reified within effective ${root_grace_effective}s (nominal ${ARGOCD_ROOT_APP_GRACE_SECONDS}s; shared sync budget capped this loop early)" >&2
+    else
+      echo "::error::root Application '${root_app}' not reified within ${ARGOCD_ROOT_APP_GRACE_SECONDS}s" >&2
+    fi
+    kubectl -n argocd get applications || true
+    echo "::endgroup::"
+    exit 1
+  fi
+  echo "::endgroup::"
+
+  echo "::group::Wait for all Argo CD Applications to reach terminal-pass (budget $(( argocd_deadline - SECONDS ))s)"
+  # Two premature-convergence guards run before the 4-arm terminal-pass
+  # predicate (which mirrors tests/chainsaw/kwok/argocd-sync/chainsaw-test.yaml,
+  # source-agnostic per that test's SYNC NOTE header):
+  #   1. items == []               -> "no Applications yet" (CRD present but
+  #      neither root nor children reified yet).
+  #   2. items == [root] only, or root not Synced -> in the race window where
+  #      the app-of-apps root is OutOfSync+Healthy while its child Applications
+  #      have not yet been generated, arm 2 (OutOfSync+Healthy) would satisfy
+  #      `bad=""` and return 0 before gpu-operator/DRA even exist. Require the
+  #      root Application to be Synced (not merely present) as the crossover.
+  # Otherwise apply the 4-arm predicate: Synced+Healthy (canonical); OutOfSync+
+  # Healthy (operator mutation — gpu-operator ClusterPolicy, ResourceSlice
+  # injection); Synced+Progressing / Synced+Degraded (Argo health-controller
+  # divergence post-op — tolerated because the ultimate verdict lives in the
+  # deployment readiness gate that follows).
+  local root_app_name="${ARGOCD_ROOT_APP:-nvidia-stack}"
+  local jq_bad
+  jq_bad='
+    if (.items | length) == 0 then
+      "no Applications yet"
+    elif ([.items[] | select(.metadata.name == "'"${root_app_name}"'" and .status.sync.status == "Synced")] | length) == 0 then
+      "root '"${root_app_name}"' not Synced yet (children may not be reified)"
+    else
+      ([ .items[] |
+        select(
+          ((.status.sync.status == "Synced")    and (.status.health.status | IN("Healthy","Progressing","Degraded"))) or
+          ((.status.sync.status == "OutOfSync") and (.status.health.status == "Healthy"))
+        | not)
+        | (.metadata.name + "[" + (.status.sync.status // "?") + "/" + (.status.health.status // "?") + "]")
+      ] | join(", "))
+    end'
+  # Initialize `bad` with a sentinel so the failure diagnostic below reads
+  # sensibly even in the pathological case where the while guard is false on
+  # the first check (SECONDS already >= argocd_deadline because kubectl-apply
+  # + root-grace consumed the whole shared budget). Loop iterations overwrite
+  # this with real values.
+  local bad="not sampled (sync-wait loop never ran — budget spent by upstream steps)"
+  local sync_remaining sync_nap
+  while (( SECONDS < argocd_deadline )); do
+    # Bound each poll by remaining shared budget so a hung apiserver on `get`
+    # cannot outlast the sync window (same discipline as the apply-retry loop
+    # above). Clamp to >= 1 for the `timeout 0 == no timeout` boundary.
+    sync_remaining=$(( argocd_deadline - SECONDS ))
+    (( sync_remaining < 1 )) && sync_remaining=1
+    bad="$(timeout "${sync_remaining}" kubectl -n argocd get applications -o json 2>/dev/null | jq -r "${jq_bad}" || echo "ERR")"
+    if [[ -z "${bad}" ]]; then
+      echo "all Applications in terminal-pass state"
+      echo "::endgroup::"
+      return 0
+    fi
+    echo "waiting for: ${bad}"
+    # Cap the poll interval to remaining budget so `sleep 15` near the
+    # deadline can't overrun it. Positive-only guard so we exit the loop
+    # cleanly when budget hits 0.
+    sync_nap=15
+    sync_remaining=$(( argocd_deadline - SECONDS ))
+    (( sync_nap > sync_remaining )) && sync_nap=${sync_remaining}
+    (( sync_nap > 0 )) && sleep "${sync_nap}"
+  done
+  echo "::error::Argo CD sync did not converge within ${ARGOCD_SYNC_TIMEOUT_SECONDS}s; last bad: ${bad}" >&2
+  # Best-effort failure diagnostic — every call `|| true` so a transient
+  # apiserver error on `get` doesn't skip the `describe` and repo-server
+  # logs that follow (which are what a reviewer actually needs to diagnose
+  # an OCI-pull auth error or a sync-wave block). Matches the KWOK failure
+  # dump semantics.
+  kubectl -n argocd get applications || true
+  kubectl -n argocd describe applications 2>&1 | head -200 >&2 || true
+  kubectl -n argocd logs -l app.kubernetes.io/name=argocd-repo-server --tail=100 2>&1 >&2 || true
+  echo "::endgroup::"
+  exit 1
+}
+
+install_readiness_gate() {
   # Readiness gate: run the deployment validation phase -- the authoritative
   # expected-resources / ClusterPolicy / DRA / nodewright checks the later
   # `--phase all` run gates on -- in a retry loop until it passes
