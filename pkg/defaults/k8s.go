@@ -40,3 +40,13 @@ const (
 	// (discovery + the first batch of GETs) is not immediately throttled.
 	ValidatorClientBurst = 100
 )
+
+// MaxK8sNameLength is the maximum length of a Kubernetes object name built
+// from a run-scoped prefix. 63 characters is the general DNS label ceiling
+// (RFC 1123) that Kubernetes enforces on object names, but the binding
+// constraint here is narrower: Jobs propagate their name into the
+// batch.kubernetes.io/job-name label on every Pod they create, and label
+// values share the same 63-character ceiling. A run-scoped Job name that
+// fits the object-name limit but not the label limit would fail Pod
+// creation, so name helpers must budget against this constant.
+const MaxK8sNameLength = 63

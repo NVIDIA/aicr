@@ -211,7 +211,7 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 
 	cr := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: clusterRoleName,
+			Name: d.clusterRoleName(),
 		},
 		Rules: rules,
 	}
@@ -234,7 +234,7 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: clusterRoleName,
+			Name: d.clusterRoleName(),
 		},
 		Subjects: []rbacv1.Subject{
 			{
@@ -246,7 +246,7 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: rbacAPIGroup,
 			Kind:     "ClusterRole",
-			Name:     clusterRoleName,
+			Name:     d.clusterRoleName(),
 		},
 	}
 
@@ -292,7 +292,7 @@ func (d *Deployer) deleteRoleBinding(ctx context.Context) error {
 // If the ClusterRole doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteClusterRole(ctx context.Context) error {
 	err := d.clientset.RbacV1().ClusterRoles().
-		Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
+		Delete(ctx, d.clusterRoleName(), metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }
 
@@ -300,7 +300,7 @@ func (d *Deployer) deleteClusterRole(ctx context.Context) error {
 // If the ClusterRoleBinding doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteClusterRoleBinding(ctx context.Context) error {
 	err := d.clientset.RbacV1().ClusterRoleBindings().
-		Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
+		Delete(ctx, d.clusterRoleName(), metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }
 

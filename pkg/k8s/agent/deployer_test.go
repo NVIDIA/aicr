@@ -150,7 +150,7 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 
 		cr, err := clientset.RbacV1().ClusterRoles().
-			Get(ctx, "aicr-node-reader", metav1.GetOptions{})
+			Get(ctx, deployer.clusterRoleName(), metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("ClusterRole not found: %v", err)
 		}
@@ -227,7 +227,7 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 			t.Fatalf("failed to create ClusterRole: %v", err)
 		}
 		cr, err := discoverClientset.RbacV1().ClusterRoles().
-			Get(ctx, "aicr-node-reader", metav1.GetOptions{})
+			Get(ctx, d.clusterRoleName(), metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("ClusterRole not found: %v", err)
 		}
@@ -283,7 +283,7 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 
 		crb, err := clientset.RbacV1().ClusterRoleBindings().
-			Get(ctx, "aicr-node-reader", metav1.GetOptions{})
+			Get(ctx, deployer.clusterRoleName(), metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("ClusterRoleBinding not found: %v", err)
 		}
@@ -294,8 +294,8 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 
 		// Verify roleRef
-		if crb.RoleRef.Name != "aicr-node-reader" {
-			t.Errorf("expected roleRef name 'aicr-node-reader', got %q", crb.RoleRef.Name)
+		if crb.RoleRef.Name != deployer.clusterRoleName() {
+			t.Errorf("expected roleRef name %q, got %q", deployer.clusterRoleName(), crb.RoleRef.Name)
 		}
 	})
 }
@@ -562,14 +562,14 @@ func TestDeployer_Deploy(t *testing.T) {
 
 	// Verify ClusterRole
 	_, err = clientset.RbacV1().ClusterRoles().
-		Get(ctx, "aicr-node-reader", metav1.GetOptions{})
+		Get(ctx, deployer.clusterRoleName(), metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("ClusterRole not created: %v", err)
 	}
 
 	// Verify ClusterRoleBinding
 	_, err = clientset.RbacV1().ClusterRoleBindings().
-		Get(ctx, "aicr-node-reader", metav1.GetOptions{})
+		Get(ctx, deployer.clusterRoleName(), metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("ClusterRoleBinding not created: %v", err)
 	}
@@ -702,13 +702,13 @@ func TestDeployer_Cleanup_AttemptsAllDeletions(t *testing.T) {
 	}
 
 	_, err = clientset.RbacV1().ClusterRoles().
-		Get(ctx, clusterRoleName, metav1.GetOptions{})
+		Get(ctx, deployer.clusterRoleName(), metav1.GetOptions{})
 	if err == nil {
 		t.Error("ClusterRole should be deleted")
 	}
 
 	_, err = clientset.RbacV1().ClusterRoleBindings().
-		Get(ctx, clusterRoleName, metav1.GetOptions{})
+		Get(ctx, deployer.clusterRoleName(), metav1.GetOptions{})
 	if err == nil {
 		t.Error("ClusterRoleBinding should be deleted")
 	}

@@ -116,8 +116,8 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 		{fmt.Sprintf("ServiceAccount %q", d.config.ServiceAccountName), d.deleteServiceAccount},
 		{fmt.Sprintf("Role %q", d.config.ServiceAccountName), d.deleteRole},
 		{fmt.Sprintf("RoleBinding %q", d.config.ServiceAccountName), d.deleteRoleBinding},
-		{fmt.Sprintf("ClusterRole %q", clusterRoleName), d.deleteClusterRole},
-		{fmt.Sprintf("ClusterRoleBinding %q", clusterRoleName), d.deleteClusterRoleBinding},
+		{fmt.Sprintf("ClusterRole %q", d.clusterRoleName()), d.deleteClusterRole},
+		{fmt.Sprintf("ClusterRoleBinding %q", d.clusterRoleName()), d.deleteClusterRoleBinding},
 	}
 
 	// sync.WaitGroup (not errgroup) is intentional here: cleanup must

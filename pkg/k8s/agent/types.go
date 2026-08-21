@@ -19,9 +19,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// clusterRoleName is the name used for the ClusterRole and ClusterRoleBinding.
-const clusterRoleName = "aicr-node-reader"
-
 // Standard Kubernetes recommended labels applied to all agent-managed
 // resources. Centralized here so selectors and resource templates stay in sync.
 const (
@@ -36,17 +33,28 @@ type Config struct {
 	Namespace          string
 	ServiceAccountName string
 	JobName            string
-	Image              string
-	ImagePullSecrets   []string
-	NodeSelector       map[string]string
-	Tolerations        []corev1.Toleration
-	Output             string
-	Debug              bool
-	Privileged         bool   // If true, run with privileged security context (required for GPU/SystemD collectors)
-	RequireGPU         bool   // If true, request nvidia.com/gpu resource (required for CDI environments)
-	RuntimeClassName   string // If set, use this runtimeClassName on the pod and inject NVIDIA_VISIBLE_DEVICES=all (alternative to RequireGPU)
-	MaxNodesPerEntry   int    // Max node names per topology entry (0 = unlimited)
-	OS                 string // Recipe OS criteria value. When set to oskind.Talos, systemd hostPath mounts are skipped and the in-pod agent uses the Talos service backend.
+
+	// RunID scopes every resource this Deployer creates to a single run,
+	// so concurrent snapshot-agent runs never collide on a shared resource
+	// name. Callers generate it with runid.Generate() before deploying.
+	RunID string
+
+	// NameBase prefixes generated resource names only — it has no effect
+	// when ServiceAccountName or JobName is already set. Defaults to
+	// "aicr" when empty.
+	NameBase string
+
+	Image            string
+	ImagePullSecrets []string
+	NodeSelector     map[string]string
+	Tolerations      []corev1.Toleration
+	Output           string
+	Debug            bool
+	Privileged       bool   // If true, run with privileged security context (required for GPU/SystemD collectors)
+	RequireGPU       bool   // If true, request nvidia.com/gpu resource (required for CDI environments)
+	RuntimeClassName string // If set, use this runtimeClassName on the pod and inject NVIDIA_VISIBLE_DEVICES=all (alternative to RequireGPU)
+	MaxNodesPerEntry int    // Max node names per topology entry (0 = unlimited)
+	OS               string // Recipe OS criteria value. When set to oskind.Talos, systemd hostPath mounts are skipped and the in-pod agent uses the Talos service backend.
 
 	// ClusterConfigPath, when set, forwards to the in-pod network
 	// collector via AICR_CLUSTER_CONFIG_PATH so it ingests an existing
