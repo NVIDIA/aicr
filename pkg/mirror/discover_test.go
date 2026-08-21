@@ -528,59 +528,134 @@ func TestDiscover_SetEnabledOverride(t *testing.T) {
 	}
 }
 
-func TestDiscover_ProfileLockLeavesUnownedHydrationBestEffort(t *testing.T) {
-	result := &recipe.RecipeResult{
-		Kind:       recipe.RecipeResultKind,
-		APIVersion: recipe.RecipeProfileAPIVersion,
-		ComponentRefs: []recipe.ComponentRef{
-			{
-				Name:    "gpu-operator",
-				Type:    recipe.ComponentTypeHelm,
-				Source:  "https://helm.ngc.nvidia.com/nvidia",
-				Chart:   "gpu-operator",
-				Version: "v25.3.0",
-				Overrides: map[string]any{
-					"driver": map[string]any{"enabled": false},
+// TestDiscover_UnloadableValuesFailsClosed covers #2261.
+//
+// A mirror list is a completeness claim: it is the full set of images an
+// operator relocates into a disconnected registry. A component that cannot
+// hydrate its values renders nothing and therefore contributes zero images, so
+// returning that list successfully means the relocation "succeeds", the bundle
+// deploys, and the component then fails to pull in the air-gapped environment
+// where diagnosis is hardest.
+//
+// A values-load failure is deterministic and structural (a missing or
+// unreadable values file, or a provider-binding problem), not transient, so it
+// is the fail-closed direction per the repo's convention. This test asserts
+// Discover errors rather than returning a silently-incomplete list, and covers
+// both the profile-owned path (prepareMirrorCandidate, which already failed
+// closed) and the unowned path (which did not, and was the bug).
+//
+// The predecessor of this test asserted the opposite for the unowned case: that
+// hydration stayed "best effort" and surfaced only a warning. That expectation
+// was the defect #2261 describes, so the assertion is inverted here rather than
+// removed, and the profile-lock case it also covered is retained below.
+func TestDiscover_UnloadableValuesFailsClosed(t *testing.T) {
+	const badValues = "components/does-not-exist/values.yaml"
+
+	// newRecipe builds a two-component recipe where gpu-operator is
+	// profile-owned and network-operator is not, so a single shape exercises
+	// both hydration paths depending on which values file is broken.
+	newRecipe := func(gpuValues, networkValues string) *recipe.RecipeResult {
+		result := &recipe.RecipeResult{
+			Kind:       recipe.RecipeResultKind,
+			APIVersion: recipe.RecipeProfileAPIVersion,
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name:       "gpu-operator",
+					Type:       recipe.ComponentTypeHelm,
+					Source:     "https://helm.ngc.nvidia.com/nvidia",
+					Chart:      "gpu-operator",
+					Version:    "v25.3.0",
+					ValuesFile: gpuValues,
+					Overrides: map[string]any{
+						"driver": map[string]any{"enabled": false},
+					},
+				},
+				{
+					Name:       "network-operator",
+					Type:       recipe.ComponentTypeHelm,
+					Source:     "https://helm.ngc.nvidia.com/nvidia",
+					Chart:      "network-operator",
+					Version:    "v25.1.0",
+					ValuesFile: networkValues,
 				},
 			},
-			{
-				Name:       "network-operator",
-				Type:       recipe.ComponentTypeHelm,
-				Source:     "https://helm.ngc.nvidia.com/nvidia",
-				Chart:      "network-operator",
-				Version:    "v25.1.0",
-				ValuesFile: "components/does-not-exist/values.yaml",
+		}
+		result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+			Name:  "gpuStack",
+			Value: "driver-installed",
+			OwnedPaths: map[string][]string{
+				"gpu-operator": {"driver.enabled", "enabled"},
 			},
-		},
-	}
-	result.Metadata.SelectedProfile = &recipe.SelectedProfile{
-		Name:  "gpuStack",
-		Value: "driver-installed",
-		OwnedPaths: map[string][]string{
-			"gpu-operator": {"driver.enabled", "enabled"},
-		},
-	}
-	renderer := &helmtest.MockRenderer{
-		Rendered: map[string][]byte{"gpu-operator": {}},
+		}
+		return result
 	}
 
-	list, err := NewLister(WithHelmRenderer(renderer)).Discover(t.Context(), result)
-	if err != nil {
-		t.Fatalf("Discover() error = %v", err)
+	tests := []struct {
+		name           string
+		gpuValues      string
+		networkValues  string
+		wantErr        bool
+		wantComponents int
+	}{
+		{
+			name:          "unowned component values file missing",
+			networkValues: badValues,
+			wantErr:       true,
+		},
+		{
+			name:      "profile-owned component values file missing",
+			gpuValues: badValues,
+			wantErr:   true,
+		},
+		{
+			name:           "both components hydrate",
+			wantErr:        false,
+			wantComponents: 2,
+		},
 	}
-	if len(list.Components) != 2 {
-		t.Fatalf("components = %d, want 2", len(list.Components))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			renderer := &helmtest.MockRenderer{
+				Rendered: map[string][]byte{
+					"gpu-operator":     {},
+					"network-operator": {},
+				},
+			}
+
+			list, err := NewLister(WithHelmRenderer(renderer)).
+				Discover(t.Context(), newRecipe(tt.gpuValues, tt.networkValues))
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Discover() error = nil, want error; "+
+						"a values-load failure must not yield a successful list: %+v", list)
+				}
+				// The list must not be returned alongside the error. A
+				// non-nil list here is what would let a caller ignore err
+				// and relocate an incomplete image set.
+				if list != nil {
+					t.Errorf("Discover() list = %+v, want nil on error", list)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Discover() error = %v, want nil", err)
+			}
+			if len(list.Components) != tt.wantComponents {
+				t.Fatalf("components = %d, want %d", len(list.Components), tt.wantComponents)
+			}
+			// The control case must be a genuine success, not a success
+			// carrying the warning the old behavior produced.
+			for _, ci := range list.Components {
+				if len(ci.Warnings) != 0 {
+					t.Errorf("component %q warnings = %v, want none",
+						ci.Component, ci.Warnings)
+				}
+			}
+		})
 	}
-	for _, componentImages := range list.Components {
-		if componentImages.Component != "network-operator" {
-			continue
-		}
-		if len(componentImages.Warnings) == 0 {
-			t.Fatal("network-operator hydration failure did not produce a warning")
-		}
-		return
-	}
-	t.Fatal("network-operator missing from mirror result")
 }
 
 func TestKubeVersionFromConstraints(t *testing.T) {

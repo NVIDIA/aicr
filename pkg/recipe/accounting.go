@@ -70,6 +70,16 @@ func ParseAccountingMode(value string) (AccountingMode, error) {
 // resolved recipe without participating in catalog matching.
 type RecipeConfiguration struct {
 	Slurm *SlurmConfiguration `json:"slurm,omitempty" yaml:"slurm,omitempty"`
+
+	// RuntimeInventory records the generation-time selection for the runtime
+	// AI inventory component. See runtimeinventory.go.
+	//
+	// This is the second entry here, and the pattern is one bespoke selection
+	// per optional component. That is deliberate for two (ADR-019 asks for
+	// this component specifically, and a generic per-component disable needs
+	// a policy for which components may be declined at all). If a third
+	// arrives, revisit rather than extending by reflex.
+	RuntimeInventory *RuntimeInventoryConfiguration `json:"runtimeInventory,omitempty" yaml:"runtimeInventory,omitempty"`
 }
 
 // SlurmConfiguration records Slurm-specific desired state.
@@ -86,7 +96,8 @@ type SlurmAccountingConfiguration struct {
 type BuildOption func(*buildConfig)
 
 type buildConfig struct {
-	accountingMode *AccountingMode
+	accountingMode       *AccountingMode
+	runtimeInventoryMode *RuntimeInventoryMode
 }
 
 // WithAccountingMode selects the Slurm accounting ownership mode for one
@@ -196,7 +207,23 @@ func validateAccountingProfileOwnership(result *RecipeResult, mode AccountingMod
 }
 
 func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
-	if result == nil || cfg == nil || cfg.accountingMode == nil {
+	if result == nil || cfg == nil {
+		return nil
+	}
+	selected := false
+	if cfg.runtimeInventoryMode != nil {
+		if err := applyRuntimeInventoryMode(result, *cfg.runtimeInventoryMode); err != nil {
+			return err
+		}
+		selected = true
+	}
+	if cfg.accountingMode == nil {
+		// Deployment order still has to be refreshed: a selection that ran
+		// above may have disabled a component, and the accounting path's own
+		// recompute is not reached on this branch.
+		if selected {
+			return recomputeDeploymentOrder(result)
+		}
 		return nil
 	}
 
@@ -204,10 +231,16 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 	if err := validateAccountingProfileOwnership(result, mode); err != nil {
 		return err
 	}
-	result.Configuration = &RecipeConfiguration{
-		Slurm: &SlurmConfiguration{
-			Accounting: &SlurmAccountingConfiguration{Mode: mode},
-		},
+	// Update in place rather than assigning a fresh RecipeConfiguration:
+	// another selection may already have recorded its own section, and
+	// replacing the struct would silently discard it while leaving that
+	// selection's component overrides applied. A recipe that acts on a
+	// decision it no longer records is worse than one that never made it.
+	if result.Configuration == nil {
+		result.Configuration = &RecipeConfiguration{}
+	}
+	result.Configuration.Slurm = &SlurmConfiguration{
+		Accounting: &SlurmAccountingConfiguration{Mode: mode},
 	}
 	result.APIVersion = ConfiguredRecipeResultAPIVersion
 
@@ -232,11 +265,23 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 			return err
 		}
 	}
-	accountingSpec := &RecipeMetadataSpec{ComponentRefs: result.ComponentRefs}
-	deploymentOrder, err := accountingSpec.TopologicalSort()
+	return recomputeDeploymentOrder(result)
+}
+
+// recomputeDeploymentOrder refreshes DeploymentOrder after a selection has
+// changed which components are enabled.
+//
+// TopologicalSort emits enabled components only, so a selection that disables
+// one without recomputing leaves the disabled component listed in the emitted
+// recipe's deploymentOrder. The bundler re-filters by IsEnabled, so nothing
+// mis-deploys, but the artifact contradicts itself and `aicr query --selector
+// deploymentOrder` reports a component the same document marks disabled.
+func recomputeDeploymentOrder(result *RecipeResult) error {
+	spec := &RecipeMetadataSpec{ComponentRefs: result.ComponentRefs}
+	deploymentOrder, err := spec.TopologicalSort()
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
-			"failed to recompute deployment order after applying Slurm accounting mode")
+			"failed to recompute deployment order after applying a build selection")
 	}
 	result.DeploymentOrder = deploymentOrder
 	return nil

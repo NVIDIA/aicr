@@ -516,11 +516,18 @@ Bundle artifacts + recipe (deploymentOrder, componentRefs)
       argocd-helm    — Helm-chart app-of-apps (values overridable at install)
       flux           — Flux HelmRelease manifests
       helmfile       — helmfile.yaml release graph
-  → numbered NNN-<component>/ output + closed-world root checksums.txt
-
-Each component folder holds install.sh, values.yaml, and cluster-values.yaml
-(there is no scripts/ subdirectory).
+  → closed-world root checksums.txt
+  → layout:
+      helm / argocd / argocd-helm / helmfile — numbered NNN-<component>/
+        (via pkg/bundler/deployer/localformat)
+      flux — unnumbered <component>/ dirs with HelmRelease CRs (no NNN- prefix)
 ```
+
+Component file contents are deployer-specific. In the Helm upstream-chart
+layout, each component folder holds `install.sh`, `values.yaml`, and
+`cluster-values.yaml` (there is no `scripts/` subdirectory). Argo CD folders
+instead carry `application.yaml` (and typically `values.yaml`); see the
+deployer sections below.
 
 ### Deployment Order Flow
 
@@ -539,9 +546,9 @@ Ordering follows each component's declared `dependencyRefs`, not its linear posi
 │         │                                               │
 │         ▼                                               │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │ orderComponentsByDeployment()                    │   │
-│  │   Sorts components based on deploymentOrder      │   │
-│  │   Returns: []orderedComponent{Name, Order}       │   │
+│  │ SortComponentRefsByDeploymentOrder()             │   │
+│  │   (pkg/bundler/deployer/helpers.go)              │   │
+│  │   Sorts ComponentRefs by recipe deploymentOrder  │   │
 │  └───────────────────────┬──────────────────────────┘   │
 │                          │                              │
 │         ┌────────────────┴────────────────┐             │
@@ -561,7 +568,7 @@ Ordering follows each component's declared `dependencyRefs`, not its linear posi
 └─────────────────────────────────────────────────────────┘
 ```
 
-The `orderComponentsByDeployment()` sort shown above produces the flat order used for folder numbering and the helm `deploy.sh`. The Argo CD sync-waves are **not** taken from that linear order: they are assigned by dependency tier (`wave = tier*4 + phase`), so components that share a tier share a wave and sync together. The `1, 5, 9` values above reflect the specific `cert-manager → gpu-operator → network-operator` dependency chain (one component per tier); a recipe with independent components would place them at the same wave. See [Deployment ordering](../contributor/component.md#deployment-ordering) for the full model.
+`SortComponentRefsByDeploymentOrder()` produces the flat order used for `NNN-<name>/` folder numbering (helm / argocd / argocd-helm / helmfile via localformat) and the helm `deploy.sh`. The Argo CD sync-waves are **not** taken from that linear order: they are assigned by dependency tier (`wave = tier*4 + phase`), so components that share a tier share a wave and sync together. The `1, 5, 9` values above reflect the specific `cert-manager → gpu-operator → network-operator` dependency chain (one component per tier); a recipe with independent components would place them at the same wave. See [Deployment ordering](../contributor/component.md#deployment-ordering) for the full model.
 
 ### Deployer-Specific Output
 
@@ -656,7 +663,7 @@ spec:
 │     └─ Extract componentRefs + deploymentOrder               │
 │                                                              │
 │  2. Order components                                         │
-│     └─ orderComponentsByDeployment()                         │
+│     └─ SortComponentRefsByDeploymentOrder()                  │
 │                                                              │
 │  3. Bundle (single DefaultBundler, all components)           │
 │     ├─ cert-manager   → values.yaml, manifests/              │
@@ -664,6 +671,7 @@ spec:
 │     └─ network-operator → values.yaml, manifests/            │
 │                                                              │
 │  4. Run deployer (argocd) → numbered NNN-<name>/ folders     │
+│     (argocd shares localformat with helm; flux does not)     │
 │     ├─ 001-cert-manager/application.yaml (wave: 1)          │
 │     ├─ 002-gpu-operator/application.yaml (wave: 5)          │
 │     └─ 003-network-operator/application.yaml (wave: 9)      │

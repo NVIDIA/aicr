@@ -668,6 +668,43 @@ func TestCompare(t *testing.T) {
 			other:    Version{Major: 1, Minor: 2, Patch: 3, Precision: 3},
 			expected: 1,
 		},
+		// GKE build suffix tie-break cases
+		{
+			name:     "gke same build → 0",
+			version:  Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-gke.1318000"},
+			other:    Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-gke.1318000"},
+			expected: 0,
+		},
+		{
+			name:     "actual has higher gke build → 1",
+			version:  Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-gke.2000000"},
+			other:    Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-gke.1318000"},
+			expected: 1,
+		},
+		{
+			name:     "actual has lower gke build → -1",
+			version:  Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-gke.1000000"},
+			other:    Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-gke.1318000"},
+			expected: -1,
+		},
+		{
+			name:     "only constraint has gke suffix → actual fails floor → -1",
+			version:  Version{Major: 1, Minor: 34, Patch: 3, Precision: 3},
+			other:    Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-gke.1318000"},
+			expected: -1,
+		},
+		{
+			name:     "only actual has gke suffix → passes bare constraint → 1",
+			version:  Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-gke.1318000"},
+			other:    Version{Major: 1, Minor: 34, Patch: 3, Precision: 3},
+			expected: 1,
+		},
+		{
+			name:     "EKS non-numeric extras both sides → 0",
+			version:  Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-eks-3025e55"},
+			other:    Version{Major: 1, Minor: 34, Patch: 3, Precision: 3, Extras: "-eks-abc"},
+			expected: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -831,6 +868,63 @@ func ExampleNewVersion() {
 	// Output:
 	// 1.2.3
 	// Major: 1, Minor: 2, Patch: 3, Precision: 3
+}
+
+func TestExtractGKEBuild(t *testing.T) {
+	tests := []struct {
+		name      string
+		extras    string
+		wantBuild int64
+		wantIsGKE bool
+	}{
+		{name: "standard GKE suffix", extras: "-gke.1318000", wantBuild: 1318000, wantIsGKE: true},
+		{name: "zero build number", extras: "-gke.0", wantBuild: 0, wantIsGKE: true},
+		{name: "EKS non-GKE suffix", extras: "-eks-3025e55", wantBuild: 0, wantIsGKE: false},
+		{name: "empty extras", extras: "", wantBuild: 0, wantIsGKE: false},
+		{name: "GKE prefix with empty number", extras: "-gke.", wantBuild: 0, wantIsGKE: false},
+		{name: "GKE prefix with non-numeric suffix", extras: "-gke.abc", wantBuild: 0, wantIsGKE: false},
+		{name: "hotfix suffix", extras: "-hotfix.20240322", wantBuild: 0, wantIsGKE: false},
+		{name: "aws kernel suffix", extras: "-1028-aws", wantBuild: 0, wantIsGKE: false},
+		{name: "negative build number rejected", extras: "-gke.-1", wantBuild: 0, wantIsGKE: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			build, isGKE := ExtractGKEBuild(tt.extras)
+			if build != tt.wantBuild {
+				t.Errorf("ExtractGKEBuild(%q) build = %d, want %d", tt.extras, build, tt.wantBuild)
+			}
+			if isGKE != tt.wantIsGKE {
+				t.Errorf("ExtractGKEBuild(%q) isGKE = %v, want %v", tt.extras, isGKE, tt.wantIsGKE)
+			}
+		})
+	}
+}
+
+// TestHasRawGKESuffix verifies that HasRawGKESuffix returns true whenever the
+// -gke. prefix is present, regardless of build-number validity.
+func TestHasRawGKESuffix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		extras string
+		want   bool
+	}{
+		{"-gke.1318000", true},  // valid
+		{"-gke.-1", true},       // invalid build but prefix present
+		{"-gke.abc", true},      // invalid build but prefix present
+		{"-gke.", true},         // empty build but prefix present
+		{"-eks-3025e55", false}, // non-GKE
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.extras, func(t *testing.T) {
+			t.Parallel()
+			if got := HasRawGKESuffix(tt.extras); got != tt.want {
+				t.Errorf("HasRawGKESuffix(%q) = %v, want %v", tt.extras, got, tt.want)
+			}
+		})
+	}
 }
 
 // ExampleVersion_Compare demonstrates sorting versions

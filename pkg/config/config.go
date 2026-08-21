@@ -127,6 +127,15 @@ type RecipeSpec struct {
 // participate in recipe catalog matching.
 type RecipeConfigurationSpec struct {
 	Slurm *SlurmConfigurationSpec `yaml:"slurm,omitempty" json:"slurm,omitempty"`
+
+	// RuntimeInventory selects whether the runtime AI inventory component
+	// (k8s-aibom) is installed. Mirrors the --runtime-inventory flag.
+	RuntimeInventory *RuntimeInventorySpec `yaml:"runtimeInventory,omitempty" json:"runtimeInventory,omitempty"`
+}
+
+// RuntimeInventorySpec contains the runtime AI inventory selection.
+type RuntimeInventorySpec struct {
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 // SlurmConfigurationSpec contains Slurm-specific desired-state inputs.
