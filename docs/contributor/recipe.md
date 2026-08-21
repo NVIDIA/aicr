@@ -496,7 +496,7 @@ field before upgrading.
 sufficient. It is satisfied when `service` and `accelerator` are each honored
 by *some* overlay independently, even when no single overlay carries the
 combination and the combination's content lives only on an OS-gated leaf. The
-caller then receives a recipe that silently never applied it.
+caller then receives a recipe that silently omits that OS-gated content.
 `verifyCriteriaCoverage` therefore also enforces a second condition
 (issue #1782): resolution fails when **no applied overlay jointly carries
 every stated dimension** *and* stating a strict dimension would reach an

@@ -16,9 +16,13 @@ package recipe
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
+
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // retiredOSGuard is the deleted requireOSIfNeeded, preserved verbatim as a
@@ -160,4 +164,89 @@ func TestJointSufficiencySubsumesRetiredGuard(t *testing.T) {
 		t.Fatal("generated no catalog where the retired guard fires; the test proves nothing")
 	}
 	t.Logf("subsumption held: retired guard fired on %d (catalog, query) pairs, all still rejected", guardFired)
+}
+
+// TestStrictGapErrorRendering pins the strict-gap message and context shape
+// directly, independent of catalog shape.
+//
+// Both are otherwise under-exercised. The embedded catalog produces zero
+// joint-sufficiency failures — completeness always fires first — so
+// testdata/coverage_golden.yaml has no strictDimensions entries and the
+// golden helper's extraction branch never runs against real data. And the
+// multi-value join executes only when one dimension has several reaching
+// values, which the single-strict-dimension catalog cannot produce.
+func TestStrictGapErrorRendering(t *testing.T) {
+	criteria := &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100}
+
+	tests := []struct {
+		name         string
+		gaps         []strictGap
+		excluded     []ExcludedOverlay
+		wantContains []string
+		wantExcluded bool
+	}{
+		{
+			name:         "single value",
+			gaps:         []strictGap{{dimension: string(FieldOS), validValues: []string{"ubuntu"}}},
+			wantContains: []string{"specify os (valid: ubuntu)"},
+		},
+		{
+			name:         "multiple values join with a comma",
+			gaps:         []strictGap{{dimension: string(FieldOS), validValues: []string{"cos", "ubuntu"}}},
+			wantContains: []string{"specify os (valid: cos, ubuntu)"},
+		},
+		{
+			name: "multiple gaps join with a comma",
+			gaps: []strictGap{
+				{dimension: string(FieldOS), validValues: []string{"ubuntu"}},
+				{dimension: string(FieldIntent), validValues: []string{"training"}},
+			},
+			wantContains: []string{"os (valid: ubuntu)", "intent (valid: training)"},
+		},
+		{
+			// On the evaluator path a covering overlay may have been removed by
+			// a failing constraint. The demand still stands, but the caller
+			// needs the exclusion context or they will state the os and only
+			// then meet the real failure.
+			name:         "constraint exclusions are attached",
+			gaps:         []strictGap{{dimension: string(FieldOS), validValues: []string{"ubuntu"}}},
+			excluded:     []ExcludedOverlay{{Name: "h100-eks-ubuntu-training"}},
+			wantContains: []string{"specify os (valid: ubuntu)"},
+			wantExcluded: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := strictGapError(criteria, tt.gaps, tt.excluded, nil)
+			for _, want := range tt.wantContains {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("message = %q, want it to contain %q", err.Error(), want)
+				}
+			}
+
+			var se *aicrerrors.StructuredError
+			if !stderrors.As(err, &se) {
+				t.Fatalf("expected StructuredError, got %v", err)
+			}
+			if se.Context["uncovered"] != nil {
+				t.Error("strict-gap failure must not populate `uncovered`; relaxation would clear it")
+			}
+			if (se.Context["excludedOverlays"] != nil) != tt.wantExcluded {
+				t.Errorf("excludedOverlays present = %v, want %v",
+					se.Context["excludedOverlays"] != nil, tt.wantExcluded)
+			}
+
+			// The golden matrix classifies via this extraction, so exercise it
+			// here rather than relying on catalog shape to reach it.
+			got := strictDimensionsFromError(err)
+			want := make([]string, 0, len(tt.gaps))
+			for _, g := range tt.gaps {
+				want = append(want, g.dimension)
+			}
+			if !equalStrings(got, want) {
+				t.Errorf("strictDimensionsFromError = %v, want %v", got, want)
+			}
+		})
+	}
 }

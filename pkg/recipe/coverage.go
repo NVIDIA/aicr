@@ -65,12 +65,20 @@ var coverageDimensions = []coverageDimension{
 	// hand back. Resolving one anyway would emit a recipe whose driver story
 	// is wrong rather than merely generic.
 	//
-	// That is a property of installing NVIDIA drivers on Linux, not of this
-	// catalog's shape, so it holds for external --data catalogs too. The
-	// assumption that would break it is a cluster whose node pools run
-	// different operating systems; AICR models that as separate recipes
-	// today (see ADR-018, which partitions a resolved recipe by component
-	// class and explicitly does not change resolution).
+	// The driver argument is a property of installing NVIDIA drivers on Linux
+	// rather than of this catalog's shape, so it carries to external --data
+	// catalogs. Note what that does and does not claim: it says os is the
+	// right dimension to demand, NOT that every catalog shape is served well
+	// by demanding it. A split-coverage external catalog (service overlay,
+	// os-agnostic accelerator overlay, one os-gated tuned leaf) is rejected
+	// here asking for an os, because no single overlay carries the stated
+	// combination. That is deliberate and the escape hatch is explicit:
+	// declare an os-agnostic overlay carrying the combination, which is the
+	// same assertion eks.yaml makes.
+	//
+	// The assumption that would break the driver argument itself is a cluster
+	// whose node pools run different operating systems. AICR has no model for
+	// that; it is expressed as separate recipes.
 	{name: string(FieldOS), value: func(c *Criteria) string { return string(c.OS) }, strict: true},
 	{name: string(FieldPlatform), value: func(c *Criteria) string { return string(c.Platform) }},
 }
@@ -258,7 +266,7 @@ func (s *MetadataStore) verifyCriteriaCoverage(criteria *Criteria, appliedOverla
 		// overlay covers the combination. Joint sufficiency catches that, and
 		// absorbs the retired requireOSIfNeeded guard (issue #1782).
 		if gaps := s.strictDimensionGaps(criteria, appliedOverlays); len(gaps) > 0 {
-			return strictGapError(criteria, gaps)
+			return strictGapError(criteria, gaps, excluded, warnings)
 		}
 		return nil
 	}
@@ -562,7 +570,16 @@ func (s *MetadataStore) inheritanceChainNames(overlay *RecipeMetadata) []string 
 // context uses its own key rather than `uncovered`: pkg/client/v1 relaxation
 // CLEARS uncovered dimensions and retries, which here would discard the check
 // and return the partial recipe that issue #1542 fixed.
-func strictGapError(criteria *Criteria, gaps []strictGap) error {
+//
+// excluded/warnings are attached exactly as the completeness path attaches
+// them. reachesUnappliedOverlay probes through the UNFILTERED overlay set, so
+// on the evaluator path an overlay that would cover the combination but was
+// removed by a failing constraint still counts as reachable. Without this
+// context the caller is told to state an os, supplies it, and only then meets
+// the real constraint failure. The demand itself is still correct — the
+// combination genuinely is not covered — so this is a diagnosis aid, not a
+// gate: the error stands either way.
+func strictGapError(criteria *Criteria, gaps []strictGap, excluded []ExcludedOverlay, warnings []ConstraintWarning) error {
 	clauses := make([]string, 0, len(gaps))
 	entries := make([]map[string]any, 0, len(gaps))
 	for _, gap := range gaps {
@@ -573,8 +590,15 @@ func strictGapError(criteria *Criteria, gaps []strictGap) error {
 			"validValues": gap.validValues,
 		})
 	}
+	ctx := map[string]any{"strictDimensions": entries}
+	if len(excluded) > 0 {
+		ctx["excludedOverlays"] = excluded
+	}
+	if len(warnings) > 0 {
+		ctx["constraintWarnings"] = warnings
+	}
 	return aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 		fmt.Sprintf("%s has no recipe covering that combination; specify %s",
 			criteria.String(), strings.Join(clauses, ", ")),
-		map[string]any{"strictDimensions": entries})
+		ctx)
 }
