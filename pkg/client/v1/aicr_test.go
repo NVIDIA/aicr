@@ -178,22 +178,31 @@ func TestNewClientRejectsMissingFilesystemDir(t *testing.T) {
 func TestNewClientRejectsInvalidOCISourceConfiguration(t *testing.T) {
 	t.Parallel()
 
+	digestSelector := "sha256:" + strings.Repeat("a", 64)
 	tests := []struct {
 		name       string
 		repository string
 		selector   string
+		tempDir    string
+		setTempDir bool
 	}{
 		{name: "empty repository", selector: "v1"},
 		{name: "tag selector", repository: "ghcr.io/nvidia/aicr-recipes", selector: "v1"},
 		{name: "invalid digest", repository: "ghcr.io/nvidia/aicr-recipes", selector: "sha256:short"},
-		{name: "ambiguous repository tag", repository: "ghcr.io/nvidia/aicr-recipes:v1", selector: "sha256:" + strings.Repeat("a", 64)},
+		{name: "ambiguous repository tag", repository: "ghcr.io/nvidia/aicr-recipes:v1", selector: digestSelector},
+		{name: "empty temp directory", repository: "ghcr.io/nvidia/aicr-recipes", selector: digestSelector, setTempDir: true},
+		{name: "temp directory whitespace", repository: "ghcr.io/nvidia/aicr-recipes", selector: digestSelector, tempDir: " /tmp", setTempDir: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := aicr.NewClient(
+			opts := []aicr.Option{
 				aicr.WithRecipeSource(aicr.OCISource(tt.repository, tt.selector)),
-			)
+			}
+			if tt.setTempDir {
+				opts = append(opts, aicr.WithOCISourceTempDir(tt.tempDir))
+			}
+			_, err := aicr.NewClient(opts...)
 			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("NewClient() error = %v, want ErrCodeInvalidRequest", err)
 			}

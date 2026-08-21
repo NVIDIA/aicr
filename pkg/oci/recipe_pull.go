@@ -25,6 +25,7 @@ import (
 	stderrors "errors"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
@@ -67,6 +68,25 @@ type RecipePullOptions struct {
 	Repository string
 	Selector   string
 	TempDir    string
+}
+
+type recipePullValidation struct {
+	normalized     string
+	registry       string
+	repository     string
+	selectorDigest digest.Digest
+}
+
+// ValidateRecipePullOptions performs the I/O-free structural validation used
+// before staging and reports whether Selector is an immutable sha256 digest.
+// An empty TempDir selects os.TempDir; a nonempty value is syntax-checked here,
+// while StageRecipeArtifact verifies that it can create the private child.
+func ValidateRecipePullOptions(opts RecipePullOptions) (bool, error) {
+	validated, err := validateRecipePullOptions(opts)
+	if err != nil {
+		return false, err
+	}
+	return validated.selectorDigest != "", nil
 }
 
 // StagedRecipeArtifact owns the private OCI content and, after an explicit
@@ -351,7 +371,7 @@ func stageRecipeArtifactWithDependencies(
 	deps recipePullDependencies,
 ) (_ *StagedRecipeArtifact, retErr error) {
 
-	normalized, registry, repository, digestSelector, err := validateRecipePullOptions(opts)
+	validated, err := validateRecipePullOptions(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -380,7 +400,7 @@ func stageRecipeArtifactWithDependencies(
 		return nil, apperrors.PropagateOrWrap(err, apperrors.ErrCodeInternal,
 			"failed to create private OCI recipe content store")
 	}
-	repo, err := deps.newRepository(ctx, normalized)
+	repo, err := deps.newRepository(ctx, validated.normalized)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +412,7 @@ func stageRecipeArtifactWithDependencies(
 	}()
 
 	descriptor, manifest, err := pullRecipeGraphWithRetry(
-		ctx, repo, store, opts.Selector, digestSelector, deps)
+		ctx, repo, store, opts.Selector, validated.selectorDigest, deps)
 	if err != nil {
 		return nil, err
 	}
@@ -410,10 +430,10 @@ func stageRecipeArtifactWithDependencies(
 		remote:       repo,
 		descriptor:   immutableDescriptor(descriptor),
 		manifest:     cloneRecipeManifest(manifest),
-		selectorHash: digestSelector,
-		reference:    normalized + "@" + descriptor.Digest.String(),
-		registry:     registry,
-		repository:   repository,
+		selectorHash: validated.selectorDigest,
+		reference:    validated.normalized + "@" + descriptor.Digest.String(),
+		registry:     validated.registry,
+		repository:   validated.repository,
 		extract:      deps.extract,
 	}
 	keepLayout = true
@@ -475,6 +495,13 @@ func pullRecipeGraphWithRetry(
 		if attempt == attempts {
 			break
 		}
+		slog.Debug("retrying OCI recipe pull after transient failure",
+			"attempt", attempt,
+			"nextAttempt", attempt+1,
+			"maxAttempts", attempts,
+			"backoff", backoff,
+			"error", lastErr,
+		)
 		if err := deps.waitBackoff(ctx, backoff); err != nil {
 			return ociv1.Descriptor{}, ociv1.Manifest{}, err
 		}
@@ -715,55 +742,57 @@ func validateRecipeRetryTraffic(size int64, traffic *recipeDownloadBudget) error
 
 func validateRecipePullOptions(
 	opts RecipePullOptions,
-) (normalized, registry, repository string, selectorDigest digest.Digest, retErr error) {
+) (recipePullValidation, error) {
 
+	validated := recipePullValidation{}
 	input := opts.Repository
 	if input == "" || strings.TrimSpace(input) != input {
-		return "", "", "", "", apperrors.New(apperrors.ErrCodeInvalidRequest,
+		return validated, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI recipe repository must be non-empty and contain no surrounding whitespace")
 	}
 	if strings.HasPrefix(input, "oci://") {
 		input = strings.TrimPrefix(input, "oci://")
 	} else if strings.Contains(input, "://") {
-		return "", "", "", "", apperrors.New(apperrors.ErrCodeInvalidRequest,
+		return validated, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI recipe repository supports only the optional oci:// scheme")
 	}
 	named, err := reference.ParseNormalizedNamed(input)
 	if err != nil {
-		return "", "", "", "", apperrors.Wrap(apperrors.ErrCodeInvalidRequest,
+		return validated, apperrors.Wrap(apperrors.ErrCodeInvalidRequest,
 			"invalid OCI recipe repository", err)
 	}
 	if !reference.IsNameOnly(named) {
-		return "", "", "", "", apperrors.New(apperrors.ErrCodeInvalidRequest,
+		return validated, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI recipe repository must not contain a tag or digest")
 	}
-	registry = reference.Domain(named)
-	repository = reference.Path(named)
-	if err := validateRegistryReference(registry, repository); err != nil {
-		return "", "", "", "", err
+	validated.registry = reference.Domain(named)
+	validated.repository = reference.Path(named)
+	if err := validateRegistryReference(validated.registry, validated.repository); err != nil {
+		return recipePullValidation{}, err
 	}
 	if opts.Selector == "" || strings.TrimSpace(opts.Selector) != opts.Selector {
-		return "", "", "", "", apperrors.New(apperrors.ErrCodeInvalidRequest,
+		return recipePullValidation{}, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI recipe selector is required and must contain no surrounding whitespace")
 	}
 	if strings.Contains(opts.Selector, ":") {
-		selectorDigest = digest.Digest(opts.Selector)
-		if selectorDigest.Algorithm() != digest.SHA256 {
-			return "", "", "", "", apperrors.New(apperrors.ErrCodeInvalidRequest,
+		validated.selectorDigest = digest.Digest(opts.Selector)
+		if validated.selectorDigest.Algorithm() != digest.SHA256 {
+			return recipePullValidation{}, apperrors.New(apperrors.ErrCodeInvalidRequest,
 				"OCI recipe digest selector must use sha256")
 		}
-		if err := selectorDigest.Validate(); err != nil {
-			return "", "", "", "", apperrors.Wrap(apperrors.ErrCodeInvalidRequest,
+		if err := validated.selectorDigest.Validate(); err != nil {
+			return recipePullValidation{}, apperrors.Wrap(apperrors.ErrCodeInvalidRequest,
 				"invalid OCI recipe digest selector", err)
 		}
 	} else if err := validateDistributionTag(opts.Selector); err != nil {
-		return "", "", "", "", err
+		return recipePullValidation{}, err
 	}
 	if opts.TempDir != "" && strings.TrimSpace(opts.TempDir) != opts.TempDir {
-		return "", "", "", "", apperrors.New(apperrors.ErrCodeInvalidRequest,
+		return recipePullValidation{}, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI recipe temporary-directory parent must contain no surrounding whitespace")
 	}
-	return registry + "/" + repository, registry, repository, selectorDigest, nil
+	validated.normalized = validated.registry + "/" + validated.repository
+	return validated, nil
 }
 
 func validateRecipeManifestDescriptor(desc ociv1.Descriptor, selector digest.Digest) error {
