@@ -98,11 +98,12 @@ func TestBuildAgentConfigTolerations(t *testing.T) {
 }
 
 // TestBuildAgentConfigPropagatesRunIDAndOwnership confirms buildAgentConfig
-// forwards AgentConfig.RunID and its ownsOutput parameter onto
-// agent.Config.RunID / agent.Config.OwnsOutputConfigMap — the projection
-// deployAndWaitForResult relies on so the deployer scopes every resource
-// name to this run and Cleanup knows whether it may delete the staging
-// ConfigMap.
+// forwards AgentConfig.RunID, AgentConfig.NameBase, and its ownsOutput
+// parameter onto agent.Config.RunID / agent.Config.NameBase /
+// agent.Config.OwnsOutputConfigMap — the projection deployAndWaitForResult
+// relies on so the deployer scopes every resource name to this run, applies
+// the caller's naming prefix, and Cleanup knows whether it may delete the
+// staging ConfigMap.
 func TestBuildAgentConfigPropagatesRunIDAndOwnership(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -113,10 +114,15 @@ func TestBuildAgentConfigPropagatesRunIDAndOwnership(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildAgentConfig(&AgentConfig{RunID: "20260821-142233-9f3a1c0b7e2d4a55"},
-				"cm://ns/name", tt.ownsOutput)
+			got := buildAgentConfig(&AgentConfig{
+				RunID:    "20260821-142233-9f3a1c0b7e2d4a55",
+				NameBase: "aicr-validate",
+			}, "cm://ns/name", tt.ownsOutput)
 			if got.RunID != "20260821-142233-9f3a1c0b7e2d4a55" {
 				t.Errorf("agent.Config.RunID = %q, want the AgentConfig.RunID value", got.RunID)
+			}
+			if got.NameBase != "aicr-validate" {
+				t.Errorf("agent.Config.NameBase = %q, want the AgentConfig.NameBase value", got.NameBase)
 			}
 			if got.OwnsOutputConfigMap != tt.ownsOutput {
 				t.Errorf("agent.Config.OwnsOutputConfigMap = %v, want %v", got.OwnsOutputConfigMap, tt.ownsOutput)

@@ -1818,13 +1818,25 @@ func resolveHelmComponentValues(
 // cluster-reading Job into an unstated namespace is not a safe default. An
 // empty one is rejected with ErrCodeInvalidRequest before any cluster access.
 //
-// cfg.Image, cfg.JobName, and cfg.ServiceAccountName are defaulted when empty,
-// to the same values the CLI's flags use — defaults.AgentName for the two names,
-// which are therefore SHARED across callers that omit them (see Concurrency),
-// and for the image the tag matching this Client's WithVersion (a Client with no
-// version, like a development build, gets :latest). Set cfg.Image explicitly to
-// pin a different agent generation or a mirrored registry. Other fields fall
-// back to the defaults documented on snapshotter.AgentConfig.
+// cfg.Image is defaulted when empty to the tag matching this Client's
+// WithVersion (a Client with no version, like a development build, gets
+// :latest). Set it explicitly to pin a different agent generation or a
+// mirrored registry.
+//
+// cfg.JobName and cfg.ServiceAccountName are optional naming PREFIXES, not
+// exact names. Leaving them empty is fine: cfg.NameBase (default
+// defaults.AgentName) supplies the prefix instead. cfg.RunID is appended to
+// whichever prefix applies, so two callers that both omit these names still
+// get distinct objects rather than shared ones — see Concurrency. Other
+// fields fall back to the defaults documented on snapshotter.AgentConfig.
+//
+// One exception to the prefix rule, because it is the point of the mode: a
+// cfg.ServiceAccountName that names a ServiceAccount already present in
+// cfg.Namespace is used VERBATIM, and this call then creates and deletes no
+// RBAC at all. That is how a caller runs the agent under an IRSA or Workload
+// Identity account, whose cloud trust is pinned to the account name and so
+// cannot survive a run-scoped rename. It waives per-run permission isolation:
+// concurrent runs sharing that account share its grants.
 //
 // # Output and delivery
 //
@@ -1883,24 +1895,23 @@ func resolveHelmComponentValues(
 //
 // # Concurrency
 //
-// Concurrent CollectSnapshot calls are safe at the Client level — each call
-// constructs an independent run and shares no in-process state.
+// Concurrent CollectSnapshot calls are safe, at the Client level and against
+// the same cluster. Each call gets its own RunID (cfg.RunID when set,
+// otherwise generated) and, from it, its own Job, ServiceAccount, Role,
+// RoleBinding, ClusterRole, ClusterRoleBinding and — when cfg.Output does not
+// name one — its own staging ConfigMap. Every object is deleted under a UID
+// precondition recorded when this run created it, so no run can delete
+// something another run owns. This replaces the earlier one-at-a-time
+// constraint (#2120).
 //
-// They are NOT safe against the same cluster. The agent deployment is
-// name-addressed and partly cluster-scoped, so two runs collide in three ways
-// regardless of what this method defaults:
+// Two effects remain shared, both by design:
 //
-//   - The Job is delete-then-created, so a second run destroys a first run's
-//     in-flight Job even when Cleanup is false.
-//   - The ServiceAccount, Role, and RoleBinding are named from
-//     cfg.ServiceAccountName in cfg.Namespace.
-//   - The ClusterRoleBinding has a FIXED name and carries the ServiceAccount as
-//     its subject, so a second run repoints it and the first run's pod loses its
-//     node-read permission mid-collection. Distinct JobName and
-//     ServiceAccountName values do not avoid this one.
-//
-// Collect against one cluster at a time. Concurrent collection needs per-run
-// ownership down in pkg/k8s/agent, tracked in #2481.
+//   - Two calls that set cfg.Output to the SAME explicit cm://namespace/name
+//     URI write to that one caller-named ConfigMap and overwrite each other.
+//     Output identifies a caller-owned destination, not a run-scoped one, so
+//     RunID does not disambiguate it.
+//   - Two calls naming the same existing cfg.ServiceAccountName run under that
+//     one identity and share its grants, since neither creates RBAC.
 func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapshot, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")

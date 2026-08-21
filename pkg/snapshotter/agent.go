@@ -158,6 +158,13 @@ type AgentConfig struct {
 	// setting it explicitly is for correlating this run with an external
 	// identifier (e.g. sharing one ID with a downstream validator run).
 	RunID string
+
+	// NameBase prefixes generated resource names (Job, ServiceAccount,
+	// Role/RoleBinding) when JobName / ServiceAccountName are left empty.
+	// It has no effect once either of those is set. Forwarded verbatim
+	// to pkg/k8s/agent.Config.NameBase, which defaults to "aicr" when
+	// also empty.
+	NameBase string
 }
 
 // buildAgentConfig projects snapshotter configuration onto the deployer's
@@ -174,6 +181,7 @@ func buildAgentConfig(config *AgentConfig, agentOutput string, ownsOutput bool) 
 		ServiceAccountName:  config.ServiceAccountName,
 		JobName:             config.JobName,
 		RunID:               config.RunID,
+		NameBase:            config.NameBase,
 		Image:               config.Image,
 		ImagePullSecrets:    config.ImagePullSecrets,
 		NodeSelector:        config.NodeSelector,

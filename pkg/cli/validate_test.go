@@ -470,6 +470,71 @@ func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
 	}
 }
 
+// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID pins half of the
+// ADR-020 Ruling 7 contract: validateAgentConfig.toAgentConfig must forward
+// runID onto the facade AgentConfig.RunID field unchanged, and must supply
+// validateNameBase ("aicr-validate") rather than leaving JobName/
+// ServiceAccountName to carry the naming prefix. If toAgentConfig ever drops
+// or misassigns runID, this fails even though parseValidateAgentConfig (the
+// other half, tested below) still wires the caller's id in correctly.
+func TestValidateAgentConfig_ToAgentConfig_ForwardsRunID(t *testing.T) {
+	cfg := &validateAgentConfig{
+		namespace: "aicr-validation-test",
+		runID:     "20260821-142233-9f3a1c0b7e2d4a55",
+	}
+
+	ac := cfg.toAgentConfig()
+
+	if ac.RunID != cfg.runID {
+		t.Errorf("AgentConfig.RunID = %q, want %q (validateAgentConfig.runID)", ac.RunID, cfg.runID)
+	}
+	if ac.NameBase != validateNameBase {
+		t.Errorf("AgentConfig.NameBase = %q, want %q", ac.NameBase, validateNameBase)
+	}
+}
+
+// TestParseValidateAgentConfig_SingleRunIDPerInvocation pins the other half
+// of the ADR-020 Ruling 7 contract: `aicr validate` generates exactly one
+// RunID per invocation (see the Action's `runID := v1.GenerateRunID()`) and
+// must hand that SAME id to parseValidateAgentConfig, which is what
+// eventually reaches the live-capture snapshot agent's Job/RBAC via
+// toAgentConfig above. Combined with that test, this closes the loop: if a
+// future change reintroduces a second, independently generated id for the
+// snapshot agent (e.g. reverting to a per-call v1.GenerateRunID() inside
+// parseValidateAgentConfig, or simply forgetting to thread the caller's id
+// through), one of these two tests fails — exactly the two-run-IDs-per-
+// command split ADR-020 forbids.
+func TestParseValidateAgentConfig_SingleRunIDPerInvocation(t *testing.T) {
+	const wantRunID = "20260821-142233-9f3a1c0b7e2d4a55"
+
+	var captured *validateAgentConfig
+	cmd := validateCmd()
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		cfg, err := loadCmdConfig(ctx, c)
+		if err != nil {
+			return err
+		}
+		resolved, err := cfg.Validation().Resolve()
+		if err != nil {
+			return err
+		}
+		shared := validateSharedResolved{namespace: "aicr-validation-test"}
+		// wantRunID stands in for the Action's single
+		// `runID := v1.GenerateRunID()` call — the production code path
+		// passes that same local variable to both parseValidateAgentConfig
+		// (here) and validationConfig.runID (runValidation).
+		captured = parseValidateAgentConfig(c, resolved, shared, wantRunID)
+		return nil
+	}
+	if err := cmd.Run(t.Context(), []string{"validate", "--no-cluster"}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	if captured.runID != wantRunID {
+		t.Errorf("validateAgentConfig.runID = %q, want %q", captured.runID, wantRunID)
+	}
+}
+
 // TestClassifyIgnoredAKSGPUPools pins the provenance matrix of the
 // ignored-projection note: explicit CLI presence (either flag form) always
 // warns; a purely ambient env source is demoted to debug; nothing logs

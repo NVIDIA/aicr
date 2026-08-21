@@ -337,10 +337,16 @@ type ValidateResolved struct {
 	// config did not set the field.
 	ImagePullSecrets []string
 
-	// JobName is spec.validate.agent.jobName.
+	// JobName is spec.validate.agent.jobName — an optional Job name
+	// prefix, not a required name. Empty (config unset and no
+	// --job-name) lets the CLI's own default prefix ("aicr-validate")
+	// apply instead; either way the run ID is appended, so the deployed
+	// Job name is always run-scoped.
 	JobName string
 
-	// ServiceAccountName is spec.validate.agent.serviceAccountName.
+	// ServiceAccountName is spec.validate.agent.serviceAccountName — an
+	// optional ServiceAccount name prefix, not a required name. Same
+	// empty-value behavior as JobName.
 	ServiceAccountName string
 
 	// NodeSelector is spec.validate.agent.nodeSelector. Nil if unset;
@@ -641,10 +647,16 @@ type SnapshotResolved struct {
 	// config did not set the field.
 	ImagePullSecrets []string
 
-	// JobName is spec.snapshot.agent.jobName.
+	// JobName is spec.snapshot.agent.jobName — an optional Job name
+	// prefix, not a required name. Empty (config unset and no
+	// --job-name) lets the CLI's own default prefix ("aicr") apply
+	// instead; either way the run ID is appended, so the deployed Job
+	// name is always run-scoped.
 	JobName string
 
-	// ServiceAccountName is spec.snapshot.agent.serviceAccountName.
+	// ServiceAccountName is spec.snapshot.agent.serviceAccountName — an
+	// optional ServiceAccount name prefix, not a required name. Same
+	// empty-value behavior as JobName.
 	ServiceAccountName string
 
 	// NodeSelector is spec.snapshot.agent.nodeSelector. Nil if unset;

@@ -175,6 +175,24 @@ type AgentConfig struct {
 	// Required for AKS profile-qualified resolution from a collected
 	// snapshot; empty disables the projection.
 	AKSGPUPoolsPath string
+
+	// RunID scopes every resource this deployment creates (Job, RBAC, and
+	// the internal staging ConfigMap when Output does not name one) to a
+	// single run, so concurrent snapshot-agent runs never collide on a
+	// shared resource name. Empty lets CollectSnapshot's underlying
+	// deployment generate one; SDK and CLI callers normally leave it
+	// unset. Set it explicitly to correlate this run with an external
+	// identifier — `aicr validate` does this to give its live-capture
+	// snapshot agent and its validator Jobs the same RunID.
+	RunID string
+
+	// NameBase prefixes generated Job/ServiceAccount/RBAC names when
+	// JobName and ServiceAccountName are left empty; it has no effect
+	// once either of those is set. Defaults to "aicr" when also empty.
+	// JobName and ServiceAccountName themselves are optional prefixes,
+	// not required names — RunID is appended to whichever prefix
+	// applies, so the deployed object names are always run-scoped.
+	NameBase string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution

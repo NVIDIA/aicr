@@ -153,6 +153,7 @@ func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 		DiscoverNetwork:    o.discoverNetwork,
 		Requests:           o.requests,
 		Limits:             o.limits,
+		NameBase:           name,
 	}
 }
 
@@ -344,14 +345,12 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "job-name",
-			Usage:    "Override default Job name",
-			Value:    name,
+			Usage:    "Job name prefix (default: \"aicr\"); the run ID is always appended",
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "Override default ServiceAccount name",
-			Value:    name,
+			Usage:    "ServiceAccount name prefix (default: \"aicr\"); the run ID is always appended",
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
