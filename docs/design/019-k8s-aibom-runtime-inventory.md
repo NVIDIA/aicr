@@ -555,9 +555,9 @@ semantics.
 
 ## Follow-Up Decisions
 
-Three of the six requirements below are resolved by
+Four of the six requirements below are resolved by
 [Amendment: stock adoption on one GKE recipe](#amendment-stock-adoption-on-one-gke-recipe);
-one remains open, and two are planned work tracked in the epic. The list is
+the remaining two are planned work tracked in the epic. The list is
 retained as originally written; the amendment records what changed, what
 remains open, and where the rest is tracked.
 
@@ -634,25 +634,50 @@ cluster and establishing the pattern for later stock adoptions. This is
 recorded plainly rather than framed as customer demand, because the
 requirement exists to prevent adoption justified only by availability.
 
-### Still open: selection and opt-out semantics
+### E. Selection and opt-out semantics
 
-Unresolved and deliberately not decided here. `ComponentRef.IsEnabled()`
-already reads a recipe-recorded `enabled` override, which satisfies "recipe-
-recorded" and is not the bundle-time toggle Decision 2 rejects. What remains
-undecided is how a user generating from a stock recipe declines the
-component: by authoring a custom overlay using the existing mechanism, or by
-a generation-time flag that `aicr recipe` records into the emitted recipe.
+Resolved 2026-08-20. A **generation-time flag recorded in the emitted recipe**,
+modelled on the existing `--slurm-accounting-mode` selection rather than
+invented:
 
-The second shape changes the CLI contract, so it is a decision rather than an
-implementation detail. It must be resolved before the overlay change in C
-merges, and whichever shape is chosen is recorded by amending this section.
+```bash
+aicr recipe ... --runtime-inventory disabled
+```
+
+The selection is recorded as `configuration.runtimeInventory.mode`, the recipe's
+`apiVersion` becomes `ConfiguredRecipeResultAPIVersion`, and the component's ref
+carries `install: false`. `ComponentRef.IsEnabled()` already reads that key, so
+the component leaves the resolved set, the bundle, and deployment validation.
+
+This satisfies Decision 2's specific objection. A bundle-time
+`--set k8s-aibom:enabled=false` was rejected because it changes neither the
+recipe nor its health checks; here both change, and the health-check half comes
+for free because the check lives on the component's own ref rather than on a
+sibling. That is simpler than the Slurm accounting precedent, which has to
+append and omit a check on a different component.
+
+Passing the flag on a recipe that does not declare the component is an error,
+not a silent no-op. Selecting a mode there is a mistake — wrong criteria, a
+typo, a recipe that never carried it — and succeeding quietly would record a
+decision the recipe cannot honor. The check runs before the configuration is
+written, so a rejected build leaves no partial record.
+
+The same selection is available in an `AICRConfig` document at
+`spec.recipe.configuration.runtimeInventory.mode`.
+
+**Scope boundary worth naming.** This is the second entry under
+`RecipeConfiguration`, and the pattern is one bespoke selection per optional
+component. That is deliberate: this ADR asks for this component specifically,
+and a generic per-component disable would need a policy for which components
+may be declined at all — nothing should let a recipe decline `gpu-operator`.
+A third entry is the signal to revisit rather than extend by reflex.
 
 ### Requirement status
 
 | Follow-Up requirement | Status |
 |---|---|
 | Exact recipe families in scope | Resolved — C |
-| Selection and opt-out semantics | **Open** — see above |
+| Selection and opt-out semantics | Resolved — E |
 | Non-alpha storage API and migration policy | Resolved — A |
 | Concrete user-demand case | Resolved — D |
 | Managed-cluster qualification and measured cost | Planned — [#2271](https://github.com/NVIDIA/aicr/issues/2271) |

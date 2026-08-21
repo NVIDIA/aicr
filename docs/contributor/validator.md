@@ -611,6 +611,11 @@ tagged with its cordon state, and:
    schedulable count: it is `0` on the all-cordoned and busy-skip
    paths (nothing was attempted yet) and the successful-node count on
    the failure path (a partial pass is not conflated with a full one).
+   Exception: when the recipe declares `Deployment.gpu-driver.version`,
+   those same all-cordoned and busy paths (and the no-GPU-nodes path)
+   fail closed instead of Skip — a declared host-driver floor that
+   cannot be measured must not PASS (#1995). Skip remains only when
+   the floor constraint is absent.
    The `RESULT:` prefix is `pkg/validator/validator.go`'s
    `resultSummaryPrefix` convention: the validator runtime echoes the
    trailing text of any such stdout line into live CLI output via

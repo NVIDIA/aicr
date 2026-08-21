@@ -325,6 +325,16 @@ func TestClassifyConstraintsWellformed(t *testing.T) {
 			StatusPass, "",
 		},
 		{
+			"compound OR constraint passes health validation",
+			result(constraint("K8s.server.version", ">= 1.34.3-gke.1318000 < 1.35.0 || >= 1.35.0-gke.2745000")),
+			StatusPass, "",
+		},
+		{
+			"malformed empty OR clause fails health validation",
+			result(constraint("K8s.server.version", ">= 1.34.3 || || >= 1.35.0")),
+			StatusFail, "malformed value",
+		},
+		{
 			// The node-set form (#1755) has its own grammar; the negated
 			// "!key" value is valid there but rejected by the scalar
 			// parser — grading must mirror constraints.Evaluate's dispatch

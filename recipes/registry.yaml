@@ -301,6 +301,8 @@ components:
           --accelerated-node-toleration nvidia.com/gpu:NoSchedule."
 
   - name: nvsentinel
+    # Sole owner of its CRDs and no webhook conversion (audited, #2264).
+    ownsCRDs: true
     displayName: nvsentinel
     valueOverrideKeys:
       - nv-sentinel
@@ -508,6 +510,8 @@ components:
           - tolerations
 
   - name: k8s-aibom
+    # Sole owner of its CRDs and no webhook conversion (audited, #2264).
+    ownsCRDs: true
     displayName: k8s-aibom
     valueOverrideKeys:
       - k8saibom
@@ -908,6 +912,8 @@ components:
           - nodeDataBroker.tolerations
 
   - name: gatekeeper
+    # Sole owner of its CRDs and no webhook conversion (audited, #2264).
+    ownsCRDs: true
     displayName: Gatekeeper
     valueOverrideKeys:
       - gatekeeper
