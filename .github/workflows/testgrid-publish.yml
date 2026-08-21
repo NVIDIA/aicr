@@ -178,13 +178,18 @@ jobs:
             exit 1
           fi
           echo "bundle_ref=${BUNDLE_REF}" >> "${GITHUB_OUTPUT}"
-          echo "skip=false" >> "${GITHUB_OUTPUT}"
           echo "Resolved bundle: ${BUNDLE_REF}"
 
       # Authenticate to GCP via WIF using the testgrid publish SA.
       # This SA has objectCreator on gs://aicr-testgrid[-<env>]/groups/ only.
+      #
+      # No `if: steps.bundle.outputs.skip != 'true'` guard here (or on the
+      # steps below): unlike the old workflow_run-triggered pointer lookup,
+      # which had a legitimate "no evidence produced" skip path, "Resolve
+      # bundle ref" above validates a required workflow_dispatch input and
+      # exits 1 on failure — a failed resolve already halts the job before
+      # these steps run, so there is no skip state left to guard against.
       - name: Authenticate to GCP
-        if: steps.bundle.outputs.skip != 'true'
         id: gcp-auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
         with:
@@ -192,13 +197,11 @@ jobs:
           service_account: ${{ steps.gcp.outputs.wif_sa }}
 
       - name: Set up gcloud
-        if: steps.bundle.outputs.skip != 'true'
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
 
       # Authenticate to GHCR so testgrid-publish can pull the evidence OCI
       # bundle. The packages: read permission above gates the token scope.
       - name: Login to GHCR
-        if: steps.bundle.outputs.skip != 'true'
         uses: ./.github/actions/ghcr-login
 
       # Always build from source — ensures the binary matches the current
@@ -206,7 +209,6 @@ jobs:
       # into a privileged WIF context. goreleaser packages testgrid-publish
       # for local / manual use; the workflow always builds from vendor.
       - name: Build testgrid-publish
-        if: steps.bundle.outputs.skip != 'true'
         run: |
           set -euo pipefail
           GOFLAGS="-mod=vendor" go build \
@@ -215,7 +217,6 @@ jobs:
       # Pass all user-controlled values through env — never inline ${{ }}
       # expressions in run: scripts to prevent script injection.
       - name: Publish to TestGrid
-        if: steps.bundle.outputs.skip != 'true'
         env:
           BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
           TG_BUCKET: ${{ steps.gcp.outputs.bucket }}
