@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // waitForJobCompletion waits for the Job to complete successfully or fail.
@@ -45,6 +46,16 @@ func (d *Deployer) getSnapshotFromConfigMap(ctx context.Context) ([]byte, error)
 		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("failed to get ConfigMap %s/%s", namespace, name), err)
 	}
 
+	// The staging ConfigMap is written by the in-pod agent, not this
+	// controller, so there is no Create response to record a UID from —
+	// this Get is the only point where we observe it. Record it into the
+	// created-set (for a UID-pinned Cleanup delete) only when this
+	// Deployer owns the output: a caller-supplied `cm://` Output URI
+	// names the caller's own artifact, which must never be deleted here.
+	if d.config.OwnsOutputConfigMap {
+		d.recordCreated(kindConfigMap, name, cm.UID)
+	}
+
 	// Extract snapshot data
 	snapshot, ok := cm.Data["snapshot.yaml"]
 	if !ok {
@@ -52,6 +63,19 @@ func (d *Deployer) getSnapshotFromConfigMap(ctx context.Context) ([]byte, error)
 	}
 
 	return []byte(snapshot), nil
+}
+
+// deleteStagingConfigMap deletes the staging ConfigMap in d.config.Namespace
+// by name, pinning the delete to uid so a same-named ConfigMap belonging to
+// a different run is never collected. If the ConfigMap is already gone, or
+// uid no longer matches (already replaced, not ours), this is a no-op
+// (idempotent). Only reached via Cleanup's created-set dispatch, which only
+// contains an entry for this ConfigMap when Config.OwnsOutputConfigMap was
+// true at record time (see getSnapshotFromConfigMap).
+func (d *Deployer) deleteStagingConfigMap(ctx context.Context, name string, uid types.UID) error {
+	err := d.clientset.CoreV1().ConfigMaps(d.config.Namespace).
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+	return ignoreNotFoundOrConflict(err)
 }
 
 // StreamLogs streams logs from the Job's Pod to the provided writer.

@@ -20,7 +20,6 @@ import (
 	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -111,13 +110,14 @@ func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 		},
 	}
 
-	_, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Create(ctx, sa, metav1.CreateOptions{})
+	created, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Create(ctx, sa, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		return errors.Wrap(errors.ErrCodeInternal, "ServiceAccount already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create ServiceAccount", err)
 	}
+	d.recordCreated(kindServiceAccount, created.Name, created.UID)
 	return nil
 }
 
@@ -143,13 +143,14 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 		},
 	}
 
-	_, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
+	created, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		return errors.Wrap(errors.ErrCodeInternal, "Role already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create Role", err)
 	}
+	d.recordCreated(kindRole, created.Name, created.UID)
 	return nil
 }
 
@@ -175,13 +176,14 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 		},
 	}
 
-	_, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
+	created, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		return errors.Wrap(errors.ErrCodeInternal, "RoleBinding already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create RoleBinding", err)
 	}
+	d.recordCreated(kindRoleBinding, created.Name, created.UID)
 	return nil
 }
 
@@ -239,13 +241,14 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 		Rules: rules,
 	}
 
-	_, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
+	created, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		return errors.Wrap(errors.ErrCodeInternal, "ClusterRole already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRole", err)
 	}
+	d.recordCreated(kindClusterRole, created.Name, created.UID)
 	return nil
 }
 
@@ -270,54 +273,60 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 		},
 	}
 
-	_, err := d.clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
+	created, err := d.clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		return errors.Wrap(errors.ErrCodeInternal, "ClusterRoleBinding already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
 	}
+	d.recordCreated(kindClusterRoleBinding, created.Name, created.UID)
 	return nil
 }
 
-// deleteServiceAccount deletes the ServiceAccount.
-// If the ServiceAccount doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteServiceAccount(ctx context.Context) error {
+// deleteServiceAccount deletes the ServiceAccount, pinning the delete to uid
+// so a same-named ServiceAccount belonging to a different run is never
+// collected. If the ServiceAccount is already gone, or uid no longer
+// matches (already replaced, not ours), this is a no-op (idempotent).
+func (d *Deployer) deleteServiceAccount(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).
-		Delete(ctx, d.saName(), metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+	return ignoreNotFoundOrConflict(err)
 }
 
-// deleteRole deletes the Role.
-// If the Role doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteRole(ctx context.Context) error {
+// deleteRole deletes the Role, pinning the delete to uid. If the Role is
+// already gone, or uid no longer matches, this is a no-op (idempotent).
+func (d *Deployer) deleteRole(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().Roles(d.config.Namespace).
-		Delete(ctx, d.roleName(), metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+	return ignoreNotFoundOrConflict(err)
 }
 
-// deleteRoleBinding deletes the RoleBinding.
-// If the RoleBinding doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteRoleBinding(ctx context.Context) error {
+// deleteRoleBinding deletes the RoleBinding, pinning the delete to uid. If
+// the RoleBinding is already gone, or uid no longer matches, this is a
+// no-op (idempotent).
+func (d *Deployer) deleteRoleBinding(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).
-		Delete(ctx, d.roleName(), metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+	return ignoreNotFoundOrConflict(err)
 }
 
-// deleteClusterRole deletes the ClusterRole.
-// If the ClusterRole doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteClusterRole(ctx context.Context) error {
+// deleteClusterRole deletes the ClusterRole, pinning the delete to uid. If
+// the ClusterRole is already gone, or uid no longer matches, this is a
+// no-op (idempotent).
+func (d *Deployer) deleteClusterRole(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().ClusterRoles().
-		Delete(ctx, d.clusterRoleName(), metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+	return ignoreNotFoundOrConflict(err)
 }
 
-// deleteClusterRoleBinding deletes the ClusterRoleBinding.
-// If the ClusterRoleBinding doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteClusterRoleBinding(ctx context.Context) error {
+// deleteClusterRoleBinding deletes the ClusterRoleBinding, pinning the
+// delete to uid. If the ClusterRoleBinding is already gone, or uid no
+// longer matches, this is a no-op (idempotent).
+func (d *Deployer) deleteClusterRoleBinding(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().ClusterRoleBindings().
-		Delete(ctx, d.clusterRoleName(), metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+	return ignoreNotFoundOrConflict(err)
 }
 
 // discoverNetworkClusterRules returns the cluster-scoped policy rules

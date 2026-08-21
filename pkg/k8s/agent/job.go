@@ -21,20 +21,20 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 )
 
 // ensureJob creates the run-scoped agent Job.
 func (d *Deployer) ensureJob(ctx context.Context) error {
 	job := d.buildJob()
-	_, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
+	created, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
 		Create(ctx, job, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "Job already exists under run-scoped name (duplicate RunID?)", err)
@@ -42,6 +42,7 @@ func (d *Deployer) ensureJob(ctx context.Context) error {
 	if err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Job", err)
 	}
+	d.recordCreated(kindJob, created.Name, created.UID)
 
 	return nil
 }
@@ -327,17 +328,21 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 	return envVars
 }
 
-// deleteJob deletes the Job.
-func (d *Deployer) deleteJob(ctx context.Context) error {
+// deleteJob deletes the Job, pinning the delete to uid so a same-named Job
+// belonging to a different run is never collected. If the Job is already
+// gone, or uid no longer matches (already replaced, not ours), this is a
+// no-op (idempotent).
+func (d *Deployer) deleteJob(ctx context.Context, name string, uid types.UID) error {
 	propagationPolicy := metav1.DeletePropagationForeground
 	err := d.clientset.BatchV1().Jobs(d.config.Namespace).Delete(
 		ctx,
-		d.jobName(),
+		name,
 		metav1.DeleteOptions{
 			PropagationPolicy: &propagationPolicy,
+			Preconditions:     &metav1.Preconditions{UID: &uid},
 		},
 	)
-	return k8s.IgnoreNotFound(err)
+	return ignoreNotFoundOrConflict(err)
 }
 
 // mustParseQuantity parses a resource quantity or panics.

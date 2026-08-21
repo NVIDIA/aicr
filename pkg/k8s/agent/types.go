@@ -15,8 +15,11 @@
 package agent
 
 import (
+	"sync"
+
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -28,6 +31,30 @@ const (
 	appName            = "aicr"
 	agentLabelSelector = labelAppName + "=" + appName
 )
+
+// Kind labels recorded in Deployer.created for each run-owned object type.
+// Cleanup dispatches on these to call the matching resource-specific delete.
+const (
+	kindServiceAccount     = "ServiceAccount"
+	kindRole               = "Role"
+	kindRoleBinding        = "RoleBinding"
+	kindClusterRole        = "ClusterRole"
+	kindClusterRoleBinding = "ClusterRoleBinding"
+	kindJob                = "Job"
+	kindConfigMap          = "ConfigMap"
+)
+
+// createdObject records one object this Deployer created (or, for the
+// staging ConfigMap it does not itself create, observed itself owning) so
+// Cleanup can delete exactly this set instead of deriving a delete list from
+// configured names. name is the run-scoped name the object was created
+// under; uid pins the eventual delete via metav1.Preconditions so a
+// same-named object belonging to a different run is never collected.
+type createdObject struct {
+	kind string
+	name string
+	uid  types.UID
+}
 
 // Config holds the configuration for deploying the agent.
 type Config struct {
@@ -87,12 +114,29 @@ type Config struct {
 	// caller did not already supply that key — so a caller can request
 	// e.g. nvidia.com/gpu=4 alongside RequireGPU and keep their value.
 	Limits corev1.ResourceList
+
+	// OwnsOutputConfigMap is true when Output names the staging ConfigMap
+	// this Deployer's own Job writes (the default run-scoped
+	// `cm://<namespace>/<generated-name>` URI), rather than a ConfigMap
+	// the caller supplied out of band via a hand-written `cm://` Output
+	// URI. GetSnapshot enters the ConfigMap into the created-set for
+	// Cleanup only when this is true — a caller-supplied ConfigMap is
+	// the caller's artifact and must never be deleted by this Deployer.
+	OwnsOutputConfigMap bool
 }
 
 // Deployer manages the deployment and lifecycle of the agent Job.
 type Deployer struct {
 	clientset kubernetes.Interface
 	config    Config
+
+	// mu guards created. Deploy's ensure* steps run sequentially today,
+	// but GetSnapshot (which records the staging ConfigMap) can be
+	// invoked from a different goroutine than Deploy, and Cleanup reads
+	// the created-set while a caller could still be recording into it,
+	// so every access is mutex-guarded.
+	mu      sync.Mutex
+	created []createdObject
 }
 
 // NewDeployer creates a new agent Deployer with the given configuration.
@@ -115,6 +159,42 @@ func (d *Deployer) objectLabels() map[string]string {
 		labels.Component: labels.ValueSnapshotAgent,
 		labels.RunID:     d.config.RunID,
 	}
+}
+
+// recordCreated appends a run-owned object to the created-set. Cleanup
+// builds its UID-pinned delete list from exactly this set, so every ensure*
+// call that successfully creates an object — and GetSnapshot, for the
+// staging ConfigMap it observes but does not itself create — must call this
+// on success. Safe for concurrent use.
+func (d *Deployer) recordCreated(kind, name string, uid types.UID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.created = append(d.created, createdObject{kind: kind, name: name, uid: uid})
+}
+
+// createdSnapshot returns a defensive copy of the created-set taken under
+// lock. Callers must not read d.created directly.
+func (d *Deployer) createdSnapshot() []createdObject {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]createdObject, len(d.created))
+	copy(out, d.created)
+	return out
+}
+
+// jobUID returns the UID of the Job this Deployer created, or the zero UID
+// if Deploy has not (yet) reached the Job-create step — including when
+// Deploy failed before getting there. Task 5 uses this to authorize pod
+// selection against exactly this run's Job.
+func (d *Deployer) jobUID() types.UID {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, c := range d.created {
+		if c.kind == kindJob {
+			return c.uid
+		}
+	}
+	return ""
 }
 
 // CleanupOptions controls what resources to remove during cleanup.

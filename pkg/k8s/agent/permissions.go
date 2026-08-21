@@ -61,6 +61,7 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, err
 
 		// Cleanup permissions
 		{"jobs", "delete", d.config.Namespace},
+		{resourceCM, "delete", d.config.Namespace},
 	}
 
 	// SelfSubjectAccessReview is a read-only query; running the N required

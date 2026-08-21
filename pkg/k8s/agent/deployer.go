@@ -94,30 +94,39 @@ func (d *Deployer) GetSnapshot(ctx context.Context) ([]byte, error) {
 	return d.getSnapshotFromConfigMap(ctx)
 }
 
-// Cleanup removes the agent Job and RBAC resources.
-// If opts.Enabled is false, no cleanup is performed (resources are kept for debugging).
-// All resources are attempted for deletion even if some fail, and a combined error is returned.
-// Deletions are fanned out concurrently so a slow apiserver does not serialize the wall clock.
+// Cleanup removes exactly the objects this Deployer created: the Job, the
+// RBAC resources, and — when this Deployer owns the output ConfigMap — the
+// staging ConfigMap. If opts.Enabled is false, no cleanup is performed
+// (resources are kept for debugging). All resources are attempted for
+// deletion even if some fail, and a combined error is returned. Deletions
+// are fanned out concurrently so a slow apiserver does not serialize the
+// wall clock.
 func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 	if !opts.Enabled {
 		return nil
 	}
+
+	// Build the task list from what this Deployer actually created, not
+	// from configured names — a run must never delete an object it did
+	// not create (e.g. a same-named object left behind by an unrelated
+	// run or user). Each delete is additionally pinned to the recorded
+	// UID via metav1.Preconditions.
+	created := d.createdSnapshot()
 
 	type result struct {
 		label string
 		err   error
 	}
 
-	tasks := []struct {
+	tasks := make([]struct {
 		label string
 		op    func(context.Context) error
-	}{
-		{fmt.Sprintf("Job %q", d.config.JobName), d.deleteJob},
-		{fmt.Sprintf("ServiceAccount %q", d.config.ServiceAccountName), d.deleteServiceAccount},
-		{fmt.Sprintf("Role %q", d.config.ServiceAccountName), d.deleteRole},
-		{fmt.Sprintf("RoleBinding %q", d.config.ServiceAccountName), d.deleteRoleBinding},
-		{fmt.Sprintf("ClusterRole %q", d.clusterRoleName()), d.deleteClusterRole},
-		{fmt.Sprintf("ClusterRoleBinding %q", d.clusterRoleName()), d.deleteClusterRoleBinding},
+	}, len(created))
+	for i, obj := range created {
+		tasks[i].label = fmt.Sprintf("%s %q", obj.kind, obj.name)
+		tasks[i].op = func(ctx context.Context) error {
+			return d.deleteCreatedObject(ctx, obj)
+		}
 	}
 
 	// sync.WaitGroup (not errgroup) is intentional here: cleanup must
@@ -156,6 +165,42 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 	}
 
 	return nil
+}
+
+// deleteCreatedObject deletes a single created-set entry by dispatching to
+// the resource-specific delete call for obj.kind, passing obj.name and
+// obj.uid through so every delete is UID-pinned.
+func (d *Deployer) deleteCreatedObject(ctx context.Context, obj createdObject) error {
+	switch obj.kind {
+	case kindJob:
+		return d.deleteJob(ctx, obj.name, obj.uid)
+	case kindServiceAccount:
+		return d.deleteServiceAccount(ctx, obj.name, obj.uid)
+	case kindRole:
+		return d.deleteRole(ctx, obj.name, obj.uid)
+	case kindRoleBinding:
+		return d.deleteRoleBinding(ctx, obj.name, obj.uid)
+	case kindClusterRole:
+		return d.deleteClusterRole(ctx, obj.name, obj.uid)
+	case kindClusterRoleBinding:
+		return d.deleteClusterRoleBinding(ctx, obj.name, obj.uid)
+	case kindConfigMap:
+		return d.deleteStagingConfigMap(ctx, obj.name, obj.uid)
+	default:
+		return aicrerrors.New(aicrerrors.ErrCodeInternal, fmt.Sprintf("cleanup: unknown created-object kind %q", obj.kind))
+	}
+}
+
+// ignoreNotFoundOrConflict returns nil when err is "not found" (already
+// deleted) or "conflict" (the UID precondition did not match — some other
+// object now holds this name; it has already been replaced and is not
+// ours to delete). Both are success from Cleanup's perspective: the object
+// this run created is gone.
+func ignoreNotFoundOrConflict(err error) error {
+	if k8serrors.IsNotFound(err) || k8serrors.IsConflict(err) {
+		return nil
+	}
+	return err
 }
 
 // validateRuntimeClass checks that the specified RuntimeClass exists in the cluster.

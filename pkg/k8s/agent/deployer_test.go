@@ -18,9 +18,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -32,8 +34,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -728,6 +733,254 @@ func TestDeployer_Cleanup_ReportsAllErrors(t *testing.T) {
 	// Cleanup on empty cluster should succeed (not found errors are ignored)
 	if cleanupErr := deployer.Cleanup(ctx, CleanupOptions{Enabled: true}); cleanupErr != nil {
 		t.Fatalf("Cleanup() should succeed when resources don't exist: %v", cleanupErr)
+	}
+}
+
+// TestCleanupDeletesOnlyWhatItCreated verifies Cleanup builds its delete
+// list from the created-set (Deploy's own objects), not from configured
+// names — a foreign object that happens to share no name with this run
+// must survive even though Cleanup is enabled.
+//
+// Deviation from the plan's literal test: as with
+// TestDeployUsesRunScopedNamesAndLabels above, the brief's snippet omits
+// the SelfSubjectAccessReview-allow reactor. Without it the fake clientset
+// denies all permission checks by default, so Deploy() fails at the Step-0
+// CheckPermissions gate before creating anything — a false RED unrelated to
+// created-set cleanup scoping. Added the same reactor used elsewhere in
+// this file.
+func TestCleanupDeletesOnlyWhatItCreated(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SelfSubjectAccessReview{
+			Status: authv1.SubjectAccessReviewStatus{
+				Allowed: true,
+				Reason:  "test permissions allowed",
+			},
+		}, nil
+	})
+
+	// A foreign object sharing no name with this run must survive.
+	foreign := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "aicr-other", Namespace: "test-ns"}}
+	if _, err := client.CoreV1().ServiceAccounts("test-ns").Create(ctx, foreign, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	d := NewDeployer(client, Config{Namespace: "test-ns", Image: "aicr:test", RunID: "20260821-142233-9f3a1c0b7e2d4a55"})
+	if err := d.Deploy(ctx); err != nil {
+		t.Fatalf("Deploy() error = %v", err)
+	}
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	if _, err := client.CoreV1().ServiceAccounts("test-ns").Get(ctx, "aicr-other", metav1.GetOptions{}); err != nil {
+		t.Errorf("Cleanup deleted a ServiceAccount it did not create: %v", err)
+	}
+	if _, err := client.CoreV1().ServiceAccounts("test-ns").Get(ctx, "aicr-20260821-142233-9f3a1c0b7e2d4a55", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("Cleanup did not delete its own ServiceAccount, err = %v", err)
+	}
+}
+
+// TestCleanupPassesUIDPrecondition verifies every delete Cleanup issues
+// carries Preconditions.UID set to the UID recorded at create time. The
+// fake clientset's ObjectTracker neither assigns UIDs on Create nor
+// enforces Preconditions on Delete (it ignores DeleteOptions entirely), so
+// this records a known UID directly via recordCreated and spies on the
+// outgoing delete action rather than relying on tracker behavior.
+func TestCleanupPassesUIDPrecondition(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+
+	const wantUID = types.UID("sa-uid-123")
+	var sawUID types.UID
+	var sawPreconditions bool
+	client.PrependReactor("delete", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		da, ok := action.(k8stesting.DeleteActionImpl)
+		if ok && da.DeleteOptions.Preconditions != nil && da.DeleteOptions.Preconditions.UID != nil {
+			sawPreconditions = true
+			sawUID = *da.DeleteOptions.Preconditions.UID
+		}
+		return false, nil, nil // not handled: fall through to the default tracker delete
+	})
+
+	d := NewDeployer(client, Config{Namespace: "test-ns"})
+	d.recordCreated(kindServiceAccount, "aicr-sa", wantUID)
+
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	if !sawPreconditions {
+		t.Fatal("ServiceAccount delete did not carry Preconditions.UID")
+	}
+	if sawUID != wantUID {
+		t.Errorf("Preconditions.UID = %q, want %q", sawUID, wantUID)
+	}
+}
+
+// TestCleanupTreatsConflictAsSuccess verifies a Conflict response (the UID
+// precondition did not match — the name now belongs to a different object)
+// is treated as success, same as NotFound, rather than surfaced as a
+// Cleanup failure.
+func TestCleanupTreatsConflictAsSuccess(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SelfSubjectAccessReview{
+			Status: authv1.SubjectAccessReviewStatus{Allowed: true, Reason: "test permissions allowed"},
+		}, nil
+	})
+	client.PrependReactor("delete", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "serviceaccounts"}, "aicr", errors.New("uid mismatch"))
+	})
+
+	d := NewDeployer(client, Config{Namespace: "test-ns", Image: "aicr:test", RunID: "20260821-142233-9f3a1c0b7e2d4a55"})
+	if err := d.Deploy(ctx); err != nil {
+		t.Fatalf("Deploy() error = %v", err)
+	}
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() should treat a Conflict delete response as success, got: %v", err)
+	}
+}
+
+// TestRecordCreatedAndJobUID verifies jobUID() returns the zero UID before
+// any Job is recorded, and the recorded Job's UID afterward — even when
+// other kinds have been recorded too.
+func TestRecordCreatedAndJobUID(t *testing.T) {
+	d := NewDeployer(fake.NewSimpleClientset(), Config{Namespace: "test-ns"})
+
+	if got := d.jobUID(); got != "" {
+		t.Fatalf("jobUID() before any Job recorded = %q, want zero UID", got)
+	}
+
+	d.recordCreated(kindServiceAccount, "aicr-sa", types.UID("sa-uid"))
+	if got := d.jobUID(); got != "" {
+		t.Fatalf("jobUID() after recording a non-Job kind = %q, want zero UID", got)
+	}
+
+	d.recordCreated(kindJob, "aicr-job", types.UID("job-uid"))
+	if got := d.jobUID(); got != "job-uid" {
+		t.Fatalf("jobUID() = %q, want %q", got, "job-uid")
+	}
+}
+
+// TestCreatedSnapshotIsDefensiveCopy verifies createdSnapshot returns a copy
+// that mutation cannot use to corrupt the Deployer's internal created-set.
+func TestCreatedSnapshotIsDefensiveCopy(t *testing.T) {
+	d := NewDeployer(fake.NewSimpleClientset(), Config{Namespace: "test-ns"})
+	d.recordCreated(kindServiceAccount, "aicr-sa", types.UID("sa-uid"))
+
+	snap := d.createdSnapshot()
+	if len(snap) != 1 {
+		t.Fatalf("createdSnapshot() length = %d, want 1", len(snap))
+	}
+	snap[0].name = "mutated"
+
+	again := d.createdSnapshot()
+	if again[0].name != "aicr-sa" {
+		t.Fatalf("createdSnapshot() mutation leaked into Deployer state: got %q, want %q", again[0].name, "aicr-sa")
+	}
+}
+
+// TestRecordCreatedConcurrentSafe exercises recordCreated from many
+// goroutines at once so `go test -race` can catch a data race on the
+// created-set if the locking is ever removed or narrowed incorrectly.
+func TestRecordCreatedConcurrentSafe(t *testing.T) {
+	d := NewDeployer(fake.NewSimpleClientset(), Config{Namespace: "test-ns"})
+
+	const n = 50
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			d.recordCreated(kindConfigMap, fmt.Sprintf("cm-%d", i), types.UID(fmt.Sprintf("uid-%d", i)))
+		}(i)
+	}
+	wg.Wait()
+
+	if got := len(d.createdSnapshot()); got != n {
+		t.Fatalf("createdSnapshot() length = %d, want %d", got, n)
+	}
+}
+
+// TestGetSnapshotFromConfigMap_RecordsUID_WhenOwned verifies
+// getSnapshotFromConfigMap enters the staging ConfigMap into the
+// created-set (for a UID-pinned Cleanup delete) only when
+// Config.OwnsOutputConfigMap is true — a caller-supplied `cm://` output is
+// the caller's artifact and must never be deleted by this Deployer.
+func TestGetSnapshotFromConfigMap_RecordsUID_WhenOwned(t *testing.T) {
+	tests := []struct {
+		name       string
+		ownsOutput bool
+		wantRecord bool
+	}{
+		{name: "owned output is recorded", ownsOutput: true, wantRecord: true},
+		{name: "caller-supplied output is not recorded", ownsOutput: false, wantRecord: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "aicr-snapshot",
+					Namespace: "test-namespace",
+					UID:       types.UID("cm-uid"),
+				},
+				Data: map[string]string{"snapshot.yaml": "data"},
+			}
+			clientset := fake.NewClientset(cm)
+			d := NewDeployer(clientset, Config{
+				Namespace:           "test-namespace",
+				Output:              "cm://test-namespace/aicr-snapshot",
+				OwnsOutputConfigMap: tt.ownsOutput,
+			})
+
+			if _, err := d.getSnapshotFromConfigMap(context.Background()); err != nil {
+				t.Fatalf("getSnapshotFromConfigMap() error = %v", err)
+			}
+
+			snap := d.createdSnapshot()
+			gotRecorded := len(snap) == 1 && snap[0].kind == kindConfigMap && snap[0].uid == types.UID("cm-uid")
+			if gotRecorded != tt.wantRecord {
+				t.Errorf("recorded = %v (snapshot = %+v), want %v", gotRecorded, snap, tt.wantRecord)
+			}
+		})
+	}
+}
+
+// TestCleanupDeletesStagingConfigMapWhenOwned verifies Cleanup deletes the
+// staging ConfigMap once getSnapshotFromConfigMap has recorded it (i.e.
+// Config.OwnsOutputConfigMap was true), exercising deleteStagingConfigMap's
+// dispatch from Cleanup end to end.
+func TestCleanupDeletesStagingConfigMapWhenOwned(t *testing.T) {
+	ctx := context.Background()
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "aicr-snapshot",
+			Namespace: "test-namespace",
+			UID:       types.UID("cm-uid"),
+		},
+		Data: map[string]string{"snapshot.yaml": "data"},
+	}
+	clientset := fake.NewClientset(cm)
+	d := NewDeployer(clientset, Config{
+		Namespace:           "test-namespace",
+		Output:              "cm://test-namespace/aicr-snapshot",
+		OwnsOutputConfigMap: true,
+	})
+
+	if _, err := d.getSnapshotFromConfigMap(ctx); err != nil {
+		t.Fatalf("getSnapshotFromConfigMap() error = %v", err)
+	}
+
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	if _, err := clientset.CoreV1().ConfigMaps("test-namespace").Get(ctx, "aicr-snapshot", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("Cleanup did not delete the owned staging ConfigMap, err = %v", err)
 	}
 }
 
