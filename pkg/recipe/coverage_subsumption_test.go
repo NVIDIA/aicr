@@ -270,8 +270,11 @@ func TestStrictGapErrorRendering(t *testing.T) {
 			// excludedOverlays / constraintWarnings are attached verbatim, and
 			// absent rather than empty when there is nothing to report.
 			if tt.excluded == nil {
-				if se.Context["excludedOverlays"] != nil {
-					t.Errorf("excludedOverlays = %#v, want absent", se.Context["excludedOverlays"])
+				// Two-value lookup: a key present but holding nil is a
+				// different wire shape from an absent key, and `!= nil`
+				// cannot tell them apart.
+				if v, present := se.Context["excludedOverlays"]; present {
+					t.Errorf("excludedOverlays = %#v, want the key absent", v)
 				}
 			} else if got, ok := se.Context["excludedOverlays"].([]ExcludedOverlay); !ok {
 				t.Errorf("excludedOverlays = %#v, want []ExcludedOverlay", se.Context["excludedOverlays"])
@@ -280,8 +283,8 @@ func TestStrictGapErrorRendering(t *testing.T) {
 			}
 
 			if tt.warnings == nil {
-				if se.Context["constraintWarnings"] != nil {
-					t.Errorf("constraintWarnings = %#v, want absent", se.Context["constraintWarnings"])
+				if v, present := se.Context["constraintWarnings"]; present {
+					t.Errorf("constraintWarnings = %#v, want the key absent", v)
 				}
 			} else if got, ok := se.Context["constraintWarnings"].([]ConstraintWarning); !ok {
 				t.Errorf("constraintWarnings = %#v, want []ConstraintWarning", se.Context["constraintWarnings"])
