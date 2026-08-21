@@ -36,6 +36,7 @@ import (
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/runid"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -148,38 +149,59 @@ type AgentConfig struct {
 	// that key in Limits — e.g. --require-gpu --limits nvidia.com/gpu=4
 	// keeps 4, not 1.
 	Limits corev1.ResourceList
+
+	// RunID scopes every resource this deployment creates (Job, RBAC, and
+	// the internal staging ConfigMap when Output does not name one) to a
+	// single run, so concurrent snapshot-agent runs never collide on a
+	// shared resource name. DeployAndCollect defaults it with
+	// runid.Generate() when empty — callers normally leave it unset;
+	// setting it explicitly is for correlating this run with an external
+	// identifier (e.g. sharing one ID with a downstream validator run).
+	RunID string
 }
 
 // buildAgentConfig projects snapshotter configuration onto the deployer's
 // Job configuration. Keep scheduling defaults at this projection boundary so
 // every snapshot-agent caller gets the same nil-versus-empty behavior.
-func buildAgentConfig(config *AgentConfig, agentOutput string) agent.Config {
+//
+// ownsOutput is agentConfigMapTarget's second return value, forwarded
+// verbatim: it is true only when agentOutput is the internal staging
+// ConfigMap this run owns (the caller did not name a cm:// destination), so
+// Cleanup may delete it. A caller-supplied cm:// Output is never owned.
+func buildAgentConfig(config *AgentConfig, agentOutput string, ownsOutput bool) agent.Config {
 	return agent.Config{
-		Namespace:          config.Namespace,
-		ServiceAccountName: config.ServiceAccountName,
-		JobName:            config.JobName,
-		Image:              config.Image,
-		ImagePullSecrets:   config.ImagePullSecrets,
-		NodeSelector:       config.NodeSelector,
-		Tolerations:        effectiveAgentTolerations(config.Tolerations),
-		Output:             agentOutput,
-		Debug:              config.Debug,
-		Privileged:         config.Privileged,
-		RequireGPU:         config.RequireGPU,
-		RuntimeClassName:   config.RuntimeClassName,
-		MaxNodesPerEntry:   config.MaxNodesPerEntry,
-		OS:                 config.OS,
-		ClusterConfigPath:  config.ClusterConfigPath,
-		DiscoverNetwork:    config.DiscoverNetwork,
-		Requests:           config.Requests,
-		Limits:             config.Limits,
+		Namespace:           config.Namespace,
+		ServiceAccountName:  config.ServiceAccountName,
+		JobName:             config.JobName,
+		RunID:               config.RunID,
+		Image:               config.Image,
+		ImagePullSecrets:    config.ImagePullSecrets,
+		NodeSelector:        config.NodeSelector,
+		Tolerations:         effectiveAgentTolerations(config.Tolerations),
+		Output:              agentOutput,
+		Debug:               config.Debug,
+		Privileged:          config.Privileged,
+		RequireGPU:          config.RequireGPU,
+		RuntimeClassName:    config.RuntimeClassName,
+		MaxNodesPerEntry:    config.MaxNodesPerEntry,
+		OS:                  config.OS,
+		ClusterConfigPath:   config.ClusterConfigPath,
+		DiscoverNetwork:     config.DiscoverNetwork,
+		Requests:            config.Requests,
+		Limits:              config.Limits,
+		OwnsOutputConfigMap: ownsOutput,
 	}
 }
 
 // deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
 // It creates the deployer, deploys RBAC and the Job, streams logs, waits for completion,
 // and retrieves the snapshot data from the result ConfigMap.
-func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string, deliverViaConfigMap bool) ([]byte, error) {
+//
+// ownsOutput is agentConfigMapTarget's second return value: true when
+// agentOutput is the internal staging ConfigMap this run owns, false when it
+// is a caller-supplied cm:// destination. See buildAgentConfig and
+// rewriteMergedSnapshotConfigMap for how each consumes it.
+func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string, ownsOutput bool) ([]byte, error) {
 	// The pool projection is pure file processing on the caller's host —
 	// project it BEFORE deploying so a bad file fails in milliseconds,
 	// not after a Job round-trip, and merge it into the returned snapshot
@@ -198,7 +220,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	// name the injected selector (TOCTOU: node may be cordoned after detection).
 	autoInjectedGPUSelector := maybeInjectGPUNodeSelector(ctx, clientset, config)
 
-	agentConfig := buildAgentConfig(config, agentOutput)
+	agentConfig := buildAgentConfig(config, agentOutput, ownsOutput)
 
 	deployer := agent.NewDeployer(clientset, agentConfig)
 
@@ -325,8 +347,10 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		// merged reading, so a transient Apply failure on the internal
 		// hygiene rewrite must not discard an already-captured snapshot;
 		// warn loudly instead (the orphaned ConfigMap stays pre-merge).
+		// ownsOutput is the run-owns-the-staging-ConfigMap flag, so its
+		// logical inverse is "the ConfigMap is the user's delivery vehicle".
 		if err := rewriteMergedSnapshotConfigMap(ctx, agentOutput, config.Kubeconfig,
-			snapshotData, deliverViaConfigMap); err != nil {
+			snapshotData, !ownsOutput); err != nil {
 			return nil, err
 		}
 	}
@@ -482,10 +506,27 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 			"Namespace is required: it is where the agent Job, its RBAC, and the result ConfigMap are created")
 	}
 
+	// Default RunID before any cluster access — and before
+	// agentConfigMapTarget below, which folds it into the internal staging
+	// ConfigMap's name — so every resource this run creates shares one
+	// scope. An empty RunID reaching pkg/k8s/agent would silently fall back
+	// to unscoped, collision-prone names (nameWithRunID's deploy-between-
+	// tasks safety net), so a whitespace-only value that slips past this
+	// simple emptiness check must fail closed rather than reach that
+	// fallback.
+	if config.RunID == "" {
+		config.RunID = runid.Generate()
+	}
+	if strings.TrimSpace(config.RunID) == "" {
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
+			"RunID must not be all-whitespace; leave it unset to auto-generate one")
+	}
+	slog.Info("snapshot agent run", slog.String("runID", config.RunID))
+
 	// Resolve (and validate) the Job's ConfigMap target before any cluster
 	// access: a malformed cm:// Output must not cost the caller a deployed
 	// Job and a cluster-admin binding.
-	agentOutput, deliverViaConfigMap, err := agentConfigMapTarget(config)
+	agentOutput, ownsOutput, err := agentConfigMapTarget(config)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -497,7 +538,7 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 		return nil, nil, err
 	}
 
-	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, agentOutput, deliverViaConfigMap)
+	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, agentOutput, ownsOutput)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -513,21 +554,27 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 }
 
 // agentConfigMapTarget resolves where the agent Job stages its result and
-// whether that ConfigMap is the user's delivery vehicle.
+// whether this run owns that ConfigMap.
 //
 // The Job always writes to a ConfigMap. When config.Output is a cm:// URI the
-// user asked for that exact ConfigMap, so the Job targets it directly and
-// deliverViaConfigMap is true — which makes a failed AKS-pool-merge rewrite
-// fatal rather than a warning, because the bytes the user will read live
-// there. Any other Output (file, stdout, template, or unset) stages to an
-// internal ConfigMap in config.Namespace that the caller never sees.
+// user asked for that exact ConfigMap, so the Job targets it directly,
+// ownsOutput is false, and a failed AKS-pool-merge rewrite is fatal rather
+// than a warning — the bytes the user will read live there, and this run
+// must never delete an artifact it does not own. Any other Output (file,
+// stdout, template, or unset) stages to an internal, run-scoped ConfigMap in
+// config.Namespace that the caller never names: ownsOutput is true, so
+// Cleanup may delete it.
+//
+// The returned uri's namespace equals config.Namespace in the owned case —
+// callers (deleteStagingConfigMap in pkg/k8s/agent) rely on that invariant
+// rather than re-parsing the URI for a delete namespace.
 //
 // A cm:// Output is fully parsed here, not merely prefix-matched. The
 // namespace/name only has to be well-formed for the in-pod writer much later,
 // so a typo like "cm://aicr-snapshot" (no namespace) would otherwise surface
 // as a Job failure — after RBAC and the Job exist, and with Cleanup false
 // (the zero value) they stay behind. Returns ErrCodeInvalidRequest instead.
-func agentConfigMapTarget(config *AgentConfig) (uri string, deliverViaConfigMap bool, err error) {
+func agentConfigMapTarget(config *AgentConfig) (uri string, ownsOutput bool, err error) {
 	if strings.HasPrefix(config.Output, serializer.ConfigMapURIScheme) {
 		if _, _, parseErr := pod.ParseConfigMapURI(config.Output); parseErr != nil {
 			// Wrap with the same code rather than PropagateOrWrap: the inner
@@ -537,9 +584,9 @@ func agentConfigMapTarget(config *AgentConfig) (uri string, deliverViaConfigMap 
 				fmt.Sprintf("invalid ConfigMap output URI %q (expected cm://namespace/name)", config.Output),
 				parseErr)
 		}
-		return config.Output, true, nil
+		return config.Output, false, nil
 	}
-	return fmt.Sprintf("%s%s/aicr-snapshot", serializer.ConfigMapURIScheme, config.Namespace), false, nil
+	return fmt.Sprintf("%s%s/aicr-snapshot-%s", serializer.ConfigMapURIScheme, config.Namespace, config.RunID), true, nil
 }
 
 // SnapshotDelivery describes where DeliverSnapshot writes captured bytes.

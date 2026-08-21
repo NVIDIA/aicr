@@ -207,6 +207,13 @@ type validationConfig struct {
 	// Input
 	phases []validator.Phase
 
+	// runID is generated once, up front, for the whole `aicr validate`
+	// invocation (see validateCmd's Action) and reused here instead of a
+	// second v1.GenerateRunID() call. Sharing one ID keeps names, labels,
+	// logs, and cleanup hints correlated to a single command instead of
+	// fragmenting across an agent-side ID and a validator-side one.
+	runID string
+
 	// Kubeconfig path; propagated to ConfigMap reads/writes so a single
 	// validate invocation can target a non-default cluster end-to-end.
 	kubeconfig string
@@ -257,12 +264,13 @@ func runValidation(
 
 	slog.Info("running validation", "phases", cfg.phases)
 
-	// Generate the run ID CLI-side rather than letting the validator
-	// auto-generate it internally: the no-cleanup debug log below needs to
-	// surface the same ID the validator stamps on its Jobs/RBAC so an
-	// operator can locate the kept resources. Passing it via
-	// WithValidationRunID keeps that value in our hands.
-	runID := v1.GenerateRunID()
+	// Generated once CLI-side, before either snapshot source ran (see
+	// validateCmd's Action), rather than letting the validator auto-generate
+	// it internally: the no-cleanup debug log below needs to surface the
+	// same ID the validator stamps on its Jobs/RBAC so an operator can
+	// locate the kept resources. Passing it via WithValidationRunID keeps
+	// that value in our hands.
+	runID := cfg.runID
 
 	// Translate the resolved CLI values into facade ValidateOptions. These
 	// mirror the validator.With* options the direct invocation used to set;
@@ -805,6 +813,25 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				return err
 			}
 
+			// Generate the run ID once, up front, for this whole invocation —
+			// before either snapshot source below runs. The validator Jobs
+			// deployed by runValidation need it (passed through
+			// validationConfig.runID); generating it here rather than inside
+			// runValidation means a single `aicr validate` no longer risks
+			// splitting its correlation ID across two independent
+			// v1.GenerateRunID() calls.
+			//
+			// KNOWN GAP: the live-capture branch below
+			// (deployAgentForValidation -> Client.CollectSnapshot) cannot yet
+			// forward this ID to the snapshot-capture agent's Job/RBAC —
+			// pkg/client/v1.AgentConfig has no RunID field to receive it
+			// (pkg/snapshotter.AgentConfig does; mirroring it onto the facade
+			// is a separate, later change per ADR-020's implementation plan).
+			// Until that facade field exists and is wired here, a
+			// live-capture run's agent Job still gets its own independently
+			// generated RunID from DeployAndCollect's default.
+			runID := v1.GenerateRunID()
+
 			var snap *aicr.Snapshot
 
 			// --no-cluster means "do not touch the cluster". The agent-deploy
@@ -861,6 +888,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			return runValidation(ctx, client, rec, snap, validationConfig{
 				phases:                phases,
+				runID:                 runID,
 				kubeconfig:            kubeconfig,
 				output:                cmd.String("output"),
 				outFormat:             serializer.FormatJSON,

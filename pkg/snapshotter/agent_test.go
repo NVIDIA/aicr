@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -88,9 +89,37 @@ func TestBuildAgentConfigTolerations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildAgentConfig(&AgentConfig{Tolerations: tt.input}, "snapshot.yaml").Tolerations
+			got := buildAgentConfig(&AgentConfig{Tolerations: tt.input}, "snapshot.yaml", false).Tolerations
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("buildAgentConfig().Tolerations = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildAgentConfigPropagatesRunIDAndOwnership confirms buildAgentConfig
+// forwards AgentConfig.RunID and its ownsOutput parameter onto
+// agent.Config.RunID / agent.Config.OwnsOutputConfigMap — the projection
+// deployAndWaitForResult relies on so the deployer scopes every resource
+// name to this run and Cleanup knows whether it may delete the staging
+// ConfigMap.
+func TestBuildAgentConfigPropagatesRunIDAndOwnership(t *testing.T) {
+	tests := []struct {
+		name       string
+		ownsOutput bool
+	}{
+		{name: "owned staging ConfigMap", ownsOutput: true},
+		{name: "user-supplied ConfigMap", ownsOutput: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildAgentConfig(&AgentConfig{RunID: "20260821-142233-9f3a1c0b7e2d4a55"},
+				"cm://ns/name", tt.ownsOutput)
+			if got.RunID != "20260821-142233-9f3a1c0b7e2d4a55" {
+				t.Errorf("agent.Config.RunID = %q, want the AgentConfig.RunID value", got.RunID)
+			}
+			if got.OwnsOutputConfigMap != tt.ownsOutput {
+				t.Errorf("agent.Config.OwnsOutputConfigMap = %v, want %v", got.OwnsOutputConfigMap, tt.ownsOutput)
 			}
 		})
 	}
@@ -505,11 +534,15 @@ func TestParseTolerationsOperator(t *testing.T) {
 
 // TestAgentOutputURILogic exercises agentConfigMapTarget — the rule that
 // decides where the agent Job stages its result:
-//  1. A file path leaves the Job on the default ConfigMap in its namespace.
-//  2. A cm:// URI makes that ConfigMap the Job's target AND the delivery
-//     vehicle, so a rewrite failure must be fatal rather than a warning.
+//  1. A file path leaves the Job on the run-scoped internal ConfigMap in its
+//     namespace, which this run owns.
+//  2. A cm:// URI makes that ConfigMap the Job's target directly; this run
+//     does NOT own it (the caller supplied it), so a rewrite failure must be
+//     fatal rather than a warning.
 //  3. Stdout (empty or "-") behaves like a file path.
 func TestAgentOutputURILogic(t *testing.T) {
+	const testRunID = "20260821-142233-9f3a1c0b7e2d4a55"
+
 	tests := []struct {
 		name               string
 		agentNamespace     string
@@ -518,24 +551,24 @@ func TestAgentOutputURILogic(t *testing.T) {
 		wantUsesUserOutput bool   // whether agentOutput should equal userOutput
 	}{
 		{
-			name:               "file output uses default ConfigMap with agent namespace",
+			name:               "file output uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "snapshot.yaml",
-			wantAgentOutputHas: "cm://default/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
-			name:               "stdout uses default ConfigMap with agent namespace",
+			name:               "stdout uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "",
-			wantAgentOutputHas: "cm://default/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
-			name:               "dash stdout uses default ConfigMap with agent namespace",
+			name:               "dash stdout uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "-",
-			wantAgentOutputHas: "cm://default/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
@@ -546,19 +579,20 @@ func TestAgentOutputURILogic(t *testing.T) {
 			wantUsesUserOutput: true,
 		},
 		{
-			name:               "custom namespace uses that namespace for default ConfigMap",
+			name:               "custom namespace uses that namespace for the run-scoped ConfigMap",
 			agentNamespace:     "custom-namespace",
 			userOutput:         "output.yaml",
-			wantAgentOutputHas: "cm://custom-namespace/aicr-snapshot",
+			wantAgentOutputHas: "cm://custom-namespace/aicr-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			agentOutput, deliverViaConfigMap, err := agentConfigMapTarget(&AgentConfig{
+			agentOutput, ownsOutput, err := agentConfigMapTarget(&AgentConfig{
 				Namespace: tt.agentNamespace,
 				Output:    tt.userOutput,
+				RunID:     testRunID,
 			})
 			if err != nil {
 				t.Fatalf("agentConfigMapTarget: %v", err)
@@ -573,12 +607,49 @@ func TestAgentOutputURILogic(t *testing.T) {
 					t.Errorf("agentOutput = %q, want %q", agentOutput, tt.wantAgentOutputHas)
 				}
 			}
-			if deliverViaConfigMap != tt.wantUsesUserOutput {
-				t.Errorf("deliverViaConfigMap = %v, want %v — the flag must track whether the "+
-					"ConfigMap is the user's delivery vehicle, since it decides whether an "+
-					"AKS-pool-merge rewrite failure is fatal", deliverViaConfigMap, tt.wantUsesUserOutput)
+			// ownsOutput is the logical inverse of "the user supplied this
+			// output": the run owns (and Cleanup may delete) the staging
+			// ConfigMap only when it did NOT come from the user.
+			wantOwnsOutput := !tt.wantUsesUserOutput
+			if ownsOutput != wantOwnsOutput {
+				t.Errorf("ownsOutput = %v, want %v — it must track whether this run owns the "+
+					"ConfigMap, since it decides whether Cleanup may delete it and whether an "+
+					"AKS-pool-merge rewrite failure is fatal", ownsOutput, wantOwnsOutput)
 			}
 		})
+	}
+}
+
+// TestAgentConfigMapTargetIsRunScoped and TestAgentConfigMapTargetLeavesUserURIAlone
+// pin the ownsOutput inversion: the run owns (and Cleanup may delete) the
+// staging ConfigMap only when the user did NOT name a cm:// destination.
+// Getting this backwards deletes the user's own output ConfigMap.
+func TestAgentConfigMapTargetIsRunScoped(t *testing.T) {
+	cfg := &AgentConfig{Namespace: "gpu-operator", RunID: "20260821-142233-9f3a1c0b7e2d4a55"}
+	uri, ownsOutput, err := agentConfigMapTarget(cfg)
+	if err != nil {
+		t.Fatalf("agentConfigMapTarget() error = %v", err)
+	}
+	want := "cm://gpu-operator/aicr-snapshot-20260821-142233-9f3a1c0b7e2d4a55"
+	if uri != want {
+		t.Errorf("uri = %q, want %q", uri, want)
+	}
+	if !ownsOutput {
+		t.Error("ownsOutput = false, want true for the internal staging ConfigMap")
+	}
+}
+
+func TestAgentConfigMapTargetLeavesUserURIAlone(t *testing.T) {
+	cfg := &AgentConfig{Namespace: "gpu-operator", Output: "cm://gpu-operator/aicr-snapshot", RunID: "20260821-142233-9f3a1c0b7e2d4a55"}
+	uri, ownsOutput, err := agentConfigMapTarget(cfg)
+	if err != nil {
+		t.Fatalf("agentConfigMapTarget() error = %v", err)
+	}
+	if uri != cfg.Output {
+		t.Errorf("uri = %q, want the user's URI %q unchanged", uri, cfg.Output)
+	}
+	if ownsOutput {
+		t.Error("ownsOutput = true; a user-supplied cm:// output is delivered, not run-owned")
 	}
 }
 
@@ -1114,6 +1185,20 @@ func TestDeployAndCollectRejectsBeforeClusterAccess(t *testing.T) {
 			},
 			wantMsg: "Namespace is required",
 		},
+		{
+			// Ruling 5 mitigation: nameWithRunID (pkg/k8s/agent) silently
+			// falls back to unscoped, collision-prone names when RunID is
+			// empty. A caller-supplied all-whitespace RunID bypasses the
+			// simple "== \"\"" default check, so it must fail closed here
+			// rather than reach that fallback deep in agent.Deploy.
+			name: "whitespace-only RunID",
+			config: &AgentConfig{
+				Namespace:  "default",
+				Kubeconfig: badKubeconfig,
+				RunID:      "   ",
+			},
+			wantMsg: "RunID must not be all-whitespace",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1129,5 +1214,33 @@ func TestDeployAndCollectRejectsBeforeClusterAccess(t *testing.T) {
 					"input check ran too late)", err, tt.wantMsg)
 			}
 		})
+	}
+}
+
+// TestDeployAndCollectDefaultsRunID confirms DeployAndCollect fills an empty
+// RunID with a freshly generated one before it is folded into the internal
+// staging ConfigMap's name — observable here because the malformed-Output
+// rejection below fires AFTER that defaulting step, and DeployAndCollect
+// mutates the caller's *AgentConfig in place.
+func TestDeployAndCollectDefaultsRunID(t *testing.T) {
+	runIDPattern := regexp.MustCompile(`^\d{8}-\d{6}-[0-9a-f]{16}$`)
+
+	cfg := &AgentConfig{
+		Namespace:  "default",
+		Kubeconfig: filepath.Join(t.TempDir(), "does-not-exist.kubeconfig"),
+		Output:     "cm://aicr-snapshot", // malformed: no namespace — rejected after RunID defaulting
+	}
+	if cfg.RunID != "" {
+		t.Fatalf("test precondition: cfg.RunID = %q, want empty", cfg.RunID)
+	}
+
+	_, _, err := DeployAndCollect(t.Context(), cfg)
+	if err == nil {
+		t.Fatal("DeployAndCollect() = nil error, want rejection from the malformed Output")
+	}
+
+	if !runIDPattern.MatchString(cfg.RunID) {
+		t.Errorf("cfg.RunID = %q after DeployAndCollect, want it filled with a generated ID matching %s",
+			cfg.RunID, runIDPattern)
 	}
 }
