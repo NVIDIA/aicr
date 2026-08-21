@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -122,6 +123,11 @@ func TestStageRecipeArtifactAcceptsPackageOutput(t *testing.T) {
 }
 
 func TestStageRecipeArtifactFreezesResolvedTagAcrossRetry(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
 	artifact := newTestRecipeArtifact(t, []testArchiveEntry{{
 		header:  tar.Header{Name: "registry.yaml", Mode: 0o644, Typeflag: tar.TypeReg},
 		content: []byte("components: []\n"),
@@ -160,6 +166,18 @@ func TestStageRecipeArtifactFreezesResolvedTagAcrossRetry(t *testing.T) {
 	}
 	if len(waits) != 1 || waits[0] != 2*time.Millisecond {
 		t.Errorf("backoff waits = %v, want [2ms]", waits)
+	}
+	logOutput := logs.String()
+	for _, want := range []string{
+		"retrying OCI recipe pull after transient failure",
+		"attempt=1",
+		"nextAttempt=2",
+		"maxAttempts=3",
+		"backoff=2ms",
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Errorf("retry log = %q, want field %q", logOutput, want)
+		}
 	}
 }
 
@@ -612,13 +630,58 @@ func TestValidateRecipePullOptions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, _, gotDigest, err := validateRecipePullOptions(tt.opts)
+			got, err := validateRecipePullOptions(tt.opts)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("validateRecipePullOptions() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if got != tt.wantRepo || gotDigest != tt.wantDigest {
+			if got.normalized != tt.wantRepo || got.selectorDigest != tt.wantDigest {
 				t.Errorf("validateRecipePullOptions() = (%q, %q), want (%q, %q)",
-					got, gotDigest, tt.wantRepo, tt.wantDigest)
+					got.normalized, got.selectorDigest, tt.wantRepo, tt.wantDigest)
+			}
+		})
+	}
+}
+
+func TestValidateRecipePullOptionsReportsDigestSelector(t *testing.T) {
+	digestSelector := "sha256:" + strings.Repeat("a", 64)
+	tests := []struct {
+		name       string
+		opts       RecipePullOptions
+		wantDigest bool
+		wantErr    bool
+	}{
+		{
+			name: "digest",
+			opts: RecipePullOptions{
+				Repository: "ghcr.io/nvidia/aicr-recipes",
+				Selector:   digestSelector,
+			},
+			wantDigest: true,
+		},
+		{
+			name: "tag",
+			opts: RecipePullOptions{
+				Repository: "ghcr.io/nvidia/aicr-recipes",
+				Selector:   "v1",
+			},
+		},
+		{
+			name: "invalid",
+			opts: RecipePullOptions{
+				Repository: "https://ghcr.io/nvidia/aicr-recipes",
+				Selector:   digestSelector,
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDigest, err := ValidateRecipePullOptions(tt.opts)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateRecipePullOptions() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if gotDigest != tt.wantDigest {
+				t.Errorf("ValidateRecipePullOptions() digest = %t, want %t", gotDigest, tt.wantDigest)
 			}
 		})
 	}

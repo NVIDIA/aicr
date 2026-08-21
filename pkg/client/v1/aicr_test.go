@@ -178,22 +178,31 @@ func TestNewClientRejectsMissingFilesystemDir(t *testing.T) {
 func TestNewClientRejectsInvalidOCISourceConfiguration(t *testing.T) {
 	t.Parallel()
 
+	digestSelector := "sha256:" + strings.Repeat("a", 64)
 	tests := []struct {
 		name       string
 		repository string
 		selector   string
+		tempDir    string
+		setTempDir bool
 	}{
 		{name: "empty repository", selector: "v1"},
 		{name: "tag selector", repository: "ghcr.io/nvidia/aicr-recipes", selector: "v1"},
 		{name: "invalid digest", repository: "ghcr.io/nvidia/aicr-recipes", selector: "sha256:short"},
-		{name: "ambiguous repository tag", repository: "ghcr.io/nvidia/aicr-recipes:v1", selector: "sha256:" + strings.Repeat("a", 64)},
+		{name: "ambiguous repository tag", repository: "ghcr.io/nvidia/aicr-recipes:v1", selector: digestSelector},
+		{name: "empty temp directory", repository: "ghcr.io/nvidia/aicr-recipes", selector: digestSelector, setTempDir: true},
+		{name: "temp directory whitespace", repository: "ghcr.io/nvidia/aicr-recipes", selector: digestSelector, tempDir: " /tmp", setTempDir: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := aicr.NewClient(
+			opts := []aicr.Option{
 				aicr.WithRecipeSource(aicr.OCISource(tt.repository, tt.selector)),
-			)
+			}
+			if tt.setTempDir {
+				opts = append(opts, aicr.WithOCISourceTempDir(tt.tempDir))
+			}
+			_, err := aicr.NewClient(opts...)
 			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("NewClient() error = %v, want ErrCodeInvalidRequest", err)
 			}
@@ -2509,5 +2518,77 @@ func TestSnapshotUnwrapRoundTrips(t *testing.T) {
 	// leaves it empty so callers can tell "no agent bytes" from "empty document".
 	if len(wrapped.Raw) != 0 {
 		t.Errorf("WrapSnapshot() populated Raw (%d bytes); only CollectSnapshot sets it", len(wrapped.Raw))
+	}
+}
+
+// TestResolveRecipeRuntimeInventoryMode mirrors TestResolveRecipeAccountingMode
+// and exercises the facade option through a real resolve rather than asserting
+// the option value is non-nil.
+//
+// No stock recipe declares the component, so the observable outcome for a stock
+// resolve is the fail-closed rejection. That is the contract worth pinning: a
+// selection the recipe cannot honor must surface rather than be recorded.
+func TestResolveRecipeRuntimeInventoryMode(t *testing.T) {
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := client.Close(); closeErr != nil {
+			t.Errorf("Close() error = %v", closeErr)
+		}
+	})
+
+	// Deliberately NOT the gke/h100/cos/inference combination. That is the
+	// recipe #2271 will eventually add k8s-aibom to, so a test asserting
+	// "this recipe does not declare the component" would silently invert into
+	// asserting the opposite once the overlay lands, still passing for the
+	// wrong reason. A training recipe is not the stock-adoption target.
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		Intent:      recipe.CriteriaIntentTraining,
+		OS:          recipe.CriteriaOSUbuntu,
+	}
+
+	// Pin the precondition so this fails loudly rather than quietly changing
+	// meaning if the component is ever added to the recipe above.
+	baseline, baseErr := client.ResolveRecipeFromCriteriaWithOptions(
+		t.Context(), aicr.WrapCriteria(criteria))
+	if baseErr != nil {
+		t.Fatalf("baseline resolve error = %v", baseErr)
+	}
+	for _, ref := range baseline.Resolved().ComponentRefs {
+		if ref.Name == "k8s-aibom" {
+			t.Fatal("the chosen criteria now declare k8s-aibom; pick criteria that do not, " +
+				"or this test asserts the opposite of what it claims")
+		}
+	}
+
+	for _, tt := range []struct {
+		name    string
+		mode    string
+		wantErr bool
+	}{
+		{name: "invalid mode is rejected", mode: "off", wantErr: true},
+		{name: "empty mode is rejected", mode: "", wantErr: true},
+		{
+			// Valid value, but no stock recipe declares the component, so the
+			// build must refuse rather than record a mode it cannot apply.
+			name: "valid mode on a recipe without the component is rejected",
+			mode: "disabled", wantErr: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, resolveErr := client.ResolveRecipeFromCriteriaWithOptions(
+				t.Context(),
+				aicr.WrapCriteria(criteria),
+				aicr.WithRuntimeInventoryMode(tt.mode),
+			)
+			if (resolveErr != nil) != tt.wantErr {
+				t.Fatalf("ResolveRecipeFromCriteriaWithOptions() error = %v, wantErr %v",
+					resolveErr, tt.wantErr)
+			}
+		})
 	}
 }

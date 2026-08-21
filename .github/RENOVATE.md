@@ -9,7 +9,7 @@ Self-hosted Renovate keeps the project's dependencies up to date across `go.mod`
 
 - Configuration: [`.github/renovate.json5`](renovate.json5)
 - Workflow: [`.github/workflows/renovate.yaml`](workflows/renovate.yaml)
-- Companion script: [`tools/update-chainsaw-checksums`](../tools/update-chainsaw-checksums)
+- Companion scripts: [`tools/update-chainsaw-checksums`](../tools/update-chainsaw-checksums), [`tools/update-helmfile-checksums`](../tools/update-helmfile-checksums), [`tools/update-helm-diff-checksums`](../tools/update-helm-diff-checksums)
 
 Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are documented inline in `renovate.json5`. This doc covers what's covered, how to extend coverage, and the known gotchas.
 
@@ -25,6 +25,8 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `.settings.yaml` (28 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |
 | `.settings.yaml` `chainsaw_checksums` | `postUpgradeTasks` → `tools/update-chainsaw-checksums` |
+| `.settings.yaml` `helmfile_checksums` | `postUpgradeTasks` → `tools/update-helmfile-checksums` |
+| `.settings.yaml` `helm_diff_checksums` | `postUpgradeTasks` → `tools/update-helm-diff-checksums` |
 | `.go-version` (Go toolchain) | dedicated `golang-version` customManager (`go-toolchain` group) |
 
 The `go` directive in `go.mod` is intentionally not bumped — the Go toolchain version is owned by `.go-version`. Makefile (`GOTOOLCHAIN`), the `load-versions` composite action, `install-karpenter-kwok`, and validator Dockerfiles (`--build-arg GO_VERSION`) all read from that single file.

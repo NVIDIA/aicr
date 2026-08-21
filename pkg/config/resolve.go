@@ -828,6 +828,24 @@ func (r *RecipeSpec) ResolveAccountingMode() (recipe.AccountingMode, bool, error
 	return mode, true, nil
 }
 
+// ResolveRuntimeInventoryMode parses
+// spec.recipe.configuration.runtimeInventory.mode. The bool reports whether the
+// field was explicitly present; absence leaves the recipe's own declaration
+// alone rather than materializing a default, because unlike Slurm accounting
+// there is no meaningful "off by default" for a component the recipe may not
+// declare at all.
+func (r *RecipeSpec) ResolveRuntimeInventoryMode() (recipe.RuntimeInventoryMode, bool, error) {
+	if r == nil || r.Configuration == nil || r.Configuration.RuntimeInventory == nil {
+		return "", false, nil
+	}
+	mode, err := recipe.ParseRuntimeInventoryMode(r.Configuration.RuntimeInventory.Mode)
+	if err != nil {
+		return "", false, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"invalid spec.recipe.configuration.runtimeInventory.mode")
+	}
+	return mode, true, nil
+}
+
 // boolPtrOrFalse dereferences a *bool, treating nil (absent in
 // YAML/JSON) as false. Used at the spec → resolved boundary so the
 // resolved layer can stay plain bool for downstream consumers.

@@ -39,7 +39,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
-          cache: false  # vendor/ provides deps; disable to save disk on constrained runners
+          cache: true
       - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd  # v4.37.7
         with:
           languages: go

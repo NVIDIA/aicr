@@ -98,6 +98,38 @@ func TestEvaluate(t *testing.T) {
 			constraint: recipe.Constraint{Name: "OS.release.ID", Value: ">= 1.2.3"},
 			wantCode:   errors.ErrCodeInvalidRequest,
 		},
+		// GKE regression: a bare version without the required GKE build suffix
+		// must not pass a GKE build-floor constraint. Snapshot has v1.33.5
+		// (no -gke suffix); the constraint demands >= 1.33.5-gke.1318000.
+		{
+			name:       "GKE build floor: bare version fails GKE-suffixed floor",
+			constraint: recipe.Constraint{Name: "K8s.server.version", Value: ">= 1.33.5-gke.1318000"},
+			wantPassed: false,
+		},
+		// Compound expression: OR clause with per-track GKE floors. The snapshot
+		// value (v1.33.5) has no GKE suffix, so it fails both clauses.
+		{
+			name:       "GKE compound: bare version fails per-track compound floor",
+			constraint: recipe.Constraint{Name: "K8s.server.version", Value: ">= 1.33.5-gke.1318000 < 1.34.0 || >= 1.35.0-gke.2745000"},
+			wantPassed: false,
+		},
+		// Simple non-GKE constraint still passes — backward compat.
+		{
+			name:       "simple >= 1.33 still passes without GKE suffix",
+			constraint: recipe.Constraint{Name: "K8s.server.version", Value: ">= 1.33"},
+			wantPassed: true,
+		},
+		// Backward-compat: a bare (non-GKE) version that numerically satisfies a
+		// bare floor still passes. The snapshot has v1.33.5 (no -gke suffix) and
+		// the floor is >= 1.33.0 — satisfied via numeric patch comparison alone;
+		// the GKE tie-break switch is never reached.
+		// The leftIsGKE branch is covered at the unit level in
+		// TestCompoundConstraint_Evaluate ("GKE actual passes bare >= constraint").
+		{
+			name:       "bare actual satisfies bare version floor (numeric comparison only)",
+			constraint: recipe.Constraint{Name: "K8s.server.version", Value: ">= 1.33.0"},
+			wantPassed: true,
+		},
 	}
 
 	snap := evalSnapshot()

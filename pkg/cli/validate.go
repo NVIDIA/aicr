@@ -135,7 +135,9 @@ func resolveValidateNodeSelector(cmd *cli.Command, resolved *config.ValidateReso
 // inference-perf that want to mirror the target node's taints by default
 // must distinguish "operator opted into tolerate-all" from "operator said
 // nothing". Returning nil here when neither CLI nor config set the field
-// keeps the env var unset, so the inner validator context sees nil.
+// keeps the env var unset, so the inner validator context sees nil. The live
+// snapshot path consumes that same nil as its signal to apply the agent's
+// tolerate-all default at the Job projection boundary.
 func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResolved) ([]corev1.Toleration, error) {
 	if cmd.IsSet("toleration") {
 		tols, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
@@ -465,12 +467,12 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
-			Usage:    "Override GPU node selection for validation workloads (format: key=value, can be repeated). Replaces platform-specific selectors on inner workloads (e.g., NCCL benchmark pods). Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job.",
+			Usage:    "Override GPU node selection for the live snapshot agent (when --snapshot is omitted) and inner validation workloads (format: key=value, can be repeated). Replaces platform-specific selectors on inner workloads (e.g., NCCL benchmark pods). Does not affect the validator orchestrator Job.",
 			Category: catScheduling,
 		},
 		&cli.StringSliceFlag{
 			Name:     "toleration",
-			Usage:    "Override tolerations for validation workloads (format: key=value:effect, can be repeated). Replaces the default tolerate-all policy on inner workloads. Does not affect the validator orchestrator Job.",
+			Usage:    "Override tolerations for the live snapshot agent (when --snapshot is omitted) and inner validation workloads (format: key=value:effect, can be repeated). When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job.",
 			Category: catScheduling,
 		},
 		&cli.DurationFlag{
