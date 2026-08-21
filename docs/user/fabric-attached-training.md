@@ -262,7 +262,11 @@ Also TrainJob-expressible. AICR fixes the resource name and the value is always
 `NCCL_SOCKET_IFNAME` pins NCCL's bootstrap and out-of-band traffic to the
 primary interface. AICR's tested AKS runtime sets it, as does the EKS one — on
 a multi-NIC node, leaving NCCL to guess can send rendezvous traffic down an
-interface that cannot carry it.
+interface that cannot carry it. `eth0` assumes the pod's primary interface is
+named that; under `hostNetwork` or a non-standard CNI it may not be. Confirm
+on a running pod with
+`kubectl exec -n <namespace> <pod> -- ip route get 1.1.1.1` and pin whatever
+that reports.
 
 The same repeat-every-resource caveat applies.
 
@@ -297,10 +301,18 @@ socket fallback:
 # Select workers by label rather than guessing the generated pod name.
 # --tail=-1 is required: with a selector, kubectl defaults to the last 10 lines
 # and would omit the transport banner, which NCCL prints during init.
-kubectl logs -n <namespace> -c node --tail=-1 \
+kubectl logs -n <namespace> -c node --tail=-1 --prefix \
   -l jobset.sigs.k8s.io/jobset-name=<trainjob-name>,jobset.sigs.k8s.io/replicatedjob-name=node \
   | grep -i 'NCCL INFO.*Using network'
 ```
+
+This selects the `node` replicated job, which is where a node-only runtime such
+as `torch-distributed` prints the banner. If your runtime uses an MPI launcher —
+as AICR's tested AKS runtime does — the rank processes still execute on the
+`node` pods, but they are started over sshd and `mpirun` aggregates their
+stdout in the `launcher` pod, so select
+`jobset.sigs.k8s.io/replicatedjob-name=launcher` instead. A grep against `node`
+on such a runtime finds nothing, which is not evidence of socket fallback.
 
 Expect the plugin name — `FasTrak` for TCPXO, `AWS Libfabric` for EFA, `IB` for
 InfiniBand. **`Socket` means the fabric is not in use** and the job is running
