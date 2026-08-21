@@ -34,9 +34,17 @@ const staticStagingConfigMapName = "aicr-snapshot"
 
 // nameWithRunID joins prefix and runID, truncating prefix so the result fits
 // within the Kubernetes name ceiling. An empty prefix yields the bare runID.
+// An empty runID yields the bare (trimmed) prefix rather than appending a
+// trailing "-": a trailing separator would leave a Kubernetes object name
+// that fails validation (names must end in an alphanumeric character), and
+// falling back to the unscoped prefix also keeps deploys working between
+// this task and the task that wires Config.RunID through every caller.
 func nameWithRunID(prefix, runID string) string {
 	if prefix == "" {
 		return runID
+	}
+	if runID == "" {
+		return prefix
 	}
 	budget := defaults.MaxK8sNameLength - len(runID) - 1
 	if budget < 0 {

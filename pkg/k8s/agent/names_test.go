@@ -25,22 +25,31 @@ func TestNameWithRunID(t *testing.T) {
 	tests := []struct {
 		name   string
 		prefix string
+		runID  string
 		want   string
 	}{
-		{"short prefix", "aicr", "aicr-" + runID},
-		{"exactly at budget", strings.Repeat("a", 30), strings.Repeat("a", 30) + "-" + runID},
-		{"over budget truncates", strings.Repeat("b", 40), strings.Repeat("b", 30) + "-" + runID},
-		{"trailing dash trimmed", strings.Repeat("c", 29) + "-", strings.Repeat("c", 29) + "-" + runID},
-		{"empty prefix", "", runID},
+		{"short prefix", "aicr", runID, "aicr-" + runID},
+		{"exactly at budget", strings.Repeat("a", 30), runID, strings.Repeat("a", 30) + "-" + runID},
+		{"over budget truncates", strings.Repeat("b", 40), runID, strings.Repeat("b", 30) + "-" + runID},
+		{"trailing dash trimmed", strings.Repeat("c", 29) + "-", runID, strings.Repeat("c", 29) + "-" + runID},
+		{"empty prefix", "", runID, runID},
+		// A zero-value Config.RunID (before a caller wires it in) must fall
+		// back to the bare prefix, never a prefix with a trailing "-" — that
+		// would be an invalid Kubernetes object name.
+		{"empty runID falls back to bare prefix", "aicr", "", "aicr"},
+		{"empty prefix and empty runID", "", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := nameWithRunID(tt.prefix, runID)
+			got := nameWithRunID(tt.prefix, tt.runID)
 			if got != tt.want {
-				t.Errorf("nameWithRunID(%q, runID) = %q, want %q", tt.prefix, got, tt.want)
+				t.Errorf("nameWithRunID(%q, %q) = %q, want %q", tt.prefix, tt.runID, got, tt.want)
 			}
 			if len(got) > 63 {
 				t.Errorf("len = %d, exceeds 63-char ceiling", len(got))
+			}
+			if strings.HasSuffix(got, "-") {
+				t.Errorf("nameWithRunID(%q, %q) = %q, ends in a trailing separator (invalid Kubernetes name)", tt.prefix, tt.runID, got)
 			}
 		})
 	}
