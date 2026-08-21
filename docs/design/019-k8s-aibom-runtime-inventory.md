@@ -680,8 +680,8 @@ A third entry is the signal to revisit rather than extend by reflex.
 | Selection and opt-out semantics | Resolved — E |
 | Non-alpha storage API and migration policy | Resolved — A |
 | Concrete user-demand case | Resolved — D |
-| Managed-cluster qualification and measured cost | Planned — [#2271](https://github.com/NVIDIA/aicr/issues/2271) |
-| Upgrade, rollback, uninstall, support evidence | Planned — [#2282](https://github.com/NVIDIA/aicr/issues/2282) |
+| Managed-cluster qualification and measured cost | Planned — [#2310](https://github.com/NVIDIA/aicr/issues/2310) |
+| Upgrade, rollback, uninstall, support evidence | Planned — [#2311](https://github.com/NVIDIA/aicr/issues/2311) |
 
 Decision 4 is unchanged: chart, image, CRDs, and the public status contract
 remain one versioned set, so the graduation release requires full
