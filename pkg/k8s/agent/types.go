@@ -15,6 +15,7 @@
 package agent
 
 import (
+	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -99,6 +100,20 @@ func NewDeployer(clientset kubernetes.Interface, config Config) *Deployer {
 	return &Deployer{
 		clientset: clientset,
 		config:    config,
+	}
+}
+
+// objectLabels returns the standard label set applied to every run-owned
+// object this Deployer creates: the ServiceAccount, Role, RoleBinding,
+// ClusterRole, ClusterRoleBinding, Job, and the Job's pod template. Each
+// call returns a fresh map so callers attaching it to two objects (e.g. a
+// Job and its pod template) never alias the same underlying map.
+func (d *Deployer) objectLabels() map[string]string {
+	return map[string]string{
+		labels.Name:      labels.ValueAICR,
+		labels.ManagedBy: labels.ValueAICR,
+		labels.Component: labels.ValueSnapshotAgent,
+		labels.RunID:     d.config.RunID,
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -300,38 +301,6 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 	})
 }
 
-func TestDeployer_EnsureRBAC_Idempotent(t *testing.T) {
-	clientset := fake.NewClientset()
-	config := Config{
-		Namespace:          "test-namespace",
-		ServiceAccountName: testName,
-		JobName:            testName,
-		Image:              "ghcr.io/nvidia/aicr-validator:latest",
-		Output:             "cm://test-namespace/aicr-snapshot",
-	}
-	deployer := NewDeployer(clientset, config)
-	ctx := context.Background()
-
-	// Create resources twice - second call should be idempotent
-	if err := deployer.ensureServiceAccount(ctx); err != nil {
-		t.Fatalf("first create failed: %v", err)
-	}
-
-	if err := deployer.ensureServiceAccount(ctx); err != nil {
-		t.Fatalf("second create failed (not idempotent): %v", err)
-	}
-
-	// Verify only one ServiceAccount exists
-	saList, err := clientset.CoreV1().ServiceAccounts(config.Namespace).
-		List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("failed to list ServiceAccounts: %v", err)
-	}
-	if len(saList.Items) != 1 {
-		t.Errorf("expected 1 ServiceAccount, got %d", len(saList.Items))
-	}
-}
-
 func TestDeployer_EnsureJob(t *testing.T) {
 	clientset := fake.NewClientset()
 	config := Config{
@@ -406,26 +375,6 @@ func TestDeployer_EnsureJob(t *testing.T) {
 		// Verify volumes
 		if len(job.Spec.Template.Spec.Volumes) != 3 {
 			t.Errorf("expected 3 volumes, got %d", len(job.Spec.Template.Spec.Volumes))
-		}
-	})
-
-	t.Run("recreate Job deletes old one", func(t *testing.T) {
-		// Create Job first time
-		if err := deployer.ensureJob(ctx); err != nil {
-			t.Fatalf("first create failed: %v", err)
-		}
-
-		// Create Job second time - should delete and recreate
-		if err := deployer.ensureJob(ctx); err != nil {
-			t.Fatalf("second create failed: %v", err)
-		}
-
-		// Verify Job still exists (fake client doesn't support watch/wait,
-		// but we can verify the Job exists)
-		_, err := clientset.BatchV1().Jobs(config.Namespace).
-			Get(ctx, config.JobName, metav1.GetOptions{})
-		if err != nil {
-			t.Errorf("Job should exist after recreate: %v", err)
 		}
 	})
 }
@@ -579,6 +528,53 @@ func TestDeployer_Deploy(t *testing.T) {
 		Get(ctx, config.JobName, metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("Job not created: %v", err)
+	}
+}
+
+// TestDeployUsesRunScopedNamesAndLabels verifies that Deploy() creates every
+// object under a run-scoped name (prefix-runID) and that the Job's pod
+// template carries the full label set, not just the Job object itself —
+// Job labels do not propagate to the Pods a Job creates.
+//
+// Deviation from the plan's literal test: the brief's snippet omits the
+// SelfSubjectAccessReview-allow reactor that every other Deploy()-calling
+// test in this file installs. The fake clientset denies all permission
+// checks by default (Status.Allowed defaults to false), so Deploy() fails
+// at the Step-0 CheckPermissions gate before creating anything — a false
+// RED unrelated to run-scoped naming. Added the same reactor used by
+// TestDeployer_Deploy et al. so the test exercises the behavior it names.
+func TestDeployUsesRunScopedNamesAndLabels(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SelfSubjectAccessReview{
+			Status: authv1.SubjectAccessReviewStatus{
+				Allowed: true,
+				Reason:  "test permissions allowed",
+			},
+		}, nil
+	})
+	d := NewDeployer(client, Config{
+		Namespace: "test-ns",
+		Image:     "aicr:test",
+		RunID:     "20260821-142233-9f3a1c0b7e2d4a55",
+	})
+	if err := d.Deploy(ctx); err != nil {
+		t.Fatalf("Deploy() error = %v", err)
+	}
+
+	wantSuffix := "-20260821-142233-9f3a1c0b7e2d4a55"
+	job, err := client.BatchV1().Jobs("test-ns").Get(ctx, "aicr"+wantSuffix, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Job not found under run-scoped name: %v", err)
+	}
+	for _, key := range []string{labels.Name, labels.ManagedBy, labels.Component, labels.RunID} {
+		if _, ok := job.Spec.Template.Labels[key]; !ok {
+			t.Errorf("pod template missing label %q", key)
+		}
+	}
+	if _, err := client.RbacV1().ClusterRoles().Get(ctx, "aicr-node-reader"+wantSuffix, metav1.GetOptions{}); err != nil {
+		t.Errorf("ClusterRole not found under run-scoped name: %v", err)
 	}
 }
 

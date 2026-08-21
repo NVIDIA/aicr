@@ -17,6 +17,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
@@ -79,26 +80,54 @@ func (d *Deployer) ensureNamespace(ctx context.Context) error {
 	return nil
 }
 
-// ensureServiceAccount creates the ServiceAccount for the agent.
-// If the ServiceAccount already exists, this is a no-op (idempotent).
+// ensureServiceAccount creates the run-scoped ServiceAccount for the agent.
+//
+// Before creating, it checks whether a ServiceAccount already exists under
+// the bare (unscoped) prefix name. Previously, a caller passing
+// --service-account-name to target a ServiceAccount they created out of
+// band (e.g. with cloud IAM annotations for IRSA/Workload Identity) got it
+// silently adopted via IgnoreAlreadyExists. Now every run gets its own
+// run-scoped ServiceAccount, so that adoption no longer happens; warn
+// loudly instead of leaving the caller to discover it the hard way. A
+// NotFound Get is the normal path and stays silent.
 func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
+	name := d.saName()
+	bareName := d.config.ServiceAccountName
+	if bareName == "" {
+		bareName = d.base()
+	}
+	if _, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Get(ctx, bareName, metav1.GetOptions{}); err == nil {
+		slog.Warn("ServiceAccount already exists under the unscoped name; aicr is creating a run-scoped ServiceAccount instead of adopting it",
+			"existing", bareName, "creating", name)
+	} else if !apierrors.IsNotFound(err) {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to check for pre-existing ServiceAccount", err)
+	}
+
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.config.ServiceAccountName,
+			Name:      name,
 			Namespace: d.config.Namespace,
+			Labels:    d.objectLabels(),
 		},
 	}
 
 	_, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Create(ctx, sa, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if apierrors.IsAlreadyExists(err) {
+		return errors.Wrap(errors.ErrCodeInternal, "ServiceAccount already exists under run-scoped name (duplicate RunID?)", err)
+	}
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create ServiceAccount", err)
+	}
+	return nil
 }
 
-// ensureRole creates or updates the Role for ConfigMap access.
+// ensureRole creates the run-scoped Role for ConfigMap access.
 func (d *Deployer) ensureRole(ctx context.Context) error {
 	role := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.config.ServiceAccountName,
+			Name:      d.roleName(),
 			Namespace: d.config.Namespace,
+			Labels:    d.objectLabels(),
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
@@ -116,11 +145,7 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 
 	_, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().Roles(d.config.Namespace).Update(ctx, role, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update Role", err)
-		}
-		return nil
+		return errors.Wrap(errors.ErrCodeInternal, "Role already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create Role", err)
@@ -128,34 +153,31 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 	return nil
 }
 
-// ensureRoleBinding creates or updates the RoleBinding to bind the Role to the ServiceAccount.
+// ensureRoleBinding creates the run-scoped RoleBinding binding the Role to the ServiceAccount.
 func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.config.ServiceAccountName,
+			Name:      d.roleName(),
 			Namespace: d.config.Namespace,
+			Labels:    d.objectLabels(),
 		},
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      d.config.ServiceAccountName,
+				Name:      d.saName(),
 				Namespace: d.config.Namespace,
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: rbacAPIGroup,
 			Kind:     "Role",
-			Name:     d.config.ServiceAccountName,
+			Name:     d.roleName(),
 		},
 	}
 
 	_, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().RoleBindings(d.config.Namespace).Update(ctx, rb, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update RoleBinding", err)
-		}
-		return nil
+		return errors.Wrap(errors.ErrCodeInternal, "RoleBinding already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create RoleBinding", err)
@@ -163,7 +185,7 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 	return nil
 }
 
-// ensureClusterRole creates or updates the ClusterRole for node and cluster-wide resource access.
+// ensureClusterRole creates the run-scoped ClusterRole for node and cluster-wide resource access.
 func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 	rules := []rbacv1.PolicyRule{
 		{
@@ -211,18 +233,15 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 
 	cr := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: d.clusterRoleName(),
+			Name:   d.clusterRoleName(),
+			Labels: d.objectLabels(),
 		},
 		Rules: rules,
 	}
 
 	_, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().ClusterRoles().Update(ctx, cr, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update ClusterRole", err)
-		}
-		return nil
+		return errors.Wrap(errors.ErrCodeInternal, "ClusterRole already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRole", err)
@@ -230,16 +249,17 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 	return nil
 }
 
-// ensureClusterRoleBinding creates or updates the ClusterRoleBinding to bind the ClusterRole to the ServiceAccount.
+// ensureClusterRoleBinding creates the run-scoped ClusterRoleBinding binding the ClusterRole to the ServiceAccount.
 func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: d.clusterRoleName(),
+			Name:   d.clusterRoleName(),
+			Labels: d.objectLabels(),
 		},
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      d.config.ServiceAccountName,
+				Name:      d.saName(),
 				Namespace: d.config.Namespace,
 			},
 		},
@@ -252,11 +272,7 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 
 	_, err := d.clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().ClusterRoleBindings().Update(ctx, crb, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update ClusterRoleBinding", err)
-		}
-		return nil
+		return errors.Wrap(errors.ErrCodeInternal, "ClusterRoleBinding already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
@@ -268,7 +284,7 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 // If the ServiceAccount doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteServiceAccount(ctx context.Context) error {
 	err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).
-		Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
+		Delete(ctx, d.saName(), metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }
 
@@ -276,7 +292,7 @@ func (d *Deployer) deleteServiceAccount(ctx context.Context) error {
 // If the Role doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteRole(ctx context.Context) error {
 	err := d.clientset.RbacV1().Roles(d.config.Namespace).
-		Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
+		Delete(ctx, d.roleName(), metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }
 
@@ -284,7 +300,7 @@ func (d *Deployer) deleteRole(ctx context.Context) error {
 // If the RoleBinding doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteRoleBinding(ctx context.Context) error {
 	err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).
-		Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
+		Delete(ctx, d.roleName(), metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }
 
