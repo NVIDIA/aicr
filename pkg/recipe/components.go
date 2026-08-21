@@ -126,6 +126,33 @@ type ComponentConfig struct {
 	// ships in `crds/`. See https://github.com/NVIDIA/aicr/issues/914.
 	HasSelfRefCRDs bool `yaml:"hasSelfRefCRDs,omitempty"`
 
+	// OwnsCRDs signals that this component is the ONLY chart in the
+	// registry that ships its CRDs, so a deployer may replace those CRDs
+	// on upgrade instead of leaving them at the schema installed on day
+	// one. Helm installs a chart's `crds/` directory on first install and
+	// never touches it again, and Flux's helm-controller inherits that via
+	// its `spec.upgrade.crds: Skip` default, so a chart bump whose CRDs
+	// changed otherwise runs a new controller against the previous schema.
+	//
+	// This is opt-in, and deliberately so. An audit of every Helm
+	// component in the registry found 15 ship CRDs under `crds/`, and 11
+	// of those share at least one CRD with another component: nfd,
+	// gpu-operator, and network-operator all ship the NodeFeature CRDs,
+	// and nfd plus gpu-operator plus kai-scheduler all appear together in
+	// `base.yaml`. Replacing unconditionally would have two or three
+	// HelmReleases rewrite the same CRD on every reconcile, each with the
+	// schema its own chart pins. The `Skip` default is what keeps that
+	// from happening today.
+	//
+	// Set this only for a component that both (a) solely owns every CRD it
+	// ships — including against charts that ship CRDs through `templates/`
+	// rather than `crds/`, which `helm show crds` does not report — and
+	// (b) ships no CRD using `spec.conversion.strategy: Webhook`, because
+	// replace discards a `caBundle` injected at runtime.
+	//
+	// See https://github.com/NVIDIA/aicr/issues/2264.
+	OwnsCRDs bool `yaml:"ownsCRDs,omitempty"`
+
 	// ManifestsUseChartCRDs signals that the component's attached
 	// manifestFiles (wrapped by the bundler into an injected -post
 	// local-helm release) instantiate CRs whose CRDs this component's

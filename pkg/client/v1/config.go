@@ -236,6 +236,18 @@ func (c *Config) RecipeResolveOptions() ([]RecipeResolveOption, error) {
 	if set {
 		out = append(out, WithAccountingMode(string(mode)))
 	}
+
+	// Every generation-time selection must be projected here. This method is
+	// the canonical config-to-options conversion for SDK callers, so omitting
+	// one silently drops it for anyone who configures it in a document rather
+	// than through an option.
+	riMode, riSet, err := spec.ResolveRuntimeInventoryMode()
+	if err != nil {
+		return nil, err
+	}
+	if riSet {
+		out = append(out, WithRuntimeInventoryMode(string(riMode)))
+	}
 	return out, nil
 }
 
@@ -263,6 +275,22 @@ func (c *Config) RecipeAccountingMode() (string, bool, error) {
 		return "", false, nil
 	}
 	mode, set, err := c.internal.Recipe().ResolveAccountingMode()
+	if err != nil {
+		return "", false, err
+	}
+	return string(mode), set, nil
+}
+
+// RecipeRuntimeInventoryMode returns
+// spec.recipe.configuration.runtimeInventory.mode and whether the document set
+// one. Same raw-accessor rationale as RecipeAccountingMode.
+//
+// Returns an error when the configured value is not a valid mode.
+func (c *Config) RecipeRuntimeInventoryMode() (string, bool, error) {
+	if c == nil || c.internal == nil {
+		return "", false, nil
+	}
+	mode, set, err := c.internal.Recipe().ResolveRuntimeInventoryMode()
 	if err != nil {
 		return "", false, err
 	}

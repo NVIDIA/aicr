@@ -1181,6 +1181,14 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 				out.Configuration.Slurm.Accounting = &accounting
 			}
 		}
+		// Every pointer under RecipeConfiguration needs a clause here.
+		// Omitting one does not alias it, it drops it: the copy keeps the
+		// component overrides a selection applied while losing the record
+		// explaining them, and Client.AdoptRecipe always deep-copies.
+		if r.Configuration.RuntimeInventory != nil {
+			runtimeInventory := *r.Configuration.RuntimeInventory
+			out.Configuration.RuntimeInventory = &runtimeInventory
+		}
 	}
 
 	if r.Constraints != nil {

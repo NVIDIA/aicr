@@ -76,7 +76,7 @@ func Evaluate(constraint recipe.Constraint, snap *snapshotter.Snapshot) EvalResu
 	}
 	result.Actual = actual
 
-	parsed, err := ParseConstraintExpression(constraint.Value)
+	parsed, err := ParseCompoundConstraint(constraint.Value)
 	if err != nil {
 		result.Error = errors.Wrap(errors.ErrCodeInvalidRequest, "invalid constraint expression", err)
 		return result

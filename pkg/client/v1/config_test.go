@@ -616,3 +616,57 @@ spec:
 		t.Error("RecipeCriteria accepted a value in no catalog; deferral must not mean silent acceptance")
 	}
 }
+
+const runtimeInventoryConfig = `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  recipe:
+    configuration:
+      runtimeInventory:
+        mode: disabled
+`
+
+// TestConfig_RuntimeInventoryMode covers the raw accessor and, more
+// importantly, that RecipeResolveOptions projects the selection.
+//
+// The projection is the defect this guards. RecipeResolveOptions is the
+// canonical config-to-options conversion for SDK callers, so a selection
+// readable through the raw accessor but missing from the options form is
+// silently dropped for anyone who configures it in a document rather than
+// passing an option — with no error to notice.
+func TestConfig_RuntimeInventoryMode(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, runtimeInventoryConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	mode, set, err := cfg.RecipeRuntimeInventoryMode()
+	if err != nil {
+		t.Fatalf("RecipeRuntimeInventoryMode: %v", err)
+	}
+	if !set {
+		t.Fatal("RecipeRuntimeInventoryMode reported unset, but the document configures one")
+	}
+	if mode != "disabled" {
+		t.Errorf("RecipeRuntimeInventoryMode = %q, want disabled", mode)
+	}
+
+	opts, err := cfg.RecipeResolveOptions()
+	if err != nil {
+		t.Fatalf("RecipeResolveOptions: %v", err)
+	}
+	if len(opts) == 0 {
+		t.Fatal("RecipeResolveOptions returned no options; the runtime inventory selection was dropped")
+	}
+
+	// A nil Config must stay quiet rather than panic, matching the sibling
+	// accessors.
+	var nilCfg *aicr.Config
+	if _, set, err := nilCfg.RecipeRuntimeInventoryMode(); err != nil || set {
+		t.Errorf("nil Config: set=%v err=%v, want false/nil", set, err)
+	}
+}
