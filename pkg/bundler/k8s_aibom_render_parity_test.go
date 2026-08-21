@@ -41,10 +41,17 @@ import (
 // leaves only, so no golden pins this component's rendered bytes and no KWOK
 // deployer lane exercises it per deployer.
 //
-// These tests remain the substitute — they build the same single-component
-// recipe an adopter would, from the live registry entry rather than from
-// hardcoded coordinates, so a registry edit flows into the assertions instead
-// of silently diverging from them.
+// These tests cover the per-deployer render: they build the same
+// single-component recipe an adopter would, from the live registry entry rather
+// than from hardcoded coordinates, so a registry edit flows into the assertions
+// instead of silently diverging from them.
+//
+// They deliberately do not assert the stock-adoption contract — that the target
+// recipe enables the component, the Dynamo descendant declines it, and the
+// generation-time opt-out works. A synthetic single-component fixture cannot
+// see any of that, so flipping the target ref to `install: false` would leave
+// every assertion here green. That contract is pinned separately by
+// TestK8sAIBOMStockAdoption in pkg/recipe.
 const (
 	k8sAIBOMComponentName = "k8s-aibom"
 	k8sAIBOMValuesFile    = "components/k8s-aibom/values.yaml"

@@ -534,12 +534,25 @@ underneath it, so it reconciles against resources that are disappearing.
 
 1. Remove the component reference from the custom overlay and regenerate the
    recipe and bundle.
-2. Uninstall the release with the deployer-appropriate procedure in
-   [Bundle Uninstall](cli-reference.md#bundle-uninstall) — `helm uninstall
-   k8s-aibom -n k8s-aibom-system` for the `helm` deployer, `helmfile destroy`
-   for Helmfile bundles, deleting the owning `Application` for Argo CD, and the
-   `HelmRelease` for Flux. Confirm the controller Deployment is gone before
-   continuing.
+2. Uninstall the release, scoped to this component only:
+
+   ```bash
+   # helm and helmfile bundles alike: helmfile installs through Helm, so the
+   # release is an ordinary Helm release and this removes exactly one.
+   helm uninstall k8s-aibom -n k8s-aibom-system
+   ```
+
+   For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`.
+   Confirm the controller Deployment is gone before continuing.
+
+   **Do not use `helmfile destroy` for this.** It tears down *every* release in
+   the bundle in reverse dependency order, not just this component. It is also
+   ineffective here: step 1 regenerated the bundle without `k8s-aibom`, so the
+   release is no longer declared in it and `destroy` would not remove the one
+   release you actually want gone while removing all the ones you do not. If
+   you prefer a Helmfile-native command, run it against a bundle that still
+   declares the component and scope it explicitly with
+   `helmfile destroy --selector name=k8s-aibom`.
 3. Only then delete retained AIBOMs and, last, the CRDs.
 
 Deleting the CRDs cascades to every AIBOM stored cluster-wide, including any
