@@ -16,9 +16,11 @@ package recipe_test
 
 import (
 	"context"
+	stderrors "errors"
 	"slices"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -52,9 +54,11 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		criteria     *recipe.Criteria
-		opts         []recipe.BuildOption
+		name     string
+		criteria *recipe.Criteria
+		opts     []recipe.BuildOption
+		// wantErr means the build must be rejected outright.
+		wantErr      bool
 		wantDeclared bool
 		wantEnabled  bool
 		// wantRecorded and wantMode are asserted separately, against
@@ -97,6 +101,23 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			wantMode:     recipe.RuntimeInventoryDisabled,
 		},
 		{
+			// Regression: --runtime-inventory enabled must not override a
+			// recipe that deliberately declines the component. The write path
+			// uses the same `install` key an overlay declines with, so without
+			// a pre-write guard the override clobbers the decline and the
+			// post-write check reads back only what it just wrote. That
+			// silently produced k8s-aibom alongside grove and dynamo-platform,
+			// a combination nothing has qualified.
+			name: "enabling on the declining descendant is rejected",
+			criteria: func() *recipe.Criteria {
+				c := target()
+				c.Platform = recipe.CriteriaPlatformDynamo
+				return c
+			}(),
+			opts:    []recipe.BuildOption{recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryEnabled)},
+			wantErr: true,
+		},
+		{
 			name: "a sibling stock recipe does not declare it at all",
 			criteria: func() *recipe.Criteria {
 				c := target()
@@ -113,6 +134,15 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			builder := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion))
 
 			result, err := builder.BuildFromCriteria(context.Background(), tt.criteria, tt.opts...)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("BuildFromCriteria() error = nil, want rejection: a recipe-level decline must not be overridable from the command line")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("BuildFromCriteria() error = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("BuildFromCriteria() error = %v", err)
 			}

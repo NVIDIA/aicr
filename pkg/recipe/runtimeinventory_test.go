@@ -314,8 +314,13 @@ func TestApplyRuntimeInventoryRejectsIncoherentEnable(t *testing.T) {
 	if err == nil {
 		t.Fatal("applyBuildConfig() error = nil, want rejection of an enable the recipe cannot honor")
 	}
-	if !strings.Contains(err.Error(), "cannot be applied") {
-		t.Errorf("error = %v, want a coherence rejection", err)
+	// The pre-write guard in applyRuntimeInventoryMode now catches this before
+	// any override is written, so the rejection comes from there rather than
+	// from the post-write coherence check below it. Both refuse the same thing;
+	// this asserts the behavior (an enable the recipe cannot honor is refused)
+	// rather than which of the two guards produced the message.
+	if !strings.Contains(err.Error(), "cannot be re-enabled") {
+		t.Errorf("error = %v, want a rejection of an enable the recipe cannot honor", err)
 	}
 }
 

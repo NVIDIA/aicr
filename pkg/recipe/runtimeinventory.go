@@ -38,7 +38,10 @@ const runtimeInventoryComponentName = "k8s-aibom"
 type RuntimeInventoryMode string
 
 const (
-	// RuntimeInventoryEnabled keeps the component the recipe declares.
+	// RuntimeInventoryEnabled keeps the component the recipe declares. It
+	// confirms an existing selection rather than granting one: a recipe that
+	// declines the component is rejected instead of re-enabled, so this cannot
+	// be used to opt a recipe into a combination it deliberately excludes.
 	RuntimeInventoryEnabled RuntimeInventoryMode = "enabled"
 	// RuntimeInventoryDisabled removes it from the resolved recipe.
 	RuntimeInventoryDisabled RuntimeInventoryMode = "disabled"
@@ -113,6 +116,29 @@ func applyRuntimeInventoryMode(result *RecipeResult, mode RuntimeInventoryMode) 
 			fmt.Sprintf("runtime inventory mode %q requires the recipe to declare component %q; "+
 				"this recipe does not resolve it",
 				parsed, runtimeInventoryComponentName))
+	}
+
+	// Fail closed when the resolved recipe already declined the component and
+	// the caller asks to enable it. This must be read BEFORE the override is
+	// written: setComponentOverride writes the same `install` key an overlay
+	// uses to decline, so the write clobbers the overlay's decision and the
+	// post-write check below would only read back what it just wrote.
+	//
+	// h100-gke-cos-inference-dynamo is the case that matters. It declines the
+	// inherited component deliberately, because k8s-aibom alongside grove and
+	// dynamo-platform is a combination nothing has qualified. Re-enabling it
+	// from the command line must not silently produce that stack.
+	//
+	// Mirrors the bundle-time guard in filterEnabledComponents, which already
+	// rejects the equivalent `--set k8s-aibom:enabled=true`. The two paths
+	// should not disagree about whether a recipe-level decline is overridable.
+	declinedByRecipe := !result.GetComponentRef(runtimeInventoryComponentName).IsEnabled()
+	if parsed == RuntimeInventoryEnabled && declinedByRecipe {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q is disabled by the recipe and cannot be re-enabled "+
+				"with --runtime-inventory enabled; remove the override in the recipe or "+
+				"select a recipe that enables it",
+				runtimeInventoryComponentName))
 	}
 
 	if result.Configuration == nil {
