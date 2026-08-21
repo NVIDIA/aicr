@@ -470,13 +470,20 @@ func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
 	}
 }
 
-// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID pins half of the
-// ADR-020 Ruling 7 contract: validateAgentConfig.toAgentConfig must forward
-// runID onto the facade AgentConfig.RunID field unchanged, and must supply
-// validateNameBase ("aicr-validate") rather than leaving JobName/
-// ServiceAccountName to carry the naming prefix. If toAgentConfig ever drops
-// or misassigns runID, this fails even though parseValidateAgentConfig (the
-// other half, tested below) still wires the caller's id in correctly.
+// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID covers ONLY the
+// toAgentConfig projection boundary: given a validateAgentConfig whose
+// runID field is already set, toAgentConfig must copy it onto the facade
+// AgentConfig.RunID unchanged (and set NameBase to validateNameBase rather
+// than leaving JobName/ServiceAccountName to carry the naming prefix).
+//
+// What this does NOT cover: it never runs the validateCmd Action, so it
+// says nothing about whether `aicr validate` generates exactly one RunID
+// per invocation and hands that SAME value to both the live-capture
+// snapshot agent and the validator Jobs — that single-generation invariant
+// (ADR-020 Ruling 7) is not exercised by an automated test at all; see the
+// WARNING comment on the Action's `runID := v1.GenerateRunID()` call in
+// validate.go for why, and TestParseValidateAgentConfig_ForwardsCallerRunID
+// below for the adjacent (also boundary-only) coverage on the parsing side.
 func TestValidateAgentConfig_ToAgentConfig_ForwardsRunID(t *testing.T) {
 	cfg := &validateAgentConfig{
 		namespace: "aicr-validation-test",
@@ -493,18 +500,24 @@ func TestValidateAgentConfig_ToAgentConfig_ForwardsRunID(t *testing.T) {
 	}
 }
 
-// TestParseValidateAgentConfig_SingleRunIDPerInvocation pins the other half
-// of the ADR-020 Ruling 7 contract: `aicr validate` generates exactly one
-// RunID per invocation (see the Action's `runID := v1.GenerateRunID()`) and
-// must hand that SAME id to parseValidateAgentConfig, which is what
-// eventually reaches the live-capture snapshot agent's Job/RBAC via
-// toAgentConfig above. Combined with that test, this closes the loop: if a
-// future change reintroduces a second, independently generated id for the
-// snapshot agent (e.g. reverting to a per-call v1.GenerateRunID() inside
-// parseValidateAgentConfig, or simply forgetting to thread the caller's id
-// through), one of these two tests fails — exactly the two-run-IDs-per-
-// command split ADR-020 forbids.
-func TestParseValidateAgentConfig_SingleRunIDPerInvocation(t *testing.T) {
+// TestParseValidateAgentConfig_ForwardsCallerRunID covers ONLY
+// parseValidateAgentConfig's own mapping: the runID parameter it is given
+// lands unchanged on the returned validateAgentConfig.runID field.
+//
+// This test replaces cmd.Action outright (to isolate that mapping from
+// recipe/snapshot I/O without touching a cluster), so NONE of the
+// production Action code at validate.go's `runID := v1.GenerateRunID()`
+// call through the parseValidateAgentConfig call site actually runs here.
+// It cannot detect a regression in how the real Action generates or
+// threads runID — in particular it says nothing about ADR-020 Ruling 7's
+// single-generation invariant (one v1.GenerateRunID() call feeding BOTH
+// the live-capture agent and the validator Jobs). See the WARNING comment
+// on that call site in validate.go: no automated test in this package
+// enforces single-generation, because the Action's two consumer sites sit
+// on mutually exclusive code paths (--no-cluster requires --snapshot,
+// which skips the live-capture branch entirely) and cannot both be
+// exercised in one invocation without a live cluster.
+func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
 	const wantRunID = "20260821-142233-9f3a1c0b7e2d4a55"
 
 	var captured *validateAgentConfig
@@ -519,10 +532,6 @@ func TestParseValidateAgentConfig_SingleRunIDPerInvocation(t *testing.T) {
 			return err
 		}
 		shared := validateSharedResolved{namespace: "aicr-validation-test"}
-		// wantRunID stands in for the Action's single
-		// `runID := v1.GenerateRunID()` call — the production code path
-		// passes that same local variable to both parseValidateAgentConfig
-		// (here) and validationConfig.runID (runValidation).
 		captured = parseValidateAgentConfig(c, resolved, shared, wantRunID)
 		return nil
 	}

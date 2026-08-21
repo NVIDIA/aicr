@@ -852,6 +852,23 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// snapshot agent shares this run's id with the validator Jobs
 			// rather than defaulting its own inside DeployAndCollect —
 			// ADR-020 requires one RunID per `aicr validate` invocation.
+			//
+			// WARNING, not enforced by an automated test: this line must
+			// stay the ONLY v1.GenerateRunID() call in this Action. Adding a
+			// second call — e.g. generating a fresh id inline for the
+			// parseValidateAgentConfig call below, or for the
+			// validationConfig{runID: ...} literal further down — silently
+			// splits a single `aicr validate` invocation back into two
+			// uncorrelated runs. The command's two consumer sites
+			// (live-capture agent vs. validator Jobs) sit on mutually
+			// exclusive code paths (--no-cluster requires --snapshot, which
+			// skips the live-capture branch entirely), so no unit test can
+			// observe both consumers receiving the SAME value in one
+			// invocation without a live cluster; see
+			// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID and
+			// TestParseValidateAgentConfig_ForwardsCallerRunID in
+			// validate_test.go for what IS covered (passthrough at each
+			// function boundary only) and what is not.
 			runID := v1.GenerateRunID()
 
 			var snap *aicr.Snapshot
