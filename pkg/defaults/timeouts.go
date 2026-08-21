@@ -667,7 +667,7 @@ const (
 
 	// TrainerControllerReadyTimeout is the time to wait for the Kubeflow Trainer
 	// controller-manager Deployment to have at least one ready replica after installation.
-	TrainerControllerReadyTimeout = 2 * time.Minute
+	TrainerControllerReadyTimeout = 3 * time.Minute
 
 	// TrainerInstallPollInterval is the sleep between checks that a
 	// recipe-declared Kubeflow Trainer installation has become complete. The
