@@ -122,5 +122,18 @@ jobs:
           # checksums getting committed alongside a version bump (the version
           # changes but the helmfile_checksums/chainsaw_checksums block does
           # not), which then breaks E2E/CLI E2E at the sha256 verify step.
-          RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^\\./tools/update-[a-z]+-checksums "]'
+          # `[a-z-]+` (not `[a-z]+`) so hyphenated tool names match too, e.g.
+          # tools/update-helm-diff-checksums.
+          #
+          # The stale-checksum symptom above is not uniform across the three
+          # tools. A hook that runs but *fails* (renamed asset, egress blip)
+          # leaves the new version pinned against the old checksums, and only
+          # helmfile/chainsaw fail a PR-gating job for it — qualification.yaml
+          # feeds their sha256 into setup-build-tools, which verifies it.
+          # helm_diff_checksums is read solely by tests/uat/lib/phases.sh, so a
+          # stale helm-diff pin stays green on every PR check and first surfaces
+          # in nightly UAT, across all clouds. Renovate's "Artifact update
+          # problem" warning in the PR body is the signal to heed; helm-diff is
+          # deliberately not auto-merged, so a human sees it.
+          RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^\\./tools/update-[a-z-]+-checksums "]'
           LOG_LEVEL: ${{ inputs.logLevel || 'info' }}

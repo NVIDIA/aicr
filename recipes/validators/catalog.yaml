@@ -60,7 +60,9 @@ validators:
     env: []
   - name: check-nvidia-smi
     phase: deployment
-    description: "Verify nvidia-smi works on all schedulable GPU nodes (cordoned nodes are disclosed, not silently skipped)"
+    description: >-
+      Verify nvidia-smi on schedulable GPU nodes; enforce
+      Deployment.gpu-driver.version when set (unmeasurable floor blocks)
     image: ghcr.io/nvidia/aicr-validators/deployment:latest
     timeout: 10m
     args: ["check-nvidia-smi"]

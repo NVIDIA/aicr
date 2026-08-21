@@ -3102,3 +3102,213 @@ func TestGenerate_SourceOnlyRefChartFallsBackToName(t *testing.T) {
 		t.Errorf("README should list the gpu-operator-post release for a source-only mixed component, got:\n%s", readme)
 	}
 }
+
+// TestGenerate_HelmReleaseCRDUpgradePolicyIsOptIn covers #2264.
+//
+// helm-controller's spec.upgrade.crds default of Skip means a chart bump whose
+// CRDs changed runs a new controller against the previous schema. The fix is
+// opt-in via the registry ownsCRDs flag, not a blanket default: an audit found
+// 15 components ship CRDs under crds/ and 11 share at least one with another
+// component. nfd, gpu-operator and kai-scheduler all appear together in
+// base.yaml and all ship the NodeFeature CRDs, so replacing unconditionally
+// would have several HelmReleases rewrite the same CRD every reconcile.
+//
+// Refs are built by running ApplyRegistryDefaults over an empty ref, which is
+// what a stock recipe actually resolves to. Constructing them by copying
+// registry fields directly is what an earlier revision did, and it silently
+// diverged: ApplyRegistryDefaults strips a defaultChart to its bare name, so a
+// hand-built ref carrying "gatekeeper/gatekeeper" never matched the real
+// resolved "gatekeeper" and the test could not see that gatekeeper emitted no
+// policy at all. Do not hand-build these refs.
+//
+// The owner cases are discovered from the registry rather than hardcoded, so a
+// component enrolled in ownsCRDs later is covered without touching this test.
+//
+// NOTE ON COVERAGE: this exercises the sourceRef template only. An upstream
+// Helm component renders spec.chart.spec.sourceRef regardless of
+// OCISourceName. TestUsesRegistryChartRejectsRefsWithoutCoordinates covers
+// why the chartRef shape cannot emit the policy today.
+func TestGenerate_HelmReleaseCRDUpgradePolicyIsOptIn(t *testing.T) {
+	registry, regErr := recipe.GetComponentRegistry()
+	if regErr != nil {
+		t.Fatalf("GetComponentRegistry: %v", regErr)
+	}
+
+	// resolvedRef mirrors stock resolution: an empty ref, then registry
+	// defaults. Anything else risks testing a shape the resolver never emits.
+	resolvedRef := func(t *testing.T, name string) recipe.ComponentRef {
+		t.Helper()
+		cfg := registry.Get(name)
+		if cfg == nil {
+			t.Fatalf("%s missing from registry", name)
+		}
+		ref := recipe.ComponentRef{Name: name, Namespace: name, Type: recipe.ComponentTypeHelm}
+		ref.ApplyRegistryDefaults(cfg)
+		return ref
+	}
+
+	// Every enrolled owner, discovered rather than listed.
+	var owners []string
+	for _, name := range registry.Names() {
+		if cfg := registry.Get(name); cfg != nil && cfg.OwnsCRDs {
+			owners = append(owners, name)
+		}
+	}
+	if len(owners) == 0 {
+		t.Fatal("no ownsCRDs components in the registry; this test would prove nothing")
+	}
+
+	t.Run("owners emit the policy", func(t *testing.T) {
+		for _, name := range owners {
+			t.Run(name, func(t *testing.T) {
+				assertCRDPolicy(t, resolvedRef(t, name), name, "CreateReplace")
+			})
+		}
+	})
+
+	// nfd shares the NodeFeature CRDs with gpu-operator and network-operator,
+	// all three of which co-exist in base.yaml.
+	t.Run("sharer does not", func(t *testing.T) {
+		assertCRDPolicy(t, resolvedRef(t, "nfd"), "nfd", "")
+	})
+
+	// ownsCRDs records an audit of the registry's pinned chart. A ref pointing
+	// anywhere else is unaudited, so the policy must not carry over.
+	t.Run("coordinate overrides disable it", func(t *testing.T) {
+		owner := owners[0]
+		for _, tc := range []struct {
+			name   string
+			mutate func(*recipe.ComponentRef)
+		}{
+			{"version", func(r *recipe.ComponentRef) { r.Version = "0.0.1-unaudited" }},
+			{"chart", func(r *recipe.ComponentRef) { r.Chart = "some-fork" }},
+			{"source", func(r *recipe.ComponentRef) { r.Source = "oci://example.invalid/charts" }},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ref := resolvedRef(t, owner)
+				tc.mutate(&ref)
+				assertCRDPolicy(t, ref, owner, "")
+			})
+		}
+	})
+}
+
+// assertCRDPolicy renders one component and asserts spec.upgrade.crds.
+//
+// Decoded as a map, not a typed struct: a string field cannot tell an absent
+// crds key from one explicitly rendered as "", so a negative case would pass
+// against a template emitting an empty value. Presence is the assertion.
+func assertCRDPolicy(t *testing.T, ref recipe.ComponentRef, component, want string) {
+	t.Helper()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{ref}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{component: {}},
+		Version:         "v0.9.0",
+	}
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	raw := readFile(t, filepath.Join(outputDir, component, "helmrelease.yaml"))
+	var doc struct {
+		Spec map[string]any `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("parse HelmRelease: %v", err)
+	}
+	upgrade, hasUpgrade := doc.Spec["upgrade"]
+
+	if want == "" {
+		if hasUpgrade {
+			t.Errorf("spec.upgrade present (%v), want the key absent entirely\n%s", upgrade, raw)
+		}
+		return
+	}
+	if !hasUpgrade {
+		t.Fatalf("spec.upgrade absent, want crds = %q\n%s", want, raw)
+	}
+	upgradeMap, ok := upgrade.(map[string]any)
+	if !ok {
+		t.Fatalf("spec.upgrade is %T, want a mapping\n%s", upgrade, raw)
+	}
+	crds, hasCRDs := upgradeMap["crds"]
+	if !hasCRDs {
+		t.Fatalf("spec.upgrade.crds absent, want %q\n%s", want, raw)
+	}
+	if crds != want {
+		t.Errorf("spec.upgrade.crds = %v, want %q\n%s", crds, want, raw)
+	}
+}
+
+// TestUsesRegistryChartRejectsRefsWithoutCoordinates pins the property that
+// makes the chartRef template's UpgradeCRDs block unreachable today.
+//
+// chartRef is reached by local, vendored and manifest-backed components. Those
+// carry no registry chart coordinates, so usesRegistryChart is false for them
+// and the policy cannot render. Asserting that directly is preferable to a
+// render test: an attempt at the render route produced a sourceRef HelmRelease
+// instead, so such a test would have passed without exercising anything, which
+// is the ambiguous-condition shape this suite already avoids elsewhere.
+//
+// If a future chartRef path does carry registry coordinates, this test still
+// holds but the block becomes reachable — at which point the chartRef template
+// needs its own render coverage.
+func TestUsesRegistryChartRejectsRefsWithoutCoordinates(t *testing.T) {
+	registry, regErr := recipe.GetComponentRegistry()
+	if regErr != nil {
+		t.Fatalf("GetComponentRegistry: %v", regErr)
+	}
+	cfg := registry.Get("k8s-aibom")
+	if cfg == nil || !cfg.OwnsCRDs {
+		t.Fatal("k8s-aibom must be an ownsCRDs component for this test to mean anything")
+	}
+
+	tests := []struct {
+		name string
+		ref  recipe.ComponentRef
+		want bool
+	}{
+		{
+			name: "manifest-only ref has no chart or source",
+			ref: recipe.ComponentRef{
+				Name: "k8s-aibom", Type: recipe.ComponentTypeHelm,
+				ManifestFiles: []string{"components/k8s-aibom/values.yaml"},
+			},
+			want: false,
+		},
+		{
+			name: "local chart path is not the registry chart",
+			ref: recipe.ComponentRef{
+				Name: "k8s-aibom", Type: recipe.ComponentTypeHelm,
+				Chart: "./k8s-aibom", Version: cfg.Helm.DefaultVersion,
+			},
+			want: false,
+		},
+		{
+			// The control: without this, every case above could pass because
+			// usesRegistryChart always returns false.
+			name: "fully resolved registry ref matches",
+			ref: func() recipe.ComponentRef {
+				r := recipe.ComponentRef{Name: "k8s-aibom", Type: recipe.ComponentTypeHelm}
+				r.ApplyRegistryDefaults(cfg)
+				return r
+			}(),
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := usesRegistryChart(tt.ref, cfg); got != tt.want {
+				t.Errorf("usesRegistryChart() = %v, want %v (chart=%q source=%q version=%q)",
+					got, tt.want, tt.ref.EffectiveChart(), tt.ref.Source, tt.ref.Version)
+			}
+		})
+	}
+}

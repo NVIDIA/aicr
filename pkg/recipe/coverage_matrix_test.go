@@ -19,7 +19,6 @@ import (
 	stderrors "errors"
 	"os"
 	"sort"
-	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -30,9 +29,13 @@ const goldenPath = "testdata/coverage_golden.yaml"
 
 // coverageClassification is the golden outcome for one projected query.
 type coverageClassification struct {
-	Outcome    string   `yaml:"outcome"`              // "success" | "error"
-	Uncovered  []string `yaml:"uncovered,omitempty"`  // coverage errors
-	RequiresOS bool     `yaml:"requiresOS,omitempty"` // requireOSIfNeeded guard errors
+	Outcome   string   `yaml:"outcome"`             // "success" | "error"
+	Uncovered []string `yaml:"uncovered,omitempty"` // completeness failures
+	// StrictDimensions names the dimensions a joint-sufficiency failure
+	// demanded, read from the error's structured context rather than its
+	// message text so rewording the message cannot silently reclassify a
+	// projection and retire the golden matrix's guard on the rule.
+	StrictDimensions []string `yaml:"strictDimensions,omitempty"`
 	// ValidCompletions pins the completion-suggestion content per uncovered
 	// dimension (canonical tupleKey strings, in minimalTuples order) so a
 	// regression in the suggestion machinery on the real catalog flips a
@@ -112,7 +115,8 @@ func TestCoverageGoldenMatrix(t *testing.T) {
 			continue
 		}
 		if w.Outcome != got[k].Outcome || !equalStrings(w.Uncovered, got[k].Uncovered) ||
-			w.RequiresOS != got[k].RequiresOS || !equalCompletions(w.ValidCompletions, got[k].ValidCompletions) {
+			!equalStrings(w.StrictDimensions, got[k].StrictDimensions) ||
+			!equalCompletions(w.ValidCompletions, got[k].ValidCompletions) {
 
 			t.Errorf("projection %q flipped: golden %+v, now %+v", k, w, got[k])
 		}
@@ -151,9 +155,8 @@ func classify(ctx context.Context, t *testing.T, store *MetadataStore, q *Criter
 	if err == nil {
 		return coverageClassification{Outcome: "success"}
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "specify an OS") {
-		return coverageClassification{Outcome: "error", RequiresOS: true}
+	if strict := strictDimensionsFromError(err); len(strict) > 0 {
+		return coverageClassification{Outcome: "error", StrictDimensions: strict}
 	}
 	uncovered, completions := coverageDetailsFromError(err)
 	if len(uncovered) == 0 {
@@ -162,19 +165,26 @@ func classify(ctx context.Context, t *testing.T, store *MetadataStore, q *Criter
 	return coverageClassification{Outcome: "error", Uncovered: uncovered, ValidCompletions: completions}
 }
 
-func setCriteriaDimension(c *Criteria, name, value string) {
-	switch name {
-	case "service":
-		c.Service = CriteriaServiceType(value)
-	case "accelerator":
-		c.Accelerator = CriteriaAcceleratorType(value)
-	case "intent":
-		c.Intent = CriteriaIntentType(value)
-	case "os":
-		c.OS = CriteriaOSType(value)
-	case "platform":
-		c.Platform = CriteriaPlatformType(value)
+// strictDimensionsFromError extracts the dimension names a joint-sufficiency
+// failure demanded, from the error's `strictDimensions` context, or nil when
+// err is not one. Reading the structured context rather than the message keeps
+// the golden matrix pinned to the rule instead of to its phrasing.
+func strictDimensionsFromError(err error) []string {
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) || se.Context == nil {
+		return nil
 	}
+	entries, ok := se.Context["strictDimensions"].([]map[string]any)
+	if !ok {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if name, ok := entry["dimension"].(string); ok {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // coverageDetailsFromError extracts the uncovered dimension names and their

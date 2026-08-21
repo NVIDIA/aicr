@@ -75,11 +75,12 @@
 //   - Numeric version components
 //   - Prerelease / build metadata after the numeric core (e.g., "1.2.3-alpha",
 //     "1.2.3+build.123", "1.28.0-gke.1337000") is preserved in the Extras
-//     field but is not used for ordering by Compare / EqualsOrNewer
+//     field; GKE build suffixes ("-gke.NNNNNN") are compared numerically by
+//     Compare when the numeric core is equal — see Compare for details
 //
 // Not Supported (may be added in future):
 //   - Version ranges or constraints
-//   - Prerelease-aware ordering (Extras is parsed and stored, never compared)
+//   - Ordering on non-GKE Extras (EKS, AKS, hotfix suffixes are stored but not compared)
 //
 // # Error Handling
 //

@@ -18,6 +18,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -48,6 +49,46 @@ func TestDefaultTolerations(t *testing.T) {
 	}
 	if tol.Key != "" {
 		t.Errorf("DefaultTolerations()[0].Key = %q, want empty string", tol.Key)
+	}
+}
+
+func TestBuildAgentConfigTolerations(t *testing.T) {
+	explicit := []corev1.Toleration{
+		{
+			Key:      "dedicated",
+			Operator: corev1.TolerationOpEqual,
+			Value:    "gpu-workload",
+			Effect:   corev1.TaintEffectNoSchedule,
+		},
+	}
+	tests := []struct {
+		name  string
+		input []corev1.Toleration
+		want  []corev1.Toleration
+	}{
+		{
+			name: "omitted uses tolerate-all default",
+			want: DefaultTolerations(),
+		},
+		{
+			name:  "explicit empty disables default",
+			input: []corev1.Toleration{},
+			want:  []corev1.Toleration{},
+		},
+		{
+			name:  "explicit tolerations are preserved",
+			input: explicit,
+			want:  explicit,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildAgentConfig(&AgentConfig{Tolerations: tt.input}, "snapshot.yaml").Tolerations
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("buildAgentConfig().Tolerations = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 

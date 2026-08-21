@@ -51,6 +51,23 @@ spec:
         - gpu-operator
         - kai-scheduler
 
+    # Decline the runtime inventory this recipe inherits from
+    # h100-gke-cos-inference. ADR-019 scopes stock adoption to that one recipe,
+    # and this overlay is its only descendant, so without this the component
+    # would ship in two stock recipes. k8s-aibom alongside grove and
+    # dynamo-platform is a combination nothing has qualified.
+    #
+    # Declared-and-declined rather than absent: the ref keeps the decision in
+    # the resolved recipe while `install: false` suppresses the component
+    # before any deployer, mirror, BOM, or health path sees it. Same gate
+    # `aicr recipe --runtime-inventory disabled` sets.
+    #
+    # Remove this ref when adoption widens past the single recipe.
+    - name: k8s-aibom
+      type: Helm
+      overrides:
+        install: false
+
   validation:
     deployment:
       checks:

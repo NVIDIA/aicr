@@ -336,7 +336,7 @@ func isEffectiveRawVersion(version string) bool {
 //
 // Primary (fail): every merged constraint must parse. Both the path
 // (ParseConstraintPath over Name) and the value expression
-// (ParseConstraintExpression over Value) are checked with the exported,
+// (ParseCompoundConstraint over Value) are checked with the exported,
 // snapshot-free parsers. The first malformed constraint fails the dimension,
 // naming the offending constraint and the parser error in the detail — a
 // malformed constraint is never a silent pass. The merged constraint order is
@@ -372,7 +372,7 @@ func classifyConstraintsWellformed(result *recipe.RecipeResult) (state, detail s
 		// Mirror constraints.Evaluate's dispatch: the node-set constraint
 		// form (#1755) has its own value grammar ("key=value" / "!key") and
 		// is deliberately NOT valid under the scalar expression parser —
-		// grading it with ParseConstraintExpression would fail every recipe
+		// grading it with ParseCompoundConstraint would fail every recipe
 		// carrying a well-formed node-set constraint (the GKE gpuStack
 		// profile's gke-default default declares the negated form).
 		if c.Name == constraints.GPUNodesLabelConstraintName {
@@ -384,7 +384,7 @@ func classifyConstraintsWellformed(result *recipe.RecipeResult) (state, detail s
 		if _, err := constraints.ParseConstraintPath(c.Name); err != nil {
 			return StatusFail, fmt.Sprintf("constraint %q: malformed path: %v", c.Name, err)
 		}
-		if _, err := constraints.ParseConstraintExpression(c.Value); err != nil {
+		if _, err := constraints.ParseCompoundConstraint(c.Value); err != nil {
 			return StatusFail, fmt.Sprintf("constraint %q: malformed value %q: %v", c.Name, c.Value, err)
 		}
 	}

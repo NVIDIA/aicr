@@ -416,6 +416,10 @@ and extraction are bounded, content digests are checked while streaming, and
 archive traversal, links, devices, oversized content, and malformed catalogs
 fail closed before the provider is activated.
 
+OCI sources use credentials from the standard Docker configuration
+(`~/.docker/config.json` or `$DOCKER_CONFIG`) and may invoke the configured
+credential helper for the selected registry host.
+
 Use `NewClientContext` so caller cancellation and tighter deadlines
 propagate through registry authentication, download, extraction, and catalog
 validation:
@@ -484,7 +488,9 @@ client, err := aicr.NewClient(
   to `WithAllowLists`.
 - **`WithOCISourceTempDir(parent string)`** selects an existing writable
   parent for an OCI-backed Client's private workspace. It is rejected for
-  embedded and filesystem sources.
+  embedded and filesystem sources. Budget capacity for up to a 64 MiB staged
+  compressed layer plus a 128 MiB extracted tree, along with filesystem and
+  manifest overhead.
 
 `AllowLists` is a facade-owned struct whose `Accelerators`, `Services`,
 `Intents`, and `OSTypes` fields are plain `[]string` slices, so callers
@@ -762,7 +768,7 @@ func resolveCommittedConfig(ctx context.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
-	opts, err := cfg.RecipeResolveOptions() // spec.recipe.profile + accounting mode
+	opts, err := cfg.RecipeResolveOptions() // profile + accounting + runtime inventory
 	if err != nil {
 		return err
 	}
@@ -810,8 +816,8 @@ derive step rather than the load step.
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
-| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode` |
-| `RecipeProfile()` / `RecipeAccountingMode()` | the same two, raw, for callers applying their own precedence first |
+| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
+| `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` | the same three, raw, for callers applying their own precedence first |
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 

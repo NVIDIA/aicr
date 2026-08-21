@@ -84,6 +84,22 @@ The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both inte
 
 Semantics: **`main` is never gated** (it is built from source and carries the newest fixes, so it always runs every listed intent); a **release** cell drops any intent whose minimum version is newer than the tag (semver; a tag `>=` the minimum runs). The gate lives in the schedule (`uat-broker schedule` attaches each cell's eligible `intents`), so the controller simply never dispatches a gated `(version × intent)` — no per-version workflow logic. Pointing the floor at a **not-yet-tagged** release is intentional and self-resolving: until that release ships, the intent runs on **`main` only** (green, continuous coverage of the fix), and the release enrolls automatically once it exists. `Validate` rejects a floor for an intent the row does not run, or a non-semver value. Bump the floor if the real first-fixed tag differs — an over-low floor surfaces as a visible red (safe), an over-high floor silently skips a good release (bump down).
 
+## Selecting the deployer
+
+The `deployer` input picks which deployer variant of the intent's test config the pipeline consumes. Set to `helmfile` (the default), the pipeline resolves `tests/uat/<cloud>/tests/<accelerator>-<intent>-config.yaml` — the config every existing cell has always run against. Any other value (currently only `argocd`) resolves `<accelerator>-<intent>-<deployer>-config.yaml` — for example `deployer=argocd` on `aws-h100` training loads `tests/uat/aws/tests/h100-training-argocd-config.yaml`.
+
+```bash
+# ArgoCD variant of the aws-h100 training cell (issue #2194)
+gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
+  -f reservation=aws-h100 -f intent=training -f deployer=argocd
+```
+
+The AICRConfig field `spec.bundle.deployment.deployer` is the source of truth `phase_prep`/`phase_install` read; the workflow input is only how the correct config file is *selected*. `phases.sh:phase_install` dispatches to `install_helmfile` (helmfile lane, unchanged) or `install_argocd` (Argo CD install + repo-creds Secret from `GITHUB_TOKEN` + `kubectl apply` of the `nvidia-stack` app-of-apps + terminal-pass wait on every `Application`). The post-install readiness gate is deployer-agnostic — it validates deployed cluster state (`aicr validate --phase deployment`), not the deployment mechanism — so a green ArgoCD cell means the GitOps deploy path converges on the same operator-managed stack the helmfile lane validates.
+
+**How the bundle reaches Argo CD.** `phase_prep` calls `aicr bundle --output oci://ghcr.io/nvidia/aicr-bundle-scratch/<config-metadata-name>:run-<id> --repo oci://ghcr.io/nvidia/aicr-bundle-scratch/<config-metadata-name>` — the path segment is the AICRConfig's `metadata.name` (yq-read from the test-config in `phase_prep`), not the recipe coordinate. The `--output` flag pushes the rendered bundle to GHCR (the job already has `packages: write`), and `--repo` sets the `source.repoURL` baked into every generated `Application`. `install_argocd` provisions a prefix-matched `argocd.argoproj.io/secret-type: repo-creds` Secret from `GITHUB_TOKEN` so Argo CD's repo-server can pull the pushed artifact. Concurrent runs on the same recipe are isolated by the `:run-<id>` tag.
+
+**Coverage today (issue #2194).** Only `aws-h100` training carries a `-argocd` config file. Dispatching `deployer=argocd` against a non-AWS reservation (`gcp-h100`, `azure-h100`, `kind-h100`) fails closed at the top level: `uat-run.yaml`'s `unsupported-deployer-for-cloud` guard job emits a red workflow, and the per-cloud `run-<cloud>.if:` skips the reusable pipeline so no cluster is provisioned for a request that couldn't have been served. Only `run-aws` forwards the `deployer` input to its reusable pipeline; the other reusable workflows declare no such input. Nightly enrollment is deliberately deferred until a manual dispatch is green on hardware — mirroring the `azure-h100` (#1722) and `kind-h100` (#1843) onboarding pattern. The `argocd-helm` variant, and extension to gcp/azure/kind, are separate follow-ups.
+
 ## Cluster lifecycles
 
 The `lifecycle` input selects one of three cluster lifecycles, all sharing the reservation lease:
