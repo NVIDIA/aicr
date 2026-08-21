@@ -71,6 +71,18 @@ var credentialApplyExpectations = []credentialApplyExpectation{
 
 var actuatorStepNames = []string{"Bringup Infra", "Destroy Cluster"}
 
+// awsTokenBearingStepNames enumerates AWS-lane steps that carry credentials
+// via env (not credentials_file_path). Adding the argocd deployer variant
+// wired GITHUB_TOKEN into the install step so install_argocd can provision
+// the ghcr.io repo-creds Secret (see .github/workflows/uat-aws.yaml + issue
+// #2194). The install path never enables `set -x` today and the token is
+// scoped to `packages: write`, so this is a low-value invariant pin rather
+// than a gap in protection — the pin exists so a future set -x addition in
+// the install step (an addition invisible in an env-only diff) is caught by
+// TestCredentialBearingUATStepsDisableXtrace instead of leaking the token
+// into log lines.
+var awsTokenBearingStepNames = []string{"UAT - install (helmfile apply or argocd sync)"}
+
 type workflowDocument struct {
 	Env      map[string]string      `yaml:"env"`
 	Defaults workflowDefaults       `yaml:"defaults"`
@@ -391,8 +403,14 @@ func TestCredentialBearingUATStepsDisableXtrace(t *testing.T) {
 		{
 			"AWS", "uat-aws.yaml", "uat-aws",
 			func(t *testing.T, steps []workflowStep) []workflowStep {
-				selected := make([]workflowStep, 0, len(actuatorStepNames))
+				selected := make([]workflowStep, 0, len(actuatorStepNames)+len(awsTokenBearingStepNames))
 				for _, stepName := range actuatorStepNames {
+					selected = append(selected, uniqueStepNamed(t, steps, stepName))
+				}
+				// Token-bearing steps (env-only credentials) — see the
+				// awsTokenBearingStepNames comment for the argocd deployer
+				// rationale.
+				for _, stepName := range awsTokenBearingStepNames {
 					selected = append(selected, uniqueStepNamed(t, steps, stepName))
 				}
 				return selected
