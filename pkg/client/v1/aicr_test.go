@@ -2573,8 +2573,10 @@ func TestResolveRecipeRuntimeInventoryMode(t *testing.T) {
 		{name: "invalid mode is rejected", mode: "off", wantErr: true},
 		{name: "empty mode is rejected", mode: "", wantErr: true},
 		{
-			// Valid value, but no stock recipe declares the component, so the
-			// build must refuse rather than record a mode it cannot apply.
+			// Valid value, but these criteria do not declare the component,
+			// so the build must refuse rather than record a mode it cannot
+			// apply. The baseline assertion above fails loudly if a future
+			// overlay change makes these criteria declare it.
 			name: "valid mode on a recipe without the component is rejected",
 			mode: "disabled", wantErr: true,
 		},

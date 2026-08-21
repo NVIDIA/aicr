@@ -35,9 +35,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// ADR-019 admits k8s-aibom registry-only: no stock recipe declares it, so no
-// stock-recipe render path exercises it and the KWOK deployer lanes never see
-// it. These tests are the substitute — they build the same single-component
+// One stock recipe declares k8s-aibom, h100-gke-cos-inference, under ADR-019's
+// stock-adoption amendment. That recipe is not a leaf — h100-gke-cos-inference-dynamo
+// bases on it and declines the component — and the stock render golden covers
+// leaves only, so no golden pins this component's rendered bytes and no KWOK
+// deployer lane exercises it per deployer.
+//
+// These tests remain the substitute — they build the same single-component
 // recipe an adopter would, from the live registry entry rather than from
 // hardcoded coordinates, so a registry edit flows into the assertions instead
 // of silently diverging from them.

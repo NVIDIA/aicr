@@ -59,3 +59,13 @@ spec:
       overrides:
         topologyUpdater:
           enable: true
+
+    # Runtime AI-workload inventory (ADR-019, amendment section C). This is the
+    # single stock recipe in scope for k8s-aibom; do not lift it to
+    # gke-cos-inference, gke-cos, or base. Namespace opt-in is the chart
+    # default, so nothing is inventoried until an operator labels a namespace
+    # aibom.k8saibom.dev/enabled=true. Decline at generation time with
+    # `aicr recipe --runtime-inventory disabled`.
+    - name: k8s-aibom
+      type: Helm
+      valuesFile: components/k8s-aibom/values.yaml
