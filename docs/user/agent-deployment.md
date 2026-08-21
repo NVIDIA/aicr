@@ -129,12 +129,12 @@ aicr snapshot \
 - `--namespace`: Deployment namespace (default: `default`)
 - `--image`: Container image (default: matches the CLI version, e.g. `ghcr.io/nvidia/aicr:v0.19.0`; dev and snapshot builds use `:latest`)
 - `--image-pull-secret`: Secret name for pulling the agent image from a private registry (repeatable)
-- `--job-name`: Job name (default: `aicr`)
-- `--service-account-name`: ServiceAccount name (default: `aicr`)
+- `--job-name`: Job name prefix (default: `aicr`); the run ID is always appended (`<prefix>-<run-id>`)
+- `--service-account-name`: ServiceAccount name prefix (default: `aicr`); the run ID is always appended (`<prefix>-<run-id>`)
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the `aicr-node-reader` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, and official MariaDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the run-scoped `aicr-node-reader-<run-id>` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, ClusterPolicy CRDs, Slinky Controller/NodeSet/LoginSet/RestApi/Accounting CRs, and official MariaDB CRs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
 - `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
 - `--require-gpu`: Fail the snapshot if no GPU is found. In agent mode also requests an `nvidia.com/gpu` resource for the pod (required in CDI environments).
 - `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
@@ -150,13 +150,13 @@ If something goes wrong, check Job logs:
 
 ```shell
 # Get Job status
-kubectl get jobs -n gpu-operator
+kubectl get jobs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 
 # View logs
-kubectl logs -n gpu-operator job/aicr
+kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 
 # Describe Job for events
-kubectl describe job aicr -n gpu-operator
+kubectl describe job -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 ```
 
 ## Customization
@@ -326,22 +326,23 @@ aicr diff --baseline baseline.yaml --target current.yaml --fail-on-drift \
 
 ### Job Fails to Start
 
-Check RBAC permissions:
+Check RBAC permissions. The ServiceAccount name is run-scoped (`aicr-<run-id>`), so look it up first:
 ```shell
-kubectl auth can-i get nodes --as=system:serviceaccount:gpu-operator:aicr
-kubectl auth can-i get pods --as=system:serviceaccount:gpu-operator:aicr
+SA=$(kubectl get sa -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent -o jsonpath='{.items[0].metadata.name}')
+kubectl auth can-i get nodes --as=system:serviceaccount:gpu-operator:$SA
+kubectl auth can-i get pods --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i list controllers.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:aicr
+  --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i list nodesets.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:aicr
+  --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i list loginsets.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:aicr
+  --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i list restapis.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:aicr
+  --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i list accountings.slinky.slurm.net --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:aicr
+  --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i list mariadbs.k8s.mariadb.com --all-namespaces \
-  --as=system:serviceaccount:gpu-operator:aicr
+  --as=system:serviceaccount:gpu-operator:$SA
 ```
 
 ### Job Pending
@@ -349,7 +350,7 @@ kubectl auth can-i list mariadbs.k8s.mariadb.com --all-namespaces \
 Check node selectors and tolerations:
 ```shell
 # View pod events
-kubectl describe pod -n gpu-operator -l job-name=aicr
+kubectl describe pod -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 
 # Check node labels
 kubectl get nodes --show-labels
@@ -369,25 +370,25 @@ kubectl get configmap aicr-snapshot -n gpu-operator
 kubectl get configmap aicr-snapshot -n gpu-operator -o yaml
 
 # View pod logs for errors
-kubectl logs -n gpu-operator -l job-name=aicr
+kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 ```
 
 ### Permission Denied
 
 Ensure RBAC is correctly deployed:
 ```shell
-# Verify ClusterRole
-kubectl get clusterrole aicr-node-reader
+# Verify ClusterRole (run-scoped: "aicr-node-reader-<run-id>")
+kubectl get clusterrole -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 
 # Verify ClusterRoleBinding
-kubectl get clusterrolebinding aicr-node-reader
+kubectl get clusterrolebinding -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 
-# Verify Role and RoleBinding
-kubectl get role aicr -n gpu-operator
-kubectl get rolebinding aicr -n gpu-operator
+# Verify Role and RoleBinding (run-scoped: "aicr-<run-id>")
+kubectl get role -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
+kubectl get rolebinding -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 
-# Verify ServiceAccount
-kubectl get serviceaccount aicr -n gpu-operator
+# Verify ServiceAccount (run-scoped: "aicr-<run-id>")
+kubectl get serviceaccount -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 ```
 
 ## Security Considerations
@@ -395,8 +396,8 @@ kubectl get serviceaccount aicr -n gpu-operator
 ### RBAC Permissions
 
 The agent requires these permissions (created automatically by the CLI):
-- **ClusterRole** (`aicr-node-reader`): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); and cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`)
-- **Role** (`aicr`): Create/update ConfigMaps and list pods in the deployment namespace
+- **ClusterRole** (`aicr-node-reader-<run-id>`, run-scoped): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); and cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`)
+- **Role** (`aicr-<run-id>`, run-scoped): Create/update ConfigMaps and list pods in the deployment namespace
 
 The baseline ClusterRole above is read-only (`get`/`list` only). Slinky
 detection projects only allowlisted identity, association, and boolean fields;

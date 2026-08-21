@@ -250,24 +250,23 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Kubeconfig: "/path/to/target-kubeconfig",
 	// Namespace is the only required field: the Job, its RBAC, and the result
 	// ConfigMap are created there, and an empty value is rejected with
-	// ErrCodeInvalidRequest before any cluster access. Image, JobName, and
-	// ServiceAccountName are defaulted when empty — the names to "aicr" and
-	// the image to the tag matching the Client's WithVersion. They are set
-	// explicitly here because pinning the agent generation is what a
-	// version-skew-sensitive or air-gapped deployment wants.
+	// ErrCodeInvalidRequest before any cluster access. Image is defaulted when
+	// empty to the tag matching the Client's WithVersion; it is pinned
+	// explicitly here because that is what a version-skew-sensitive or
+	// air-gapped deployment wants.
 	//
-	// Collect against one cluster at a time. The default names are shared, the
-	// Job is delete-then-created, and the ClusterRoleBinding has a fixed name
-	// carrying the ServiceAccount as its subject — so two concurrent runs
-	// interfere even with distinct JobName values. See CollectSnapshot's
-	// Concurrency godoc.
-	Namespace:          "aicr-snapshot",
-	Image:              "ghcr.io/nvidia/aicr:v0.19.0",
-	JobName:            "aicr-snapshot",
-	ServiceAccountName: "aicr-agent",
-	Timeout:            5 * time.Minute,
-	Cleanup:            true,
-	AKSGPUPoolsPath:    "/path/to/aks-gpu-pools.json", // AKS only
+	// JobName and ServiceAccountName are omitted deliberately. They are
+	// optional name PREFIXES, not exact names: left unset, both fall back to
+	// "aicr" with this run's generated run ID appended, so every run gets its
+	// own Job, ServiceAccount and RBAC and concurrent runs do not collide.
+	// Set ServiceAccountName only to name a ServiceAccount that already
+	// exists — that account is then used verbatim and AICR manages no RBAC
+	// for the run (see CollectSnapshot's godoc).
+	Namespace:       "aicr-snapshot",
+	Image:           "ghcr.io/nvidia/aicr:v0.19.0",
+	Timeout:         5 * time.Minute,
+	Cleanup:         true,
+	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)

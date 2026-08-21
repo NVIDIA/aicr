@@ -391,10 +391,19 @@ if ! $DRY_RUN; then
 fi
 kc delete ns aicr-validation --ignore-not-found --wait=false
 # Legacy on-cluster agent leftovers from the older deployment pattern.
-kc -n gpu-operator delete job aicr --ignore-not-found
-kc -n gpu-operator delete sa aicr --ignore-not-found
-kc -n gpu-operator delete role aicr --ignore-not-found
-kc -n gpu-operator delete rolebinding aicr --ignore-not-found
+# Run-scoped agent resources (Job/SA/Role/RoleBinding) are named
+# "aicr-<run-id>", so a fixed-name delete never matches current runs; select
+# by the label every one of them carries instead.
+kc -n gpu-operator delete job -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete sa -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete role -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete rolebinding -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+# One-time removal of the pre-change unlabeled cluster RBAC: before this
+# labeling was introduced, the agent's ClusterRole/ClusterRoleBinding were
+# named literally "aicr-node-reader" with no labels, so no selector above can
+# find them.
+kc delete clusterrole aicr-node-reader --ignore-not-found
+kc delete clusterrolebinding aicr-node-reader --ignore-not-found
 
 # Phase 3: Component CRDs.
 # Helm does NOT remove CRDs on uninstall — they must be deleted manually or a

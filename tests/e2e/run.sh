@@ -1875,8 +1875,10 @@ cleanup_e2e() {
   msg "Cleaning up e2e resources"
   msg "=========================================="
 
-  # Clean up snapshot resources
-  kubectl delete job aicr-e2e-snapshot -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
+  # Clean up snapshot resources. The Job name is run-scoped ("aicr-<run-id>"),
+  # so select by the label every run-owned agent resource carries instead of
+  # a fixed name.
+  kubectl delete job -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
   kubectl delete cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
 
   msg "Cleanup complete"

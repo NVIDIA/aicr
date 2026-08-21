@@ -84,12 +84,12 @@ aicr snapshot [flags]
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env). Also used when `--output` is a ConfigMap URI so reads and writes target the same cluster. |
 | `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment |
 | `--image` | | string | matches CLI version | Container image for agent Job. Release builds default to `ghcr.io/nvidia/aicr:v<version>`; dev and `-next` snapshot builds default to `ghcr.io/nvidia/aicr:latest`. |
-| `--job-name` | | string | aicr | Name for the agent Job |
-| `--service-account-name` | | string | aicr | ServiceAccount name for agent Job |
+| `--job-name` | | string | aicr | Prefix for the agent Job name; the run ID is always appended (`<prefix>-<run-id>`) |
+| `--service-account-name` | | string | aicr | Prefix for the agent Job's ServiceAccount name; the run ID is always appended (`<prefix>-<run-id>`) |
 | `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any — see [Agent Deployment](agent-deployment.md). Pass an explicit selector to override. |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
-| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves the agent's `aicr-node-reader` ClusterRoleBinding active. By default this grants only read-only access; with `--discover-network` the retained ClusterRole also carries the mutating rules live network discovery needs (CRD/namespace/daemonset create, pod exec, node patch, NicClusterPolicy). |
+| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves the agent's run-scoped `aicr-node-reader-<run-id>` ClusterRoleBinding active. By default this grants only read-only access; with `--discover-network` the retained ClusterRole also carries the mutating rules live network discovery needs (CRD/namespace/daemonset create, pod exec, node patch, NicClusterPolicy). |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--require-gpu` | | bool | false | Require GPU resources on the agent pod (mutually exclusive with `--runtime-class`) |
@@ -1031,8 +1031,8 @@ aicr validate [flags]
 | `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for validation Job |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
-| `--job-name` | | string | aicr-validate | Name for the validation Job |
-| `--service-account-name` | | string | aicr | ServiceAccount name for validation Job |
+| `--job-name` | | string | aicr-validate | Prefix for the validation Job name; the run ID is always appended (`<prefix>-<run-id>`) |
+| `--service-account-name` | | string | aicr-validate | Prefix for the validation Job's ServiceAccount name; the run ID is always appended (`<prefix>-<run-id>`) |
 | `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
 | `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
