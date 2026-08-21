@@ -84,6 +84,15 @@ testing_tools:
   helm: 'v4.2.4'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
   helm_diff: 'v3.15.11'
+  # helm_diff_checksums are refreshed automatically by tools/update-helm-diff-checksums
+  # via Renovate postUpgradeTasks whenever the helm-diff version above is bumped.
+  # The darwin_* keys name GOOS (matching the sibling blocks); upstream labels
+  # those release assets "macos".
+  helm_diff_checksums:
+    linux_amd64: 'ed54aa5a14a51a6e44cf8ab6020aaa9e56779b4d33bc2adf07abea6b240a5e7c'
+    linux_arm64: '1c38c487ec348fe5ef2b10c61deddff79f0fa5bfbab762b302874578e6dc2d2c'
+    darwin_amd64: '833e1054d0cfe28bbd6f2edc4c1d5b786968b7732f8df6fe99b67c3bf12bf7bb'
+    darwin_arm64: 'ba489cc4a5998ad259fbc18c454f2319da26ba4c8f469e7acb587a07e61072cd'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
   helmfile: 'v1.7.4'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums

@@ -43,38 +43,98 @@ runs:
     - name: Install E2E testing tools
       uses: ./.github/actions/install-e2e-tools
 
-    - name: Create Kind cluster
-      shell: bash
-      run: make cluster-create
-
-    - name: Deploy aicrd to Kind
+    - name: Create Kind cluster and deploy aicrd
       shell: bash
       env:
         GOFLAGS: -mod=vendor
       run: |
-        # Build and push aicrd image (replaces Tilt custom_build)
+        # If any `wait` below fails, `set -e` (GitHub's default shell flags)
+        # exits this script immediately - any background job not yet reached
+        # by its own `wait` would otherwise keep running. Most consequential
+        # for pid_cluster specifically: the job's always()-run Cleanup step
+        # (`make cluster-delete`) could then race a still-in-flight
+        # `make cluster-create`. Kill whatever is still alive on any exit.
+        cleanup_background_jobs() {
+          local rc=$?
+          for pid in "$pid_cluster" "$pid_dep" "$pid_perf" "$pid_conf" "$pid_cli" "$pid_aicr" "$pid_validators"; do
+            [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null
+          done
+          exit "$rc"
+        }
+        trap cleanup_background_jobs EXIT
+
+        # This step folds what used to be two separate steps (Create Kind
+        # cluster / Deploy aicrd) into one, so GitHub's per-step red-X no
+        # longer says at a glance which phase failed. Group markers fold the
+        # log into the same phases instead.
+        echo "::group::cluster-and-builds"
+        # cluster-create (~35s locally; Kind bring-up + registry) and the
+        # host compiles below touch none of each other's inputs/outputs, so
+        # launch everything in the background up front. Each later command
+        # waits only on the specific PID(s) its own inputs actually depend
+        # on: aicrd's ko build needs just the cluster/registry (not the
+        # validator/CLI binaries), so it must not be gated behind builds it
+        # doesn't read from - an earlier version of this step wait'ed on all
+        # four build PIDs before it, which measured ~19s slower in CI than
+        # the original sequential script for no reason: nothing here reads
+        # dist/validator/* or dist/e2e/aicr until the docker build step below.
+        pid_cluster=""; pid_dep=""; pid_perf=""; pid_conf=""; pid_cli=""; pid_aicr=""; pid_validators=""
+        make cluster-create > /tmp/cluster-create.log 2>&1 &
+        pid_cluster=$!
+
+        mkdir -p dist/validator dist/e2e
+        for phase in deployment performance conformance; do
+          mkdir -p "validators/${phase}/testdata"
+        done
+
+        # Compile validator binaries + the host aicr CLI on the runner (Go
+        # build cache hit) while the cluster comes up. This is also much
+        # faster than building inside Docker (no cache sharing there). Go's
+        # build cache is safe for concurrent use by simultaneous go
+        # commands, including ko's own internal compile of aicrd below.
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment &
+        pid_dep=$!
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance &
+        pid_perf=$!
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance &
+        pid_conf=$!
+        go build -o dist/e2e/aicr ./cmd/aicr &
+        pid_cli=$!
+
+        # aicrd only needs the cluster/registry - build and push it (replaces
+        # Tilt custom_build) as soon as that's ready, not gated behind the
+        # unrelated validator/CLI builds above.
+        #
+        # cluster-create's output was redirected to a file above so it
+        # wouldn't interleave with the concurrent builds; print it on
+        # failure too (not just success), since a failed `wait` here is the
+        # most common, most opaque failure on this step and would otherwise
+        # exit via the EXIT trap with zero diagnostic output.
+        wait $pid_cluster || { cat /tmp/cluster-create.log; exit 1; }
+        cat /tmp/cluster-create.log
+        echo "::endgroup::"
+
+        echo "::group::deploy-aicrd"
         KO_DOCKER_REPO=localhost:5001/aicrd ko build --bare --tags=tilt ./cmd/aicrd
 
         # Apply namespace first (must exist before deployment references it)
         kubectl apply -f tilt/k8s/namespace.yaml
         kubectl apply -f tilt/k8s/
+        echo "::endgroup::"
 
-        # Build images + CLI binary in parallel while deployment starts
+        echo "::group::validator-images"
+        # The validator images COPY the binaries built above, so wait for
+        # those specifically (not pid_cli, which nothing here needs) before
+        # building them.
+        wait $pid_dep
+        wait $pid_perf
+        wait $pid_conf
+
+        # Build + push the remaining images. Validator binaries are already
+        # compiled above; this is just the COPY-only image build + push.
         KO_DOCKER_REPO=localhost:5001/aicr ko build --bare --tags=local ./cmd/aicr &
         pid_aicr=$!
-        # Compile validator binaries on host (Go build cache hit) then COPY-only images.
-        # This is much faster than building inside Docker (no cache sharing).
         (
-          mkdir -p dist/validator
-          CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment &
-          CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance &
-          CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance &
-          wait
-          # Build per-phase COPY-only images and push to local registry.
-          # Ensure testdata dirs exist (conformance has none).
-          for phase in deployment performance conformance; do
-            mkdir -p "validators/${phase}/testdata"
-          done
           for phase in deployment performance conformance; do
             docker build -t "localhost:5001/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
         FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
@@ -99,10 +159,14 @@ runs:
           docker push "localhost:5001/aicr-validators/aiperf-bench:latest"
         ) &
         pid_validators=$!
-        go build -o dist/e2e/aicr ./cmd/aicr &
-        pid_cli=$!
-        wait $pid_aicr $pid_validators $pid_cli
+        # Separate waits, not `wait $pid_aicr $pid_validators`: bash returns
+        # only the LAST pid's exit status from a combined wait, so a failed
+        # pid_aicr would be silently masked whenever pid_validators succeeds.
+        wait $pid_aicr
+        wait $pid_validators
+        echo "::endgroup::"
 
+        echo "::group::rollout-and-verify"
         # Wait for deployment rollout (may already be ready)
         kubectl rollout status deployment/aicrd -n aicr --timeout=120s
 
@@ -112,6 +176,13 @@ runs:
         curl -sf http://localhost:5001/v2/aicr-validators/performance/tags/list
         curl -sf http://localhost:5001/v2/aicr-validators/conformance/tags/list
         curl -sf http://localhost:5001/v2/aicr-validators/aiperf-bench/tags/list
+        echo "::endgroup::"
+
+        # Not needed by anything above, but its output (dist/e2e/aicr) is
+        # used by a later step (AICR_BIN) - wait now so a build failure here
+        # fails this step instead of surfacing as a confusing missing-binary
+        # error two steps later, and so the step's own exit code reflects it.
+        wait $pid_cli
 
     - name: Set up fake GPU environment
       shell: bash
@@ -151,6 +222,7 @@ runs:
       shell: bash
       run: |
         mkdir -p /tmp/debug-artifacts
+        cp /tmp/cluster-create.log /tmp/debug-artifacts/cluster-create.log 2>/dev/null || true
         kubectl get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
         kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
         kubectl logs -n aicr -l app.kubernetes.io/name=aicrd --tail=500 > /tmp/debug-artifacts/aicrd-logs.txt || true

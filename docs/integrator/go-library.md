@@ -721,7 +721,7 @@ func resolveCommittedConfig(ctx context.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
-	opts, err := cfg.RecipeResolveOptions() // spec.recipe.profile + accounting mode
+	opts, err := cfg.RecipeResolveOptions() // profile + accounting + runtime inventory
 	if err != nil {
 		return err
 	}
@@ -769,8 +769,8 @@ derive step rather than the load step.
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
-| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode` |
-| `RecipeProfile()` / `RecipeAccountingMode()` | the same two, raw, for callers applying their own precedence first |
+| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
+| `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` | the same three, raw, for callers applying their own precedence first |
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 

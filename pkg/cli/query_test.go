@@ -291,3 +291,70 @@ spec:
 	}
 	return dir
 }
+
+// TestRecipeAndQueryCommandsRejectInvalidRuntimeInventoryMode exercises
+// runtimeInventoryResolveOptions' flag-set branch on both commands that expose
+// the flag.
+//
+// Without this the function is covered only by its "flag unset and no config"
+// fallthrough, which returns before touching the value — so a parse or wiring
+// defect in the branch operators actually use would not be observed.
+func TestRecipeAndQueryCommandsRejectInvalidRuntimeInventoryMode(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  func() *cli.Command
+		args []string
+	}{
+		{
+			name: "recipe",
+			cmd:  recipeCmd,
+			args: []string{"recipe", "--service", "eks", "--runtime-inventory", "off"},
+		},
+		{
+			name: "query",
+			cmd:  queryCmd,
+			args: []string{
+				"query", "--service", "eks", "--selector", "deploymentOrder",
+				"--runtime-inventory", "off",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd().Run(t.Context(), tt.args)
+			if err == nil {
+				t.Fatal("command error = nil, want rejection of an invalid runtime inventory mode")
+			}
+			// Assert the code, since that is what callers branch on; a text
+			// match alone would accept an unrelated error carrying similar
+			// wording. The message check stays to distinguish which
+			// invalid-request this is.
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), "invalid runtime inventory mode") {
+				t.Fatalf("command error = %v, want an invalid-mode rejection", err)
+			}
+		})
+	}
+}
+
+// TestRecipeCommandRejectsRuntimeInventoryWithoutComponent covers the flag-set
+// branch reaching a successful parse and then failing closed at build time,
+// which is the path an operator hits after a typo in --service.
+func TestRecipeCommandRejectsRuntimeInventoryWithoutComponent(t *testing.T) {
+	err := recipeCmd().Run(t.Context(), []string{
+		"recipe", "--service", "gke", "--accelerator", "h100",
+		"--os", "cos", "--intent", "inference",
+		"--runtime-inventory", "disabled",
+	})
+	if err == nil {
+		t.Fatal("command error = nil, want rejection for a recipe that does not declare the component")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "requires the recipe to declare component") {
+		t.Fatalf("command error = %v, want the missing-component rejection", err)
+	}
+}
