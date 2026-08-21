@@ -647,8 +647,15 @@ files:
   `h100-gke-cos-inference-dynamo` and not `h100-gke-cos-inference`. The target
   recipe of this amendment therefore has no rendered-bytes parity coverage. The
   golden that does move is the resolution golden, recording the declined ref on
-  the descendant; the render golden stays byte-identical, which is the proof
-  that the deployed blast radius is one recipe.
+  the descendant, while the render golden stays byte-identical.
+
+  That unchanged render golden is **supporting evidence, not the proof**: it
+  establishes only that the descendant's rendered bytes did not change. It
+  cannot establish the one-recipe blast radius, precisely because the target
+  recipe has no render golden of its own. The scope assertion lives in
+  `TestK8sAIBOMStockAdoption` (`pkg/recipe`), which pins that the target
+  enables the component, the descendant declines it, the generation-time
+  opt-out declines it, and a sibling recipe does not declare it at all.
 
 ### D. User-demand case
 

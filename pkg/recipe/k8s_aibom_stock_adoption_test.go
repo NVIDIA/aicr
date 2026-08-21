@@ -57,6 +57,14 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 		opts         []recipe.BuildOption
 		wantDeclared bool
 		wantEnabled  bool
+		// wantMode is the selection the emitted recipe must record. Empty
+		// means nothing should be recorded, which is the case for every
+		// build that does not pass the flag. Asserted separately from
+		// IsEnabled because a regression that declines the component while
+		// dropping the recorded decision would otherwise pass: ADR-019
+		// section E requires the recipe to carry the decision, not just its
+		// effect.
+		wantMode recipe.RuntimeInventoryMode
 	}{
 		{
 			name:         "target stock recipe declares and enables the component",
@@ -80,6 +88,7 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			opts:         []recipe.BuildOption{recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryDisabled)},
 			wantDeclared: true,
 			wantEnabled:  false,
+			wantMode:     recipe.RuntimeInventoryDisabled,
 		},
 		{
 			name: "a sibling stock recipe does not declare it at all",
@@ -100,6 +109,15 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			result, err := builder.BuildFromCriteria(context.Background(), tt.criteria, tt.opts...)
 			if err != nil {
 				t.Fatalf("BuildFromCriteria() error = %v", err)
+			}
+
+			var gotMode recipe.RuntimeInventoryMode
+			if result.Configuration != nil && result.Configuration.RuntimeInventory != nil {
+				gotMode = result.Configuration.RuntimeInventory.Mode
+			}
+			if gotMode != tt.wantMode {
+				t.Errorf("configuration.runtimeInventory.mode = %q, want %q: the recipe must record the decision, not just its effect",
+					gotMode, tt.wantMode)
 			}
 
 			var ref *recipe.ComponentRef
