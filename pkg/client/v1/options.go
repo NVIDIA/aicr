@@ -360,11 +360,21 @@ type RecipeSourceOption struct {
 }
 
 // WithRecipeSource sets the recipe source on the Client. Construct the
-// argument with OCISource or FilesystemSource.
+// argument with EmbeddedSource, FilesystemSource, or OCISource.
 func WithRecipeSource(s RecipeSourceOption) Option {
 	return func(c *Client) {
 		c.source = s.internal
 	}
+}
+
+// WithOCISourceTempDir sets the existing writable parent directory beneath
+// which an OCI recipe source creates its unique, private per-Client workspace.
+// Client.Close removes only the child workspace; it never removes parent.
+//
+// When omitted, the system temporary directory is used. Supplying this option
+// with EmbeddedSource or FilesystemSource is invalid.
+func WithOCISourceTempDir(parent string) Option {
+	return func(c *Client) { c.ociSource.tempDir = &parent }
 }
 
 // WithVersion sets the version string stamped into resolved recipe
@@ -396,16 +406,20 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 	return WrapAllowLists(internal), nil
 }
 
-// OCISource describes an OCI registry containing AICR recipes.
+// OCISource describes an OCI repository containing an AICR recipe tree rooted
+// at registry.yaml. repository may optionally begin with "oci://", but must
+// not contain a tag or digest: selector is the single source of truth for the
+// artifact version.
 //
-// The tag is optional; if empty, "latest" is assumed by the downstream
-// loader.
-func OCISource(registry, tag string) RecipeSourceOption {
+// selector is required and must be a sha256:<64-hex-character> manifest
+// digest supplied by trusted configuration. Tags and implicit "latest" are
+// rejected so mutable registry state cannot change the selected catalog.
+func OCISource(repository, selector string) RecipeSourceOption {
 	return RecipeSourceOption{
 		internal: recipeSource{
 			kind:     sourceKindOCI,
-			registry: registry,
-			tag:      tag,
+			registry: repository,
+			selector: selector,
 		},
 	}
 }
@@ -440,6 +454,10 @@ const (
 type recipeSource struct {
 	kind     sourceKind
 	registry string
-	tag      string
+	selector string
 	path     string
+}
+
+type ociSourceConfig struct {
+	tempDir *string
 }

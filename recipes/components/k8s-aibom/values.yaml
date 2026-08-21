@@ -20,7 +20,7 @@
 image:
   repository: ghcr.io/googlecloudplatform/k8s-aibom
   tag: ""
-  digest: sha256:b5040d14a20b4e890956d5f47b78445dac6c871eb5799586d9011c48ce71c198
+  digest: sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d
 
 # Make pod readiness reflect the current AIBOMControllerConfig status rather
 # than process liveness alone. Invalid current configuration must fail closed.

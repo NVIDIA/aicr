@@ -910,7 +910,9 @@ aicr validate \
   --toleration dedicated=worker-workload:NoExecute
 ```
 
-These flags affect the inner benchmark pods that run on GPU nodes (NCCL workers, Dynamo workers), not the validator orchestrator Job itself. For `inference-perf` specifically, `--node-selector` narrows the pool of candidate GPU nodes — the validator then picks the candidate with the most free GPUs (subtracting same-ledger occupancy only — DRA allocations from DRA capacity, device-plugin requests from device-plugin capacity — and skipping DRA candidates that carry scalar `nvidia.com/gpu` workloads) and pins all Dynamo Frontend + worker pods to that node via `kubernetes.io/hostname`. The AIPerf benchmark runner pod is CPU-only, uses a tolerate-all / no-nodeSelector pod spec, and is unaffected by these flags.
+These flags affect the inner benchmark pods that run on GPU nodes (NCCL workers, Dynamo workers). The example above supplies `--snapshot`, so it does not launch the live snapshot agent. When `--snapshot` is omitted, the flags also configure that preliminary agent. With no toleration override, the agent tolerates all taints; an explicit `spec.validate.agent.tolerations: []` clears that default. Neither flag affects the validator orchestrator Job itself.
+
+For `inference-perf` specifically, `--node-selector` narrows the pool of candidate GPU nodes — the validator then picks the candidate with the most free GPUs (subtracting same-ledger occupancy only — DRA allocations from DRA capacity, device-plugin requests from device-plugin capacity — and skipping DRA candidates that carry scalar `nvidia.com/gpu` workloads) and pins all Dynamo Frontend + worker pods to that node via `kubernetes.io/hostname`. The AIPerf benchmark runner pod is CPU-only, uses a tolerate-all / no-nodeSelector pod spec, and is unaffected by these flags.
 
 ### A check reports `skipped` unexpectedly
 

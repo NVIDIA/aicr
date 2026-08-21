@@ -211,6 +211,8 @@ func TestStability_ClientOptions(t *testing.T) {
 	requireSignature[func() aicr.RecipeSourceOption](aicr.EmbeddedSource)
 	requireSignature[func(string) aicr.RecipeSourceOption](aicr.FilesystemSource)
 	requireSignature[func(string, string) aicr.RecipeSourceOption](aicr.OCISource)
+	requireSignature[func(context.Context, ...aicr.Option) (*aicr.Client, error)](aicr.NewClientContext)
+	requireSignature[func(string) aicr.Option](aicr.WithOCISourceTempDir)
 	requireSignature[func() (*aicr.AllowLists, error)](aicr.ParseAllowListsFromEnv)
 
 	_ = []aicr.Option{
@@ -219,6 +221,7 @@ func TestStability_ClientOptions(t *testing.T) {
 		aicr.WithRecipeSource(aicr.EmbeddedSource()),
 		aicr.WithRecipeSource(aicr.FilesystemSource("/x")),
 		aicr.WithRecipeSource(aicr.OCISource("reg", "tag")),
+		aicr.WithOCISourceTempDir("/tmp"),
 	}
 }
 

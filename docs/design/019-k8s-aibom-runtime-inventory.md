@@ -2,7 +2,11 @@
 
 ## Status
 
-**Accepted** — 2026-08-19. Originally proposed 2026-08-12.
+**Accepted** — 2026-08-19. Originally proposed 2026-08-12. Amended
+2026-08-19 to define what "non-alpha storage API" requires, to replace the
+preview-label concept with the registry-only boundary this ADR already
+establishes, and to name the single GKE recipe in scope for stock adoption.
+See [Amendment: stock adoption on one GKE recipe](#amendment-stock-adoption-on-one-gke-recipe).
 
 The accepted implementation qualifies upstream v1.2.0 at source commit
 `4aa7638b08ab9927bfa8df85c46c80234b9996f9`, OCI chart digest
@@ -551,6 +555,12 @@ semantics.
 
 ## Follow-Up Decisions
 
+Four of the six requirements below are resolved by
+[Amendment: stock adoption on one GKE recipe](#amendment-stock-adoption-on-one-gke-recipe);
+the remaining two are planned work tracked in the epic. The list is
+retained as originally written; the amendment records what changed, what
+remains open, and where the rest is tracked.
+
 Stock adoption requires a separate ADR or explicit amendment that defines:
 
 - the exact recipe families in scope;
@@ -564,6 +574,151 @@ Runtime-observation signing requires a separate evidence design as described in
 Decision 8. Neither follow-up is implied by registry qualification or elapsed
 time.
 
+## Amendment: stock adoption on one GKE recipe
+
+**2026-08-19.** Amends the Follow-Up Decisions above. Execution is tracked in
+[#2271](https://github.com/NVIDIA/aicr/issues/2271); this section records only
+the decisions that change what this ADR committed to.
+
+### A. "Non-alpha storage API" means the storage flip, not object migration
+
+The requirement is satisfied when the served CRD reports
+`spec.versions[?storage].name == 'v1beta1'`. Migrating existing stored objects
+and cleaning `status.storedVersions` are **not** required, because upstream's
+graduated schema is byte-identical to `v1alpha1` and conversion strategy stays
+`None`, so existing stored objects remain readable without rewrite.
+
+Those two steps instead gate a later, separate decision: **removing**
+`v1alpha1`. Upstream commits to that removal being its own announced release
+with a documented migration procedure, in
+[k8s-aibom design note 001](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/ae3782d052ab8951bab0a273fbf642ecfadc8195/docs/design/001-api-graduation-v1beta1.md).
+
+AICR asserts the storage version in the component health check so a cluster
+whose CRD was never upgraded fails validation rather than passing quietly.
+
+### B. No preview or maturity label; the registry boundary is the gate
+
+Cross-organization discussion proposed an "explicit preview label" on the
+registry entry as the carrier for adopting an alpha-API component. **AICR
+does not implement one.** Every entry in `recipes/registry.yaml` is assumed
+stable, and a preview-labeled entry would contradict that premise.
+
+Decision 2 above already supplies the needed mechanism, and this amendment
+makes its second-order meaning explicit:
+
+- **Registry presence** asserts the component is qualified and stable enough
+  to offer. It says nothing about default installation.
+- **Stock recipe presence** asserts AICR ships the component by default. This
+  is the assertion that requires the graduated API.
+
+Therefore stock-adoption preparation — design, selection semantics, and the
+managed-cluster demonstration — proceeds against the currently qualified
+v1.2.0, while **the overlay change adding the component to a stock recipe
+merges only after requalification against the graduation release**. The
+demonstration runs from a custom recipe or an unmerged branch, which proves
+the workflow without asserting stock stability.
+
+### C. Recipe in scope
+
+`h100-gke-cos-inference`, a single leaf overlay. Not a recipe family, not
+`gke-cos-inference`, not `gke-cos`, not a mixin, and not a shared base.
+Inference is chosen because an AI BOM inventories models and AI workloads, so
+a served model exercises the component's actual purpose. Substituting a
+different recipe requires amending this section.
+
+### D. User-demand case
+
+The demonstration itself. No external customer or partner is driving GKE
+adoption. The motivation is proving the workflow end to end on a managed
+cluster and establishing the pattern for later stock adoptions. This is
+recorded plainly rather than framed as customer demand, because the
+requirement exists to prevent adoption justified only by availability.
+
+### E. Selection and opt-out semantics
+
+Resolved 2026-08-20. A **generation-time flag recorded in the emitted recipe**,
+modelled on the existing `--slurm-accounting-mode` selection rather than
+invented:
+
+```bash
+aicr recipe ... --runtime-inventory disabled
+```
+
+The selection is recorded as `configuration.runtimeInventory.mode`, the recipe's
+`apiVersion` becomes `ConfiguredRecipeResultAPIVersion`, and the component's ref
+carries `install: false`. `ComponentRef.IsEnabled()` already reads that key, so
+the component leaves the resolved set, the bundle, and deployment validation.
+
+This satisfies Decision 2's specific objection. A bundle-time
+`--set k8s-aibom:enabled=false` was rejected because it changes neither the
+recipe nor its health checks; here both change, and the health-check half comes
+for free because the check lives on the component's own ref rather than on a
+sibling. That is simpler than the Slurm accounting precedent, which has to
+append and omit a check on a different component.
+
+Passing the flag on a recipe that does not declare the component is an error,
+not a silent no-op. Selecting a mode there is a mistake — wrong criteria, a
+typo, a recipe that never carried it — and succeeding quietly would record a
+decision the recipe cannot honor. The check runs before the configuration is
+written, so a rejected build leaves no partial record.
+
+The same selection is available in an `AICRConfig` document at
+`spec.recipe.configuration.runtimeInventory.mode`.
+
+**Scope boundary worth naming.** This is the second entry under
+`RecipeConfiguration`, and the pattern is one bespoke selection per optional
+component. That is deliberate: this ADR asks for this component specifically,
+and a generic per-component disable would need a policy for which components
+may be declined at all — nothing should let a recipe decline `gpu-operator`.
+A third entry is the signal to revisit rather than extend by reflex.
+
+### Requirement status
+
+| Follow-Up requirement | Status |
+|---|---|
+| Exact recipe families in scope | Resolved — C |
+| Selection and opt-out semantics | Resolved — E |
+| Non-alpha storage API and migration policy | Resolved — A |
+| Concrete user-demand case | Resolved — D |
+| Managed-cluster qualification and measured cost | Planned — [#2271](https://github.com/NVIDIA/aicr/issues/2271) |
+| Upgrade, rollback, uninstall, support evidence | Planned — [#2282](https://github.com/NVIDIA/aicr/issues/2282) |
+
+Decision 4 is unchanged: chart, image, CRDs, and the public status contract
+remain one versioned set, so the graduation release requires full
+requalification rather than a version bump.
+
+### Requalified artifact set: v1.3.0, 2026-08-20
+
+That requalification was performed. The Status block above records what was
+accepted on 2026-08-19 and is left intact as the dated record; this is the
+set the registry now pins.
+
+| Item | Qualified value |
+|---|---|
+| Source tag | [`v1.3.0`](https://github.com/GoogleCloudPlatform/k8s-aibom/releases/tag/v1.3.0) at `30af41abbe0bed3c41a42289ccf294be8c4779bb` |
+| Image | `ghcr.io/googlecloudplatform/k8s-aibom@sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d` |
+| Chart | `oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.3.0` at `sha256:4ffa933e272a977e0b60f2eca1c4326176e6196e2ee69e1bf4f72c8b5a511c90` |
+| Attestations | Image SLSA provenance, image CycloneDX SBOM, and chart SLSA provenance all verify, bound to `refs/tags/v1.3.0`, source digest `30af41ab…`, and a GitHub-hosted runner |
+| API | `v1alpha1` and `v1beta1` both served; CRD storage on `v1beta1` |
+| Kubernetes support | Policy rather than fixed range: stable APIs only, no known ceiling, tested floor 1.27, backed by an upstream version-matrix CI job |
+
+Gate findings that changed AICR-visible behavior:
+
+- **Rendered RBAC is byte-identical to 1.2.0.** No permission change accompanies
+  the graduation.
+- **The rendered resource set is unchanged**, and the chart still renders
+  `AIBOMControllerConfig` at `aibom.k8saibom.dev/v1alpha1`. Only CRD *storage*
+  moved to `v1beta1`. The component health check reflects that asymmetry
+  deliberately, asserting `v1beta1` storage on both CRDs while continuing to
+  read the config resource at `v1alpha1`.
+- **The readiness fixes ship in the image, not the chart.** Probe configuration
+  renders identically across the two versions, so the corrected readiness
+  behavior is only obtained by re-pinning the image digest — which is the
+  substantive half of this requalification.
+
+The prior pin's supported-range statement is superseded by the upstream policy
+above; AICR documentation links that policy rather than restating a range.
+
 ## References
 
 - [k8s-aibom repository](https://github.com/GoogleCloudPlatform/k8s-aibom)
@@ -573,5 +728,6 @@ time.
 - [AIBOM API at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/api/v1alpha1/aibom_types.go)
 - [AIBOMControllerConfig API at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/api/v1alpha1/aibomcontrollerconfig_types.go)
 - [Security model at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/e752beb15c8eb0179bba4f3066c7b989c84da33e/docs/security-model.md)
+- [k8s-aibom design note 001: v1beta1 API graduation, at the reviewed commit](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/ae3782d052ab8951bab0a273fbf642ecfadc8195/docs/design/001-api-graduation-v1beta1.md)
 - [ADR-006: Container Image Pinning Policy](006-image-pinning-policy.md)
 - [ADR-007: Verifiable Recipe Test Evidence](007-recipe-evidence.md)

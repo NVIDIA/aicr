@@ -76,6 +76,21 @@ const (
 	// NOT the only layout: the kubeflow-trainer Helm chart the recipes deploy pins
 	// defaultNamespace: kubeflow (recipes/registry.yaml). The probe therefore
 	// discovers the live namespace rather than assuming this one.
+	//
+	// Differing from the chart's namespace is load-bearing, not accidental drift to
+	// be tidied away later (issue #2223). Two things depend on it:
+	//
+	//   - The CNCF evidence collector distinguishes "the bundle deployed Kubeflow
+	//     Trainer" from "the validator self-installed one to run the NCCL
+	//     benchmark" solely by namespace. Sharing one namespace would let this
+	//     temporary install be collected as recipe-deployed, so signed conformance
+	//     evidence would claim an operator the bundle never shipped.
+	//   - The conflict guard in ensureTrainerInstalled compares the discovered
+	//     installation's namespace against this one to refuse installing over a
+	//     Trainer this validator does not own. Sharing a namespace makes that
+	//     comparison always false, and applyTrainerResources would then overwrite
+	//     the recipe's Helm-managed objects in place via
+	//     updateExistingTrainerResource, with nothing restoring them afterwards.
 	trainerNamespace = "kubeflow-system"
 
 	// trainerValidatingWebhookConfig and trainerMutatingWebhookConfig are the
