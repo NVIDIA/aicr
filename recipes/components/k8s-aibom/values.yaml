@@ -13,10 +13,14 @@
 # limitations under the License.
 
 # k8s-aibom Helm values
-# Optional runtime AI-workload inventory. Registry-only: no stock recipe
-# selects this component. The digest and defaults below were qualified as one
-# coherent v1.3.0 artifact set under ADR-019, re-pinned from v1.2.0 when
-# upstream graduated the API to v1beta1.
+# Optional runtime AI-workload inventory. One stock recipe selects it,
+# h100-gke-cos-inference (ADR-019 stock-adoption amendment); its only
+# descendant, h100-gke-cos-inference-dynamo, declines it.
+#
+# The digest and defaults below were qualified as one coherent v1.3.0 artifact
+# set under ADR-019, re-pinned from v1.2.0 when upstream graduated CRD storage
+# to v1beta1. Both v1alpha1 and v1beta1 remain served, and the chart still
+# renders AIBOMControllerConfig at v1alpha1.
 
 image:
   repository: ghcr.io/googlecloudplatform/k8s-aibom

@@ -184,14 +184,28 @@ jobs:
             if git show-ref --verify --quiet "refs/tags/${version}"; then
               mkdir -p "fern/versions/${version}-content"
               git archive "refs/tags/${version}" -- docs/ | tar -x --strip-components=1 -C "fern/versions/${version}-content"
-              # Sanitize frozen markdown for Fern's MDX parser.
-              # Versioned content gets strict MDX parsing; escape all bare
-              # { } and < so nothing is interpreted as JSX. Markdown renders
-              # &lt; as < and \{ as { so the output is visually identical.
-              find "fern/versions/${version}-content" -name '*.md' -print0 | xargs -0 sed -i \
-                -e 's/{/\\{/g' \
-                -e 's/}/\\}/g' \
-                -e 's/</\&lt;/g'
+              # Escape {, }, < for MDX — but only outside fenced code blocks and inline code spans
+              find "fern/versions/${version}-content" -name '*.md' -print0 | while IFS= read -r -d '' f; do
+                awk '
+                  /^````*/ || /^~~~~*/ { fence = !fence; print; next }
+                  fence { print; next }
+                  {
+                    n = split($0, p, "`")
+                    out = ""
+                    for (i = 1; i <= n; i++) {
+                      if (i % 2 == 1) {
+                        gsub(/{/, "\\{", p[i])
+                        gsub(/}/, "\\}", p[i])
+                        gsub(/</, "\\&lt;", p[i])
+                      }
+                      out = out p[i]
+                      if (i < n) out = out "`"
+                    }
+                    print out
+                  }
+                ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+              done
+              tools/check-docs-mdx-parse "fern/versions/${version}-content"
               echo "Extracted docs from $version"
             else
               echo "::error::Tag $version not found — cannot pin frozen docs content"

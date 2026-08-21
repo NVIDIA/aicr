@@ -620,11 +620,42 @@ the workflow without asserting stock stability.
 
 ### C. Recipe in scope
 
-`h100-gke-cos-inference`, a single leaf overlay. Not a recipe family, not
-`gke-cos-inference`, not `gke-cos`, not a mixin, and not a shared base.
-Inference is chosen because an AI BOM inventories models and AI workloads, so
-a served model exercises the component's actual purpose. Substituting a
-different recipe requires amending this section.
+`h100-gke-cos-inference`. Not a recipe family, not `gke-cos-inference`, not
+`gke-cos`, not a mixin, and not a shared base. Inference is chosen because an
+AI BOM inventories models and AI workloads, so a served model exercises the
+component's actual purpose. Substituting a different recipe requires amending
+this section.
+
+**Correction, 2026-08-21.** This section originally called
+`h100-gke-cos-inference` "a single leaf overlay." It is not a leaf:
+`h100-gke-cos-inference-dynamo` declares it as its `base`, so a componentRef
+added here is inherited by that recipe and the component would ship in two
+stock recipes rather than one. The scope decision is unchanged — one recipe —
+so `h100-gke-cos-inference-dynamo` declines the inherited component with
+`overrides.install: false`, the same gate `--runtime-inventory disabled` sets.
+The declined ref is retained rather than omitted so the resolved recipe records
+the decision.
+
+Two consequences worth stating, because neither is obvious from the overlay
+files:
+
+- Declining it there is a scope decision, not a judgment about Dynamo. AICR has
+  qualified `k8s-aibom` on its own, not alongside `grove` and
+  `dynamo-platform`. Widening adoption to that recipe is a later decision that
+  needs its own evidence.
+- The stock render golden covers *leaves only*, so it pins
+  `h100-gke-cos-inference-dynamo` and not `h100-gke-cos-inference`. The target
+  recipe of this amendment therefore has no rendered-bytes parity coverage. The
+  golden that does move is the resolution golden, recording the declined ref on
+  the descendant, while the render golden stays byte-identical.
+
+  That unchanged render golden is **supporting evidence, not the proof**: it
+  establishes only that the descendant's rendered bytes did not change. It
+  cannot establish the one-recipe blast radius, precisely because the target
+  recipe has no render golden of its own. The scope assertion lives in
+  `TestK8sAIBOMStockAdoption` (`pkg/recipe`), which pins that the target
+  enables the component, the descendant declines it, the generation-time
+  opt-out declines it, and a sibling recipe does not declare it at all.
 
 ### D. User-demand case
 

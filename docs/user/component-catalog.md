@@ -28,7 +28,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work zero-config. Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
-| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Registry-only: no stock recipe installs it. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
+| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Installed by one stock recipe, `h100-gke-cos-inference`; every other stock recipe leaves it out. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a NATS-backed Kubernetes event plane for KV-cache events, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
@@ -291,9 +291,17 @@ AICR enforces and surfaces inference-gateway exposure in two places:
 ## k8s-aibom Runtime Inventory
 
 AICR qualifies k8s-aibom v1.3.0 as an optional Helm component. It is not in
-the base, a mixin, or any stock overlay. To enable it, add this reference to a
-custom or external overlay and keep that overlay's criteria as narrow as the
-intended rollout:
+the base or a mixin. Exactly one stock recipe installs it,
+`h100-gke-cos-inference`, under [ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md)'s
+stock-adoption amendment. Decline it at generation time with
+`aicr recipe --runtime-inventory disabled`, described below.
+
+`h100-gke-cos-inference-dynamo` inherits from that recipe and deliberately
+declines the component, so the Dynamo platform recipe deploys exactly what it
+did before. Adoption beyond the one recipe is a later decision.
+
+To enable it anywhere else, add this reference to a custom or external overlay
+and keep that overlay's criteria as narrow as the intended rollout:
 
 ```yaml
 spec:
@@ -366,10 +374,17 @@ storage. So the check catches a stranded upgrade that crosses a
 storage-version boundary, such as the 1.2.0 to 1.3.0 move this pin made, and
 does not catch one within a boundary, such as 1.0.0 to 1.2.0.
 
-**Declining the component.** No stock recipe declares `k8s-aibom` today, so the
-flag applies to a recipe that adds it through a custom overlay — the shape shown
-above. Point `--data` at the directory holding that overlay and generate with
-`--runtime-inventory disabled`:
+**Declining the component.** `h100-gke-cos-inference` installs `k8s-aibom` by
+default. Decline it at generation time:
+
+```bash
+aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+  --runtime-inventory disabled -o recipe.yaml
+```
+
+The same flag works for a recipe that adds the component through a custom
+overlay — the shape shown above. Point `--data` at the directory holding that
+overlay:
 
 ```bash
 aicr recipe --service gke --accelerator h100 --os cos --intent inference \
@@ -377,10 +392,10 @@ aicr recipe --service gke --accelerator h100 --os cos --intent inference \
 ```
 
 Passing the flag against a recipe that does not declare the component is an
-error, not a silent no-op:
+error, not a silent no-op. Training recipes do not, so:
 
 ```console
-$ aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+$ aicr recipe --service gke --accelerator h100 --os cos --intent training \
     --runtime-inventory disabled
 [INVALID_REQUEST] runtime inventory mode "disabled" requires the recipe to
 declare component "k8s-aibom"; this recipe does not resolve it
@@ -519,12 +534,25 @@ underneath it, so it reconciles against resources that are disappearing.
 
 1. Remove the component reference from the custom overlay and regenerate the
    recipe and bundle.
-2. Uninstall the release with the deployer-appropriate procedure in
-   [Bundle Uninstall](cli-reference.md#bundle-uninstall) — `helm uninstall
-   k8s-aibom -n k8s-aibom-system` for the `helm` deployer, `helmfile destroy`
-   for Helmfile bundles, deleting the owning `Application` for Argo CD, and the
-   `HelmRelease` for Flux. Confirm the controller Deployment is gone before
-   continuing.
+2. Uninstall the release, scoped to this component only:
+
+   ```bash
+   # helm and helmfile bundles alike: helmfile installs through Helm, so the
+   # release is an ordinary Helm release and this removes exactly one.
+   helm uninstall k8s-aibom -n k8s-aibom-system
+   ```
+
+   For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`.
+   Confirm the controller Deployment is gone before continuing.
+
+   **Do not use `helmfile destroy` for this.** It tears down *every* release in
+   the bundle in reverse dependency order, not just this component. It is also
+   ineffective here: step 1 regenerated the bundle without `k8s-aibom`, so the
+   release is no longer declared in it and `destroy` would not remove the one
+   release you actually want gone while removing all the ones you do not. If
+   you prefer a Helmfile-native command, run it against a bundle that still
+   declares the component and scope it explicitly with
+   `helmfile destroy --selector name=k8s-aibom`.
 3. Only then delete retained AIBOMs and, last, the CRDs.
 
 Deleting the CRDs cascades to every AIBOM stored cluster-wide, including any
