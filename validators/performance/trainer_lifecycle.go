@@ -652,11 +652,18 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 		// Report why from *this* probe, not the previous one. When ok is true the
 		// installation is complete, so reusing last would blame a missing object the
 		// probe just found — sending an operator to look for something that is there,
-		// when the real finding is a rollout slower than its budget.
-		expired := last
+		// when the real finding is a rollout slower than its budget. When ok is false
+		// the current probe's own finding is the specific object still missing, which
+		// the previous iteration's result would replace with a staler one — or, on the
+		// first probe, with the zero value's generic fallback.
+		//
+		// The complete case claims only what was observed. The wait never measures when
+		// the installation became complete, only when it saw that it was, so wording it
+		// as a transition would assert a time nobody read.
+		expired := install
 		if ok {
 			expired = trainerInstall{
-				Incomplete: "the installation became complete, but only after the allowance expired",
+				Incomplete: "the installation was observed complete only after the allowance expired",
 			}
 		}
 		if verdict := classifyPollExpiry(ctx, pollCtx, expired); verdict != nil {

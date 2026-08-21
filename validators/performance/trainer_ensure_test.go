@@ -565,3 +565,88 @@ func TestWaitForDeclaredTrainer_LateSuccessDoesNotOutrunTheDeadline(t *testing.T
 		t.Errorf("reason claims nothing was found, but the probe returned complete: %v", err)
 	}
 }
+
+// TestWaitForDeclaredTrainer_ExpiryNamesTheProbeThatJustRan pins the reason reported
+// when the allowance expires on an *incomplete* probe.
+//
+// The recheck before accepting a result runs on every iteration, not only the
+// successful ones. When the probe that just ran came back incomplete, its own
+// finding — the object that is actually missing — is what the operator needs. An
+// earlier revision carried the previous iteration's result into the diagnosis, so
+// the first probe of a wait reported the zero value and the operator got a generic
+// "no complete installation was found" instead of the missing CRD.
+//
+// Stalling the CRD read past the allowance and answering NotFound produces exactly
+// that shape: one probe, incomplete, deadline already gone.
+func TestWaitForDeclaredTrainer_ExpiryNamesTheProbeThatJustRan(t *testing.T) {
+	oldTimeout, oldInterval := trainerInstallWaitTimeout, trainerInstallPollInterval
+	trainerInstallWaitTimeout = 20 * time.Millisecond
+	trainerInstallPollInterval = time.Millisecond
+	defer func() {
+		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
+	}()
+
+	client := newTrainerFakeClient()
+	client.PrependReactor("get", "customresourcedefinitions",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			// Outlive the allowance, then answer NotFound. A missing CRD short-circuits
+			// the probe, so it returns incomplete with no error and the recheck below
+			// is the next thing that runs.
+			time.Sleep(60 * time.Millisecond)
+			return true, nil, apierrors.NewNotFound(
+				schema.GroupResource{Group: "apiextensions.k8s.io", Resource: "customresourcedefinitions"},
+				"trainjobs.trainer.kubeflow.org")
+		})
+
+	_, err := waitForDeclaredTrainer(context.Background(), client)
+	if err == nil {
+		t.Fatal("expected an error once the allowance expired with the installation incomplete")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeNotFound, "")) {
+		t.Errorf("error code = %v, want ErrCodeNotFound: the deadline expired locally "+
+			"with the parent still live", err)
+	}
+	if !strings.Contains(err.Error(), "CRD trainjobs.trainer.kubeflow.org is missing") {
+		t.Errorf("expiry did not name the object the probe just found missing: %v", err)
+	}
+	if strings.Contains(err.Error(), "no complete installation was found") {
+		t.Errorf("expiry fell back to the generic reason even though the probe that just "+
+			"ran reported a specific missing object: %v", err)
+	}
+}
+
+// TestWaitForDeclaredTrainer_LateSuccessClaimsOnlyWhatWasObserved pins the wording of
+// the late-success reason to what the code can actually know.
+//
+// The recheck learns that the probe returned complete and that the deadline has
+// already passed. It cannot know *when* the installation became complete — only when
+// it was observed to be. Claiming it "became complete after the allowance expired"
+// asserts a transition time nobody measured, and would mislead an operator whose
+// Trainer was healthy all along behind a slow apiserver.
+func TestWaitForDeclaredTrainer_LateSuccessClaimsOnlyWhatWasObserved(t *testing.T) {
+	oldTimeout, oldInterval := trainerInstallWaitTimeout, trainerInstallPollInterval
+	trainerInstallWaitTimeout = 20 * time.Millisecond
+	trainerInstallPollInterval = time.Millisecond
+	defer func() {
+		trainerInstallWaitTimeout, trainerInstallPollInterval = oldTimeout, oldInterval
+	}()
+
+	client := newTrainerFakeClient(completeTrainerInstall()...)
+	client.PrependReactor("get", "services",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			time.Sleep(60 * time.Millisecond)
+			return false, nil, nil
+		})
+
+	_, err := waitForDeclaredTrainer(context.Background(), client)
+	if err == nil {
+		t.Fatal("expected an error once the allowance expired")
+	}
+	if strings.Contains(err.Error(), "became complete") {
+		t.Errorf("reason asserts when the installation became complete, which the wait "+
+			"never measured; it only observed completeness after expiry: %v", err)
+	}
+	if !strings.Contains(err.Error(), "observed complete only after the allowance expired") {
+		t.Errorf("reason does not state what was actually observed: %v", err)
+	}
+}
