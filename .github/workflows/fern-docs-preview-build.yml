@@ -89,6 +89,7 @@ jobs:
                   }
                 ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
               done
+              tools/check-docs-mdx-parse "fern/versions/${version}-content"
               echo "Extracted docs from $version"
             else
               echo "::warning::Tag $version not found — skipping content checkout"
