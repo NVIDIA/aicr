@@ -3265,10 +3265,20 @@ func (b *DefaultBundler) injectDRAChartVersionAnnotation(
 	if gpuOperatorComponentName == gpuOperatorOCPComponentName && gpuOperatorVersion == "" {
 		// gpu-operator-ocp is a ClusterPolicy CR, not a Helm chart, so
 		// ComponentRef.Version is never populated for it — the empty
-		// check below would always skip injection on OCP. The OLM
-		// Subscription channel (gpu-operator-ocp-olm) is the signal
-		// that actually changes when the operator is upgraded, so use
-		// it as the rollout-trigger value instead.
+		// check below would always skip injection on OCP. Fall back to
+		// the OLM Subscription channel (gpu-operator-ocp-olm) as the
+		// rollout-trigger value instead.
+		//
+		// KNOWN LIMITATION: the channel pin (e.g. "v25.10") only
+		// changes on a channel re-pin, not on every operator update.
+		// With installPlanApproval: Automatic (the default —
+		// components/gpu-operator-ocp-olm/values.yaml), OLM can
+		// upgrade to newer CSVs inside the same channel — reloading
+		// the driver — without the channel string changing, so this
+		// annotation catches bundle-driven operator bumps (a recipe
+		// regenerated against a different channel) but NOT in-channel
+		// auto-upgrades. The stale-NVML gap this annotation exists to
+		// close (#973) remains open for that case on OCP. See #2135.
 		if olmValues, ok := componentValues[gpuOperatorOCPOLMComponentName]; ok {
 			if sub, ok := olmValues["subscription"].(map[string]any); ok {
 				if channel, ok := sub["channel"].(string); ok {

@@ -400,20 +400,25 @@ func legacyRecipeAlternativeRemedy(service recipe.CriteriaServiceType, os recipe
 		"driver, so the GPU-Operator-managed override set is not available there; if the " +
 		"GPU nodes use the GKE-managed driver install, retarget the DRA driver root " +
 		"instead: --set dradriver:nvidiaDriverRoot=" + gkeManagedDriverRootPath + "."
-	if service != recipe.CriteriaServiceGKE {
+	switch service { //nolint:exhaustive // only GKE and OCP need dedicated override-key wording; every other service takes the generic gpuOperatorManagedOverrideSet default
+	case recipe.CriteriaServiceOCP:
+		return "Or supply the full GPU-Operator-managed override set: " +
+			ocpGPUOperatorManagedOverrideSet + "."
+	case recipe.CriteriaServiceGKE:
+		switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
+		case recipe.CriteriaOSCOS:
+			return gkeCOSAlternative
+		case recipe.CriteriaOSUbuntu:
+			return "Or supply the full GPU-Operator-managed override set: " +
+				gkeGPUOperatorManagedOverrideSet + "."
+		default:
+			return gkeCOSAlternative + " On GKE Ubuntu node images the GPU Operator can manage " +
+				"the driver, so those may instead supply the full GPU-Operator-managed " +
+				"override set: " + gkeGPUOperatorManagedOverrideSet + "."
+		}
+	default:
 		return "Or supply the full GPU-Operator-managed override set: " +
 			gpuOperatorManagedOverrideSet + "."
-	}
-	switch os { //nolint:exhaustive // COS and Ubuntu are the only GKE node images with specific wording; everything else (unknown, any, or an OS GKE does not offer) gets both supported GKE paths
-	case recipe.CriteriaOSCOS:
-		return gkeCOSAlternative
-	case recipe.CriteriaOSUbuntu:
-		return "Or supply the full GPU-Operator-managed override set: " +
-			gkeGPUOperatorManagedOverrideSet + "."
-	default:
-		return gkeCOSAlternative + " On GKE Ubuntu node images the GPU Operator can manage " +
-			"the driver, so those may instead supply the full GPU-Operator-managed " +
-			"override set: " + gkeGPUOperatorManagedOverrideSet + "."
 	}
 }
 
@@ -981,7 +986,7 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 				"populates that path when the operator does not manage the driver. This is "+
 				"commonly the signature of a recipe generated before the preinstalled-driver "+
 				"default flip: regenerate the recipe (aicr recipe ...) for this AICR version. %s",
-			componentName, draDriverComponentName, operatorContainerDriverRoot,
+			componentName, draRef.Name, operatorContainerDriverRoot,
 			legacyRecipeAlternativeRemedy(service, osCriteria)))
 	}
 	return msgs, nil
