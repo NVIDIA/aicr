@@ -3262,6 +3262,21 @@ func (b *DefaultBundler) injectDRAChartVersionAnnotation(
 		// is exercised by the disabled-component unit tests.
 		return
 	}
+	if gpuOperatorComponentName == gpuOperatorOCPComponentName && gpuOperatorVersion == "" {
+		// gpu-operator-ocp is a ClusterPolicy CR, not a Helm chart, so
+		// ComponentRef.Version is never populated for it — the empty
+		// check below would always skip injection on OCP. The OLM
+		// Subscription channel (gpu-operator-ocp-olm) is the signal
+		// that actually changes when the operator is upgraded, so use
+		// it as the rollout-trigger value instead.
+		if olmValues, ok := componentValues[gpuOperatorOCPOLMComponentName]; ok {
+			if sub, ok := olmValues["subscription"].(map[string]any); ok {
+				if channel, ok := sub["channel"].(string); ok {
+					gpuOperatorVersion = channel
+				}
+			}
+		}
+	}
 	if gpuOperatorVersion == "" {
 		// gpu-operator is enabled but the resolver produced an empty
 		// Version string. This shouldn't happen in normal recipe

@@ -413,8 +413,8 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
 
   # --- post-install name-matched blocks ---
   {{- range .Components }}
-  {{- if eq .Name "nvidia-dra-driver-gpu" }}
-  if [[ "${name}" == "nvidia-dra-driver-gpu" ]]; then
+  {{- if or (eq .Name "nvidia-dra-driver-gpu") (eq .Name "nvidia-dra-driver-gpu-ocp") }}
+  if [[ "${name}" == "nvidia-dra-driver-gpu" || "${name}" == "nvidia-dra-driver-gpu-ocp" ]]; then
     # gpu-operator's k8s-driver-manager reloads NVIDIA kernel modules
     # asynchronously per-node after `helm upgrade gpu-operator` returns.
     # If the DRA kubelet plugin pod re-rolls (via the chart's
