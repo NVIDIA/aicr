@@ -717,6 +717,36 @@ func TestCheckConditions(t *testing.T) {
 	}
 }
 
+// TestDriverAbsentRemedy_OCP pins the OCP branch added for #2135:
+// driverAbsentRemedy must use the OCP-specific override keys
+// (gpuoperatorocp:/dradriverocp:) rather than falling through to the
+// generic gpuoperator:/dradriver: default, since those keys don't
+// resolve against an OCP recipe's registry aliases. Also asserts the
+// generic-default keys are NOT present, so a future edit that
+// accidentally reuses gpuOperatorManagedOverrideSet for OCP fails
+// loudly instead of silently.
+func TestDriverAbsentRemedy_OCP(t *testing.T) {
+	got := driverAbsentRemedy(recipe.CriteriaServiceOCP, "", false)
+
+	wantContains := []string{
+		"--set gpuoperatorocp:driver.enabled=true",
+		"--set gpuoperatorocp:toolkit.enabled=true",
+		"--set dradriverocp:nvidiaDriverRoot=/run/nvidia/driver",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(got, want) {
+			t.Errorf("driverAbsentRemedy(OCP) missing %q:\n%s", want, got)
+		}
+	}
+
+	dontWant := []string{"gpuoperator:", "dradriver:"}
+	for _, unwanted := range dontWant {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("driverAbsentRemedy(OCP) unexpectedly contains generic-default key %q:\n%s", unwanted, got)
+		}
+	}
+}
+
 // TestCheckDriverOwnershipCoherence covers the bundle-time
 // driver-ownership gate on FINAL effective values: Rule 1 (a recipe whose
 // snapshot observed no NVIDIA driver on the sampled GPU node —
