@@ -51,6 +51,7 @@ func TestCompute_Structure(t *testing.T) {
 		{"eks", "rtx-pro-6000", "generic", "", "nvidia-tuned"},
 		{"gke", "a100", "h100", "", "nvidia-tuning-gke"},
 		{"gke", "b200", "-", "", "nvidia-tuning-gke"},
+		{"gke", "gb200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
 		// VR200 runs its native rke2 tuning (nvidia-tuned's rke2 service,
 		// added in nodewright-packages 0.9.0), so the profile column is

@@ -77,6 +77,8 @@ navigation:
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking
         path: integrator/gke-tcpxo-networking.md
+      - page: GKE GB200 Networking
+        path: integrator/gke-gb200-networking.md
       - page: OpenShift Deployment
         path: integrator/openshift.md
       - page: Talos Integration
