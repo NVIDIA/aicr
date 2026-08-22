@@ -798,6 +798,38 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			},
 			wantDRAConstraint: true,
 		},
+		{
+			name: "gb200-gke-cos-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceGKE
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSCOS
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents: []string{
+				"gpu-operator",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"kubeflow-trainer",
+			},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: true,
+		},
 	}
 
 	for _, tt := range tests {
