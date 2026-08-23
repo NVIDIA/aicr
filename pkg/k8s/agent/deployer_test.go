@@ -45,6 +45,12 @@ import (
 
 const testName = "aicr"
 
+// testRunID is a fixed, well-formed run ID (the shape runid.Generate emits:
+// UTC timestamp + 16 hex bytes). Tests that exercise production naming must
+// set Config.RunID — leaving it empty falls back to unscoped names no
+// production caller ever builds.
+const testRunID = "20260821-142233-9f3a1c0b7e2d4a55"
+
 func TestDeployer_EnsureRBAC(t *testing.T) {
 	clientset := fake.NewClientset()
 	config := Config{
@@ -596,15 +602,21 @@ func TestDeployer_Cleanup(t *testing.T) {
 		}, nil
 	})
 
+	// JobName / ServiceAccountName are prefixes: the objects Cleanup must
+	// find are named "<prefix>-<RunID>", so RunID is set here to exercise
+	// the same naming production uses.
 	config := Config{
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
+		RunID:              testRunID,
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		Output:             "cm://test-namespace/aicr-snapshot",
 	}
 	deployer := NewDeployer(clientset, config)
 	ctx := context.Background()
+	scopedJob := testName + "-" + testRunID
+	scopedSA := testName + "-" + testRunID
 
 	// Deploy first
 	if err := deployer.Deploy(ctx); err != nil {
@@ -618,14 +630,14 @@ func TestDeployer_Cleanup(t *testing.T) {
 
 	// Job should still exist (cleanup disabled)
 	_, err := clientset.BatchV1().Jobs(config.Namespace).
-		Get(ctx, config.JobName, metav1.GetOptions{})
+		Get(ctx, scopedJob, metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("Job should still exist when cleanup disabled: %v", err)
 	}
 
 	// ServiceAccount should still exist
 	_, err = clientset.CoreV1().ServiceAccounts(config.Namespace).
-		Get(ctx, testName, metav1.GetOptions{})
+		Get(ctx, scopedSA, metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("ServiceAccount should still exist: %v", err)
 	}
@@ -637,7 +649,7 @@ func TestDeployer_Cleanup(t *testing.T) {
 
 	// Job should be deleted
 	_, err = clientset.BatchV1().Jobs(config.Namespace).
-		Get(ctx, config.JobName, metav1.GetOptions{})
+		Get(ctx, scopedJob, metav1.GetOptions{})
 	if err == nil {
 		t.Errorf("Job should be deleted")
 	}
@@ -656,15 +668,19 @@ func TestDeployer_Cleanup_AttemptsAllDeletions(t *testing.T) {
 		}, nil
 	})
 
+	// RunID set for the same reason as TestDeployer_Cleanup: without it the
+	// test asserts on bare names production never creates.
 	config := Config{
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
+		RunID:              testRunID,
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		Output:             "cm://test-namespace/aicr-snapshot",
 	}
 	deployer := NewDeployer(clientset, config)
 	ctx := context.Background()
+	scopedName := testName + "-" + testRunID
 
 	// Deploy first
 	if err := deployer.Deploy(ctx); err != nil {
@@ -673,7 +689,7 @@ func TestDeployer_Cleanup_AttemptsAllDeletions(t *testing.T) {
 
 	// Manually delete the Job to simulate it already being cleaned up
 	// This tests that cleanup continues to delete other resources
-	if err := clientset.BatchV1().Jobs(config.Namespace).Delete(ctx, config.JobName, metav1.DeleteOptions{}); err != nil {
+	if err := clientset.BatchV1().Jobs(config.Namespace).Delete(ctx, scopedName, metav1.DeleteOptions{}); err != nil {
 		t.Fatalf("Failed to pre-delete Job: %v", err)
 	}
 
@@ -685,19 +701,19 @@ func TestDeployer_Cleanup_AttemptsAllDeletions(t *testing.T) {
 
 	// Verify all RBAC resources were deleted
 	_, err := clientset.CoreV1().ServiceAccounts(config.Namespace).
-		Get(ctx, testName, metav1.GetOptions{})
+		Get(ctx, scopedName, metav1.GetOptions{})
 	if err == nil {
 		t.Error("ServiceAccount should be deleted")
 	}
 
 	_, err = clientset.RbacV1().Roles(config.Namespace).
-		Get(ctx, testName, metav1.GetOptions{})
+		Get(ctx, scopedName, metav1.GetOptions{})
 	if err == nil {
 		t.Error("Role should be deleted")
 	}
 
 	_, err = clientset.RbacV1().RoleBindings(config.Namespace).
-		Get(ctx, testName, metav1.GetOptions{})
+		Get(ctx, scopedName, metav1.GetOptions{})
 	if err == nil {
 		t.Error("RoleBinding should be deleted")
 	}
@@ -981,6 +997,139 @@ func TestCleanupDeletesStagingConfigMapWhenOwned(t *testing.T) {
 
 	if _, err := clientset.CoreV1().ConfigMaps("test-namespace").Get(ctx, "aicr-snapshot", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("Cleanup did not delete the owned staging ConfigMap, err = %v", err)
+	}
+}
+
+// TestCleanupSweepsUnrecordedStagingConfigMap covers the leak path: the
+// in-pod agent wrote the staging ConfigMap, but the run failed (Job timeout,
+// wait error, canceled context) before getSnapshotFromConfigMap could observe
+// its UID, so nothing was recorded. With run-scoped naming that would leak one
+// ConfigMap per failed run, so Cleanup Gets it by its run-scoped name and
+// deletes it pinned to the UID that Get returned.
+func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
+	ctx := context.Background()
+	name := StagingConfigMapName(testRunID)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "test-namespace",
+			UID:       types.UID("staging-uid"),
+		},
+		Data: map[string]string{"snapshot.yaml": "data"},
+	}
+	clientset := fake.NewClientset(cm)
+
+	var sawUIDPrecondition bool
+	clientset.PrependReactor("delete", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		del, ok := action.(k8stesting.DeleteActionImpl)
+		if !ok || del.DeleteOptions.Preconditions == nil || del.DeleteOptions.Preconditions.UID == nil {
+			return false, nil, nil
+		}
+		if *del.DeleteOptions.Preconditions.UID == types.UID("staging-uid") {
+			sawUIDPrecondition = true
+		}
+		return false, nil, nil
+	})
+
+	d := NewDeployer(clientset, Config{
+		Namespace:           "test-namespace",
+		RunID:               testRunID,
+		Output:              "cm://test-namespace/" + name,
+		OwnsOutputConfigMap: true,
+	})
+
+	// Deliberately no getSnapshotFromConfigMap call: this is the failed run.
+	if d.hasCreated(kindConfigMap) {
+		t.Fatal("precondition: created-set must not hold the staging ConfigMap")
+	}
+
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	if _, err := clientset.CoreV1().ConfigMaps("test-namespace").Get(ctx, name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("Cleanup leaked the staging ConfigMap, Get err = %v", err)
+	}
+	if !sawUIDPrecondition {
+		t.Error("staging ConfigMap delete was not pinned to the observed UID")
+	}
+}
+
+// TestCleanupSkipsStagingConfigMapSweepWhenNotOwned asserts the sweep stays
+// ownership-scoped: a caller-supplied cm:// Output is the caller's artifact
+// (OwnsOutputConfigMap false) and must survive Cleanup even when it happens to
+// carry this run's staging name.
+func TestCleanupSkipsStagingConfigMapSweepWhenNotOwned(t *testing.T) {
+	ctx := context.Background()
+	name := StagingConfigMapName(testRunID)
+	clientset := fake.NewClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "test-namespace",
+			UID:       types.UID("callers-uid"),
+		},
+		Data: map[string]string{"snapshot.yaml": "data"},
+	})
+
+	d := NewDeployer(clientset, Config{
+		Namespace:           "test-namespace",
+		RunID:               testRunID,
+		Output:              "cm://test-namespace/" + name,
+		OwnsOutputConfigMap: false,
+	})
+
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	if _, err := clientset.CoreV1().ConfigMaps("test-namespace").Get(ctx, name, metav1.GetOptions{}); err != nil {
+		t.Errorf("Cleanup deleted a ConfigMap this run does not own: %v", err)
+	}
+}
+
+// TestCleanupSweepNoOpWhenStagingConfigMapAbsent covers the common failure
+// shape — the Job never got far enough to write anything — where the sweep's
+// Get is a NotFound and Cleanup must still report success.
+func TestCleanupSweepNoOpWhenStagingConfigMapAbsent(t *testing.T) {
+	ctx := context.Background()
+	clientset := fake.NewClientset()
+
+	d := NewDeployer(clientset, Config{
+		Namespace:           "test-namespace",
+		RunID:               testRunID,
+		Output:              "cm://test-namespace/" + StagingConfigMapName(testRunID),
+		OwnsOutputConfigMap: true,
+	})
+
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v, want nil when the staging ConfigMap was never written", err)
+	}
+}
+
+// TestCleanupSweepSurfacesUnexpectedGetError fails closed: an apiserver error
+// other than NotFound while looking for the staging ConfigMap means cleanup
+// cannot prove the object is gone, so it must be reported rather than
+// silently swallowed.
+func TestCleanupSweepSurfacesUnexpectedGetError(t *testing.T) {
+	ctx := context.Background()
+	clientset := fake.NewClientset()
+	clientset.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInternalError(errors.New("apiserver exploded"))
+	})
+
+	d := NewDeployer(clientset, Config{
+		Namespace:           "test-namespace",
+		RunID:               testRunID,
+		Output:              "cm://test-namespace/" + StagingConfigMapName(testRunID),
+		OwnsOutputConfigMap: true,
+	})
+
+	err := d.Cleanup(ctx, CleanupOptions{Enabled: true})
+	if err == nil {
+		t.Fatal("Cleanup() error = nil, want the unexpected Get error surfaced")
+	}
+	if !strings.Contains(err.Error(), StagingConfigMapName(testRunID)) {
+		t.Errorf("error %q does not name the staging ConfigMap", err)
 	}
 }
 

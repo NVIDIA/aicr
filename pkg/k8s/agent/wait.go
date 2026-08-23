@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -77,6 +78,33 @@ func (d *Deployer) deleteStagingConfigMap(ctx context.Context, name string, uid 
 	err := d.clientset.CoreV1().ConfigMaps(d.config.Namespace).
 		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
 	return ignoreNotFoundOrConflict(err)
+}
+
+// deleteUnrecordedStagingConfigMap deletes this run's staging ConfigMap when
+// the in-pod agent wrote it but the controller never observed it — the run
+// failed between the agent's write and getSnapshotFromConfigMap, so there is
+// no recorded UID to pin the delete to. It Gets the ConfigMap first and pins
+// the delete to the UID it observes there, so the sweep is still
+// ownership-scoped rather than name-only.
+//
+// Only called from Cleanup, and only when Config.OwnsOutputConfigMap is true.
+// That flag means Output is the run-scoped staging URI pkg/snapshotter builds
+// from StagingConfigMapName, so d.stagingConfigMapName() names exactly that
+// object in d.config.Namespace. A caller that sets the flag while pointing
+// Output elsewhere simply finds nothing here (NotFound is a no-op) — this
+// deletes nothing it does not own.
+func (d *Deployer) deleteUnrecordedStagingConfigMap(ctx context.Context) error {
+	name := d.stagingConfigMapName()
+	cm, err := d.clientset.CoreV1().ConfigMaps(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		// The Job never got far enough to write it: nothing to clean up.
+		return nil
+	}
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to get staging ConfigMap %s/%s", d.config.Namespace, name), err)
+	}
+	return d.deleteStagingConfigMap(ctx, cm.Name, cm.UID)
 }
 
 // StreamLogs streams logs from the Job's Pod to the provided writer.

@@ -363,11 +363,14 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 
 Check ConfigMap and container logs:
 ```shell
-# Check if ConfigMap was created
-kubectl get configmap aicr-snapshot -n gpu-operator
+# Check if the staging ConfigMap was created. Without an explicit
+# "-o cm://<namespace>/<name>", the agent stages its result in a run-scoped
+# ConfigMap named "aicr-agent-snapshot-<run-id>" that cleanup deletes when
+# the run ends — pass --no-cleanup to keep it around for inspection.
+kubectl get configmap -n gpu-operator -l app.kubernetes.io/name=aicr
 
 # View ConfigMap contents
-kubectl get configmap aicr-snapshot -n gpu-operator -o yaml
+kubectl get configmap -n gpu-operator -l app.kubernetes.io/name=aicr -o yaml
 
 # View pod logs for errors
 kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent

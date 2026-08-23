@@ -259,8 +259,11 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		timeout = defaults.K8sJobCompletionTimeout
 	}
 
+	// Log the run-scoped Job name, not agentConfig.JobName: that field is
+	// only the user's optional prefix and is empty by default, so logging it
+	// prints job="".
 	slog.Info("waiting for Job completion",
-		slog.String("job", agentConfig.JobName),
+		slog.String("job", deployer.JobName()),
 		slog.Duration("timeout", timeout))
 
 	// Stream logs in background while waiting for Job completion.
@@ -286,7 +289,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 			if logCtx.Err() == nil {
 				slog.Warn("agent log streaming skipped: pod did not become ready",
 					slog.String("namespace", agentConfig.Namespace),
-					slog.String("job", agentConfig.JobName),
+					slog.String("job", deployer.JobName()),
 					"error", podErr)
 			}
 			return
@@ -518,10 +521,9 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 	// agentConfigMapTarget below, which folds it into the internal staging
 	// ConfigMap's name — so every resource this run creates shares one
 	// scope. An empty RunID reaching pkg/k8s/agent would silently fall back
-	// to unscoped, collision-prone names (nameWithRunID's deploy-between-
-	// tasks safety net), so a whitespace-only value that slips past this
-	// simple emptiness check must fail closed rather than reach that
-	// fallback.
+	// to unscoped, collision-prone names (nameWithRunID's empty-runID
+	// branch), so a whitespace-only value that slips past this simple
+	// emptiness check must fail closed rather than reach that fallback.
 	if config.RunID == "" {
 		config.RunID = runid.Generate()
 	}
@@ -573,9 +575,12 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 // config.Namespace that the caller never names: ownsOutput is true, so
 // Cleanup may delete it.
 //
-// The returned uri's namespace equals config.Namespace in the owned case —
-// callers (deleteStagingConfigMap in pkg/k8s/agent) rely on that invariant
-// rather than re-parsing the URI for a delete namespace.
+// In the owned case the returned uri is exactly
+// cm://<config.Namespace>/<agent.StagingConfigMapName(config.RunID)>. Cleanup
+// in pkg/k8s/agent relies on both halves of that invariant rather than
+// re-parsing the URI: deleteStagingConfigMap deletes in Config.Namespace, and
+// deleteUnrecordedStagingConfigMap (the sweep for a run that failed before
+// the ConfigMap's UID was observed) looks it up by that same generated name.
 //
 // A cm:// Output is fully parsed here, not merely prefix-matched. The
 // namespace/name only has to be well-formed for the in-pod writer much later,
@@ -594,7 +599,7 @@ func agentConfigMapTarget(config *AgentConfig) (uri string, ownsOutput bool, err
 		}
 		return config.Output, false, nil
 	}
-	return fmt.Sprintf("%s%s/aicr-snapshot-%s", serializer.ConfigMapURIScheme, config.Namespace, config.RunID), true, nil
+	return serializer.ConfigMapURIScheme + config.Namespace + "/" + agent.StagingConfigMapName(config.RunID), true, nil
 }
 
 // SnapshotDelivery describes where DeliverSnapshot writes captured bytes.

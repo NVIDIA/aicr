@@ -183,8 +183,8 @@ func (d *Deployer) createdSnapshot() []createdObject {
 
 // jobUID returns the UID of the Job this Deployer created, or the zero UID
 // if Deploy has not (yet) reached the Job-create step — including when
-// Deploy failed before getting there. Task 5 uses this to authorize pod
-// selection against exactly this run's Job.
+// Deploy failed before getting there. Pod selection (see ownedByJob in
+// wait.go) authorizes candidates against exactly this UID.
 func (d *Deployer) jobUID() types.UID {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -194,6 +194,21 @@ func (d *Deployer) jobUID() types.UID {
 		}
 	}
 	return ""
+}
+
+// hasCreated reports whether the created-set already holds an object of
+// kind. Cleanup uses it to decide whether the staging ConfigMap still needs
+// a name-based sweep (the run failed before getSnapshotFromConfigMap could
+// observe its UID) or was already recorded. Safe for concurrent use.
+func (d *Deployer) hasCreated(kind string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, c := range d.created {
+		if c.kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // CleanupOptions controls what resources to remove during cleanup.

@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s/agent"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -560,21 +561,21 @@ func TestAgentOutputURILogic(t *testing.T) {
 			name:               "file output uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "snapshot.yaml",
-			wantAgentOutputHas: "cm://default/aicr-snapshot-" + testRunID,
+			wantAgentOutputHas: "cm://default/aicr-agent-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
 			name:               "stdout uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "",
-			wantAgentOutputHas: "cm://default/aicr-snapshot-" + testRunID,
+			wantAgentOutputHas: "cm://default/aicr-agent-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
 			name:               "dash stdout uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "-",
-			wantAgentOutputHas: "cm://default/aicr-snapshot-" + testRunID,
+			wantAgentOutputHas: "cm://default/aicr-agent-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
@@ -588,7 +589,7 @@ func TestAgentOutputURILogic(t *testing.T) {
 			name:               "custom namespace uses that namespace for the run-scoped ConfigMap",
 			agentNamespace:     "custom-namespace",
 			userOutput:         "output.yaml",
-			wantAgentOutputHas: "cm://custom-namespace/aicr-snapshot-" + testRunID,
+			wantAgentOutputHas: "cm://custom-namespace/aicr-agent-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 	}
@@ -636,9 +637,19 @@ func TestAgentConfigMapTargetIsRunScoped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agentConfigMapTarget() error = %v", err)
 	}
-	want := "cm://gpu-operator/aicr-snapshot-20260821-142233-9f3a1c0b7e2d4a55"
+	// The staging ConfigMap is deliberately prefixed "aicr-agent-snapshot",
+	// NOT "aicr-snapshot": pkg/validator names its own snapshot data
+	// ConfigMap "aicr-snapshot-<runID>", and `aicr validate` gives both
+	// subsystems the same run ID in the same namespace. See
+	// TestStagingConfigMapNameDoesNotCollideWithValidator in pkg/k8s/agent.
+	want := "cm://gpu-operator/aicr-agent-snapshot-20260821-142233-9f3a1c0b7e2d4a55"
 	if uri != want {
 		t.Errorf("uri = %q, want %q", uri, want)
+	}
+	// The URI must be built from the one exported helper the agent package
+	// also deletes by, not from a second copy of the format string.
+	if wantHelper := "cm://gpu-operator/" + agent.StagingConfigMapName(cfg.RunID); uri != wantHelper {
+		t.Errorf("uri = %q, want %q (agent.StagingConfigMapName)", uri, wantHelper)
 	}
 	if !ownsOutput {
 		t.Error("ownsOutput = false, want true for the internal staging ConfigMap")

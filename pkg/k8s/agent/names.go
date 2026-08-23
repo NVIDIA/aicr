@@ -30,21 +30,34 @@ const staticClusterRoleName = "aicr-node-reader"
 
 // staticStagingConfigMapName is the un-scoped staging ConfigMap name used
 // only as the prefix input to nameWithRunID.
-const staticStagingConfigMapName = "aicr-snapshot"
+//
+// It is deliberately NOT "aicr-snapshot": pkg/validator names its own
+// snapshot data ConfigMap "aicr-snapshot-<runID>" (see EnsureDataConfigMaps
+// and cleanupDataConfigMaps in pkg/validator/validator.go, and the volume in
+// pkg/validator/v1/job_plan_internal.go). `aicr validate` hands ONE run ID to
+// both the snapshot agent and the validator Jobs and points both at the same
+// namespace, so a shared prefix would put two owners on one object: the
+// validator would adopt and overwrite the agent's staging ConfigMap, and its
+// (UID-unpinned) cleanup would delete it. Distinct prefixes keep the two
+// namespaces of generated names disjoint by construction.
+const staticStagingConfigMapName = "aicr-agent-snapshot"
 
 // nameWithRunID joins prefix and runID, truncating prefix so the result fits
 // within the Kubernetes name ceiling. An empty prefix yields the bare runID.
-// An empty runID yields the bare (trimmed) prefix rather than appending a
-// trailing "-": a trailing separator would leave a Kubernetes object name
-// that fails validation (names must end in an alphanumeric character), and
-// falling back to the unscoped prefix also keeps deploys working between
-// this task and the task that wires Config.RunID through every caller.
+// An empty runID yields the prefix with any trailing "-" trimmed rather than
+// appending one: a trailing separator would leave a Kubernetes object name
+// that fails validation (names must end in an alphanumeric character).
+//
+// Every in-tree caller supplies a RunID — pkg/snapshotter defaults and
+// rejects an all-whitespace one before building an agent Config — so the
+// empty-runID fallback is reachable only by an SDK caller constructing a
+// Config directly, which then gets unscoped, collision-prone names.
 func nameWithRunID(prefix, runID string) string {
 	if prefix == "" {
 		return runID
 	}
 	if runID == "" {
-		return prefix
+		return strings.TrimRight(prefix, "-")
 	}
 	budget := defaults.MaxK8sNameLength - len(runID) - 1
 	if budget < 0 {
@@ -99,8 +112,17 @@ func (d *Deployer) clusterRoleName() string {
 	return nameWithRunID(staticClusterRoleName, d.config.RunID)
 }
 
+// StagingConfigMapName returns the run-scoped name of the internal staging
+// ConfigMap the agent Job writes its snapshot result to for the given run ID.
+// It is exported so the one caller that builds the Job's `cm://` output URI
+// (pkg/snapshotter's agentConfigMapTarget) derives that name from the same
+// place Cleanup deletes it, instead of repeating the format string.
+func StagingConfigMapName(runID string) string {
+	return nameWithRunID(staticStagingConfigMapName, runID)
+}
+
 // stagingConfigMapName returns the run-scoped name for the staging
 // ConfigMap the agent writes its snapshot result to.
 func (d *Deployer) stagingConfigMapName() string {
-	return nameWithRunID(staticStagingConfigMapName, d.config.RunID)
+	return StagingConfigMapName(d.config.RunID)
 }

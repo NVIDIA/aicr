@@ -53,7 +53,9 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to ensure namespace", err)
 	}
 
-	// Step 2: Ensure RBAC resources (idempotent - reuses if already exists)
+	// Step 2: Create this run's RBAC. Every name carries the run ID, so
+	// nothing here can already exist; an AlreadyExists is reported as an
+	// error rather than adopted or overwritten.
 	if err := d.ensureServiceAccount(ctx); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ServiceAccount", err)
 	}
@@ -74,12 +76,21 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
 	}
 
-	// Step 2: Ensure Job (delete existing + recreate)
+	// Step 3: Create this run's Job under its run-scoped name.
 	if err := d.ensureJob(ctx); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Job", err)
 	}
 
 	return nil
+}
+
+// JobName returns the run-scoped name of the Job this Deployer deploys —
+// Config.JobName (or the name base) suffixed with Config.RunID. Callers that
+// surface the Job to an operator (log lines, kubectl hints) must use this
+// rather than Config.JobName, which is only the optional prefix and is empty
+// by default.
+func (d *Deployer) JobName() string {
+	return d.jobName()
 }
 
 // WaitForCompletion waits for the agent Job to complete successfully.
@@ -118,15 +129,32 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 		err   error
 	}
 
-	tasks := make([]struct {
+	type task struct {
 		label string
 		op    func(context.Context) error
-	}, len(created))
+	}
+
+	tasks := make([]task, len(created))
 	for i, obj := range created {
 		tasks[i].label = fmt.Sprintf("%s %q", obj.kind, obj.name)
 		tasks[i].op = func(ctx context.Context) error {
 			return d.deleteCreatedObject(ctx, obj)
 		}
+	}
+
+	// The staging ConfigMap is written by the in-pod agent, so it only
+	// enters the created-set when getSnapshotFromConfigMap got far enough
+	// to observe its UID. A run that fails after the agent wrote it (Job
+	// timeout, wait error, canceled context) would otherwise leak it — and
+	// with run-scoped naming that is one leaked object per failed run, not
+	// one shared object. Sweep it here: the name is run-unique, and the
+	// delete is still UID-pinned against the UID observed by the Get.
+	if d.config.OwnsOutputConfigMap && !d.hasCreated(kindConfigMap) {
+		name := d.stagingConfigMapName()
+		tasks = append(tasks, task{
+			label: fmt.Sprintf("%s %q", kindConfigMap, name),
+			op:    d.deleteUnrecordedStagingConfigMap,
+		})
 	}
 
 	// sync.WaitGroup (not errgroup) is intentional here: cleanup must
