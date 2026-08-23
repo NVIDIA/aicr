@@ -513,10 +513,11 @@ func TestValidateAgentConfig_ToAgentConfig_ForwardsRunID(t *testing.T) {
 // single-generation invariant (one v1.GenerateRunID() call feeding BOTH
 // the live-capture agent and the validator Jobs). See the WARNING comment
 // on that call site in validate.go: no automated test in this package
-// enforces single-generation, because the Action's two consumer sites sit
-// on mutually exclusive code paths (--no-cluster requires --snapshot,
-// which skips the live-capture branch entirely) and cannot both be
-// exercised in one invocation without a live cluster.
+// enforces single-generation. The two consumer sites are NOT mutually
+// exclusive — with neither --snapshot nor --no-cluster, the live-capture
+// branch and runValidation both consume the id in one invocation. What
+// blocks the test is that exercising both requires live-cluster I/O (both
+// branches deploy Jobs) with no injectable seam in the Action to fake it.
 func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
 	const wantRunID = "20260821-142233-9f3a1c0b7e2d4a55"
 

@@ -859,12 +859,14 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// parseValidateAgentConfig call below, or for the
 			// validationConfig{runID: ...} literal further down — silently
 			// splits a single `aicr validate` invocation back into two
-			// uncorrelated runs. The command's two consumer sites
-			// (live-capture agent vs. validator Jobs) sit on mutually
-			// exclusive code paths (--no-cluster requires --snapshot, which
-			// skips the live-capture branch entirely), so no unit test can
-			// observe both consumers receiving the SAME value in one
-			// invocation without a live cluster; see
+			// uncorrelated runs. The two consumer sites are NOT mutually
+			// exclusive: with neither --snapshot nor --no-cluster, the
+			// live-capture branch below and runValidation both consume this
+			// id in the same invocation — which is exactly the case the
+			// invariant protects. What blocks a unit test is that reaching
+			// both requires live-cluster I/O (deployAgentForValidation
+			// deploys a Job; runValidation deploys validator Jobs) with no
+			// injectable seam here to fake it. See
 			// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID and
 			// TestParseValidateAgentConfig_ForwardsCallerRunID in
 			// validate_test.go for what IS covered (passthrough at each
