@@ -65,7 +65,9 @@ var (
 // RBAC permissions (specifically DiscoverNetwork's extra cluster rules)
 // into the other, must each select only their own Pod, must each read back
 // only their own snapshot bytes, and one run's Cleanup must never touch the
-// other's objects. Run under -race.
+// other's objects — nor an object that merely sits at a name that run's own
+// naming formula would produce but that it never actually created. Run
+// under -race.
 //
 // Fake-clientset limitations this test works around, not around-asserts:
 //
@@ -121,11 +123,20 @@ func TestConcurrentRuns(t *testing.T) {
 	})
 
 	dA := NewDeployer(clientset, Config{
-		Namespace:           concurrencyTestNamespace,
-		Image:               "aicr:test",
-		RunID:               concurrencyRunIDA,
-		Output:              fmt.Sprintf("cm://%s/%s", concurrencyTestNamespace, nameWithRunID(staticStagingConfigMapName, concurrencyRunIDA)),
-		OwnsOutputConfigMap: true,
+		Namespace: concurrencyTestNamespace,
+		Image:     "aicr:test",
+		RunID:     concurrencyRunIDA,
+		Output:    fmt.Sprintf("cm://%s/%s", concurrencyTestNamespace, nameWithRunID(staticStagingConfigMapName, concurrencyRunIDA)),
+		// OwnsOutputConfigMap is false for run A on purpose (unlike run B
+		// below): it models an object — the staging ConfigMap seeded for
+		// run A below — that sits at exactly the name run A's own naming
+		// formula computes, but that run A never created or recorded into
+		// its created-set. Assertion 5's discriminator subtest needs
+		// exactly this shape: name-scoping alone (assertion 1) cannot
+		// explain that object surviving run A's Cleanup, only created-set
+		// scoping can. Run B keeps OwnsOutputConfigMap true so the
+		// "owned and recorded" path stays covered too (assertion 4).
+		OwnsOutputConfigMap: false,
 		DiscoverNetwork:     false,
 	})
 	dB := NewDeployer(clientset, Config{
@@ -264,6 +275,27 @@ func TestConcurrentRuns(t *testing.T) {
 		// Cleanup that vacuously "succeeds" without deleting anything.
 		if _, err := clientset.BatchV1().Jobs(concurrencyTestNamespace).Get(ctx, dA.jobName(), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 			t.Errorf("run A's Job should be deleted by its own Cleanup, err = %v", err)
+		}
+	})
+
+	// --- Assertion 5 (cleanup ownership discriminator): run A's Cleanup
+	// must not touch an object it never created, even when that object
+	// sits at exactly the name run A's own naming formula computes.
+	//
+	// This is deliberately a separate subtest from the one above: the run-B
+	// check above would pass equally against a hypothetical name-derived
+	// Cleanup, because run A and run B always compute different names
+	// (assertion 1 already proves that) — so it cannot by itself prove
+	// Cleanup is scoped by the created-set rather than by recomputed names.
+	// This subtest supplies the missing case: dA's staging ConfigMap name
+	// collides with dA's own formula, but Config.OwnsOutputConfigMap was
+	// false for run A, so getSnapshotFromConfigMap (assertion 4) never
+	// recorded it into run A's created-set. See the RED/GREEN evidence in
+	// task-9-report.md for confirmation this genuinely discriminates
+	// against a name-derived Cleanup.
+	t.Run("run A Cleanup leaves its own unrecorded staging ConfigMap intact", func(t *testing.T) {
+		if _, err := clientset.CoreV1().ConfigMaps(concurrencyTestNamespace).Get(ctx, dA.stagingConfigMapName(), metav1.GetOptions{}); err != nil {
+			t.Errorf("run A's own staging ConfigMap %q should survive run A's Cleanup (never recorded, so not owned), err = %v", dA.stagingConfigMapName(), err)
 		}
 	})
 }
