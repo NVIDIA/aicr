@@ -89,16 +89,30 @@ func (d *Deployer) ensureNamespace(ctx context.Context) error {
 // run-scoped ServiceAccount, so that adoption no longer happens; warn
 // loudly instead of leaving the caller to discover it the hard way. A
 // NotFound Get is the normal path and stays silent.
+//
+// That Get is a diagnostic courtesy and must not gate the deployment:
+// `serviceaccounts get` is deliberately absent from CheckPermissions'
+// requiredChecks (permissions.go), so an identity scoped to exactly the
+// pre-flight verb set would otherwise pass the pre-flight and then fail
+// Deploy with an ErrCodeInternal — a permission problem reported as an
+// internal error. Forbidden therefore downgrades to a debug line and the
+// deployment proceeds; every other unexpected error still fails closed.
 func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 	name := d.saName()
 	bareName := d.config.ServiceAccountName
 	if bareName == "" {
 		bareName = d.base()
 	}
-	if _, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Get(ctx, bareName, metav1.GetOptions{}); err == nil {
+	switch _, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Get(ctx, bareName, metav1.GetOptions{}); {
+	case err == nil:
 		slog.Warn("ServiceAccount already exists under the unscoped name; aicr is creating a run-scoped ServiceAccount instead of adopting it",
 			"existing", bareName, "creating", name)
-	} else if !apierrors.IsNotFound(err) {
+	case apierrors.IsNotFound(err):
+		// Normal path: nothing to warn about.
+	case apierrors.IsForbidden(err):
+		slog.Debug("skipping adoption-drift check: not permitted to read ServiceAccounts in this namespace",
+			"name", bareName, "namespace", d.config.Namespace, "error", err)
+	default:
 		return errors.Wrap(errors.ErrCodeInternal, "failed to check for pre-existing ServiceAccount", err)
 	}
 
