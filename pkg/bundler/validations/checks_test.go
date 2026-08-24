@@ -852,8 +852,13 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 				recipe.CriteriaOSCOS, gpuOpRef(driverOff())),
 			wantMsgs: 1,
 			wantContains: []string{
-				"gpu-driver-version",
 				"On GKE COS node images the GPU Operator cannot install the driver",
+				"gpu-driver-version=default",
+				"--profile gpuStack=bundle-installer",
+				"gke-no-default-nvidia-gpu-device-plugin=true",
+				"gpu-driver-version=disabled",
+				"gcp-driver-installer",
+				"do not deploy a standalone DaemonSet alongside it",
 			},
 		},
 		{
