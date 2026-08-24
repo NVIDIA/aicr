@@ -381,6 +381,11 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 Check ConfigMap and container logs:
 
 ```shell
+# Every name below is run-scoped, so start from the run ID. The CLI logs it
+# when it starts ("snapshot agent run: runID=..."); this reads it back off the
+# Job instead. Substitute your own Job name (or use the logged run ID).
+RUN_ID=$(kubectl get job -n gpu-operator <job-name> -o jsonpath='{.metadata.labels.aicr\.run/run-id}')
+
 # Check if the staging ConfigMap was created. Without an explicit
 # "-o cm://<namespace>/<name>", the agent stages its result in a run-scoped
 # ConfigMap named "aicr-agent-snapshot-<run-id>" that cleanup deletes when

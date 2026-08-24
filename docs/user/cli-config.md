@@ -182,7 +182,7 @@ spec:
       image: ""
       imagePullSecrets: []
       # Optional prefixes; omitted here so the defaults apply
-      # (jobName: aicr-validate, serviceAccountName: aicr).
+      # (jobName and serviceAccountName both default to aicr-validate).
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
