@@ -13,9 +13,14 @@
 # limitations under the License.
 
 # k8s-aibom Helm values
-# Optional runtime AI-workload inventory. Registry-only: no stock recipe
-# selects this component. The digest and defaults below were qualified as one
-# coherent v1.2.0 artifact set under ADR-019.
+# Optional runtime AI-workload inventory. One stock recipe selects it,
+# h100-gke-cos-inference (ADR-019 stock-adoption amendment); its only
+# descendant, h100-gke-cos-inference-dynamo, declines it.
+#
+# The digest and defaults below were qualified as one coherent v1.3.0 artifact
+# set under ADR-019, re-pinned from v1.2.0 when upstream graduated CRD storage
+# to v1beta1. Both v1alpha1 and v1beta1 remain served, and the chart still
+# renders AIBOMControllerConfig at v1alpha1.
 
 image:
   repository: ghcr.io/googlecloudplatform/k8s-aibom
@@ -58,8 +63,10 @@ securityContext:
   runAsUser: 65532
   allowPrivilegeEscalation: false
 
-# Measured at 0, 250, and 1,000 replicas-zero workloads. At 1,000 workloads,
-# the final v1.2.0 image converged in 14s and remained below 231m CPU / 49MiB.
+# Envelope measured on GKE with the qualified v1.3.0 image (#2310), at 0, 251,
+# and 1,001 workloads, each a Deployment with replicas set to zero. At 1,001
+# workloads memory reached 67-69MiB and steady-state CPU was 1-2m, both well
+# inside the requests below. Convergence completed within 10s.
 resources:
   requests:
     cpu: 50m

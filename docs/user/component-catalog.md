@@ -15,7 +15,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **gpu-operator** | Manages the GPU driver and runtime lifecycle on Kubernetes nodes. Handles driver installation, container runtime configuration, device plugin, and GPU feature discovery. | [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) |
 | **network-operator** | Manages high-performance networking for GPU workloads. Configures RDMA, SR-IOV, and host networking for multi-node communication. | [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) |
 | **nfd** | Node Feature Discovery — labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
-| **gke-nccl-tcpxo** | NCCL TCPxO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
+| **gke-nccl-tcpxo** | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
 | **gatekeeper** | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
@@ -28,7 +28,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work zero-config. Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
-| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Registry-only: no stock recipe installs it. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
+| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Installed by one stock recipe, `h100-gke-cos-inference`; every other stock recipe leaves it out. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a NATS-backed Kubernetes event plane for KV-cache events, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
@@ -291,9 +291,17 @@ AICR enforces and surfaces inference-gateway exposure in two places:
 ## k8s-aibom Runtime Inventory
 
 AICR qualifies k8s-aibom v1.3.0 as an optional Helm component. It is not in
-the base, a mixin, or any stock overlay. To enable it, add this reference to a
-custom or external overlay and keep that overlay's criteria as narrow as the
-intended rollout:
+the base or a mixin. Exactly one stock recipe installs it,
+`h100-gke-cos-inference`, under [ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md)'s
+stock-adoption amendment. Decline it at generation time with
+`aicr recipe --runtime-inventory disabled`, described below.
+
+`h100-gke-cos-inference-dynamo` inherits from that recipe and deliberately
+declines the component, so the Dynamo platform recipe deploys exactly what it
+did before. Adoption beyond the one recipe is a later decision.
+
+To enable it anywhere else, add this reference to a custom or external overlay
+and keep that overlay's criteria as narrow as the intended rollout:
 
 ```yaml
 spec:
@@ -317,10 +325,17 @@ image pinned by digest in the component values. v1.3.0 is the API-graduation
 release: both `v1alpha1` and `v1beta1` are served and CRD storage is on
 `v1beta1`, while the chart still renders the `AIBOMControllerConfig` resource
 itself at `v1alpha1`. Upstream states Kubernetes support as a policy rather
-than a fixed range — stable APIs only, no known ceiling, tested floor 1.27 —
-backed by a version-matrix CI job. AICR also observed the dedicated
-integration test passing on its Kind 1.36.1 node image; that is qualification
-evidence, not an extension of upstream's support statement.
+than a fixed range: stable APIs only, no known version ceiling, tested floor
+1.27, backed by a weekly CI matrix. The authoritative statement is
+[upstream's compatibility policy](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/compatibility.md),
+which is linked rather than restated here so it cannot drift out of date on
+our side. That link deliberately tracks `main`: the point is the current
+policy, not a snapshot of it, which is the opposite of how this page cites
+qualified artifacts.
+
+AICR also observed the dedicated integration test passing on its Kind 1.36.1
+node image; that is qualification evidence, not an extension of upstream's
+support statement.
 
 ### Health and readiness
 
@@ -333,12 +348,17 @@ closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
 The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
 `aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
-the chart version pinned in the registry. It matters
-because Helm and Helmfile skip a chart's `crds/` directory on upgrade, and the
-`HelmRelease` AICR generates for Flux leaves `spec.upgrade.crds` unset so the
-helm-controller default of `Skip` applies. A cluster can therefore run a new
+the chart version pinned in the registry. It matters because Helm and Helmfile
+skip a chart's `crds/` directory on upgrade, so a cluster can run a new
 controller against the previous schema while the older version stays served
 and the controller keeps working.
+
+Flux is the exception for this component: `k8s-aibom` is marked `ownsCRDs` in
+the registry, so its generated `HelmRelease` sets
+`spec.upgrade.crds: CreateReplace` and Flux applies the CRDs itself. Argo CD
+applies them as ordinary manifests each sync. The assertion is still worth
+making on every deployer, because it proves the deployed CRDs match the pinned
+chart rather than merely that some deployer was expected to update them.
 
 Both CRDs are asserted separately, so a failure names which one is stranded
 and a partially applied CRD set cannot pass. If this check fails after a chart
@@ -353,6 +373,48 @@ a storage version. Charts 1.0.0, 1.1.0, and 1.2.0 all declare `v1alpha1` as
 storage. So the check catches a stranded upgrade that crosses a
 storage-version boundary, such as the 1.2.0 to 1.3.0 move this pin made, and
 does not catch one within a boundary, such as 1.0.0 to 1.2.0.
+
+**Declining the component.** `h100-gke-cos-inference` installs `k8s-aibom` by
+default. Decline it at generation time:
+
+```bash
+aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+  --runtime-inventory disabled -o recipe.yaml
+```
+
+The same flag works for a recipe that adds the component through a custom
+overlay — the shape shown above. Point `--data` at the directory holding that
+overlay:
+
+```bash
+aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+  --data ./my-recipes --runtime-inventory disabled -o recipe.yaml
+```
+
+Passing the flag against a recipe that does not declare the component is an
+error, not a silent no-op. Training recipes do not, so:
+
+```console
+$ aicr recipe --service gke --accelerator h100 --os cos --intent training \
+    --runtime-inventory disabled
+[INVALID_REQUEST] runtime inventory mode "disabled" requires the recipe to
+declare component "k8s-aibom"; this recipe does not resolve it
+```
+
+The selection is recorded in the emitted recipe as
+`configuration.runtimeInventory.mode`, and the component's ref carries
+`install: false`, so the component and its health check are both absent from
+the bundle and from deployment validation. A bundle-time
+`--set k8s-aibom:enabled=false` is **not** equivalent and is not a supported
+way to decline the component: it changes neither the recipe nor its health
+checks, which is why [ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md)
+rejects it as a selection contract.
+
+A wrong `--service` or a typo therefore surfaces instead of producing a recipe
+that claims a decision it never applied.
+
+The same selection is available in an `AICRConfig` document as
+`spec.recipe.configuration.runtimeInventory.mode`.
 
 **Overriding the chart version requires overriding this assertion.** Assert
 content is static YAML with no templating, so the expected storage version is
@@ -401,20 +463,40 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**Apply CRDs before the bundle upgrade.** The chart ships its CRDs under
-`crds/`. Helm installs that directory on first install and never touches it
-again on upgrade, so a chart bump whose CRDs changed leaves the previous schema
-in place and the API server silently prunes the new controller's writes to
-added fields. Apply the CRDs from the exact qualified chart first, then
-upgrade:
+**Apply CRDs before the bundle upgrade — `helm` and `helmfile` only.** The
+chart ships its CRDs under `crds/`. Helm installs that directory on first
+install and never touches it again on upgrade, so a chart bump whose CRDs
+changed leaves the previous schema in place and the API server silently prunes
+the new controller's writes to added fields.
+
+The `flux`, `argocd`, and `argocd-helm` bundles handle this themselves for this
+component and need no manual step; see the deployer table below. For `helm` and
+`helmfile`, apply the CRDs from the exact qualified chart first, then upgrade:
 
 ```bash
-helm show crds oci://ghcr.io/googlecloudplatform/charts/k8s-aibom \
-  --version <qualified-version> | kubectl apply --server-side -f -
+CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
+VERSION="1.3.0"   # replace with the version you are upgrading to
+
+helm show crds "${CHART}" --version "${VERSION}" \
+  | sed -n '/^---$/,$p' \
+  | kubectl apply --server-side --force-conflicts -f -
 ```
 
-Use `--server-side` because the CRDs exceed the annotation size limit that
-client-side apply depends on.
+Three details in that command are load-bearing. The obvious shorter form —
+piping `helm show crds` straight into `kubectl apply --server-side` — fails on
+the first two:
+
+- **`sed -n '/^---$/,$p'`** drops `helm`'s progress output. For an OCI chart,
+  `helm show crds` writes `Pulled:` and `Digest:` lines to *stdout*, and those
+  two lines parse as a valid YAML mapping, so `kubectl` rejects the stream with
+  `error validating data: [apiVersion not set, kind not set]`.
+- **`--force-conflicts`** is required because Helm created these CRDs on
+  install and owns their fields. Without it, server-side apply refuses with a
+  field-manager conflict.
+- **`--server-side`** is required because the CRDs exceed the annotation size
+  limit that client-side apply depends on.
+
+Verified against a live GKE cluster across a 1.2.0 to 1.3.0 upgrade.
 
 Which deployers need that step differs, so check yours:
 
@@ -422,14 +504,26 @@ Which deployers need that step differs, so check yours:
 |---|---|---|
 | `helm` | `helm upgrade` skips `crds/` | Yes |
 | `helmfile` | `helmfile apply` upgrades through Helm, so it also skips `crds/` | Yes |
-| `flux` | The generated `HelmRelease` sets no `spec.upgrade.crds`, and the helm-controller default is `Skip` | Yes |
+| `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
 
-Flux can be made to handle this itself by setting `spec.upgrade.crds:
-CreateReplace` on the `HelmRelease`, but AICR does not generate that field for
-any component today, and `CreateReplace` is a cluster-wide behavior change that
-should be decided per chart rather than assumed. Until then, treat Flux like
-`helm`.
+`ownsCRDs` is opt-in, and narrow on purpose. Of the 15 registry components
+that ship CRDs under `crds/`, 11 share at least one CRD with another
+component: `nfd`, `gpu-operator`, and `network-operator` all ship the
+NodeFeature CRDs, and `nfd`, `gpu-operator`, and `kai-scheduler` all appear
+together in `base.yaml`. If every release replaced CRDs on upgrade, two or
+three `HelmRelease` objects would rewrite the same CRD on every reconcile,
+each with the schema its own chart pins. The `Skip` default is what prevents
+that today, so it stays the default.
+
+A component qualifies only if it solely owns every CRD it ships and ships none
+using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
+injected at runtime. `kubeflow-trainer` is excluded for that second reason.
+Currently `gatekeeper`, `k8s-aibom`, and `nvsentinel` qualify.
+
+`helm` and `helmfile` always need the step, because skipping `crds/` on
+upgrade is Helm's own behavior rather than something the generated bundle can
+change.
 
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the
@@ -440,12 +534,25 @@ underneath it, so it reconciles against resources that are disappearing.
 
 1. Remove the component reference from the custom overlay and regenerate the
    recipe and bundle.
-2. Uninstall the release with the deployer-appropriate procedure in
-   [Bundle Uninstall](cli-reference.md#bundle-uninstall) — `helm uninstall
-   k8s-aibom -n k8s-aibom-system` for the `helm` deployer, `helmfile destroy`
-   for Helmfile bundles, deleting the owning `Application` for Argo CD, and the
-   `HelmRelease` for Flux. Confirm the controller Deployment is gone before
-   continuing.
+2. Uninstall the release, scoped to this component only:
+
+   ```bash
+   # helm and helmfile bundles alike: helmfile installs through Helm, so the
+   # release is an ordinary Helm release and this removes exactly one.
+   helm uninstall k8s-aibom -n k8s-aibom-system
+   ```
+
+   For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`.
+   Confirm the controller Deployment is gone before continuing.
+
+   **Do not use `helmfile destroy` for this.** It tears down *every* release in
+   the bundle in reverse dependency order, not just this component. It is also
+   ineffective here: step 1 regenerated the bundle without `k8s-aibom`, so the
+   release is no longer declared in it and `destroy` would not remove the one
+   release you actually want gone while removing all the ones you do not. If
+   you prefer a Helmfile-native command, run it against a bundle that still
+   declares the component and scope it explicitly with
+   `helmfile destroy --selector name=k8s-aibom`.
 3. Only then delete retained AIBOMs and, last, the CRDs.
 
 Deleting the CRDs cascades to every AIBOM stored cluster-wide, including any

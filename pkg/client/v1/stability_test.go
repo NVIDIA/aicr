@@ -29,6 +29,7 @@ package aicr_test
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -102,6 +103,47 @@ func TestStability_RecipeResolution(t *testing.T) {
 		aicr.DimensionIntent,
 		aicr.DimensionOS,
 		aicr.DimensionPlatform,
+	}
+}
+
+// TestStability_SnapshotDiff pins the facade-owned drift-detection surface.
+func TestStability_SnapshotDiff(t *testing.T) {
+	t.Parallel()
+
+	requireSignature[func(*aicr.Client, context.Context, *aicr.Snapshot, *aicr.Snapshot, aicr.SnapshotDiffOptions) (*aicr.SnapshotDiff, error)]((*aicr.Client).DiffSnapshots)
+	requireSignature[func(io.Writer, *aicr.SnapshotDiff) error](aicr.WriteSnapshotDiffTable)
+	requireSignature[func(*aicr.SnapshotDiff) bool]((*aicr.SnapshotDiff).HasDrift)
+
+	var opts aicr.SnapshotDiffOptions
+	_ = opts.BaselineSource
+	_ = opts.TargetSource
+
+	var result aicr.SnapshotDiff
+	_ = result.BaselineSource
+	_ = result.TargetSource
+	_ = result.Changes
+	_ = result.Summary
+
+	var change aicr.SnapshotChange
+	_ = change.Kind
+	_ = change.Severity
+	_ = change.Path
+	_ = change.Baseline
+	_ = change.Target
+
+	var summary aicr.SnapshotDiffSummary
+	_ = summary.Added
+	_ = summary.Removed
+	_ = summary.Modified
+	_ = summary.Total
+
+	_ = []aicr.SnapshotChangeKind{
+		aicr.SnapshotChangeAdded,
+		aicr.SnapshotChangeRemoved,
+		aicr.SnapshotChangeModified,
+	}
+	_ = []aicr.SnapshotChangeSeverity{
+		aicr.SnapshotChangeSeverityInfo,
 	}
 }
 

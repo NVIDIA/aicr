@@ -224,6 +224,43 @@ func Example_resolveFromSnapshot() {
 	}
 }
 
+// ExampleClient_DiffSnapshots compares two previously captured snapshots in
+// memory. Loading local files needs no cluster access; cm:// sources use the
+// kubeconfig argument passed to LoadSnapshot.
+func ExampleClient_DiffSnapshots() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	baseline, err := client.LoadSnapshot(ctx, "before.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	target, err := client.LoadSnapshot(ctx, "after.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	result, err := client.DiffSnapshots(ctx, baseline, target, aicr.SnapshotDiffOptions{
+		BaselineSource: "before.yaml",
+		TargetSource:   "after.yaml",
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	if result.HasDrift() {
+		fmt.Printf("detected %d change(s)\n", result.Summary.Total)
+	}
+}
+
 // Example_bundleAndVerify is the integrator path end to end: resolve a recipe,
 // render its deployment bundle, then check what was written.
 //

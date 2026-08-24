@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -42,12 +43,38 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"sigs.k8s.io/yaml"
 )
+
+// remapParentCtxErr converts a parent-context error into the matching
+// structured code. Returns nil when the parent context is still live, so
+// callers can fall through to their own error handling.
+func remapParentCtxErr(ctx context.Context, msg string) error {
+	parentErr := ctx.Err()
+	if parentErr == nil {
+		return nil
+	}
+	if stderrors.Is(parentErr, context.Canceled) {
+		return errors.Wrap(errors.ErrCodeCanceled, msg+" canceled", parentErr)
+	}
+	return errors.Wrap(errors.ErrCodeTimeout, msg+" deadline exceeded", parentErr)
+}
+
+// jitterBackoff applies ±25% jitter to d to decorrelate retries.
+// Mirrors pkg/oci/push.go pattern for retry backoff scheduling.
+func jitterBackoff(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	// Range: [0.75*d, 1.25*d). rand/v2.Float64 is in [0.0, 1.0).
+	jitter := 0.75 + rand.Float64()*0.5 //nolint:gosec // non-cryptographic jitter
+	return time.Duration(float64(d) * jitter)
+}
 
 // safeChartNameRE bounds the recipe-supplied identifiers that flow into
 // `helm pull` as positional argv tokens. The leading character must be
@@ -578,22 +605,138 @@ func disallowedIPReason(ip net.IP) string {
 // depending on the developer's system resolver or network reachability.
 var fetchIndexYAML = defaultFetchIndexYAML
 
-// defaultFetchIndexYAML performs the production HTTP GET. Every redirect
-// hop is passed back through checkEgressPolicy so a public repo cannot
-// redirect the index-fetch itself into the private range. Response body
-// is capped at defaults.HelmChartIndexBodyLimit.
+// fetchIndexYAMLAttempt is the single-attempt HTTP GET function, wrapped by
+// the retry logic in defaultFetchIndexYAML. Tests inject a canned function
+// to control retry behavior.
+var fetchIndexYAMLAttempt = doFetchIndexYAMLAttempt
+
+// newBackoffTimer creates a timer for retry backoff. Tests inject a no-op to
+// avoid production sleep times.
+var newBackoffTimer = time.NewTimer
+
+// defaultFetchIndexYAML performs the production HTTP GET with retries on
+// transient failures. Every redirect hop is passed back through
+// checkEgressPolicy so a public repo cannot redirect the index-fetch itself
+// into the private range. Response body is capped at
+// defaults.HelmChartIndexBodyLimit. Transient errors (network failures, 5xx,
+// 408, 429) are retried up to HelmChartIndexRetryBudget with exponential
+// backoff. Non-transient errors (404, 401/403, other 4xx) fail on the first
+// attempt. Policy-rejected redirects are never retried.
 func defaultFetchIndexYAML(ctx context.Context, indexURL string) ([]byte, error) {
-	// Fail-closed egress check on the initial URL. Idempotent: safe to
-	// re-run for URLs the caller already validated. Today the only
-	// production caller (resolveAndValidateHTTPIndex) runs
-	// checkEgressPolicy(c.Repository) upstream and derives indexURL from
-	// the same host, so this call is a no-op in the happy path. It
-	// exists so a future refactor that reorders Pull() — or a new caller
-	// of defaultFetchIndexYAML that skips the upstream check — cannot
-	// silently open an SSRF hole here.
-	if err := checkFetchTargetURL(ctx, indexURL); err != nil {
-		return nil, err
+	backoff := defaults.HelmChartIndexRetryInitialBackoff
+
+	for attempt := 1; attempt <= defaults.HelmChartIndexRetryBudget; attempt++ {
+		// Per-attempt timeout independent of parent context, so a slow
+		// upstream cannot outlive the fetch operation itself. The parent
+		// context governs cancellation.
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, defaults.HelmChartIndexPreCheckTimeout)
+
+		// Check parent context cancellation first.
+		if ctxErr := remapParentCtxErr(ctx, "vendor-charts: index pre-check"); ctxErr != nil {
+			attemptCancel()
+			return nil, ctxErr
+		}
+
+		// Fail-closed egress check on every attempt. Defends against DNS
+		// rebinding across attempts: a malicious resolver could serve an
+		// allowed address on the first attempt, then rebind to a disallowed
+		// address on retries. Note the intra-attempt resolve-then-dial TOCTOU
+		// documented at checkEgressPolicy remains — closing it requires
+		// pinning the validated IP into a custom DialContext.
+		// Validation errors are routed through the retry classification logic:
+		// transient errors (timeouts, temporary DNS failures) are retried;
+		// policy rejections fail immediately.
+		if err := checkFetchTargetURL(attemptCtx, indexURL); err != nil {
+			attemptCancel()
+			// Policy rejections (InvalidRequest) never retry.
+			isRetryable := stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
+			if !isRetryable {
+				return nil, err
+			}
+			// Don't retry if at budget limit. Remap parent-context errors so a
+			// ctx-canceled lookupIP wrapped as Unavailable surfaces as
+			// Canceled/Timeout rather than a transient-looking failure.
+			if attempt == defaults.HelmChartIndexRetryBudget {
+				if ctxErr := remapParentCtxErr(ctx, "vendor-charts: index pre-check"); ctxErr != nil {
+					return nil, ctxErr
+				}
+				return nil, err
+			}
+			slog.WarnContext(ctx, "vendor-charts: index fetch retrying after validation error",
+				"attempt", attempt, "of", defaults.HelmChartIndexRetryBudget, "error", err)
+			// Sleep with exponential backoff + jitter to decorrelate retries.
+			timer := newBackoffTimer(jitterBackoff(backoff))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				if stderrors.Is(ctx.Err(), context.Canceled) {
+					return nil, errors.Wrap(errors.ErrCodeCanceled,
+						"vendor-charts: index pre-check canceled during backoff", ctx.Err())
+				}
+				return nil, errors.Wrap(errors.ErrCodeTimeout,
+					"vendor-charts: index pre-check deadline exceeded during backoff", ctx.Err())
+			case <-timer.C:
+			}
+			backoff *= 2
+			continue
+		}
+
+		body, err := fetchIndexYAMLAttempt(attemptCtx, indexURL)
+		attemptCancel()
+
+		// Check parent context cancellation first.
+		if ctxErr := remapParentCtxErr(ctx, "vendor-charts: index pre-check"); ctxErr != nil {
+			return nil, ctxErr
+		}
+
+		// Success path.
+		if err == nil {
+			return body, nil
+		}
+
+		// Determine if this error is retryable. Policy-rejected redirects
+		// (InvalidRequest code) and non-transient auth/validation errors must
+		// never be retried.
+		isRetryable := stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, ""))
+		if !isRetryable {
+			return nil, err
+		}
+
+		// Don't retry if we're at the budget limit.
+		if attempt == defaults.HelmChartIndexRetryBudget {
+			return nil, err
+		}
+
+		slog.WarnContext(ctx, "vendor-charts: index fetch retrying after transient error",
+			"attempt", attempt, "of", defaults.HelmChartIndexRetryBudget,
+			"target", redactURL(indexURL), "error", err)
+
+		// Sleep with exponential backoff + jitter, but honor parent context cancellation.
+		timer := newBackoffTimer(jitterBackoff(backoff))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			if stderrors.Is(ctx.Err(), context.Canceled) {
+				return nil, errors.Wrap(errors.ErrCodeCanceled,
+					"vendor-charts: index pre-check canceled during backoff", ctx.Err())
+			}
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				"vendor-charts: index pre-check deadline exceeded during backoff", ctx.Err())
+		case <-timer.C:
+		}
+		backoff *= 2
 	}
+
+	// Unreachable: the final attempt always returns from inside the loop.
+	return nil, errors.New(errors.ErrCodeInternal,
+		"vendor-charts: index pre-check exhausted retry budget without result")
+}
+
+// doFetchIndexYAMLAttempt performs a single HTTP GET attempt for the index.
+// Returns body on success. Returns a StructuredError with code indicating
+// retryability: ErrCodeUnavailable for transient errors, other codes for
+// permanent failures.
+func doFetchIndexYAMLAttempt(ctx context.Context, indexURL string) ([]byte, error) {
 	client := &http.Client{
 		Transport: defaults.NewHTTPTransport(),
 		Timeout:   defaults.HelmChartIndexPreCheckTimeout,

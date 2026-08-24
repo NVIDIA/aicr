@@ -16,11 +16,14 @@ package diff
 
 import (
 	"bytes"
+	"context"
+	stderrors "errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -685,6 +688,130 @@ func TestSnapshots_EmptySnapshots(t *testing.T) {
 	if result.HasDrift() {
 		t.Errorf("expected no drift for empty snapshots")
 	}
+}
+
+func TestSnapshotsWithContext_MidTraversalCancellation(t *testing.T) {
+	baselineData := make(map[string]measurement.Reading, 64)
+	targetData := make(map[string]measurement.Reading, 64)
+	for i := 0; i < 64; i++ {
+		key := fmt.Sprintf("reading-%02d", i)
+		baselineData[key] = measurement.Int(i)
+		targetData[key] = measurement.Int(i + 1)
+	}
+	baseline := makeSnapshot(makeMeasurement(measurement.TypeK8s, makeSubtype("server", baselineData)))
+	target := makeSnapshot(makeMeasurement(measurement.TypeK8s, makeSubtype("server", targetData)))
+	probeCtx := &countingContext{Context: t.Context()}
+	probeResult, err := SnapshotsWithContext(probeCtx, baseline, target)
+	if err != nil {
+		t.Fatalf("SnapshotsWithContext() probe error = %v", err)
+	}
+	// The final summary traversal checks the context once per accumulated
+	// change. Cancel halfway through it without depending on the number of
+	// checkpoints used by earlier comparison stages.
+	cancelAt := probeCtx.checks - probeResult.Summary.Total/2
+	if cancelAt <= 0 || cancelAt >= probeCtx.checks {
+		t.Fatalf("derived cancellation checkpoint = %d, probe checks = %d", cancelAt, probeCtx.checks)
+	}
+
+	tests := []struct {
+		name     string
+		cause    error
+		wantCode aicrerrors.ErrorCode
+	}{
+		{name: "canceled", cause: context.Canceled, wantCode: aicrerrors.ErrCodeCanceled},
+		{name: "deadline", cause: context.DeadlineExceeded, wantCode: aicrerrors.ErrCodeTimeout},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newCheckpointContext(t.Context(), cancelAt, tt.cause)
+			result, err := SnapshotsWithContext(ctx, baseline, target)
+			if result != nil {
+				t.Fatalf("SnapshotsWithContext() result = %#v, want nil after cancellation", result)
+			}
+			if !stderrors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+				t.Errorf("SnapshotsWithContext() error = %v, want code %s", err, tt.wantCode)
+			}
+			if !stderrors.Is(err, tt.cause) {
+				t.Errorf("SnapshotsWithContext() error = %v, want cause %v", err, tt.cause)
+			}
+			if ctx.checks < cancelAt {
+				t.Errorf("context checks = %d, want at least %d to prove traversal began", ctx.checks, cancelAt)
+			}
+		})
+	}
+}
+
+func TestSnapshotsWithContext_LegacyOutputUnchanged(t *testing.T) {
+	baseline := makeSnapshot(makeMeasurement(measurement.Type("Network"), makePFSubtype(
+		map[string]measurement.Reading{"mtu": measurement.Int(1500)},
+		map[string]string{"node": "n1"},
+		[]measurement.ItemEntry{{
+			Context: map[string]string{"name": "pf0"},
+			Data:    map[string]measurement.Reading{"speed": measurement.Int(100)},
+		}},
+	)))
+	target := makeSnapshot(makeMeasurement(measurement.Type("Network"), makePFSubtype(
+		map[string]measurement.Reading{"mtu": measurement.Int(9000)},
+		map[string]string{"node": "n2"},
+		[]measurement.ItemEntry{{
+			Context: map[string]string{"name": "pf1"},
+			Data:    map[string]measurement.Reading{"speed": measurement.Int(200)},
+		}},
+	)))
+
+	legacy := Snapshots(baseline, target)
+	withContext, err := SnapshotsWithContext(t.Context(), baseline, target)
+	if err != nil {
+		t.Fatalf("SnapshotsWithContext() error = %v", err)
+	}
+	if !reflect.DeepEqual(withContext, legacy) {
+		t.Errorf("SnapshotsWithContext() = %#v, want legacy output %#v", withContext, legacy)
+	}
+}
+
+type checkpointContext struct {
+	context.Context
+	cancelAt int
+	cause    error
+	done     chan struct{}
+	checks   int
+	closed   bool
+}
+
+type countingContext struct {
+	context.Context
+	checks int
+}
+
+func (c *countingContext) Err() error {
+	c.checks++
+	return c.Context.Err()
+}
+
+func newCheckpointContext(parent context.Context, cancelAt int, cause error) *checkpointContext {
+	return &checkpointContext{
+		Context:  parent,
+		cancelAt: cancelAt,
+		cause:    cause,
+		done:     make(chan struct{}),
+	}
+}
+
+func (c *checkpointContext) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *checkpointContext) Err() error {
+	c.checks++
+	if c.checks < c.cancelAt {
+		return nil
+	}
+	if !c.closed {
+		close(c.done)
+		c.closed = true
+	}
+	return c.cause
 }
 
 // TestHasDrift_DerivedFromChanges verifies HasDrift derives from len(Changes)

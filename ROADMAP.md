@@ -74,7 +74,7 @@ so future changes can warn before they break.
 **Bundle output as a stable surface.** The bundle is what downstream consumers
 integrate against; v1 hardens it as a first-class contract. This includes a generic
 Helm bundle format that is deployer-neutral, deferring teardown to the deployer's
-native uninstall path (helm, ArgoCD, Flux) rather than shipping bundle-side
+native uninstall path (helm, Argo CD, Flux) rather than shipping bundle-side
 scripts, and decoupling environment specifics (e.g., StorageClass) from recipe
 content so bundles are portable.
 

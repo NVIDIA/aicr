@@ -669,6 +669,13 @@ const (
 	// controller-manager Deployment to have at least one ready replica after installation.
 	TrainerControllerReadyTimeout = 2 * time.Minute
 
+	// TrainerInstallPollInterval is the sleep between checks that a
+	// recipe-declared Kubeflow Trainer installation has become complete. The
+	// benchmark polls rather than failing on the first incomplete read, because a
+	// CRD that is present but not yet Established — or a controller Deployment
+	// that has not appeared — is an ordinary rollout state, not a failed deploy.
+	TrainerInstallPollInterval = 5 * time.Second
+
 	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
 	NCCLTrainJobTimeout = 30 * time.Minute
 
@@ -1340,6 +1347,22 @@ const (
 	// resolver caches and slow-start CDN edges without letting a stalled
 	// upstream tie up an aicrd request slot for minutes.
 	HelmChartIndexPreCheckTimeout = 30 * time.Second
+
+	// HelmChartIndexRetryBudget is the maximum number of index fetch
+	// attempts before failing permanently. Retryable errors are transport
+	// failures, connection resets, and 5xx / 408 / 429 responses from the upstream.
+	//
+	// WARNING: Retry shares the parent timeout budget. On the HTTP server path,
+	// the pre-check shares the 60s BundleHandlerTimeout with the subsequent helm
+	// pull; a maxed-out pre-check (30s + 1s backoff + 29s) leaves ~0s for the
+	// chart download. Consider capping total pre-check wall-clock if upstream
+	// latency becomes a concern.
+	HelmChartIndexRetryBudget = 3
+
+	// HelmChartIndexRetryInitialBackoff is the wait between the first and
+	// second index fetch attempts. Subsequent backoffs scale by
+	// exponential factor 2: HelmChartIndexRetryInitialBackoff * 2^(attempt-1).
+	HelmChartIndexRetryInitialBackoff = 1 * time.Second
 )
 
 // OCI publication phase budgets. The whole-publish ceiling covers two source

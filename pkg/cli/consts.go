@@ -37,6 +37,7 @@ const (
 	flagPlatform            = "platform"
 	flagProfile             = "profile"
 	flagSlurmAccountingMode = "slurm-accounting-mode"
+	flagRuntimeInventory    = "runtime-inventory"
 	flagNoHealth            = "no-health"
 )
 

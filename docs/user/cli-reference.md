@@ -459,6 +459,7 @@ Generate recipes using direct system parameters:
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or `gpuStack=driver-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -534,6 +535,7 @@ target-cluster conflict detection.
 | `--platform` | | string | Explicit platform/framework type, including slurm |
 | `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
+| `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
@@ -963,8 +965,8 @@ aicr validate [flags]
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Name for the validation Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for validation Job |
-| `--node-selector` | | string[] | | Override GPU node selection for validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
-| `--toleration` | | string[] | | Override tolerations for validation workloads. Replaces the default tolerate-all policy on inner workloads like NCCL benchmark pods and conformance test pods. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
+| `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
+| `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
 | `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
@@ -1166,13 +1168,13 @@ spec:
       snapshot: ./snapshot.yaml          # optional; omit to capture live
     agent:                               # only used when input.snapshot is empty
       namespace: aicr-validation
-      image: ghcr.io/nvidia/aicr:v0.1.0
+      image: ghcr.io/nvidia/aicr:v0.19.0
       imagePullSecrets: [registry-secret]
       jobName: aicr-validate
       serviceAccountName: aicr
       nodeSelector:
         my-org/gpu-pool: "true"
-      tolerations:
+      tolerations:                         # [] clears the live snapshot agent's tolerate-all default
         - "gpu-type=h100:NoSchedule"
       requireGpu: true
     execution:
@@ -1209,7 +1211,7 @@ aicr validate --config validate-cluster-a.yaml
 aicr validate --config validate-cluster-b.yaml
 ```
 
-The `--node-selector` and `--toleration` flags control scheduling for the inner validation workloads (NCCL benchmark workers, conformance test pods), not the validator orchestrator Job. For when to use them with non-standard GPU labels or taints, see [Validation](validation.md#non-standard-gpu-labels-or-taints).
+The `--node-selector` and `--toleration` flags control scheduling for the inner validation workloads (NCCL benchmark workers, conformance test pods). When `--snapshot` is omitted, they also configure the preliminary live snapshot agent. They do not configure the validator orchestrator Job. For when to use them with non-standard GPU labels or taints, see [Validation](validation.md#non-standard-gpu-labels-or-taints).
 
 **Output Structure ([CTRF](https://ctrf.io/) JSON):**
 
@@ -1515,7 +1517,7 @@ CLI flags always override values loaded from `--config`. For slice/map flags (`-
 
 The `--accelerated-node-selector` and `--accelerated-node-toleration` flags control scheduling for GPU-specific components:
 
-| Flag | GPU Daemonsets | NFD Workers |
+| Flag | GPU DaemonSets | NFD Workers |
 |------|---------------|-------------|
 | `--accelerated-node-selector` | Applied (restricts to GPU nodes) | **Not applied** (NFD runs on all nodes) |
 | `--accelerated-node-toleration` | Applied | Applied |
@@ -1524,7 +1526,7 @@ The `--accelerated-node-selector` and `--accelerated-node-toleration` flags cont
 
 NFD (Node Feature Discovery) workers must run on **all nodes** (GPU, CPU, and system) to detect hardware features. This matches the gpu-operator default behavior where NFD workers also run on control-plane nodes. The `--accelerated-node-selector` is intentionally not applied to NFD workers so they are not restricted to GPU nodes.
 
-> **Note:** When no `--accelerated-node-toleration` is specified, a default toleration (`operator: Exists`) is applied to both GPU daemonsets and NFD workers, allowing them to run on nodes with any taint.
+> **Note:** When no `--accelerated-node-toleration` is specified, a default toleration (`operator: Exists`) is applied to both GPU DaemonSets and NFD workers, allowing them to run on nodes with any taint.
 
 **Example:**
 
@@ -1542,7 +1544,7 @@ aicr bundle --recipe recipe.yaml \
 > **Cluster node requirements:** This example assumes the cluster has nodes labeled `nodeGroup=system-worker` with taints `dedicated=system-workload:NoSchedule,NoExecute` for system infrastructure, and GPU nodes labeled `nodeGroup=gpu-worker` with taints `dedicated=worker-workload:NoSchedule,NoExecute`.
 
 This results in:
-- **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **GPU DaemonSets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
 - **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
 - **System components** (gpu-operator controller, NFD gc/master, dynamo grove, agentgateway proxy): `nodeSelector=nodeGroup=system-worker` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
 
@@ -2627,9 +2629,9 @@ Components that use operator patterns with custom resources that reconcile async
 
 ##### DRA kubelet plugin registration
 
-After installing `nvidia-dra-driver-gpu`, the script automatically restarts the DRA kubelet plugin daemonset. This is a best-effort mitigation for a known issue: after uninstall/reinstall, the kubelet's plugin watcher (`fsnotify`) may not detect new registration sockets, causing `DRA driver gpu.nvidia.com is not registered` errors.
+After installing `nvidia-dra-driver-gpu`, the script automatically restarts the DRA kubelet plugin DaemonSet. This is a best-effort mitigation for a known issue: after uninstall/reinstall, the kubelet's plugin watcher (`fsnotify`) may not detect new registration sockets, causing `DRA driver gpu.nvidia.com is not registered` errors.
 
-If DRA pods fail with this error after redeployment, the daemonset restart alone may not be sufficient — a **node reboot** is required to reset the kubelet's plugin registration state. To reboot GPU nodes:
+If DRA pods fail with this error after redeployment, the DaemonSet restart alone may not be sufficient — a **node reboot** is required to reset the kubelet's plugin registration state. To reboot GPU nodes:
 
 ```bash
 # Cordon, drain, and reboot the affected node
@@ -2730,7 +2732,7 @@ while `Prune=false` prevents pruning during manual or automated sync after a PVC
 disappears from the desired manifests. StatefulSet-created claims are not
 rendered as Application resources and normally remain.
 
-See [ArgoCD app deletion docs](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/)
+See [Argo CD app deletion docs](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/)
 for finalizer behavior, cascade modes, and selective deletion.
 
 ##### argocd-helm

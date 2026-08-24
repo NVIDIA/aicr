@@ -31,7 +31,7 @@ in the [Go library integration guide](./go-library.md).
 | `pkg/bom` | Internal | Bill-of-materials / image inventory generation. |
 | `pkg/config` | Internal | Config-file loading and flag/spec resolution. |
 | `pkg/corroborate` | Internal | Cross-source corroboration of observed state. |
-| `pkg/diff` | Internal | Structural diff between two snapshots. |
+| `pkg/diff` | Internal | Structural snapshot comparison implementation. External consumers use `Client.DiffSnapshots` and `aicr.WriteSnapshotDiffTable`. |
 | `pkg/fingerprint` | Internal | Cluster/provider fingerprint detection. |
 | `pkg/health` | Internal | Health-check orchestration. |
 | `pkg/helm` | Internal | Helm chart rendering helpers. |
@@ -65,6 +65,10 @@ unrelated exports in their evolving packages remain free to change.
 | Facade symbol | Translates to/from | Notes |
 |---|---|---|
 | `aicr.Snapshot` | `pkg/snapshotter.Snapshot` | **Facade-owned struct**. Public fields are identifying metadata; full measurement payload is preserved in an unexported field for round-trip through `ValidateState`. Obtain one from `Client.LoadSnapshot` (file, URL, or `cm://` ConfigMap) or `Client.CollectSnapshot` (live capture) — neither requires importing `pkg/snapshotter`. `aicr.WrapSnapshot` remains for the narrower case of lifting a `*snapshotter.Snapshot` you already hold from a direct `pkg/snapshotter` call. |
+| `aicr.SnapshotDiff`, `aicr.SnapshotChange`, `aicr.SnapshotDiffSummary` | `pkg/diff` result shapes | **Facade-owned structs** returned by `Client.DiffSnapshots`. They preserve the CLI's JSON/YAML schema without exposing `pkg/diff` types. Drift is data (`SnapshotDiff.HasDrift`), while invalid or payload-less inputs and context cancellation are errors. |
+| `aicr.SnapshotDiffOptions` | `Client.DiffSnapshots` input | **Facade-owned input struct** carrying optional baseline and target source labels. The labels are copied to output metadata and do not affect comparison semantics. |
+| `aicr.SnapshotChangeKind` and its constants | `pkg/diff.ChangeKind` | **Facade-owned string enum** whose values describe added, removed, and modified readings. |
+| `aicr.SnapshotChangeSeverity` and `aicr.SnapshotChangeSeverityInfo` | `pkg/diff.Severity` | **Facade-owned string enum** classifying change impact; informational is the currently defined severity. |
 | `aicr.AgentConfig` | `pkg/snapshotter.AgentConfig` | **Facade-owned struct** covering the deployment-time agent fields. `Tolerations` keeps `k8s.io/api/core/v1.Toleration` since `k8s.io` is itself a stable contract. It does **not** mirror every `pkg/snapshotter.AgentConfig` field — the network-collector fields `ClusterConfigPath` and `DiscoverNetwork` are not surfaced on the facade type. `AKSGPUPoolsPath` **is** surfaced (controller-side pool projection input, required for AKS profile-qualified resolution from a collected snapshot). |
 | `aicr.PhaseResult` | `pkg/validator.PhaseResult` | **Facade-owned struct**. Exposes `Summary` (CTRF counts) and `RawReport` (CTRF JSON bytes); `Report *ctrf.Report` is retained for in-tree consumers that merge per-phase reports. |
 | `aicr.Phase`, `aicr.PhaseDeployment` / `PhasePerformance` / `PhaseConformance` | string consts | **Facade-owned**. Values match `pkg/validator/v1` constants verbatim for byte-identical wire round-trip. |

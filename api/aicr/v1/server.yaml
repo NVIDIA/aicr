@@ -2622,6 +2622,13 @@ components:
                     mode:
                       type: string
                       enum: [disabled, customer-managed, aicr-provided]
+            runtimeInventory:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum: [enabled, disabled]
         componentRefs:
           type: array
           items:
@@ -2812,7 +2819,10 @@ components:
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase/properties/configuration"
         - type: object
-          required: [slurm]
+          # At least one section, but not any particular one: a recipe may
+          # record a runtime-inventory selection without Slurm accounting, or
+          # the reverse. Requiring `slurm` rejected the former outright.
+          minProperties: 1
           additionalProperties: false
           properties:
             slurm:
@@ -2828,6 +2838,14 @@ components:
                     mode:
                       type: string
                       enum: [disabled, customer-managed, aicr-provided]
+            runtimeInventory:
+              type: object
+              required: [mode]
+              additionalProperties: false
+              properties:
+                mode:
+                  type: string
+                  enum: [enabled, disabled]
 
     ProfileRecipeResponse:
       allOf:

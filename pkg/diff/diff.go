@@ -18,12 +18,15 @@
 package diff
 
 import (
+	"context"
+	stderrors "errors"
 	"fmt"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -110,41 +113,108 @@ func (r *Result) HasDrift() bool {
 // The baseline is the reference state; the target is the current state.
 // If either baseline or target is nil, returns an empty Result (no drift).
 func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
-	if baseline == nil || target == nil {
+	result, err := snapshots(context.Background(), baseline, target)
+	if err != nil {
+		// context.Background cannot be canceled. Keep the legacy no-error API
+		// total if that invariant ever changes.
 		return &Result{Changes: make([]Change, 0)}
+	}
+	return result
+}
+
+// SnapshotsWithContext compares two snapshots while honoring cancellation
+// throughout the in-memory traversal. It returns no partial result when the
+// context is canceled or its deadline expires.
+func SnapshotsWithContext(ctx context.Context, baseline, target *snapshotter.Snapshot) (*Result, error) {
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "snapshot diff context is required (got nil)")
+	}
+
+	result, err := snapshots(ctx, baseline, target)
+	if err != nil {
+		return nil, snapshotContextError(err)
+	}
+	return result, nil
+}
+
+func snapshots(ctx context.Context, baseline, target *snapshotter.Snapshot) (*Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if baseline == nil || target == nil {
+		return &Result{Changes: make([]Change, 0)}, nil
 	}
 
 	result := &Result{
 		Changes: make([]Change, 0),
 	}
 
-	baseByType := indexMeasurements(baseline.Measurements)
-	targetByType := indexMeasurements(target.Measurements)
+	baseByType, err := indexMeasurements(ctx, baseline.Measurements)
+	if err != nil {
+		return nil, err
+	}
+	targetByType, err := indexMeasurements(ctx, target.Measurements)
+	if err != nil {
+		return nil, err
+	}
 
-	allTypes := mergeKeys(baseByType, targetByType)
+	allTypes, err := mergeKeys(ctx, baseByType, targetByType)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sort.Strings(allTypes)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	for _, typeName := range allTypes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		baseMeasurement, baseExists := baseByType[typeName]
 		targetMeasurement, targetExists := targetByType[typeName]
 
 		if !baseExists {
-			result.Changes = append(result.Changes, addedMeasurement(targetMeasurement)...)
+			changes, err := addedMeasurement(ctx, targetMeasurement)
+			if err != nil {
+				return nil, err
+			}
+			result.Changes = append(result.Changes, changes...)
 			continue
 		}
 		if !targetExists {
-			result.Changes = append(result.Changes, removedMeasurement(baseMeasurement)...)
+			changes, err := removedMeasurement(ctx, baseMeasurement)
+			if err != nil {
+				return nil, err
+			}
+			result.Changes = append(result.Changes, changes...)
 			continue
 		}
 
-		result.Changes = append(result.Changes, compareMeasurements(baseMeasurement, targetMeasurement)...)
+		changes, err := compareMeasurements(ctx, baseMeasurement, targetMeasurement)
+		if err != nil {
+			return nil, err
+		}
+		result.Changes = append(result.Changes, changes...)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sort.Slice(result.Changes, func(i, j int) bool {
 		return result.Changes[i].Path < result.Changes[j].Path
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	for _, c := range result.Changes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		switch c.Kind {
 		case Added:
 			result.Summary.Added++
@@ -155,8 +225,11 @@ func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
 		}
 	}
 	result.Summary.Total = len(result.Changes)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
-	return result
+	return result, nil
 }
 
 // --- helpers ---
@@ -180,58 +253,115 @@ func safeReadingString(r measurement.Reading) string {
 	return r.String()
 }
 
-func indexMeasurements(measurements []*measurement.Measurement) map[string]*measurement.Measurement {
+func indexMeasurements(ctx context.Context, measurements []*measurement.Measurement) (map[string]*measurement.Measurement, error) {
 	idx := make(map[string]*measurement.Measurement, len(measurements))
 	for _, m := range measurements {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if m == nil {
 			continue
 		}
 		idx[string(m.Type)] = m
 	}
-	return idx
+	return idx, nil
 }
 
-func compareMeasurements(base, target *measurement.Measurement) []Change {
+func compareMeasurements(ctx context.Context, base, target *measurement.Measurement) ([]Change, error) {
 	var changes []Change
 
-	base, target = alignTopologyEncoding(base, target)
+	var err error
+	base, target, err = alignTopologyEncoding(ctx, base, target)
+	if err != nil {
+		return nil, err
+	}
 
-	baseByName := indexSubtypes(base.Subtypes)
-	targetByName := indexSubtypes(target.Subtypes)
+	baseByName, err := indexSubtypes(ctx, base.Subtypes)
+	if err != nil {
+		return nil, err
+	}
+	targetByName, err := indexSubtypes(ctx, target.Subtypes)
+	if err != nil {
+		return nil, err
+	}
 
-	allNames := mergeKeys(baseByName, targetByName)
+	allNames, err := mergeKeys(ctx, baseByName, targetByName)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sort.Strings(allNames)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	for _, name := range allNames {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		baseSt, baseExists := baseByName[name]
 		targetSt, targetExists := targetByName[name]
 
 		prefix := string(base.Type) + "." + name
 
 		if !baseExists {
-			changes = append(changes, addedSubtype(prefix, targetSt)...)
+			added, err := addedSubtype(ctx, prefix, targetSt)
+			if err != nil {
+				return nil, err
+			}
+			changes = append(changes, added...)
 			continue
 		}
 		if !targetExists {
-			changes = append(changes, removedSubtype(prefix, baseSt)...)
+			removed, err := removedSubtype(ctx, prefix, baseSt)
+			if err != nil {
+				return nil, err
+			}
+			changes = append(changes, removed...)
 			continue
 		}
 
-		changes = append(changes, compareReadings(prefix, baseSt.Data, targetSt.Data)...)
-		changes = append(changes, compareStrings(prefix+".context", baseSt.Context, targetSt.Context)...)
-		changes = append(changes, compareItems(prefix, baseSt.Items, targetSt.Items)...)
+		readingChanges, err := compareReadings(ctx, prefix, baseSt.Data, targetSt.Data)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, readingChanges...)
+		stringChanges, err := compareStrings(ctx, prefix+".context", baseSt.Context, targetSt.Context)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, stringChanges...)
+		itemChanges, err := compareItems(ctx, prefix, baseSt.Items, targetSt.Items)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, itemChanges...)
 	}
 
-	return changes
+	return changes, nil
 }
 
-func compareReadings(prefix string, base, target map[string]measurement.Reading) []Change {
+func compareReadings(ctx context.Context, prefix string, base, target map[string]measurement.Reading) ([]Change, error) {
 	var changes []Change
 
-	allKeys := mergeKeys(base, target)
+	allKeys, err := mergeKeys(ctx, base, target)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sort.Strings(allKeys)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	for _, key := range allKeys {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		path := dataPath(prefix, key)
 		baseReading, baseExists := base[key]
 		targetReading, targetExists := target[key]
@@ -247,12 +377,15 @@ func compareReadings(prefix string, base, target map[string]measurement.Reading)
 
 		baseVal := safeReadingString(baseReading)
 		targetVal := safeReadingString(targetReading)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if baseVal != targetVal {
 			changes = append(changes, Change{Kind: Modified, Severity: SeverityInfo, Path: path, Baseline: strPtr(baseVal), Target: strPtr(targetVal)})
 		}
 	}
 
-	return changes
+	return changes, nil
 }
 
 func dataPath(prefix, key string) string {
@@ -264,20 +397,32 @@ func dataPath(prefix, key string) string {
 	return prefix + "." + key
 }
 
-func addedReadings(prefix string, values map[string]measurement.Reading) []Change {
-	return compareReadings(prefix, nil, values)
+func addedReadings(ctx context.Context, prefix string, values map[string]measurement.Reading) ([]Change, error) {
+	return compareReadings(ctx, prefix, nil, values)
 }
 
-func removedReadings(prefix string, values map[string]measurement.Reading) []Change {
-	return compareReadings(prefix, values, nil)
+func removedReadings(ctx context.Context, prefix string, values map[string]measurement.Reading) ([]Change, error) {
+	return compareReadings(ctx, prefix, values, nil)
 }
 
-func compareStrings(prefix string, base, target map[string]string) []Change {
+func compareStrings(ctx context.Context, prefix string, base, target map[string]string) ([]Change, error) {
 	changes := make([]Change, 0)
-	keys := mergeKeys(base, target)
+	keys, err := mergeKeys(ctx, base, target)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sort.Strings(keys)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	for _, key := range keys {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		path := prefix + "." + key
 		baseValue, baseExists := base[key]
 		targetValue, targetExists := target[key]
@@ -292,15 +437,15 @@ func compareStrings(prefix string, base, target map[string]string) []Change {
 		}
 	}
 
-	return changes
+	return changes, nil
 }
 
-func addedStrings(prefix string, values map[string]string) []Change {
-	return compareStrings(prefix, nil, values)
+func addedStrings(ctx context.Context, prefix string, values map[string]string) ([]Change, error) {
+	return compareStrings(ctx, prefix, nil, values)
 }
 
-func removedStrings(prefix string, values map[string]string) []Change {
-	return compareStrings(prefix, values, nil)
+func removedStrings(ctx context.Context, prefix string, values map[string]string) ([]Change, error) {
+	return compareStrings(ctx, prefix, values, nil)
 }
 
 func itemPrefix(prefix string, index int) string {
@@ -317,8 +462,11 @@ func lengthChange(prefix string, kind ChangeKind, baseline, target *string) Chan
 	}
 }
 
-func compareItems(prefix string, base, target []measurement.ItemEntry) []Change {
+func compareItems(ctx context.Context, prefix string, base, target []measurement.ItemEntry) ([]Change, error) {
 	changes := make([]Change, 0)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(base) != len(target) {
 		changes = append(changes, lengthChange(
 			prefix,
@@ -330,107 +478,213 @@ func compareItems(prefix string, base, target []measurement.ItemEntry) []Change 
 
 	shared := min(len(base), len(target))
 	for i := 0; i < shared; i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		path := itemPrefix(prefix, i)
-		changes = append(changes, compareStrings(path+".context", base[i].Context, target[i].Context)...)
-		changes = append(changes, compareReadings(path+".data", base[i].Data, target[i].Data)...)
+		stringChanges, err := compareStrings(ctx, path+".context", base[i].Context, target[i].Context)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, stringChanges...)
+		readingChanges, err := compareReadings(ctx, path+".data", base[i].Data, target[i].Data)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, readingChanges...)
 	}
 	for i := shared; i < len(target); i++ {
-		changes = append(changes, addedItem(itemPrefix(prefix, i), &target[i])...)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		added, err := addedItem(ctx, itemPrefix(prefix, i), &target[i])
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, added...)
 	}
 	for i := shared; i < len(base); i++ {
-		changes = append(changes, removedItem(itemPrefix(prefix, i), &base[i])...)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		removed, err := removedItem(ctx, itemPrefix(prefix, i), &base[i])
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, removed...)
 	}
 
-	return changes
+	return changes, nil
 }
 
-func addedItem(prefix string, item *measurement.ItemEntry) []Change {
-	changes := addedStrings(prefix+".context", item.Context)
-	return append(changes, addedReadings(prefix+".data", item.Data)...)
+func addedItem(ctx context.Context, prefix string, item *measurement.ItemEntry) ([]Change, error) {
+	changes, err := addedStrings(ctx, prefix+".context", item.Context)
+	if err != nil {
+		return nil, err
+	}
+	readings, err := addedReadings(ctx, prefix+".data", item.Data)
+	if err != nil {
+		return nil, err
+	}
+	return append(changes, readings...), nil
 }
 
-func removedItem(prefix string, item *measurement.ItemEntry) []Change {
-	changes := removedStrings(prefix+".context", item.Context)
-	return append(changes, removedReadings(prefix+".data", item.Data)...)
+func removedItem(ctx context.Context, prefix string, item *measurement.ItemEntry) ([]Change, error) {
+	changes, err := removedStrings(ctx, prefix+".context", item.Context)
+	if err != nil {
+		return nil, err
+	}
+	readings, err := removedReadings(ctx, prefix+".data", item.Data)
+	if err != nil {
+		return nil, err
+	}
+	return append(changes, readings...), nil
 }
 
-func addedItems(prefix string, items []measurement.ItemEntry) []Change {
+func addedItems(ctx context.Context, prefix string, items []measurement.ItemEntry) ([]Change, error) {
 	if len(items) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	changes := []Change{
 		lengthChange(prefix, Added, nil, strPtr(strconv.Itoa(len(items)))),
 	}
 	for i := range items {
-		changes = append(changes, addedItem(itemPrefix(prefix, i), &items[i])...)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		added, err := addedItem(ctx, itemPrefix(prefix, i), &items[i])
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, added...)
 	}
-	return changes
+	return changes, nil
 }
 
-func removedItems(prefix string, items []measurement.ItemEntry) []Change {
+func removedItems(ctx context.Context, prefix string, items []measurement.ItemEntry) ([]Change, error) {
 	if len(items) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	changes := []Change{
 		lengthChange(prefix, Removed, strPtr(strconv.Itoa(len(items))), nil),
 	}
 	for i := range items {
-		changes = append(changes, removedItem(itemPrefix(prefix, i), &items[i])...)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		removed, err := removedItem(ctx, itemPrefix(prefix, i), &items[i])
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, removed...)
 	}
-	return changes
+	return changes, nil
 }
 
-func addedMeasurement(m *measurement.Measurement) []Change {
+func addedMeasurement(ctx context.Context, m *measurement.Measurement) ([]Change, error) {
 	changes := make([]Change, 0, len(m.Subtypes))
 	for i := range m.Subtypes {
-		changes = append(changes, addedSubtype(string(m.Type)+"."+m.Subtypes[i].Name, &m.Subtypes[i])...)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		added, err := addedSubtype(ctx, string(m.Type)+"."+m.Subtypes[i].Name, &m.Subtypes[i])
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, added...)
 	}
-	return changes
+	return changes, nil
 }
 
-func removedMeasurement(m *measurement.Measurement) []Change {
+func removedMeasurement(ctx context.Context, m *measurement.Measurement) ([]Change, error) {
 	changes := make([]Change, 0, len(m.Subtypes))
 	for i := range m.Subtypes {
-		changes = append(changes, removedSubtype(string(m.Type)+"."+m.Subtypes[i].Name, &m.Subtypes[i])...)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		removed, err := removedSubtype(ctx, string(m.Type)+"."+m.Subtypes[i].Name, &m.Subtypes[i])
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, removed...)
 	}
-	return changes
+	return changes, nil
 }
 
-func addedSubtype(prefix string, st *measurement.Subtype) []Change {
-	changes := addedReadings(prefix, st.Data)
-	changes = append(changes, addedStrings(prefix+".context", st.Context)...)
-	changes = append(changes, addedItems(prefix, st.Items)...)
-	return changes
+func addedSubtype(ctx context.Context, prefix string, st *measurement.Subtype) ([]Change, error) {
+	changes, err := addedReadings(ctx, prefix, st.Data)
+	if err != nil {
+		return nil, err
+	}
+	stringChanges, err := addedStrings(ctx, prefix+".context", st.Context)
+	if err != nil {
+		return nil, err
+	}
+	changes = append(changes, stringChanges...)
+	items, err := addedItems(ctx, prefix, st.Items)
+	if err != nil {
+		return nil, err
+	}
+	return append(changes, items...), nil
 }
 
-func removedSubtype(prefix string, st *measurement.Subtype) []Change {
-	changes := removedReadings(prefix, st.Data)
-	changes = append(changes, removedStrings(prefix+".context", st.Context)...)
-	changes = append(changes, removedItems(prefix, st.Items)...)
-	return changes
+func removedSubtype(ctx context.Context, prefix string, st *measurement.Subtype) ([]Change, error) {
+	changes, err := removedReadings(ctx, prefix, st.Data)
+	if err != nil {
+		return nil, err
+	}
+	stringChanges, err := removedStrings(ctx, prefix+".context", st.Context)
+	if err != nil {
+		return nil, err
+	}
+	changes = append(changes, stringChanges...)
+	items, err := removedItems(ctx, prefix, st.Items)
+	if err != nil {
+		return nil, err
+	}
+	return append(changes, items...), nil
 }
 
-func indexSubtypes(subtypes []measurement.Subtype) map[string]*measurement.Subtype {
+func indexSubtypes(ctx context.Context, subtypes []measurement.Subtype) (map[string]*measurement.Subtype, error) {
 	idx := make(map[string]*measurement.Subtype, len(subtypes))
 	for i := range subtypes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		idx[subtypes[i].Name] = &subtypes[i]
 	}
-	return idx
+	return idx, nil
 }
 
-func mergeKeys[V any](a, b map[string]V) []string {
+func mergeKeys[V any](ctx context.Context, a, b map[string]V) ([]string, error) {
 	seen := make(map[string]struct{}, len(a)+len(b))
 	for k := range a {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		seen[k] = struct{}{}
 	}
 	for k := range b {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		seen[k] = struct{}{}
 	}
 	keys := make([]string, 0, len(seen))
 	for k := range seen {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		keys = append(keys, k)
 	}
-	return keys
+	return keys, nil
+}
+
+func snapshotContextError(cause error) error {
+	if stderrors.Is(cause, context.Canceled) {
+		return errors.Wrap(errors.ErrCodeCanceled, "snapshot diff canceled", cause)
+	}
+	return errors.Wrap(errors.ErrCodeTimeout, "snapshot diff deadline exceeded", cause)
 }
