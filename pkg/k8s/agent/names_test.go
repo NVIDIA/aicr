@@ -20,12 +20,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestNameWithRunID(t *testing.T) {
-	const runID = "20260821-142233-9f3a1c0b7e2d4a55" // 32 chars
+	const runID = "20260821-142233-9f3a1c0b7e2d4a55"
+
+	// nameWithRunID budgets the prefix against defaults.MaxK8sNameLength,
+	// reserving len(runID) plus the "-" separator. Derive the budget the same
+	// way rather than hard-coding it, so raising or lowering the constant
+	// moves these boundaries with it instead of silently invalidating them.
+	budget := defaults.MaxK8sNameLength - len(runID) - 1
 
 	tests := []struct {
 		name   string
@@ -34,9 +41,9 @@ func TestNameWithRunID(t *testing.T) {
 		want   string
 	}{
 		{"short prefix", "aicr", runID, "aicr-" + runID},
-		{"exactly at budget", strings.Repeat("a", 30), runID, strings.Repeat("a", 30) + "-" + runID},
-		{"over budget truncates", strings.Repeat("b", 40), runID, strings.Repeat("b", 30) + "-" + runID},
-		{"trailing dash trimmed", strings.Repeat("c", 29) + "-", runID, strings.Repeat("c", 29) + "-" + runID},
+		{"exactly at budget", strings.Repeat("a", budget), runID, strings.Repeat("a", budget) + "-" + runID},
+		{"over budget truncates", strings.Repeat("b", budget+10), runID, strings.Repeat("b", budget) + "-" + runID},
+		{"trailing dash trimmed", strings.Repeat("c", budget-1) + "-", runID, strings.Repeat("c", budget-1) + "-" + runID},
 		{"empty prefix", "", runID, runID},
 		// A zero-value Config.RunID (only reachable from an SDK caller
 		// constructing a Config directly) must fall back to the bare prefix,
@@ -52,8 +59,8 @@ func TestNameWithRunID(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("nameWithRunID(%q, %q) = %q, want %q", tt.prefix, tt.runID, got, tt.want)
 			}
-			if len(got) > 63 {
-				t.Errorf("len = %d, exceeds 63-char ceiling", len(got))
+			if len(got) > defaults.MaxK8sNameLength {
+				t.Errorf("len = %d, exceeds the %d-char ceiling", len(got), defaults.MaxK8sNameLength)
 			}
 			if strings.HasSuffix(got, "-") {
 				t.Errorf("nameWithRunID(%q, %q) = %q, ends in a trailing separator (invalid Kubernetes name)", tt.prefix, tt.runID, got)
@@ -208,14 +215,14 @@ func TestValidateRunID(t *testing.T) {
 	}{
 		{"well-formed generated run ID", "20260821-142233-9f3a1c0b7e2d4a55", false},
 		{"single character", "a", false},
-		{"exactly at the DNS-1123 label ceiling", strings.Repeat("a", 63), false},
+		{"exactly at the DNS-1123 label ceiling", strings.Repeat("a", defaults.MaxK8sNameLength), false},
 		{"empty", "", true},
 		{"whitespace", "   ", true},
 		{"embedded slash", "build/42", true},
 		{"leading dash", "-build", true},
 		{"trailing dash", "build-", true},
 		{"uppercase", "Build42", true},
-		{"one over the DNS-1123 label ceiling", strings.Repeat("a", 64), true},
+		{"one over the DNS-1123 label ceiling", strings.Repeat("a", defaults.MaxK8sNameLength+1), true},
 	}
 
 	for _, tt := range tests {
@@ -248,7 +255,7 @@ func TestValidateRunID(t *testing.T) {
 // rejected run leaves no partially-created RBAC behind.
 func TestDeployRejectsInvalidRunIDBeforeCreatingAnything(t *testing.T) {
 	ctx := context.Background()
-	for _, runID := range []string{"", "   ", "build/42", "-build", "build-", "Build42", strings.Repeat("a", 64)} {
+	for _, runID := range []string{"", "   ", "build/42", "-build", "build-", "Build42", strings.Repeat("a", defaults.MaxK8sNameLength+1)} {
 		t.Run(runID, func(t *testing.T) {
 			clientset := fake.NewClientset()
 			d := NewDeployer(clientset, Config{Namespace: "test-ns", Image: "aicr:test", RunID: runID})
