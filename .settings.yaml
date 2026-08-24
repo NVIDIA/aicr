@@ -19,7 +19,7 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.17.1'
+  goreleaser: 'v2.18.0'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
@@ -61,8 +61,8 @@ security_tools:
   #
   # Stored WITHOUT the leading 'v', unlike cosign/syft/grype above:
   # oras-project/setup-oras looks the version up against bare release keys and
-  # throws on 'v1.3.0'. tools/setup-tools re-adds the prefix for the download URL.
-  oras: '1.3.0'
+  # throws on 'v1.3.3'. tools/setup-tools re-adds the prefix for the download URL.
+  oras: '1.3.3'
 
 # E2E Testing Tools
 testing_tools:

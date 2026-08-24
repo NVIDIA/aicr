@@ -352,8 +352,8 @@ func DiscoverClusterConfig(ctx context.Context, c client.Client, restConfig *res
 	// from the per-group hardware probes), assign each group a stable
 	// machine label. This replaces the differential-label nodeSelector
 	// algorithm: every node in the group is patched with
-	// `nvidia.kubernetes-launch-kit.machine: <machineType>-<gpuType>` and
-	// the group's Identifier + NodeSelector are aligned with that value.
+	// `nvidia.kubernetes-launch-kit.machine: <generated-identifier>` and the
+	// group's Identifier + NodeSelector are aligned with that value.
 	applyMachineLabelToGroups(ctx, c, cfg.ClusterConfig)
 
 	// Persist the automatic GPUDirect decision in the generated config. The
@@ -485,18 +485,16 @@ func resolvePresetCatalog(opts Options) (*presets.Catalog, error) {
 // applyMachineLabelToGroups walks each group and writes two l8k-specific
 // labels onto every node in the group:
 //
-//   - MachineLabelKey = `<machineType>-<gpuType>` literal — per-source-group
-//     identifier, written when both fields are resolved.
+//   - MachineLabelKey = the generated per-source-group identifier, written
+//     when both machineType and gpuType are resolved.
 //   - GPULabelKey = `<gpuType>` literal — written when gpuType is resolved.
 //     Used as the merged-group NodeSelector when source groups span
 //     machineTypes but share a GPU type.
 //
-// Long label values are shortened with a deterministic hash. Machine labels
-// and generated group identifiers are bounded to 40 bytes so identifiers can
-// be safely appended to other generated values; GPU labels use Kubernetes'
-// 63-byte limit. Group `Identifier` follows the resource-name convention
-// (lowercase via `SanitizeIdentifier`); label values keep their original case
-// to match `nvidia.com/gpu.product`-style values.
+// Machine labels and generated group identifiers share the same lowercase,
+// vendor-free value, bounded to 30 bytes with balanced machine/GPU prefixes
+// and a deterministic hash. GPU labels retain their original case and vendor
+// segment and continue to use Kubernetes' 63-byte label-value limit.
 //
 // Groups whose machine label can't be computed (one input missing) keep
 // their fallback identifier ("group-N") and an empty NodeSelector. The
@@ -505,10 +503,10 @@ func resolvePresetCatalog(opts Options) (*presets.Catalog, error) {
 func applyMachineLabelToGroups(ctx context.Context, c client.Client, groups []config.ClusterConfig) {
 	for i := range groups {
 		g := &groups[i]
-		machineLabel := config.MachineLabelValue(g.MachineType, g.GPUType)
+		groupIdentifier := config.GeneratedGroupIdentifier(g.MachineType, g.GPUType)
 		gpuLabel := config.GPULabelValue(g.GPUType)
 
-		if machineLabel == "" {
+		if groupIdentifier == "" {
 			log.Log.V(1).Info("Skipping machine label: machineType/gpuType unresolved",
 				"group", g.Identifier,
 				"machineType", g.MachineType,
@@ -518,15 +516,15 @@ func applyMachineLabelToGroups(ctx context.Context, c client.Client, groups []co
 				"originalIdentifier", g.Identifier,
 				"machineType", g.MachineType,
 				"gpuType", g.GPUType,
-				"labelValue", machineLabel,
+				"labelValue", groupIdentifier,
 				"nodes", len(g.WorkerNodes))
-			g.Identifier = config.SanitizeIdentifier(machineLabel)
-			g.NodeSelector = map[string]string{config.MachineLabelKey: machineLabel}
+			g.Identifier = groupIdentifier
+			g.NodeSelector = map[string]string{config.MachineLabelKey: groupIdentifier}
 		}
 
 		labels := map[string]string{}
-		if machineLabel != "" {
-			labels[config.MachineLabelKey] = machineLabel
+		if groupIdentifier != "" {
+			labels[config.MachineLabelKey] = groupIdentifier
 		}
 		if gpuLabel != "" {
 			labels[config.GPULabelKey] = gpuLabel

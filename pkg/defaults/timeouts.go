@@ -1254,8 +1254,18 @@ const (
 	// recipe constraints. Without this flag Helm uses its compiled-in
 	// default (currently v1.27.0 in Helm 3.x), which is too old for
 	// charts that declare a kubeVersion constraint (e.g., >=1.32.0-0).
-	// The value tracks the project's minimum supported Kubernetes version
-	// declared in recipes/overlays/base.yaml.
+	//
+	// This is a render-safe fallback, not a support floor. This constant
+	// must stay at or above the strictest kubeVersion any bundled chart
+	// declares. Do NOT lower it to match the ">= 1.25" recipe floor in
+	// recipes/overlays/base.yaml: that is the constraint recipes are
+	// validated against, and a recipe that declares one never reaches this
+	// default (see mirror.KubeVersionFromConstraints).
+	//
+	// The invariant binds this constant only. The constraint path is
+	// unbounded below: KubeVersionFromConstraints returns the recipe's own
+	// value, so a recipe carrying nothing but base.yaml's ">= 1.25" renders
+	// with --kube-version 1.25.
 	MirrorDefaultKubeVersion = "1.33.0"
 
 	// MirrorDiscoveryConcurrency caps the number of components rendered in
