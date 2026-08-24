@@ -56,6 +56,15 @@ type ComponentData struct {
 	IsOCI      bool
 	Tag        string // Git ref for Kustomize-typed components (tag/branch/commit)
 	Path       string // Path within the repository to the kustomization
+
+	// DriverOperatorManaged is true when the bundle's effective values
+	// select an operator-managed NVIDIA driver — gpu-operator's or
+	// gpu-operator-ocp's driver.enabled is true. deploy.sh's DRA
+	// migration-wait block (see #2135, #973) uses this to tell "driver
+	// is host-managed" apart from "driver is operator-managed but the
+	// DaemonSet/node-label migration signal isn't observable yet",
+	// which live cluster state alone cannot distinguish.
+	DriverOperatorManaged bool
 }
 
 // compile-time interface check
@@ -265,6 +274,29 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 // buildComponentDataList builds a sorted list of ComponentData from the recipe.
 // It validates that all component names are safe for use as directory names.
+// driverOperatorManaged reports whether this bundle's effective values
+// select an operator-managed NVIDIA driver: gpu-operator's or
+// gpu-operator-ocp's driver.enabled is true. Checks both component names
+// since only one is ever enabled in a given recipe (see
+// pkg/bundler/bundler.go's gpuOperatorComponentNames for the canonical
+// list this mirrors).
+func (g *Generator) driverOperatorManaged() bool {
+	for _, name := range []string{"gpu-operator", "gpu-operator-ocp"} {
+		values, ok := g.ComponentValues[name]
+		if !ok {
+			continue
+		}
+		driver, ok := values["driver"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if enabled, ok := driver["enabled"].(bool); ok && enabled {
+			return true
+		}
+	}
+	return false
+}
+
 // Only the fields consumed by the orchestration templates are populated.
 func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 	// Sort by deployment order
@@ -272,6 +304,8 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 		g.RecipeResult.ComponentRefs,
 		g.RecipeResult.DeploymentOrder,
 	)
+
+	driverOperatorManaged := g.driverOperatorManaged()
 
 	components := make([]ComponentData, 0, len(sorted))
 	for _, ref := range sorted {
@@ -283,14 +317,15 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 		chartName := ref.EffectiveChart()
 
 		components = append(components, ComponentData{
-			Name:       ref.Name,
-			Namespace:  ref.Namespace,
-			Repository: ref.Source,
-			ChartName:  chartName,
-			Version:    ref.Version,
-			IsOCI:      strings.HasPrefix(ref.Source, "oci://"),
-			Tag:        ref.Tag,
-			Path:       ref.Path,
+			Name:                  ref.Name,
+			Namespace:             ref.Namespace,
+			Repository:            ref.Source,
+			ChartName:             chartName,
+			Version:               ref.Version,
+			IsOCI:                 strings.HasPrefix(ref.Source, "oci://"),
+			Tag:                   ref.Tag,
+			Path:                  ref.Path,
+			DriverOperatorManaged: driverOperatorManaged,
 		})
 	}
 

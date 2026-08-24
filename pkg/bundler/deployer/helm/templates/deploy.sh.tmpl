@@ -453,7 +453,21 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     MANAGED_NODES=$(kubectl get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
     SKIP_RESTART="false"
     if [[ -z "${DRIVER_DS_NS}" && "${MANAGED_NODES}" -eq 0 ]]; then
+      {{- if .DriverOperatorManaged }}
+      # This bundle's effective values select an operator-managed
+      # driver (driver.enabled=true), so the absence of both runtime
+      # signals means the migration gate isn't observable YET (the
+      # operator hasn't converged), not that the driver is
+      # host-managed. Falling through to the restart below on that
+      # wrong assumption reproduces the exact invalid-CDI/
+      # ContainerCreating failure this block exists to prevent (#973).
+      # Block the restart; a retried deploy will observe the gate once
+      # the operator creates the DaemonSet or labels a node.
+      echo "  WARNING: gpu-operator driver.enabled=true but neither the driver DaemonSet nor the migration label is observable yet; blocking the DRA plugin restart until the driver rollout is detectable (retry the deploy)"
+      SKIP_RESTART=true
+      {{- else }}
       echo "  gpu-operator nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"
+      {{- end }}
     elif [[ "${MANAGED_NODES}" -gt 0 ]]; then
       echo "  Waiting for gpu-operator driver migration on ${MANAGED_NODES} managed GPU node(s) to reach upgrade-done (ns=${DRIVER_DS_NS:-unknown})..."
       if ! kubectl wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
