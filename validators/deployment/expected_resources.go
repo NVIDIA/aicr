@@ -87,17 +87,19 @@ const (
 	runtimeRequiredTaintKey   = "skyhook.nvidia.com"
 	runtimeRequiredTaintValue = "runtime-required"
 
-	// nicClusterPolicyManifestMarker identifies the AKS NicClusterPolicy manifest
-	// (recipes/components/network-operator/manifests/nic-cluster-policy-aks.yaml)
-	// among a network-operator ComponentRef's ManifestFiles. Its presence means
-	// the recipe stands up an RDMA fabric (MOFED + rdma-shared-device-plugin), so
-	// a GPU node not yet advertising the shared resource is "still converging",
-	// not "no fabric". OCP wires a different component (network-operator-ocp) and
-	// manifest name and so does not match; kind/talos enable network-operator
-	// without this manifest and are likewise (correctly) not gated. The shared
-	// resource name and the RDMA node label are defined in validators/helper
-	// (AKSRdmaSharedResource, PCIMellanoxPresentLabel) so this gate and the NCCL
-	// consumer cannot drift.
+	// nicClusterPolicyManifestMarker identifies a NicClusterPolicy manifest
+	// (nic-cluster-policy-aks.yaml, nic-cluster-policy-oke-{gb200,l40s}.yaml
+	// under recipes/components/network-operator/manifests/) among a
+	// network-operator ComponentRef's ManifestFiles. Its presence means the
+	// recipe stands up an RDMA fabric (an RDMA-shared or SR-IOV device plugin),
+	// so a GPU node not yet advertising the fabric resource is "still
+	// converging", not "no fabric". OCP wires a different component
+	// (network-operator-ocp) and manifest name and so does not match; kind/talos
+	// enable network-operator without this manifest and are likewise (correctly)
+	// not gated. The polled resource name is derived per recipe from the matched
+	// manifest itself (rdmaFabricResource), so the gate always waits for exactly
+	// what this recipe's fabric advertises; the RDMA node label lives in
+	// validators/helper (PCIMellanoxPresentLabel).
 	nicClusterPolicyManifestMarker = "nic-cluster-policy"
 )
 
@@ -433,7 +435,15 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 	}
 
 	if ref, ok := findEnabledComponent(refs, networkOperatorComponent); ok && recipeDeclaresRDMAFabric(ref) {
-		capture(verifyRDMAFabricReady(ctx))
+		// The polled resource is derived from the recipe's own NicClusterPolicy
+		// manifest (rdma/hca_shared_devices_a on AKS, nvidia.com/mlnxnics on OKE)
+		// so the gate waits for exactly what this recipe's fabric advertises. A
+		// derivation failure fails the gate closed — never "skip the fabric".
+		if fabricResource, ferr := rdmaFabricResource(ctx.Ctx, ref); ferr != nil {
+			capture(ferr)
+		} else {
+			capture(verifyRDMAFabricReady(ctx, fabricResource))
+		}
 	}
 
 	return failures, firstStructured
@@ -1043,12 +1053,13 @@ func draKubeletPluginProbe(ctx *validators.Context, namespace string) (string, e
 }
 
 // recipeDeclaresRDMAFabric reports whether a network-operator ComponentRef
-// stands up an RDMA fabric on this cluster — i.e. it declares the AKS
-// NicClusterPolicy manifest that creates MOFED + the rdma-shared-device-plugin
+// stands up an RDMA fabric on this cluster — i.e. it declares a
+// NicClusterPolicy manifest that creates an RDMA device plugin
 // (nicClusterPolicyManifestMarker). When true, a GPU node that does not yet
-// advertise aksRDMASharedResource is "still converging", so verifyRDMAFabricReady
-// waits for it; when false (kind's single-node nvkind, talos' namespace-only
-// ref) there is no shared fabric to gate on and the check is skipped.
+// advertise the manifest-derived fabric resource is "still converging", so
+// verifyRDMAFabricReady waits for it; when false (kind's single-node nvkind,
+// talos' namespace-only ref) there is no shared fabric to gate on and the
+// check is skipped.
 //
 // Sibling predicate: pkg/bundler/readiness.go's
 // recipeAttachesNicClusterPolicy encodes the same "does this recipe stand
@@ -1070,7 +1081,8 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 }
 
 // verifyRDMAFabricReady blocks the deployment gate until the network operator's
-// shared RDMA device (helper.AKSRdmaSharedResource) is allocatable in a uniform,
+// shared RDMA device (fabricResource, derived from the recipe's own
+// NicClusterPolicy manifest by rdmaFabricResource) is allocatable in a uniform,
 // positive count across every Mellanox RDMA-capable GPU node, held continuously for the
 // stability window.
 //
@@ -1098,19 +1110,19 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 // so it survives the default redaction policy into the signed bundle (#1951/#1952) —
 // a cordoned node narrowing the fabric cohort can no longer hide behind a
 // stdout-only line the publisher strips.
-func verifyRDMAFabricReady(ctx *validators.Context) error {
+func verifyRDMAFabricReady(ctx *validators.Context, fabricResource string) error {
 	// Production emit seam: publish the structured coverage as an EmitExtra
 	// sentinel. verifyRDMAFabricReadyEmit injects it so tests can record the eager
 	// floor and terminal disclosures without capturing the EmitExtra stdout
 	// transport (which lives in the validators package).
-	return verifyRDMAFabricReadyEmit(ctx, func(validated, total int) {
+	return verifyRDMAFabricReadyEmit(ctx, fabricResource, func(validated, total int) {
 		emitExtraOrWarn(rdmaFabricCoverageExtra(validated, total))
 	})
 }
 
 // verifyRDMAFabricReadyEmit is verifyRDMAFabricReady with the structured
 // coverage emit injected. See verifyRDMAFabricReady for the gate contract.
-func verifyRDMAFabricReadyEmit(ctx *validators.Context, emitCoverage func(validated, total int)) error {
+func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, emitCoverage func(validated, total int)) error {
 	var coverage rdmaFabricCoverage
 	// emittedEarly gates the eager disclosure floor to exactly one emit.
 	var emittedEarly bool
@@ -1120,9 +1132,9 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, emitCoverage func(valida
 	// each tick — the settled disclosure must land exactly once, at the final
 	// outcome).
 	err := pollUntilStable(ctx,
-		fmt.Sprintf("RDMA shared-device fabric (%s) across RDMA GPU nodes", helper.AKSRdmaSharedResource),
+		fmt.Sprintf("RDMA shared-device fabric (%s) across RDMA GPU nodes", fabricResource),
 		func() error {
-			cov, probeErr := rdmaFabricProbeCoverage(ctx)
+			cov, probeErr := rdmaFabricProbeCoverage(ctx, fabricResource)
 			coverage = cov
 			// Eager disclosure floor: emit the structured coverage once, on the
 			// first observation that actually enumerated an RDMA-candidate node,
@@ -1172,7 +1184,7 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, emitCoverage func(valida
 
 	if err == nil {
 		fmt.Printf("  RDMA fabric (%s): allocatable (uniform) on all %d schedulable RDMA GPU node(s) (stable ≥%s)\n",
-			helper.AKSRdmaSharedResource, coverage.schedulable, gpuReadinessStabilityWindow)
+			fabricResource, coverage.schedulable, gpuReadinessStabilityWindow)
 	}
 	return err
 }
@@ -1243,13 +1255,13 @@ func rdmaFabricCoverageExtra(validated, total int) map[string]string {
 // then validates only the schedulable cohort: nodes carrying the NicClusterPolicy
 // nodeAffinity label helper.PCIMellanoxPresentLabel. It returns nil — plus the
 // coverage partition — only when every schedulable such node advertises
-// helper.AKSRdmaSharedResource in a uniform, positive count. It fails closed on a
+// fabricResource in a uniform, positive count. It fails closed on a
 // List error and when no schedulable RDMA GPU node is observed yet: "could not
 // observe the fabric" must never read as "fabric ready". The returned error rides
 // the poll's dwell reset like any other unhealthy sample; the coverage is
 // returned alongside every error so the terminal disclosure can still name the
 // cordoned nodes it saw.
-func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error) {
+func rdmaFabricProbeCoverage(ctx *validators.Context, fabricResource string) (rdmaFabricCoverage, error) {
 	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
 	defer cancel()
 
@@ -1263,7 +1275,7 @@ func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error
 			"failed to list nodes for the RDMA fabric readiness gate")
 	}
 
-	fabric := corev1.ResourceName(helper.AKSRdmaSharedResource)
+	fabric := corev1.ResourceName(fabricResource)
 	type rdmaNode struct {
 		name  string
 		count int64
@@ -1323,8 +1335,8 @@ func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error
 	if len(notReady) > 0 {
 		return coverage, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("%s not yet allocatable on %d of %d RDMA GPU node(s): %s "+
-				"(network operator MOFED / rdma-shared-device-plugin still rolling out)",
-				helper.AKSRdmaSharedResource, len(notReady), len(cohort), formatNames(notReady)))
+				"(network operator MOFED / RDMA device plugin still rolling out)",
+				fabricResource, len(notReady), len(cohort), formatNames(notReady)))
 	}
 
 	// All present and positive: require a uniform count, matching the NCCL
@@ -1340,7 +1352,7 @@ func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error
 	if len(skew) > 0 {
 		return coverage, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("%s allocatable count is non-uniform across %d RDMA GPU node(s) (want all == %d): %s",
-				helper.AKSRdmaSharedResource, len(cohort), want, formatNames(skew)))
+				fabricResource, len(cohort), want, formatNames(skew)))
 	}
 	return coverage, nil
 }

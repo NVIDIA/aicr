@@ -60,23 +60,33 @@ const (
 	preflightPodNamePrefix = "nccl-nvreg-probe-"
 
 	// nvregDocsHint is the cluster-operator-facing message the preflight
-	// emits when the flag is missing. Keeps the fix one `kubectl` away.
-	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on p6e-gb200 EKS nodes so ` +
-		`the NVIDIA driver allows EFA (a PCIe-attached NIC) to attach dma-buf ` +
-		`handles for GPU HBM on the Grace CPU topology. Without it, the kernel ` +
-		`rejects the attach with "NVRM: dma-buf attach failed: topology not ` +
-		`supported for mapping type FORCE_PCIE" and NCCL silently falls back ` +
-		`to the Socket transport. Set it via the GPU Operator ClusterPolicy: ` +
-		`spec.driver.kernelModuleConfig.name → a ConfigMap in gpu-operator ` +
-		`with data "nvidia.conf: options nvidia NVreg_GrdmaPciTopoCheckOverride=1", ` +
-		`then delete the nvidia-driver DaemonSet pods to pick up the change.`
+	// emits when the flag is missing. Keeps the fix one `kubectl` away, and
+	// names the remediation for BOTH driver-ownership modes: when the GPU
+	// Operator manages the driver (EKS p6e-gb200; OKE under
+	// gpuStack=operator-managed) the ConfigMap route applies, and when the
+	// driver ships in the node image (OKE's default oci-managed profile) the
+	// image or node bootstrap must set the module parameter itself — there is
+	// no driver DaemonSet for a ConfigMap to reach.
+	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 nodes (EKS p6e-gb200 ` +
+		`and OKE NVL72) so the NVIDIA driver allows a PCIe-attached NIC (EFA on EKS, ` +
+		`ConnectX IB on OKE) to attach dma-buf handles for GPU HBM on the Grace CPU ` +
+		`topology. Without it, the kernel rejects the attach with "NVRM: dma-buf ` +
+		`attach failed: topology not supported for mapping type FORCE_PCIE" and NCCL ` +
+		`silently falls back to the Socket transport. When the GPU Operator manages ` +
+		`the driver, set it via the ClusterPolicy: spec.driver.kernelModuleConfig.name ` +
+		`→ a ConfigMap in gpu-operator with data "nvidia.conf: options nvidia ` +
+		`NVreg_GrdmaPciTopoCheckOverride=1", then delete the nvidia-driver DaemonSet ` +
+		`pods to pick up the change. When the driver ships in the node image (OKE ` +
+		`gpuStack=oci-managed), set the module parameter in the image or node ` +
+		`bootstrap (e.g. /etc/modprobe.d) and reboot the GPU nodes.`
 )
 
 // preflightGB200NetNVregFlag verifies that every target GPU node has the
 // NVIDIA kernel driver loaded with NVreg_GrdmaPciTopoCheckOverride=1. Called
-// only for the NET variant on GB200/EKS — this is the knob that determines
-// whether EFA GPUDirect RDMA works on the GB200 PCI topology. NVLS (MNNVL)
-// traffic stays on NVLink-C2C and does not need it.
+// only for the NET variant on GB200/EKS and GB200/OKE — this is the knob that
+// determines whether GPUDirect RDMA over a PCIe-attached NIC (EFA, ConnectX
+// IB) works on the GB200 PCI topology. NVLS (MNNVL) traffic stays on
+// NVLink-C2C and does not need it.
 //
 // The check runs one short-lived Pod per target node, pinned via NodeName,
 // with /proc/driver/nvidia hostPath-mounted read-only. The pod greps for the
@@ -285,8 +295,17 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 // gb200NetPreflightApplies reports whether the preflight check should run for
 // the given (variant, accelerator, service) tuple. Keeps the call site at the
 // top of validateNcclAllReduceBw uncluttered.
+//
+// EKS and OKE are the two GB200 NET fabrics that traverse a PCIe-attached NIC
+// (EFA and ConnectX IB respectively), so both need the dma-buf module flag.
+// On OKE the flag reaches the driver only under gpuStack=operator-managed
+// (the leaf's kernel-module-params ConfigMap needs a driver DaemonSet to
+// consume it — see recipes/overlays/gb200-oke-training.yaml); under the
+// default oci-managed profile the driver ships in the node image, so this
+// preflight is the fail-closed gate that catches an image driver missing the
+// flag before NCCL silently degrades to Socket (#2356 review).
 func gb200NetPreflightApplies(variant ncclVariant, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) bool {
 	return variant == variantNET &&
 		accelerator == recipe.CriteriaAcceleratorGB200 &&
-		service == recipe.CriteriaServiceEKS
+		(service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE)
 }
