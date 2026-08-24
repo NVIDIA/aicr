@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -90,7 +91,7 @@ func TestBuildAgentConfigTolerations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildAgentConfig(&AgentConfig{Tolerations: tt.input}, "snapshot.yaml", false).Tolerations
+			got := buildAgentConfig(&AgentConfig{Tolerations: tt.input}, "20260821-142233-9f3a1c0b7e2d4a55", "snapshot.yaml", false).Tolerations
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("buildAgentConfig().Tolerations = %#v, want %#v", got, tt.want)
 			}
@@ -99,12 +100,18 @@ func TestBuildAgentConfigTolerations(t *testing.T) {
 }
 
 // TestBuildAgentConfigPropagatesRunIDAndOwnership confirms buildAgentConfig
-// forwards AgentConfig.RunID, AgentConfig.NameBase, and its ownsOutput
+// forwards its runID argument, AgentConfig.NameBase, and its ownsOutput
 // parameter onto agent.Config.RunID / agent.Config.NameBase /
 // agent.Config.OwnsOutputConfigMap — the projection deployAndWaitForResult
 // relies on so the deployer scopes every resource name to this run, applies
 // the caller's naming prefix, and Cleanup knows whether it may delete the
 // staging ConfigMap.
+//
+// runID is a parameter, not a read of AgentConfig.RunID: DeployAndCollect
+// resolves it into a local and never writes a generated ID back into the
+// caller's config. The AgentConfig below deliberately leaves RunID empty so a
+// projection that regressed to reading config.RunID would produce "" and fail
+// here.
 func TestBuildAgentConfigPropagatesRunIDAndOwnership(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -116,11 +123,10 @@ func TestBuildAgentConfigPropagatesRunIDAndOwnership(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := buildAgentConfig(&AgentConfig{
-				RunID:    "20260821-142233-9f3a1c0b7e2d4a55",
 				NameBase: "aicr-validate",
-			}, "cm://ns/name", tt.ownsOutput)
+			}, "20260821-142233-9f3a1c0b7e2d4a55", "cm://ns/name", tt.ownsOutput)
 			if got.RunID != "20260821-142233-9f3a1c0b7e2d4a55" {
-				t.Errorf("agent.Config.RunID = %q, want the AgentConfig.RunID value", got.RunID)
+				t.Errorf("agent.Config.RunID = %q, want the runID argument", got.RunID)
 			}
 			if got.NameBase != "aicr-validate" {
 				t.Errorf("agent.Config.NameBase = %q, want the AgentConfig.NameBase value", got.NameBase)
@@ -599,8 +605,7 @@ func TestAgentOutputURILogic(t *testing.T) {
 			agentOutput, ownsOutput, err := agentConfigMapTarget(&AgentConfig{
 				Namespace: tt.agentNamespace,
 				Output:    tt.userOutput,
-				RunID:     testRunID,
-			})
+			}, testRunID)
 			if err != nil {
 				t.Fatalf("agentConfigMapTarget: %v", err)
 			}
@@ -632,8 +637,9 @@ func TestAgentOutputURILogic(t *testing.T) {
 // staging ConfigMap only when the user did NOT name a cm:// destination.
 // Getting this backwards deletes the user's own output ConfigMap.
 func TestAgentConfigMapTargetIsRunScoped(t *testing.T) {
-	cfg := &AgentConfig{Namespace: "gpu-operator", RunID: "20260821-142233-9f3a1c0b7e2d4a55"}
-	uri, ownsOutput, err := agentConfigMapTarget(cfg)
+	const runID = "20260821-142233-9f3a1c0b7e2d4a55"
+	cfg := &AgentConfig{Namespace: "gpu-operator"}
+	uri, ownsOutput, err := agentConfigMapTarget(cfg, runID)
 	if err != nil {
 		t.Fatalf("agentConfigMapTarget() error = %v", err)
 	}
@@ -648,7 +654,7 @@ func TestAgentConfigMapTargetIsRunScoped(t *testing.T) {
 	}
 	// The URI must be built from the one exported helper the agent package
 	// also deletes by, not from a second copy of the format string.
-	if wantHelper := "cm://gpu-operator/" + agent.StagingConfigMapName(cfg.RunID); uri != wantHelper {
+	if wantHelper := "cm://gpu-operator/" + agent.StagingConfigMapName(runID); uri != wantHelper {
 		t.Errorf("uri = %q, want %q (agent.StagingConfigMapName)", uri, wantHelper)
 	}
 	if !ownsOutput {
@@ -657,8 +663,8 @@ func TestAgentConfigMapTargetIsRunScoped(t *testing.T) {
 }
 
 func TestAgentConfigMapTargetLeavesUserURIAlone(t *testing.T) {
-	cfg := &AgentConfig{Namespace: "gpu-operator", Output: "cm://gpu-operator/aicr-snapshot", RunID: "20260821-142233-9f3a1c0b7e2d4a55"}
-	uri, ownsOutput, err := agentConfigMapTarget(cfg)
+	cfg := &AgentConfig{Namespace: "gpu-operator", Output: "cm://gpu-operator/aicr-snapshot"}
+	uri, ownsOutput, err := agentConfigMapTarget(cfg, "20260821-142233-9f3a1c0b7e2d4a55")
 	if err != nil {
 		t.Fatalf("agentConfigMapTarget() error = %v", err)
 	}
@@ -1139,7 +1145,7 @@ func TestAgentConfigMapTargetRejectsMalformedURI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := agentConfigMapTarget(&AgentConfig{Namespace: "default", Output: tt.output})
+			_, _, err := agentConfigMapTarget(&AgentConfig{Namespace: "default", Output: tt.output}, "20260821-142233-9f3a1c0b7e2d4a55")
 			if err == nil {
 				t.Fatalf("agentConfigMapTarget(%q) = nil error, want rejection before any cluster access", tt.output)
 			}
@@ -1234,18 +1240,34 @@ func TestDeployAndCollectRejectsBeforeClusterAccess(t *testing.T) {
 	}
 }
 
-// TestDeployAndCollectDefaultsRunID confirms DeployAndCollect fills an empty
-// RunID with a freshly generated one before it is folded into the internal
-// staging ConfigMap's name — observable here because the malformed-Output
-// rejection below fires AFTER that defaulting step, and DeployAndCollect
-// mutates the caller's *AgentConfig in place.
-func TestDeployAndCollectDefaultsRunID(t *testing.T) {
-	runIDPattern := regexp.MustCompile(`^\d{8}-\d{6}-[0-9a-f]{16}$`)
+// TestDeployAndCollectGeneratesRunIDWithoutMutatingConfig confirms
+// DeployAndCollect resolves an empty RunID to a freshly generated one before
+// it is folded into the internal staging ConfigMap's name, AND that it leaves
+// the caller's *AgentConfig untouched while doing so.
+//
+// The non-mutation half is the load-bearing one. Writing the generated ID
+// back into the caller's config would turn a caller who reuses one config
+// pointer for a second run into a caller pinning a duplicate RunID — the one
+// state ADR-020 declares unsupported — and run 2 would hard-fail
+// ErrCodeInternal on the first still-existing run-scoped object. In-tree
+// callers reach this through the pkg/client/v1 facade, which builds a fresh
+// internal config per call, but pkg/snapshotter is public.
+//
+// The generated value is observed through the "snapshot agent run" log line,
+// which is emitted just before the malformed-Output rejection below fires;
+// there is no other seam that does not require cluster access.
+func TestDeployAndCollectGeneratesRunIDWithoutMutatingConfig(t *testing.T) {
+	runIDPattern := regexp.MustCompile(`runID=(\d{8}-\d{6}-[0-9a-f]{16})`)
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
 
 	cfg := &AgentConfig{
 		Namespace:  "default",
 		Kubeconfig: filepath.Join(t.TempDir(), "does-not-exist.kubeconfig"),
-		Output:     "cm://aicr-snapshot", // malformed: no namespace — rejected after RunID defaulting
+		Output:     "cm://aicr-snapshot", // malformed: no namespace — rejected after RunID resolution
 	}
 	if cfg.RunID != "" {
 		t.Fatalf("test precondition: cfg.RunID = %q, want empty", cfg.RunID)
@@ -1256,8 +1278,14 @@ func TestDeployAndCollectDefaultsRunID(t *testing.T) {
 		t.Fatal("DeployAndCollect() = nil error, want rejection from the malformed Output")
 	}
 
-	if !runIDPattern.MatchString(cfg.RunID) {
-		t.Errorf("cfg.RunID = %q after DeployAndCollect, want it filled with a generated ID matching %s",
-			cfg.RunID, runIDPattern)
+	if !runIDPattern.MatchString(logs.String()) {
+		t.Errorf("no generated run ID matching %s in log output; DeployAndCollect must "+
+			"resolve an empty RunID with runid.Generate(). Logs:\n%s", runIDPattern, logs.String())
+	}
+
+	if cfg.RunID != "" {
+		t.Errorf("cfg.RunID = %q after DeployAndCollect, want it left empty — the generated ID "+
+			"must stay in a local so a caller reusing this config for a second run does not "+
+			"silently pin a duplicate RunID", cfg.RunID)
 	}
 }

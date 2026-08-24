@@ -153,17 +153,27 @@ type AgentConfig struct {
 	// RunID scopes every resource this deployment creates (Job, RBAC, and
 	// the internal staging ConfigMap when Output does not name one) to a
 	// single run, so concurrent snapshot-agent runs never collide on a
-	// shared resource name. DeployAndCollect defaults it with
-	// runid.Generate() when empty — callers normally leave it unset;
-	// setting it explicitly is for correlating this run with an external
-	// identifier (e.g. sharing one ID with a downstream validator run).
+	// shared resource name. DeployAndCollect generates one with
+	// runid.Generate() when this is empty — callers normally leave it
+	// unset; setting it explicitly is for correlating this run with an
+	// external identifier (e.g. sharing one ID with a downstream
+	// validator run).
+	//
+	// DeployAndCollect never writes the generated value back here: the
+	// AgentConfig belongs to the caller, and a caller reusing one config
+	// pointer across two runs would otherwise silently become a caller
+	// pinning a duplicate RunID — the one state ADR-020 declares
+	// unsupported, which fails the second run with ErrCodeInternal on the
+	// first still-existing run-scoped object.
 	RunID string
 
 	// NameBase prefixes generated resource names (Job, ServiceAccount,
-	// Role/RoleBinding) when JobName / ServiceAccountName are left empty.
-	// It has no effect once either of those is set. Forwarded verbatim
-	// to pkg/k8s/agent.Config.NameBase, which defaults to "aicr" when
-	// also empty.
+	// Role/RoleBinding). It applies per name: JobName falls back to it
+	// when JobName is empty, and ServiceAccountName (which also names the
+	// Role and RoleBinding) falls back to it when ServiceAccountName is
+	// empty — so setting only one of the two leaves NameBase governing the
+	// other. Forwarded verbatim to pkg/k8s/agent.Config.NameBase, which
+	// defaults to "aicr" when also empty.
 	NameBase string
 }
 
@@ -175,12 +185,18 @@ type AgentConfig struct {
 // verbatim: it is true only when agentOutput is the internal staging
 // ConfigMap this run owns (the caller did not name a cm:// destination), so
 // Cleanup may delete it. A caller-supplied cm:// Output is never owned.
-func buildAgentConfig(config *AgentConfig, agentOutput string, ownsOutput bool) agent.Config {
+//
+// runID is the resolved run ID for this invocation — config.RunID when the
+// caller pinned one, otherwise the value DeployAndCollect generated. It is
+// passed in rather than read from config because DeployAndCollect must not
+// write the generated ID back into the caller's AgentConfig (see
+// AgentConfig.RunID).
+func buildAgentConfig(config *AgentConfig, runID, agentOutput string, ownsOutput bool) agent.Config {
 	return agent.Config{
 		Namespace:           config.Namespace,
 		ServiceAccountName:  config.ServiceAccountName,
 		JobName:             config.JobName,
-		RunID:               config.RunID,
+		RunID:               runID,
 		NameBase:            config.NameBase,
 		Image:               config.Image,
 		ImagePullSecrets:    config.ImagePullSecrets,
@@ -209,7 +225,9 @@ func buildAgentConfig(config *AgentConfig, agentOutput string, ownsOutput bool) 
 // agentOutput is the internal staging ConfigMap this run owns, false when it
 // is a caller-supplied cm:// destination. See buildAgentConfig and
 // rewriteMergedSnapshotConfigMap for how each consumes it.
-func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string, ownsOutput bool) ([]byte, error) {
+//
+// runID is the resolved run ID for this invocation; see buildAgentConfig.
+func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, runID, agentOutput string, ownsOutput bool) ([]byte, error) {
 	// The pool projection is pure file processing on the caller's host —
 	// project it BEFORE deploying so a bad file fails in milliseconds,
 	// not after a Job round-trip, and merge it into the returned snapshot
@@ -228,7 +246,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	// name the injected selector (TOCTOU: node may be cordoned after detection).
 	autoInjectedGPUSelector := maybeInjectGPUNodeSelector(ctx, clientset, config)
 
-	agentConfig := buildAgentConfig(config, agentOutput, ownsOutput)
+	agentConfig := buildAgentConfig(config, runID, agentOutput, ownsOutput)
 
 	deployer := agent.NewDeployer(clientset, agentConfig)
 
@@ -525,19 +543,24 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 	// field a CLI user never set — so catch the whitespace-only value that
 	// slips past this simple emptiness check here, where the message can
 	// point at the knob the caller actually controls.
-	if config.RunID == "" {
-		config.RunID = runid.Generate()
+	//
+	// The resolved value stays in a local: writing it back into the
+	// caller-owned *AgentConfig would turn a caller who reuses one config
+	// pointer for a second run into a caller pinning a duplicate RunID.
+	runID := config.RunID
+	if runID == "" {
+		runID = runid.Generate()
 	}
-	if strings.TrimSpace(config.RunID) == "" {
+	if strings.TrimSpace(runID) == "" {
 		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
 			"RunID must not be all-whitespace; leave it unset to auto-generate one")
 	}
-	slog.Info("snapshot agent run", slog.String("runID", config.RunID))
+	slog.Info("snapshot agent run", slog.String("runID", runID))
 
 	// Resolve (and validate) the Job's ConfigMap target before any cluster
 	// access: a malformed cm:// Output must not cost the caller a deployed
 	// Job and a cluster-admin binding.
-	agentOutput, ownsOutput, err := agentConfigMapTarget(config)
+	agentOutput, ownsOutput, err := agentConfigMapTarget(config, runID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -549,7 +572,7 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 		return nil, nil, err
 	}
 
-	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, agentOutput, ownsOutput)
+	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, runID, agentOutput, ownsOutput)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -576,8 +599,13 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 // config.Namespace that the caller never names: ownsOutput is true, so
 // Cleanup may delete it.
 //
+// runID is the resolved run ID for this invocation (config.RunID when the
+// caller pinned one, otherwise the value DeployAndCollect generated); it is a
+// parameter rather than a config field read because DeployAndCollect never
+// writes the generated ID back into the caller's AgentConfig.
+//
 // In the owned case the returned uri is exactly
-// cm://<config.Namespace>/<agent.StagingConfigMapName(config.RunID)>. Cleanup
+// cm://<config.Namespace>/<agent.StagingConfigMapName(runID)>. Cleanup
 // in pkg/k8s/agent relies on both halves of that invariant rather than
 // re-parsing the URI: deleteStagingConfigMap deletes in Config.Namespace, and
 // deleteUnrecordedStagingConfigMap (the sweep for a run that failed before
@@ -588,7 +616,7 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 // so a typo like "cm://aicr-snapshot" (no namespace) would otherwise surface
 // as a Job failure — after RBAC and the Job exist, and with Cleanup false
 // (the zero value) they stay behind. Returns ErrCodeInvalidRequest instead.
-func agentConfigMapTarget(config *AgentConfig) (uri string, ownsOutput bool, err error) {
+func agentConfigMapTarget(config *AgentConfig, runID string) (uri string, ownsOutput bool, err error) {
 	if strings.HasPrefix(config.Output, serializer.ConfigMapURIScheme) {
 		if _, _, parseErr := pod.ParseConfigMapURI(config.Output); parseErr != nil {
 			// Wrap with the same code rather than PropagateOrWrap: the inner
@@ -600,7 +628,7 @@ func agentConfigMapTarget(config *AgentConfig) (uri string, ownsOutput bool, err
 		}
 		return config.Output, false, nil
 	}
-	return serializer.ConfigMapURIScheme + config.Namespace + "/" + agent.StagingConfigMapName(config.RunID), true, nil
+	return serializer.ConfigMapURIScheme + config.Namespace + "/" + agent.StagingConfigMapName(runID), true, nil
 }
 
 // SnapshotDelivery describes where DeliverSnapshot writes captured bytes.
