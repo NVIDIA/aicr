@@ -535,11 +535,14 @@ func runLabeledPod(d *Deployer, name string, ownerUID types.UID) *corev1.Pod {
 	}
 }
 
+// watchNamespace is the namespace every watch-path subtest deploys into.
+const watchNamespace = "watch-ns"
+
 // watchDeployer returns a Deployer for the watch-path tests with run A's Job
 // UID already recorded, so jobUID() is non-zero and the ownership checks in
 // findOrWatchPodName are actually exercised rather than skipped.
-func watchDeployer(client *fake.Clientset, namespace string) *Deployer {
-	d := NewDeployer(client, Config{Namespace: namespace, RunID: testRunID})
+func watchDeployer(client *fake.Clientset) *Deployer {
+	d := NewDeployer(client, Config{Namespace: watchNamespace, RunID: testRunID})
 	d.recordCreated(kindJob, d.jobName(), watchJobUIDA)
 	return d
 }
@@ -561,14 +564,13 @@ func watchDeployer(client *fake.Clientset, namespace string) *Deployer {
 // what authorizes selection. The List-side selector filtering IS honored by
 // the fake, so the re-List subtests exercise it for real.
 func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
-	const ns = "watch-ns"
 
 	t.Run("watch event for another run's Job is skipped", func(t *testing.T) {
 		client := fake.NewClientset()
 		w := watch.NewRaceFreeFake()
 		client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(w, nil))
 
-		d := watchDeployer(client, ns)
+		d := watchDeployer(client)
 
 		// The imposter arrives FIRST: a watch loop that returned the first
 		// event passing the label filter would take it and never see the
@@ -594,7 +596,7 @@ func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
 		w := watch.NewRaceFreeFake()
 		client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(w, nil))
 
-		d := watchDeployer(client, ns)
+		d := watchDeployer(client)
 
 		// Labels alone, no controlling ownerReference at all — the shape a
 		// caller with pods/update in the namespace can produce directly.
@@ -617,7 +619,7 @@ func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
 
 	t.Run("closed watch channel re-Lists and authorizes the re-Listed pod", func(t *testing.T) {
 		client := fake.NewClientset()
-		d := watchDeployer(client, ns)
+		d := watchDeployer(client)
 
 		// The fast-path List must miss so the watch is reached at all; the
 		// re-List after the channel closes then returns both pods.
@@ -651,7 +653,7 @@ func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
 
 	t.Run("closed watch channel with only a foreign pod fails closed", func(t *testing.T) {
 		client := fake.NewClientset()
-		d := watchDeployer(client, ns)
+		d := watchDeployer(client)
 
 		installStagedPodLister(client, func(call int) []corev1.Pod {
 			if call == 1 {
@@ -679,7 +681,7 @@ func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
 
 	t.Run("closed watch channel surfaces a failed re-List", func(t *testing.T) {
 		client := fake.NewClientset()
-		d := watchDeployer(client, ns)
+		d := watchDeployer(client)
 
 		var mu sync.Mutex
 		var calls int
