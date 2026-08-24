@@ -172,7 +172,7 @@ testing_tools:
   # Docker Hub pulls rate-limit on shared CI runners. Do not regress to a
   # Docker Hub pin on bump.
   # renovate: datasource=docker depName=docker.gitea.com/gitea depType=testing_tools
-  gitea_image: 'docker.gitea.com/gitea:1.26.4-rootless'
+  gitea_image: 'docker.gitea.com/gitea:1.27.0-rootless'
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.0.3'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
