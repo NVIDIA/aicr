@@ -18,6 +18,7 @@ instances:
     multi-source: true
 title: NVIDIA AI Cluster Runtime
 global-theme: nvidia
+css: custom.css
 metadata:
   canonical-host: "docs.nvidia.com/aicr"
 products:
