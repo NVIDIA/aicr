@@ -93,18 +93,26 @@ func nameWithRunID(prefix, runID string) string {
 // pkg/snapshotter defaults and whitespace-checks RunID before building an
 // agent Config, but that guard does not cover callers who construct a
 // pkg/k8s/agent Config directly, which is the public SDK surface.
+// Error-context keys shared by the name-validation failures below, so a
+// caller parsing a structured error keys off one spelling.
+const (
+	ctxKeyField        = "field"
+	ctxKeyValue        = "value"
+	ctxKeyResolvedName = "resolvedName"
+)
+
 func (d *Deployer) validateRunID() error {
 	runID := d.config.RunID
 	if runID == "" {
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"Config.RunID is required: every object this Deployer creates is named \"<prefix>-<RunID>\"; generate one with runid.Generate()",
-			map[string]any{"field": "Config.RunID", "value": runID})
+			map[string]any{ctxKeyField: "Config.RunID", ctxKeyValue: runID})
 	}
 	if problems := validation.IsDNS1123Label(runID); len(problems) > 0 {
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("Config.RunID %q is not a valid Kubernetes name segment: %s",
 				runID, strings.Join(problems, "; ")),
-			map[string]any{"field": "Config.RunID", "value": runID})
+			map[string]any{ctxKeyField: "Config.RunID", ctxKeyValue: runID})
 	}
 	return nil
 }
@@ -172,7 +180,7 @@ func (d *Deployer) validateResolvedNames() error {
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s %q yields the %s name %q, which is not a valid Kubernetes object name: %s",
 				n.field, n.prefix, n.objects, n.value, strings.Join(problems, "; ")),
-			map[string]any{"field": n.field, "value": n.prefix, "resolvedName": n.value})
+			map[string]any{ctxKeyField: n.field, ctxKeyValue: n.prefix, ctxKeyResolvedName: n.value})
 	}
 	return nil
 }
