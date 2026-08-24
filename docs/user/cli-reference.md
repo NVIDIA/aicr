@@ -348,12 +348,12 @@ adopter: `gpuStack` with values `azure-managed` (default) and `operator-managed`
 see [AKS GPU setup](../integrator/aks-gpu-setup.md#gpu-driver-setup).
 The GKE family declares `gpuStack` with values `gke-default` (default; GKE's
 managed plugin stays the advertiser — recorded as `advertiser: external` —
-for default-provisioned clusters with no node label) and `driver-installer` (the GPU
-Operator's device plugin owns `nvidia.com/gpu`; GPU node pools carry
+for default-provisioned clusters with no node label) and `bundle-installer`
+(the GPU Operator's device plugin owns `nvidia.com/gpu`; GPU node pools carry
 `gke-no-default-nvidia-gpu-device-plugin=true` and, because that label
 forfeits GKE's managed driver install, are created
-`gpu-driver-version=disabled` with Google's standalone
-`nvidia-driver-installer` DaemonSet supplying the driver); because the GKE
+`gpu-driver-version=disabled` — the bundle's `gcp-driver-installer`
+component supplies the driver with a recipe-pinned version); because the GKE
 values govern advertisement, the #1327 allocation-policy paths are
 closure-locked in addition to the declared owned paths — see
 [GKE GPU setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) and
@@ -457,7 +457,7 @@ Generate recipes using direct system parameters:
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
-| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or `gpuStack=driver-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE) |
+| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |

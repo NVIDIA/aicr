@@ -180,7 +180,7 @@ componentRefs:
 			"no profile block"},
 		{"selection mismatch rejected",
 			func(p *attestation.Predicate) {
-				p.Profile.Selection = "gpuStack=driver-installer"
+				p.Profile.Selection = "gpuStack=bundle-installer"
 			}, "selection"},
 		{"advertiser mismatch rejected",
 			func(p *attestation.Predicate) { p.Profile.Advertiser = "" },

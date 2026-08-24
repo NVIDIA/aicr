@@ -78,9 +78,9 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 			wantAssume: ptr(true),
 		},
 		{
-			name:       "GKE-COS driver-installer: Google's DaemonSet supplies a driver pod",
+			name:       "GKE-COS bundle-installer: the bundle-carried installer supplies a driver pod",
 			criteria:   gkeCriteria(),
-			profile:    "gpuStack=driver-installer",
+			profile:    "gpuStack=bundle-installer",
 			wantAssume: ptr(false),
 		},
 		{

@@ -515,7 +515,7 @@ converted workflow to v2 as one cut-over.
 reject. Move GET clients to `GET /v2/recipe` / `GET /v2/query` (identical
 query parameters, plus optional `profile=gpuStack=azure-managed` or
 `profile=gpuStack=operator-managed` on AKS, and `profile=gpuStack=gke-default`
-or `profile=gpuStack=driver-installer` on GKE); move POST
+or `profile=gpuStack=bundle-installer` on GKE); move POST
 clients to `POST /v2/recipe` / `POST /v2/query`, converting the body to the
 strict envelope described above (a plain `criteria` object with an explicit
 `Content-Type`, not the v1 `RecipeCriteria` resource). Then POST the
@@ -524,12 +524,12 @@ unaffected on `/v1` until they adopt a profile.
 
 ```shell
 # GKE migration: /v2/recipe (omit profile= for the gke-default default,
-# or select gpuStack=driver-installer explicitly), then POST to /v2/bundle.
+# or select gpuStack=bundle-installer explicitly), then POST to /v2/bundle.
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip.
 set -euo pipefail
 curl -fsS -o recipe.json \
-  "http://localhost:8080/v2/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=driver-installer"
+  "http://localhost:8080/v2/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=bundle-installer"
 curl -fsS -X POST "http://localhost:8080/v2/bundle" \
   -H "Content-Type: application/json" -d @recipe.json -o bundles.zip
 ```

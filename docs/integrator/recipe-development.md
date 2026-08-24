@@ -548,7 +548,7 @@ directions fail closed on a truncated node list (a snapshot captured with
 reading), on an empty GPU-node universe, and on malformed or ambiguous
 label readings (an encoding collision between a disambiguated entry and a
 distinct dotted label name — see #2003). It is consumed by the GKE
-`gpuStack` profile values (the positive form qualifies `driver-installer`, the
+`gpuStack` profile values (the positive form qualifies `bundle-installer`, the
 negated form `gke-default`), where each selected value's constraint is
 verified at generation when generating from a snapshot (criteria-only
 generation has no snapshot evaluator and defers entirely to the

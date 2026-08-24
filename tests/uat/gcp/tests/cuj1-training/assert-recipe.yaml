@@ -36,6 +36,7 @@ constraints:
     value: '!gke-no-default-nvidia-gpu-device-plugin'
 componentRefs: ## alphabetically sorted
   - name: cert-manager
+  - name: gcp-driver-installer
   - name: gke-nccl-tcpxo
   - name: gpu-operator
   - name: k8s-ephemeral-storage-metrics
@@ -51,6 +52,7 @@ componentRefs: ## alphabetically sorted
   - name: prometheus-operator-crds
 deploymentOrder:
   - cert-manager
+  - gcp-driver-installer
   - nfd
   - nodewright-operator
   - nodewright-customizations

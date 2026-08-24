@@ -62,9 +62,9 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 			wantConstraint: "!gke-no-default-nvidia-gpu-device-plugin",
 		},
 		{
-			name:           "explicit driver-installer records no advertiser and the positive label predicate",
-			selection:      "gpuStack=driver-installer",
-			wantValue:      "driver-installer",
+			name:           "explicit bundle-installer records no advertiser and the positive label predicate",
+			selection:      "gpuStack=bundle-installer",
+			wantValue:      "bundle-installer",
 			wantAdvertiser: "",
 			wantConstraint: "gke-no-default-nvidia-gpu-device-plugin=true",
 		},
@@ -93,6 +93,13 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 			owned := selected.OwnedPaths["gpu-operator"]
 			if len(owned) != 2 || owned[0] != "devicePlugin.enabled" || owned[1] != "enabled" {
 				t.Errorf("ownedPaths[gpu-operator] = %v, want [devicePlugin.enabled enabled]", owned)
+			}
+			// The installer's gate and presence are declaration-wide owned
+			// paths (issue #1716): locked for EVERY selection, including the
+			// two values where the component renders nothing.
+			installerOwned := selected.OwnedPaths["gcp-driver-installer"]
+			if len(installerOwned) != 2 || installerOwned[0] != "enabled" || installerOwned[1] != "installer.enabled" {
+				t.Errorf("ownedPaths[gcp-driver-installer] = %v, want [enabled installer.enabled]", installerOwned)
 			}
 			var found bool
 			for _, c := range result.Constraints {
@@ -365,7 +372,7 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 	t.Run("stock driver-installer tuple passes the gate", func(t *testing.T) {
 		t.Parallel()
 		result, err := NewBuilder().BuildFromCriteriaWithProfile(
-			t.Context(), gkeCriteria(), "gpuStack=driver-installer")
+			t.Context(), gkeCriteria(), "gpuStack=bundle-installer")
 		if err != nil {
 			t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 		}
@@ -377,7 +384,7 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			result, err := NewBuilder().BuildFromCriteriaWithProfile(
-				t.Context(), gkeCriteria(), "gpuStack=driver-installer")
+				t.Context(), gkeCriteria(), "gpuStack=bundle-installer")
 			if err != nil {
 				t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 			}

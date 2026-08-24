@@ -513,7 +513,7 @@ func TestValidateBundleProfileCoherence(t *testing.T) {
 		{"profiled coherent", &Bundle{Profile: "gpuStack=gke-default", PolicyDescriptorIdentity: "d", Predicate: pred("gpuStack=gke-default")}, false},
 		{"profiled recipe with v1 predicate", &Bundle{Profile: "gpuStack=gke-default", Predicate: pred("")}, true},
 		{"unprofiled recipe with profile block", &Bundle{Predicate: pred("gpuStack=gke-default")}, true},
-		{"selection mismatch", &Bundle{Profile: "gpuStack=gke-default", Predicate: pred("gpuStack=driver-installer")}, true},
+		{"selection mismatch", &Bundle{Profile: "gpuStack=gke-default", Predicate: pred("gpuStack=bundle-installer")}, true},
 		{"advertiser coherent", &Bundle{Profile: "gpuStack=gke-default", Advertiser: "external", PolicyDescriptorIdentity: "d", Predicate: predAdv("gpuStack=gke-default", "external")}, false},
 		{"advertiser mismatch: predicate missing it", &Bundle{Profile: "gpuStack=gke-default", Advertiser: "external", Predicate: pred("gpuStack=gke-default")}, true},
 		{"advertiser mismatch: recipe missing it", &Bundle{Profile: "gpuStack=gke-default", Predicate: predAdv("gpuStack=gke-default", "external")}, true},

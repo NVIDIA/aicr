@@ -44,8 +44,11 @@ import (
 
 const (
 	nodewrightCustomizationsComponent = "nodewright-customizations"
-	draDriverComponent                = "nvidia-dra-driver-gpu"
-	networkOperatorComponent          = "network-operator"
+	// gcpDriverInstallerComponent is the values-gated GKE COS driver
+	// installer (issue #1716); rendered only under gpuStack=bundle-installer.
+	gcpDriverInstallerComponent = "gcp-driver-installer"
+	draDriverComponent          = "nvidia-dra-driver-gpu"
+	networkOperatorComponent    = "network-operator"
 
 	// draKubeletPluginSuffix is the chart-template-defined name suffix for
 	// the NVIDIA DRA driver's kubelet-plugin DaemonSet. The upstream chart
@@ -243,12 +246,12 @@ func checkExpectedResources(ctx *validators.Context) error {
 			// in that case, mirroring the render-aware Go readiness check. Only
 			// nodewright-customizations is subject to this; a render/read error
 			// propagates rather than silently skipping. See #1844.
-			suppressed, suppressErr := nodewrightHealthCheckSuppressed(ref)
+			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ref)
 			if suppressErr != nil {
 				return suppressErr
 			}
 			if suppressed {
-				fmt.Printf("  [chainsaw] %s: skipped — effective values suppress the tuning Skyhook CR (see #1844)\n", ref.Name)
+				fmt.Printf("  [chainsaw] %s: skipped — %s\n", ref.Name, reason)
 			} else {
 				chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
 					Name:       ref.Name,
@@ -686,6 +689,87 @@ func isRuntimeRequiredTaint(t *corev1.Taint) bool {
 	return t.Key == runtimeRequiredTaintKey &&
 		t.Value == runtimeRequiredTaintValue &&
 		t.Effect == corev1.TaintEffectNoSchedule
+}
+
+// gatedHealthCheckSuppressed dispatches the render-aware static-assert
+// suppression for the small set of values-gated components whose registry
+// health check targets objects the effective values may legitimately
+// suppress. Every other component's assert queues unconditionally.
+// Fail-closed throughout: a render or read error propagates so a broken
+// template is never mistaken for "nothing to assert".
+func gatedHealthCheckSuppressed(ref recipe.ComponentRef) (bool, string, error) {
+	switch ref.Name {
+	case nodewrightCustomizationsComponent:
+		suppressed, err := nodewrightHealthCheckSuppressed(ref)
+		return suppressed, "effective values suppress the tuning Skyhook CR (see #1844)", err
+	case gcpDriverInstallerComponent:
+		suppressed, err := emptyRenderHealthCheckSuppressed(ref)
+		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
+	default:
+		return false, "", nil
+	}
+}
+
+// emptyRenderHealthCheckSuppressed reports whether the component's manifests
+// render zero Kubernetes objects under its effective values — the shape of a
+// values-gated component (ADR-015: the component set is constant across
+// profile values; a non-selected value renders an empty release). A static
+// health-check assert cannot see value gates and would fail on a healthy
+// cluster where the render is deliberately empty.
+func emptyRenderHealthCheckSuppressed(ref recipe.ComponentRef) (bool, error) {
+	if len(ref.ManifestFiles) == 0 {
+		// Nothing to render — leave the assert in place so its own failure
+		// surfaces the problem.
+		return false, nil
+	}
+	values, err := recipe.GetComponentValues(&ref)
+	if err != nil {
+		return false, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to resolve effective values for component %s", ref.Name), err)
+	}
+	chartName := ref.Chart
+	if chartName == "" {
+		chartName = ref.Name
+	}
+	renderInput := manifest.RenderInput{
+		ComponentName: ref.Name,
+		Namespace:     ref.Namespace,
+		ChartName:     chartName,
+		ChartVersion:  ref.Version,
+		Values:        values,
+	}
+	for _, path := range ref.ManifestFiles {
+		content, err := recipe.GetManifestContent(path)
+		if err != nil {
+			return false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to load manifest %s for component %s", path, ref.Name), err)
+		}
+		rendered, rerr := manifest.Render(content, renderInput)
+		if rerr != nil {
+			// Fail closed: a render error must not be read as "renders nothing".
+			return false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to render manifest %s for component %s with effective values", path, ref.Name), rerr)
+		}
+		if renderedYAMLHasObjects(string(rendered)) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// renderedYAMLHasObjects reports whether rendered YAML contains at least one
+// non-empty document (comment-only and whitespace-only documents count as
+// empty), mirroring the bundler's empty-release detection.
+func renderedYAMLHasObjects(rendered string) bool {
+	for _, doc := range strings.Split(rendered, "\n---") {
+		for _, line := range strings.Split(doc, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") && trimmed != "---" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // nodewrightHealthCheckSuppressed reports whether the registry-declared static

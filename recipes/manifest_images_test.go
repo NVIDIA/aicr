@@ -100,6 +100,12 @@ var imageDigestExemptions = map[string]string{
 	// Skyhook Package `containerSHA` field (issue #1031), folded into the
 	// extracted image ref as `@sha256:...` by pkg/bom.ExtractImagesFromYAML.
 	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1": "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
+
+	// cos-gpu-installer (gcp-driver-installer): node-local image preloaded on
+	// every COS node and referenced with imagePullPolicy: Never — there is no
+	// registry to pin a digest against, the "digest" differs per COS build,
+	// and the ref must never be mirrored or pulled. Issue #1716.
+	"cos-nvidia-installer:fixed": "COS-node-local preloaded image (imagePullPolicy: Never); no registry digest exists and it must not be mirrored; issue #1716",
 }
 
 // TestComponentManifestImagesAreDigestPinned asserts that every image

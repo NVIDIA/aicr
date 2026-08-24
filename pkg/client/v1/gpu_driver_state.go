@@ -101,12 +101,12 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"(opt-out label absent) provision the GPU node pools with " +
 				"the GKE-managed driver install (node pool " +
 				"gpu-driver-version=default). With --profile " +
-				"gpuStack=driver-installer (pools labeled " +
-				"gke-no-default-nvidia-gpu-device-plugin=true) the label " +
-				"forfeits the managed install — deploy Google's standalone " +
-				"nvidia-driver-installer DaemonSet and create the pools " +
-				"with gpu-driver-version=disabled instead; see " +
-				"docs/integrator/gke-gpu-setup.md."
+				"gpuStack=bundle-installer (pools labeled " +
+				"gke-no-default-nvidia-gpu-device-plugin=true and created " +
+				"with gpu-driver-version=disabled) the bundle's " +
+				"gcp-driver-installer component carries the installer " +
+				"DaemonSet and pins the driver version — nothing to deploy " +
+				"by hand; see docs/integrator/gke-gpu-setup.md."
 		case recipe.CriteriaOSUbuntu:
 			// The pinned GPU Operator (v26.3.3) supports driver management
 			// on GKE only on Ubuntu node images with containerd.

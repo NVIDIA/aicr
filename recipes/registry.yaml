@@ -184,6 +184,30 @@ components:
       defaultRepository: ""
       defaultNamespace: kube-system
 
+  # GKE COS NVIDIA driver installer (issue #1716): Google's cos-gpu-installer
+  # DaemonSet as an AICR-managed, values-gated component. Present
+  # unconditionally in the gke-cos chain; renders nothing unless the gpuStack
+  # bundle-installer profile value flips installer.enabled true. The
+  # DaemonSet carries its own nodeAffinity (GPU nodes without GKE-managed
+  # driver labels), so no nodeSelector injection — only accelerated
+  # tolerations flow through.
+  - name: gcp-driver-installer
+    displayName: gcp-driver-installer
+    valueOverrideKeys:
+      - gcpdriverinstaller
+    healthCheck:
+      assertFile: checks/gcp-driver-installer/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: kube-system
+    manifestFiles:
+      - components/gcp-driver-installer/manifests/nvidia-driver-installer.yaml
+    nodeScheduling:
+      accelerated:
+        tolerationPaths:
+          - acceleratedTolerations
+
   - name: aws-efa
     displayName: aws-efa
     valueOverrideKeys:
@@ -340,7 +364,7 @@ components:
       # itself — from the gpuStack profile on AKS and GKE-COS, at overlay
       # level on OKE and Kind (#2181) — so this gate is defense in depth
       # rather than the primary mechanism. GKE
-      # gpuStack=driver-installer and AKS gpuStack=operator-managed
+      # gpuStack=bundle-installer and AKS gpuStack=operator-managed
       # assign an explicit false: a driver pod exists there for the
       # labeler to detect. Issue #2175.
       - function: CheckNVSentinelDriverLabelDetectable

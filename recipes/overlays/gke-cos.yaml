@@ -35,9 +35,10 @@ spec:
   # installed and which device plugin advertises nvidia.com/gpu — selected
   # at recipe generation (--profile gpuStack=<value>), recorded in
   # metadata.selectedProfile, and locked at every output boundary. In BOTH
-  # values the driver is Google-supplied: the GPU Operator installs no
-  # driver on COS (an operator-installed driver is the deferred
-  # operator-selfdriver value, issue #1716). This
+  # values the driver arrives outside the GPU Operator, which installs no
+  # driver on COS in either value; under bundle-installer the
+  # bundle-carried gcp-driver-installer component (issue #1716) supplies
+  # it. This
   # replaces nothing pre-existing — GKE had no qualified alternative before
   # — but the gke-default value makes the previously unsupported
   # "GKE's managed plugin owns nvidia.com/gpu" state declarable, verifiable
@@ -52,18 +53,17 @@ spec:
   # container of the SAME kube-system DaemonSet that the
   # gke-no-default-nvidia-gpu-device-plugin=true label disables, so a fresh
   # labeled pool comes up driverless — "GKE-installed driver + operator
-  # plugin" is not a reachable state. The driver-installer value — named
-  # after Google's standalone nvidia-driver-installer DaemonSet that
-  # supplies the driver under it — therefore requires the label AND that
-  # DaemonSet on pools created with gpu-driver-version=disabled; the GPU
-  # Operator's device plugin is the sole advertiser.
+  # plugin" is not a reachable state. The bundle-installer value therefore
+  # requires the label on pools created with gpu-driver-version=disabled;
+  # the bundle's gcp-driver-installer component supplies the driver and the
+  # GPU Operator's device plugin is the sole advertiser.
   #
   # Every leaf GKE-COS overlay inherits this declaration unchanged. The
-  # third ADR value (operator-selfdriver, the AICR-owned GKE
-  # driver-installer component of issue #1716 — distinct from Google's
-  # DaemonSet the driver-installer value is named after) is deliberately
-  # NOT declared: it lands together with its
-  # durable distinguishing signal (ADR-015 Deferred Decision 5).
+  # bundle-installer value (issue #1716) carries the AICR-owned installer;
+  # the two values are distinguished at generation time by the opt-out
+  # pool label alone (positive vs negated), which resolved ADR-015
+  # Deferred Decision 5 by construction — the ambiguous external-installer
+  # sibling mode was withdrawn rather than marked.
   #
   # nvsentinel.labeler.assumeDriverInstalled is owned per value because driver
   # evidence differs between them (#2181). The NVSentinel labeler infers driver
@@ -92,29 +92,39 @@ spec:
     name: gpuStack
     description: >-
       GPU stack shape for GKE GPU node pools — how the driver is installed
-      and which device plugin advertises nvidia.com/gpu. The driver is
-      Google-supplied in both values; the GPU Operator installs no driver
-      on COS. "gke-default" (the default) is the default-provisioned
-      cluster: GKE's bundled driver install plus GKE's managed device
-      plugin as the advertiser (opt-out label absent everywhere), with the
-      operator's plugin disabled. "driver-installer" runs the GPU
-      Operator's device plugin as the sole advertiser; its verified
-      generation-time constraint is that every GPU node carries
-      gke-no-default-nvidia-gpu-device-plugin=true (the only durable
-      distinguishing signal — ADR-015 DD5). Google's standalone
-      nvidia-driver-installer DaemonSet on pools created with
-      gpu-driver-version=disabled is the documented operational
-      prerequisite that supplies the driver under this value; its
-      presence is not qualified at generation — driver presence is
-      observed by the deployment-phase validation.
+      and which device plugin advertises nvidia.com/gpu. The GPU Operator
+      itself installs no driver on COS in either value. "gke-default" (the
+      default) is the default-provisioned cluster: GKE's bundled driver
+      install plus GKE's managed device plugin as the advertiser (opt-out
+      label absent everywhere), with the operator's plugin disabled.
+      "bundle-installer" is the opt-out pool shape
+      (gke-no-default-nvidia-gpu-device-plugin=true, pools created with
+      gpu-driver-version=disabled): the GPU Operator's device plugin is the
+      sole advertiser, and the bundle-carried gcp-driver-installer component
+      (issue #1716) supplies the driver — the version is pinned in the
+      recipe and upgrades roll with the bundle. A hand-applied standalone
+      nvidia-driver-installer DaemonSet is not a named mode: it is the same
+      pool shape with an unmanaged installer — delete it and select
+      bundle-installer (the bundle's DaemonSet shares its name and Helm
+      will not adopt the pre-existing object).
     default: gke-default
     values:
-      driver-installer:
+      # Bundle-owned driver install (issue #1716): opt-out pools
+      # (gpu-driver-version=disabled + the node label), with the
+      # cos-gpu-installer DaemonSet carried by the gcp-driver-installer
+      # component. The recipe pins the driver version; upgrades roll with
+      # the bundle.
+      bundle-installer:
         componentRefs:
+          - name: gcp-driver-installer
+            overrides:
+              installer: {enabled: true}
           - name: gpu-operator
             overrides:
               devicePlugin:
                 enabled: true
+          # The bundle-carried installer IS a driver pod the NVSentinel
+          # labeler detects, so no preinstalled-driver assumption.
           - name: nvsentinel
             overrides:
               labeler: {assumeDriverInstalled: false}
@@ -122,23 +132,19 @@ spec:
           - name: NodeTopology.gpu-nodes.label
             value: gke-no-default-nvidia-gpu-device-plugin=true
             remediation: >-
-              The driver-installer profile requires the GPU Operator's device
-              plugin to be the sole nvidia.com/gpu advertiser, so every GPU
-              node pool must carry gke-no-default-nvidia-gpu-device-plugin=true
-              at creation (gcloud container node-pools create ...
+              The bundle-installer profile requires the GPU Operator's
+              device plugin to be the sole nvidia.com/gpu advertiser, so
+              every GPU node pool must carry
+              gke-no-default-nvidia-gpu-device-plugin=true at creation
+              (gcloud container node-pools create ...
               --node-labels=gke-no-default-nvidia-gpu-device-plugin=true)
-              PLUS Google's standalone nvidia-driver-installer DaemonSet,
-              with the pools created gpu-driver-version=disabled. The label
-              forfeits GKE's managed driver install — the installer rides
-              the same kube-system DaemonSet the label disables — so it
-              must NOT be paired with gpu-driver-version=default (labeled
-              pools come up driverless). This constraint verifies the
-              label only; the installer DaemonSet is an operational
-              prerequisite whose effect (a present driver) is observed by
-              the deployment-phase validation. See the GKE GPU Setup
-              integrator guide (docs/integrator/gke-gpu-setup.md) for the
-              full procedure. To use a default-provisioned GKE cluster instead,
-              regenerate with the default (--profile gpuStack=gke-default).
+              and be created with gpu-driver-version=disabled — the label
+              forfeits GKE's managed driver install, and the bundle's
+              gcp-driver-installer component supplies the driver instead.
+              See docs/integrator/gke-gpu-setup.md. To use a
+              default-provisioned GKE cluster instead, regenerate with the
+              default (--profile gpuStack=gke-default).
+
       # GKE-installed driver AND GKE's managed device plugin — a
       # default-provisioned GKE cluster (no node label required). The
       # external advertiser is counted as THE nvidia.com/gpu advertiser in
@@ -148,6 +154,9 @@ spec:
       gke-default:
         advertiser: external
         componentRefs:
+          - name: gcp-driver-installer
+            overrides:
+              installer: {enabled: false}
           - name: gpu-operator
             overrides:
               devicePlugin:
@@ -167,17 +176,29 @@ spec:
               labeled pools (gcloud container node-pools update ...
               --node-labels=... passing the pool's full label set with the
               label omitted; --node-labels REPLACES the full set), or
-              regenerate with --profile gpuStack=driver-installer.
+              regenerate with --profile gpuStack=bundle-installer.
 
   componentRefs:
+    # Values-gated driver installer (issue #1716): present unconditionally so
+    # the gpuStack profile may own its installer.enabled gate (a profile can
+    # change how components are configured, never the component set). Renders
+    # nothing except under bundle-installer, where it supplies the driver.
+    - name: gcp-driver-installer
+      type: Helm
+      valuesFile: components/gcp-driver-installer/values.yaml
+
     # GKE-COS-specific GPU Operator overrides
-    # GKE preinstalls NVIDIA drivers on COS; disable driver installation.
+    # GKE installs no driver via the GPU Operator on COS; disable driver installation.
     # The GKE ResourceQuota that admits system-*-critical pods is synthesized
     # by the bundler from registry.yaml (gkeCriticalPriority: true); no
     # manifestFiles entry needed here. Issue #915.
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-gke-cos.yaml
+      # Driver must land before GPU Operator operands start. A no-op
+      # dependency under gke-default (empty release).
+      dependencyRefs:
+        - gcp-driver-installer
 
     # Enable Prometheus persistent storage for GKE (GKE PD CSI is built-in)
     - name: kube-prometheus-stack
@@ -224,7 +245,7 @@ spec:
     # generation only; criteria-only generation defers entirely to the
     # pre-flight), and are re-evaluated by the `aicr validate` readiness
     # pre-flight — same fail-closed exit,
-    # now symmetric per selected value (positive form for driver-installer,
+    # now symmetric per selected value (positive form for bundle-installer,
     # negated for gke-default).
     conformance:
       checks:

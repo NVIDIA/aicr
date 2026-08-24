@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **43**
-- Unique images: **98**
+- Components: **44**
+- Unique images: **100**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -40,6 +40,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | cert-manager-ocp-olm | manifest | — | — | 0 |
 | dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
+| gcp-driver-installer | manifest | — | — | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
 | gpu-operator | helm | nvidia/gpu-operator | v26.3.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
@@ -133,6 +134,12 @@ _No images extracted._
 - `curlimages/curl:8.12.0`
 - `openpolicyagent/gatekeeper-crds:v3.22.2`
 - `openpolicyagent/gatekeeper:v3.22.2`
+
+### gcp-driver-installer
+
+- `cos-nvidia-installer:fixed`
+- `gcr.io/gke-release/nvidia-partition-gpu@sha256:e226275da6c45816959fe43cde907ee9a85c6a2aa8a429418a4cadef8ecdb86a`
+- `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
 
 ### gke-nccl-tcpxo
 
