@@ -290,9 +290,10 @@ func TestConcurrentRuns(t *testing.T) {
 	// This subtest supplies the missing case: dA's staging ConfigMap name
 	// collides with dA's own formula, but Config.OwnsOutputConfigMap was
 	// false for run A, so getSnapshotFromConfigMap (assertion 4) never
-	// recorded it into run A's created-set. See the RED/GREEN evidence in
-	// task-9-report.md for confirmation this genuinely discriminates
-	// against a name-derived Cleanup.
+	// recorded it into run A's created-set. So the property under test is
+	// precisely this: a Cleanup that recomputed its delete list from
+	// d.stagingConfigMapName() would delete this ConfigMap, while one
+	// driven by the created-set leaves it standing.
 	t.Run("run A Cleanup leaves its own unrecorded staging ConfigMap intact", func(t *testing.T) {
 		if _, err := clientset.CoreV1().ConfigMaps(concurrencyTestNamespace).Get(ctx, dA.stagingConfigMapName(), metav1.GetOptions{}); err != nil {
 			t.Errorf("run A's own staging ConfigMap %q should survive run A's Cleanup (never recorded, so not owned), err = %v", dA.stagingConfigMapName(), err)
