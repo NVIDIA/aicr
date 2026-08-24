@@ -54,6 +54,12 @@ func TestRender(t *testing.T) {
 	if strings.Contains(got, "secrets") {
 		t.Error("manifest must not grant secrets read")
 	}
+	// The mellanox.com rule is component-specific — it must NOT leak
+	// into gpu-operator's gate SA (PR #2337 review). It appears only
+	// for the network-operator component; see TestRender_NetworkOperator.
+	if strings.Contains(got, "mellanox.com") {
+		t.Errorf("gpu-operator manifest must not grant mellanox.com read; got:\n%s", got)
+	}
 	for _, want := range []string{
 		"--timeout=" + defaults.ReadinessGateExecTimeout.String(),
 		"--max-wait=" + defaults.ReadinessGateMaxWait.String(),
@@ -108,5 +114,26 @@ func TestRender_HelmHooks(t *testing.T) {
 func TestRender_EmptyComponentName(t *testing.T) {
 	if _, err := Render("", "img:tag", []byte("x"), config.DeployerHelm); err == nil {
 		t.Fatal("expected error for empty component name")
+	}
+}
+
+// TestRender_NetworkOperator pins the component-specific mellanox.com
+// rule that componentClusterRoleRules injects only for the
+// network-operator gate (PR #2337 review).
+func TestRender_NetworkOperator(t *testing.T) {
+	got, err := Render("network-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerArgoCD)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	s := string(got)
+
+	const mellanoxRule = `  - apiGroups: ["mellanox.com"]
+    resources: ["nicclusterpolicies"]
+    verbs: ["get", "list", "watch"]`
+	if !strings.Contains(s, mellanoxRule) {
+		t.Errorf("network-operator manifest missing mellanox.com rule:\n%s", s)
+	}
+	if strings.Count(s, `apiGroups: ["mellanox.com"]`) != 1 {
+		t.Errorf("mellanox.com rule must appear exactly once in the ClusterRole; got:\n%s", s)
 	}
 }
