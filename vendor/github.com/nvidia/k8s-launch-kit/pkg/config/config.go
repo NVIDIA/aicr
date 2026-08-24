@@ -81,12 +81,10 @@ func DefaultLaunchKitConfig() (*LaunchKitConfig, error) {
 	return &cfg, nil
 }
 
-// MachineLabelKey is the node label `l8k discover` writes onto every
-// node whose group has both machineType and gpuType resolved. The value
-// is the literal `<machineType>-<gpuType>` (e.g. `DGX-B200-NVIDIA-H100-NVL`)
-// — upstream discovery already trims whitespace and converts spaces to
-// hyphens to match GPU operator label format. Per-source-group
-// `NodeSelector` keys on this label.
+// MachineLabelKey is the node label `l8k discover` writes onto every node
+// whose group has both machineType and gpuType resolved. Its value is the
+// group's generated identifier, so per-source-group NodeSelectors and
+// generated names use the same stable identity.
 const MachineLabelKey = "nvidia.kubernetes-launch-kit.machine"
 
 // GPULabelKey is the node label `l8k discover` writes onto every node
@@ -101,7 +99,13 @@ const (
 	MaxLabelValueLength = 63
 	// MaxGeneratedIdentifierLength leaves room for prefixes added to generated
 	// resource names and label values while retaining a collision-resistant hash.
-	MaxGeneratedIdentifierLength = 40
+	MaxGeneratedIdentifierLength = 30
+	// generatedIdentifierHashLength is the number of FNV-32a hex digits kept
+	// in shortened generated identities. The leading dash is additional.
+	generatedIdentifierHashLength = 6
+	// labelValueHashLength retains the existing hash width for GPU label values,
+	// which continue to use Kubernetes' full label-value budget.
+	labelValueHashLength = 8
 )
 
 const (
@@ -116,23 +120,52 @@ const (
 	SpectrumXIPVersionIPv6 = "ipv6"
 )
 
-// MachineLabelValue returns the per-source-group machine label value:
-// `<machineType>-<gpuType>` literal when it fits the 40-byte generated-group
-// identity limit, or a deterministic shortened form for long names
-// (truncated prefix + 8-hex FNV-32a suffix). Returns the empty string
-// only when either input is empty.
-//
-// The shortened form looks like
-// `HPE-ProLiant-Compute-DL380-Gen1-0885f134`
-// and is reproducible: identical inputs always produce the same
-// value, so the label discover writes onto nodes always matches what
-// `MachineLabelValue` returns at filter time.
-func MachineLabelValue(machineType, gpuType string) string {
+// GeneratedGroupIdentifier returns the shared identifier used by a source
+// group and its MachineLabelKey node label. Normalization removes complete
+// "nvidia" segments and shortens common machine segments ("thinksystem" to
+// "ts", "poweredge" to "pe"). Long identities retain balanced prefixes from
+// machineType and gpuType plus a deterministic 6-hex FNV-32a hash. If one
+// component is shorter than half of the readable budget, the other component
+// receives the unused space.
+func GeneratedGroupIdentifier(machineType, gpuType string) string {
 	if machineType == "" || gpuType == "" {
 		return ""
 	}
-	raw := machineType + "-" + gpuType
-	return truncateWithHash(raw, MaxGeneratedIdentifierLength)
+
+	machine := normalizeIdentifier(machineType)
+	gpu := normalizeIdentifier(gpuType)
+	if machine == "" {
+		return truncateIdentifierWithHash(gpu)
+	}
+	if gpu == "" {
+		return truncateIdentifierWithHash(machine)
+	}
+
+	raw := machine + "-" + gpu
+	if len(raw) <= MaxGeneratedIdentifierLength {
+		return raw
+	}
+
+	suffix := hashSuffix(raw, generatedIdentifierHashLength)
+	readableBudget := MaxGeneratedIdentifierLength - len(suffix) - 1
+	machineBudget := readableBudget / 2
+	gpuBudget := readableBudget - machineBudget
+	if len(machine) < machineBudget {
+		machineBudget = len(machine)
+		gpuBudget = readableBudget - machineBudget
+	} else if len(gpu) < gpuBudget {
+		gpuBudget = len(gpu)
+		machineBudget = readableBudget - gpuBudget
+	}
+
+	return machine[:machineBudget] + "-" + gpu[:gpuBudget] + suffix
+}
+
+// MachineLabelValue returns the generated source-group identifier used as the
+// MachineLabelKey node label. It is kept as a named helper for callers that
+// construct selector values outside discovery.
+func MachineLabelValue(machineType, gpuType string) string {
+	return GeneratedGroupIdentifier(machineType, gpuType)
 }
 
 // GPULabelValue returns the gpu label value, applying the same
@@ -142,36 +175,60 @@ func GPULabelValue(gpuType string) string {
 	if gpuType == "" {
 		return ""
 	}
-	return truncateWithHash(gpuType, MaxLabelValueLength)
+	return truncateWithHash(gpuType, MaxLabelValueLength, labelValueHashLength)
 }
 
 // truncateWithHash returns s unchanged when it fits maxLen bytes. Longer
-// values retain a readable prefix and an 8-hex FNV-32a hash of the full input.
-func truncateWithHash(s string, maxLen int) string {
+// values retain a readable prefix and the requested number of FNV-32a hash
+// digits from the full input.
+func truncateWithHash(s string, maxLen, hashLength int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(s))
-	suffix := fmt.Sprintf("-%08x", h.Sum32())
+	suffix := hashSuffix(s, hashLength)
 	prefixBudget := maxLen - len(suffix)
 	prefix := strings.TrimRight(s[:prefixBudget], "-_.")
 	return prefix + suffix
 }
 
+func hashSuffix(s string, hashLength int) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	fullHash := fmt.Sprintf("%08x", h.Sum32())
+	return "-" + fullHash[:hashLength]
+}
+
 // SanitizeIdentifier converts a product-type or label-value string into a
-// valid K8s name component: lowercases the input and replaces spaces with
-// hyphens, then deterministically bounds the result to 40 bytes. The shorter
-// limit leaves room for prefixes wherever the identifier is appended to a
-// generated resource name or label value. Used by discovery to derive
-// `ClusterConfig.Identifier` from the machine label, and by the renderer when
-// an identifier needs to land in a resource name. Both call sites must agree
-// on the rule so a config produced by discovery renders the same names
-// downstream — single function here guarantees that.
+// valid K8s name component: lowercases the input, replaces spaces with
+// hyphens, removes complete "nvidia" segments, and applies common segment
+// shortenings before deterministically bounding the result to 30 bytes with a
+// 6-hex hash when needed. Used for single-component generated identities such
+// as auto-merged GPU groups.
 func SanitizeIdentifier(s string) string {
+	return truncateIdentifierWithHash(normalizeIdentifier(s))
+}
+
+func normalizeIdentifier(s string) string {
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, " ", "-")
-	return truncateWithHash(s, MaxGeneratedIdentifierLength)
+	segments := strings.Split(s, "-")
+	filtered := segments[:0]
+	for _, segment := range segments {
+		switch segment {
+		case "nvidia":
+			continue
+		case "thinksystem":
+			segment = "ts"
+		case "poweredge":
+			segment = "pe"
+		}
+		filtered = append(filtered, segment)
+	}
+	return strings.Join(filtered, "-")
+}
+
+func truncateIdentifierWithHash(s string) string {
+	return truncateWithHash(s, MaxGeneratedIdentifierLength, generatedIdentifierHashLength)
 }
 
 // LaunchKitConfig represents the l8k-config.yaml structure
@@ -687,11 +744,10 @@ type ClusterConfig struct {
 	// same kubelet resource. In Mode A this equals Identifier; in Mode B's
 	// per-source render units it differs.
 	MergedIdentifier string `yaml:"-"`
-	// SourceMachineLabels lists the machine-label values
-	// (`<machineType>-<gpuType>`) of every source group represented by the
-	// merged bucket. Populated only when this is a merged render group and
-	// the filtered set is a strict subset of its (gpuType, railCount)
-	// bucket — used by Scope-Aggregate templates to emit a
+	// SourceMachineLabels lists the generated identifier/machine-label values
+	// of every source group represented by the merged bucket. Populated only
+	// when this is a merged render group and the filtered set is a strict subset
+	// of its (gpuType, railCount) bucket; Scope-Aggregate templates use it to emit a
 	// `matchExpressions In: [...]` selector. Empty in Mode A and for
 	// per-source render units.
 	SourceMachineLabels []string `yaml:"-"`

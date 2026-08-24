@@ -87,13 +87,13 @@ func refLabelItem(key, value, dataKey string, count int) measurement.ItemEntry {
 // the vintages — the count as well as the presence of items.
 func collidingCluster() (map[string]string, []measurement.ItemEntry) {
 	return map[string]string{
-			"zone.us-west": "true|gpu-a,gpu-b",
-			"zone.us-east": "us-east|gpu-b",
-		}, []measurement.ItemEntry{
-			labelItem("zone", "us-east", "gpu-b"),
-			labelItem("zone", "us-west", "gpu-a"),
-			labelItem("zone.us-west", "true", "gpu-a,gpu-b"),
-		}
+		"zone.us-west": "true|gpu-a,gpu-b",
+		"zone.us-east": "us-east|gpu-b",
+	}, []measurement.ItemEntry{
+		labelItem("zone", "us-east", "gpu-b"),
+		labelItem("zone", "us-west", "gpu-a"),
+		labelItem("zone.us-west", "true", "gpu-a,gpu-b"),
+	}
 }
 
 // TestSnapshots_UpgradeIsNotDrift pins that capturing a baseline with an older
