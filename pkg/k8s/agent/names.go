@@ -109,6 +109,85 @@ func (d *Deployer) validateRunID() error {
 	return nil
 }
 
+// resolvedName is one caller-influenced object name this Deployer would
+// create, carried together with the Config field that supplied its prefix.
+// Validation reports the field rather than only the derived string, because
+// the field is what a caller can actually change.
+type resolvedName struct {
+	field  string // Config field the prefix came from
+	prefix string // the prefix value that field held
+	value  string // the resolved object name, "<prefix>-<RunID>"
+	// objects names what value is the name of, so a rejection states the
+	// blast radius: saName() also names the Role and the RoleBinding.
+	objects string
+}
+
+// resolvedNames returns every object name this Deployer builds from a
+// caller-supplied prefix, paired with its source field.
+//
+// The ClusterRole/ClusterRoleBinding and staging ConfigMap names are
+// deliberately absent: their prefixes are package constants
+// (staticClusterRoleName, staticStagingConfigMapName), so the only
+// caller-supplied input they carry is the run ID, which validateRunID
+// already covers.
+func (d *Deployer) resolvedNames() []resolvedName {
+	jobField, jobPrefix := "Config.NameBase", d.base()
+	if d.config.JobName != "" {
+		jobField, jobPrefix = "Config.JobName", d.config.JobName
+	}
+	saField, saPrefix := "Config.NameBase", d.base()
+	if d.config.ServiceAccountName != "" {
+		saField, saPrefix = "Config.ServiceAccountName", d.config.ServiceAccountName
+	}
+	return []resolvedName{
+		{field: jobField, prefix: jobPrefix, value: d.jobName(), objects: "Job"},
+		{field: saField, prefix: saPrefix, value: d.saName(), objects: "ServiceAccount, Role and RoleBinding"},
+	}
+}
+
+// validateResolvedNames rejects a generated object name Kubernetes would
+// refuse. validateRunID covers one half of every run-owned name; this covers
+// the other. NameBase, JobName and ServiceAccountName are caller-supplied
+// too, and a prefix such as "agent_" yields "agent_-<RunID>" — which the
+// apiserver rejects with an opaque "Invalid value: metadata.name" from
+// partway through Deploy's ensure* chain, after some objects already exist.
+//
+// The constraint is DNS-1123 subdomain, which is what the apiserver enforces
+// on Job and ServiceAccount names, plus the narrower defaults.MaxK8sNameLength
+// ceiling this package budgets against (a Job name also becomes the
+// batch.kubernetes.io/job-name label value on every Pod the Job creates, and
+// label values share that ceiling). nameWithRunID truncates the prefix to
+// that budget, so the length branch is reachable only for a run ID that is
+// itself over-long — which validateRunID rejects first when both run under
+// validateNames, but not when this method is called on its own.
+func (d *Deployer) validateResolvedNames() error {
+	for _, n := range d.resolvedNames() {
+		problems := validation.IsDNS1123Subdomain(n.value)
+		if len(problems) == 0 && len(n.value) > defaults.MaxK8sNameLength {
+			problems = []string{fmt.Sprintf("must be no more than %d characters", defaults.MaxK8sNameLength)}
+		}
+		if len(problems) == 0 {
+			continue
+		}
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s %q yields the %s name %q, which is not a valid Kubernetes object name: %s",
+				n.field, n.prefix, n.objects, n.value, strings.Join(problems, "; ")),
+			map[string]any{"field": n.field, "value": n.prefix, "resolvedName": n.value})
+	}
+	return nil
+}
+
+// validateNames is Deploy's naming pre-flight: it rejects both halves of a
+// run-owned name — the run ID and the resolved object names built from the
+// caller's prefixes — before any cluster call is made, so an invalid value
+// can never leave a partially-created deployment behind.
+func (d *Deployer) validateNames() error {
+	if err := d.validateRunID(); err != nil {
+		return err
+	}
+	return d.validateResolvedNames()
+}
+
 // base returns the configured name base, defaulting to "aicr" when unset.
 func (d *Deployer) base() string {
 	if d.config.NameBase != "" {

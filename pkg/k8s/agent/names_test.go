@@ -276,3 +276,187 @@ func TestDeployRejectsInvalidRunIDBeforeCreatingAnything(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateResolvedNames covers the other half of the naming gate:
+// Config.RunID may be well-formed while the caller-supplied prefix it is
+// appended to is not. Every case here calls validateResolvedNames directly
+// rather than validateNames, so the over-long run ID case can reach the
+// length branch that validateRunID would otherwise short-circuit.
+func TestValidateResolvedNames(t *testing.T) {
+	const runID = "20260821-142233-9f3a1c0b7e2d4a55"
+
+	// A prefix that leaves no room at all: nameWithRunID's budget floors at
+	// zero, so the resolved name is the bare (over-long) run ID.
+	overLongRunID := strings.Repeat("a", defaults.MaxK8sNameLength+17)
+
+	tests := []struct {
+		name string
+		// config carries only the naming fields; RunID defaults to runID
+		// unless the case overrides it.
+		config Config
+		// wantErr is the substring the message must name — the Config field
+		// at fault. Empty means the names must be accepted.
+		wantField string
+		// wantValue is echoed in the message alongside the field so an
+		// operator sees what to change. Only checked when wantField is set.
+		wantValue string
+	}{
+		{
+			name:   "default prefixes are valid",
+			config: Config{RunID: runID},
+		},
+		{
+			name:   "explicit prefixes are valid",
+			config: Config{JobName: "my-job", ServiceAccountName: "my-sa", RunID: runID},
+		},
+		{
+			name:   "a dot is a legal DNS-1123 subdomain character",
+			config: Config{JobName: "aicr.agent", RunID: runID},
+		},
+		{
+			// nameWithRunID trims the separator rather than doubling it,
+			// so this resolves to a valid name and must be accepted.
+			name:   "trailing dash on the prefix is trimmed, not rejected",
+			config: Config{JobName: "agent-", RunID: runID},
+		},
+		{
+			// The budget truncation keeps the resolved name inside
+			// defaults.MaxK8sNameLength, so an over-long prefix is not an
+			// error — it is silently shortened.
+			name:   "over-length prefix truncates to a valid name",
+			config: Config{JobName: strings.Repeat("a", defaults.MaxK8sNameLength*3), RunID: runID},
+		},
+		{
+			// Truncation plus trailing-dash trimming can empty the prefix
+			// entirely; the result is the bare run ID, which is valid.
+			name:   "prefix that empties after truncation degrades to the bare run ID",
+			config: Config{JobName: "----", RunID: runID},
+		},
+		{
+			name:      "underscore in JobName",
+			config:    Config{JobName: "agent_", RunID: runID},
+			wantField: "Config.JobName",
+			wantValue: "agent_",
+		},
+		{
+			name:      "underscore in ServiceAccountName",
+			config:    Config{ServiceAccountName: "agent_sa", RunID: runID},
+			wantField: "Config.ServiceAccountName",
+			wantValue: "agent_sa",
+		},
+		{
+			name:      "underscore in NameBase governs both names",
+			config:    Config{NameBase: "agent_base", RunID: runID},
+			wantField: "Config.NameBase",
+			wantValue: "agent_base",
+		},
+		{
+			name:      "uppercase in JobName",
+			config:    Config{JobName: "Agent", RunID: runID},
+			wantField: "Config.JobName",
+			wantValue: "Agent",
+		},
+		{
+			name:      "leading dash in JobName",
+			config:    Config{JobName: "-agent", RunID: runID},
+			wantField: "Config.JobName",
+			wantValue: "-agent",
+		},
+		{
+			name:      "slash in ServiceAccountName",
+			config:    Config{ServiceAccountName: "team/agent", RunID: runID},
+			wantField: "Config.ServiceAccountName",
+			wantValue: "team/agent",
+		},
+		{
+			// Reachable only by calling validateResolvedNames directly:
+			// validateNames rejects this run ID first. It exists so the
+			// defaults.MaxK8sNameLength branch is covered rather than
+			// trusted.
+			name:      "over-long run ID leaves a name past the length ceiling",
+			config:    Config{RunID: overLongRunID},
+			wantField: "Config.NameBase",
+			wantValue: defaultNameBase,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDeployer(fake.NewClientset(), tt.config)
+			err := d.validateResolvedNames()
+			if tt.wantField == "" {
+				if err != nil {
+					t.Fatalf("validateResolvedNames() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("validateResolvedNames() = nil, want an error naming %s", tt.wantField)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
+			}
+			if !strings.Contains(err.Error(), tt.wantField) {
+				t.Errorf("error %q does not name the offending field %q", err.Error(), tt.wantField)
+			}
+			if !strings.Contains(err.Error(), tt.wantValue) {
+				t.Errorf("error %q does not echo the offending value %q", err.Error(), tt.wantValue)
+			}
+		})
+	}
+}
+
+// TestValidateNamesChecksRunIDFirst pins the order inside the pre-flight: a
+// caller who gets both halves wrong should hear about the run ID, which is
+// the value they are least likely to have set deliberately.
+func TestValidateNamesChecksRunIDFirst(t *testing.T) {
+	d := NewDeployer(fake.NewClientset(), Config{JobName: "agent_", RunID: "Bad/ID"})
+	err := d.validateNames()
+	if err == nil {
+		t.Fatal("validateNames() = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "Config.RunID") {
+		t.Errorf("error %q does not name Config.RunID", err.Error())
+	}
+}
+
+// TestDeployRejectsInvalidResolvedNameBeforeCreatingAnything is the
+// end-to-end half of the resolved-name gate, mirroring the run-ID test
+// above: an invalid prefix must be rejected before CheckPermissions and
+// before any write, so no partially-created RBAC is left behind.
+func TestDeployRejectsInvalidResolvedNameBeforeCreatingAnything(t *testing.T) {
+	const runID = "20260821-142233-9f3a1c0b7e2d4a55"
+	ctx := context.Background()
+
+	tests := []struct {
+		name   string
+		config Config
+	}{
+		{"underscore JobName", Config{JobName: "agent_", RunID: runID}},
+		{"uppercase ServiceAccountName", Config{ServiceAccountName: "AgentSA", RunID: runID}},
+		{"underscore NameBase", Config{NameBase: "agent_base", RunID: runID}},
+		{"leading dash JobName", Config{JobName: "-agent", RunID: runID}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clientset := fake.NewClientset()
+			cfg := tt.config
+			cfg.Namespace = "test-ns"
+			cfg.Image = "aicr:test"
+
+			err := NewDeployer(clientset, cfg).Deploy(ctx)
+			if err == nil {
+				t.Fatalf("Deploy() with config %+v should fail", cfg)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("Deploy() error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
+			}
+			// Not even the Step-0 SelfSubjectAccessReview may have been
+			// issued: the gate runs ahead of CheckPermissions.
+			if actions := clientset.Actions(); len(actions) != 0 {
+				t.Errorf("Deploy() issued %d API call(s) before rejecting an invalid name: %v", len(actions), actions)
+			}
+		})
+	}
+}
