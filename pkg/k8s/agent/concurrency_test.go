@@ -65,9 +65,9 @@ var (
 // RBAC permissions (specifically DiscoverNetwork's extra cluster rules)
 // into the other, must each select only their own Pod, must each read back
 // only their own snapshot bytes, and one run's Cleanup must never touch the
-// other's objects — nor an object that merely sits at a name that run's own
-// naming formula would produce but that it never actually created. Run
-// under -race.
+// other's objects — nor a ConfigMap that merely sits at a name that run's own
+// naming formula would produce but that the run does not own. Run under
+// -race.
 //
 // Fake-clientset limitations this test works around, not around-asserts:
 //
@@ -92,7 +92,10 @@ var (
 //     selector string for that path. Watch does NOT filter (the fake
 //     Watch reactor ignores ListOptions.LabelSelector entirely); this
 //     test does not exercise the watch-based pod-discovery path
-//     (findOrWatchPodName), so that gap does not apply here.
+//     (findOrWatchPodName), so that gap does not apply here. That path —
+//     the one production actually takes, since WaitForPodReady runs right
+//     after Deploy — has its own ownership coverage in
+//     TestFindOrWatchPodNameAuthorizesByJobOwnership (wait_test.go).
 func TestConcurrentRuns(t *testing.T) {
 	ctx := context.Background()
 	clientset := fake.NewClientset()
@@ -130,12 +133,11 @@ func TestConcurrentRuns(t *testing.T) {
 		// OwnsOutputConfigMap is false for run A on purpose (unlike run B
 		// below): it models an object — the staging ConfigMap seeded for
 		// run A below — that sits at exactly the name run A's own naming
-		// formula computes, but that run A never created or recorded into
-		// its created-set. Assertion 5's discriminator subtest needs
-		// exactly this shape: name-scoping alone (assertion 1) cannot
-		// explain that object surviving run A's Cleanup, only created-set
-		// scoping can. Run B keeps OwnsOutputConfigMap true so the
-		// "owned and recorded" path stays covered too (assertion 4).
+		// formula computes, but that run A does not own. Assertion 5's
+		// ownership subtest needs exactly this shape, since name-scoping
+		// alone (assertion 1) cannot explain that object surviving run A's
+		// Cleanup. Run B keeps OwnsOutputConfigMap true so the "owned and
+		// recorded" path stays covered too (assertion 4).
 		OwnsOutputConfigMap: false,
 		DiscoverNetwork:     false,
 	})
@@ -278,25 +280,30 @@ func TestConcurrentRuns(t *testing.T) {
 		}
 	})
 
-	// --- Assertion 5 (cleanup ownership discriminator): run A's Cleanup
-	// must not touch an object it never created, even when that object
-	// sits at exactly the name run A's own naming formula computes.
+	// --- Assertion 5 (staging-ConfigMap ownership gate): run A's Cleanup
+	// must not touch a staging-named ConfigMap this run does not own, even
+	// when that name is exactly what run A's own naming formula computes.
 	//
-	// This is deliberately a separate subtest from the one above: the run-B
-	// check above would pass equally against a hypothetical name-derived
-	// Cleanup, because run A and run B always compute different names
-	// (assertion 1 already proves that) — so it cannot by itself prove
-	// Cleanup is scoped by the created-set rather than by recomputed names.
-	// This subtest supplies the missing case: dA's staging ConfigMap name
-	// collides with dA's own formula, but Config.OwnsOutputConfigMap was
-	// false for run A, so getSnapshotFromConfigMap (assertion 4) never
-	// recorded it into run A's created-set. So the property under test is
-	// precisely this: a Cleanup that recomputed its delete list from
-	// d.stagingConfigMapName() would delete this ConfigMap, while one
-	// driven by the created-set leaves it standing.
-	t.Run("run A Cleanup leaves its own unrecorded staging ConfigMap intact", func(t *testing.T) {
+	// This is deliberately a separate subtest from the one above, which
+	// compares run A against run B and so is satisfied by name-scoping
+	// alone (assertion 1 already proves the two runs compute different
+	// names). Here the names collide, so only Config.OwnsOutputConfigMap —
+	// false for run A, which is why getSnapshotFromConfigMap in assertion 4
+	// did not record the ConfigMap and why the name-based sweep does not
+	// fire either — can explain the object surviving.
+	//
+	// Scope note: this pins the OWNERSHIP GATE, not created-set scoping as
+	// such. A hypothetical Cleanup that recomputed its delete list from
+	// d.stagingConfigMapName() but kept the same OwnsOutputConfigMap gate
+	// would pass this subtest unchanged. The tests that actually
+	// discriminate created-set scoping are TestCleanupPassesUIDPrecondition
+	// (every delete carries the UID from its Create response — a value no
+	// name-derived delete list can supply) and
+	// TestCleanupDeletesUnconfirmedCreateByBareName, both in
+	// deployer_test.go.
+	t.Run("run A Cleanup leaves its own unowned staging ConfigMap intact", func(t *testing.T) {
 		if _, err := clientset.CoreV1().ConfigMaps(concurrencyTestNamespace).Get(ctx, dA.stagingConfigMapName(), metav1.GetOptions{}); err != nil {
-			t.Errorf("run A's own staging ConfigMap %q should survive run A's Cleanup (never recorded, so not owned), err = %v", dA.stagingConfigMapName(), err)
+			t.Errorf("the ConfigMap at run A's staging name %q should survive run A's Cleanup (OwnsOutputConfigMap is false, so it is not run A's to delete), err = %v", dA.stagingConfigMapName(), err)
 		}
 	})
 }
@@ -335,6 +342,12 @@ func assertSevenKindsExist(t *testing.T, ctx context.Context, clientset kubernet
 // seedStagingConfigMap creates d's staging ConfigMap directly, standing in
 // for the in-pod agent write that Deploy() itself never performs against
 // the fake clientset.
+//
+// The labels below are d's own set for convenience only. The real in-pod
+// writer (pkg/serializer's ConfigMap writer) stamps a different, smaller set —
+// no managed-by and no run-ID label — because it also produces the user's
+// delivered cm:// artifact. Nothing here selects on these labels: run scoping
+// for this object comes from its name.
 func seedStagingConfigMap(t *testing.T, ctx context.Context, clientset kubernetes.Interface, d *Deployer, uid, snapshotYAML string) {
 	t.Helper()
 	cm := &corev1.ConfigMap{

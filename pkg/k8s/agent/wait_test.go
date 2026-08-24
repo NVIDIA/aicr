@@ -17,17 +17,23 @@ package agent
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestParseConfigMapName_Extended(t *testing.T) {
@@ -496,4 +502,224 @@ func TestPickLivePod(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Two Job UIDs for the watch-path ownership tests: A is the run under test,
+// B stands in for any concurrent run whose pod could reach this run's watch.
+const (
+	watchJobUIDA = types.UID("job-uid-a")
+	watchJobUIDB = types.UID("job-uid-b")
+)
+
+// runLabeledPod returns a Pod carrying d's full label set — so it passes
+// d.podLabelSelector() — controlled by the Job with ownerUID. Passing a UID
+// other than d's own recorded Job UID produces the imposter: a pod that
+// anything able to update pods in the namespace could label as this run's,
+// but that this run's Job does not control.
+func runLabeledPod(d *Deployer, name string, ownerUID types.UID) *corev1.Pod {
+	controller := true
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: d.config.Namespace,
+			Labels:    d.objectLabels(),
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind:       kindJob,
+					Name:       "some-other-run-job",
+					UID:        ownerUID,
+					Controller: &controller,
+				},
+			},
+		},
+	}
+}
+
+// watchDeployer returns a Deployer for the watch-path tests with run A's Job
+// UID already recorded, so jobUID() is non-zero and the ownership checks in
+// findOrWatchPodName are actually exercised rather than skipped.
+func watchDeployer(client *fake.Clientset, namespace string) *Deployer {
+	d := NewDeployer(client, Config{Namespace: namespace, RunID: testRunID})
+	d.recordCreated(kindJob, d.jobName(), watchJobUIDA)
+	return d
+}
+
+// TestFindOrWatchPodNameAuthorizesByJobOwnership covers the watch-based
+// discovery path, which is the PRIMARY production path: pkg/snapshotter calls
+// WaitForPodReady immediately after Deploy, before any pod exists, so the fast
+// List misses and the watch loop is what actually selects the pod.
+//
+// Every other test in this package that reaches findOrWatchPodName leaves
+// jobUID() empty, which makes both pickLivePod calls AND the per-event guard
+// no-ops — so the ownership authorization on this path was previously
+// untested. Each subtest here records a real Job UID first.
+//
+// Fake-clientset limitation this works around: the fake Watch reactor ignores
+// ListOptions.LabelSelector entirely, so every emitted event reaches the loop.
+// That is fine — and in fact necessary — here, because the property under test
+// is that the controlling ownerReference (not the forgeable RunID label) is
+// what authorizes selection. The List-side selector filtering IS honored by
+// the fake, so the re-List subtests exercise it for real.
+func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
+	const ns = "watch-ns"
+
+	t.Run("watch event for another run's Job is skipped", func(t *testing.T) {
+		client := fake.NewClientset()
+		w := watch.NewRaceFreeFake()
+		client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(w, nil))
+
+		d := watchDeployer(client, ns)
+
+		// The imposter arrives FIRST: a watch loop that returned the first
+		// event passing the label filter would take it and never see the
+		// real pod.
+		w.Add(runLabeledPod(d, "imposter-pod", watchJobUIDB))
+		w.Add(runLabeledPod(d, "agent-pod-a", watchJobUIDA))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		got, err := d.findOrWatchPodName(ctx)
+		if err != nil {
+			t.Fatalf("findOrWatchPodName() error = %v", err)
+		}
+		if got != "agent-pod-a" {
+			t.Errorf("findOrWatchPodName() = %q, want %q — a pod controlled by another run's "+
+				"Job was selected on the watch path", got, "agent-pod-a")
+		}
+	})
+
+	t.Run("watch event with no ownerReference is skipped", func(t *testing.T) {
+		client := fake.NewClientset()
+		w := watch.NewRaceFreeFake()
+		client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(w, nil))
+
+		d := watchDeployer(client, ns)
+
+		// Labels alone, no controlling ownerReference at all — the shape a
+		// caller with pods/update in the namespace can produce directly.
+		orphan := runLabeledPod(d, "orphan-pod", watchJobUIDA)
+		orphan.OwnerReferences = nil
+		w.Add(orphan)
+		w.Add(runLabeledPod(d, "agent-pod-a", watchJobUIDA))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		got, err := d.findOrWatchPodName(ctx)
+		if err != nil {
+			t.Fatalf("findOrWatchPodName() error = %v", err)
+		}
+		if got != "agent-pod-a" {
+			t.Errorf("findOrWatchPodName() = %q, want %q", got, "agent-pod-a")
+		}
+	})
+
+	t.Run("closed watch channel re-Lists and authorizes the re-Listed pod", func(t *testing.T) {
+		client := fake.NewClientset()
+		d := watchDeployer(client, ns)
+
+		// The fast-path List must miss so the watch is reached at all; the
+		// re-List after the channel closes then returns both pods.
+		installStagedPodLister(client, func(call int) []corev1.Pod {
+			if call == 1 {
+				return nil
+			}
+			return []corev1.Pod{
+				*runLabeledPod(d, "imposter-pod", watchJobUIDB),
+				*runLabeledPod(d, "agent-pod-a", watchJobUIDA),
+			}
+		})
+
+		w := watch.NewRaceFreeFake()
+		w.Stop() // apiserver hiccup / LB drop: channel closed, no event
+		client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(w, nil))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		got, err := d.findOrWatchPodName(ctx)
+		if err != nil {
+			t.Fatalf("findOrWatchPodName() error = %v — a closed watch channel must re-List "+
+				"before declaring failure", err)
+		}
+		if got != "agent-pod-a" {
+			t.Errorf("findOrWatchPodName() = %q, want %q — the re-List branch must apply the "+
+				"same ownership check", got, "agent-pod-a")
+		}
+	})
+
+	t.Run("closed watch channel with only a foreign pod fails closed", func(t *testing.T) {
+		client := fake.NewClientset()
+		d := watchDeployer(client, ns)
+
+		installStagedPodLister(client, func(call int) []corev1.Pod {
+			if call == 1 {
+				return nil
+			}
+			return []corev1.Pod{*runLabeledPod(d, "imposter-pod", watchJobUIDB)}
+		})
+
+		w := watch.NewRaceFreeFake()
+		w.Stop()
+		client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(w, nil))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		got, err := d.findOrWatchPodName(ctx)
+		if err == nil {
+			t.Fatalf("findOrWatchPodName() = %q, nil error; a pod owned by another run's Job "+
+				"must not satisfy the re-List branch", got)
+		}
+		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnavailable, "")) {
+			t.Errorf("error = %v, want code ErrCodeUnavailable", err)
+		}
+	})
+
+	t.Run("closed watch channel surfaces a failed re-List", func(t *testing.T) {
+		client := fake.NewClientset()
+		d := watchDeployer(client, ns)
+
+		var mu sync.Mutex
+		var calls int
+		client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			if calls == 1 {
+				return true, &corev1.PodList{}, nil
+			}
+			return true, nil, stderrors.New("apiserver unreachable")
+		})
+
+		w := watch.NewRaceFreeFake()
+		w.Stop()
+		client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(w, nil))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if _, err := d.findOrWatchPodName(ctx); err == nil {
+			t.Fatal("findOrWatchPodName() = nil error, want the re-List failure surfaced")
+		} else if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnavailable, "")) {
+			t.Errorf("error = %v, want code ErrCodeUnavailable", err)
+		}
+	})
+}
+
+// installStagedPodLister makes successive Pod List calls return different
+// results: items(1) answers the fast-path List in findOrWatchPodName, items(2)
+// answers the re-List after the watch channel closes. The fake still applies
+// ListOptions.LabelSelector to whatever this returns, so the label narrowing
+// is exercised for real.
+func installStagedPodLister(client *fake.Clientset, items func(call int) []corev1.Pod) {
+	var mu sync.Mutex
+	var calls int
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		return true, &corev1.PodList{Items: items(calls)}, nil
+	})
 }
