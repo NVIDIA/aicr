@@ -348,6 +348,21 @@ func podWithOwner(kind string, uid types.UID, controller bool) corev1.Pod {
 	}
 }
 
+// podWithNilControllerOwner returns a Pod whose sole OwnerReference omits
+// the Controller field. Controller is a *bool, so an ownerReference written
+// by a client that never set it leaves nil there — the exact case
+// ownedByJob's `ref.Controller != nil` guard exists to survive, and one
+// podWithOwner cannot produce because it always takes the address of a bool.
+func podWithNilControllerOwner(kind string, uid types.UID) corev1.Pod {
+	return corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: kind, UID: uid},
+			},
+		},
+	}
+}
+
 // podWithForgedLabel returns a Pod with no OwnerReferences but a
 // batch.kubernetes.io/controller-uid label set to uid — the label any
 // client that can update pods in the namespace could set directly, unlike
@@ -374,6 +389,9 @@ func TestOwnedByJob(t *testing.T) {
 		{"controller job matching uid", podWithOwner(kindJob, want, true), want, true},
 		{"controller job wrong uid", podWithOwner(kindJob, types.UID("other"), true), want, false},
 		{"non-controller ref", podWithOwner(kindJob, want, false), want, false},
+		// Controller is a *bool: an ownerReference written without it
+		// must be rejected, not dereferenced.
+		{"nil Controller on an otherwise matching ref", podWithNilControllerOwner(kindJob, want), want, false},
 		{"wrong kind", podWithOwner("ReplicaSet", want, true), want, false},
 		{"no owner refs", corev1.Pod{}, want, false},
 		{"forged label only", podWithForgedLabel(want), want, false},
