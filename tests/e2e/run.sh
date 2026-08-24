@@ -507,6 +507,208 @@ test_snapshot() {
 }
 
 # =============================================================================
+# Snapshot Run Isolation Tests (ADR-020, issue #2120)
+# =============================================================================
+
+# Verifies that concurrent snapshot runs own and delete only their own
+# Kubernetes resources. These checks are cluster-backed on purpose: the
+# unit tests in pkg/k8s/agent run against a fake clientset, which runs no
+# Job controller (so pod ownerReferences must be hand-seeded there) and does
+# not enforce metav1.Preconditions on delete. Only a real apiserver exercises
+# both.
+#
+# Scope note on UID preconditions: the delete-with-stale-UID race itself is
+# not reachable from outside the CLI process — the window between an object's
+# creation and the deferred Cleanup is the Job wait, and swapping a live
+# object's UID mid-run revokes the running agent's own credentials. That
+# mechanism is covered by TestCleanupPassesUIDPrecondition and
+# TestCleanupTreatsConflictAsSuccess in pkg/k8s/agent/deployer_test.go. What
+# is verified here is the ownership contract those preconditions enforce and
+# that IS externally observable: cleanup deletes only objects this run
+# created, never one that merely matches its labels or name shape.
+test_snapshot_run_isolation() {
+  msg "=========================================="
+  msg "Testing snapshot run isolation"
+  msg "=========================================="
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "snapshot/isolation" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local ns="$SNAPSHOT_NAMESPACE"
+  local decoy="aicr-node-reader-e2edecoy"
+  local rc=0
+
+  # --- Decoy: labelled like a run-owned object, but created by nobody's run ---
+  # A cleanup that swept by label or by name shape would collect this. A
+  # cleanup scoped to its own created-set must leave it alone.
+  msg "--- Test: cleanup is scoped to created objects, not to labels ---"
+  kubectl delete clusterrole "$decoy" --ignore-not-found=true > /dev/null 2>&1 || true
+  kubectl create clusterrole "$decoy" --verb=get --resource=nodes > /dev/null 2>&1 || true
+  kubectl label clusterrole "$decoy" \
+    app.kubernetes.io/name=aicr \
+    app.kubernetes.io/managed-by=aicr \
+    app.kubernetes.io/component=snapshot-agent \
+    aicr.run/run-id=e2edecoy --overwrite > /dev/null 2>&1 || true
+  local decoy_uid_before
+  decoy_uid_before=$(kubectl get clusterrole "$decoy" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+
+  # --- Retained run: --no-cleanup, so its objects must outlive later runs ---
+  msg "--- Test: a retained run's resources survive concurrent runs ---"
+  local retained_log="${OUTPUT_DIR}/isolation-retained.log"
+  "${AICR_BIN}" snapshot \
+    --image "${AICR_IMAGE}" \
+    --namespace "${ns}" \
+    --no-cleanup \
+    --output "${OUTPUT_DIR}/isolation-retained.yaml" \
+    --timeout 180s \
+    --privileged \
+    --node-selector kubernetes.io/os=linux > "$retained_log" 2>&1 || rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    cat "$retained_log"
+    fail "snapshot/isolation/retained-run" "retained snapshot run failed"
+    return 1
+  fi
+
+  local retained_id
+  retained_id=$(kubectl get jobs -n "$ns" -l app.kubernetes.io/name=aicr \
+    -o jsonpath='{.items[0].metadata.labels.aicr\.run/run-id}' 2>/dev/null || echo "")
+  if [ -z "$retained_id" ]; then
+    fail "snapshot/isolation/run-id-label" "no aicr.run/run-id label on the retained Job"
+    return 1
+  fi
+  detail "retained run ID: ${retained_id}"
+  pass "snapshot/isolation/run-id-label"
+
+  # Every run-owned object must carry the run ID in its name.
+  local missing=""
+  kubectl get job     -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} job"
+  kubectl get sa      -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} sa"
+  kubectl get role    -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} role"
+  kubectl get rolebinding -n "$ns" "aicr-${retained_id}"                  > /dev/null 2>&1 || missing="${missing} rolebinding"
+  kubectl get cm      -n "$ns" "aicr-agent-snapshot-${retained_id}"       > /dev/null 2>&1 || missing="${missing} staging-cm"
+  kubectl get clusterrole        "aicr-node-reader-${retained_id}"        > /dev/null 2>&1 || missing="${missing} clusterrole"
+  kubectl get clusterrolebinding "aicr-node-reader-${retained_id}"        > /dev/null 2>&1 || missing="${missing} clusterrolebinding"
+  if [ -n "$missing" ]; then
+    fail "snapshot/isolation/run-scoped-names" "not found under run-scoped names:${missing}"
+    return 1
+  fi
+  pass "snapshot/isolation/run-scoped-names"
+
+  # The agent's staging ConfigMap must not reuse the validator's name shape.
+  # aicr validate hands one run ID to both subsystems in one namespace, so a
+  # shared aicr-snapshot- prefix would give two owners one object.
+  if kubectl get cm -n "$ns" "aicr-snapshot-${retained_id}" > /dev/null 2>&1; then
+    fail "snapshot/isolation/staging-cm-name" "found aicr-snapshot-${retained_id}; collides with the validator's data ConfigMap"
+    return 1
+  fi
+  pass "snapshot/isolation/staging-cm-name"
+
+  # The pod must be authorized by its controlling ownerReference, not by a
+  # label — pod labels are writable by anything that can update pods.
+  msg "--- Test: pod is owned by its Job (controlling ownerReference) ---"
+  local pod job_uid owner_uid
+  pod=$(kubectl get pods -n "$ns" -l "aicr.run/run-id=${retained_id}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  job_uid=$(kubectl get job -n "$ns" "aicr-${retained_id}" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+  owner_uid=$(kubectl get pod -n "$ns" "$pod" \
+    -o jsonpath='{.metadata.ownerReferences[?(@.controller==true)].uid}' 2>/dev/null || echo "")
+  if [ -n "$pod" ] && [ -n "$job_uid" ] && [ "$job_uid" = "$owner_uid" ]; then
+    detail "pod ${pod} controlled by Job UID ${job_uid}"
+    pass "snapshot/isolation/pod-owned-by-job"
+  else
+    fail "snapshot/isolation/pod-owned-by-job" "pod=${pod} jobUID=${job_uid} ownerUID=${owner_uid}"
+    return 1
+  fi
+
+  # --- Two concurrent runs, with the retained run's objects still present ---
+  msg "--- Test: two concurrent runs are independent ---"
+  local log_a="${OUTPUT_DIR}/isolation-a.log"
+  local log_b="${OUTPUT_DIR}/isolation-b.log"
+  local rc_a=0 rc_b=0 pid_a pid_b
+
+  "${AICR_BIN}" snapshot --image "${AICR_IMAGE}" --namespace "${ns}" \
+    --output "${OUTPUT_DIR}/isolation-a.yaml" --timeout 180s --privileged \
+    --node-selector kubernetes.io/os=linux > "$log_a" 2>&1 &
+  pid_a=$!
+  "${AICR_BIN}" snapshot --image "${AICR_IMAGE}" --namespace "${ns}" \
+    --output "${OUTPUT_DIR}/isolation-b.yaml" --timeout 180s --privileged \
+    --node-selector kubernetes.io/os=linux > "$log_b" 2>&1 &
+  pid_b=$!
+
+  wait "$pid_a" || rc_a=$?
+  wait "$pid_b" || rc_b=$?
+
+  if [ "$rc_a" -ne 0 ] || [ "$rc_b" -ne 0 ]; then
+    echo "--- concurrent run A ---"; tail -30 "$log_a"
+    echo "--- concurrent run B ---"; tail -30 "$log_b"
+    fail "snapshot/isolation/concurrent-runs" "run A rc=${rc_a}, run B rc=${rc_b}"
+    return 1
+  fi
+
+  local id_a id_b
+  id_a=$(grep -o 'runID=[0-9a-f-]*' "$log_a" | head -1 | cut -d= -f2 || echo "")
+  id_b=$(grep -o 'runID=[0-9a-f-]*' "$log_b" | head -1 | cut -d= -f2 || echo "")
+  if [ -z "$id_a" ] || [ -z "$id_b" ] || [ "$id_a" = "$id_b" ]; then
+    fail "snapshot/isolation/concurrent-runs" "expected two distinct run IDs, got '${id_a}' and '${id_b}'"
+    return 1
+  fi
+  detail "run A: ${id_a}"
+  detail "run B: ${id_b}"
+  if [ ! -s "${OUTPUT_DIR}/isolation-a.yaml" ] || [ ! -s "${OUTPUT_DIR}/isolation-b.yaml" ]; then
+    fail "snapshot/isolation/concurrent-runs" "a concurrent run produced an empty snapshot"
+    return 1
+  fi
+  pass "snapshot/isolation/concurrent-runs"
+
+  # The retained run's objects must be untouched by both concurrent runs.
+  # Before ADR-020 this is exactly what broke: a second run's ensureJob
+  # deleted the same-named Job and its cleanup deleted the shared RBAC.
+  local destroyed=""
+  kubectl get job     -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} job"
+  kubectl get sa      -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} sa"
+  kubectl get role    -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} role"
+  kubectl get rolebinding -n "$ns" "aicr-${retained_id}"            > /dev/null 2>&1 || destroyed="${destroyed} rolebinding"
+  kubectl get clusterrole        "aicr-node-reader-${retained_id}"  > /dev/null 2>&1 || destroyed="${destroyed} clusterrole"
+  kubectl get clusterrolebinding "aicr-node-reader-${retained_id}"  > /dev/null 2>&1 || destroyed="${destroyed} clusterrolebinding"
+  if [ -n "$destroyed" ]; then
+    fail "snapshot/isolation/retained-run-survives" "concurrent runs destroyed:${destroyed}"
+    return 1
+  fi
+  pass "snapshot/isolation/retained-run-survives"
+
+  # Each concurrent run must have removed its own resources.
+  local leftover_jobs
+  leftover_jobs=$(kubectl get jobs -n "$ns" -l app.kubernetes.io/name=aicr -o name 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$leftover_jobs" != "1" ]; then
+    kubectl get jobs -n "$ns" -l app.kubernetes.io/name=aicr -o name || true
+    fail "snapshot/isolation/self-cleanup" "expected only the retained Job to remain, found ${leftover_jobs}"
+    return 1
+  fi
+  pass "snapshot/isolation/self-cleanup"
+
+  # The decoy must have survived every run above.
+  local decoy_uid_after
+  decoy_uid_after=$(kubectl get clusterrole "$decoy" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+  if [ -n "$decoy_uid_before" ] && [ "$decoy_uid_before" = "$decoy_uid_after" ]; then
+    pass "snapshot/isolation/cleanup-scoped-to-created"
+  else
+    fail "snapshot/isolation/cleanup-scoped-to-created" \
+      "aicr-labelled ClusterRole it never created was deleted or replaced (before=${decoy_uid_before} after=${decoy_uid_after})"
+    return 1
+  fi
+
+  # Housekeeping: remove the decoy and the retained run's resources.
+  kubectl delete clusterrole "$decoy" --ignore-not-found=true > /dev/null 2>&1 || true
+  kubectl delete job "aicr-${retained_id}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+  kubectl delete sa,role,rolebinding "aicr-${retained_id}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+  kubectl delete cm "aicr-agent-snapshot-${retained_id}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+  kubectl delete clusterrole,clusterrolebinding "aicr-node-reader-${retained_id}" --ignore-not-found=true > /dev/null 2>&1 || true
+}
+
+# =============================================================================
 # Recipe from Snapshot Tests (from e2e.md)
 # =============================================================================
 
@@ -1943,6 +2145,7 @@ main() {
   # Setup fake GPU environment and run snapshot tests
   if setup_fake_gpu; then
     test_snapshot
+    test_snapshot_run_isolation
     test_recipe_from_snapshot
     test_validate
     test_validate_deployment_checks
