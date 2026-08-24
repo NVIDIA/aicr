@@ -56,6 +56,11 @@ CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
 CREATED_FAKE_CLUSTER_POLICY=false
 CREATED_FAKE_CLUSTER_POLICY_CRD=false
 
+# Seconds to wait for the concurrent runs' self-deleted Jobs to disappear from
+# the API before the self-cleanup assertion gives up. Deletion is asynchronous,
+# so the count settles shortly after the CLI returns rather than at that instant.
+AGENT_JOB_SETTLE_TIMEOUT="${AGENT_JOB_SETTLE_TIMEOUT:-60}"
+
 # Run IDs of the snapshot-agent runs this script launched, space separated.
 # cleanup_e2e deletes only these Jobs. Every agent run carries the same
 # app.kubernetes.io/{name,component} labels, so a label-only sweep would also
@@ -739,15 +744,30 @@ snapshot_run_isolation_body() {
   fi
   pass "snapshot/isolation/retained-run-survives"
 
-  # Each concurrent run must have removed its own resources.
-  local leftover_jobs
+  # Each concurrent run must have removed its own resources: exactly the
+  # retained Job survives.
+  #
+  # Poll rather than sample once. Kubernetes deletion is asynchronous -- a Job
+  # whose delete the CLI already issued and acked stays listable while its
+  # pods terminate and its finalizers clear, so a single read can legitimately
+  # still see it and report "found 2" for a cleanup that worked. Only the
+  # timing is tolerant; the assertion below is still exact.
+  local leftover_jobs=""
   local agent_job_selector="app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent"
-  leftover_jobs=$(kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$leftover_jobs" != "1" ]; then
-    kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name || true
-    fail "snapshot/isolation/self-cleanup" "expected only the retained Job to remain, found ${leftover_jobs}"
-    return 1
-  fi
+  local deadline=$((SECONDS + AGENT_JOB_SETTLE_TIMEOUT))
+  while :; do
+    leftover_jobs=$(kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$leftover_jobs" = "1" ]; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name || true
+      fail "snapshot/isolation/self-cleanup" \
+        "expected only the retained Job to remain after ${AGENT_JOB_SETTLE_TIMEOUT}s, found ${leftover_jobs}"
+      return 1
+    fi
+    sleep 2
+  done
   pass "snapshot/isolation/self-cleanup"
 
   # The decoy must have survived every run above.
