@@ -213,12 +213,9 @@ target state, gated by this rule.
 
 ```yaml
 # recipes/overlays/gke-cos.yaml — device-plugin ownership
-# Shown with the value set as originally drawn. Amended 2026-08-24: the
-# family ships as gke-default plus bundle-installer — the drawn
-# operator-selfdriver, which REPLACED the operator value (shipped
-# v0.19.0 as driver-installer). The two shipped values differ in the
-# opt-out pool label at generation time, so Deferred Decision 5 needed
-# no durable marker.
+# Shown with the post-DD5 value set as drawn. Amended 2026-08-24:
+# operator-selfdriver shipped as bundle-installer, REPLACING operator
+# (shipped driver-installer) — see the Deferred Decision 5 resolution.
 spec:
   profile:
     name: gpuStack
@@ -279,13 +276,8 @@ spec:
         componentRefs:
           - name: gcp-driver-installer
             overrides:
-              # Amended 2026-08-24: shipped as the nested installer.enabled,
-              # not the top-level `install` drawn here — top-level
-              # `install`/`enabled` are component-PRESENCE gates (IsEnabled),
-              # so a false default would make the component "not enabled in
-              # the surviving composition" and deadlock resolution for every
-              # value; root `overrides.enabled` is separately rejected in
-              # fragments. A nested key is an ordinary owned value path.
+              # Shipped as nested installer.enabled — top-level install is a
+              # component-presence gate and deadlocks profile resolution.
               installer: {enabled: true}
           - name: gpu-operator
             overrides:
@@ -306,10 +298,9 @@ step 2 describes. Selection:
 # gke-default (declared default; drawn above as csp-managed) — no flag needed
 aicr recipe --service gke --os cos --accelerator h100 --intent inference
 
-# explicit alternative configuration (shipped name; drawn above as
-# operator-selfdriver)
+# explicit alternative configuration (shipped name; drawn above as operator)
 aicr recipe --service gke --os cos --accelerator h100 --intent inference \
-  --profile gpuStack=bundle-installer
+  --profile gpuStack=driver-installer
 ```
 
 A profile fragment may reference only components **enabled in the
@@ -334,8 +325,7 @@ explicit toggles from changing the pre-existing presence state, with
 subset-filter semantics defined under Override locking.
 
 **Conditional installation is expressible in v1 through a values-gated
-component** — the `operator-selfdriver` value above (shipped as
-`bundle-installer`) is the pattern.
+component** — the `operator-selfdriver` value above is the pattern.
 The component sits unconditionally in the composition and renders
 nothing unless its gate value is selected; the profile value flips a
 plain values path — owned, locked, and validated like any other —
@@ -1468,18 +1458,8 @@ recurrence — the shape the Problem section expects.
    installer's synthetic `enabled` joins `ownedPaths`), which is a
    family-wide re-qualification and evidence re-signing event.
 
-   *Amended 2026-08-24 (issue #1716).* The landing event shipped the value
-   as `bundle-installer`, **replacing** `driver-installer` rather than
-   joining it: the two named the same pool shape
-   (`gpu-driver-version=disabled` + the opt-out label), differing only in
-   who applied the installer DaemonSet — precisely Deferred Decision 5's
-   ambiguity, which the replacement resolves without any signal. The
-   shipped family is `gke-default` / `bundle-installer`, distinguished at
-   generation time by the pool label alone. Selecting
-   `gpuStack=driver-installer` fails closed with the valid-values list;
-   migration: delete any hand-applied `nvidia-driver-installer` DaemonSet
-   (the bundle's DaemonSet shares its name) and regenerate with
-   `--profile gpuStack=bundle-installer`.
+   *Amended 2026-08-24 (#1716):* shipped as `bundle-installer`, replacing
+   `driver-installer` (breaking; same pool shape — see Deferred Decision 5).
 
    Any dcgm-exporter GPU-ID-mapping adjustment for `csp-managed` is an
    external GKE behavior not verifiable from this repository. It is
@@ -1487,8 +1467,7 @@ recurrence — the shape the Problem section expects.
    citations recorded in that PR. Before conversion, this step also
    checks the family's `/v1` usage or announces a deprecation window so
    clients do not discover the `/v1` rejection at cut-over.
-4. Other consumers: once `operator-selfdriver` (shipped as
-   `bundle-installer`) is declared, internal
+4. Other consumers: once `operator-selfdriver` is declared, internal
    recipes (DGXC/NKX) migrate the cos-gpu-installer arrangement
    (internal MR #27) to the public value. The values-gated
    `gcp-driver-installer` component makes the case expressible without
@@ -1520,8 +1499,8 @@ work that resolves it.
    GKE's managed driver install, so the standalone gate's prerequisite
    needed the profile's per-value pairing), and the GKE `gpuStack`
    profile now consumes the form per selected value (#1761 rollout
-   PR 3): positive for `driver-installer` (later `bundle-installer`),
-   negated for the `gke-default` default.
+   PR 3): positive for `driver-installer`, negated for the
+   `gke-default` default.
 3. **AKS node-pool-mode signal — resolved by the 2026-07-27 amendment.**
    The provider-facing AgentPool `gpuProfile.driver` property is the
    durable ownership marker. AKS adoption projects it into a snapshot
@@ -1548,8 +1527,7 @@ work that resolves it.
    **Proposed: identify a durable signal during the value's adoption;
    the `operator` and `csp-managed` values do not wait on it.**
 
-   *Resolved 2026-08-24 (issue #1716): no signal was needed.* The value
-   shipped as `bundle-installer`, **replacing** `operator`
-   (shipped `driver-installer`) — the two named the same pool shape, and
-   with the sibling gone the family's values are mutually distinguishable
-   at generation time by the opt-out pool label alone.
+   *Resolved 2026-08-24 (#1716): no signal was needed* — the value shipped
+   as `bundle-installer`, replacing `operator` (shipped `driver-installer`);
+   with the same-shaped sibling gone, the family is distinguishable at
+   generation time by the opt-out pool label alone.
