@@ -1398,10 +1398,13 @@ EOF
 
 phase_serve() {
   # Deploy the served inference graph (Dynamo) — the intent=inference CUJ, the
-  # DC3 counterpart of phase_train. Mirrors the DynamoGraphDeployment in
-  # demos/cuj2-inference.md (demos/workloads/inference/vllm-agg.yaml): the KAI
-  # queue and a two-component (Frontend + decode Worker) graph serving an
-  # OpenAI-compatible endpoint. The worker requests its GPU as a scalar
+  # DC3 counterpart of phase_train. Graph topology mirrors the
+  # DynamoGraphDeployment in demos/cuj2-inference.md
+  # (demos/workloads/inference/vllm-agg.yaml): the KAI queue and a
+  # two-component (Frontend + decode Worker) graph serving an OpenAI-compatible
+  # endpoint. Frontend placement intentionally diverges — the demo pins
+  # nodeGroup=cpu-worker; this graph selects the GPU pool for both components
+  # (pool-selection note below, #1644). The worker requests its GPU as a scalar
   # nvidia.com/gpu limit — the device-plugin production default (#1327).
   #
   # Tolerations are a portable SUPERSET of the taints across all UAT clusters
