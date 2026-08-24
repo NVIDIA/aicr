@@ -56,6 +56,29 @@ CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
 CREATED_FAKE_CLUSTER_POLICY=false
 CREATED_FAKE_CLUSTER_POLICY_CRD=false
 
+# Run IDs of the snapshot-agent runs this script launched, space separated.
+# cleanup_e2e deletes only these Jobs. Every agent run carries the same
+# app.kubernetes.io/{name,component} labels, so a label-only sweep would also
+# delete -- and thereby terminate -- a concurrent snapshot run someone else
+# started against the same cluster.
+E2E_AGENT_RUN_IDS=""
+
+# extract_run_id prints the agent run ID an `aicr snapshot` invocation logged
+# ("runID=<id>" on its "snapshot agent run" line), read from the log file
+# given as $1. Prints nothing when the run failed before generating one.
+extract_run_id() {
+  grep -o 'runID=[0-9a-f-]*' "$1" | head -1 | cut -d= -f2 || true
+}
+
+# remember_agent_run_id records a run ID in E2E_AGENT_RUN_IDS so cleanup_e2e
+# can sweep that run's Job. An empty argument is ignored: a run that never
+# reported an ID created no Job for cleanup to find.
+remember_agent_run_id() {
+  if [ -n "$1" ]; then
+    E2E_AGENT_RUN_IDS="${E2E_AGENT_RUN_IDS} $1"
+  fi
+}
+
 # Test counters
 TOTAL_TESTS=0
 PASSED_TESTS=0
@@ -389,6 +412,7 @@ test_snapshot() {
   detail "Output: cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}"
 
   echo -e "${DIM}  \$ aicr snapshot --image ${AICR_IMAGE} --namespace ${SNAPSHOT_NAMESPACE} -o cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}${NC}"
+  local snapshot_log="${OUTPUT_DIR}/snapshot-agent.log"
   local snapshot_output
   snapshot_output=$("${AICR_BIN}" snapshot \
     --image "${AICR_IMAGE}" \
@@ -397,6 +421,8 @@ test_snapshot() {
     --timeout 120s \
     --privileged \
     --node-selector kubernetes.io/os=linux 2>&1) || true
+  printf '%s\n' "$snapshot_output" > "$snapshot_log"
+  remember_agent_run_id "$(extract_run_id "$snapshot_log")"
 
   if kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" > /dev/null 2>&1; then
     pass "snapshot/agent"
@@ -487,6 +513,30 @@ test_snapshot() {
 # Snapshot Run Isolation Tests (ADR-020, issue #2120)
 # =============================================================================
 
+# Objects snapshot_run_isolation_body creates that outlive its assertions.
+# Published as globals so cleanup_snapshot_run_isolation can remove them on
+# every exit path, including an early `return 1` from a failed assertion.
+ISOLATION_DECOY=""
+ISOLATION_RETAINED_ID=""
+
+# cleanup_snapshot_run_isolation removes the decoy ClusterRole and the
+# retained (--no-cleanup) run's objects. Safe to call when the body bailed
+# before creating either: both globals are empty then.
+cleanup_snapshot_run_isolation() {
+  if [ -n "$ISOLATION_DECOY" ]; then
+    kubectl delete clusterrole "$ISOLATION_DECOY" --ignore-not-found=true > /dev/null 2>&1 || true
+  fi
+  if [ -n "$ISOLATION_RETAINED_ID" ]; then
+    local ns="$SNAPSHOT_NAMESPACE"
+    kubectl delete job "aicr-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete sa,role,rolebinding "aicr-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete cm "aicr-agent-snapshot-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete clusterrole,clusterrolebinding "aicr-node-reader-${ISOLATION_RETAINED_ID}" --ignore-not-found=true > /dev/null 2>&1 || true
+  fi
+  ISOLATION_DECOY=""
+  ISOLATION_RETAINED_ID=""
+}
+
 # Verifies that concurrent snapshot runs own and delete only their own
 # Kubernetes resources. These checks are cluster-backed on purpose: the
 # unit tests in pkg/k8s/agent run against a fake clientset, which runs no
@@ -504,6 +554,18 @@ test_snapshot() {
 # that IS externally observable: cleanup deletes only objects this run
 # created, never one that merely matches its labels or name shape.
 test_snapshot_run_isolation() {
+  local rc=0
+  snapshot_run_isolation_body || rc=$?
+  # Housekeeping must run whether the body passed or bailed early. Every
+  # `return 1` below used to skip it, leaving an aicr-labelled ClusterRole
+  # and a full set of run-scoped objects behind for later tests -- and later
+  # CI runs on the same cluster -- to trip over. The body's status is
+  # preserved so a failed assertion still fails the suite.
+  cleanup_snapshot_run_isolation
+  return "$rc"
+}
+
+snapshot_run_isolation_body() {
   msg "=========================================="
   msg "Testing snapshot run isolation"
   msg "=========================================="
@@ -528,6 +590,7 @@ test_snapshot_run_isolation() {
     app.kubernetes.io/managed-by=aicr \
     app.kubernetes.io/component=snapshot-agent \
     aicr.run/run-id=e2edecoy --overwrite > /dev/null 2>&1 || true
+  ISOLATION_DECOY="$decoy"
   local decoy_uid_before
   decoy_uid_before=$(kubectl get clusterrole "$decoy" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
 
@@ -549,11 +612,29 @@ test_snapshot_run_isolation() {
     return 1
   fi
 
+  # Take the run ID from THIS run's own output. A label query returning
+  # `.items[0]` would happily hand back an aborted run's Job, or a concurrent
+  # snapshot someone else started -- and everything below, including the
+  # housekeeping delete, is keyed on this value.
   local retained_id
-  retained_id=$(kubectl get jobs -n "$ns" -l app.kubernetes.io/name=aicr \
-    -o jsonpath='{.items[0].metadata.labels.aicr\.run/run-id}' 2>/dev/null || echo "")
+  retained_id=$(extract_run_id "$retained_log")
   if [ -z "$retained_id" ]; then
-    fail "snapshot/isolation/run-id-label" "no aicr.run/run-id label on the retained Job"
+    cat "$retained_log"
+    fail "snapshot/isolation/run-id-label" "retained run printed no runID"
+    return 1
+  fi
+  ISOLATION_RETAINED_ID="$retained_id"
+  remember_agent_run_id "$retained_id"
+
+  # That Job must carry the run ID as a label, and the stable
+  # component label consumers select on across runs.
+  local retained_job_labels
+  retained_job_labels=$(kubectl get job -n "$ns" "aicr-${retained_id}" \
+    -o jsonpath='{.metadata.labels.aicr\.run/run-id}/{.metadata.labels.app\.kubernetes\.io/component}' \
+    2>/dev/null || echo "")
+  if [ "$retained_job_labels" != "${retained_id}/snapshot-agent" ]; then
+    fail "snapshot/isolation/run-id-label" \
+      "Job aicr-${retained_id} labels run-id/component = '${retained_job_labels}', want '${retained_id}/snapshot-agent'"
     return 1
   fi
   detail "retained run ID: ${retained_id}"
@@ -626,12 +707,14 @@ test_snapshot_run_isolation() {
   fi
 
   local id_a id_b
-  id_a=$(grep -o 'runID=[0-9a-f-]*' "$log_a" | head -1 | cut -d= -f2 || echo "")
-  id_b=$(grep -o 'runID=[0-9a-f-]*' "$log_b" | head -1 | cut -d= -f2 || echo "")
+  id_a=$(extract_run_id "$log_a")
+  id_b=$(extract_run_id "$log_b")
   if [ -z "$id_a" ] || [ -z "$id_b" ] || [ "$id_a" = "$id_b" ]; then
     fail "snapshot/isolation/concurrent-runs" "expected two distinct run IDs, got '${id_a}' and '${id_b}'"
     return 1
   fi
+  remember_agent_run_id "$id_a"
+  remember_agent_run_id "$id_b"
   detail "run A: ${id_a}"
   detail "run B: ${id_b}"
   if [ ! -s "${OUTPUT_DIR}/isolation-a.yaml" ] || [ ! -s "${OUTPUT_DIR}/isolation-b.yaml" ]; then
@@ -658,9 +741,10 @@ test_snapshot_run_isolation() {
 
   # Each concurrent run must have removed its own resources.
   local leftover_jobs
-  leftover_jobs=$(kubectl get jobs -n "$ns" -l app.kubernetes.io/name=aicr -o name 2>/dev/null | wc -l | tr -d ' ')
+  local agent_job_selector="app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent"
+  leftover_jobs=$(kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name 2>/dev/null | wc -l | tr -d ' ')
   if [ "$leftover_jobs" != "1" ]; then
-    kubectl get jobs -n "$ns" -l app.kubernetes.io/name=aicr -o name || true
+    kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name || true
     fail "snapshot/isolation/self-cleanup" "expected only the retained Job to remain, found ${leftover_jobs}"
     return 1
   fi
@@ -677,12 +761,9 @@ test_snapshot_run_isolation() {
     return 1
   fi
 
-  # Housekeeping: remove the decoy and the retained run's resources.
-  kubectl delete clusterrole "$decoy" --ignore-not-found=true > /dev/null 2>&1 || true
-  kubectl delete job "aicr-${retained_id}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
-  kubectl delete sa,role,rolebinding "aicr-${retained_id}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
-  kubectl delete cm "aicr-agent-snapshot-${retained_id}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
-  kubectl delete clusterrole,clusterrolebinding "aicr-node-reader-${retained_id}" --ignore-not-found=true > /dev/null 2>&1 || true
+  # Housekeeping (the decoy and the retained run's objects) is the wrapper's
+  # job -- see cleanup_snapshot_run_isolation -- so it also happens on the
+  # `return 1` paths above.
 }
 
 # =============================================================================
@@ -2055,9 +2136,16 @@ cleanup_e2e() {
   msg "=========================================="
 
   # Clean up snapshot resources. The Job name is run-scoped ("aicr-<run-id>"),
-  # so select by the label every run-owned agent resource carries instead of
-  # a fixed name.
-  kubectl delete job -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
+  # so select by label -- but scoped to the run IDs THIS script launched.
+  # A sweep of every Job matching the agent's labels would also delete, and
+  # so terminate, a concurrent snapshot run started against the same cluster
+  # by someone else.
+  local run_id
+  for run_id in $E2E_AGENT_RUN_IDS; do
+    kubectl delete job \
+      -l "app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent,aicr.run/run-id=${run_id}" \
+      -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
+  done
   kubectl delete cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
 
   msg "Cleanup complete"
