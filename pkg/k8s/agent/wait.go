@@ -76,7 +76,7 @@ func (d *Deployer) getSnapshotFromConfigMap(ctx context.Context) ([]byte, error)
 // true at record time (see getSnapshotFromConfigMap).
 func (d *Deployer) deleteStagingConfigMap(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.CoreV1().ConfigMaps(d.config.Namespace).
-		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
 	return ignoreNotFoundOrConflict(err)
 }
 

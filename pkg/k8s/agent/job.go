@@ -34,9 +34,13 @@ import (
 // ensureJob creates the run-scoped agent Job.
 func (d *Deployer) ensureJob(ctx context.Context) error {
 	job := d.buildJob()
+	// Record the intent before the Create so a committed create whose
+	// response is lost still enters Cleanup's delete list (see recordIntent).
+	d.recordIntent(kindJob, job.Name)
 	created, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
 		Create(ctx, job, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
+		d.discardIntent(kindJob, job.Name)
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "Job already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
@@ -339,7 +343,7 @@ func (d *Deployer) deleteJob(ctx context.Context, name string, uid types.UID) er
 		name,
 		metav1.DeleteOptions{
 			PropagationPolicy: &propagationPolicy,
-			Preconditions:     &metav1.Preconditions{UID: &uid},
+			Preconditions:     uidPreconditions(uid),
 		},
 	)
 	return ignoreNotFoundOrConflict(err)

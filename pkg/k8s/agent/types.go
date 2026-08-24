@@ -49,6 +49,10 @@ const (
 // configured names. name is the run-scoped name the object was created
 // under; uid pins the eventual delete via metav1.Preconditions so a
 // same-named object belonging to a different run is never collected.
+//
+// uid is the zero UID for an entry recorded by recordIntent but never
+// confirmed by a Create response. Such an entry is deleted by bare name (no
+// Preconditions) — see uidPreconditions.
 type createdObject struct {
 	kind string
 	name string
@@ -72,8 +76,11 @@ type Config struct {
 	// errors.ErrCodeInvalidRequest.
 	RunID string
 
-	// NameBase prefixes generated resource names only — it has no effect
-	// when ServiceAccountName or JobName is already set. Defaults to
+	// NameBase prefixes generated resource names. It applies per name,
+	// not all-or-nothing: jobName() falls back to it when JobName is
+	// empty, and saName() (which also names the Role and RoleBinding)
+	// falls back to it when ServiceAccountName is empty — so setting only
+	// one of the two leaves NameBase governing the other. Defaults to
 	// "aicr" when empty.
 	NameBase string
 
@@ -166,15 +173,77 @@ func (d *Deployer) objectLabels() map[string]string {
 	}
 }
 
-// recordCreated appends a run-owned object to the created-set. Cleanup
+// recordIntent enters a run-owned object into the created-set with the zero
+// UID, immediately BEFORE its Create call. It closes the window in which a
+// committed Create whose response never arrives (client timeout, apiserver
+// rollout, LB 502/504, connection reset, context cancellation in the
+// response window) leaves an object nothing will ever delete: the ensure*
+// call returns a non-AlreadyExists error, Deploy aborts, and the deferred
+// Cleanup — enabled by default — would otherwise never learn the object
+// exists. Because the name is run-unique, no later run reclaims it either,
+// so the orphan is permanent.
+//
+// Cleanup deletes a zero-UID entry by bare name (uidPreconditions returns
+// nil), which is safe precisely because the name carries this run's ID. An
+// AlreadyExists response is the one case that proves the object is NOT ours,
+// so every ensure* discards the intent on that branch (see discardIntent).
+// Safe for concurrent use.
+func (d *Deployer) recordIntent(kind, name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.created = append(d.created, createdObject{kind: kind, name: name})
+}
+
+// discardIntent drops the zero-UID entry recordIntent added for (kind,
+// name). Called only when a Create returns AlreadyExists: the object at that
+// name exists but this run did not create it, so it must not enter this
+// run's delete list. Safe for concurrent use.
+func (d *Deployer) discardIntent(kind, name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := range d.created {
+		if d.created[i].kind == kind && d.created[i].name == name && d.created[i].uid == "" {
+			d.created = append(d.created[:i], d.created[i+1:]...)
+			return
+		}
+	}
+}
+
+// recordCreated confirms a run-owned object in the created-set. Cleanup
 // builds its UID-pinned delete list from exactly this set, so every ensure*
 // call that successfully creates an object — and GetSnapshot, for the
 // staging ConfigMap it observes but does not itself create — must call this
-// on success. Safe for concurrent use.
+// on success.
+//
+// It upserts: when recordIntent already entered (kind, name) with the zero
+// UID, the observed UID is written onto that entry rather than appended as a
+// second one, so the set holds one entry per object and jobUID() sees the
+// real Job UID. Safe for concurrent use.
 func (d *Deployer) recordCreated(kind, name string, uid types.UID) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	for i := range d.created {
+		if d.created[i].kind == kind && d.created[i].name == name && d.created[i].uid == "" {
+			d.created[i].uid = uid
+			return
+		}
+	}
 	d.created = append(d.created, createdObject{kind: kind, name: name, uid: uid})
+}
+
+// containsKind reports whether objs holds an entry of kind. Cleanup uses it
+// against the single created-set snapshot it already took, rather than
+// re-entering the mutex: reading the set twice would let a recordCreated
+// landing between the two reads produce a snapshot that misses the staging
+// ConfigMap while the second read reports it present, skipping both the
+// created-set delete and the name-based sweep and leaking the object.
+func containsKind(objs []createdObject, kind string) bool {
+	for _, o := range objs {
+		if o.kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // createdSnapshot returns a defensive copy of the created-set taken under
@@ -189,8 +258,10 @@ func (d *Deployer) createdSnapshot() []createdObject {
 
 // jobUID returns the UID of the Job this Deployer created, or the zero UID
 // if Deploy has not (yet) reached the Job-create step — including when
-// Deploy failed before getting there. Pod selection (see ownedByJob in
-// wait.go) authorizes candidates against exactly this UID.
+// Deploy failed before getting there, and while the Job's Create is in
+// flight (recordIntent has entered the name but no UID is known yet). Pod
+// selection (see ownedByJob in wait.go) authorizes candidates against
+// exactly this UID.
 func (d *Deployer) jobUID() types.UID {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -203,9 +274,10 @@ func (d *Deployer) jobUID() types.UID {
 }
 
 // hasCreated reports whether the created-set already holds an object of
-// kind. Cleanup uses it to decide whether the staging ConfigMap still needs
-// a name-based sweep (the run failed before getSnapshotFromConfigMap could
-// observe its UID) or was already recorded. Safe for concurrent use.
+// kind. Cleanup does NOT use it — it derives the same answer from the single
+// snapshot it already took, via containsKind, so the decision cannot straddle
+// two lock acquisitions. This remains as the locked accessor for callers
+// (tests) that hold no snapshot. Safe for concurrent use.
 func (d *Deployer) hasCreated(kind string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()

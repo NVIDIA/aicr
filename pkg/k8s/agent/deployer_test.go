@@ -807,40 +807,216 @@ func TestCleanupDeletesOnlyWhatItCreated(t *testing.T) {
 	}
 }
 
+// observedDelete is one delete action captured by spyOnDeletes.
+type observedDelete struct {
+	resource string
+	name     string
+	uid      *types.UID // nil when the delete carried no UID precondition
+}
+
+// spyOnDeletes installs a reactor over EVERY resource that records each
+// outgoing delete's resource, name, and Preconditions.UID, then falls through
+// to the default tracker delete. Reactors run under the fake Clientset's own
+// lock, but Cleanup fans its deletes out concurrently, so the slice is
+// mutex-guarded regardless; the returned accessor takes the same lock.
+func spyOnDeletes(client *fake.Clientset) func() []observedDelete {
+	var mu sync.Mutex
+	var observed []observedDelete
+	client.PrependReactor("delete", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		da, ok := action.(k8stesting.DeleteActionImpl)
+		if !ok {
+			return false, nil, nil
+		}
+		rec := observedDelete{resource: da.GetResource().Resource, name: da.GetName()}
+		if da.DeleteOptions.Preconditions != nil && da.DeleteOptions.Preconditions.UID != nil {
+			uid := *da.DeleteOptions.Preconditions.UID
+			rec.uid = &uid
+		}
+		mu.Lock()
+		observed = append(observed, rec)
+		mu.Unlock()
+		return false, nil, nil // not handled: fall through to the default tracker delete
+	})
+	return func() []observedDelete {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]observedDelete, len(observed))
+		copy(out, observed)
+		return out
+	}
+}
+
 // TestCleanupPassesUIDPrecondition verifies every delete Cleanup issues
-// carries Preconditions.UID set to the UID recorded at create time. The
-// fake clientset's ObjectTracker neither assigns UIDs on Create nor
+// carries Preconditions.UID set to the UID recorded at create time — for all
+// seven kinds deleteCreatedObject dispatches on, not just one. A reactor
+// scoped to a single resource would leave the other six dispatch arms free to
+// drop the precondition unnoticed, so the spy here is installed over "*".
+//
+// The fake clientset's ObjectTracker neither assigns UIDs on Create nor
 // enforces Preconditions on Delete (it ignores DeleteOptions entirely), so
-// this records a known UID directly via recordCreated and spies on the
-// outgoing delete action rather than relying on tracker behavior.
+// this records known UIDs directly via recordCreated and inspects the
+// outgoing delete actions rather than relying on tracker behavior.
 func TestCleanupPassesUIDPrecondition(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
+	deletes := spyOnDeletes(client)
 
-	const wantUID = types.UID("sa-uid-123")
-	var sawUID types.UID
-	var sawPreconditions bool
-	client.PrependReactor("delete", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		da, ok := action.(k8stesting.DeleteActionImpl)
-		if ok && da.DeleteOptions.Preconditions != nil && da.DeleteOptions.Preconditions.UID != nil {
-			sawPreconditions = true
-			sawUID = *da.DeleteOptions.Preconditions.UID
-		}
-		return false, nil, nil // not handled: fall through to the default tracker delete
-	})
+	// One object per kind, each with a distinct UID so a dispatch arm that
+	// passed some OTHER entry's UID would be caught as well as one that
+	// passed none.
+	created := []struct {
+		kind     string
+		name     string
+		resource string
+		uid      types.UID
+	}{
+		{kindServiceAccount, "aicr-sa", "serviceaccounts", "sa-uid-123"},
+		{kindRole, "aicr-role", "roles", "role-uid-123"},
+		{kindRoleBinding, "aicr-rb", "rolebindings", "rb-uid-123"},
+		{kindClusterRole, "aicr-cr", "clusterroles", "cr-uid-123"},
+		{kindClusterRoleBinding, "aicr-crb", "clusterrolebindings", "crb-uid-123"},
+		{kindJob, "aicr-job", "jobs", "job-uid-123"},
+		{kindConfigMap, "aicr-agent-snapshot", "configmaps", "cm-uid-123"},
+	}
 
 	d := NewDeployer(client, Config{Namespace: "test-ns"})
-	d.recordCreated(kindServiceAccount, "aicr-sa", wantUID)
+	for _, c := range created {
+		d.recordCreated(c.kind, c.name, c.uid)
+	}
 
 	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
 
-	if !sawPreconditions {
-		t.Fatal("ServiceAccount delete did not carry Preconditions.UID")
+	observed := deletes()
+	if len(observed) != len(created) {
+		t.Fatalf("Cleanup issued %d deletes, want %d: %+v", len(observed), len(created), observed)
 	}
-	if sawUID != wantUID {
-		t.Errorf("Preconditions.UID = %q, want %q", sawUID, wantUID)
+	for _, c := range created {
+		t.Run(c.kind, func(t *testing.T) {
+			idx := slices.IndexFunc(observed, func(o observedDelete) bool {
+				return o.resource == c.resource && o.name == c.name
+			})
+			if idx < 0 {
+				t.Fatalf("Cleanup issued no delete for %s %q (resource %q); observed: %+v",
+					c.kind, c.name, c.resource, observed)
+			}
+			got := observed[idx]
+			if got.uid == nil {
+				t.Fatalf("%s delete did not carry Preconditions.UID", c.kind)
+			}
+			if *got.uid != c.uid {
+				t.Errorf("%s delete Preconditions.UID = %q, want %q", c.kind, *got.uid, c.uid)
+			}
+		})
+	}
+}
+
+// TestCleanupDeletesUnconfirmedCreateByBareName covers the lost-Create-response
+// path: recordIntent enters an object BEFORE its Create, so an entry can reach
+// Cleanup with the zero UID. Such a delete must omit Preconditions entirely.
+//
+// Passing &"" instead would be worse than useless: the apiserver would compare
+// the empty UID against the live object's real one, reject every attempt with
+// a Conflict, and ignoreNotFoundOrConflict would swallow that as success —
+// leaking the very object this entry exists to reclaim. A bare-name delete is
+// safe here because the name carries this run's ID.
+func TestCleanupDeletesUnconfirmedCreateByBareName(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	deletes := spyOnDeletes(client)
+
+	d := NewDeployer(client, Config{Namespace: "test-ns"})
+	d.recordIntent(kindServiceAccount, "aicr-20260821-142233-9f3a1c0b7e2d4a55")
+
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	observed := deletes()
+	if len(observed) != 1 {
+		t.Fatalf("Cleanup issued %d deletes, want 1: %+v", len(observed), observed)
+	}
+	if observed[0].name != "aicr-20260821-142233-9f3a1c0b7e2d4a55" {
+		t.Errorf("delete name = %q, want the recorded run-scoped name", observed[0].name)
+	}
+	if observed[0].uid != nil {
+		t.Errorf("delete carried Preconditions.UID = %q; a zero-UID entry must delete by bare name",
+			*observed[0].uid)
+	}
+}
+
+// TestEnsureRecordsIntentBeforeCreate is the reason recordIntent exists: an
+// apiserver that commits a Create but never delivers the response (client
+// timeout, apiserver rollout, LB 502/504, connection reset) must not leave an
+// object nothing will ever delete. The run-scoped name means no later run
+// reclaims it, so the orphan would be permanent.
+//
+// The reactor below reproduces exactly that: the object is written into the
+// tracker and THEN an error is returned, so ensureServiceAccount fails while
+// the ServiceAccount exists. Cleanup must still delete it.
+func TestEnsureRecordsIntentBeforeCreate(t *testing.T) {
+	ctx := context.Background()
+	const ns = "test-ns"
+	client := fake.NewSimpleClientset()
+
+	d := NewDeployer(client, Config{Namespace: ns, RunID: testRunID})
+	saName := d.saName()
+
+	client.PrependReactor("create", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ca, ok := action.(k8stesting.CreateActionImpl)
+		if !ok {
+			return false, nil, nil
+		}
+		// Commit the object the way a real apiserver would...
+		if err := client.Tracker().Create(ca.GetResource(), ca.GetObject(), ns); err != nil {
+			return true, nil, err
+		}
+		// ...then lose the response on the way back to the client.
+		return true, nil, syscall.ECONNRESET
+	})
+
+	if err := d.ensureServiceAccount(ctx); err == nil {
+		t.Fatal("ensureServiceAccount() = nil error, want the simulated lost response")
+	}
+
+	if _, err := client.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{}); err != nil {
+		t.Fatalf("test precondition: the ServiceAccount must exist in the cluster despite the "+
+			"failed call, Get err = %v", err)
+	}
+
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	if _, err := client.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("Cleanup leaked the ServiceAccount created by the lost-response Create; Get err = %v", err)
+	}
+}
+
+// TestEnsureDiscardsIntentOnAlreadyExists is recordIntent's counterweight: an
+// AlreadyExists response is the one outcome that proves the object at that
+// name is NOT ours (a duplicate RunID, or a 16-byte random collision). Keeping
+// the intent entry would hand this run a bare-name delete of another run's
+// object — strictly worse than the leak recordIntent prevents.
+func TestEnsureDiscardsIntentOnAlreadyExists(t *testing.T) {
+	ctx := context.Background()
+	const ns = "test-ns"
+	client := fake.NewSimpleClientset()
+
+	d := NewDeployer(client, Config{Namespace: ns, RunID: testRunID})
+	client.PrependReactor("create", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(
+			schema.GroupResource{Resource: "serviceaccounts"}, d.saName())
+	})
+
+	if err := d.ensureServiceAccount(ctx); err == nil {
+		t.Fatal("ensureServiceAccount() = nil error, want AlreadyExists to be reported")
+	}
+
+	if got := d.createdSnapshot(); len(got) != 0 {
+		t.Errorf("created-set = %+v, want empty — an AlreadyExists object was not created by "+
+			"this run and must not enter its delete list", got)
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Deploy deploys the agent with all required resources (RBAC + Job).
@@ -159,7 +160,13 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 	// with run-scoped naming that is one leaked object per failed run, not
 	// one shared object. Sweep it here: the name is run-unique, and the
 	// delete is still UID-pinned against the UID observed by the Get.
-	if d.config.OwnsOutputConfigMap && !d.hasCreated(kindConfigMap) {
+	//
+	// The presence test reads the `created` snapshot taken above rather than
+	// re-entering the mutex (see containsKind): two separate lock
+	// acquisitions would let a concurrent recordCreated land between them,
+	// producing a snapshot without the ConfigMap and a second read reporting
+	// it present — skipping both delete paths and leaking the object.
+	if d.config.OwnsOutputConfigMap && !containsKind(created, kindConfigMap) {
 		name := d.stagingConfigMapName()
 		tasks = append(tasks, task{
 			label: fmt.Sprintf("%s %q", kindConfigMap, name),
@@ -227,6 +234,24 @@ func (d *Deployer) deleteCreatedObject(ctx context.Context, obj createdObject) e
 	default:
 		return aicrerrors.New(aicrerrors.ErrCodeInternal, fmt.Sprintf("cleanup: unknown created-object kind %q", obj.kind))
 	}
+}
+
+// uidPreconditions returns the DeleteOptions precondition pinning a delete
+// to uid, or nil when uid is the zero UID.
+//
+// A zero UID means recordIntent entered the object before its Create and no
+// Create response ever confirmed a UID (see recordIntent). Omitting the
+// precondition entirely is required — metav1.Preconditions{UID: &""} is NOT
+// equivalent to no precondition: the apiserver compares it against the live
+// object's UID and rejects every delete with a Conflict, which
+// ignoreNotFoundOrConflict then swallows as success, leaking the object this
+// entry exists to reclaim. A bare-name delete is safe here precisely because
+// the name carries this run's ID and no other run can produce it.
+func uidPreconditions(uid types.UID) *metav1.Preconditions {
+	if uid == "" {
+		return nil
+	}
+	return &metav1.Preconditions{UID: &uid}
 }
 
 // ignoreNotFoundOrConflict returns nil when err is "not found" (already

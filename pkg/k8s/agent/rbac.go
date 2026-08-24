@@ -124,8 +124,12 @@ func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 		},
 	}
 
+	// Record the intent before the Create so a committed create whose
+	// response is lost still enters Cleanup's delete list (see recordIntent).
+	d.recordIntent(kindServiceAccount, name)
 	created, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Create(ctx, sa, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
+		d.discardIntent(kindServiceAccount, name)
 		return errors.Wrap(errors.ErrCodeInternal, "ServiceAccount already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
@@ -137,9 +141,10 @@ func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 
 // ensureRole creates the run-scoped Role for ConfigMap access.
 func (d *Deployer) ensureRole(ctx context.Context) error {
+	name := d.roleName()
 	role := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.roleName(),
+			Name:      name,
 			Namespace: d.config.Namespace,
 			Labels:    d.objectLabels(),
 		},
@@ -157,8 +162,10 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 		},
 	}
 
+	d.recordIntent(kindRole, name)
 	created, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
+		d.discardIntent(kindRole, name)
 		return errors.Wrap(errors.ErrCodeInternal, "Role already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
@@ -170,9 +177,10 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 
 // ensureRoleBinding creates the run-scoped RoleBinding binding the Role to the ServiceAccount.
 func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
+	name := d.roleName()
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.roleName(),
+			Name:      name,
 			Namespace: d.config.Namespace,
 			Labels:    d.objectLabels(),
 		},
@@ -190,8 +198,10 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 		},
 	}
 
+	d.recordIntent(kindRoleBinding, name)
 	created, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
+		d.discardIntent(kindRoleBinding, name)
 		return errors.Wrap(errors.ErrCodeInternal, "RoleBinding already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
@@ -247,16 +257,19 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 		rules = append(rules, discoverNetworkClusterRules()...)
 	}
 
+	name := d.clusterRoleName()
 	cr := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   d.clusterRoleName(),
+			Name:   name,
 			Labels: d.objectLabels(),
 		},
 		Rules: rules,
 	}
 
+	d.recordIntent(kindClusterRole, name)
 	created, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
+		d.discardIntent(kindClusterRole, name)
 		return errors.Wrap(errors.ErrCodeInternal, "ClusterRole already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
@@ -268,9 +281,10 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 
 // ensureClusterRoleBinding creates the run-scoped ClusterRoleBinding binding the ClusterRole to the ServiceAccount.
 func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
+	name := d.clusterRoleName()
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   d.clusterRoleName(),
+			Name:   name,
 			Labels: d.objectLabels(),
 		},
 		Subjects: []rbacv1.Subject{
@@ -287,8 +301,10 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 		},
 	}
 
+	d.recordIntent(kindClusterRoleBinding, name)
 	created, err := d.clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
+		d.discardIntent(kindClusterRoleBinding, name)
 		return errors.Wrap(errors.ErrCodeInternal, "ClusterRoleBinding already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
@@ -304,7 +320,7 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 // matches (already replaced, not ours), this is a no-op (idempotent).
 func (d *Deployer) deleteServiceAccount(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).
-		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
 	return ignoreNotFoundOrConflict(err)
 }
 
@@ -312,7 +328,7 @@ func (d *Deployer) deleteServiceAccount(ctx context.Context, name string, uid ty
 // already gone, or uid no longer matches, this is a no-op (idempotent).
 func (d *Deployer) deleteRole(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().Roles(d.config.Namespace).
-		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
 	return ignoreNotFoundOrConflict(err)
 }
 
@@ -321,7 +337,7 @@ func (d *Deployer) deleteRole(ctx context.Context, name string, uid types.UID) e
 // no-op (idempotent).
 func (d *Deployer) deleteRoleBinding(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).
-		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
 	return ignoreNotFoundOrConflict(err)
 }
 
@@ -330,7 +346,7 @@ func (d *Deployer) deleteRoleBinding(ctx context.Context, name string, uid types
 // no-op (idempotent).
 func (d *Deployer) deleteClusterRole(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().ClusterRoles().
-		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
 	return ignoreNotFoundOrConflict(err)
 }
 
@@ -339,7 +355,7 @@ func (d *Deployer) deleteClusterRole(ctx context.Context, name string, uid types
 // longer matches, this is a no-op (idempotent).
 func (d *Deployer) deleteClusterRoleBinding(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().ClusterRoleBindings().
-		Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
 	return ignoreNotFoundOrConflict(err)
 }
 
