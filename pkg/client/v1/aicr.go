@@ -32,6 +32,8 @@
 //   - LoadSnapshot — read a previously captured *Snapshot from a file,
 //     URL, or cm:// ConfigMap, for the common case where the snapshot
 //     already exists and no cluster is needed.
+//   - DiffSnapshots — compare two loaded or collected snapshots in memory and
+//     return facade-owned field-level changes for drift detection.
 //   - ValidateState — evaluate a resolved recipe against a snapshot,
 //     running deployment / conformance / performance phases.
 //   - LoadConfig — read and validate the AICRConfig a team commits, from a
@@ -62,10 +64,10 @@
 //   - VerifyBinaryAttestation — package-level; prove an aicr binary was
 //     built by NVIDIA CI.
 //
-// All facade types (Snapshot, AgentConfig, Criteria, RecipeRequest,
-// RecipeResult, ComponentBundle, ComponentRef, PhaseResult, and AllowLists)
-// are facade-owned structs translated to and from the upstream pkg/*
-// shapes, so internal field renames don't churn external callers.
+// All facade types (Snapshot, SnapshotDiff, SnapshotChange, AgentConfig,
+// Criteria, RecipeRequest, RecipeResult, ComponentBundle, ComponentRef,
+// PhaseResult, AllowLists) are facade-owned structs translated to and from the
+// upstream pkg/* shapes, so internal field renames don't churn external callers.
 //
 // Seven types remain deliberate transparent aliases: BundleConfig,
 // BundleAttester, BundleArtifact, OIDCResolveOptions, CriteriaRegistry,

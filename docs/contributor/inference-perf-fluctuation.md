@@ -1,7 +1,7 @@
 # Inference-Perf Validation — TTFT Fluctuation & Worker-Stall Investigation
 
 **Date:** 2026-06-04
-**Author:** Yuan Chen (with Claude Code)
+**Author:** Yuan Chen
 **Related:** NVIDIA/aicr #1192, #1193, #1194, #1196
 **Status:** root cause characterized; mitigations shipped/in-PR; long-term fix proposed
 

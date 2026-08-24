@@ -28,7 +28,7 @@ NVIDIA AI Cluster Runtime (AICR) generates validated GPU-accelerated Kubernetes 
  state         config         vs actual     manifests
 ```
 
-**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint, Ko for images (pinned versions in `.settings.yaml`)
+**Tech Stack:** Go 1.26, Kubernetes, golangci-lint, Ko for images (pinned versions in `.settings.yaml`)
 
 ## Commands
 
@@ -116,7 +116,7 @@ workspace paths. Use local file paths only when explicitly requested.
 | `pkg/snapshotter` | System state snapshot orchestration | Yes |
 | `pkg/k8s/client` | Singleton Kubernetes client | Yes |
 | `pkg/k8s/pod` | Shared K8s Job/Pod utilities (wait, logs, ConfigMap URIs) | Yes |
-| `pkg/validator/helper` | Shared validator helpers (PodLifecycle, test context) | Yes |
+| `validators/helper` | Shared validator helpers (PodLifecycle, GPU/resource utilities) | Yes |
 | `pkg/defaults` | Centralized timeout and configuration constants | Yes |
 
 **Critical Architecture Principle:**

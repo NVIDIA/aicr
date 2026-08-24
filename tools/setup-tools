@@ -378,7 +378,10 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     echo "════════════════════════════════════════════════════════"
 
     GRYPE_INSTALL_SHA256=${GRYPE_INSTALL_SHA256:-"8646f06a90b10ca64992c1809b4aa00c44e30b4f551f63c309b0b0ab66873556"}
-    GOLANGCI_LINT_INSTALL_SHA256=${GOLANGCI_LINT_INSTALL_SHA256:-"d32d3534af96cfd59546a084d22b213e8a47541cada5013aa8a84c4fa2589905"}
+    # install.sh is fetched from the golangci-lint tag in .settings.yaml, so this
+    # hash is version-specific: re-pin it whenever linting.golangci_lint is bumped.
+    #   curl -fsSL "https://raw.githubusercontent.com/golangci/golangci-lint/$(yq '.linting.golangci_lint' .settings.yaml)/install.sh" | shasum -a 256
+    GOLANGCI_LINT_INSTALL_SHA256=${GOLANGCI_LINT_INSTALL_SHA256:-"1022ddb4d87ed252350ed03fc9677e250a4ae95cc6bcd4658c2a20a8a23d390f"}
 
     if command_exists helm && [[ "${UPGRADE}" != "true" ]]; then
         log_success "Helm already installed: $(helm version --short)"
