@@ -52,7 +52,10 @@
 # bundle-installer profile value flips installer.enabled true.
 # Default-off fails closed: rendering the installer is a profile
 # decision, never a chart default.
-{{- if eq (toString (index (index $vals "installer") "enabled")) "true" }}
+{{- $installer := index $vals "installer" }}
+{{- $gate := "" }}
+{{- if $installer }}{{- $gate = toString (index $installer "enabled") }}{{- end }}
+{{- if eq $gate "true" }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet

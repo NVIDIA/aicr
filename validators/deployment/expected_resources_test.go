@@ -1609,3 +1609,115 @@ func TestRDMAFabricProbeCoverage_CountsCordonedOnFailClosed(t *testing.T) {
 		t.Errorf("total() = %d, want 2 (cordoned counted even on failure)", got)
 	}
 }
+
+// TestGatedHealthCheckSuppressed pins the render-aware static-assert
+// suppression dispatch for values-gated components: the gcp-driver-installer
+// health check is skipped exactly when the effective values gate the render
+// off, other components' asserts queue unconditionally, and render/read
+// failures propagate rather than being read as "nothing to assert".
+func TestGatedHealthCheckSuppressed(t *testing.T) {
+	t.Parallel()
+
+	installerManifest := "components/gcp-driver-installer/manifests/nvidia-driver-installer.yaml"
+	tests := []struct {
+		name           string
+		ref            recipe.ComponentRef
+		wantSuppressed bool
+		wantErr        bool
+	}{
+		{
+			name: "installer gated off (default values) suppresses the assert",
+			ref: recipe.ComponentRef{
+				Name:          "gcp-driver-installer",
+				Type:          recipe.ComponentTypeHelm,
+				ValuesFile:    "components/gcp-driver-installer/values.yaml",
+				ManifestFiles: []string{installerManifest},
+			},
+			wantSuppressed: true,
+		},
+		{
+			// A wholesale override can drop the gate key entirely; the
+			// template must fail closed to not-rendering, never panic.
+			name: "missing gate key renders nothing and suppresses",
+			ref: recipe.ComponentRef{
+				Name:          "gcp-driver-installer",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{installerManifest},
+			},
+			wantSuppressed: true,
+		},
+		{
+			name: "installer gated on renders objects and keeps the assert",
+			ref: recipe.ComponentRef{
+				Name:          "gcp-driver-installer",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{installerManifest},
+				Overrides: map[string]any{
+					"installer": map[string]any{"enabled": true},
+				},
+			},
+			wantSuppressed: false,
+		},
+		{
+			name: "no manifests leaves the assert in place",
+			ref: recipe.ComponentRef{
+				Name: "gcp-driver-installer",
+				Type: recipe.ComponentTypeHelm,
+			},
+			wantSuppressed: false,
+		},
+		{
+			name: "unreadable manifest fails closed",
+			ref: recipe.ComponentRef{
+				Name:          "gcp-driver-installer",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{"components/gcp-driver-installer/manifests/no-such-file.yaml"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "non-gated component queues unconditionally",
+			ref: recipe.ComponentRef{
+				Name:          "gpu-operator",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{installerManifest},
+			},
+			wantSuppressed: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			suppressed, reason, err := gatedHealthCheckSuppressed(t.Context(), tt.ref)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("gatedHealthCheckSuppressed() error = nil, want failure")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+			}
+			if suppressed != tt.wantSuppressed {
+				t.Errorf("suppressed = %v, want %v", suppressed, tt.wantSuppressed)
+			}
+			if suppressed && reason == "" {
+				t.Error("suppressed with an empty reason — operators need the why")
+			}
+		})
+	}
+
+	t.Run("canceled context stops manifest evaluation", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, _, err := gatedHealthCheckSuppressed(ctx, recipe.ComponentRef{
+			Name:          "gcp-driver-installer",
+			Type:          recipe.ComponentTypeHelm,
+			ManifestFiles: []string{installerManifest},
+		})
+		if err == nil {
+			t.Fatal("gatedHealthCheckSuppressed() error = nil, want cancellation")
+		}
+	})
+}

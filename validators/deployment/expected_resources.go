@@ -246,7 +246,7 @@ func checkExpectedResources(ctx *validators.Context) error {
 			// in that case, mirroring the render-aware Go readiness check. Only
 			// nodewright-customizations is subject to this; a render/read error
 			// propagates rather than silently skipping. See #1844.
-			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ref)
+			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ctx.Ctx, ref)
 			if suppressErr != nil {
 				return suppressErr
 			}
@@ -697,13 +697,14 @@ func isRuntimeRequiredTaint(t *corev1.Taint) bool {
 // suppress. Every other component's assert queues unconditionally.
 // Fail-closed throughout: a render or read error propagates so a broken
 // template is never mistaken for "nothing to assert".
-func gatedHealthCheckSuppressed(ref recipe.ComponentRef) (bool, string, error) {
+func gatedHealthCheckSuppressed(goCtx context.Context, ref recipe.ComponentRef) (bool, string, error) {
 	switch ref.Name {
 	case nodewrightCustomizationsComponent:
+		//nolint:contextcheck // pre-existing ctx-less chain (expectedNodewrightNames); threading ctx through it is tracked separately from this dispatch.
 		suppressed, err := nodewrightHealthCheckSuppressed(ref)
 		return suppressed, "effective values suppress the tuning Skyhook CR (see #1844)", err
 	case gcpDriverInstallerComponent:
-		suppressed, err := emptyRenderHealthCheckSuppressed(ref)
+		suppressed, err := emptyRenderHealthCheckSuppressed(goCtx, ref)
 		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
 	default:
 		return false, "", nil
@@ -716,13 +717,13 @@ func gatedHealthCheckSuppressed(ref recipe.ComponentRef) (bool, string, error) {
 // profile values; a non-selected value renders an empty release). A static
 // health-check assert cannot see value gates and would fail on a healthy
 // cluster where the render is deliberately empty.
-func emptyRenderHealthCheckSuppressed(ref recipe.ComponentRef) (bool, error) {
+func emptyRenderHealthCheckSuppressed(goCtx context.Context, ref recipe.ComponentRef) (bool, error) {
 	if len(ref.ManifestFiles) == 0 {
 		// Nothing to render — leave the assert in place so its own failure
 		// surfaces the problem.
 		return false, nil
 	}
-	values, err := recipe.GetComponentValues(&ref)
+	values, err := recipe.GetComponentValuesWithContext(goCtx, nil, &ref)
 	if err != nil {
 		return false, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to resolve effective values for component %s", ref.Name), err)
@@ -739,7 +740,15 @@ func emptyRenderHealthCheckSuppressed(ref recipe.ComponentRef) (bool, error) {
 		Values:        values,
 	}
 	for _, path := range ref.ManifestFiles {
-		content, err := recipe.GetManifestContent(path)
+		// Preserve the validator cancellation contract: reads and renders in
+		// this loop must stop once the deployment phase is canceled.
+		select {
+		case <-goCtx.Done():
+			return false, errors.Wrap(errors.ErrCodeTimeout,
+				"deployment validation canceled during gated health-check evaluation", goCtx.Err())
+		default:
+		}
+		content, err := recipe.GetManifestContentWithContext(goCtx, nil, path)
 		if err != nil {
 			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to load manifest %s for component %s", path, ref.Name), err)

@@ -240,24 +240,24 @@ section above apply here unchanged.
 #### Retrofitting an existing pool
 
 For a GPU node pool that already exists, do the retrofit in this order:
-standalone driver ready **first**, then the opt-out label, then the GPU
-Operator. The label takes effect the moment it lands, disabling the
-kube-system DaemonSet whose init container finalizes GKE's managed driver
-install — so on a labeled pool still set to `gpu-driver-version=default` (or
-`latest`), every node created in the interim (autoscaling, upgrade,
-auto-repair) comes up **driverless**. Deploying the standalone installer
-alone does not close that gap either — Google's `nvidia-driver-installer`
-DaemonSet
-[ignores nodes configured for automatic driver installation](https://cloud.google.com/kubernetes-engine/docs/troubleshooting/gpus#gpu_device_plugins_fail_with_crashloopbackoff_errors),
-so it skips every node of a pool whose driver mode is still `default`. Only
-the sequence below keeps the pool functional at every step.
+driver mode first, then the opt-out label, then the bundle. The bundle
+carries the driver installer, so — unlike the hand-applied arrangement this
+replaces — there is nothing to apply out-of-band, but the installer only
+arrives with the bundle in step 3: between step 1 and step 3 the pool has a
+scheduling gap, described per step below. Plan the retrofit as one sitting
+with the bundle generated in advance.
 
-**Step 1 — apply the standalone
-[`nvidia-driver-installer` DaemonSet](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers).**
-Applying it early is safe: it skips automatic-install nodes, so it is a
-no-op until step 2 flips the pool's driver mode.
+**Step 0 — if migrating from a hand-applied installer, delete it first.**
+The bundle's DaemonSet shares the name `nvidia-driver-installer` in
+`kube-system`, and Helm will not adopt a pre-existing object — step 3 would
+fail. Nodes keep their loaded drivers; only the provisioning workload is
+replaced.
 
-**Step 2 — switch the pool to `gpu-driver-version=disabled`** (restate the
+```bash
+kubectl delete daemonset -n kube-system nvidia-driver-installer --ignore-not-found
+```
+
+**Step 1 — switch the pool to `gpu-driver-version=disabled`** (restate the
 pool's actual accelerator type and count):
 
 ```bash
@@ -267,31 +267,20 @@ gcloud container node-pools update POOL_NAME \
   --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=disabled
 ```
 
-The driver-mode update may re-create the pool's nodes; with the standalone
-installer already applied, re-created and future nodes come up with a
-driver, and GKE's device plugin (not yet disabled) keeps advertising
-`nvidia.com/gpu` — the pool stays schedulable throughout.
+The driver-mode update may re-create the pool's nodes. Until step 3's
+installer runs, re-created nodes come up **driverless while GKE's plugin
+still advertises** `nvidia.com/gpu` on them — GPU pods scheduled there will
+fail. Avoid scheduling GPU work from here until the handoff completes
+(cordon the pool's nodes for GPU workloads if the cluster is busy).
 
-**Step 3 — verify the driver before touching the label.** Every GPU node
-should be running the installer's pods and still report non-zero allocatable
-`nvidia.com/gpu` (advertised, for now, by GKE's plugin):
-
-```bash
-kubectl get pods -n kube-system -l k8s-app=nvidia-driver-installer -o wide
-kubectl get nodes -l cloud.google.com/gke-accelerator \
-  -o custom-columns='NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu'
-```
-
-**Step 4 — apply the opt-out label.** This begins the handoff: the label
-immediately evicts GKE's managed plugin, so from this point until step 5's
-Operator plugin registers, the pool has **no** `nvidia.com/gpu` advertiser
-and GPU pods will not schedule. That brief advertiser-free window is the
-accepted cost of the handoff direction — do **not** invert it by deploying
-the Operator's plugin onto a still-unlabeled pool, which would put two
-advertisers on the same nodes (the dual-advertisement state the
+**Step 2 — apply the opt-out label.** This evicts GKE's managed plugin, so
+from this point until step 3's Operator plugin registers, the pool has
+**no** `nvidia.com/gpu` advertiser — which also stops the driverless nodes
+from being advertised. Do **not** invert the order by deploying the bundle
+onto a still-unlabeled pool: that would put two advertisers on the same
+nodes (the dual-advertisement state the
 [allocation-policy gates](#the-three-bundle-installer-settings) exist to
-prevent). Have the bundle from step 5 generated in advance to keep the
-window short, and avoid scheduling GPU work during it.
+prevent).
 Note that `--node-labels` on update **replaces** the pool's full user-label
 set: first list the labels the pool already carries, then pass the complete
 set with the new label appended:
@@ -315,18 +304,22 @@ expects — without it, `value(config.labels)` joins entries with semicolons,
 which the update rejects. Omitting an existing label removes it from the
 pool's nodes, which can break scheduling that depends on it.
 
-**Step 5 — deploy the GPU Operator and wait for its plugin.** Deploy the
-AICR bundle generated with `--profile gpuStack=bundle-installer`, then wait
-until the Operator's device-plugin pods are Running on the labeled nodes and
-every GPU node again reports non-zero allocatable `nvidia.com/gpu` — that
-closes the advertiser-free window opened in step 4. Confirm the full result
-with the checks in [Verifying the handoff](#verifying-the-handoff).
+**Step 3 — deploy the bundle.** Deploy the AICR bundle generated with
+`--profile gpuStack=bundle-installer`. Its `gcp-driver-installer` DaemonSet
+installs the pinned driver on the labeled, driver-mode-disabled nodes
+(nodes that already have a loaded driver are skipped), and the GPU
+Operator's device plugin registers once the driver is ready — closing the
+window opened in steps 1–2. Wait until every GPU node again reports
+non-zero allocatable `nvidia.com/gpu`, then confirm the full result with
+the checks in [Verifying the handoff](#verifying-the-handoff).
 
 **Rollback:** if the Operator's device plugin fails to come up after the
 label lands, remove the label (another `--node-labels` update passing the
-full set with the opt-out label omitted) — GKE's plugin returns and the pool
-resumes advertising GPUs, with the driver still supplied by the standalone
-installer.
+full set with the opt-out label omitted) — GKE's plugin returns and the
+pool resumes advertising GPUs. Nodes the bundle's installer already
+provisioned keep their driver; nodes re-created before step 3 ran are
+driverless until the pool's driver mode is restored
+(`gpu-driver-version=default`) or the bundle deploys.
 
 #### Verifying the handoff
 
@@ -426,7 +419,7 @@ stay `Pending`, even though the driver is present and healthy.
 (yet) registered. The label immediately evicts GKE's managed plugin, so
 until the Operator's plugin comes up, the node has no `nvidia.com/gpu`
 advertiser at all. A brief window in this state is the expected
-intermediate step of the retrofit handoff (step 4 of
+intermediate step of the retrofit handoff (step 2 of
 [Retrofitting an existing pool](#retrofitting-an-existing-pool)); it is a
 problem only when nothing closes it.
 
