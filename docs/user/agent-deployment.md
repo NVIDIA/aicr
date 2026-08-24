@@ -326,9 +326,19 @@ aicr diff --baseline baseline.yaml --target current.yaml --fail-on-drift \
 
 ### Job Fails to Start
 
-Check RBAC permissions. The ServiceAccount name is run-scoped (`aicr-<run-id>`), so look it up first:
+Check RBAC permissions. The ServiceAccount name is run-scoped (`aicr-<run-id>`), so look it up first.
+
+Select it by run ID, not by position: with concurrent snapshot runs the namespace
+holds one ServiceAccount per run, and `.items[0]` would pick an arbitrary one — so
+the checks below could report on a healthy run while you are debugging a failed one.
+The CLI logs the run ID when it starts (`snapshot agent run: runID=...`), and every
+resource the run created carries it as the `aicr.run/run-id` label:
+
 ```shell
-SA=$(kubectl get sa -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent -o jsonpath='{.items[0].metadata.name}')
+# From the failing Job (or use the runID the CLI logged at start).
+RUN_ID=$(kubectl get job -n gpu-operator <job-name> -o jsonpath='{.metadata.labels.aicr\.run/run-id}')
+
+SA=$(kubectl get sa -n gpu-operator -l app.kubernetes.io/name=aicr,aicr.run/run-id=$RUN_ID -o jsonpath='{.items[0].metadata.name}')
 kubectl auth can-i get nodes --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i get pods --as=system:serviceaccount:gpu-operator:$SA
 kubectl auth can-i list controllers.slinky.slurm.net --all-namespaces \

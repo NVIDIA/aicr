@@ -398,12 +398,6 @@ kc -n gpu-operator delete job -l app.kubernetes.io/name=aicr,app.kubernetes.io/c
 kc -n gpu-operator delete sa -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
 kc -n gpu-operator delete role -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
 kc -n gpu-operator delete rolebinding -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
-# One-time removal of the pre-change unlabeled cluster RBAC: before this
-# labeling was introduced, the agent's ClusterRole/ClusterRoleBinding were
-# named literally "aicr-node-reader" with no labels, so no selector above can
-# find them.
-kc delete clusterrole aicr-node-reader --ignore-not-found
-kc delete clusterrolebinding aicr-node-reader --ignore-not-found
 
 # Phase 3: Component CRDs.
 # Helm does NOT remove CRDs on uninstall — they must be deleted manually or a
