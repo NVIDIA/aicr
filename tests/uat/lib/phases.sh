@@ -1307,10 +1307,15 @@ serve_debug() {
     kubectl describe pods -n "${SERVE_NAMESPACE}" 2>&1 || true
     echo "--- events ---"
     kubectl get events -n "${SERVE_NAMESPACE}" --sort-by=.lastTimestamp 2>&1 || true
-    echo "--- logs (all pods, all containers, last 200 lines) ---"
+    echo "--- logs (all pods, all containers, last 200 lines; --previous for crash loops) ---"
     for p in $(kubectl get pods -n "${SERVE_NAMESPACE}" -o name 2>/dev/null); do
       echo "=== ${p} ==="
       kubectl logs -n "${SERVE_NAMESPACE}" "${p#pod/}" --all-containers --tail=200 2>&1 || true
+      # CrashLoopBackOff replaces the current container before this dump
+      # runs, so the dying process's stdout is on --previous. Missing
+      # previous (first start, or already GC'd) is a no-op.
+      echo "=== ${p} (previous) ==="
+      kubectl logs -n "${SERVE_NAMESPACE}" "${p#pod/}" --all-containers --previous --tail=200 2>&1 || true
     done
   } | tee serve-logs/"${SERVE_NAME}".log
 }
@@ -1384,7 +1389,24 @@ spec:
             - name: main
               image: ${SERVE_RUNTIME_IMAGE}
               workingDir: /workspace/examples/backends/vllm
-              command: ["python3", "-m", "dynamo.vllm"]
+              # A bare `python3 -m dynamo.vllm` here crash-looped on GKE before
+              # binding its health port (run 32732018329), while inference-perf
+              # served the same runtime on the SAME cluster minutes earlier
+              # using this wrapper. GKE mounts the node driver at
+              # /usr/local/nvidia without putting it on LD_LIBRARY_PATH, so
+              # vLLM cannot dlopen libcuda.so.1 ("Failed to infer device type",
+              # observed live in gke-default qualification — see the same
+              # wrapper in validators/performance/testdata/inference).
+              # Shell APPEND with \${VAR:+} so we do not clobber
+              # the image's nixl/ucx/cuda entries or create a leading empty
+              # ld.so entry. Harmless no-op when the path is absent (EKS/AKS
+              # GPU Operator toolkit). \$ so the unquoted heredoc does not
+              # expand LD_LIBRARY_PATH at render time.
+              command:
+                - /bin/bash
+                - -c
+                - export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:+\${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; exec python3 -m dynamo.vllm "\$@"
+                - dynamo.vllm
               args:
                 - --model
                 - ${SERVE_MODEL}
@@ -1402,9 +1424,12 @@ phase_serve() {
   # DynamoGraphDeployment in demos/cuj2-inference.md
   # (demos/workloads/inference/vllm-agg.yaml): the KAI queue and a
   # two-component (Frontend + decode Worker) graph serving an OpenAI-compatible
-  # endpoint. Frontend placement intentionally diverges — the demo pins
-  # nodeGroup=cpu-worker; this graph selects the GPU pool for both components
-  # (pool-selection note below, #1644). The worker requests its GPU as a scalar
+  # endpoint. Two intentional divergences from the demo: Frontend placement
+  # (the demo pins nodeGroup=cpu-worker; this graph selects the GPU pool for
+  # both components — pool-selection note below, #1644), and the worker
+  # command (the demo uses python3 -m dynamo.vllm; this graph wraps it with
+  # the GKE driver-lib append used by inference-perf, or vLLM cannot see
+  # libcuda.so.1 on gke-default). The worker requests its GPU as a scalar
   # nvidia.com/gpu limit — the device-plugin production default (#1327).
   #
   # Tolerations are a portable SUPERSET of the taints across all UAT clusters
@@ -1424,7 +1449,9 @@ phase_serve() {
   # no device: the Frontend declares no nvidia.com/gpu limit, so the device
   # plugin never allocates one to it. This matches how the inference-perf
   # validator places every component on the GPU cohort
-  # (validators/performance/inference_perf_constraint.go).
+  # (validators/performance/inference_perf_constraint.go). The worker command
+  # is the same GKE driver-lib append as that validator's Dynamo templates;
+  # without it, vLLM crash-loops on gke-default (run 32732018329).
   #
   # This selects the POOL, not a node: the pool holds two GPU nodes and nothing
   # constrains the two components to the same one, so they may be split. That is

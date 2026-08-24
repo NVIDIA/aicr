@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -164,6 +165,39 @@ func TestServeGraphSelectorIsOverridable(t *testing.T) {
 	}
 }
 
+// TestServeGraphWorkerDriverLibPathAppend pins the GKE driver-lib wrapper on
+// the decode worker. GKE's managed device plugin mounts /usr/local/nvidia
+// without setting LD_LIBRARY_PATH; a bare `python3 -m dynamo.vllm` then
+// crash-loops before it binds its health port (UAT run 32732018329). The
+// shape matches validators/performance testdata Dynamo templates: a shell
+// APPEND with ${VAR:+}, argv0 consumed by the trailing "dynamo.vllm" element
+// so --model stays args[0]. A revert to ["python3", "-m", "dynamo.vllm"]
+// must fail here.
+func TestServeGraphWorkerDriverLibPathAppend(t *testing.T) {
+	graph := renderServeGraph(t, nil)
+	worker := graph.component(t, workerComponent)
+
+	wantCommand := []string{
+		"/bin/bash",
+		"-c",
+		`export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; exec python3 -m dynamo.vllm "$@"`,
+		"dynamo.vllm",
+	}
+	for _, c := range worker.PodTemplate.Spec.Containers {
+		if c.Name != "main" {
+			continue
+		}
+		if !reflect.DeepEqual(c.Command, wantCommand) {
+			t.Errorf("worker main command = %#v, want %#v", c.Command, wantCommand)
+		}
+		if len(c.Args) == 0 || c.Args[0] != "--model" {
+			t.Errorf("worker main args = %v, want first element %q", c.Args, "--model")
+		}
+		return
+	}
+	t.Fatal("main container not found in VllmDecodeWorker")
+}
+
 // renderServeGraph sources phases.sh, runs serve_render_manifest, and returns
 // the DynamoGraphDeployment document. env entries (KEY=VALUE) override the
 // script's defaults. It also asserts the render produced the Queue and Namespace
@@ -279,7 +313,9 @@ type dynamoComponent struct {
 			NodeSelector map[string]string `yaml:"nodeSelector"`
 			Tolerations  []toleration      `yaml:"tolerations"`
 			Containers   []struct {
-				Name      string `yaml:"name"`
+				Name      string   `yaml:"name"`
+				Command   []string `yaml:"command"`
+				Args      []string `yaml:"args"`
 				Resources struct {
 					// Quantities are `any`: YAML renders `nvidia.com/gpu: 1` as an
 					// int, while a chart-style "1" would be a string. Comparison is
