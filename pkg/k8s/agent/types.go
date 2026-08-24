@@ -64,6 +64,12 @@ type Config struct {
 	// RunID scopes every resource this Deployer creates to a single run,
 	// so concurrent snapshot-agent runs never collide on a shared resource
 	// name. Callers generate it with runid.Generate() before deploying.
+	//
+	// Required, and validated by Deploy before any object is created: it
+	// is folded into every run-owned name, so it must be a DNS-1123 label
+	// (lowercase alphanumerics and "-", starting and ending alphanumeric,
+	// at most 63 characters). Anything else fails with
+	// errors.ErrCodeInvalidRequest.
 	RunID string
 
 	// NameBase prefixes generated resource names only — it has no effect

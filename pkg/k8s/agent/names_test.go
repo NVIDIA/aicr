@@ -15,8 +15,13 @@
 package agent
 
 import (
+	"context"
+	stderrors "errors"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestNameWithRunID(t *testing.T) {
@@ -188,5 +193,79 @@ func TestStagingConfigMapNameMatchesDeployerMethod(t *testing.T) {
 	d := &Deployer{config: Config{RunID: runID}}
 	if got, want := d.stagingConfigMapName(), StagingConfigMapName(runID); got != want {
 		t.Errorf("stagingConfigMapName() = %q, StagingConfigMapName(%q) = %q; they must agree", got, runID, want)
+	}
+}
+
+// TestValidateRunID covers the run IDs that are non-empty but still cannot
+// be folded into a Kubernetes object name. Without this gate they reach the
+// apiserver as an opaque "Invalid value: metadata.name" from partway through
+// Deploy's ensure* chain, after some objects already exist.
+func TestValidateRunID(t *testing.T) {
+	tests := []struct {
+		name    string
+		runID   string
+		wantErr bool
+	}{
+		{"well-formed generated run ID", "20260821-142233-9f3a1c0b7e2d4a55", false},
+		{"single character", "a", false},
+		{"exactly at the DNS-1123 label ceiling", strings.Repeat("a", 63), false},
+		{"empty", "", true},
+		{"whitespace", "   ", true},
+		{"embedded slash", "build/42", true},
+		{"leading dash", "-build", true},
+		{"trailing dash", "build-", true},
+		{"uppercase", "Build42", true},
+		{"one over the DNS-1123 label ceiling", strings.Repeat("a", 64), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDeployer(fake.NewClientset(), Config{Namespace: "test-ns", RunID: tt.runID})
+			err := d.validateRunID()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateRunID() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil {
+				return
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %v", err, errors.ErrCodeInvalidRequest)
+			}
+			// The message must name the field and echo the offending
+			// value so an operator can see what to change.
+			if !strings.Contains(err.Error(), "Config.RunID") {
+				t.Errorf("error %q does not name the offending field", err.Error())
+			}
+			if tt.runID != "" && !strings.Contains(err.Error(), tt.runID) {
+				t.Errorf("error %q does not echo the offending value %q", err.Error(), tt.runID)
+			}
+		})
+	}
+}
+
+// TestDeployRejectsInvalidRunIDBeforeCreatingAnything is the end-to-end half
+// of the gate: Deploy must fail before it reaches the ensure* chain, so a
+// rejected run leaves no partially-created RBAC behind.
+func TestDeployRejectsInvalidRunIDBeforeCreatingAnything(t *testing.T) {
+	ctx := context.Background()
+	for _, runID := range []string{"", "   ", "build/42", "-build", "build-", "Build42", strings.Repeat("a", 64)} {
+		t.Run(runID, func(t *testing.T) {
+			clientset := fake.NewClientset()
+			d := NewDeployer(clientset, Config{Namespace: "test-ns", Image: "aicr:test", RunID: runID})
+
+			err := d.Deploy(ctx)
+			if err == nil {
+				t.Fatalf("Deploy() with RunID %q should fail", runID)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("Deploy() error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
+			}
+
+			// Nothing may have been created — not even the Namespace,
+			// which Deploy ensures before any run-owned object.
+			if actions := clientset.Actions(); len(actions) != 0 {
+				t.Errorf("Deploy() issued %d API call(s) before rejecting an invalid RunID: %v", len(actions), actions)
+			}
+		})
 	}
 }

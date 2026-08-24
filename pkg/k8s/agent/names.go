@@ -15,9 +15,12 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // defaultNameBase is the prefix used for generated resource names when the
@@ -48,10 +51,11 @@ const staticStagingConfigMapName = "aicr-agent-snapshot"
 // appending one: a trailing separator would leave a Kubernetes object name
 // that fails validation (names must end in an alphanumeric character).
 //
-// Every in-tree caller supplies a RunID — pkg/snapshotter defaults and
-// rejects an all-whitespace one before building an agent Config — so the
-// empty-runID fallback is reachable only by an SDK caller constructing a
-// Config directly, which then gets unscoped, collision-prone names.
+// The empty-runID fallback is not reachable through Deploy, which rejects
+// an empty or malformed RunID up front (see validateRunID). It survives for
+// the accessors a caller can reach without deploying — JobName, Cleanup on a
+// Deployer that never ran — where returning a name that fails Kubernetes
+// validation would be strictly worse than returning the bare prefix.
 func nameWithRunID(prefix, runID string) string {
 	if prefix == "" {
 		return runID
@@ -71,6 +75,38 @@ func nameWithRunID(prefix, runID string) string {
 		return runID
 	}
 	return prefix + "-" + runID
+}
+
+// validateRunID rejects a Config.RunID that cannot be folded into a valid
+// Kubernetes object name. Deploy calls it before any object is created:
+// every run-owned name is "<prefix>-<RunID>", so a bad run ID would
+// otherwise surface as an opaque apiserver "Invalid value: metadata.name"
+// from deep inside the ensure* chain — after some objects already exist.
+//
+// The constraint is exactly DNS-1123 label: lowercase alphanumerics and
+// "-", starting and ending alphanumeric, at most 63 characters. The length
+// bound is what keeps the generated name inside defaults.MaxK8sNameLength:
+// nameWithRunID truncates the prefix to fit, so an over-long run ID is the
+// one input it cannot compensate for (its budget floors at zero and the
+// bare run ID is returned).
+//
+// pkg/snapshotter defaults and whitespace-checks RunID before building an
+// agent Config, but that guard does not cover callers who construct a
+// pkg/k8s/agent Config directly, which is the public SDK surface.
+func (d *Deployer) validateRunID() error {
+	runID := d.config.RunID
+	if runID == "" {
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"Config.RunID is required: every object this Deployer creates is named \"<prefix>-<RunID>\"; generate one with runid.Generate()",
+			map[string]any{"field": "Config.RunID", "value": runID})
+	}
+	if problems := validation.IsDNS1123Label(runID); len(problems) > 0 {
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("Config.RunID %q is not a valid Kubernetes name segment: %s",
+				runID, strings.Join(problems, "; ")),
+			map[string]any{"field": "Config.RunID", "value": runID})
+	}
+	return nil
 }
 
 // base returns the configured name base, defaulting to "aicr" when unset.

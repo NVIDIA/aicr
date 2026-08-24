@@ -520,10 +520,11 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 	// Default RunID before any cluster access — and before
 	// agentConfigMapTarget below, which folds it into the internal staging
 	// ConfigMap's name — so every resource this run creates shares one
-	// scope. An empty RunID reaching pkg/k8s/agent would silently fall back
-	// to unscoped, collision-prone names (nameWithRunID's empty-runID
-	// branch), so a whitespace-only value that slips past this simple
-	// emptiness check must fail closed rather than reach that fallback.
+	// scope. pkg/k8s/agent's Deploy independently rejects an empty or
+	// malformed RunID, but only as an ErrCodeInvalidRequest naming a Config
+	// field a CLI user never set — so catch the whitespace-only value that
+	// slips past this simple emptiness check here, where the message can
+	// point at the knob the caller actually controls.
 	if config.RunID == "" {
 		config.RunID = runid.Generate()
 	}

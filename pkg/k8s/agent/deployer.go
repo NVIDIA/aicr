@@ -31,6 +31,16 @@ import (
 // Deploy deploys the agent with all required resources (RBAC + Job).
 // This is the main entry point that orchestrates the deployment.
 func (d *Deployer) Deploy(ctx context.Context) error {
+	// Pre-flight, ahead of any cluster call: reject a run ID that cannot
+	// be folded into a valid object name. Every object created below is
+	// named "<prefix>-<RunID>", so validating here is what keeps an
+	// invalid value from surfacing as an apiserver
+	// "Invalid value: metadata.name" partway through the ensure* chain,
+	// with some objects already created.
+	if err := d.validateRunID(); err != nil {
+		return err
+	}
+
 	// Step 0: Check permissions before attempting deployment
 	_, err := d.CheckPermissions(ctx)
 	if err != nil {
