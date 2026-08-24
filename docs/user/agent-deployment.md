@@ -50,7 +50,7 @@ metadata:
   namespace: gpu-operator
   labels:
     app.kubernetes.io/name: aicr
-    app.kubernetes.io/component: snapshot
+    app.kubernetes.io/component: Snapshot
     app.kubernetes.io/version: <aicr-version>
 data:
   snapshot.yaml: |  # Complete snapshot YAML

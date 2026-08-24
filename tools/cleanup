@@ -412,6 +412,17 @@ kc -n gpu-operator delete job aicr --ignore-not-found
 kc -n gpu-operator delete sa aicr --ignore-not-found
 kc -n gpu-operator delete role aicr --ignore-not-found
 kc -n gpu-operator delete rolebinding aicr --ignore-not-found
+# The pre-ADR-020 cluster-scoped pair, for the same reason: it was named
+# literally "aicr-node-reader" and carried no labels, so every selector above
+# misses it and the name-grep fallback ('/aicr-validator-|/aicr$') does not
+# match it either. Nothing else in the tree deletes it now that run-owned
+# names are "aicr-node-reader-<run-id>" — a later run no longer reclaims the
+# bare name — so without this it is a permanent orphan. That matters because a
+# leftover from `--discover-network` carries mutating grants (nodes: patch,
+# pods/exec: create, CRD and namespace create/delete). The exact-name delete
+# cannot touch a live run, whose name always carries a run-ID suffix.
+kc delete clusterrole aicr-node-reader --ignore-not-found
+kc delete clusterrolebinding aicr-node-reader --ignore-not-found
 
 # Phase 3: Component CRDs.
 # Helm does NOT remove CRDs on uninstall — they must be deleted manually or a
