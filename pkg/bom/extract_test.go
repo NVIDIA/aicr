@@ -350,6 +350,78 @@ spec:
 				"ghcr.io/example/null-tag",
 			},
 		},
+		{
+			// Bitnami-style and Helm-chart patterns split the image reference
+			// into separate repository, tag, and digest sibling fields. The
+			// digest is appended as @<digest> so the extracted reference is
+			// fully pinned and digest-pin tests see the correct form.
+			name: "operator image mapping with separate digest field produces tag@digest ref",
+			in: `spec:
+  db:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.4"
+      digest: sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad
+      pullPolicy: IfNotPresent
+`,
+			want: []string{
+				"docker.io/library/postgres:17.4@sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad",
+			},
+		},
+		{
+			// Charts that optionally carry a digest pin ship digest: "" or
+			// digest: null as a "not pinned" default. Treat like an absent
+			// digest rather than failing the whole survey.
+			name: "operator image mapping treats empty and null digest as absent",
+			in: `spec:
+  empty:
+    image:
+      repository: ghcr.io/example/unpinned
+      tag: v1
+      digest: ""
+  null:
+    image:
+      repository: ghcr.io/example/unpinned-null
+      tag: v1
+      digest:
+`,
+			want: []string{
+				"ghcr.io/example/unpinned-null:v1",
+				"ghcr.io/example/unpinned:v1",
+			},
+		},
+		{
+			// The name-present branch combined with a sibling digest field
+			// must produce a fully-pinned reference.
+			name: "operator image mapping with name repository tag and digest produces pinned ref",
+			in: `spec:
+  binder:
+    image:
+      name: binder
+      repository: ghcr.io/kai
+      tag: v1
+      digest: sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b
+`,
+			want: []string{
+				"ghcr.io/kai/binder:v1@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b",
+			},
+		},
+		{
+			// When the repository already carries an inline @digest, the
+			// sibling digest field must not re-append a different digest.
+			// The inline digest is preserved and the sibling is ignored.
+			name: "operator image mapping does not double-append digest when ref already has one",
+			in: `spec:
+  pinned:
+    image:
+      repository: ghcr.io/example/pinned@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b
+      tag: v1
+      digest: sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad
+`,
+			want: []string{
+				"ghcr.io/example/pinned@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -398,13 +470,6 @@ func TestExtractImagesFromYAML_InvalidStructuredImageDescriptor(t *testing.T) {
       repository: nvidia/foo
       tag: v1`,
 			wantField: "registry",
-		},
-		{
-			name: "digest member present",
-			descriptor: `repository: ghcr.io/example/pinned
-      tag: v1
-      digest: sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b`,
-			wantField: "digest",
 		},
 		{
 			name: "empty name",
@@ -527,6 +592,68 @@ func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
 			_, err := ExtractImagesFromYAML([]byte(tt.in))
 			if err == nil {
 				t.Fatal("expected error for malformed containerSHA")
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestExtractImagesFromYAML_InvalidDigestInMapping exercises the fail-loud
+// guard for the structured image descriptor's `digest` field: any value that
+// does not match `^sha256:[a-f0-9]{64}$` must surface as an
+// invalidStructuredImageDescriptorError so mirror-discovery and BOM-generation
+// callers that gate on IsInvalidStructuredImageDescriptor fail closed rather
+// than warning-and-continuing with the image omitted.
+func TestExtractImagesFromYAML_InvalidDigestInMapping(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		wantSub string
+	}{
+		{
+			name: "non-sha256 prefix in digest field",
+			in: `spec:
+  db:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.4"
+      digest: notasha256
+`,
+			wantSub: `field "digest"`,
+		},
+		{
+			name: "sha256 prefix but truncated hex in digest field",
+			in: `spec:
+  db:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.4"
+      digest: sha256:abc123
+`,
+			wantSub: `field "digest"`,
+		},
+		{
+			name: "uppercase hex in digest field",
+			in: `spec:
+  db:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.4"
+      digest: sha256:304AB813518754228F9F792F79D6DA36359B82D8ECF418096C636725F8C930AD
+`,
+			wantSub: `field "digest"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ExtractImagesFromYAML([]byte(tt.in))
+			if err == nil {
+				t.Fatal("expected error for malformed digest field")
+			}
+			if !IsInvalidStructuredImageDescriptor(err) {
+				t.Errorf("IsInvalidStructuredImageDescriptor(%v) = false, want true", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
