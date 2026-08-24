@@ -165,7 +165,7 @@ The package is designed for testability with Kubernetes fake clients:
 	)
 
 	func TestDeployer(t *testing.T) {
-		clientset := fake.NewSimpleClientset()
+		clientset := fake.NewClientset()
 		deployer := agent.NewDeployer(clientset, agent.Config{
 			Namespace: "test",
 			RunID:     "20260821-142233-9f3a1c0b7e2d4a55",

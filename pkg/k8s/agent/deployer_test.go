@@ -565,7 +565,7 @@ func TestDeployer_Deploy(t *testing.T) {
 // TestDeployer_Deploy et al. so the test exercises the behavior it names.
 func TestDeployUsesRunScopedNamesAndLabels(t *testing.T) {
 	ctx := context.Background()
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, &authv1.SelfSubjectAccessReview{
 			Status: authv1.SubjectAccessReviewStatus{
@@ -775,7 +775,7 @@ func TestDeployer_Cleanup_ReportsAllErrors(t *testing.T) {
 // this file.
 func TestCleanupDeletesOnlyWhatItCreated(t *testing.T) {
 	ctx := context.Background()
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, &authv1.SelfSubjectAccessReview{
 			Status: authv1.SubjectAccessReviewStatus{
@@ -858,7 +858,7 @@ func spyOnDeletes(client *fake.Clientset) func() []observedDelete {
 // outgoing delete actions rather than relying on tracker behavior.
 func TestCleanupPassesUIDPrecondition(t *testing.T) {
 	ctx := context.Background()
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	deletes := spyOnDeletes(client)
 
 	// One object per kind, each with a distinct UID so a dispatch arm that
@@ -923,7 +923,7 @@ func TestCleanupPassesUIDPrecondition(t *testing.T) {
 // safe here because the name carries this run's ID.
 func TestCleanupDeletesUnconfirmedCreateByBareName(t *testing.T) {
 	ctx := context.Background()
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	deletes := spyOnDeletes(client)
 
 	d := NewDeployer(client, Config{Namespace: "test-ns"})
@@ -958,7 +958,7 @@ func TestCleanupDeletesUnconfirmedCreateByBareName(t *testing.T) {
 func TestEnsureRecordsIntentBeforeCreate(t *testing.T) {
 	ctx := context.Background()
 	const ns = "test-ns"
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 
 	d := NewDeployer(client, Config{Namespace: ns, RunID: testRunID})
 	saName := d.saName()
@@ -1002,7 +1002,7 @@ func TestEnsureRecordsIntentBeforeCreate(t *testing.T) {
 func TestEnsureDiscardsIntentOnAlreadyExists(t *testing.T) {
 	ctx := context.Background()
 	const ns = "test-ns"
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 
 	d := NewDeployer(client, Config{Namespace: ns, RunID: testRunID})
 	client.PrependReactor("create", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -1026,7 +1026,7 @@ func TestEnsureDiscardsIntentOnAlreadyExists(t *testing.T) {
 // Cleanup failure.
 func TestCleanupTreatsConflictAsSuccess(t *testing.T) {
 	ctx := context.Background()
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, &authv1.SelfSubjectAccessReview{
 			Status: authv1.SubjectAccessReviewStatus{Allowed: true, Reason: "test permissions allowed"},
@@ -1049,7 +1049,7 @@ func TestCleanupTreatsConflictAsSuccess(t *testing.T) {
 // any Job is recorded, and the recorded Job's UID afterward — even when
 // other kinds have been recorded too.
 func TestRecordCreatedAndJobUID(t *testing.T) {
-	d := NewDeployer(fake.NewSimpleClientset(), Config{Namespace: "test-ns"})
+	d := NewDeployer(fake.NewClientset(), Config{Namespace: "test-ns"})
 
 	if got := d.jobUID(); got != "" {
 		t.Fatalf("jobUID() before any Job recorded = %q, want zero UID", got)
@@ -1069,7 +1069,7 @@ func TestRecordCreatedAndJobUID(t *testing.T) {
 // TestCreatedSnapshotIsDefensiveCopy verifies createdSnapshot returns a copy
 // that mutation cannot use to corrupt the Deployer's internal created-set.
 func TestCreatedSnapshotIsDefensiveCopy(t *testing.T) {
-	d := NewDeployer(fake.NewSimpleClientset(), Config{Namespace: "test-ns"})
+	d := NewDeployer(fake.NewClientset(), Config{Namespace: "test-ns"})
 	d.recordCreated(kindServiceAccount, "aicr-sa", types.UID("sa-uid"))
 
 	snap := d.createdSnapshot()
@@ -1088,7 +1088,7 @@ func TestCreatedSnapshotIsDefensiveCopy(t *testing.T) {
 // goroutines at once so `go test -race` can catch a data race on the
 // created-set if the locking is ever removed or narrowed incorrectly.
 func TestRecordCreatedConcurrentSafe(t *testing.T) {
-	d := NewDeployer(fake.NewSimpleClientset(), Config{Namespace: "test-ns"})
+	d := NewDeployer(fake.NewClientset(), Config{Namespace: "test-ns"})
 
 	const n = 50
 	var wg sync.WaitGroup
