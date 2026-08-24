@@ -30,6 +30,7 @@ The agent is a Kubernetes Job that captures system configuration and writes outp
 ### ConfigMap storage
 
 Agent uses ConfigMap URI scheme (`cm://namespace/name`) to write snapshots:
+
 ```bash
 aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 ```
@@ -40,6 +41,7 @@ namespace **must match `--namespace`** — otherwise the Job's ServiceAccount ha
 no permission to create the ConfigMap and the snapshot write fails.
 
 This creates:
+
 ```yaml
 apiVersion: v1
 kind: ConfigMap
@@ -358,6 +360,7 @@ kubectl auth can-i list mariadbs.k8s.mariadb.com --all-namespaces \
 ### Job Pending
 
 Check node selectors and tolerations:
+
 ```shell
 # View pod events
 kubectl describe pod -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
@@ -372,6 +375,7 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 ### Job Completes but No Output
 
 Check ConfigMap and container logs:
+
 ```shell
 # Check if the staging ConfigMap was created. Without an explicit
 # "-o cm://<namespace>/<name>", the agent stages its result in a run-scoped
@@ -389,6 +393,7 @@ kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/co
 ### Permission Denied
 
 Ensure RBAC is correctly deployed:
+
 ```shell
 # Verify ClusterRole (run-scoped: "aicr-node-reader-<run-id>")
 kubectl get clusterrole -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
