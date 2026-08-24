@@ -12,7 +12,7 @@ verify against the cluster's GPU-node labels.
 | Value | `nvidia.com/gpu` advertiser | Driver provisioning | Node-label requirement | Pool creation | Recipe effect |
 |------|------|------|------|------|------|
 | `gke-default` (default) | GKE's managed device plugin (recorded as `advertiser: external`) | GKE's managed driver install | **No** GPU node carries `gke-no-default-nvidia-gpu-device-plugin` | Normal pools with `gpu-driver-version=default` or `latest` — zero extra setup | `devicePlugin.enabled=false` (profile-owned) |
-| `driver-installer` | GPU Operator's device plugin (sole advertiser) | Google's standalone `nvidia-driver-installer` DaemonSet | **Every** GPU node carries `gke-no-default-nvidia-gpu-device-plugin=true` | Pools created with the label and `gpu-driver-version=disabled` | `devicePlugin.enabled=true` (profile-owned) |
+| `bundle-installer` | GPU Operator's device plugin (sole advertiser) | the bundle's `gcp-driver-installer` DaemonSet (recipe-pinned version) | **Every** GPU node carries `gke-no-default-nvidia-gpu-device-plugin=true` | Pools created with the label and `gpu-driver-version=disabled` | `devicePlugin.enabled=true` (profile-owned) |
 
 Both values keep `driver.enabled=false` in the GPU Operator values — the GPU
 Operator cannot install a driver on COS node images, so driver provisioning is
@@ -161,7 +161,7 @@ override is needed:
 | `gpuStack` value | `labeler.assumeDriverInstalled` | Why |
 |---|---|---|
 | `gke-default` (default) | `true` | no driver pod exists to observe |
-| `driver-installer` | `false` | Google's standalone `nvidia-driver-installer` DaemonSet supplies one |
+| `bundle-installer` | `false` | the bundle's `gcp-driver-installer` DaemonSet supplies one |
 
 Because the path is profile-owned, a bundle-time `--set` diverging from the
 selected value is **rejected** rather than silently applied. The explicit
