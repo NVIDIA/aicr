@@ -98,8 +98,8 @@ spec:
       namespace: aicr-validation
       image: ""                      # default: ghcr.io/nvidia/aicr:latest
       imagePullSecrets: []
-      jobName: aicr
-      serviceAccountName: aicr
+      # jobName / serviceAccountName are optional PREFIXES, not names — the
+      # run ID is always appended. Omit them to take the defaults.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -181,8 +181,8 @@ spec:
       namespace: aicr-validation
       image: ""
       imagePullSecrets: []
-      jobName: aicr
-      serviceAccountName: aicr
+      # Optional prefixes; omitted here so the defaults apply
+      # (jobName: aicr-validate, serviceAccountName: aicr).
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -229,7 +229,7 @@ produced from the live cluster.
 | `output.path` | string | Output file path (same as `-o`) |
 | `output.format` | string | `yaml` \| `json` \| `table` |
 | `output.template` | string | Optional Go template path |
-| `agent.*` | object | In-cluster capture Job pod: `namespace`, `image`, `imagePullSecrets`, `jobName`, `serviceAccountName`, `nodeSelector`, `tolerations`, `requireGpu`, `runtimeClassName` (mutually exclusive with `requireGpu`), `os`, `requests`, `limits`. Mirrors `spec.validate.agent` so one file pins matching placement for both |
+| `agent.*` | object | In-cluster capture Job pod: `namespace`, `image`, `imagePullSecrets`, `jobName`, `serviceAccountName`, `nodeSelector`, `tolerations`, `requireGpu`, `runtimeClassName` (mutually exclusive with `requireGpu`), `os`, `requests`, `limits`. `jobName` and `serviceAccountName` are optional **prefixes**, not exact names — the run ID is appended (`<prefix>-<run-id>`), so omit them unless you need a custom prefix. Mirrors `spec.validate.agent` so one file pins matching placement for both |
 | `execution.timeout` | duration string | e.g. `5m` |
 | `execution.noCleanup` | bool | Keep the capture Job after completion |
 | `execution.privileged` | bool (tri-state) | Set `false` for PSS-restricted namespaces |
@@ -289,7 +289,7 @@ Inputs to `aicr validate`.
 | Field | Type | Notes |
 |-------|------|-------|
 | `input.recipe` / `.snapshot` | string | Recipe + snapshot to validate |
-| `agent.*` | object | In-cluster validation Job pod; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`) |
+| `agent.*` | object | The **live snapshot-capture** Job pod `aicr validate` deploys when `input.snapshot` is empty; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`). `jobName` and `serviceAccountName` are optional prefixes with the run ID appended (defaults: both `aicr-validate`); they do not name the validator Jobs |
 | `execution.phases` | []string | e.g. `[deployment, conformance, performance]` |
 | `execution.failOnError` | bool (tri-state) | Absent = CLI default (`true`); explicit `false` opts out |
 | `execution.failFast` | bool (tri-state) | Stop after the first failed phase |

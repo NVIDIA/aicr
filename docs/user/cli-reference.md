@@ -208,8 +208,8 @@ spec:
       namespace: aicr-validation
       image: ""                    # default: ghcr.io/nvidia/aicr:latest
       imagePullSecrets: []
-      jobName: aicr
-      serviceAccountName: aicr
+      # jobName / serviceAccountName are optional PREFIXES, not names — the
+      # run ID is always appended. Omit them to take the defaults.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -1031,8 +1031,8 @@ aicr validate [flags]
 | `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for validation Job |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
-| `--job-name` | | string | aicr-validate | Prefix for the validation Job name; the run ID is always appended (`<prefix>-<run-id>`) |
-| `--service-account-name` | | string | aicr-validate | Prefix for the validation Job's ServiceAccount name; the run ID is always appended (`<prefix>-<run-id>`) |
+| `--job-name` | | string | aicr-validate | Prefix for the **live snapshot-capture agent's** Job name; the run ID is always appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied — no agent is deployed. Does not name the validator Jobs (`aicr-<validator>-<hash>`) |
+| `--service-account-name` | | string | aicr-validate | Prefix for the **live snapshot-capture agent's** ServiceAccount, Role, and RoleBinding; the run ID is always appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied. Does not name the validator Jobs' ServiceAccount (`aicr-validator-<run-id>`) |
 | `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
 | `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
@@ -1248,8 +1248,9 @@ spec:
       namespace: aicr-validation
       image: ghcr.io/nvidia/aicr:v0.19.0
       imagePullSecrets: [registry-secret]
-      jobName: aicr-validate
-      serviceAccountName: aicr
+      # Optional prefixes for the live-capture agent, not names — the run ID
+      # is always appended. Omitted here so the defaults apply
+      # (both aicr-validate).
       nodeSelector:
         my-org/gpu-pool: "true"
       tolerations:                         # [] clears the live snapshot agent's tolerate-all default

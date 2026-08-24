@@ -46,11 +46,21 @@ Two objects are deliberately NOT run-scoped:
     artifact. It is written on purpose and never deleted
     (Config.OwnsOutputConfigMap is false for it).
 
-Every created object carries app.kubernetes.io/name=aicr,
-app.kubernetes.io/managed-by=aicr,
+Every object this package itself creates — the Job, ServiceAccount, Role,
+RoleBinding, ClusterRole, and ClusterRoleBinding — carries
+app.kubernetes.io/name=aicr, app.kubernetes.io/managed-by=aicr,
 app.kubernetes.io/component=snapshot-agent, and aicr.run/run-id=<RunID>, on the
 Job's pod template as well as the Job itself. Select agent pods across runs
 with the component label; the Job name changes every run.
+
+The staging ConfigMap is the exception: it is written from inside the pod by
+pkg/serializer's ConfigMap writer, which stamps app.kubernetes.io/name=aicr,
+app.kubernetes.io/component=<snapshot kind> and app.kubernetes.io/version — not
+managed-by and not the run-ID label. That writer also produces the user's
+delivered cm:// artifact, so it deliberately does not stamp the run-ID sweep
+key onto an object this package must never delete. Run scoping for the staging
+ConfigMap comes from its name (see StagingConfigMapName), which is what both
+Cleanup paths key on.
 
 Job and Pod lifecycle waits use the Kubernetes watch API (not polling) for
 efficiency. Pod selection narrows by label and then authorizes the candidate
@@ -59,12 +69,19 @@ labels are writable by anything that can update pods in the namespace.
 
 # Cleanup
 
-The Deployer records (kind, name, UID) for each object it successfully creates.
-Cleanup deletes exactly that set, passing the recorded UID as a
-metav1.Preconditions so a same-named object belonging to another run is never
-collected; a UID mismatch (Conflict) and a NotFound are both treated as
-success. Cleanup also runs on the Deploy failure path, which is why it is
-scoped to what was created rather than to configured names.
+The Deployer records (kind, name) immediately before each Create and writes the
+returned UID onto that entry on success. Cleanup deletes exactly that set,
+passing the recorded UID as a metav1.Preconditions so a same-named object
+belonging to another run is never collected; a UID mismatch (Conflict) and a
+NotFound are both treated as success. Cleanup also runs on the Deploy failure
+path, which is why it is scoped to what was created rather than to configured
+names.
+
+Recording before the Create is what keeps a lost Create response from orphaning
+an object forever: if the apiserver commits the create but the response never
+arrives, the entry is already in the set and Cleanup deletes it by its
+(run-unique) name with no UID precondition. The one response that proves the
+object is not ours — AlreadyExists — discards the entry again.
 
 The staging ConfigMap is written by the in-pod agent, so its UID is observed
 when GetSnapshot reads it. When the run owns that ConfigMap and failed before

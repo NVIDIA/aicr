@@ -333,8 +333,12 @@ Check RBAC permissions. The ServiceAccount name is run-scoped (`aicr-<run-id>`),
 Select it by run ID, not by position: with concurrent snapshot runs the namespace
 holds one ServiceAccount per run, and `.items[0]` would pick an arbitrary one — so
 the checks below could report on a healthy run while you are debugging a failed one.
-The CLI logs the run ID when it starts (`snapshot agent run: runID=...`), and every
-resource the run created carries it as the `aicr.run/run-id` label:
+The CLI logs the run ID when it starts (`snapshot agent run: runID=...`), and the
+Job, its pods, and its RBAC resources all carry it as the `aicr.run/run-id`
+label. (The staging ConfigMap is the exception — it is written from inside the
+pod and carries only `app.kubernetes.io/name`, `app.kubernetes.io/component` and
+`app.kubernetes.io/version`; find it by its run-scoped name instead, see
+[Job Completes but No Output](#job-completes-but-no-output).)
 
 ```shell
 # From the failing Job (or use the runID the CLI logged at start).
@@ -381,10 +385,18 @@ Check ConfigMap and container logs:
 # "-o cm://<namespace>/<name>", the agent stages its result in a run-scoped
 # ConfigMap named "aicr-agent-snapshot-<run-id>" that cleanup deletes when
 # the run ends — pass --no-cleanup to keep it around for inspection.
-kubectl get configmap -n gpu-operator -l app.kubernetes.io/name=aicr
+#
+# This object is written by the in-pod agent, not by the CLI, so it does NOT
+# carry the aicr.run/run-id label the Job and RBAC resources do. Address it by
+# name: with concurrent runs, the label selector below matches every run's
+# staging ConfigMap plus any delivered cm:// artifact in the namespace.
+kubectl get configmap -n gpu-operator aicr-agent-snapshot-$RUN_ID
 
 # View ConfigMap contents
-kubectl get configmap -n gpu-operator -l app.kubernetes.io/name=aicr -o yaml
+kubectl get configmap -n gpu-operator aicr-agent-snapshot-$RUN_ID -o yaml
+
+# Or list every aicr-written ConfigMap in the namespace (all runs)
+kubectl get configmap -n gpu-operator -l app.kubernetes.io/name=aicr
 
 # View pod logs for errors
 kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent

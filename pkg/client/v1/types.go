@@ -186,9 +186,13 @@ type AgentConfig struct {
 	// snapshot agent and its validator Jobs the same RunID.
 	RunID string
 
-	// NameBase prefixes generated Job/ServiceAccount/RBAC names when
-	// JobName and ServiceAccountName are left empty; it has no effect
-	// once either of those is set. Defaults to "aicr" when also empty.
+	// NameBase prefixes generated Job/ServiceAccount/RBAC names. The
+	// fallback is per name, not all-or-nothing: the Job uses JobName when
+	// set and NameBase otherwise, while the ServiceAccount, Role and
+	// RoleBinding use ServiceAccountName when set and NameBase otherwise.
+	// Setting only one of the two therefore leaves NameBase governing the
+	// other. Defaults to "aicr" when also empty.
+	//
 	// JobName and ServiceAccountName themselves are optional prefixes,
 	// not required names — RunID is appended to whichever prefix
 	// applies, so the deployed object names are always run-scoped.
