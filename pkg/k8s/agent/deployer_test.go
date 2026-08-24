@@ -53,10 +53,15 @@ const testRunID = "20260821-142233-9f3a1c0b7e2d4a55"
 
 func TestDeployer_EnsureRBAC(t *testing.T) {
 	clientset := fake.NewClientset()
+	// ServiceAccountName and JobName are prefixes, not names: every
+	// run-owned object lands at "<prefix>-<RunID>". Assertions below go
+	// through the deployer's own name accessors so they track the names a
+	// production caller actually gets.
 	config := Config{
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
+		RunID:              testRunID,
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		Output:             "cm://test-namespace/aicr-snapshot",
 	}
@@ -93,12 +98,12 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 
 		sa, err := clientset.CoreV1().ServiceAccounts(config.Namespace).
-			Get(ctx, testName, metav1.GetOptions{})
+			Get(ctx, deployer.saName(), metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("ServiceAccount not found: %v", err)
 		}
-		if sa.Name != testName {
-			t.Errorf("expected SA name %q, got %q", testName, sa.Name)
+		if sa.Name != deployer.saName() {
+			t.Errorf("expected SA name %q, got %q", deployer.saName(), sa.Name)
 		}
 	})
 
@@ -109,7 +114,7 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 
 		role, err := clientset.RbacV1().Roles(config.Namespace).
-			Get(ctx, testName, metav1.GetOptions{})
+			Get(ctx, deployer.roleName(), metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("Role not found: %v", err)
 		}
@@ -136,7 +141,7 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 
 		rb, err := clientset.RbacV1().RoleBindings(config.Namespace).
-			Get(ctx, testName, metav1.GetOptions{})
+			Get(ctx, deployer.roleName(), metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("RoleBinding not found: %v", err)
 		}
@@ -145,13 +150,13 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		if len(rb.Subjects) != 1 {
 			t.Errorf("expected 1 subject, got %d", len(rb.Subjects))
 		}
-		if rb.Subjects[0].Name != testName {
-			t.Errorf("expected subject name 'aicr', got %q", rb.Subjects[0].Name)
+		if rb.Subjects[0].Name != deployer.saName() {
+			t.Errorf("expected subject name %q, got %q", deployer.saName(), rb.Subjects[0].Name)
 		}
 
 		// Verify roleRef
-		if rb.RoleRef.Name != testName {
-			t.Errorf("expected roleRef name 'aicr', got %q", rb.RoleRef.Name)
+		if rb.RoleRef.Name != deployer.roleName() {
+			t.Errorf("expected roleRef name %q, got %q", deployer.roleName(), rb.RoleRef.Name)
 		}
 	})
 
@@ -318,6 +323,7 @@ func TestDeployer_EnsureJob(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
+		RunID:              testRunID,
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		Output:             "cm://test-namespace/aicr-snapshot",
 		Privileged:         true, // Test privileged mode (default for agent deployment)
@@ -342,15 +348,16 @@ func TestDeployer_EnsureJob(t *testing.T) {
 		}
 
 		job, err := clientset.BatchV1().Jobs(config.Namespace).
-			Get(ctx, config.JobName, metav1.GetOptions{})
+			Get(ctx, deployer.jobName(), metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("Job not found: %v", err)
 		}
 
-		// Verify Job spec
-		if job.Spec.Template.Spec.ServiceAccountName != config.ServiceAccountName {
+		// Verify Job spec. The pod's ServiceAccountName is the run-scoped
+		// SA name, not the configured prefix.
+		if job.Spec.Template.Spec.ServiceAccountName != deployer.saName() {
 			t.Errorf("expected ServiceAccountName %q, got %q",
-				config.ServiceAccountName, job.Spec.Template.Spec.ServiceAccountName)
+				deployer.saName(), job.Spec.Template.Spec.ServiceAccountName)
 		}
 
 		// Verify host settings
@@ -396,6 +403,7 @@ func TestDeployer_EnsureJob_Unprivileged(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
+		RunID:              testRunID,
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		Output:             "cm://test-namespace/aicr-snapshot",
 		Privileged:         false, // Test unprivileged mode for PSS-restricted namespaces
@@ -408,7 +416,7 @@ func TestDeployer_EnsureJob_Unprivileged(t *testing.T) {
 	}
 
 	job, err := clientset.BatchV1().Jobs(config.Namespace).
-		Get(ctx, config.JobName, metav1.GetOptions{})
+		Get(ctx, deployer.jobName(), metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Job not found: %v", err)
 	}
@@ -481,6 +489,7 @@ func TestDeployer_Deploy(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
+		RunID:              testRunID,
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		Output:             "cm://test-namespace/aicr-snapshot",
 	}
@@ -501,21 +510,21 @@ func TestDeployer_Deploy(t *testing.T) {
 
 	// Verify ServiceAccount
 	_, err = clientset.CoreV1().ServiceAccounts(config.Namespace).
-		Get(ctx, testName, metav1.GetOptions{})
+		Get(ctx, deployer.saName(), metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("ServiceAccount not created: %v", err)
 	}
 
 	// Verify Role
 	_, err = clientset.RbacV1().Roles(config.Namespace).
-		Get(ctx, testName, metav1.GetOptions{})
+		Get(ctx, deployer.roleName(), metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("Role not created: %v", err)
 	}
 
 	// Verify RoleBinding
 	_, err = clientset.RbacV1().RoleBindings(config.Namespace).
-		Get(ctx, testName, metav1.GetOptions{})
+		Get(ctx, deployer.roleName(), metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("RoleBinding not created: %v", err)
 	}
@@ -536,7 +545,7 @@ func TestDeployer_Deploy(t *testing.T) {
 
 	// Verify Job
 	_, err = clientset.BatchV1().Jobs(config.Namespace).
-		Get(ctx, config.JobName, metav1.GetOptions{})
+		Get(ctx, deployer.jobName(), metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("Job not created: %v", err)
 	}
@@ -1417,6 +1426,7 @@ func TestDeployer_Deploy_NetworkError(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
+		RunID:              testRunID,
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		Output:             "cm://test-namespace/aicr-snapshot",
 	}
@@ -1517,6 +1527,7 @@ func TestDeployer_Deploy_RuntimeClassNotFound(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
+		RunID:              testRunID,
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		Output:             "cm://test-namespace/aicr-snapshot",
 		RuntimeClassName:   "nvidia",
