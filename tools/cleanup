@@ -26,6 +26,10 @@
 # are touched. Cluster-scoped resources outside the AICR component domains are
 # left alone.
 #
+# Not narrow, by design: the snapshot-agent sweep in phase 2 is label-based and
+# matches every run, including one in flight. See the HAZARD note there before
+# running this against a cluster someone else is using.
+#
 # On shared / bring-up clusters a registry component may be deliberately owned
 # out-of-band (installed by the platform team, excluded from the AICR recipe).
 # Destroying it is data loss AICR does not own, so `--exclude-ns` and
@@ -404,6 +408,17 @@ kc delete ns aicr-validation --ignore-not-found --wait=false
 #
 # The two cannot collide: a run-scoped name is always "aicr-<run-id>", never
 # the bare "aicr".
+#
+# HAZARD -- this sweep is not run-scoped, and deliberately so. EVERY agent run
+# carries this exact label set, so running `tools/cleanup` while a snapshot is
+# in flight deletes that run's Job and revokes its ServiceAccount, Role and
+# RoleBinding; the run fails partway through. That is the intended contract for
+# a manual teardown tool: it reclaims the namespace regardless of which run
+# left an object behind, including runs whose IDs this invocation never saw.
+# Contrast tests/e2e/run.sh, which records the run IDs it launched and sweeps
+# only those: an unattended suite shares its cluster and cannot make this
+# choice. Do not run this tool against a cluster with an active
+# `aicr snapshot` or `aicr validate`.
 kc -n gpu-operator delete job -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
 kc -n gpu-operator delete sa -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
 kc -n gpu-operator delete role -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
