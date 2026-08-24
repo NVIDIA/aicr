@@ -298,9 +298,10 @@ step 2 describes. Selection:
 # gke-default (declared default; drawn above as csp-managed) — no flag needed
 aicr recipe --service gke --os cos --accelerator h100 --intent inference
 
-# explicit alternative configuration (shipped name; drawn above as operator)
+# explicit alternative configuration (shipped name; drawn above as
+# operator-selfdriver)
 aicr recipe --service gke --os cos --accelerator h100 --intent inference \
-  --profile gpuStack=driver-installer
+  --profile gpuStack=bundle-installer
 ```
 
 A profile fragment may reference only components **enabled in the
@@ -1499,8 +1500,8 @@ work that resolves it.
    GKE's managed driver install, so the standalone gate's prerequisite
    needed the profile's per-value pairing), and the GKE `gpuStack`
    profile now consumes the form per selected value (#1761 rollout
-   PR 3): positive for `driver-installer`, negated for the
-   `gke-default` default.
+   PR 3): positive for `driver-installer` (since replaced by
+   `bundle-installer`), negated for the `gke-default` default.
 3. **AKS node-pool-mode signal — resolved by the 2026-07-27 amendment.**
    The provider-facing AgentPool `gpuProfile.driver` property is the
    durable ownership marker. AKS adoption projects it into a snapshot
