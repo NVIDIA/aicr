@@ -24,6 +24,7 @@ This section is for integrators who:
 | [GKE TCPXO Networking](gke-tcpxo-networking.md) | GPUDirect TCPXO prerequisites for GKE training overlays |
 | [AKS GPU Setup](aks-gpu-setup.md) | AKS prerequisites: Kubernetes 1.34+ (DRA GA), GPU driver setup, DRA configuration |
 | [GKE GPU Setup](gke-gpu-setup.md) | GKE device-plugin ownership: the `gpuStack` profile, node-pool setup for both values, verification, and troubleshooting |
+| [OKE GPU Setup](oke-gpu-setup.md) | OKE GPU stack ownership: the `gpuStack` profile (three values), the device-plugin add-on / disable label, and bring-your-own-image pools |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [OpenShift Deployment](openshift.md) | OpenShift/OCP-specific Helm and OLM integration and two-phase operator deployment |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |

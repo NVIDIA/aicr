@@ -759,7 +759,7 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			shouldLog, atWarn := classifyIgnoredAKSGPUPools(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath)
+			shouldLog, atWarn := classifyIgnoredProjection(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath, "aks-gpu-pools")
 			if shouldLog != tt.wantShouldLog || atWarn != tt.wantAtWarn {
 				t.Fatalf("classify = (log=%v, warn=%v), want (log=%v, warn=%v)",
 					shouldLog, atWarn, tt.wantShouldLog, tt.wantAtWarn)

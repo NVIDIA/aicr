@@ -154,6 +154,13 @@ type AgentConfig struct {
 	// merges the aks-gpu-pools subtype into the snapshot the Job returns.
 	AKSGPUPoolsPath string
 
+	// OKEAddonsPath, when set, points at an operator-supplied
+	// `oci ce cluster list-addons --all --output json` dump on the
+	// CALLER's filesystem. Same contract as AKSGPUPoolsPath: projected
+	// controller-side before deploying, merged into the returned
+	// snapshot as the oke-addons subtype.
+	OKEAddonsPath string
+
 	// DiscoverNetwork enables the in-pod network collector's live l8k
 	// discovery path. Discovery is NOT read-only — it writes node labels
 	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
@@ -256,13 +263,20 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	// project it BEFORE deploying so a bad file fails in milliseconds,
 	// not after a Job round-trip, and merge it into the returned snapshot
 	// below. It deliberately does not ride the in-pod collector path.
-	var aksGPUPools *measurement.Subtype
+	var projections []measurement.Subtype
 	if config.AKSGPUPoolsPath != "" {
 		subtype, err := k8scollector.ProjectAKSGPUPools(ctx, config.AKSGPUPoolsPath)
 		if err != nil {
 			return nil, err
 		}
-		aksGPUPools = &subtype
+		projections = append(projections, subtype)
+	}
+	if config.OKEAddonsPath != "" {
+		subtype, err := k8scollector.ProjectOKEAddons(ctx, config.OKEAddonsPath)
+		if err != nil {
+			return nil, err
+		}
+		projections = append(projections, subtype)
 	}
 
 	// Auto-inject GPU node selector when no placement constraints are set.
@@ -381,10 +395,12 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
 	}
 
-	if aksGPUPools != nil {
-		snapshotData, err = mergeAKSGPUPools(snapshotData, *aksGPUPools)
-		if err != nil {
-			return nil, err
+	if len(projections) > 0 {
+		for _, projection := range projections {
+			snapshotData, err = mergeProviderProjection(snapshotData, projection)
+			if err != nil {
+				return nil, err
+			}
 		}
 		// The Job stored the PRE-merge snapshot in the result ConfigMap,
 		// and Cleanup removes Job+RBAC but never that ConfigMap. Rewrite
@@ -411,7 +427,8 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	return snapshotData, nil
 }
 
-// mergeAKSGPUPools attaches the controller-side pool projection to the
+// mergeProviderProjection attaches a controller-side provider projection
+// (aks-gpu-pools, oke-addons) to the
 // snapshot the agent Job returned. The merge is performed on generic maps,
 // NOT through the controller's typed Snapshot struct: the agent image is
 // user-pinnable, so a newer agent may emit fields this binary's struct does
@@ -419,11 +436,11 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 // the returned snapshot and the rewritten ConfigMap. The subtype cannot
 // affect the cluster fingerprint (fingerprint dimensions read no
 // aks-gpu-pools key), so merging after the in-pod derivation is sound.
-func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte, error) {
+func mergeProviderProjection(snapshotData []byte, subtype measurement.Subtype) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(snapshotData, &doc); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to parse agent snapshot for AKS GPU pools merge", err)
+			"failed to parse agent snapshot for provider projection merge", err)
 	}
 	if doc == nil {
 		// An empty or `null` document unmarshals to a nil map without
@@ -437,12 +454,12 @@ func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte,
 	subtypeYAML, err := yaml.Marshal(subtype)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to serialize AKS GPU pools subtype", err)
+			"failed to serialize provider projection subtype", err)
 	}
 	var subtypeNode map[string]any
 	if reshapeErr := yaml.Unmarshal(subtypeYAML, &subtypeNode); reshapeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to reshape AKS GPU pools subtype", reshapeErr)
+			"failed to reshape provider projection subtype", reshapeErr)
 	}
 
 	measurements, _ := doc["measurements"].([]any)

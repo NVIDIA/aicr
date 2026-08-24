@@ -73,7 +73,8 @@ type validateAgentConfig struct {
 	// by the caller of parseValidateAgentConfig) so ADR-020 run isolation
 	// scopes every resource this command creates to a single run rather
 	// than splitting it across two independently generated ids.
-	runID string
+	runID         string
+	okeAddonsPath string
 }
 
 // parseValidateAgentConfig builds the snapshot-capture agent's deployment
@@ -114,6 +115,7 @@ func parseValidateAgentConfig(
 		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", opts.RequireGPU),
 		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
 		runID:              runID,
+		okeAddonsPath:      cmd.String("oke-addons"),
 	}
 }
 
@@ -286,6 +288,7 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 		AKSGPUPoolsPath:    c.aksGPUPoolsPath,
 		RunID:              c.runID,
 		NameBase:           validateNameBase,
+		OKEAddonsPath:      c.okeAddonsPath,
 	}
 }
 
@@ -619,6 +622,12 @@ func validateCmdFlags() []cli.Flag {
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
+			Name:     "oke-addons",
+			Usage:    "Path to an `oci ce cluster list-addons --all --output json` dump on the local filesystem. When validate captures a live snapshot, the NvidiaGpuPlugin add-on's control-plane state is projected into the K8s oke-addons subtype so profile constraints recorded in OKE recipes can evaluate. Ignored when --snapshot supplies a pre-captured snapshot.",
+			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
 			Name:     "aks-gpu-pools",
 			Usage:    "Path to an `az aks nodepool list -o json` dump on the local filesystem. When validate captures a live snapshot, the GPU pools' gpuProfile.driver values are projected into the K8s aks-gpu-pools subtype (ADR-015 DD3) so profile constraints recorded in AKS recipes can evaluate. Ignored when --snapshot supplies a pre-captured snapshot.",
 			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
@@ -719,13 +728,22 @@ func validateCmdFlags() []cli.Flag {
 // AICR_AKS_GPU_POOLS_PATH job-wide whose snapshots WERE captured with the
 // reading), log at debug — it is not an explicit per-invocation request.
 func warnIgnoredAKSGPUPools(cmd *cli.Command, snapshotFilePath string) {
-	shouldLog, atWarn := classifyIgnoredAKSGPUPools(
-		os.Args[1:], os.Getenv("AICR_AKS_GPU_POOLS_PATH"),
-		cmd.String("aks-gpu-pools"), snapshotFilePath)
+	warnIgnoredProjection(cmd, snapshotFilePath, "aks-gpu-pools", "AICR_AKS_GPU_POOLS_PATH")
+}
+
+// warnIgnoredOKEAddons is the OKE analog of warnIgnoredAKSGPUPools.
+func warnIgnoredOKEAddons(cmd *cli.Command, snapshotFilePath string) {
+	warnIgnoredProjection(cmd, snapshotFilePath, "oke-addons", "AICR_OKE_ADDONS_PATH")
+}
+
+func warnIgnoredProjection(cmd *cli.Command, snapshotFilePath, flagName, envVar string) {
+	shouldLog, atWarn := classifyIgnoredProjection(
+		os.Args[1:], os.Getenv(envVar),
+		cmd.String(flagName), snapshotFilePath, flagName)
 	if !shouldLog {
 		return
 	}
-	msg := "--aks-gpu-pools does not apply to a pre-captured --snapshot; " +
+	msg := "--" + flagName + " does not apply to a pre-captured --snapshot; " +
 		"the reading must already be in that snapshot (capture it with the same flag if missing)"
 	if atWarn {
 		slog.Warn(msg)
@@ -740,13 +758,13 @@ func warnIgnoredAKSGPUPools(cmd *cli.Command, snapshotFilePath string) {
 // invocation. Only a purely ambient env source (e.g. a CI lane exporting
 // AICR_AKS_GPU_POOLS_PATH job-wide whose snapshots WERE captured with the
 // reading) is demoted to debug. Pure function for testability.
-func classifyIgnoredAKSGPUPools(args []string, envValue, poolsPath, snapshotFilePath string) (shouldLog, atWarn bool) {
+func classifyIgnoredProjection(args []string, envValue, poolsPath, snapshotFilePath, flagName string) (shouldLog, atWarn bool) {
 	if snapshotFilePath == "" || poolsPath == "" {
 		return false, false
 	}
 	explicit := false
 	for _, arg := range args {
-		if arg == "--aks-gpu-pools" || strings.HasPrefix(arg, "--aks-gpu-pools=") {
+		if arg == "--"+flagName || strings.HasPrefix(arg, "--"+flagName+"=") {
 			explicit = true
 			break
 		}
@@ -794,7 +812,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", flagPush, flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", flagPush, flagIdentityToken); err != nil {
 				return err
 			}
 
@@ -856,6 +874,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", input.SnapshotPath)
 			warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
+			warnIgnoredOKEAddons(cmd, snapshotFilePath)
 			kubeconfig := cmd.String("kubeconfig")
 
 			if recipeFilePath == "" {

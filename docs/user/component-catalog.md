@@ -132,6 +132,15 @@ The selected constraint is the only deterministic detection point. `aicr bundle`
 
 See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation procedures. The [NVIDIA GPU Operator GKE guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/google-gke.html) documents the same `gpu-driver-version=disabled` + installer-DaemonSet combination the `bundle-installer` value builds on ([#1716](https://github.com/NVIDIA/aicr/issues/1716)) — with AICR, that DaemonSet ships inside the bundle rather than being applied by hand, and the two values are distinguished at generation time by the opt-out pool label alone (positive vs negated), which resolved ADR-015 Deferred Decision 5 by construction.
 
+## OKE Device-Plugin Ownership
+
+**Same profile mechanism as GKE, one control-plane signal.** The OKE recipes declare an ADR-015 `gpuStack` profile with two qualified values; because both ownership axes (driver and device plugin) move together on OKE, a single signal — the `NvidiaGpuPlugin` cluster add-on's control-plane state — qualifies a selection:
+
+- **`oci-managed` (the default)** — Oracle's GPU node image supplies the driver and toolkit, and the `NvidiaGpuPlugin` add-on is the `nvidia.com/gpu` advertiser (recorded as `advertiser: external`); the GPU Operator's driver, toolkit, and plugin are all off (profile-owned). Its constraint requires the add-on **installed and ACTIVE**.
+- **`operator-managed`** (`aicr recipe ... --profile gpuStack=operator-managed`) — bring-your-own driverless image with the add-on **removed**: the GPU Operator owns driver, toolkit, and plugin, and the DRA driver root moves to the operator install path in lockstep. Its constraint requires the add-on **absent**.
+
+The signal is supplied as an `oci ce cluster list-addons --all --output json` dump via `--oke-addons` on `aicr snapshot` and `aicr validate` (projected into `K8s.oke-addons.nvidia-gpu-plugin`); it is evaluated at snapshot-based generation and re-evaluated by the validate readiness pre-flight, failing closed on any other add-on lifecycle state or a missing reading. Per-node label disablement (`oci.oraclecloud.com/disable-gpu-device-plugin`) is out of contract — it leaves the add-on installed. The exactly-one-advertiser rationale is the same as [GKE's](#gke-device-plugin-ownership), and the profile closure-locks the ownership tuple the same way — switching modes is a recipe-generation decision, never a `--set`. For the end-to-end flow and the qualification matrix, see [OKE GPU Setup](../integrator/oke-gpu-setup.md).
+
 ## NVSentinel Deployment Posture
 
 AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration: it detects GPU and node faults and publishes health events, but takes no automatic action on a node. AICR does not disable remediation — the upstream chart ships it off, and AICR inherits that default rather than overriding it.
@@ -196,15 +205,16 @@ The recipes now carry that value wherever it is needed ([#2181](https://github.c
 | AKS `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
 | GKE COS `gpuStack=gke-default` (default) | none the labeler can observe — the driver is finalized by an init container of GKE's kube-system DaemonSet | `true` | the `gpuStack` profile |
 | GKE COS `gpuStack=bundle-installer` | the bundle's `gcp-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
-| OKE | none — driver is in the node image | `true` | the overlay (OKE has no profile) |
+| OKE `gpuStack=oci-managed` (default) | none — driver is in the node image; OKE's `NvidiaGpuPlugin` add-on advertises | `true` | the `gpuStack` profile |
+| OKE `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
 | EKS | the operator's driver pod | unset (chart default `false`) | — |
 | Kind (nvkind) | none — driver is host-installed | `true` | the overlay (Kind has no profile) |
 
 The explicit `false` on the operator-managed variants is deliberate rather than redundant: it keeps the path profile-owned, so it cannot be flipped into an unsafe hybrid later. Do **not** assume a preinstalled driver where the GPU Operator installs one — skipping detection there would keep the label applied across an unloaded or unhealthy driver.
 
-**NVSentinel is mandatory on the profiled families.** Because the AKS and GKE-COS `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as OKE and EKS.
+**NVSentinel is mandatory on the profiled families.** Because the AKS, GKE-COS, and OKE `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as EKS.
 
-Only AKS and GKE-COS get the install-time profile lock; OKE and Kind set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
+AKS, GKE-COS, and OKE get the install-time profile lock; Kind sets the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
 
 If you do need to set it yourself on an unlisted platform, it is an ordinary override:
 

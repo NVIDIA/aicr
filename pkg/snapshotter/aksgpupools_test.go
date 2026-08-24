@@ -105,7 +105,7 @@ func TestMeasureFailsLoudOnBadPoolsFile(t *testing.T) {
 // case: explicit input survives even when no K8s measurement was collected.
 func TestAttachAKSGPUPoolsCreatesK8sMeasurement(t *testing.T) {
 	snap := NewSnapshot()
-	attachAKSGPUPools(snap, measurement.Subtype{
+	attachProviderProjection(snap, measurement.Subtype{
 		Name: k8scollector.SubtypeAKSGPUPools,
 		Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("None")},
 	})
@@ -131,12 +131,12 @@ func TestMergeAKSGPUPools(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	merged, err := mergeAKSGPUPools(raw, measurement.Subtype{
+	merged, err := mergeProviderProjection(raw, measurement.Subtype{
 		Name: k8scollector.SubtypeAKSGPUPools,
 		Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("Install")},
 	})
 	if err != nil {
-		t.Fatalf("mergeAKSGPUPools() error = %v", err)
+		t.Fatalf("mergeProviderProjection() error = %v", err)
 	}
 
 	var got Snapshot
@@ -151,20 +151,20 @@ func TestMergeAKSGPUPools(t *testing.T) {
 		t.Fatalf("gpu-driver = %v, want Install", subtype.Data["gpu-driver"].Any())
 	}
 
-	if _, err := mergeAKSGPUPools([]byte("{not yaml"), measurement.Subtype{}); err == nil {
-		t.Fatal("mergeAKSGPUPools(garbage) = nil, want parse error")
+	if _, err := mergeProviderProjection([]byte("{not yaml"), measurement.Subtype{}); err == nil {
+		t.Fatal("mergeProviderProjection(garbage) = nil, want parse error")
 	}
 
 	// An empty or `null` agent document (malfunctioning agent image)
 	// unmarshals to a nil map without error; the merge must produce a
 	// document carrying the subtype instead of panicking.
 	for _, degenerate := range [][]byte{nil, []byte(""), []byte("null" + "\n")} {
-		merged, err := mergeAKSGPUPools(degenerate, measurement.Subtype{
+		merged, err := mergeProviderProjection(degenerate, measurement.Subtype{
 			Name: k8scollector.SubtypeAKSGPUPools,
 			Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("Install")},
 		})
 		if err != nil {
-			t.Fatalf("mergeAKSGPUPools(degenerate %q) error = %v", degenerate, err)
+			t.Fatalf("mergeProviderProjection(degenerate %q) error = %v", degenerate, err)
 		}
 		var got Snapshot
 		if err := yaml.Unmarshal(merged, &got); err != nil {
@@ -191,12 +191,12 @@ measurements:
             version: v1.35.0
           futureSubtypeField: keep-me-three
 `)
-	merged, err := mergeAKSGPUPools(raw, measurement.Subtype{
+	merged, err := mergeProviderProjection(raw, measurement.Subtype{
 		Name: k8scollector.SubtypeAKSGPUPools,
 		Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("None")},
 	})
 	if err != nil {
-		t.Fatalf("mergeAKSGPUPools() error = %v", err)
+		t.Fatalf("mergeProviderProjection() error = %v", err)
 	}
 	for _, want := range []string{"futureTopLevel: keep-me", "futureMeasurementField: keep-me-too",
 		"futureSubtypeField: keep-me-three", "gpu-driver: None"} {

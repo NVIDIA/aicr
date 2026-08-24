@@ -114,6 +114,11 @@ type snapshotCmdOptions struct {
 	// layer. Works in both agent Job mode (controller-side merge) and
 	// local mode; the file never enters the pod.
 	aksGPUPoolsPath string
+
+	// okeAddonsPath, when non-empty, projects an OKE cluster add-ons
+	// dump into the oke-addons subtype at the snapshot orchestration
+	// layer — same contract as aksGPUPoolsPath.
+	okeAddonsPath string
 	// discoverNetwork enables the network collector's live-discovery
 	// path. The collector calls l8k.Discover against the resolved
 	// kubeconfig; discovery is NOT read-only.
@@ -158,6 +163,7 @@ func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 		OS:                 o.os,
 		ClusterConfigPath:  o.clusterConfigPath,
 		AKSGPUPoolsPath:    o.aksGPUPoolsPath,
+		OKEAddonsPath:      o.okeAddonsPath,
 		DiscoverNetwork:    o.discoverNetwork,
 		Requests:           o.requests,
 		Limits:             o.limits,
@@ -184,7 +190,7 @@ func (o *snapshotCmdOptions) toSnapshotDelivery() snapshotter.SnapshotDelivery {
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
 // can pass to the snapshotter without further parsing.
 func parseSnapshotCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*snapshotCmdOptions, error) {
-	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools"); err != nil {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools", "oke-addons"); err != nil {
 		return nil, err
 	}
 
@@ -326,6 +332,7 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*snapshotCmdOp
 		maxNodesPerEntry:  intFlagOrConfig(cmd, "max-nodes-per-entry", agent.MaxNodesPerEntry),
 		clusterConfigPath: cmd.String("cluster-config"),
 		aksGPUPoolsPath:   cmd.String("aks-gpu-pools"),
+		okeAddonsPath:     cmd.String("oke-addons"),
 		discoverNetwork:   cmd.Bool("discover-network"),
 		requests:          resourceRequests,
 		limits:            resourceLimits,
@@ -599,6 +606,12 @@ func snapshotCmdFlags() []cli.Flag {
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
+			Name:     "oke-addons",
+			Usage:    "Path to an `oci ce cluster list-addons --all --output json` dump on the local filesystem. Projects the NvidiaGpuPlugin add-on's control-plane state into the K8s oke-addons subtype (installed/absent; any other lifecycle state projects a value no profile constraint accepts). The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
+			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
 			Name:     "aks-gpu-pools",
 			Usage:    "Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each GPU agent pool's gpuProfile.driver into the K8s aks-gpu-pools subtype (Install/None; mixed or AKS-managed pools project a value no profile constraint accepts, ADR-015 DD3). The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
 			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
@@ -759,6 +772,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 					Serializer:      ser,
 					RequireGPU:      opts.requireGPU,
 					AKSGPUPoolsPath: opts.aksGPUPoolsPath,
+					OKEAddonsPath:   opts.okeAddonsPath,
 				}
 				return ns.Measure(ctx)
 			}
