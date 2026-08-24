@@ -352,38 +352,15 @@ setup_fake_gpu() {
   # Create namespace for snapshot tests (if it doesn't exist)
   kubectl create namespace "$SNAPSHOT_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-  # Create RBAC for snapshot agent
-  msg "Creating RBAC for snapshot agent"
-  kubectl apply -f - << EOF
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: aicr
-  namespace: ${SNAPSHOT_NAMESPACE}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: aicr-e2e-reader
-rules:
-- apiGroups: [""]
-  resources: ["nodes", "pods", "configmaps"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: aicr-e2e-reader
-subjects:
-- kind: ServiceAccount
-  name: aicr
-  namespace: ${SNAPSHOT_NAMESPACE}
-roleRef:
-  kind: ClusterRole
-  name: aicr-e2e-reader
-  apiGroup: rbac.authorization.k8s.io
-EOF
-  pass "setup/rbac"
+  # No RBAC is pre-provisioned here. Per ADR-020 the agent creates its own
+  # run-scoped ServiceAccount, Role/RoleBinding and ClusterRole/ClusterRoleBinding
+  # ("aicr-<run-id>" / "aicr-node-reader-<run-id>") and deletes exactly those at
+  # the end of the run. The fixture this replaced pre-created a ServiceAccount
+  # named "aicr" bound to an "aicr-e2e-reader" ClusterRole granting
+  # nodes/pods/configmaps — the same access the agent now grants itself. Nothing
+  # referenced that ServiceAccount once the agent stopped using a fixed name, and
+  # its presence tripped the agent's adoption-drift warning on every run because
+  # it collided with the default name prefix.
 
   return 0
 }
