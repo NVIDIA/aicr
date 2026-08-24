@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -191,14 +192,25 @@ func TestCheckPermissions_ConfigMapDeleteGatedOnOwnership(t *testing.T) {
 
 			// Deny only `configmaps: delete`; allow everything else. This
 			// models the least-privilege identity the gate exists for.
+			//
+			// CheckPermissions fans the checks out over an errgroup, so this
+			// reactor runs on worker goroutines, not the test goroutine.
+			// t.Fatalf there would Goexit only the worker and leave the
+			// errgroup waiting on a goroutine that never returns a value;
+			// report with t.Errorf and hand the failure back as the
+			// reactor's error so the call under test terminates.
 			clientset.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 				create, ok := action.(k8stesting.CreateAction)
 				if !ok {
-					t.Fatalf("action %T is not a CreateAction", action)
+					reactorErr := fmt.Errorf("action %T is not a CreateAction", action)
+					t.Error(reactorErr)
+					return true, nil, reactorErr
 				}
 				review, ok := create.GetObject().(*authv1.SelfSubjectAccessReview)
 				if !ok {
-					t.Fatalf("object %T is not a SelfSubjectAccessReview", create.GetObject())
+					reactorErr := fmt.Errorf("object %T is not a SelfSubjectAccessReview", create.GetObject())
+					t.Error(reactorErr)
+					return true, nil, reactorErr
 				}
 				attrs := review.Spec.ResourceAttributes
 				allowed := attrs.Resource != resourceCM || attrs.Verb != verbDelete
