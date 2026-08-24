@@ -19,6 +19,7 @@ const (
 	verbCreate = "create"
 	verbList   = "list"
 	verbGet    = "get"
+	verbDelete = "delete"
 	resourceCM = "configmaps"
 
 	slinkyAPIGroup           = "slinky.slurm.net"

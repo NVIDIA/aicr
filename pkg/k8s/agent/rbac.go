@@ -363,7 +363,7 @@ func (d *Deployer) deleteClusterRoleBinding(ctx context.Context, name string, ui
 //   - nicclusterpolicies: l8k patches the user's NicClusterPolicy
 //     (NicConfigurationOperator section) via server-side apply.
 func discoverNetworkClusterRules() []rbacv1.PolicyRule {
-	const verbUpdate, verbPatch, verbWatch, verbDelete = "update", "patch", "watch", "delete"
+	const verbUpdate, verbPatch, verbWatch = "update", "patch", "watch"
 	return []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{"apiextensions.k8s.io"},

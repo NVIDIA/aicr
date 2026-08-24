@@ -154,3 +154,79 @@ func TestCheckPermission(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckPermissions_ConfigMapDeleteGatedOnOwnership pins the gate on the
+// `configmaps: delete` verb. CheckPermissions fails closed, so an
+// unconditional entry would make Deploy return ErrCodeUnauthorized at Step 0
+// for a caller who supplied their own `cm://` output URI — a run that never
+// deletes a ConfigMap at all, because both Cleanup's staging sweep and
+// getSnapshotFromConfigMap's created-set record are gated on
+// Config.OwnsOutputConfigMap.
+func TestCheckPermissions_ConfigMapDeleteGatedOnOwnership(t *testing.T) {
+	tests := []struct {
+		name              string
+		ownsOutput        bool
+		wantCMDeleteCheck bool
+		wantErr           bool
+	}{
+		{
+			name:              "owns output ConfigMap requires configmaps delete",
+			ownsOutput:        true,
+			wantCMDeleteCheck: true,
+			// The identity below is denied exactly `configmaps: delete`,
+			// so a required check makes the whole pre-flight fail.
+			wantErr: true,
+		},
+		{
+			name:              "caller-supplied output ConfigMap does not require configmaps delete",
+			ownsOutput:        false,
+			wantCMDeleteCheck: false,
+			wantErr:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clientset := fake.NewClientset()
+
+			// Deny only `configmaps: delete`; allow everything else. This
+			// models the least-privilege identity the gate exists for.
+			clientset.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				create, ok := action.(k8stesting.CreateAction)
+				if !ok {
+					t.Fatalf("action %T is not a CreateAction", action)
+				}
+				review, ok := create.GetObject().(*authv1.SelfSubjectAccessReview)
+				if !ok {
+					t.Fatalf("object %T is not a SelfSubjectAccessReview", create.GetObject())
+				}
+				attrs := review.Spec.ResourceAttributes
+				allowed := attrs.Resource != resourceCM || attrs.Verb != verbDelete
+				return true, &authv1.SelfSubjectAccessReview{
+					Status: authv1.SubjectAccessReviewStatus{Allowed: allowed, Reason: "test reason"},
+				}, nil
+			})
+
+			deployer := NewDeployer(clientset, Config{
+				Namespace:           "gpu-operator",
+				RunID:               testRunID,
+				OwnsOutputConfigMap: tt.ownsOutput,
+			})
+
+			checks, err := deployer.CheckPermissions(context.Background())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CheckPermissions() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			gotCMDelete := false
+			for _, c := range checks {
+				if c.Resource == resourceCM && c.Verb == verbDelete {
+					gotCMDelete = true
+				}
+			}
+			if gotCMDelete != tt.wantCMDeleteCheck {
+				t.Errorf("configmaps delete check present = %v, want %v", gotCMDelete, tt.wantCMDeleteCheck)
+			}
+		})
+	}
+}

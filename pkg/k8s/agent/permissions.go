@@ -60,8 +60,21 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, err
 		{"clusterrolebindings", verbCreate, ""},
 
 		// Cleanup permissions
-		{"jobs", "delete", d.config.Namespace},
-		{resourceCM, "delete", d.config.Namespace},
+		{"jobs", verbDelete, d.config.Namespace},
+	}
+
+	// `configmaps: delete` is required only when this Deployer owns the
+	// output ConfigMap. Cleanup's staging-ConfigMap sweep and
+	// getSnapshotFromConfigMap's created-set record are both gated on
+	// Config.OwnsOutputConfigMap, so a caller who supplied their own
+	// `cm://` output URI never has a ConfigMap deleted on their behalf.
+	// CheckPermissions fails closed — a denied check makes Deploy return
+	// ErrCodeUnauthorized at Step 0 — so demanding an unconditional
+	// delete grant would block deployment for identities that are
+	// perfectly capable of the run they actually asked for. Gate it the
+	// same way ensureClusterRole gates its DiscoverNetwork rules.
+	if d.config.OwnsOutputConfigMap {
+		requiredChecks = append(requiredChecks, permCheck{resourceCM, verbDelete, d.config.Namespace})
 	}
 
 	// SelfSubjectAccessReview is a read-only query; running the N required
