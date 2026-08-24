@@ -564,7 +564,6 @@ func watchDeployer(client *fake.Clientset) *Deployer {
 // what authorizes selection. The List-side selector filtering IS honored by
 // the fake, so the re-List subtests exercise it for real.
 func TestFindOrWatchPodNameAuthorizesByJobOwnership(t *testing.T) {
-
 	t.Run("watch event for another run's Job is skipped", func(t *testing.T) {
 		client := fake.NewClientset()
 		w := watch.NewRaceFreeFake()
