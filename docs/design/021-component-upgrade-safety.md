@@ -148,7 +148,7 @@ Records are keyed by semver ranges, not explicit version pairs, so they do not g
 
 That last clause matters for the same reason `unknown` and `unversioned` are separate verdicts. "A record exists and I could not read it" is not "no record exists", and collapsing them hides which action closes the gap. A loader that quietly skips a record it cannot parse would reproduce this ADR's own motivating failure, the silent one, inside the tool built to prevent it. The catalog loader today checks `kind` only and never `apiVersion` (see ADR-015 and [#1812](https://github.com/NVIDIA/aicr/issues/1812)), and `recipes/upgrades/*.yaml` sits in the same tree an external `--data` catalog points at, so a record loader inherits that behavior unless it opts out explicitly.
 
-**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none. `unknown` and `unversioned` are never authored, only computed. The well-formedness check enforces this, so the verdict table above cannot drift from what a record actually says.
+**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none, and MUST NOT carry `hooks` either, since a transition needing a migration release is not one where nothing has to happen. `unknown` and `unversioned` are never authored, only computed. The well-formedness check enforces this, so the verdict table above cannot drift from what a record actually says.
 
 `unknown` is a gap in the *data*, fixed by authoring a record. `unversioned` is a gap in the *inputs*, fixed by pinning something comparable. Collapsing them would hide which action closes the gap.
 
@@ -219,7 +219,7 @@ What it is good for is the thing an operator needs *before* upgrading rather tha
 | `.reversible`, `.reversibleNotes` | no | Advisory only; absent means no claim. Notes required when the flag is set. |
 | `.stepsByDeployer[]` | for `manual`/`blocked` | One group per deployer set, each with an ordered `steps` list. Forbidden on `safe`. Omitting `deployers` covers the deployers no explicit group claims. |
 | `.stepsByDeployer[].steps[]` | yes | `id` unique within the group, `description` required, `reason` optional. |
-| `.hooks[]` | no | `file` under `manifests/migrations/`, `phase` pre- or post-upgrade. See [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release). |
+| `.hooks[]` | no | Forbidden on `safe`. `file` under `manifests/migrations/`, `phase` pre- or post-upgrade. See [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release). |
 | `.affectedResources[]` | no | `group` plus `kinds`; drives the at-risk scan in [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see). |
 | `.references[]` | no | Links to upstream migration notes. |
 
@@ -377,6 +377,8 @@ Non-`safe` transitions are not covered by testing at all, and deliberately so: t
 | `manual`, `blocked` | The authoring workflow ([Decision 11](#decision-11-authoring-is-a-documented-workflow-not-adr-content)): checklist, pin-bump rule, review. |
 | Residual: hardware-specific risk outside the UAT matrix | Evidence from whoever performed the upgrade. |
 
+**A tested pair does not validate a whole range.** A record's `to` is a range, but UAT exercises specific version pairs, so a `safe` verdict covering `>=1.2.0 <2.0.0` is tested at whichever pair the lane happened to run and asserted for the rest. This is the same authored-claim problem the record has everywhere else, narrowed rather than removed by testing, and it is worth being explicit that "tested" means "tested at a point in this range".
+
 **Two things testing cannot reach.** Manual steps, by definition. And accelerator-specific risk: UAT is H100-only across all four reservations, while the registry supports gb200, b200, h200, l40s and others. That residual is narrower than it sounds, because most transitions are chart-level and accelerator-independent; the exposure is transitions whose risk *is* hardware-specific, such as driver or topology behavior.
 
 For that residual, and only that residual, evidence submitted by whoever performed the upgrade is the fallback. AICR already signs and publishes evidence (`aicr validate --emit-attestation`, `aicr evidence sign|publish|verify`), so this reuses a path rather than inventing one. Its predicate and whether it warrants a distinct kind alongside ADR-007's `cncf` and `attestation` are implementation questions, not decided here.
@@ -497,6 +499,12 @@ transitions:
               The admission webhook rejects DeploymentPolicy deletion while
               referencing Skyhooks still exist, so the order is
               load-bearing.
+    hooks:
+      - file: manifests/migrations/adopt-mirrored-crs.yaml
+        phase: pre-upgrade
+    affectedResources:
+      - group: skyhook.nvidia.com
+        kinds: [Skyhook, DeploymentPolicy]
     references:
       - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md
 
