@@ -1,5 +1,12 @@
 # ADR-011: Artifact apiVersion Policy and Compatibility Gate
 
+> **Amended by [ADR-022](022-artifact-maturity-and-deprecation.md).** ADR-022
+> introduces a per-kind maturity map for v1 and makes the deprecation window
+> conditional on the level being retired (alpha none, beta two releases, GA not
+> removed within a major). It **replaces §4** below, whose dual-accept rule was
+> stated unconditionally, and **extends §3** to the catalog loader. §1 and §2
+> stand unchanged.
+
 > **Amended by [ADR-015](015-recipe-configuration-profiles.md).** ADR-015
 > introduces kind-scoped version evolution: `RecipeMetadata` and
 > `RecipeResult` accept `aicr.run/v1alpha3` for profile-bearing artifacts
