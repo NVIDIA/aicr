@@ -173,10 +173,8 @@ export CGO_ENABLED=0
 # of the license text. Each entry is "<module path>|<repo-relative file>|<SPDX id>".
 #
 # The copies are committed rather than read from the module cache so generation
-# stays hermetic and works regardless of how dependencies are materialised. It
-# The copies are committed rather than read from the module cache so generation
-# does not depend on how dependencies are materialised, and so the exact bytes
-# being disclosed are reviewable in-tree.
+# stays hermetic, does not depend on how dependencies are materialised, and so
+# the exact bytes being disclosed are reviewable in-tree.
 #
 # All three are Apache-2.0, verified by reading the files.
 #
@@ -259,8 +257,13 @@ INDEX_FILE="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-idx.XXXXXX")"
 LINKED_RAW="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-linked.XXXXXX")"
 INDEX_KEYS="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-keys.XXXXXX")"
 LINKED_LIST="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-pkgs.XXXXXX")"
+MISSING_LIST="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-missing.XXXXXX")"
+LIST_ERR="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-listerr.XXXXXX")"
+MODMAP_RAW="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-modmap.XXXXXX")"
+MODMAP="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-modmap-u.XXXXXX")"
 trap 'rm -rf "${SAVE_ROOT}"; rm -f "${COMBINED_CSV}" "${INDEX_FILE}" \
-    "${LINKED_RAW}" "${INDEX_KEYS}" "${LINKED_LIST}"' EXIT
+    "${LINKED_RAW}" "${INDEX_KEYS}" "${LINKED_LIST}" "${MISSING_LIST}" \
+    "${LIST_ERR}" "${MODMAP_RAW}" "${MODMAP}"' EXIT
 
 mkdir -p "${LICENSES_DIR}"
 
@@ -325,27 +328,64 @@ for platform in "${PLATFORMS[@]}"; do
         --ignore="${ignore}" \
         >> "${COMBINED_CSV}"
 
-    # Union the linked-package set per platform, for the same reason the
+    # Union the linked-module set per platform, for the same reason the
     # collection loops at all: build-tagged sources import different transitive
     # dependencies per GOOS/GOARCH, so a single-platform list would let a
     # linux-only dependency pass unnoticed on a macOS run — the same silent
     # omission this gate exists to catch.
-    GOOS="${goos}" GOARCH="${goarch}" go list -deps ./cmd/... 2>/dev/null \
-        >> "${LINKED_RAW}"
+    #
+    # Resolve each package to its OWNING MODULE rather than listing package
+    # paths. A license is a property of the module, and nested submodules are
+    # independent modules that may carry a different license than their parent
+    # — this dependency graph already contains several (oauth2adapt under
+    # cloud.google.com/go/auth, ~20 aws-sdk-go-v2/* under aws-sdk-go-v2).
+    # Comparing package paths let a parent's index entry vouch for a submodule
+    # whose license was never seen, which is the exact failure this gate exists
+    # to catch. Stdlib packages have no .Module and emit nothing.
+    #
+    # stderr is surfaced rather than discarded: on a partial failure `go list`
+    # still prints what it could resolve and exits non-zero, so `set -e` aborts
+    # here — but with the error hidden that abort carries no explanation.
+    if ! GOOS="${goos}" GOARCH="${goarch}" \
+        go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./cmd/... \
+        >> "${LINKED_RAW}" 2>"${LIST_ERR}"; then
+        echo "ERROR: 'go list -deps ./cmd/...' failed for ${goos}/${goarch}:" >&2
+        sed 's/^/  /' "${LIST_ERR}" >&2
+        exit 1
+    fi
+
+    # Package -> owning module, used to resolve index keys back to a module.
+    # Built from './...' rather than './cmd/...' because go-licenses is run over
+    # './...' and can therefore key a row on a package this binary's dependency
+    # graph does not itself contain; an unresolvable key would then look like a
+    # missing license. Superset in, exact resolution out.
+    if ! GOOS="${goos}" GOARCH="${goarch}" \
+        go list -deps -f '{{.ImportPath}} {{if .Module}}{{.Module.Path}}{{end}}' ./... \
+        >> "${MODMAP_RAW}" 2>"${LIST_ERR}"; then
+        echo "ERROR: 'go list -deps ./...' failed for ${goos}/${goarch}:" >&2
+        sed 's/^/  /' "${LIST_ERR}" >&2
+        exit 1
+    fi
 done
 
-# Packages linked into the released commands, unioned across every target
+# Modules linked into the released commands, unioned across every target
 # platform by the loop above. Both the override staleness check and the
 # completeness gate below use it.
-LINKED_PKGS=$(LC_ALL=C sort -u "${LINKED_RAW}")
-if [[ -z "${LINKED_PKGS}" ]]; then
-    echo "ERROR: 'go list -deps ./cmd/...' returned nothing; cannot verify license coverage." >&2
+LINKED_MODULES=$(LC_ALL=C sort -u "${LINKED_RAW}" | grep -v '^$' || true)
+if [[ -z "${LINKED_MODULES}" ]]; then
+    echo "ERROR: 'go list -deps ./cmd/...' resolved no dependency modules; cannot verify license coverage." >&2
+    exit 1
+fi
+
+LC_ALL=C sort -u "${MODMAP_RAW}" > "${MODMAP}"
+if [[ ! -s "${MODMAP}" ]]; then
+    echo "ERROR: 'go list -deps ./...' produced no package-to-module map; cannot verify license coverage." >&2
     exit 1
 fi
 
 # Inject the override modules go-licenses could not classify. Their license
-# files come from the module cache; the index rows are appended so they appear
-# alongside every other dependency.
+# files come from the committed copies under LICENSE_OVERRIDES_DIR; the index
+# rows are appended so they appear alongside every other dependency.
 for entry in "${LICENSE_OVERRIDES[@]}"; do
     ov_module="${entry%%|*}"
     ov_rest="${entry#*|}"
@@ -361,11 +401,11 @@ for entry in "${LICENSE_OVERRIDES[@]}"; do
     fi
 
     # A stale override is worse than none: it would keep asserting a license for
-    # a module the build no longer uses. Check against the linked package list
+    # a module the build no longer uses. Check against the linked module list
     # rather than `go list -m`, which cannot resolve dependency modules while a
-    # vendor directory is present.
-    if ! grep -qxF -- "${ov_module}" <<<"${LINKED_PKGS}" \
-       && ! grep -qF -- "${ov_module}/" <<<"${LINKED_PKGS}"; then
+    # vendor directory is present. Both sides are module paths, so this is an
+    # exact match — an override must name a module, not a package within one.
+    if ! grep -qxF -- "${ov_module}" <<<"${LINKED_MODULES}"; then
         echo "ERROR: license override lists ${ov_module}, which is no longer linked into any released binary." >&2
         echo "Remove its entry from LICENSE_OVERRIDES and delete ${ov_src}." >&2
         exit 1
@@ -395,43 +435,70 @@ fi
 # mode it silently omitted seven packages that are linked into the released
 # binaries, so their licenses were missing from this file with no error anywhere.
 #
-# Assert directly instead. Every third-party package reachable from the released
-# commands must be covered by some index entry — matched by prefix, since the
-# index is keyed by module while the dependency list is by package.
+# Assert directly instead. Every third-party module linked into the released
+# commands must appear in the index under its own path.
 echo "Verifying every linked dependency is covered..." >&2
-# The index is keyed by module, the dependency list by package, so a package is
-# covered when the index holds it or any of its path prefixes. Walking prefixes
-# in awk keeps this O(path depth) per package rather than a nested shell loop.
+# Coverage is compared on module identity, never on path prefixes. go-licenses
+# keys a row on whatever package it resolved a license for, which is usually a
+# package *inside* the module, so each key is mapped back to its owning module
+# before comparison.
+#
+# Prefix matching was the earlier approach and is wrong: it let an ancestor
+# entry vouch for a nested submodule, and a nested submodule is a separate
+# module whose license may differ from — or be missing in — its parent's. This
+# graph already contains such submodules (oauth2adapt under
+# cloud.google.com/go/auth, ~20 aws-sdk-go-v2/*), so an undisclosed one would
+# have passed unreported. Resolving to modules also disposes of the degenerate
+# bare-host key ("github.com") go-licenses emits when it cannot resolve a
+# package at all: it maps to no module, so it vouches for nothing.
 LC_ALL=C cut -d, -f1 "${INDEX_FILE}" > "${INDEX_KEYS}"
-printf '%s\n' "${LINKED_PKGS}" > "${LINKED_LIST}"
-missing_pkgs=$(
-    awk -v local="${LOCAL_MODULE}" '
-        # Skip degenerate index keys. go-licenses sometimes emits a bare host
-        # such as "github.com" when it cannot resolve a package to a module;
-        # kept as a prefix it would match every package under that host and
-        # make this entire check vacuous. A real module path has a slash.
-        NR == FNR { if (index($0, "/") > 0) mods[$0] = 1; next }
-        {
-            pkg = $0
-            if (index(pkg, local "/") == 1 || pkg == local) next
-            split(pkg, seg, "/")
-            if (seg[1] !~ /\./) next          # stdlib: no dot in first segment
-            p = pkg
+printf '%s\n' "${LINKED_MODULES}" > "${LINKED_LIST}"
+# Explicit status check: an awk failure must not read as "everything covered".
+# Files are distinguished by FILENAME rather than an input counter, which would
+# desynchronise if any input were empty.
+if ! awk -v local="${LOCAL_MODULE}" \
+        -v mapf="${MODMAP}" -v keysf="${INDEX_KEYS}" '
+        FILENAME == mapf {
+            if ($2 != "") { pkgmod[$1] = $2; ismod[$2] = 1 }
+            next
+        }
+        # Resolve an index key to the module that owns it. go-licenses keys a
+        # row on the directory a license covers, which is often a roll-up
+        # prefix ("k8s.io/apimachinery/pkg") rather than a real import path, so
+        # an exact package lookup is not enough. Walking up finds the LONGEST
+        # known module that contains the key, which is the definition of its
+        # owning module: a key inside a nested submodule resolves to that
+        # submodule and never to its parent. A key under no known module (the
+        # degenerate bare host) resolves to nothing and vouches for nothing.
+        FILENAME == keysf {
+            key = $0
+            if (key in pkgmod) { covered[pkgmod[key]] = 1; next }
+            p = key
             while (p != "") {
-                if (p in mods) next
+                if (p in ismod) { covered[p] = 1; next }
                 i = length(p)
                 while (i > 0 && substr(p, i, 1) != "/") i--
                 if (i == 0) break
                 p = substr(p, 1, i - 1)
             }
-            print pkg
+            next
         }
-    ' "${INDEX_KEYS}" "${LINKED_LIST}"
-)
+        {
+            mod = $0
+            if (mod == "" || mod == local) next
+            if (index(mod, local "/") == 1) next   # nested local submodule
+            if (mod in covered) next
+            print mod
+        }
+    ' "${MODMAP}" "${INDEX_KEYS}" "${LINKED_LIST}" > "${MISSING_LIST}"; then
+    echo "ERROR: the license completeness check failed to run." >&2
+    exit 1
+fi
+missing_mods=$(cat "${MISSING_LIST}")
 
-if [[ -n "${missing_pkgs}" ]]; then
-    echo "ERROR: package(s) linked into the released binaries have no license entry:" >&2
-    printf '%s\n' "${missing_pkgs}" | sed 's/^/  /' >&2
+if [[ -n "${missing_mods}" ]]; then
+    echo "ERROR: module(s) linked into the released binaries have no license entry:" >&2
+    printf '%s\n' "${missing_mods}" | sed 's/^/  /' >&2
     echo "" >&2
     echo "These are redistributed, so their licenses must appear in ${OUTPUT}." >&2
     echo "If go-licenses cannot classify one, add it to LICENSE_OVERRIDES near the" >&2
