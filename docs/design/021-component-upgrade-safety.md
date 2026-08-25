@@ -6,7 +6,7 @@
 
 Numbering note: 020 is double-claimed at time of writing. Branch `docs/adr-020-resolution-policy` carries `020-recipe-resolution-policy.md`, and [#2334](https://github.com/NVIDIA/aicr/pull/2334) proposes ADR-020 for snapshot agent run isolation. Renumber at merge if 021 is also taken.
 
-Builds on the registry-declared component facts established by `ownsCRDs` ([#2264](https://github.com/NVIDIA/aicr/issues/2264)) and the uniform local-chart bundle layout in `pkg/bundler/deployer/localformat`. It does not change recipe resolution, bundle layout, or the deployer contract.
+Builds on the registry-declared component facts established by `ownsCRDs` ([#2264](https://github.com/NVIDIA/aicr/issues/2264)) and the uniform local-chart bundle layout in `pkg/bundler/deployer/localformat`. It does not change recipe resolution or the deployer contract. It does change bundle layout in two bounded ways: [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release) adds an optional `-premigrate` folder, and [Decision 7](#decision-7-generated-wrappers-carry-two-versions) adds fields to generated wrapper `Chart.yaml`.
 
 ## Problem
 
@@ -113,36 +113,39 @@ transitions:
       controller is read-only on legacy objects, so GitOps controllers
       observe no drift from the operator upgrade itself.
     precondition: >-
-      All Skyhook objects are in `complete` status with no nodes in
-      progress. Upgrading mid-rollout hands the migrated operator a stage
-      in flight.
-    steps:
-      - id: rename-crs-gitops
-        deployers: [argocd, argocdhelm, flux]
-        description: >-
-          In a single commit, remove the Skyhook manifests and add the
-          NodeWright equivalents. Rewrite apiVersion and kind only; keep
-          metadata.name identical.
-        reason: >-
-          One commit lets the controller prune the old object and adopt the
-          mirrored new one in a single sync. Splitting it leaves a window
-          where auto-sync recreates what you just deleted.
-      - id: rename-crs-imperative
-        deployers: [helm, helmfile, localformat]
-        description: >-
-          Rewrite apiVersion and kind in your manifests, then apply. The
-          mirror pre-created the NodeWright, so this adopts the existing
-          object rather than creating one.
-      - id: delete-legacy-crs
-        deployers: [helm, helmfile, localformat]
-        description: >-
-          After confirming each NodeWright carries the
-          nodewright.nvidia.com/mirrored-from stamp and is reconciling,
-          delete the legacy Skyhook objects, then the DeploymentPolicy
-          objects.
-        reason: >-
-          The admission webhook rejects DeploymentPolicy deletion while
-          referencing Skyhooks still exist, so the order is load-bearing.
+      No Skyhook is in an in-flight rollout state (in_progress, erroring,
+      blocked, waiting, unknown) and no nodes are mid-package. Paused and
+      disabled Skyhooks migrate as-is; the mirror copies the annotation, so
+      do not resume or enable them.
+    stepsByDeployer:
+      - deployers: [argocd, argocd-helm, flux]
+        steps:
+          - id: rename-crs
+            description: >-
+              In a single commit, remove the Skyhook manifests and add the
+              NodeWright equivalents. Rewrite apiVersion and kind only;
+              keep metadata.name identical.
+            reason: >-
+              One commit lets the controller prune the old object and adopt
+              the mirrored new one in a single sync. Splitting it leaves a
+              window where auto-sync recreates what you just deleted.
+      - deployers: [helm, helmfile]
+        steps:
+          - id: rename-crs
+            description: >-
+              Rewrite apiVersion and kind in your manifests, then apply. The
+              mirror pre-created the NodeWright, so this adopts the existing
+              object rather than creating one.
+          - id: delete-legacy-crs
+            description: >-
+              After confirming each NodeWright carries the
+              nodewright.nvidia.com/mirrored-from stamp and is reconciling,
+              delete the legacy Skyhook objects, then the DeploymentPolicy
+              objects.
+            reason: >-
+              The admission webhook rejects DeploymentPolicy deletion while
+              referencing Skyhooks still exist, so the order is
+              load-bearing.
     references:
       - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md
 
@@ -156,15 +159,16 @@ transitions:
       Skyhook objects still present.
     precondition: >-
       No Skyhook objects remain in the cluster.
-    steps:
-      - id: confirm-rename-complete
-        description: >-
-          Confirm no Skyhook objects remain. If any do, complete the
-          rename migration on 0.18.x or 0.19.x before crossing into
-          0.20.0.
-        reason: >-
-          The CRD removal cascade-deletes whatever is left, and the
-          objects are unrecoverable afterwards.
+    stepsByDeployer:
+      - steps:            # no `deployers:` means every deployer
+          - id: confirm-rename-complete
+            description: >-
+              Confirm no Skyhook objects remain. If any do, complete the
+              rename migration on 0.18.x or 0.19.x before crossing into
+              0.20.0.
+            reason: >-
+              The CRD removal cascade-deletes whatever is left, and the
+              objects are unrecoverable afterwards.
 ```
 
 Note what the two records together express: a **migration window**. The rename is optional between 0.18.0 and 0.20.0 and mandatory before crossing into 0.20.0. Directional ranges carry that without any new concept.
@@ -178,6 +182,10 @@ Note what the two records together express: a **migration window**. The rename i
 | `blocked` | Direct transition unsupported. Either the jump spans more than one block, or it needs an uninstall and reinstall. |
 | `unknown` | No record matches this transition. **Not an assertion of safety.** |
 | `unversioned` | The two sides cannot be compared at all. **Not an assertion of safety.** |
+
+**A transition may also carry `hooks`.** Steps describe what a human does; `hooks` reference AICR-authored migration manifests that ship as a release beside the component. The field is defined in [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release), which owns its delivery; it is listed here so the transition schema is complete in one place.
+
+**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none. `unknown` and `unversioned` are never authored, only computed. The well-formedness check enforces this, so the verdict table above cannot drift from what a record actually says.
 
 `unknown` is a gap in the *data*, fixed by authoring a record. `unversioned` is a gap in the *inputs*, fixed by pinning something comparable. Collapsing them would hide which action closes the gap.
 
@@ -214,11 +222,15 @@ Composing the steps of both records would be wrong, not merely cautious. Nodewri
 
 In practice this is quiet. An ordinary component gets one broad block per major line (`from: ">=25.0 <26.0"`, `to: ">=25.0 <26.0"`, `verdict: safe`) and no jump inside that line ever spans. Blocks multiply only where real boundaries exist, which is exactly where spanning should stop you.
 
-**Steps are deployer-scoped.** Each step carries an optional `deployers:` list; omitting it means every deployer. This is not cosmetic. In the nodewright migration the step *list itself* differs: under GitOps the rename and the legacy deletion collapse into one atomic commit, because a separate `kubectl delete` fights auto-sync and self-heal. Under imperative Helm they are two distinct steps in a load-bearing order. Rendering the imperative "delete legacy CRs" step to an Argo CD user with a footnote saying not to do it would be worse than not rendering it.
+**Steps are grouped by deployer, not filtered per step.** `stepsByDeployer` holds one entry per deployer group, each with its own ordered `steps` list; a group that omits `deployers:` applies to every deployer. This is not cosmetic. In the nodewright migration the step *list itself* differs: under GitOps the rename and the legacy deletion collapse into one atomic commit, because a separate `kubectl delete` fights auto-sync and self-heal. Under imperative Helm they are two distinct steps in a load-bearing order.
+
+Grouping rather than per-step filtering matters because **order is part of the instruction**. A reader of a group sees exactly the sequence they must perform. With a single flat list plus per-step deployer tags, the reader has to filter mentally before the ordering means anything, and the numbering they see depends on that filtering. Rendering the imperative "delete legacy CRs" step to an Argo CD user with a footnote saying not to do it would be worse still.
 
 This is also where AICR adds value no upstream document can. The nodewright guide must hedge across every deployer, explaining Argo behavior to Flux users and vice versa. AICR knows which deployer you chose, so it renders the one path that applies to you.
 
-**Step `id` is unique within a transition**, across every deployer scope. Two deployer-specific variants of the same action get distinct ids (`rename-crs-gitops`, `rename-crs-imperative`) so a consumer, or the well-formedness check, can key on id without ambiguity.
+**Step `id` is unique within its group.** The same logical action may reuse an id across groups (`rename-crs` appears in both above) because each group is a self-contained sequence; a consumer addresses a step as (deployer, id). A group may not list a deployer that another group in the same transition already claims.
+
+**Deployer identifiers are the canonical `--deployer` values** from `pkg/bundler/config/config.go`: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. There are five. `localformat` is the internal bundle-layout package every deployer consumes, not a selectable deployer.
 
 **`reason` is separate from `description`.** The description says what to do; the reason says why the order or the shape matters. Deleting Skyhooks before DeploymentPolicies is not stylistic, it is what the admission webhook requires. A step whose reason is missing is a step somebody will eventually "optimize".
 
@@ -274,7 +286,7 @@ Offline mode cannot answer this question at all. It says so explicitly rather th
 
 Content lives beside the component's existing manifests:
 
-```
+```text
 recipes/components/nodewright-customizations/
   manifests/
     tuning.yaml
@@ -292,7 +304,7 @@ and is referenced from the transition record:
 
 The bundler emits it as a separate generated chart folder, ordered immediately before the component it serves:
 
-```
+```text
 006-nodewright-operator/
 007-nodewright-customizations-premigrate/     <- new
 008-nodewright-customizations/
@@ -305,7 +317,7 @@ Three properties follow:
 - **Uniform across component kinds.** Manifest-only, Kustomize, and upstream-chart components are treated identically, because the migration release does not depend on whether the component itself has a generated chart. Decision 1's rule holds with no special case: AICR never touches an upstream chart, it emits a release *beside* it.
 
   Uniformity is reasoned, not demonstrated, for one of the three. The Kustomize path is fully implemented (`pkg/bundler/deployer/localformat/kustomize.go`, in-process krusty), but **the registry contains zero Kustomize components today** and no overlay references one. So that limb is untested in practice and should be treated as a design claim until a Kustomize component exists.
-- **Ordering is folder order**, not Helm hook phase semantics that would have to behave identically across six deployers.
+- **Ordering is folder order**, not Helm hook phase semantics that would have to behave identically across all five deployers.
 - **It is an ordinary release.** Visible in `helm list`, uninstallable, and subject to the same checksum, BOM, and signing paths as every other folder.
 
 Helm hook annotations still apply *within* the folder where finer ordering is needed. Flux's helm-controller runs Helm hooks and Argo CD translates `helm.sh/hook` into its own semantics, so one annotation set covers most of the deployer matrix rather than six bespoke renderings.
@@ -316,7 +328,7 @@ The image-pinning cost from [Decision 3](#decision-3-ownership-classes-and-what-
 
 One matcher runs over a `component -> version` table per side. Three separate inputs decide how those tables are built and how the result is rendered. They are independent, which is why "offline mode" and "online mode" are not the right framing.
 
-**Where the `from` table comes from.** `--from <recipe|bundle|cluster>`. Artifacts are read with no cluster access, which is the CI and GitOps path and the whole feature for anyone who keeps recipes in git. `cluster` reads installed release inventory through the Helm SDK, keyed on release name matching component name, and is ground truth including drift and hand-edits. `--to` is always an artifact, since there is nothing to upgrade *to* in a cluster. Because every bundle embeds a deterministic `recipe.yaml`, the recipe and bundle forms share one code path.
+**Where the `from` table comes from.** `--from <recipe|bundle|cluster>`. Artifacts are read with no cluster access, which is the CI and GitOps path and the whole feature for anyone who keeps recipes in git. `cluster` reads installed release inventory through the Helm SDK, keyed on release name matching component name. This is authoritative for *which release version is installed*, including when that has drifted from the artifact in git. It is **not** a live view of cluster resources: Helm records what it last applied, so a hand-edited resource leaves the release metadata unchanged. `--to` is always an artifact, since there is nothing to upgrade *to* in a cluster. Because every bundle embeds a deterministic `recipe.yaml`, the recipe and bundle forms share one code path.
 
 **Whether a cluster scan runs.** The at-risk scan for unmanaged resources ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)) needs a cluster no matter where the `from` table came from, so it is its own axis rather than a property of `--from`. It is implied by `--from cluster` and available alongside artifact comparison via `--scan-cluster`. Comparing two bundles while scanning a live cluster for unmanaged `Skyhook` objects is a legitimate combination, and the two-mode framing had no name for it.
 
@@ -324,7 +336,7 @@ One matcher runs over a `component -> version` table per side. Three separate in
 
 Output:
 
-```
+```text
 COMPONENT              FROM      TO        VERDICT   NOTES
 gpu-operator           v25.3.0   v25.3.2   safe      patch, recorded
 nodewright-operator    0.17.2    0.18.1    manual    1 step, reversible (24h)
@@ -342,7 +354,9 @@ Vendoring the SDK is a substantial change on its own and may land as its own PR 
 
 ### Decision 6: Strict by default, semver-calibrated
 
-The check is strict by default. It fails on `manual`, on `blocked`, on `unversioned`, and on `unknown` across a major version boundary. It passes `safe`, and passes `unknown` within a patch or minor boundary.
+The check is strict by default. It fails on `manual`, on `blocked`, on `unversioned`, and on `unknown` across a **breaking boundary**. It passes `safe`, and passes `unknown` within a non-breaking boundary.
+
+A breaking boundary is a major bump, **or a minor bump while the major version is 0**. Semver gives no stability guarantee below 1.0, so `0.18 -> 0.19` may break exactly as `1.x -> 2.x` may. Treating 0.x minors as non-breaking would have passed an unassessed `0.17.2 -> 0.18.1`, which is this ADR's own worked example and an entire API-group rename.
 
 `unversioned` fails unconditionally because the semver calibration below has nothing to calibrate on: there is no boundary to classify. It is a blind spot rather than an unassessed transition, and the remedy is in the operator's hands, since pinning a comparable ref resolves it. The escape-hatch flag covers anyone who accepts the blind spot deliberately.
 
@@ -378,7 +392,7 @@ Reproducibility is unaffected. The AICR version already travels in every bundle 
 
 ### Decision 8: Close the `ownsCRDs` deployer gap
 
-`ownsCRDs` is consumed by exactly one deployer, `pkg/bundler/deployer/flux/flux.go:994`. On helm, helmfile, argocd, and argocdhelm, CRDs still sit at day-one schema after every upgrade. That is a live upgrade defect, not a hypothetical one.
+`ownsCRDs` is consumed by exactly one deployer, `pkg/bundler/deployer/flux/flux.go:994`. On helm, helmfile, argocd, and argocd-helm, CRDs still sit at day-one schema after every upgrade. That is a live upgrade defect, not a hypothetical one.
 
 This ADR records `ownsCRDs` as the precedent the transition-record design follows, and names the deployer gap as in-scope work. It may well ship as its own issue and PR rather than riding the same change.
 
@@ -445,7 +459,7 @@ nodewright-operator 0.17.2 -> 0.18.1  (manual, reversible: yes)
 upgrade check failed: 1 transition requires manual steps
 ```
 
-Under `--deployer helm` the same record renders three steps instead of one, because the imperative path cannot merge the rename and the legacy deletion into a single atomic commit.
+Under `--deployer helm` the same record renders two steps instead of one, because the imperative path cannot merge the rename and the legacy deletion into a single atomic commit.
 
 The `AT RISK` block appears only in online mode. Offline, the check states that it cannot see unmanaged resources rather than omitting the section, since an absent warning reads as an all-clear.
 
@@ -481,11 +495,10 @@ It deliberately proves nothing about real component upgrades. It proves the mech
 - **Is the boundary premise true?** Decision 1 assumes most upgrades are already handled by the component's own chart. That is a structural argument, not a measurement, and nobody has checked it against this registry. An audit of past `registry.yaml` pin bumps, asking for each whether it required operator action beyond `helm upgrade`, would either support the boundary or overturn it. If a large fraction did require action, the rejected mutating-hook alternative deserves reopening.
 - **When to vendor `helm.sh/helm/v4`.** Online mode requires it, and it is a substantial change in its own right: it lands in `make scan`, the license allowlist, api-diff, and the vendor tree. It may be worth landing as its own PR before this work rather than inside it, which would also let the offline check (steps 1 through 5) ship independently. Sequencing undecided.
 - **Escape-hatch flag name.** `--force-updated` was considered and rejected: it reads as forcing an update rather than suppressing a check. Candidates: `--skip-upgrade-check` (disables the gate entirely), `--allow-unknown-upgrades` (relaxes only the `unknown` case, keeping `manual` and `blocked` fatal). The second is narrower and probably better, but it needs a name for the first case too.
-- **Command name.** `upgrade-check` handling downgrades reads oddly.
 - **No pinning gate covers Kustomize.** `bom-pinning-check` in `make lint` verifies that every *Helm* component has a pinned chart version per ADR-006; it runs `tools/bom`, which renders charts, so a Kustomize `defaultTag` is unchecked. The `unversioned` verdict means a branch ref can no longer produce a silent false negative, but it will fail strict mode until someone repins. Rejecting mutable Kustomize refs at lint time would catch it at authoring instead, and probably belongs as an ADR-006 amendment rather than here. Latent today: the registry has no Kustomize components.
 - **Kustomize `Chart.yaml` version.** Decision 7 puts the payload version in an annotation specifically because Kustomize tags may not be semver. Confirm no deployer path reads wrapper `version:` for anything meaningful before changing it.
 - **Coverage ratchet.** Matrix coverage starts at zero. A maintainer-side CI gate (fail when a `registry.yaml` pin bump crosses a major boundary with no matching record) is probably needed for records to ever get authored. Not decided here.
-- **Values-drift detection.** Validating `recipes/components/*/values.yaml` keys against each chart's `values.schema.json` addresses the silent-misconfiguration gap named in Context. It is adjacent to this ADR and likely belongs in its own.
+- **Values-drift detection is out of scope.** Validating `recipes/components/*/values.yaml` keys against each chart's `values.schema.json` addresses the silent-misconfiguration gap named in Context, but it belongs on the PR that bumps the pin and changes the values, not at `upgrade-check` time (per review on #2343). Tracked separately.
 
 ## Alternatives Considered
 
