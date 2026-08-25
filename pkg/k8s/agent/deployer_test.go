@@ -937,6 +937,18 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 	saName := d.saName()
 	ourLabels := d.objectLabels()
 
+	// Every aicr label except the run ID. This is the shape that makes the
+	// empty-RunID guard load-bearing: objLabels[labels.RunID] is "" here, so
+	// against an empty Config.RunID the run-ID comparison SUCCEEDS ("" == "")
+	// and the other three match too. Without the guard, createdByThisRun
+	// would claim this object. A label-less seed cannot show that — it is
+	// rejected on labels.Name regardless.
+	runIDLessLabels := map[string]string{
+		labels.Name:      labels.ValueAICR,
+		labels.ManagedBy: labels.ValueAICR,
+		labels.Component: labels.ValueSnapshotAgent,
+	}
+
 	// A replacement created after this run's object was deleted: same name,
 	// different identity. Carries a foreign run's labels, which is what a
 	// second aicr run standing an object up at this name would stamp.
@@ -997,13 +1009,16 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 			wantWarn:   true,
 		},
 		{
-			// An empty Config.RunID is not a wildcard: the run-ID
-			// comparison alone would let "" == "" pass a label-less
-			// object off as this run's, so createdByThisRun matches
-			// nothing at all when this run has no ID to match on.
+			// An empty Config.RunID is not a wildcard. The seed carries
+			// every aicr label but the run ID, so all four comparisons
+			// would pass against an empty RunID -- "" == "" included.
+			// createdByThisRun must still match nothing, because a run
+			// with no ID has no ownership to prove. Deleting the guard
+			// fails this row; a label-less seed would not.
 			name: "an empty RunID proves ownership of nothing",
 			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
 				Name: saName, Namespace: ns, UID: types.UID("operators-uid"),
+				Labels: runIDLessLabels,
 			}},
 			runID:      ptr.To(""),
 			wantDelete: false,
