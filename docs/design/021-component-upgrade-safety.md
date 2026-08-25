@@ -190,7 +190,9 @@ Grouping rather than per-step filtering matters because **order is part of the i
 
 This is also where AICR adds value no upstream document can. The nodewright guide must hedge across every deployer, explaining Argo behavior to Flux users and vice versa. AICR knows which deployer you chose, so it renders the one path that applies to you.
 
-**Step `id` is unique within its group.** The same logical action may reuse an id across groups (`rename-crs` appears in both above) because each group is a self-contained sequence; a consumer addresses a step as (deployer, id). A group may not list a deployer that another group in the same transition already claims.
+**Step `id` is unique within its group.** The same logical action may reuse an id across groups because each group is a self-contained sequence; a consumer addresses a step as (deployer, id).
+
+**Groups partition the deployers; they do not overlap.** An explicit group may not claim a deployer another explicit group already claims. A group omitting `deployers` is the remainder, covering exactly those deployers no explicit group claims, so it is "all" only when no explicit group exists. And because a `manual` or `blocked` verdict promises steps, **every deployer must be covered by some group** for those verdicts: a partition with a gap would hand an Argo CD operator a `manual` verdict with no steps, which is the failure deployer grouping exists to prevent. The well-formedness check enforces both.
 
 **Deployer identifiers are the canonical `--deployer` values** from `pkg/bundler/config/config.go`: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. There are five. `localformat` is the internal bundle-layout package every deployer consumes, not a selectable deployer.
 
@@ -214,7 +216,7 @@ What it is good for is the thing an operator needs *before* upgrading rather tha
 | `.summary` | yes | One sentence on what changes. |
 | `.precondition` | no | Cluster state that must hold before starting. |
 | `.reversible`, `.reversibleNotes` | no | Advisory only; absent means no claim. Notes required when the flag is set. |
-| `.stepsByDeployer[]` | for `manual`/`blocked` | One group per deployer set, each with an ordered `steps` list. Forbidden on `safe`. Omitting `deployers` means all. |
+| `.stepsByDeployer[]` | for `manual`/`blocked` | One group per deployer set, each with an ordered `steps` list. Forbidden on `safe`. Omitting `deployers` covers the deployers no explicit group claims. |
 | `.stepsByDeployer[].steps[]` | yes | `id` unique within the group, `description` required, `reason` optional. |
 | `.hooks[]` | no | `file` under `manifests/migrations/`, `phase` pre- or post-upgrade. See [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release). |
 | `.affectedResources[]` | no | `group` plus `kinds`; drives the at-risk scan in [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see). |
@@ -531,9 +533,9 @@ nodewright-operator 0.17.2 -> 0.18.1  (manual, reversible: yes)
   in this release)
 
   PRECONDITION
-    All Skyhook objects are in `complete` status with no nodes in
-    progress. Upgrading mid-rollout hands the migrated operator a stage
-    in flight.
+    No Skyhook is in an in-flight rollout state (in_progress, erroring,
+    blocked, waiting, unknown) and no nodes are mid-package. Paused and
+    disabled Skyhooks migrate as-is; do not resume or enable them.
 
   STEPS (deployer: argocd)
     1. rename-crs
