@@ -158,10 +158,39 @@ if [[ -z "${LOCAL_MODULE}" ]]; then
     exit 1
 fi
 
-export GOFLAGS="-mod=vendor"
+# Deliberately NOT -mod=vendor. In vendor mode go-licenses silently omits some
+# packages entirely rather than reporting them: it emitted 245 CSV rows against
+# the vendor tree and 252 in module mode, and the 7 it dropped are real
+# dependencies linked into the released binaries — every in-toto/in-toto-golang,
+# in-toto/attestation, and cyberphone/json-canonicalization package. Their
+# licenses were therefore absent from the notices file, which is a disclosure
+# gap rather than a cosmetic one. Module mode surfaces them.
+#
 # CGO is disabled for every released binary (see .goreleaser.yaml). Disabling it
 # here lets go-licenses cross-list each target platform without a C toolchain.
 export CGO_ENABLED=0
+
+# Modules whose license go-licenses cannot classify, mapped to a committed copy
+# of the license text. Each entry is "<module path>|<repo-relative file>|<SPDX id>".
+#
+# The copies are committed rather than read from the module cache so generation
+# stays hermetic and works regardless of how dependencies are materialised. It
+# is also required for in-toto/attestation: its module path ends /go/v1, but the
+# LICENSE lives at the repository root and is therefore not in the module zip at
+# all — there is no in-cache path that would resolve it.
+#
+# All three are Apache-2.0, verified by reading the files.
+#
+# This list is not an escape hatch. The completeness check after collection
+# fails on any linked package missing from the index whether or not it is listed
+# here, so the only way to satisfy that check is to disclose a license — naming
+# the file and the SPDX id.
+LICENSE_OVERRIDES_DIR="${LICENSE_OVERRIDES_DIR:-licenses/overrides}"
+LICENSE_OVERRIDES=(
+    "github.com/in-toto/attestation/go/v1|github.com/in-toto/attestation/LICENSE|Apache-2.0"
+    "github.com/in-toto/in-toto-golang|github.com/in-toto/in-toto-golang/LICENSE|Apache-2.0"
+    "github.com/cyberphone/json-canonicalization|github.com/cyberphone/json-canonicalization/LICENSE|Apache-2.0"
+)
 
 # go-licenses decides whether a package is standard library by testing its
 # source path against go/build's GOROOT, and a Go binary only carries a baked-in
@@ -240,10 +269,23 @@ for platform in "${PLATFORMS[@]}"; do
     # 'go list std' is GOOS-dependent (e.g. syscall/js exists only for wasm),
     # so recompute the stdlib ignore set per target platform. Standard-library
     # packages are excluded from the notices file (covered by Go's own license).
+    # Full package paths, NOT first path segments. `--ignore` matches by
+    # prefix, and `go list std | cut -d/ -f1` yields the bare segment `go`
+    # (from go/ast, go/build, ...), which then also matches every third-party
+    # module under go.opentelemetry.io, go.uber.org, and go.yaml.in — silently
+    # dropping them from the notices file with no error. Full paths cannot
+    # collide that way.
     stdlib_ignore=$(GOOS="${goos}" GOARCH="${goarch}" go list std 2>/dev/null \
-        | cut -d'/' -f1 | LC_ALL=C sort -u | paste -sd ',' -)
+        | LC_ALL=C sort -u | paste -sd ',' -)
     # go-licenses --ignore takes a comma-separated list of package paths.
+    # The override modules are ignored here because `go-licenses save` exits
+    # non-zero on a license it cannot classify; their licenses are injected
+    # verbatim after the loop and their index rows appended, so they still
+    # appear in the notices file.
     ignore="${stdlib_ignore},${LOCAL_MODULE}"
+    for entry in "${LICENSE_OVERRIDES[@]}"; do
+        ignore="${ignore},${entry%%|*}"
+    done
 
     # 'go-licenses save' writes each dependency's license file to
     # <save_path>/<import-path>/<original-filename>. We do NOT pass a
@@ -281,6 +323,50 @@ for platform in "${PLATFORMS[@]}"; do
         >> "${COMBINED_CSV}"
 done
 
+# Packages linked into the released commands. Computed once: the override
+# staleness check and the completeness gate below both need it, and `go list`
+# over the full graph is not cheap.
+LINKED_PKGS=$(go list -deps ./cmd/... 2>/dev/null | LC_ALL=C sort -u)
+if [[ -z "${LINKED_PKGS}" ]]; then
+    echo "ERROR: 'go list -deps ./cmd/...' returned nothing; cannot verify license coverage." >&2
+    exit 1
+fi
+
+# Inject the override modules go-licenses could not classify. Their license
+# files come from the module cache; the index rows are appended so they appear
+# alongside every other dependency.
+for entry in "${LICENSE_OVERRIDES[@]}"; do
+    ov_module="${entry%%|*}"
+    ov_rest="${entry#*|}"
+    ov_file="${ov_rest%%|*}"
+    ov_spdx="${ov_rest##*|}"
+
+    ov_src="${LICENSE_OVERRIDES_DIR}/${ov_file}"
+    if [[ ! -s "${ov_src}" ]]; then
+        echo "ERROR: license override for ${ov_module} names ${ov_src}, which is missing or empty." >&2
+        echo "Restore the committed license copy rather than deleting the override:" >&2
+        echo "removing it drops a real dependency's license from ${OUTPUT}." >&2
+        exit 1
+    fi
+
+    # A stale override is worse than none: it would keep asserting a license for
+    # a module the build no longer uses. Check against the linked package list
+    # rather than `go list -m`, which cannot resolve dependency modules while a
+    # vendor directory is present.
+    if ! grep -q -e "^${ov_module}$" -e "^${ov_module}/" <<<"${LINKED_PKGS}"; then
+        echo "ERROR: license override lists ${ov_module}, which is no longer linked into any released binary." >&2
+        echo "Remove its entry from LICENSE_OVERRIDES and delete ${ov_src}." >&2
+        exit 1
+    fi
+
+    mkdir -p "${LICENSES_DIR}/${ov_module}"
+    cp "${ov_src}" "${LICENSES_DIR}/${ov_module}/$(basename "${ov_file}")"
+    printf '%s,%s,%s\n' \
+        "${ov_module}" \
+        "https://${ov_module}/blob/HEAD/${ov_file}" \
+        "${ov_spdx}" >> "${COMBINED_CSV}"
+done
+
 echo "Generating dependency index..." >&2
 # Deduplicate by package (first CSV field) and sort deterministically. LC_ALL=C
 # pins byte-ordering so macOS (BSD sort) and Linux (GNU sort) agree — locale
@@ -289,6 +375,59 @@ LC_ALL=C sort -t, -k1,1 -u "${COMBINED_CSV}" > "${INDEX_FILE}"
 
 if [[ ! -s "${INDEX_FILE}" ]]; then
     echo "ERROR: go-licenses produced no entries — refusing to write empty notices file." >&2
+    exit 1
+fi
+
+# Completeness gate. Everything above trusts go-licenses to report each package
+# it was asked about; nothing checked that it did. It does not always: in vendor
+# mode it silently omitted seven packages that are linked into the released
+# binaries, so their licenses were missing from this file with no error anywhere.
+#
+# Assert directly instead. Every third-party package reachable from the released
+# commands must be covered by some index entry — matched by prefix, since the
+# index is keyed by module while the dependency list is by package.
+echo "Verifying every linked dependency is covered..." >&2
+# The index is keyed by module, the dependency list by package, so a package is
+# covered when the index holds it or any of its path prefixes. Walking prefixes
+# in awk keeps this O(path depth) per package rather than a nested shell loop.
+INDEX_KEYS="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-keys.XXXXXX")"
+LINKED_LIST="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-pkgs.XXXXXX")"
+LC_ALL=C cut -d, -f1 "${INDEX_FILE}" > "${INDEX_KEYS}"
+printf '%s\n' "${LINKED_PKGS}" > "${LINKED_LIST}"
+missing_pkgs=$(
+    awk -v local="${LOCAL_MODULE}" '
+        # Skip degenerate index keys. go-licenses sometimes emits a bare host
+        # such as "github.com" when it cannot resolve a package to a module;
+        # kept as a prefix it would match every package under that host and
+        # make this entire check vacuous. A real module path has a slash.
+        NR == FNR { if (index($0, "/") > 0) mods[$0] = 1; next }
+        {
+            pkg = $0
+            if (index(pkg, local "/") == 1 || pkg == local) next
+            split(pkg, seg, "/")
+            if (seg[1] !~ /\./) next          # stdlib: no dot in first segment
+            p = pkg
+            while (p != "") {
+                if (p in mods) next
+                i = length(p)
+                while (i > 0 && substr(p, i, 1) != "/") i--
+                if (i == 0) break
+                p = substr(p, 1, i - 1)
+            }
+            print pkg
+        }
+    ' "${INDEX_KEYS}" "${LINKED_LIST}"
+)
+rm -f "${INDEX_KEYS}" "${LINKED_LIST}"
+
+if [[ -n "${missing_pkgs}" ]]; then
+    echo "ERROR: package(s) linked into the released binaries have no license entry:" >&2
+    printf '%s\n' "${missing_pkgs}" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "These are redistributed, so their licenses must appear in ${OUTPUT}." >&2
+    echo "If go-licenses cannot classify one, add it to LICENSE_OVERRIDES near the" >&2
+    echo "top of this script with its license file and SPDX id. Do not silence this" >&2
+    echo "by adding the package to --ignore: that is what hid them previously." >&2
     exit 1
 fi
 
