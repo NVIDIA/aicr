@@ -239,6 +239,14 @@ const (
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
 
+	// AgentRBACProvisionTimeout bounds
+	// `aicr snapshot --add-roles-to-service-account`, which reads the
+	// target ServiceAccount and then creates-or-updates four RBAC objects.
+	// That is a handful of small writes with no waiting on cluster state,
+	// so the budget only has to absorb apiserver latency and a retry or
+	// two — not a Job round trip.
+	AgentRBACProvisionTimeout = 60 * time.Second
+
 	// DiscoveryRefreshCooldown rate-limits how often the shared cluster
 	// fetcher (pkg/chainsaw) invalidates its cached discovery data after a
 	// no-match. The refresh exists so a CRD installed by the component being

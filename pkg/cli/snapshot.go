@@ -16,6 +16,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -176,7 +178,7 @@ func (o *snapshotCmdOptions) toSnapshotDelivery() snapshotter.SnapshotDelivery {
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
 // can pass to the snapshotter without further parsing.
 func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapshotCmdOptions, error) {
-	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools"); err != nil {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools"); err != nil {
 		return nil, err
 	}
 
@@ -269,6 +271,66 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 	}, nil
 }
 
+// runAddRolesToServiceAccount handles the provision-and-exit invocation
+// `aicr snapshot --add-roles-to-service-account <name>`: it grants the agent's
+// permissions to an already-existing ServiceAccount and returns without
+// deploying a Job or capturing anything.
+//
+// It is a thin adapter — every decision (name derivation, existence check,
+// rule set, idempotent create-or-update) lives in pkg/snapshotter and
+// pkg/k8s/agent. What belongs here is only presenting the outcome, including
+// the two properties an operator must not have to discover on their own: the
+// objects are permanent, and adopting one ServiceAccount across runs waives
+// per-run permission isolation.
+func runAddRolesToServiceAccount(ctx context.Context, cmd *cli.Command, opts *snapshotCmdOptions, saName string) error {
+	res, err := snapshotter.ProvisionAgentRoles(ctx, &snapshotter.AgentRolesConfig{
+		Kubeconfig:         opts.kubeconfig,
+		Namespace:          opts.namespace,
+		ServiceAccountName: saName,
+		DiscoverNetwork:    opts.discoverNetwork,
+	})
+	if err != nil {
+		return err
+	}
+
+	writeProvisionReport(cmd.Root().Writer, res)
+	return nil
+}
+
+// writeProvisionReport renders the outcome of a provisioning run. It is split
+// out from runAddRolesToServiceAccount so the two properties an operator must
+// not have to discover on their own — the objects are permanent, and adopting
+// one ServiceAccount across runs waives per-run permission isolation — are
+// assertable without a cluster.
+func writeProvisionReport(w io.Writer, res *snapshotter.AgentRolesResult) {
+	fmt.Fprintf(w, `Granted the snapshot agent's permissions to ServiceAccount %[1]q in namespace %[2]q.
+
+Created or updated:
+  role/%[3]s (namespace %[2]s)
+  rolebinding/%[4]s (namespace %[2]s)
+  clusterrole/%[5]s
+  clusterrolebinding/%[6]s
+
+These objects are permanent: no aicr run creates, updates, or deletes them.
+Re-run this command after an aicr upgrade to refresh the rules; delete the four
+objects by hand when the ServiceAccount no longer needs them.
+
+Capture a snapshot as this ServiceAccount with:
+  aicr snapshot --namespace %[2]s --service-account-name %[1]s
+
+Trade-off: runs that share this ServiceAccount share its permissions, so per-run
+permission isolation is waived for them.
+`, res.ServiceAccountName, res.Namespace, res.Role, res.RoleBinding, res.ClusterRole, res.ClusterRoleBinding)
+
+	if res.DiscoverNetwork {
+		fmt.Fprint(w, `
+WARNING: --discover-network also granted cluster-scoped MUTATING rules
+(nodes: patch, pods/exec: create, CRD/namespace/DaemonSet create-delete).
+This ServiceAccount now carries them permanently, not for one run.
+`)
+	}
+}
+
 // snapshotTemplateOptions holds parsed template options for the snapshot command.
 type snapshotTemplateOptions struct {
 	templatePath string
@@ -350,7 +412,12 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "ServiceAccount name prefix (default: \"aicr\"); the run ID is always appended",
+			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and aicr creates and deletes no RBAC for the run (grant it permissions once with --add-roles-to-service-account). Otherwise it is a name prefix (default: \"aicr\") and the run ID is appended.",
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
+			Name:     flagAddRolesToSA,
+			Usage:    "Grant the agent's permissions to the named EXISTING ServiceAccount in --namespace, then exit without taking a snapshot. Creates permanent, non-run-scoped Role/RoleBinding and ClusterRole/ClusterRoleBinding that no run cleanup removes; idempotent. Add --discover-network to also grant the mutating live-discovery rules.",
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
@@ -524,6 +591,15 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			opts, err := parseSnapshotCmdOptions(cmd, cfg)
 			if err != nil {
 				return err
+			}
+
+			// Provision-and-exit: --add-roles-to-service-account grants the
+			// agent's permissions to an existing ServiceAccount and takes no
+			// snapshot. Checked ahead of every collection path (including the
+			// in-pod one below) so the flag can never be combined with a
+			// capture.
+			if saName := cmd.String(flagAddRolesToSA); saName != "" {
+				return runAddRolesToServiceAccount(ctx, cmd, opts, saName)
 			}
 
 			agentCfg := opts.toAgentConfig()

@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -446,6 +447,134 @@ func TestOutputDestinationParsing(t *testing.T) {
 			}
 			if isConfigMap != tt.isConfigMap {
 				t.Errorf("isConfigMap = %v, want %v", isConfigMap, tt.isConfigMap)
+			}
+		})
+	}
+}
+
+// TestSnapshotCmd_AddRolesFlagWiring covers the CLI surface of the
+// provision-and-exit invocation. The provisioning itself is cluster work and
+// is covered in pkg/k8s/agent; what this asserts is the wiring an operator
+// touches: the flag exists under the agent-deployment category, and it is
+// single-valued so a repeated flag is rejected rather than silently taking
+// the last value and provisioning the wrong ServiceAccount.
+func TestSnapshotCmd_AddRolesFlagWiring(t *testing.T) {
+	t.Run("flag is registered under agent deployment", func(t *testing.T) {
+		var found cli.Flag
+		for _, f := range snapshotCmd().Flags {
+			for _, n := range f.Names() {
+				if n == flagAddRolesToSA {
+					found = f
+				}
+			}
+		}
+		if found == nil {
+			t.Fatalf("snapshot command must define --%s", flagAddRolesToSA)
+		}
+		sf, ok := found.(*cli.StringFlag)
+		if !ok {
+			t.Fatalf("--%s is %T, want *cli.StringFlag", flagAddRolesToSA, found)
+		}
+		if sf.Category != catAgentDeployment {
+			t.Errorf("--%s category = %q, want %q", flagAddRolesToSA, sf.Category, catAgentDeployment)
+		}
+		if !strings.Contains(sf.Usage, "without taking a snapshot") {
+			t.Errorf("--%s usage must say it takes no snapshot; got %q", flagAddRolesToSA, sf.Usage)
+		}
+	})
+
+	t.Run("repeated flag is rejected", func(t *testing.T) {
+		err := runSnapshotCmdExpectErr(t, []string{
+			"--" + flagAddRolesToSA, "sa-one",
+			"--" + flagAddRolesToSA, "sa-two",
+		})
+		if err == nil {
+			t.Fatalf("repeated --%s accepted; the last value would silently win", flagAddRolesToSA)
+		}
+		if !strings.Contains(err.Error(), flagAddRolesToSA) {
+			t.Errorf("error = %q, want it to name --%s", err.Error(), flagAddRolesToSA)
+		}
+	})
+}
+
+// TestSnapshotCmd_ServiceAccountNameUsageStatesExactIfExists pins the one
+// thing an operator has to learn from `--help`: --service-account-name is no
+// longer only a prefix. A usage string that still says "prefix" alone would
+// send an IRSA user straight into the silent credential loss this change
+// exists to close.
+func TestSnapshotCmd_ServiceAccountNameUsageStatesExactIfExists(t *testing.T) {
+	for _, f := range snapshotCmd().Flags {
+		sf, ok := f.(*cli.StringFlag)
+		if !ok || sf.Name != "service-account-name" {
+			continue
+		}
+		if !strings.Contains(sf.Usage, "xact-if-exists") {
+			t.Errorf("--service-account-name usage does not state the exact-if-exists rule; got %q", sf.Usage)
+		}
+		return
+	}
+	t.Fatal("snapshot command must define --service-account-name")
+}
+
+// TestWriteProvisionReport asserts the two properties the provisioning output
+// must state outright, because an operator who does not read them cannot
+// discover either from the cluster: the objects are permanent (nothing in aicr
+// will ever remove them), and adopting one ServiceAccount across runs waives
+// per-run permission isolation. The --discover-network warning is separate
+// because that grant is the one that is also mutating.
+func TestWriteProvisionReport(t *testing.T) {
+	res := &snapshotter.AgentRolesResult{
+		Namespace:          "gpu-operator",
+		ServiceAccountName: "irsa-snapshotter",
+		Role:               "aicr-agent-irsa-snapshotter-rbac",
+		RoleBinding:        "aicr-agent-irsa-snapshotter-rbac",
+		ClusterRole:        "aicr-agent-gpu-operator-irsa-snapshotter-rbac",
+		ClusterRoleBinding: "aicr-agent-gpu-operator-irsa-snapshotter-rbac",
+	}
+
+	tests := []struct {
+		name            string
+		discoverNetwork bool
+		wantSubstrings  []string
+		notWant         string
+	}{
+		{
+			name: "read-only grant",
+			wantSubstrings: []string{
+				`ServiceAccount "irsa-snapshotter" in namespace "gpu-operator"`,
+				"role/aicr-agent-irsa-snapshotter-rbac",
+				"clusterrolebinding/aicr-agent-gpu-operator-irsa-snapshotter-rbac",
+				"These objects are permanent",
+				"permission isolation is waived",
+				"aicr snapshot --namespace gpu-operator --service-account-name irsa-snapshotter",
+			},
+			notWant: "MUTATING",
+		},
+		{
+			name:            "discovery grant warns about the permanent mutating rules",
+			discoverNetwork: true,
+			wantSubstrings: []string{
+				"These objects are permanent",
+				"MUTATING",
+				"carries them permanently, not for one run",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := *res
+			r.DiscoverNetwork = tt.discoverNetwork
+			var buf bytes.Buffer
+			writeProvisionReport(&buf, &r)
+
+			for _, want := range tt.wantSubstrings {
+				if !strings.Contains(buf.String(), want) {
+					t.Errorf("report does not contain %q; got:\n%s", want, buf.String())
+				}
+			}
+			if tt.notWant != "" && strings.Contains(buf.String(), tt.notWant) {
+				t.Errorf("report contains %q but should not; got:\n%s", tt.notWant, buf.String())
 			}
 		})
 	}

@@ -39,6 +39,11 @@ const (
 	flagSlurmAccountingMode = "slurm-accounting-mode"
 	flagRuntimeInventory    = "runtime-inventory"
 	flagNoHealth            = "no-health"
+
+	// flagAddRolesToSA switches `aicr snapshot` into a provision-and-exit
+	// invocation that grants the agent's permissions to an existing
+	// ServiceAccount. No snapshot is taken.
+	flagAddRolesToSA = "add-roles-to-service-account"
 )
 
 // criteriaAny is the wildcard value for any criteria dimension.
