@@ -79,7 +79,6 @@ jobs:
 
       - name: Build and attest
         env:
-          GOFLAGS: -mod=vendor
           AICR_CANDIDATE_TAG: candidate-attested-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail

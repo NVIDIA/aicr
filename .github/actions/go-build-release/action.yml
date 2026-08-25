@@ -126,7 +126,6 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        GOFLAGS: -mod=vendor
         AICR_CANDIDATE_TAG: ${{ steps.validate.outputs.candidate_tag }}
         # Repository paths are fully specified in .goreleaser.yaml kos.repositories
       run: |

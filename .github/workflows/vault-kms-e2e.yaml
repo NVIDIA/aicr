@@ -62,7 +62,6 @@ on:
       - 'cmd/aicr/**'
       - 'go.mod'
       - 'go.sum'
-      - 'vendor/**'
 
 # Least privilege at the workflow level; id-token is granted only to the job
 # that needs it (below).
@@ -190,8 +189,6 @@ jobs:
           echo "Provisioned Transit key: ${VAULT_KMS_KEY} (URI: hashivault://${VAULT_KMS_KEY})"
 
       - name: Build aicr binary
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           set -euo pipefail
           goreleaser build --clean --single-target --snapshot --timeout 10m
