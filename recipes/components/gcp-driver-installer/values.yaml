@@ -26,9 +26,9 @@ installer:
 # against the COS build's curated per-GPU-type list
 # (gs://cos-tools/<build>/lakitu/gpu_driver_versions.bin) and rejects versions
 # absent from it — an unqualified pin crash-loops the DaemonSet. 580.173.02
-# matches the GPU Operator chart default and is qualified for H100/A100/B200/
-# GB200 on COS 125 (19216.x) and COS 129 (19506.x); COS 121 carries neither
-# this pin nor any R580 build newer than 580.105.08.
+# is qualified for H100/A100/B200/GB200 on COS 125 (19216.x) and COS 129
+# (19506.x); COS 121 carries neither this pin nor any R580 build newer than
+# 580.105.08.
 #
 # Rollout note: the installer's lsmod fast path exits 0 when any nvidia module
 # is already loaded — a version bump takes effect only on replaced or rebooted

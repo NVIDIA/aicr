@@ -246,7 +246,7 @@ spec:
         componentRefs:
           - name: gcp-driver-installer
             overrides:
-              install: false      # every value assigns every union path
+              installer: {enabled: false}   # every value assigns every union path
           - name: gpu-operator
             overrides:
               devicePlugin: {enabled: true}
@@ -261,7 +261,7 @@ spec:
         componentRefs:
           - name: gcp-driver-installer
             overrides:
-              install: false
+              installer: {enabled: false}
           - name: gpu-operator
             overrides:
               devicePlugin: {enabled: false}
@@ -513,7 +513,7 @@ to the surviving composition:
                                 # digest, so ordering must be byte-stable
         # Post-DD5 state shown; the initial recording is
         # gpu-operator: [devicePlugin.enabled, enabled] only.
-        gcp-driver-installer: [enabled, install]
+        gcp-driver-installer: [enabled, installer.enabled]
         gpu-operator: [devicePlugin.enabled, enabled]
   ```
 

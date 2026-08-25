@@ -214,8 +214,7 @@ provisioning is carried **inside the bundle**: the `gcp-driver-installer`
 component ships Google's cos-gpu-installer DaemonSet
 ([#1716](https://github.com/NVIDIA/aicr/issues/1716)), ordered ahead of the
 GPU Operator, with the driver version pinned in the recipe
-(`gcp-driver-installer.driverVersion`, default matching the GPU Operator
-chart's driver pin). The pin must be COS-qualified: the installer validates
+(`gcp-driver-installer.driverVersion`). The pin must be COS-qualified: the installer validates
 the request against the COS build's curated per-GPU-type list and rejects
 unqualified versions. Version bumps take effect on replaced or rebooted
 nodes only (the installer skips nodes with a loaded nvidia module).
