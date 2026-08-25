@@ -519,13 +519,15 @@ need conflict detection. See
 
 #### Qualified machine types
 
-Each recipe is qualified against a specific node shape. Running it on another
-machine type of the same GPU model is not blocked, but it is not qualified, and
-the consequence differs by family.
+Each recipe is qualified against a specific node shape. Criteria resolution
+does not reject another machine type of the same GPU model — there is no axis
+to reject it on — so a recipe always resolves. What differs by family is what
+happens afterwards: on some, deployment validation fails; on others it succeeds
+and only the performance gates are affected.
 
 | Accelerator | Service | Qualified machine type | On other shapes of the same GPU |
 |---|---|---|---|
-| `h100` | `gke` | `a3-megagpu-8g` | **Components do not schedule.** The GPUDirect-TCPXO DaemonSets pin node affinity to `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb`, so on `a3-highgpu-*` / `a3-edgegpu-8g` nothing rolls out and the deployment health check fails. GPUDirect-TCPX is not shipped — tracked in [#2290](https://github.com/NVIDIA/aicr/issues/2290). |
+| `h100` | `gke` | `a3-megagpu-8g` | **Components do not schedule.** The GPUDirect-TCPXO DaemonSets pin node affinity to `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb`, so on `a3-highgpu-*` / `a3-edgegpu-8g` nothing rolls out and the deployment health check fails. AICR ships no GPUDirect-TCPX component for the shapes that need one — tracked in [#2290](https://github.com/NVIDIA/aicr/issues/2290). |
 | `h100` | `eks` | `p5.48xlarge` (8× H100 SXM, 32× EFA) | Deploys, but performance floors are calibrated on the full node; smaller shapes such as `p5.4xlarge` can false-fail a healthy run. |
 | `h100` | `aks` | `Standard_ND96isr_H100_v5` (8× H100 SXM) | Deploys, but as above; `Standard_NC80adis_H100_v5` (2 GPUs) and `Standard_NC40ads_H100_v5` (1 GPU) can false-fail performance gates. |
 | `gb200` | `eks` | `p6e-gb200.36xlarge` (4 GPUs per K8s node) | Deploys; floors are sized for this shape and are themselves provisional pending production NVL72 data. |

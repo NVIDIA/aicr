@@ -32,8 +32,9 @@ spec:
   # `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb`.
   #
   # On a non-mega shape nothing schedules and the deployment health check fails
-  # loudly (`desiredNumberScheduled > 0`). TCPX is not shipped. Selection fix
-  # and a TCPX component are tracked in #2290; whether criteria should gain a
+  # loudly (`desiredNumberScheduled > 0`). AICR ships no GPUDirect-TCPX
+  # component, so those shapes have no working alternative. Selection fix and a
+  # TCPX component are tracked in #2290; whether criteria should gain a
   # machine-type or fabric axis is tracked in #2377.
   criteria:
     service: gke
