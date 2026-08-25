@@ -25,6 +25,10 @@ spec:
   # `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
   base: h100-gke-cos-training
 
+  # Machine type: a3-megagpu-8g only, inherited from the parent leaf along with
+  # its gke-nccl-tcpxo componentRef. These criteria add no machine-type axis, so
+  # the parent's TCPXO-vs-TCPX selection gap applies here unchanged. See the
+  # parent overlay's note and #2290.
   criteria:
     service: gke
     accelerator: h100
