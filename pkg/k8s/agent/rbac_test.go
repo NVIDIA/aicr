@@ -234,8 +234,8 @@ func TestDeploy_ExistingServiceAccountCreatesAndDeletesNoRBAC(t *testing.T) {
 		}
 	}
 
-	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
-		t.Fatalf("Cleanup() error = %v", err)
+	if cleanupErr := d.Cleanup(ctx, CleanupOptions{Enabled: true}); cleanupErr != nil {
+		t.Fatalf("Cleanup() error = %v", cleanupErr)
 	}
 
 	sa, err := clientset.CoreV1().ServiceAccounts(testNamespace).Get(ctx, saName, metav1.GetOptions{})
