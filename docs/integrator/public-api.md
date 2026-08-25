@@ -46,7 +46,6 @@ in the [Go library integration guide](./go-library.md).
 | `pkg/oci` | Internal | OCI registry helpers. |
 | `pkg/logging` | Internal | Logging setup. |
 | `pkg/header` | Internal | HTTP header helpers. |
-| `pkg/build` | Internal | Build-time metadata. |
 | `pkg/server` | Internal | aicrd HTTP server: middleware chain and REST handlers (thin adapters over `pkg/client/v1`). Consumers use the HTTP API, not the Go types. |
 | `pkg/cli` | Internal | CLI command implementations. |
 

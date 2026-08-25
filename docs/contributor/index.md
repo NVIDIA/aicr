@@ -201,7 +201,6 @@ both entry points share it. Adding business logic to `pkg/cli` or
 | `pkg/oci` | OCI artifact push/pull for evidence and bundles |
 | `pkg/mirror` | Air-gap mirror for charts and images |
 | `pkg/trust` | Sigstore trust root management |
-| `pkg/build` | Build provenance metadata |
 | **Cross-cutting** | |
 | `pkg/k8s/client` | Singleton Kubernetes clientset (in-cluster + kubeconfig) |
 | `pkg/k8s/pod` | Shared K8s Job/Pod helpers (wait, logs, ConfigMap URI parsing) |
