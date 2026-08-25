@@ -43,6 +43,18 @@ const (
 	ValidatorClientBurst = 100
 )
 
+// K8sAccessReviewConcurrency bounds how many Self/SubjectAccessReview
+// requests a pre-flight permission gate keeps in flight at once.
+//
+// An access review is read-only, so the checks fan out concurrently: N
+// sequential reviews cost N round trips against the apiserver while one
+// batch costs roughly one. The bound exists because the set is not small —
+// the snapshot agent expands the agent ServiceAccount's own PolicyRules into
+// one review per (apiGroup, resource, verb), which reaches several dozen on
+// a --discover-network run — and opening that many connections at once buys
+// nothing over a handful of waves while adding avoidable apiserver load.
+const K8sAccessReviewConcurrency = 16
+
 // MaxK8sNameLength is the maximum length of a Kubernetes object name built
 // from a run-scoped prefix. 63 characters is the general DNS label ceiling
 // (RFC 1123) that Kubernetes enforces on object names, but the binding

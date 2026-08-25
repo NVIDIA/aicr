@@ -100,14 +100,22 @@ func (d *Deployer) ensureNamespace(ctx context.Context) error {
 // aicr's own default, not something the operator asked for, so a stray
 // ServiceAccount sitting at that name must not silently capture the run.
 //
-// The Get must not gate the deployment: `serviceaccounts get` is
-// deliberately absent from CheckPermissions' requiredChecks
-// (permissions.go), so an identity scoped to exactly the pre-flight verb
-// set would otherwise pass the pre-flight and then fail Deploy with an
-// ErrCodeInternal — a permission problem reported as an internal error.
-// Forbidden therefore downgrades to a debug line and the run proceeds in
-// prefix mode, which is the mode that identity has the permissions for.
-// Every other unexpected error still fails closed.
+// It is called from CheckPermissions, not from Deploy directly: the verb set
+// the pre-flight demands depends on which of the two modes this run is in,
+// so the gate has to resolve before it can finish. The Get is read-only, so
+// resolving inside the gate does not weaken fail-before-mutate — no write is
+// issued until Deploy's ensure* chain, which runs only once the gate passes.
+//
+// Every error fails closed, Forbidden included. `serviceaccounts: get` is a
+// REQUIRED check in CheckPermissions, evaluated before this runs, so a
+// caller that reaches here has been told by the apiserver's own authorizer
+// that it may read ServiceAccounts; a Forbidden anyway means the answer and
+// the behavior disagree, which is not a state to guess through. The
+// previous downgrade — log at debug, continue in prefix mode — is the exact
+// credential-loss seam this package exists to close: an operator who passed
+// --service-account-name pointing at their IRSA or Workload Identity
+// ServiceAccount would silently run under a fresh "<prefix>-<runID>" account
+// carrying none of its cloud annotations, with no visible signal.
 func (d *Deployer) resolveServiceAccount(ctx context.Context) error {
 	name := d.config.ServiceAccountName
 	if name == "" {
@@ -126,8 +134,13 @@ func (d *Deployer) resolveServiceAccount(ctx context.Context) error {
 		// Normal path: the value is a prefix and this run creates its own
 		// run-scoped ServiceAccount below.
 	case apierrors.IsForbidden(err):
-		slog.Debug("cannot read ServiceAccounts in this namespace; treating --service-account-name as a prefix",
-			attrName, name, attrNamespace, d.config.Namespace, "error", err)
+		return errors.WrapWithContext(errors.ErrCodeUnauthorized,
+			fmt.Sprintf("cannot read ServiceAccount %q in namespace %q, so it is impossible to tell whether "+
+				"--service-account-name names an existing ServiceAccount to run as verbatim or is a prefix "+
+				"for one this run creates; refusing to guess, because guessing \"prefix\" would run the agent "+
+				"under a generated ServiceAccount carrying none of that account's cloud credentials. "+
+				"Grant 'get serviceaccounts' in this namespace and re-run", name, d.config.Namespace),
+			err, map[string]any{attrName: name, attrNamespace: d.config.Namespace})
 	default:
 		return errors.Wrap(errors.ErrCodeInternal, "failed to check for an existing ServiceAccount", err)
 	}
@@ -172,11 +185,11 @@ func namespacedRules() []rbacv1.PolicyRule {
 		{
 			APIGroups: []string{""},
 			Resources: []string{resourceCM},
-			Verbs:     []string{verbCreate, verbGet, "update", "patch"},
+			Verbs:     []string{verbCreate, verbGet, verbUpdate, verbPatch},
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"pods"},
+			Resources: []string{resourcePods},
 			Verbs:     []string{verbGet, verbList},
 		},
 	}
@@ -193,12 +206,12 @@ func clusterRules(discoverNetwork bool) []rbacv1.PolicyRule {
 	rules := []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{""},
-			Resources: []string{"nodes"},
+			Resources: []string{resourceNodes},
 			Verbs:     []string{verbGet, verbList},
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"pods"},
+			Resources: []string{resourcePods},
 			Verbs:     []string{verbGet, verbList},
 		},
 		{
@@ -421,7 +434,6 @@ func (d *Deployer) deleteClusterRoleBinding(ctx context.Context, name string, ui
 //   - nicclusterpolicies: l8k patches the user's NicClusterPolicy
 //     (NicConfigurationOperator section) via server-side apply.
 func discoverNetworkClusterRules() []rbacv1.PolicyRule {
-	const verbUpdate, verbPatch, verbWatch = "update", "patch", "watch"
 	return []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{"apiextensions.k8s.io"},
@@ -440,22 +452,22 @@ func discoverNetworkClusterRules() []rbacv1.PolicyRule {
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"serviceaccounts", "configmaps"},
+			Resources: []string{resourceServiceAccounts, resourceCM},
 			Verbs:     []string{verbGet, verbCreate, verbDelete},
 		},
 		{
 			APIGroups: []string{rbacAPIGroup},
-			Resources: []string{"roles", "rolebindings"},
+			Resources: []string{resourceRoles, resourceRoleBindings},
 			Verbs:     []string{verbGet, verbCreate, verbDelete},
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"pods/exec"},
+			Resources: []string{resourcePods + "/exec"},
 			Verbs:     []string{verbCreate},
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"nodes"},
+			Resources: []string{resourceNodes},
 			Verbs:     []string{verbPatch},
 		},
 		{

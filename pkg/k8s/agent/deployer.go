@@ -43,14 +43,22 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		return err
 	}
 
-	// Step 0: Check permissions before attempting deployment
-	_, err := d.CheckPermissions(ctx)
-	if err != nil {
+	// Step 0: the authoritative permission gate for the whole run. It
+	// verifies every permission this run will exercise — for the caller AND
+	// for the ServiceAccount the agent pod runs as — and resolves which
+	// ServiceAccount mode the run is in, which is what decides the verb set
+	// it demands. Everything it does is a read, so nothing below has been
+	// written yet when it fails.
+	if _, err := d.CheckPermissions(ctx); err != nil {
 		if aicrerrors.IsNetworkError(err) {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeUnavailable,
 				"cannot reach Kubernetes API server\n\nCheck your network connectivity:\n  - Is your VPN connected?\n  - Is the cluster endpoint correct in your kubeconfig?\n  - Are firewall rules allowing egress to the API server?", err)
 		}
-		return aicrerrors.Wrap(aicrerrors.ErrCodeUnauthorized, "insufficient permissions to deploy agent\n\nTo deploy the agent, you need cluster admin privileges.\nRun: aicr snapshot", err)
+		// Propagated as-is: CheckPermissions already returns
+		// ErrCodeUnauthorized carrying the complete list of what is
+		// missing, for which subject, and how to fix it. Re-wrapping would
+		// bury that behind a generic sentence.
+		return err
 	}
 
 	// Step 0.5: Validate RuntimeClass exists if configured
@@ -65,15 +73,13 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to ensure namespace", err)
 	}
 
-	// Step 1.5: Decide whether Config.ServiceAccountName names a
-	// ServiceAccount that already exists (use it verbatim, manage none of
-	// its permissions) or is a prefix for one this run creates and owns.
-	// It runs after ensureNamespace so the Get is issued against a
-	// namespace that exists, and before Step 2 because it decides whether
-	// Step 2 happens at all.
-	if err := d.resolveServiceAccount(ctx); err != nil {
-		return err
-	}
+	// ServiceAccount mode is already decided at this point: Step 0's gate
+	// resolves it (resolveServiceAccount) because the permissions it must
+	// demand differ between the two modes. Resolving there rather than here
+	// also means the decision is made before ensureNamespace, which is
+	// harmless — a ServiceAccount cannot exist in a namespace that does
+	// not, so the Get correctly reports NotFound and the run stays in
+	// prefix mode.
 
 	// Step 2: Create this run's RBAC. Every name carries the run ID, so
 	// nothing here can already exist; an AlreadyExists is reported as an

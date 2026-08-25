@@ -20,7 +20,30 @@ const (
 	verbList   = "list"
 	verbGet    = "get"
 	verbDelete = "delete"
-	resourceCM = "configmaps"
+	verbWatch  = "watch"
+	verbUpdate = "update"
+	verbPatch  = "patch"
+
+	// Resource names, as they appear in an RBAC PolicyRule and in the
+	// ResourceAttributes of an access review. Named so the RBAC this
+	// package builds and the pre-flight gate that checks for it can never
+	// spell the same resource two different ways.
+	resourceCM                  = "configmaps"
+	resourceServiceAccounts     = "serviceaccounts"
+	resourceRoles               = "roles"
+	resourceRoleBindings        = "rolebindings"
+	resourceClusterRoles        = "clusterroles"
+	resourceClusterRoleBindings = "clusterrolebindings"
+	resourceJobs                = "jobs"
+	resourcePods                = "pods"
+	resourceNodes               = "nodes"
+
+	// subresourceLog is the pods subresource the CLI reads to stream the
+	// agent's output back to the operator's terminal.
+	subresourceLog = "log"
+
+	// batchAPIGroup is the API group the agent Job lives in.
+	batchAPIGroup = "batch"
 
 	slinkyAPIGroup           = "slinky.slurm.net"
 	slinkyControllerResource = "controllers"

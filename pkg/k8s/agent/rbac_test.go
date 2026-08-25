@@ -53,10 +53,12 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 // operator-supplied ServiceAccount verbatim (and manages none of its
 // permissions) or treats the value as a prefix and creates its own.
 //
-// The Forbidden branch is the load-bearing one: `serviceaccounts get` is NOT
-// in CheckPermissions' requiredChecks, so an identity holding exactly the
-// pre-flight verb set must still be able to deploy. It falls back to prefix
-// mode, which is the mode that identity has the permissions for.
+// The Forbidden branch is the load-bearing one, and it now fails closed.
+// `serviceaccounts get` is a REQUIRED check in CheckPermissions, evaluated
+// before this runs, so a Forbidden here means the authorizer's answer and
+// the apiserver's behavior disagree. The old downgrade — continue in prefix
+// mode — silently ran an operator who named their IRSA / Workload Identity
+// ServiceAccount under a generated one carrying none of its annotations.
 func TestResolveServiceAccount(t *testing.T) {
 	saGR := schema.GroupResource{Group: "", Resource: "serviceaccounts"}
 
@@ -69,6 +71,10 @@ func TestResolveServiceAccount(t *testing.T) {
 		seeded string
 		// getErr, when non-nil, is returned by every ServiceAccount Get.
 		getErr error
+		// wantErrCode is the structured code the failure must carry. A
+		// permission problem must surface as ErrCodeUnauthorized, not as
+		// an opaque internal error.
+		wantErrCode aicrerrors.ErrorCode
 		// wantExisting is the ServiceAccount the run should adopt
 		// verbatim; "" means prefix mode.
 		wantExisting  string
@@ -94,18 +100,20 @@ func TestResolveServiceAccount(t *testing.T) {
 			notWantLog: "aicr manages no RBAC for this run",
 		},
 		{
-			name:          "forbidden Get falls back to prefix mode",
-			configured:    "irsa-snapshotter",
-			seeded:        "irsa-snapshotter",
-			getErr:        apierrors.NewForbidden(saGR, "irsa-snapshotter", stderrors.New("no get permission")),
-			wantLogSubstr: "treating --service-account-name as a prefix",
-			notWantLog:    "aicr manages no RBAC for this run",
+			name:        "forbidden Get fails closed instead of downgrading to a prefix",
+			configured:  "irsa-snapshotter",
+			seeded:      "irsa-snapshotter",
+			getErr:      apierrors.NewForbidden(saGR, "irsa-snapshotter", stderrors.New("no get permission")),
+			wantErr:     true,
+			wantErrCode: aicrerrors.ErrCodeUnauthorized,
+			notWantLog:  "aicr manages no RBAC for this run",
 		},
 		{
-			name:       "unexpected Get error fails closed",
-			configured: "irsa-snapshotter",
-			getErr:     apierrors.NewInternalError(stderrors.New("apiserver exploded")),
-			wantErr:    true,
+			name:        "unexpected Get error fails closed",
+			configured:  "irsa-snapshotter",
+			getErr:      apierrors.NewInternalError(stderrors.New("apiserver exploded")),
+			wantErr:     true,
+			wantErrCode: aicrerrors.ErrCodeInternal,
 		},
 	}
 
@@ -138,8 +146,8 @@ func TestResolveServiceAccount(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveServiceAccount() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
-				t.Errorf("error = %v, want ErrCodeInternal", err)
+			if tt.wantErr && !stderrors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+				t.Errorf("error = %v, want code %s", err, tt.wantErrCode)
 			}
 			if got := d.existingServiceAccount(); got != tt.wantExisting {
 				t.Errorf("existingServiceAccount() = %q, want %q", got, tt.wantExisting)
@@ -341,23 +349,35 @@ func assertNoRBACObjects(ctx context.Context, t *testing.T, clientset *fake.Clie
 	}
 }
 
-// allowAllPermissionChecks makes every SelfSubjectAccessReview succeed so a
-// test exercises Deploy past its Step 0 pre-flight.
+// allowAllPermissionChecks makes every access review succeed so a test
+// exercises Deploy past its Step 0 pre-flight. Both kinds are answered:
+// SelfSubjectAccessReview covers the caller's verbs, and SubjectAccessReview
+// covers the agent ServiceAccount's own rules, which the gate checks in
+// exact-ServiceAccount mode.
 func allowAllPermissionChecks(clientset *fake.Clientset) {
 	clientset.PrependReactor("create", "selfsubjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, &authv1.SelfSubjectAccessReview{
 			Status: authv1.SubjectAccessReviewStatus{Allowed: true, Reason: "pre-flight verb set granted"},
 		}, nil
 	})
+	clientset.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SubjectAccessReview{
+			Status: authv1.SubjectAccessReviewStatus{Allowed: true, Reason: "ServiceAccount rules granted"},
+		}, nil
+	})
 }
 
-// TestDeploy_SucceedsWhenServiceAccountGetForbidden is the end-to-end shape of
-// the same bug: an identity authorized for exactly CheckPermissions'
-// requiredChecks (which do not include `serviceaccounts get`) passes the
-// pre-flight, so Deploy must not then fail on the exact-if-exists Get.
-// ServiceAccountName is set because that Get is issued only when it is —
-// leaving it empty would make the test pass without reaching the branch.
-func TestDeploy_SucceedsWhenServiceAccountGetForbidden(t *testing.T) {
+// TestDeploy_FailsWhenServiceAccountGetForbidden is the end-to-end shape of
+// the closed hole: an explicitly-named ServiceAccount that cannot be read
+// must stop the run, not be silently reinterpreted as a name prefix.
+//
+// The SelfSubjectAccessReview reactor says `serviceaccounts: get` is
+// allowed while the Get itself returns Forbidden — the authorizer and the
+// apiserver disagreeing. That is precisely the state the run must not guess
+// through, because guessing "prefix" deploys the agent under a generated
+// ServiceAccount carrying none of the named account's cloud credentials.
+// ServiceAccountName is set because the Get is issued only when it is.
+func TestDeploy_FailsWhenServiceAccountGetForbidden(t *testing.T) {
 	ctx := context.Background()
 	captureLogs(t)
 
@@ -365,7 +385,7 @@ func TestDeploy_SucceedsWhenServiceAccountGetForbidden(t *testing.T) {
 	allowAllPermissionChecks(clientset)
 	clientset.PrependReactor("get", "serviceaccounts", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(
-			schema.GroupResource{Group: "", Resource: "serviceaccounts"}, testName,
+			schema.GroupResource{Group: "", Resource: resourceServiceAccounts}, testName,
 			stderrors.New(`User "snapshot-runner" cannot get resource "serviceaccounts"`))
 	})
 
@@ -376,23 +396,27 @@ func TestDeploy_SucceedsWhenServiceAccountGetForbidden(t *testing.T) {
 		RunID:              testRunID,
 	})
 
-	if err := d.Deploy(ctx); err != nil {
-		t.Fatalf("Deploy() error = %v, want nil (the exact-if-exists Get must not gate deployment)", err)
+	err := d.Deploy(ctx)
+	if err == nil {
+		t.Fatal("Deploy() error = nil; an unreadable, explicitly-named ServiceAccount must fail the run")
+	}
+	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeUnauthorized, "")) {
+		t.Errorf("Deploy() error code = %v, want ErrCodeUnauthorized", err)
+	}
+	if !strings.Contains(err.Error(), "refusing to guess") {
+		t.Errorf("Deploy() error = %v, want it to say the run refuses to guess the mode", err)
 	}
 
-	if _, err := clientset.BatchV1().Jobs(testNamespace).Get(ctx, "aicr-"+testRunID, metav1.GetOptions{}); err != nil {
-		t.Errorf("Job not created: %v", err)
+	// Nothing may have been written: the gate fails before Deploy's ensure*
+	// chain runs. Read through the tracker, not the clientset — the reactor
+	// above stands in for an identity that cannot read ServiceAccounts at
+	// all, and that must not also blind the assertion.
+	if _, jobErr := clientset.BatchV1().Jobs(testNamespace).Get(ctx, "aicr-"+testRunID, metav1.GetOptions{}); !apierrors.IsNotFound(jobErr) {
+		t.Errorf("Job Get error = %v, want NotFound (no Job may be created)", jobErr)
 	}
-	// Forbidden must fall back to prefix mode, which still creates the
-	// run-scoped RBAC set.
-	if !d.managesRBAC() {
-		t.Error("managesRBAC() = false; a Forbidden Get must not be read as an adopted ServiceAccount")
+	saGVR := corev1.SchemeGroupVersion.WithResource(resourceServiceAccounts)
+	if _, saErr := clientset.Tracker().Get(saGVR, testNamespace, "aicr-"+testRunID); !apierrors.IsNotFound(saErr) {
+		t.Errorf("run-scoped ServiceAccount Get error = %v, want NotFound", saErr)
 	}
-	// Read through the tracker, not the clientset: the reactor above stands
-	// in for an identity that cannot read ServiceAccounts at all, and that
-	// must not also blind the assertion.
-	saGVR := corev1.SchemeGroupVersion.WithResource("serviceaccounts")
-	if _, err := clientset.Tracker().Get(saGVR, testNamespace, "aicr-"+testRunID); err != nil {
-		t.Errorf("run-scoped ServiceAccount not created: %v", err)
-	}
+	assertNoRBACObjects(ctx, t, clientset)
 }

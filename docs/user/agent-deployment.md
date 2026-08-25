@@ -66,7 +66,13 @@ data:
 - Kubernetes cluster with GPU nodes
 - aicr CLI installed
 - GPU Operator installed (or appropriate namespace configured via `--namespace`)
-- Cluster admin permissions (for RBAC setup)
+- Permission to create and delete the run's Job and RBAC in the target
+  namespace, plus the cluster-scoped `ClusterRole`/`ClusterRoleBinding` the
+  agent needs. Every run starts by verifying this and stops before touching
+  the cluster if anything is missing — see
+  [Pre-flight permission gate](#pre-flight-permission-gate). Pointing
+  `--service-account-name` at a ServiceAccount you provisioned yourself
+  requires **no** RBAC permissions at all
 
 ## Quick Start
 
@@ -558,7 +564,13 @@ kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/co
 
 ### Permission Denied
 
-Ensure RBAC is correctly deployed:
+A run that stops with `missing required permissions` never reached the cluster
+— read the list it printed, which names every missing verb, its scope, and
+whether you or the agent ServiceAccount lacked it. See
+[Pre-flight permission gate](#pre-flight-permission-gate) for the full matrix
+and for why exact-ServiceAccount mode needs fewer of them.
+
+If the run got past the gate, verify the RBAC it deployed:
 
 ```shell
 # Verify ClusterRole (run-scoped: "aicr-node-reader-<run-id>")
@@ -634,6 +646,100 @@ than read access:
 
 Use `--discover-network` only against clusters where this mutation and the
 broader RBAC grant are acceptable.
+
+### Pre-flight permission gate
+
+Every run begins by verifying the permissions it will actually use and stops
+before writing anything if any are missing. The gate is read-only: an access
+review is an authorization query that persists nothing, and the one object it
+reads — the ServiceAccount named by `--service-account-name` — is read with
+`get`. A failed gate therefore leaves the cluster exactly as it found it.
+
+All failures are reported together, so one run tells you everything to fix.
+Each line names the verb, the resource, the scope, and which of the two
+identities lacked it:
+
+```text
+missing required permissions:
+  - the caller (your kubeconfig identity) cannot "delete" clusterroles.rbac.authorization.k8s.io (cluster-scoped)
+  - agent ServiceAccount "system:serviceaccount:gpu-operator/irsa-snapshotter" cannot "list" nodes (cluster-scoped)
+```
+
+#### What the caller must be able to do
+
+Checked with `SelfSubjectAccessReview` against your kubeconfig identity. The
+first group is required in both ServiceAccount modes:
+
+| Resource | Verbs | Scope | Used by |
+|---|---|---|---|
+| `serviceaccounts` | `get` | namespace | Deciding whether `--service-account-name` names an existing ServiceAccount or is a prefix |
+| `jobs.batch` | `create`, `get`, `list`, `watch`, `delete` | namespace | Creating the agent Job, waiting on it, cleaning it up |
+| `pods` | `get`, `list`, `watch` | namespace | Finding the agent pod and waiting for it to be ready |
+| `pods/log` | `get` | namespace | Streaming the agent's output back to your terminal |
+| `configmaps` | `get`, `list` | namespace | Reading the snapshot the agent staged |
+| `configmaps` | `delete` | namespace | Only when aicr owns the output ConfigMap (i.e. you did not pass your own `cm://` URI) |
+
+`serviceaccounts: get` is not optional. Without it the run cannot tell whether
+`--service-account-name` names an existing ServiceAccount or is a prefix, and
+guessing "prefix" would run the agent under a generated ServiceAccount carrying
+none of the named account's IRSA or Workload Identity annotations. The run
+stops instead of guessing.
+
+The second group is required **only in prefix mode** — when the run creates
+its own run-scoped ServiceAccount:
+
+| Resource | Verbs | Scope |
+|---|---|---|
+| `serviceaccounts` | `create`, `delete` | namespace |
+| `roles.rbac.authorization.k8s.io` | `create`, `delete` | namespace |
+| `rolebindings.rbac.authorization.k8s.io` | `create`, `delete` | namespace |
+| `clusterroles.rbac.authorization.k8s.io` | `create`, `delete` | cluster |
+| `clusterrolebindings.rbac.authorization.k8s.io` | `create`, `delete` | cluster |
+
+`delete` is required alongside `create` because cleanup always runs, including
+on the failure path. An identity that can create but not delete would leave a
+ServiceAccount, Role, RoleBinding, ClusterRole and ClusterRoleBinding behind on
+every single run.
+
+**Exact-ServiceAccount mode requires fewer caller permissions.** When
+`--service-account-name` names a ServiceAccount that already exists, the run
+creates and deletes no RBAC at all, so none of the five kinds above is
+demanded of you. What it requires instead is that the ServiceAccount was
+actually provisioned — see below.
+
+#### What the agent ServiceAccount must be able to do
+
+The agent pod runs as a ServiceAccount, not as you, so its permissions are
+checked separately with `SubjectAccessReview` naming
+`system:serviceaccount:<namespace>:<name>` as the subject. The questions are
+derived from the same rule set the run-scoped `Role` and `ClusterRole` grant
+(and that `--add-roles-to-service-account` renders), so the gate cannot fall
+behind what the agent needs: namespaced `configmaps` and `pods` access, plus
+cluster-scoped `nodes`, `pods`, `nvidia.com` ClusterPolicies, the Slinky CRs
+and the MariaDB CRs — widened to the full mutating set when
+`--discover-network` is passed.
+
+This check runs **in exact-ServiceAccount mode only**. In prefix mode the
+ServiceAccount does not exist yet and the run is about to grant it exactly
+those rules, so there is nothing to verify. In exact mode aicr grants nothing,
+and the most common failure is that the manifests from
+`--add-roles-to-service-account` were rendered but never applied. The gate
+catches that up front and tells you how to fix it, rather than letting a Job
+start and fail inside the pod minutes later.
+
+**When the ServiceAccount's permissions cannot be verified.** Creating a
+`SubjectAccessReview` is itself a privilege. If you do not hold it, the run
+does **not** silently skip the check — it says so and continues, because the
+agent will still fail visibly in-pod if a rule is missing:
+
+```text
+WARN could not verify the agent ServiceAccount's own permissions; continuing,
+but a missing rule will surface as an in-pod failure minutes from now instead
+of here serviceAccount=irsa-snapshotter namespace=gpu-operator
+uncheckedRules=18 remedy="grant the caller 'create
+subjectaccessreviews.authorization.k8s.io', or verify by hand with: kubectl
+auth can-i --list --as system:serviceaccount:gpu-operator/irsa-snapshotter"
+```
 
 ### Pod Security Context
 
