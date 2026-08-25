@@ -458,6 +458,27 @@ coverage-check: ## Verifies $(COVERAGE_DOC_PATH) is up to date (run by qualify a
 	fi; \
 	echo "$(COVERAGE_DOC_PATH) is up to date"
 
+VERSION_MATRIX_DOC_PATH := docs/user/component-version-matrix.md
+
+.PHONY: version-matrix-docs
+version-matrix-docs: ## Regenerates the component version matrix in $(VERSION_MATRIX_DOC_PATH) from git history
+	@set -e; \
+	if ! grep -q '<!-- BEGIN AICR-VERSION-MATRIX -->' $(VERSION_MATRIX_DOC_PATH) || \
+	   ! grep -q '<!-- END AICR-VERSION-MATRIX -->' $(VERSION_MATRIX_DOC_PATH); then \
+	   echo "ERROR: $(VERSION_MATRIX_DOC_PATH) is missing AICR-VERSION-MATRIX markers." >&2; exit 1; \
+	fi; \
+	TMP="$$(mktemp -d)"; \
+	trap 'rm -rf "$$TMP"' EXIT; \
+	{ ./tools/upgrade-matrix --releases 8; echo; echo "## Transitions"; echo; \
+	  ./tools/upgrade-matrix --releases 8 --transitions; } > "$$TMP/matrix.md"; \
+	awk -v body="$$TMP/matrix.md" ' \
+	  /<!-- BEGIN AICR-VERSION-MATRIX -->/ { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
+	  /<!-- END AICR-VERSION-MATRIX -->/   { skip = 0 } \
+	  !skip                                { print } \
+	' $(VERSION_MATRIX_DOC_PATH) > "$$TMP/merged.md"; \
+	mv "$$TMP/merged.md" $(VERSION_MATRIX_DOC_PATH); \
+	echo "Updated $(VERSION_MATRIX_DOC_PATH)"
+
 .PHONY: bom-pinning-check
 bom-pinning-check: ## Verifies every Helm component in the registry has a pinned chart version (per ADR-006)
 	@set -e; \

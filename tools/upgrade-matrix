@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Report which component version shipped in each AICR release, and the
+# transitions between them that an upgrade record must describe (ADR-021).
+#
+# BEST EFFORT BY DESIGN. This reconstructs history that predates the
+# transition-record convention, so it reports what it can and never fails the
+# build. Tags whose registry.yaml cannot be read or parsed are counted and
+# skipped. Treat the output as a starting point for authoring records.
+#
+# The matrix answers "what shipped where"; --transitions answers "what changed,
+# and which changes need scrutiny". Two categories a plain version diff misses:
+#
+#   chart-change  the repository or chart name moved, so the two version strings
+#                 are unrelated and a semver-keyed record cannot express the hop
+#   backwards     the version decreased, which the directional matching rules
+#                 treat as a downgrade rather than an upgrade
+#
+# Usage:
+#   tools/upgrade-matrix                    # release x component matrix (markdown)
+#   tools/upgrade-matrix --releases 5       # limit columns
+#   tools/upgrade-matrix --transitions      # what changed between releases
+#   tools/upgrade-matrix --json
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+REGISTRY = "recipes/registry.yaml"
+NAME_RE = re.compile(r"^  - name: (\S+)\s*$")
+FIELD_RE = re.compile(r'^\s+(defaultVersion|defaultChart|defaultRepository):\s*"?([^"\s#]+)"?')
+SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
+RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout
+
+
+def releases(limit):
+    tags = [t for t in git("tag", "--list", "v*", "--sort=version:refname").split()
+            if RELEASE_TAG_RE.match(t)]
+    return tags[-limit:] if limit else tags
+
+
+def snapshot(ref):
+    """component -> (version, chart, repository) at ref; None if unreadable."""
+    try:
+        text = git("show", f"{ref}:{REGISTRY}")
+    except subprocess.CalledProcessError:
+        return None
+    out, cur, fields = {}, None, {}
+
+    def flush():
+        if cur and "defaultVersion" in fields:
+            out[cur] = (fields.get("defaultVersion"), fields.get("defaultChart"),
+                        fields.get("defaultRepository"))
+
+    for line in text.splitlines():
+        m = NAME_RE.match(line)
+        if m:
+            flush()
+            cur, fields = m.group(1), {}
+            continue
+        f = FIELD_RE.match(line)
+        if cur and f and f.group(1) not in fields:
+            fields[f.group(1)] = f.group(2)
+    flush()
+    return out
+
+
+def classify(before, after):
+    if (before[1], before[2]) != (after[1], after[2]):
+        return "chart-change", None
+    a, b = SEMVER_RE.match(before[0] or ""), SEMVER_RE.match(after[0] or "")
+    if not a or not b:
+        return "unparseable", None
+    pa = tuple(int(x) for x in a.groups())
+    pb = tuple(int(x) for x in b.groups())
+    for i, kind in enumerate(("major", "minor", "patch")):
+        if pa[i] != pb[i]:
+            return kind, pb[i] - pa[i]
+    return "none", 0
+
+
+def needs_scrutiny(kind, dist):
+    return kind == "chart-change" or (dist or 0) < 0 or (kind in ("major", "minor") and (dist or 0) >= 3)
+
+
+def label(kind, dist):
+    if kind == "chart-change":
+        return "chart-change"
+    if dist is None:
+        return kind
+    if dist < 0:
+        return f"{kind} {dist} backwards"
+    return f"{kind} +{dist}"
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Component versions per AICR release (ADR-021, best effort).")
+    ap.add_argument("--releases", type=int, default=8, help="how many recent releases (0 = all)")
+    ap.add_argument("--transitions", action="store_true", help="list what changed instead of the matrix")
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args()
+
+    tags = releases(args.releases)
+    snaps, skipped = {}, []
+    for t in tags:
+        s = snapshot(t)
+        if s is None:
+            skipped.append(t)
+        else:
+            snaps[t] = s
+    tags = [t for t in tags if t in snaps]
+    comps = sorted({c for s in snaps.values() for c in s})
+
+    changes = []
+    for c in comps:
+        for i in range(len(tags) - 1):
+            a, b = snaps[tags[i]].get(c), snaps[tags[i + 1]].get(c)
+            if not a or not b or a == b[:1] * 0 or a == b:
+                continue
+            kind, dist = classify(a, b)
+            if kind == "none":
+                continue
+            changes.append({"component": c, "release": tags[i + 1], "from": a[0], "to": b[0],
+                            "kind": kind, "distance": dist, "scrutiny": needs_scrutiny(kind, dist)})
+
+    if args.json:
+        print(json.dumps({"releases": tags, "skippedTags": skipped,
+                          "matrix": {c: {t: snaps[t].get(c, ["-"])[0] for t in tags} for c in comps},
+                          "transitions": changes}, indent=2, sort_keys=True))
+        return 0
+
+    if args.transitions:
+        print(f"| Component | Release | From | To | Change |")
+        print(f"|---|---|---|---|---|")
+        for ch in changes:
+            flag = " **" if ch["scrutiny"] else " "
+            print(f"| `{ch['component']}` | {ch['release']} | `{ch['from']}` | `{ch['to']}` |"
+                  f"{flag}{label(ch['kind'], ch['distance'])}{flag.strip()} |")
+        n = sum(1 for c in changes if c["scrutiny"])
+        print(f"\n{len(changes)} transitions across {len(tags)} releases; "
+              f"**{n} need scrutiny** (chart change, backwards move, or >= 3 major/minor apart).")
+    else:
+        print("| Component | " + " | ".join(tags) + " |")
+        print("|---" * (len(tags) + 1) + "|")
+        for c in comps:
+            cells = []
+            for i, t in enumerate(tags):
+                v = snaps[t].get(c, (None,))[0] or "–"
+                prev = snaps[tags[i - 1]].get(c, (None,))[0] if i else None
+                cells.append(f"**{v}**" if prev and v != prev else v)
+            print(f"| `{c}` | " + " | ".join(cells) + " |")
+        print(f"\n**bold** = changed from the previous release. "
+              f"{len(comps)} components across {len(tags)} releases.")
+
+    if skipped:
+        print(f"\nSkipped {len(skipped)} unreadable tag(s): {', '.join(skipped)} (best-effort walk).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
