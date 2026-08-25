@@ -49,6 +49,7 @@ Every move of a component's pinned version gets a **transition record**: a small
 - AICR does not inject migration hooks into any chart, upstream or generated. Content for components AICR owns ships as a separate adjacent release; see [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release).
 - AICR does not orchestrate upgrades, drive rollout, or roll back on failure. `helm upgrade` and `helm rollback` remain the mechanism.
 - No new in-cluster preflight assertion format. See [Alternatives Considered](#alternatives-considered).
+- Validating `recipes/components/*/values.yaml` against each chart's schema is out of scope. It addresses a real silent-misconfiguration gap, but belongs on the PR that bumps the pin and changes the values, not at `upgrade-check` time (per review on #2343).
 
 ## Context
 
@@ -605,18 +606,10 @@ It deliberately proves nothing about real component upgrades. It proves the mech
 
 ## Open Questions
 
-These stay here while the design is still being shaped by review. On acceptance each becomes a tracking issue, so the ADR records the decision and the issues carry the work.
+Genuinely undecided design, not work items. Known gaps in the design are stated in the decision each one limits; the implementation work they imply is tracked outside this document.
 
-- **Is the boundary premise true?** Decision 1 assumes most upgrades are already handled by the component's own chart. That is a structural argument, not a measurement, and nobody has checked it against this registry. An audit of past `registry.yaml` pin bumps, asking for each whether it required operator action beyond `helm upgrade`, would either support the boundary or overturn it. If a large fraction did require action, the rejected mutating-hook alternative deserves reopening.
-- **When to vendor `helm.sh/helm/v4`.** Online mode requires it, and it is a substantial change in its own right: it lands in `make scan`, the license allowlist, api-diff, and the vendor tree. It may be worth landing as its own PR before this work rather than inside it, which would also let the offline check (steps 1 through 5) ship independently. Sequencing undecided.
-- ~~Escape-hatch flag name.~~ **Resolved:** `--fail-on-error`, default true, mirroring `aicr validate`. See [Decision 6](#decision-6-non-zero-exit-by-default-semver-calibrated).
-- **No pinning gate covers Kustomize.** `bom-pinning-check` in `make lint` verifies that every *Helm* component has a pinned chart version per ADR-006; it runs `tools/bom`, which renders charts, so a Kustomize `defaultTag` is unchecked. The `unversioned` verdict means a branch ref can no longer produce a silent false negative, but it will fail strict mode until someone repins. Rejecting mutable Kustomize refs at lint time would catch it at authoring instead, and probably belongs as an ADR-006 amendment rather than here. Latent today: the registry has no Kustomize components.
-- **Kustomize `Chart.yaml` version.** Decision 7 puts the payload version in an annotation specifically because Kustomize tags may not be semver. Confirm no deployer path reads wrapper `version:` for anything meaningful before changing it.
-- **Chart-identity changes have no representation.** Two of the last 19 transitions changed the chart's repository or name, so the version strings are not comparable and range matching reads them as downgrades. The record needs a way to say "this hop crosses a chart change, do not compare versions", and the field shape is undecided.
-- **Cross-component coupling has no schema field.** Decision 3 says a record "may name other components it affects" and the Example renders a coupled row, but the field is undefined: what it is called, how each side's versions are sourced, which component owns the shared verdict and steps, and how a dependency cycle is detected. Raised by all three reviewers on #2343.
-- **No verdict for a component added, removed, or replaced.** Decision 1 names this as an AICR contract change, but the matcher compares `component -> version` tables, and one side has no version at all in these cases. Undefined today.
-- **Which ADR-019 gate categories apply per component kind.** [Decision 11](#decision-11-authoring-is-a-documented-workflow-not-adr-content) settles that the checklist is based on ADR-019's five categories; which of them are relevant to a Kustomize component versus an upstream Helm chart, and which are gates rather than preferences, is checklist detail to settle when it is written.
-- **Values-drift detection is out of scope.** Validating `recipes/components/*/values.yaml` keys against each chart's `values.schema.json` addresses the silent-misconfiguration gap named in Context, but it belongs on the PR that bumps the pin and changes the values, not at `upgrade-check` time (per review on #2343). Tracked separately.
+- **Is the boundary premise true?** [Decision 1](#decision-1-boundary) assumes most upgrades are already handled by the component's own chart. That is a structural argument, not a measurement, and nobody has checked it against this registry. An audit of past pin bumps, asking for each whether it required operator action beyond `helm upgrade`, would either support the boundary or overturn it. If a large fraction did require action, the rejected mutating-hook alternative deserves reopening.
+- **Where the authoring checklist draws the line between a gate and a preference.** [Decision 11](#decision-11-authoring-is-a-documented-workflow-not-adr-content) bases it on ADR-019's five categories, but ADR-019 distinguishes gates from qualification preferences deliberately, and which of its categories are gates for a *version bump* rather than for *admission* is not obvious. Getting this wrong makes the checklist either toothless or unaffordable.
 
 ## Alternatives Considered
 
