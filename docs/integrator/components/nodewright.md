@@ -81,6 +81,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | bcm     | h100         | -       | nvidia-setup 0.3.0 | -                       |
 | eks     | a100         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
 | eks     | gb200        | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
+| eks     | gb300        | -       | -                  | -                       |
 | eks     | h100         | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
 | eks     | h200         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
 | eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.3.2      |

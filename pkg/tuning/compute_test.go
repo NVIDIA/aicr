@@ -43,6 +43,9 @@ func TestCompute_Structure(t *testing.T) {
 		{"bcm", "h100", "-", "nvidia-setup", ""},
 		{"eks", "a100", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "gb200", "-", "nvidia-setup", "nvidia-tuned"},
+		// GB300 wires the no-op placeholder: no setup or tuning package until a
+		// nodewright gb300 profile exists.
+		{"eks", "gb300", "-", "", ""},
 		{"eks", "h100", "-", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "h200", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "rtx-pro-6000", "generic", "", "nvidia-tuned"},
