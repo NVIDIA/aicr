@@ -44,8 +44,10 @@ spec:
     # enabled, combined with GKE A4's native multi-NIC infrastructure
     # managed by GCP. The `gke-nccl-tcpxo` component is intentionally
     # omitted because its DaemonSets pin to `cloud.google.com/gke-
-    # accelerator: nvidia-h100-mega-80gb` (a3-megagpu / H100) and a
-    # different transport (TCPX), so they would not run on A4 nodes.
+    # accelerator: nvidia-h100-mega-80gb` (a3-megagpu / H100) and carry a
+    # transport A4 does not use (GPUDirect-TCPXO), so they would not run on A4
+    # nodes. (TCPXO is the a3-megagpu transport; TCPX is the separate
+    # a3-highgpu/edge one. Neither applies here.)
     - name: gpu-operator
       type: Helm
       dependencyRefs:
