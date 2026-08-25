@@ -158,14 +158,13 @@ if [[ -z "${LOCAL_MODULE}" ]]; then
     exit 1
 fi
 
-# Deliberately NOT -mod=vendor. In vendor mode go-licenses silently omits some
-# packages entirely rather than reporting them: it emitted 245 CSV rows against
-# the vendor tree and 252 in module mode, and the 7 it dropped are real
-# dependencies linked into the released binaries — every in-toto/in-toto-golang,
-# in-toto/attestation, and cyberphone/json-canonicalization package. Their
-# licenses were therefore absent from the notices file, which is a disclosure
-# gap rather than a cosmetic one. Module mode surfaces them.
-#
+# Explicit, though redundant while vendor/ exists: with a vendor directory
+# present Go selects -mod=vendor on its own. Stated anyway so the mode this
+# script collects under is a decision rather than a side effect of the tree
+# layout — removing vendor/ would otherwise flip it silently and rewrite every
+# URL in the notices file.
+export GOFLAGS="-mod=vendor"
+
 # CGO is disabled for every released binary (see .goreleaser.yaml). Disabling it
 # here lets go-licenses cross-list each target platform without a C toolchain.
 export CGO_ENABLED=0
@@ -175,9 +174,9 @@ export CGO_ENABLED=0
 #
 # The copies are committed rather than read from the module cache so generation
 # stays hermetic and works regardless of how dependencies are materialised. It
-# is also required for in-toto/attestation: its module path ends /go/v1, but the
-# LICENSE lives at the repository root and is therefore not in the module zip at
-# all — there is no in-cache path that would resolve it.
+# The copies are committed rather than read from the module cache so generation
+# does not depend on how dependencies are materialised, and so the exact bytes
+# being disclosed are reviewable in-tree.
 #
 # All three are Apache-2.0, verified by reading the files.
 #
@@ -187,7 +186,7 @@ export CGO_ENABLED=0
 # the file and the SPDX id.
 LICENSE_OVERRIDES_DIR="${LICENSE_OVERRIDES_DIR:-licenses/overrides}"
 LICENSE_OVERRIDES=(
-    "github.com/in-toto/attestation/go/v1|github.com/in-toto/attestation/LICENSE|Apache-2.0"
+    "github.com/in-toto/attestation|github.com/in-toto/attestation/LICENSE|Apache-2.0"
     "github.com/in-toto/in-toto-golang|github.com/in-toto/in-toto-golang/LICENSE|Apache-2.0"
     "github.com/cyberphone/json-canonicalization|github.com/cyberphone/json-canonicalization/LICENSE|Apache-2.0"
 )
@@ -257,7 +256,11 @@ fi
 SAVE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/aicr-notices.XXXXXX")"
 COMBINED_CSV="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-csv.XXXXXX")"
 INDEX_FILE="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-idx.XXXXXX")"
-trap 'rm -rf "${SAVE_ROOT}"; rm -f "${COMBINED_CSV}" "${INDEX_FILE}"' EXIT
+LINKED_RAW="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-linked.XXXXXX")"
+INDEX_KEYS="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-keys.XXXXXX")"
+LINKED_LIST="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-pkgs.XXXXXX")"
+trap 'rm -rf "${SAVE_ROOT}"; rm -f "${COMBINED_CSV}" "${INDEX_FILE}" \
+    "${LINKED_RAW}" "${INDEX_KEYS}" "${LINKED_LIST}"' EXIT
 
 mkdir -p "${LICENSES_DIR}"
 
@@ -321,12 +324,20 @@ for platform in "${PLATFORMS[@]}"; do
     GOOS="${goos}" GOARCH="${goarch}" go-licenses csv "${PACKAGES[@]}" \
         --ignore="${ignore}" \
         >> "${COMBINED_CSV}"
+
+    # Union the linked-package set per platform, for the same reason the
+    # collection loops at all: build-tagged sources import different transitive
+    # dependencies per GOOS/GOARCH, so a single-platform list would let a
+    # linux-only dependency pass unnoticed on a macOS run — the same silent
+    # omission this gate exists to catch.
+    GOOS="${goos}" GOARCH="${goarch}" go list -deps ./cmd/... 2>/dev/null \
+        >> "${LINKED_RAW}"
 done
 
-# Packages linked into the released commands. Computed once: the override
-# staleness check and the completeness gate below both need it, and `go list`
-# over the full graph is not cheap.
-LINKED_PKGS=$(go list -deps ./cmd/... 2>/dev/null | LC_ALL=C sort -u)
+# Packages linked into the released commands, unioned across every target
+# platform by the loop above. Both the override staleness check and the
+# completeness gate below use it.
+LINKED_PKGS=$(LC_ALL=C sort -u "${LINKED_RAW}")
 if [[ -z "${LINKED_PKGS}" ]]; then
     echo "ERROR: 'go list -deps ./cmd/...' returned nothing; cannot verify license coverage." >&2
     exit 1
@@ -353,7 +364,8 @@ for entry in "${LICENSE_OVERRIDES[@]}"; do
     # a module the build no longer uses. Check against the linked package list
     # rather than `go list -m`, which cannot resolve dependency modules while a
     # vendor directory is present.
-    if ! grep -q -e "^${ov_module}$" -e "^${ov_module}/" <<<"${LINKED_PKGS}"; then
+    if ! grep -qxF -- "${ov_module}" <<<"${LINKED_PKGS}" \
+       && ! grep -qF -- "${ov_module}/" <<<"${LINKED_PKGS}"; then
         echo "ERROR: license override lists ${ov_module}, which is no longer linked into any released binary." >&2
         echo "Remove its entry from LICENSE_OVERRIDES and delete ${ov_src}." >&2
         exit 1
@@ -363,7 +375,7 @@ for entry in "${LICENSE_OVERRIDES[@]}"; do
     cp "${ov_src}" "${LICENSES_DIR}/${ov_module}/$(basename "${ov_file}")"
     printf '%s,%s,%s\n' \
         "${ov_module}" \
-        "https://${ov_module}/blob/HEAD/${ov_file}" \
+        "https://github.com/NVIDIA/aicr/blob/HEAD/${LICENSE_OVERRIDES_DIR}/${ov_file}" \
         "${ov_spdx}" >> "${COMBINED_CSV}"
 done
 
@@ -390,8 +402,6 @@ echo "Verifying every linked dependency is covered..." >&2
 # The index is keyed by module, the dependency list by package, so a package is
 # covered when the index holds it or any of its path prefixes. Walking prefixes
 # in awk keeps this O(path depth) per package rather than a nested shell loop.
-INDEX_KEYS="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-keys.XXXXXX")"
-LINKED_LIST="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-pkgs.XXXXXX")"
 LC_ALL=C cut -d, -f1 "${INDEX_FILE}" > "${INDEX_KEYS}"
 printf '%s\n' "${LINKED_PKGS}" > "${LINKED_LIST}"
 missing_pkgs=$(
@@ -418,7 +428,6 @@ missing_pkgs=$(
         }
     ' "${INDEX_KEYS}" "${LINKED_LIST}"
 )
-rm -f "${INDEX_KEYS}" "${LINKED_LIST}"
 
 if [[ -n "${missing_pkgs}" ]]; then
     echo "ERROR: package(s) linked into the released binaries have no license entry:" >&2

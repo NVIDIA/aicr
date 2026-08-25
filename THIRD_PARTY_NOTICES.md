@@ -68,7 +68,7 @@ surfaces are covered:
 | `github.com/cloudflare/circl` | BSD-3-Clause | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/cloudflare/circl/LICENSE |
 | `github.com/coreos/go-oidc/v3/oidc` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/coreos/go-oidc/v3/LICENSE |
 | `github.com/coreos/go-systemd/v22/dbus` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/coreos/go-systemd/v22/LICENSE |
-| `github.com/cyberphone/json-canonicalization` | Apache-2.0 | https://github.com/cyberphone/json-canonicalization/blob/HEAD/github.com/cyberphone/json-canonicalization/LICENSE |
+| `github.com/cyberphone/json-canonicalization` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/github.com/cyberphone/json-canonicalization/LICENSE |
 | `github.com/davecgh/go-spew/spew` | ISC | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/davecgh/go-spew/LICENSE |
 | `github.com/digitorus/pkcs7` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/digitorus/pkcs7/LICENSE |
 | `github.com/digitorus/timestamp` | BSD-2-Clause | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/digitorus/timestamp/LICENSE |
@@ -130,8 +130,8 @@ surfaces are covered:
 | `github.com/hashicorp/hcl` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/hcl/LICENSE |
 | `github.com/hashicorp/vault/api` | MPL-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/hashicorp/vault/api/LICENSE |
 | `github.com/huandu/xstrings` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/huandu/xstrings/LICENSE |
-| `github.com/in-toto/attestation/go/v1` | Apache-2.0 | https://github.com/in-toto/attestation/go/v1/blob/HEAD/github.com/in-toto/attestation/LICENSE |
-| `github.com/in-toto/in-toto-golang` | Apache-2.0 | https://github.com/in-toto/in-toto-golang/blob/HEAD/github.com/in-toto/in-toto-golang/LICENSE |
+| `github.com/in-toto/attestation` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/github.com/in-toto/attestation/LICENSE |
+| `github.com/in-toto/in-toto-golang` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/github.com/in-toto/in-toto-golang/LICENSE |
 | `github.com/jedisct1/go-minisign` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/jedisct1/go-minisign/LICENSE |
 | `github.com/jellydator/ttlcache/v3` | MIT | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/jellydator/ttlcache/v3/LICENSE |
 | `github.com/jmespath-community/go-jmespath/pkg` | Apache-2.0 | https://github.com/NVIDIA/aicr/blob/HEAD/vendor/github.com/jmespath-community/go-jmespath/LICENSE |
@@ -7449,7 +7449,7 @@ This product includes software developed at CoreOS, Inc.
 ### github.com/cyberphone/json-canonicalization
 
 * License: Apache-2.0
-* Source: https://github.com/cyberphone/json-canonicalization/blob/HEAD/github.com/cyberphone/json-canonicalization/LICENSE
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/github.com/cyberphone/json-canonicalization/LICENSE
 
 #### LICENSE
 
@@ -18856,10 +18856,10 @@ SOFTWARE.
 ```
 
 
-### github.com/in-toto/attestation/go/v1
+### github.com/in-toto/attestation
 
 * License: Apache-2.0
-* Source: https://github.com/in-toto/attestation/go/v1/blob/HEAD/github.com/in-toto/attestation/LICENSE
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/github.com/in-toto/attestation/LICENSE
 
 #### LICENSE
 
@@ -18884,7 +18884,7 @@ limitations under the License.
 ### github.com/in-toto/in-toto-golang
 
 * License: Apache-2.0
-* Source: https://github.com/in-toto/in-toto-golang/blob/HEAD/github.com/in-toto/in-toto-golang/LICENSE
+* Source: https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/github.com/in-toto/in-toto-golang/LICENSE
 
 #### LICENSE
 
