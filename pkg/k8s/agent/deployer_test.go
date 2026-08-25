@@ -42,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 )
 
 const testName = "aicr"
@@ -919,7 +920,8 @@ func TestCleanupPassesUIDPrecondition(t *testing.T) {
 // named it. The run-scoped name alone is not ownership evidence — it says what
 // this run WOULD have created, not what is standing there now — so Cleanup
 // must recover the UID from the live object and prove that object carries this
-// run's labels before deleting anything.
+// run's labels before deleting anything. Ownership takes both halves: a label
+// mismatch and a missing UID each refuse the delete on their own.
 //
 // The "replaced under the same name" case is the one this replaces a bare-name
 // delete for: an object at that name with a different UID and someone else's
@@ -948,6 +950,7 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 	tests := []struct {
 		name       string
 		seed       *corev1.ServiceAccount // nil: nothing at the name
+		runID      *string                // nil: testRunID
 		wantDelete bool
 		wantUID    types.UID // expected Preconditions.UID when wantDelete
 		wantWarn   bool
@@ -980,6 +983,32 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 			wantDelete: false,
 			wantWarn:   true,
 		},
+		{
+			// Labels alone would clear this object — they are this run's
+			// own — but a real apiserver always assigns a UID, so a
+			// missing one means the delete cannot be pinned. Refusing is
+			// the point: the fallback would be the bare-name delete this
+			// path exists to prevent.
+			name: "this run's own labels without a UID still survive",
+			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+				Name: saName, Namespace: ns, Labels: ourLabels,
+			}},
+			wantDelete: false,
+			wantWarn:   true,
+		},
+		{
+			// An empty Config.RunID is not a wildcard: the run-ID
+			// comparison alone would let "" == "" pass a label-less
+			// object off as this run's, so createdByThisRun matches
+			// nothing at all when this run has no ID to match on.
+			name: "an empty RunID proves ownership of nothing",
+			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+				Name: saName, Namespace: ns, UID: types.UID("operators-uid"),
+			}},
+			runID:      ptr.To(""),
+			wantDelete: false,
+			wantWarn:   true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -994,7 +1023,11 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 			}
 			deletes := spyOnDeletes(client)
 
-			run := NewDeployer(client, Config{Namespace: ns, RunID: testRunID})
+			runID := testRunID
+			if tt.runID != nil {
+				runID = *tt.runID
+			}
+			run := NewDeployer(client, Config{Namespace: ns, RunID: runID})
 			run.recordIntent(kindServiceAccount, saName)
 
 			if err := run.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
